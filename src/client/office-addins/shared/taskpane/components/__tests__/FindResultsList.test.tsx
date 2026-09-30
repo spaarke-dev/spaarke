@@ -12,9 +12,10 @@
  */
 
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { FindResultsList, type FindResultNode } from '../FindResultsList';
+import type { UseFindRecordMatchesResult } from '../../hooks/useFindRecordMatches';
 
 // jsdom does not implement IntersectionObserver.
 class IntersectionObserverMock {
@@ -188,6 +189,80 @@ describe('FindResultsList', () => {
 
       expect(screen.queryByRole('button', { name: /MSA Draft/ })).toBeNull();
       expect(screen.getByText('MSA Draft')).toBeTruthy();
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────────────────────
+  // Task 077 gap (a) — the records half, and lazy scroll over the MIXED result set (ADR-051).
+  // This component only presents; fetching/paging is `useFindRecordMatches`' job and is tested there.
+  // ───────────────────────────────────────────────────────────────────────────────────────────
+  describe('mixed results — documents AND matching records (task 077)', () => {
+    function recordsResult(overrides: Partial<UseFindRecordMatchesResult> = {}): UseFindRecordMatchesResult {
+      return {
+        status: 'ready',
+        records: [
+          { recordId: 'm-1', recordType: 'sprk_matter', recordName: 'Acme v. Globex', referenceNumbers: ['MAT-001'] },
+          { recordId: 'p-1', recordType: 'sprk_project', recordName: 'Globex Integration' },
+        ],
+        seedSource: 'keywords',
+        isLoadingMore: false,
+        hasMore: true,
+        error: null,
+        loadMoreError: null,
+        sentinelRef: React.createRef<HTMLDivElement>(),
+        ...overrides,
+      };
+    }
+
+    it('renders both halves in ONE scroll area, records after documents, each with its own sentinel, and no pager', () => {
+      const announce = jest.fn();
+      // 25 document rows > useLazyResults' 20-row first chunk, so the DOCUMENT reveal sentinel exists too.
+      const docs = Array.from({ length: 25 }, (_, i) => resultNode(`d-${i}`, `Doc ${i}`, 0.9));
+      renderWithProvider(<FindResultsList nodes={docs} announce={announce} records={recordsResult()} />);
+
+      const scrollArea = screen.getByTestId('find-results-scroll-area');
+      const docList = within(scrollArea).getByRole('list', { name: 'Most similar documents' });
+      const recordList = within(scrollArea).getByRole('list', { name: 'Matching records' });
+
+      // Records come AFTER documents — the only section that grows is the tail, so paging records in
+      // never moves document rows under the reader.
+      expect(docList.compareDocumentPosition(recordList) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      // Both paging mechanisms live in the same scroller: reveal-only for documents, fetch for records.
+      const docSentinel = within(scrollArea).getByTestId('find-results-sentinel');
+      const recordSentinel = within(scrollArea).getByTestId('find-records-sentinel');
+      expect(recordList.compareDocumentPosition(recordSentinel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(docSentinel.compareDocumentPosition(recordList) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      // Visually distinct from a document row: every record row carries its type badge.
+      const recordRows = within(recordList).getAllByTestId('find-record-row');
+      expect(recordRows).toHaveLength(2);
+      expect(within(recordRows[0]!).getByText('Matter')).toBeTruthy();
+      expect(within(recordRows[1]!).getByText('Project')).toBeTruthy();
+
+      // Honest framing (task 034 §4 condition ii): a text match, never presented as similarity.
+      expect(
+        screen.getByText(/Matched on this document.s AI keywords — not a content-similarity match\./)
+      ).toBeTruthy();
+
+      // ADR-051: no pager of any kind, with the mixed set.
+      expect(screen.queryByRole('button', { name: /load more|next|previous|page/i })).toBeNull();
+    });
+
+    it('when records were never searched (no seed), it does not claim there are no matching records', () => {
+      const announce = jest.fn();
+      renderWithProvider(
+        <FindResultsList
+          nodes={[]}
+          announce={announce}
+          records={recordsResult({ status: 'no-seed', records: [], seedSource: null, hasMore: false })}
+        />
+      );
+
+      // Documents are genuinely empty; records were NOT looked for, so "no matching records" would be false.
+      expect(screen.getByText('No similar documents found')).toBeTruthy();
+      expect(screen.queryByText(/matching records found/i)).toBeNull();
+      expect(screen.getByText(/none is available for it yet\./)).toBeTruthy();
     });
   });
 });

@@ -16,6 +16,7 @@ import { apiClient, ApiClientError, authService } from '@shared/services';
 import { cleanGuid } from '../../utils/cleanGuid';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { useDocumentProfile } from '../../hooks/useDocumentProfile';
+import { deriveRecordSearchSeed, useFindRecordMatches } from '../../hooks/useFindRecordMatches';
 import type { DocumentIdentityState } from '../../services/documentIdentityService';
 import { FindResultsList, type FindResultNode } from '../FindResultsList';
 
@@ -159,12 +160,19 @@ export function resolveFindState(
   }
 }
 
-function announceMessageFor(state: FindState): string {
+/**
+ * The noun for the pane's item. Only the states Outlook can reach use it — `checking`, `conflict`,
+ * `indeterminate`, `denied` and `error` arise solely from Word's URL-based identity resolution, where
+ * "document" is exactly right.
+ */
+export type FindItemNoun = 'document' | 'email';
+
+function announceMessageFor(state: FindState, noun: FindItemNoun): string {
   switch (state.kind) {
     case 'checking':
       return 'Checking whether this document is in Spaarke…';
     case 'no-document':
-      return 'This document is not yet saved to Spaarke.';
+      return `This ${noun} is not yet saved to Spaarke.`;
     case 'identity-conflict':
       return 'This document has a conflicting Spaarke record and cannot be checked for indexing.';
     case 'identity-indeterminate':
@@ -174,13 +182,13 @@ function announceMessageFor(state: FindState): string {
     case 'identity-error':
       return 'Something went wrong checking this document.';
     case 'loading-index-status':
-      return 'Checking this document’s indexing status…';
+      return `Checking this ${noun}’s indexing status…`;
     case 'index-status-error':
-      return "Couldn't check this document's indexing status.";
+      return `Couldn't check this ${noun}'s indexing status.`;
     case 'not-indexed':
-      return 'This document is not indexed yet.';
+      return `This ${noun} is not indexed yet.`;
     case 'indexed':
-      return 'This document is indexed. Loading similar documents.';
+      return `This ${noun} is indexed. Loading similar documents and matching records.`;
   }
 }
 
@@ -297,6 +305,12 @@ export interface FindViewProps {
   onRetryDocumentIdentity?: () => void;
   /** Switches the pane to the Save tab. Omitted → no control shown in the save-prompt state. */
   onGoToSave?: () => void;
+  /**
+   * Task 077: what the pane's item is called in copy — `email` in Outlook, `document` in Word. `App`
+   * derives it from the `canGetSender` CAPABILITY (an item with a sender is an email), not from
+   * `hostType`, per NFR-10. Defaults to `document`.
+   */
+  itemNoun?: FindItemNoun;
 }
 
 export const FindView: React.FC<FindViewProps> = ({
@@ -304,6 +318,7 @@ export const FindView: React.FC<FindViewProps> = ({
   savedDocumentId,
   onRetryDocumentIdentity,
   onGoToSave,
+  itemNoun = 'document',
 }) => {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
@@ -326,6 +341,12 @@ export const FindView: React.FC<FindViewProps> = ({
 
   const state = resolveFindState(documentIdentity, searchIndexed, indexStatusErrorMessage, savedDocumentId);
 
+  // Task 077 gap (a) — the records half. Seeded from THIS document's AI profile (keywords → TL;DR →
+  // summary), read by the same `useDocumentProfile` call above — no second read. Only in the `indexed`
+  // state, where results render; `null` seed issues no request.
+  const recordSeed = state.kind === 'indexed' ? deriveRecordSearchSeed(profileOutcome) : null;
+  const recordMatches = useFindRecordMatches(recordSeed);
+
   // NFR-11: announce every state transition (not the initial mount — mirrors useAnnounceOnChange).
   const prevKindRef = useRef<FindState['kind']>(state.kind);
   useEffect(() => {
@@ -333,8 +354,10 @@ export const FindView: React.FC<FindViewProps> = ({
       return;
     }
     prevKindRef.current = state.kind;
-    announce(announceMessageFor(state), 'polite');
-  }, [state, announce]);
+    announce(announceMessageFor(state, itemNoun), 'polite');
+    // `itemNoun` is listed for correctness; it cannot cause a duplicate announcement, because the guard
+    // above only announces when `state.kind` changes.
+  }, [state, announce, itemNoun]);
 
   // ── Run Index ──────────────────────────────────────────────────────────────────────────────
   const [runIndexStatus, setRunIndexStatus] = useState<'idle' | 'running'>('idle');
@@ -446,7 +469,7 @@ export const FindView: React.FC<FindViewProps> = ({
           {liveRegion}
           <div className={styles.loadingContainer}>
             <Spinner size="medium" />
-            <Text>Checking whether this document is in Spaarke…</Text>
+            <Text>Checking whether this {itemNoun} is in Spaarke…</Text>
           </div>
         </div>
       );
@@ -457,8 +480,11 @@ export const FindView: React.FC<FindViewProps> = ({
           {liveRegion}
           <div className={styles.emptyState}>
             <DocumentSearchRegular className={styles.icon} />
-            <Text weight="semibold">Save this document to Spaarke</Text>
-            <Body1>Save this document to Spaarke so it can be indexed for AI similarity search.</Body1>
+            <Text weight="semibold">Save this {itemNoun} to Spaarke</Text>
+            <Body1>
+              Save this {itemNoun} to Spaarke so it can be indexed for AI similarity search. Once it&rsquo;s saved, Find
+              shows similar documents and matching records here.
+            </Body1>
             {onGoToSave && (
               <Button appearance="primary" onClick={onGoToSave}>
                 Go to Save
@@ -553,7 +579,7 @@ export const FindView: React.FC<FindViewProps> = ({
           {liveRegion}
           <MessageBar intent="error" layout="multiline">
             <MessageBarBody>
-              <MessageBarTitle>Couldn&rsquo;t check this document&rsquo;s indexing status</MessageBarTitle>
+              <MessageBarTitle>Couldn&rsquo;t check this {itemNoun}&rsquo;s indexing status</MessageBarTitle>
               {state.message}
             </MessageBarBody>
             <MessageBarActions>
@@ -570,9 +596,9 @@ export const FindView: React.FC<FindViewProps> = ({
         <div className={styles.container}>
           {liveRegion}
           <div className={styles.section}>
-            <Text weight="semibold">This document isn&rsquo;t indexed yet.</Text>
+            <Text weight="semibold">This {itemNoun} isn&rsquo;t indexed yet.</Text>
             <Body1>
-              Index this document to find documents similar to it. This uses the AI similarity search this document
+              Index this {itemNoun} to find documents similar to it. This uses the AI similarity search this {itemNoun}{' '}
               belongs to.
             </Body1>
             <Button
@@ -623,7 +649,7 @@ export const FindView: React.FC<FindViewProps> = ({
                   </MessageBarBody>
                 </MessageBar>
               )}
-              <FindResultsList nodes={relatedState.nodes} announce={announce} />
+              <FindResultsList nodes={relatedState.nodes} announce={announce} records={recordMatches} />
             </div>
           )}
         </div>
