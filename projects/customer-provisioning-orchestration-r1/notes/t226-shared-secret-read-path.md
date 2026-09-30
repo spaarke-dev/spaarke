@@ -75,4 +75,15 @@ secret-free is an H2a parameter question (note for T225b).
 - **`AzureOpenAI-ApiKey` → A: managed identity** (approved). Remove the manifest entry so H4b stops emitting
   `AzureOpenAI__ApiKey` / `DocumentIntelligence__OpenAiKey`; E-2 fallback is an operator config action; H13 should
   exercise one OpenAI call (T230).
-- **Other five + Prompt Flow / vendor labels → "Discuss first"** — no code change until discussed.
+- **Other five + Prompt Flow / vendor labels → "Discuss first"**, then (owner, same day):
+  - **Service Bus → remove from the process** (key not required; BFF uses MI via FQNS).
+  - **AI Search → remove from the process** (key not required; all BFF consumers use `SearchClientFactory` MI; H2b
+    uses the L2 identity via `DefaultAzureCredential`, not the admin key).
+  - **Document Intelligence → MI** (remove the key).
+  - "Remove from the process" = delete the manifest entry (H4b stops emitting the settings) **and** remove the key from
+    `customer.bicep`'s `kvSecretValues` **and** its app-setting KV refs (`ConnectionStrings__ServiceBus`,
+    `AI_SEARCH_API_KEY`, `DOC_INTELLIGENCE_KEY`) — a reference to a secret no longer written would reach the BFF as a
+    literal string. `customer.bicep` is also the Model 2 template; MI behaves identically there (D3: not broken).
+  - **Redis**: owner asked how it works today → answered (access key in a connection string, fetched from KV by the App
+    Service's MI; Redis itself authenticates the key; no Entra path in BFF code or `redis.bicep`). Decision pending.
+  - **Storage**: owner asked what it is → answered (connection string for `sprk{customerId}prodsa`; no reader). Decision pending.
