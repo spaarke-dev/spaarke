@@ -44,12 +44,16 @@ computable, recordable, and re-tunable without a deployment.
 ```xml
 <hot-path-declaration>
   <bff>Y</bff>                              <!-- LANDED: RiConfidenceScorer, CommsPolicyOptions, CommunicationRuleGate, CommunicationRiActionService, TaskActionCore, ActionSeam/IActionSeam, DailyBriefingCollector. PLANNED: predicate evaluator, Decision Record writer, LookupChoicesResolver guidance injection -->
-  <spaarke-ai>Y</spaarke-ai>                <!-- CONDITIONAL on open decision D-3 (worklist surface). A sprk_gridconfiguration row is DATA; hosting it in the Console is CODE. Declared Y to force coordination rather than risk under-declaring -->
+  <spaarke-ai>Y</spaarke-ai>                <!-- The worklist surface (D-3) is a PRODUCT decision to be made in design, not left conditional. Y until D-3 resolves; if the worklist ships as a sprk_gridconfiguration row alone this becomes N and the block is CORRECTED here, not left ambiguous -->
   <ci-workflows>N</ci-workflows>
   <skill-directives>Y</skill-directives>    <!-- .claude/FAILURE-MODES.md (AP-14 + an AP-12 instance) and .claude/CHANGELOG.md. NOT .claude/skills/** -->
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>
 ```
+
+> **This block is a live contract, not a one-time declaration.** `/conflict-check` consumes it, so an
+> ambiguous or stale entry is itself the hazard. When D-3 resolves, correct `spaarke-ai` here in the same
+> change. Over-declaring to be safe is acceptable only as a *temporary* state with a named decision that ends it.
 
 **Coordination.** This project has already merged into **communication-intelligence territory** (PR #1032) —
 `CommunicationRiActionService`, `CommunicationRuleGate`, `DailyBriefingCollector`, `TaskActionCore`. That code
@@ -111,16 +115,40 @@ never run**. Seven of eight defects were in code shipped months earlier that had
 
 ## 5. Scope
 
+### 5.0 The scope rule
+
+**Owner directive, 2026-09-30**: *"if there is work identified in the course of creating this project that
+can be addressed most efficiently in this project, then that is the correct approach -- do not defer and hand
+off if can be done more efficiently now. The key/critical point is we do not want to bury or miss or lose any
+work items -- so they must be either fixed or scheduled, not merely added to a list."*
+
+Scope is therefore decided by **where the work is cheapest**, not by topical purity -- and **nothing is ever
+merely listed**:
+
+| Situation | Disposition |
+|---|---|
+| This project already holds the diagnosis; re-deriving it later costs more | **Pull into §5 In.** Items 6 and 7 below arrived this way |
+| Belongs to another domain, or needs a decision this project cannot make | **[`notes/defer-issues.md`](notes/defer-issues.md) + a GitHub Issue.** `push-to-github` Step 1.6 blocks a push if an entry has no Issue URL |
+| Genuinely out of scope | **§5 Out**, with rationale |
+
 ### In
 
-| # | Item | Shape |
-|---|---|---|
-| 1 | Cross-source predicate evaluator | code + `sprk_policy`/`sprk_policyversion` |
-| 2 | Decision Record | table + a one-line writer |
-| 3 | Generic `sprk_signal` | table (replaces `sprk_spendsignal`) |
-| 4 | Worklist | a `sprk_gridconfiguration` row |
-| 5 | `sprk_memo` as signal source #2 | one Action row + taxonomy decision |
-| 6 | Guidance injection | small change to `LookupChoicesResolver` |
+| # | Item | Shape | Note |
+|---|---|---|---|
+| 1 | **Cross-source predicate evaluator** | code + `sprk_policy` / `sprk_policyversion` | The differentiated claim. Blocked on the **D-1 spike** for test data |
+| 2 | **Decision Record** | table + a one-line writer | Needs D-2 (field list) |
+| 3 | **Worklist** | a `sprk_gridconfiguration` row | Needs D-3 (surface + row subject) |
+| 4 | **`sprk_memo` as signal source #2** | one Action row + taxonomy decision | Needs D-4 (reuse taxonomy or not) |
+| 5 | **Guidance injection** | small change to `LookupChoicesResolver` | No decision needed. Makes the ten authored `sprk_classifierguidance` rows live -- they are inert today |
+| 6 | **Space-bearing matter-number tokenizer** | `IdentifierReverseLookupRung` regex + tests | **Pulled in per §5.0.** `WellFormedTokenPattern` requires an alpha prefix *immediately* followed by `-`/`.`, so live matter `"Form D - 2023"` never tokenizes and `ExplicitReference` never fires -- even when the subject carries the number *and* the name verbatim. The rung's own docstring supplies the safety argument: *"precision comes from the EXACT reverse lookup, not this pattern -- an over-match simply resolves to no record."* Touches ADR-045 precision/cost, so it ships with tests and a measured query-count delta |
+| 7 | **The false association `reason` string** | one interpolation + a test | **Pulled in per §5.0.** Reports *"Reinforced confidence 0.97 in [0.50, 0.85)"* -- 0.97 is not in that band. The status band is computed from `topDeterministicConfidence` while the message interpolates `topConfidence`. AP-12 in **runtime-generated prose**, which is worse than a stale comment because it is written into data that later diagnoses trust |
+
+**Deferred from this discussion, to be resolved in this project's design/spec** (owner, 2026-09-30 -- *"we have
+more to finalize before we can make this specific decision"*):
+
+| Item | Why it is not settled yet |
+|---|---|
+| **Generic `sprk_signal`** (replacing `sprk_spendsignal`) | `sprk_spendsignal`'s `sprk_snapshot` lookup makes it structurally spend-only, so a memo- or communication-derived signal will not fit; it has zero client references and no production data, so replacing it is free **now** and a data migration later. But the right shape depends on decisions not yet made -- the Decision Record's fields (D-2), whether the worklist reads signals or matters (D-3), and how many producers exist at MVP (D-4). Also: `sprk_signaltype` / `sprk_signalvalue` are **already taken** as columns on `sprk_affinity`, so the naming is not free either. **Decide before the evaluator writes its first signal** -- that is the last moment it stays cheap |
 
 ### Out (with rationale)
 
@@ -140,13 +168,13 @@ never run**. Seven of eight defects were in code shipped months earlier that had
 
 | ADR | Tension | Proposed path |
 |---|---|---|
-| **ADR-039** — Binding owns dispatch routing | A Policy evaluator is a second *rule* surface. `CommunicationRuleGate` already accepted this for its own store (owner decision 2026-07-22, `notes/041-rule-store-decision.md`) | **(A) Project-scoped exception**, on the same reasoning: Policy decides *whether a claim is true*, Binding decides *what executes*. Different axes. To be cited in the PR |
-| **ADR-040** — session ledger | The Decision Record overlaps `SessionGate`, which carries `Kind`/`Status`/`SideEffectClass`/`BindingId`/`Turn` but **no** authority, policy version, evidence or confirmer | **(B) Amendment candidate.** ADR-040 is chat-session-shaped and Redis→Cosmos-tiered; a Decision Record must be a durable Dataverse row queryable per matter. Propose extending ADR-040 to name the two as siblings rather than forcing one to serve both |
+| **ADR-039** — Binding owns dispatch routing | A Policy evaluator is a second *rule* surface. `CommunicationRuleGate` already accepted this for its own store (owner decision 2026-07-22, `notes/041-rule-store-decision.md`) | **SURFACED — path deferred by owner decision (2026-09-30): "evaluate/define/revise this ADR once we get the solution actually decided."** The candidate is (A) project-scoped exception, on the reasoning that Policy decides *whether a claim is true* while Binding decides *what executes* — different axes. **Not adopted.** Must be resolved before the evaluator ships; §6.5 forbids silent compliance either way |
+| **ADR-040** — session ledger | The Decision Record overlaps `SessionGate`, which carries `Kind`/`Status`/`SideEffectClass`/`BindingId`/`Turn` but **no** authority, policy version, evidence or confirmer | **SURFACED — path deferred, same owner decision.** The candidate is (B) amendment: ADR-040 is chat-session-shaped and Redis→Cosmos-tiered, while a Decision Record must be a durable Dataverse row queryable per matter, so extending ADR-040 to name the two as siblings beats forcing one to serve both. **This is the heavier claim and the likelier to be wrong** — it needs the Decision Record shape settled first (D-2) |
 | **ADR-015** — privilege is flagged, never decided | The Decision Record must carry `PrivilegeFlagged` forward without acting on it | **(C) Comply.** The gate already does this; the writer copies the flag and never branches on it |
 | **ADR-013** — `PublicContracts` facade | The evaluator must not inject AI-internal types | **(C) Comply.** It consumes `LiveFactResolver` outputs and Dataverse reads only |
 | **ADR-045** — association engine | Fixing the space-bearing matter-number tokenizer changes the engine's precision/cost profile | **Deferred as its own decision** (D-6). Not bundled into this project |
 | **ADR-024** — polymorphic regarding | Reused unchanged as the extensibility seam for every signal source | No tension |
-| **ADR-038** — testing strategy | A shape-only unit test **pinned** a non-existent column for months (spec §17). Coverage was green over a query that always threw | **(C) Comply**, with a note for the spec: any test asserting a Dataverse **column list** must be paired with an integration touch, or it asserts nothing about reality |
+| **ADR-038** — testing strategy | A shape-only unit test **pinned** a non-existent column for months (spec §17). Coverage was green over a query that always threw on every run | **(C) Comply**, and the spec carries two rules, per owner decision 2026-09-30 (*"tests should be actually testing what exists (or should exist) — and if they consistently throw errors identify why and fix"*): **(i)** any test asserting a Dataverse **column list, entity name, or option-set value** must be paired with something that touches the real schema, or it asserts nothing about reality; **(ii)** a path that throws consistently is a **defect to diagnose**, never noise to tolerate — the `sprk_eventdescription` retrieve failed on *every* briefing run for months and nobody read the exception |
 
 ---
 
@@ -171,16 +199,42 @@ never run**. Seven of eight defects were in code shipped months earlier that had
 
 | ID | Decision | Blocks |
 |---|---|---|
-| **D-1** | **Spend test data.** `sprk_spendsnapshot` = **0 rows** (2 budgets, 1 billing event). Which matter — `REAL-2026-123456.01` or `.02`? Seed `sprk_billingevent` via MCP, or use a UI? What triggers `SpendSnapshotGenerationJobHandler`? | Criterion 2. **The differentiated claim cannot be tested at all today** |
+| **D-1** | **SCOPING SPIKE -- spend data.** Not a question to answer in the abstract; owner decision 2026-09-30: *"we can evaluate this as a project scoping spike."* See §8.1 for what the spike must produce | Criterion 2. **The differentiated claim cannot be tested at all today** |
 | **D-2** | Decision Record field list — approve or amend | Item 2 |
 | **D-3** | Worklist surface: Console, MDA, or both? Rows = matters or communications? | Item 4; the `spaarke-ai` hot-path flag |
 | **D-4** | Does `sprk_memo` reuse `sprk_triagecategory` or get its own taxonomy? *(Recommend reuse — one bounded set keeps cross-source rules simple)* | Item 5 |
 | **D-5** | Is the MM connector in MVP? Export-only ≈2 months; API mirror adds ≈2 | Scope |
-| **D-6** | The space-bearing matter-number tokenizer (`"Form D - 2023"` never fires `ExplicitReference`) | Deferred; not MVP |
-| **D-7** | The false association `reason` string (interpolates `topConfidence` against a band computed from `topDeterministicConfidence`) | Deferred; AP-12 in runtime prose |
-| **D-8** | `suggest-followups` is running a stale prompt (repo mirror 1,058 chars longer than the live row) | Another project's domain — surfaced, not owned |
 | **CM-2** | Object-definition registry — only if the MCP server must describe itself | Post-MVP |
 | **CM-4** | Reuse "disposition" for an Inquiry's typed outcome? | Item 2 naming |
+
+---
+
+**Former D-6 / D-7 are now §5 In items 6 and 7** -- pulled in per §5.0 because this project holds the
+diagnosis. **Former D-8 is [ISS-001](https://github.com/spaarke-dev/spaarke/issues/1048)** -- another domain's
+to fix, but scheduled rather than listed. Two further items that would otherwise have been lost are filed as
+[ISS-002](https://github.com/spaarke-dev/spaarke/issues/1049) (silent `$choices` degradation) and
+[ISS-003](https://github.com/spaarke-dev/spaarke/issues/1050) (49 `sprk_event` rows stranded in Draft).
+
+### 8.1 D-1 -- the spend-data scoping spike
+
+**Why a spike and not a question**: three unknowns compound, and the answer to each changes the next. Timebox
+**one day**. Deliverable: a one-page finding in `notes/`, and either a working snapshot or a costed statement
+of what standing one up requires.
+
+The spike answers, in order:
+
+1. **What populates `sprk_spendsnapshot` today?** `SpendSnapshotGenerationJobHandler` exists -- is it triggered
+   by a Service Bus message, a schedule, or an endpoint? Can it be invoked on demand in dev? *(Open item in
+   spec §9 that this session never closed.)*
+2. **Does it assume Spaarke-originated invoices?** If it reads `sprk_billingevent` rows that only a Spaarke
+   billing flow produces, the connector work is materially larger than spec §8 implies -- which feeds D-5.
+3. **What is the cheapest honest path to one over-budget matter?** Two candidates already carry budgets:
+   `REAL-2026-123456.01` and `REAL-2026-123456.02`. Seeding `sprk_billingevent` via MCP is fastest; a real UI
+   path is more faithful. Pick on what the MVP must eventually demo, not on what is quickest to fake.
+
+**Exit condition**: a matter exists with a `sprk_spendsnapshot` where `sprk_invoicedamount >= sprk_budgetamount`,
+**and** a communication on that same matter classified `Scope / budget change` or `Fee / rate change`. That
+pair is the minimum input to criterion 2 -- until it exists, item 1 cannot be built against anything real.
 
 ---
 
@@ -193,7 +247,7 @@ never run**. Seven of eight defects were in code shipped months earlier that had
 | `$choices` resolution is best-effort (NFR-04); a Dataverse read failure degrades **silently** to the pre-2026-09-04 behaviour (category null on 100% of captures) | Medium | Monitor. The failure is invisible by construction |
 | Swallow-and-log paths are undiagnosable without App Insights | Medium | Recorded in `current-task.md`: appId `6a76b012-…`, `traces` for `[comms-policy]`/`[comms-ri]`, `exceptions` for swallowed throws. **This is how the silent `InvalidCastException` was found** |
 | Recall-first produces notification fatigue | Medium | Thresholds are declared on the rule row; the Decision Record makes tuning evidence-based (criterion 5) |
-| This project keeps drifting into repair work | Medium | Yesterday's eight fixes were necessary but are **not this project's scope**. Further defects get filed (D-6..D-8), not fixed here |
+| Work surfaced in passing gets buried, missed or lost | **High** | **Owner rule (2026-09-30): every item is either FIXED or SCHEDULED — never merely listed.** Where this project already holds the diagnosis, fixing now is *cheaper* than handing off, so it is the correct choice and scope purity does not override it (that is why the tokenizer and the `reason` string were pulled INTO §5 rather than deferred). Where the work genuinely belongs elsewhere, it is filed in [`notes/defer-issues.md`](notes/defer-issues.md) **and** as a GitHub Issue, and `push-to-github` Step 1.6 refuses to let an entry through without an Issue URL |
 
 ---
 
@@ -234,8 +288,10 @@ Carried from `current-task.md`; full rationale in the notes.
 ## 12. Next steps
 
 1. **Review + iterate this document.**
-2. Settle **D-1** — without spend data the differentiated claim is untestable, which makes it the true critical path.
-3. Settle D-2, D-3, D-4 (each unblocks one item).
+2. **Run the D-1 spike** (§8.1, one day) -- without spend data the differentiated claim is untestable, which
+   makes it the true critical path, ahead of any build item.
+3. Settle D-2, D-3, D-4 (each unblocks one §5 item), and the `sprk_signal` question (§5, deferred-in-project)
+   **before the evaluator writes its first signal**.
 4. `/design-to-spec` → `/project-pipeline` → `task-execute`.
 5. Merge PR #1032.
 6. Run the §0 differentiation test retroactively across strategy-synopsis §8 Wave 2 / Wave 3 before any of those modules is specced.
