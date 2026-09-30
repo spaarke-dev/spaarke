@@ -422,7 +422,10 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             _jobSubmission.Object,
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["TENANT_ID"] = Tenant })
-                .Build());
+                .Build(),
+            // Task 080: never consulted here — every payload in this suite carries its DocumentId, so the worker
+            // creates no document. A resolver that answers nothing would refuse any create that did happen.
+            Mock.Of<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>());
 
         /// <summary>Queues the save's finalization (production <see cref="OfficeJobQueue"/>) and delivers it.</summary>
         public async Task<IReadOnlyList<JobContract>> FinalizeAsync(
@@ -440,6 +443,7 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
                 64,
                 documentId,
                 isVersionSave,
+                owningTeamId: null,
                 CancellationToken.None);
 
             return await DeliverAsync(FinalizationMessages[^1], Worker);

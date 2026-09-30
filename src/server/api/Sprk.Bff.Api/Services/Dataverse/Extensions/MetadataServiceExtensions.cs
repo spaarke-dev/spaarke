@@ -79,9 +79,9 @@ public static class MetadataServiceExtensions
     }
 
     /// <summary>
-    /// Registers <see cref="IRecordOwnershipResolver"/> — resolves the acting user's business-unit default
-    /// owner team, which every BFF record create assigns as <c>ownerid</c>
-    /// (spaarkeai-word-add-in-r1 task 080, owner decision 2026-09-22).
+    /// Registers <see cref="IRecordOwnershipResolver"/> — resolves the business-unit default owner team that
+    /// owns a new record: the filed record's unit, else the acting user's (spaarkeai-word-add-in-r1 task 080,
+    /// owner decisions 2026-09-22 / 2026-09-25). The Office writers use it; other BFF writers are GitHub #1034.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -91,8 +91,8 @@ public static class MetadataServiceExtensions
     /// app-only ownership, which is exactly the defect this resolver exists to remove.
     /// </para>
     /// <para>
-    /// Stateless over the singleton <see cref="IDataverseService"/>, so singleton. It performs two small
-    /// reads per create (systemuser → business unit, business unit → default owner team). Deliberately
+    /// Stateless over the singleton <see cref="IGenericEntityService"/>, so singleton. It performs two small
+    /// reads per create (target or systemuser → business unit, business unit → default owner team). Deliberately
     /// <b>uncached</b> for now: a record create already makes several Dataverse round trips and is not a
     /// hot path like a typeahead, and ADR-009 rules out an in-memory cache for cross-request data. If
     /// measurement later shows it matters, the cache belongs behind <c>ITenantCache</c>, not in a static.

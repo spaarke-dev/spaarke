@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (by context-handoff, pre-`/compact`)
+> **Last Updated**: 2026-09-30 (task 080 RESUMED after UAC-r2 #1029 merged)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,10 +9,17 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **NONE** — every remaining task is gated on an **owner decision** or on **UAC-r2 PR #1029** |
-| **Closed this session** | **077** ⚠️ (Find: documents + matching records; Outlook + post-save reachable) · **078** ⚠️ (ONE unified Outlook + Word app package) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` @ `eb166d4ad`+handoff, pushed, tree clean. **14 commits ahead of master, NO open PR** (PR #960 merged earlier as `e6bc26df9`) — a new PR is needed to land them. 1 behind master |
-| **Next Action** | **1)** `gh pr view 1029 --json state` — if MERGED: `git fetch origin && git merge origin/master` (merge, not rebase — the branch is pushed), then invoke `task-execute` for **080** (append its resolver ctor param AFTER `IDataverseUserClient userClient`). **2)** If the owner has answered 076's three questions → `task-execute` **076**. **3)** Otherwise nothing is startable — report and wait. |
+| **Active task** | **080** — record ownership = BU default Owner team · `tasks/080-record-ownership-assignment-pattern.poml` · FULL · opus @ xhigh · directional · **run ALONE** · 🔄 in progress |
+| **Step** | Resumed at "wire the create paths". Resolver BUILT (`Services/Dataverse/RecordOwnershipResolver.cs`) but **ZERO** create paths pass a team yet (`CreateDocumentRequest.OwningTeamId` + `OfficeDocumentPersistence(owningTeamId)` are plumbed, no caller supplies one) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` @ `26acc00e2` = master merged in (UAC-r2 #1029 = `2682e8225`), no conflicts, pushed. Build 0/0 · ArchTests 337/337 · Office/access filters 480/0 + 295/0 |
+| **Next Action** | ✅ DONE (UNCOMMITTED, build 0/0, tests green): resolver hardening (TOP 2 refuse, `IGenericEntityService`, alias via `DocumentAssociationMap.ToLogicalName`) · Office save (resolved before email capture/job/upload → `OFFICE_022`) · worker fallback + attachment children (`UploadFinalizationPayload.OwningTeamId`) · To Do record-first (`SdapProblemException(OFFICE_022)` + endpoint catch) · Invoice quick-create + Matter/Project → team · 🔒 **`POST /api/v1/documents` let the CLIENT set `OwningTeamId` + `Id`** (found by the inventory) → `[JsonIgnore]` both + server-resolved owner · tests: `RecordOwnershipResolverTests` (11), `OfficeRecordOwnershipTests` (9), `DocumentCreateOwnershipContractTests` (2), quick-create assertions → team; 4 seeded negative controls all went red. **NEXT**: notes §6 (78-site inventory from the Explore sweep + hand-offs by owning project); backfill (dry-run + reversal manifest); full suite, ArchTests, publish, CVE; code-review + adr-check; commit. `sprk_analysis` = hand off (AI zone, 5 callers; see §6). |
+
+### 080 — decided at resume (2026-09-30)
+
+- **Ctor**: the post-merge `OfficeService` tail is `ICallerSystemUserResolver? callerSystemUserResolver = null` — UAC-r2's `userClient` param did NOT survive (our file won). Append `IRecordOwnershipResolver?` after `callerSystemUserResolver`.
+- **Resolver keeps app-only `IDataverseService`**, NOT `IDataverseUserClient` (the POML UPDATE suggested the latter): background paths (`UploadFinalizationWorker`, inbound email) have no user token, and one fact must have one reader. Ownership metadata (BU, default team) is not user content.
+- **NOT changed, recorded with reasons**: `sprk_workassignment` (`ownerid` is the ONLY record of the assignee; the endpoint also writes two columns that DO NOT EXIST — `sprk_matterid`, `sprk_duedate` — live schema checked) · per-user artifacts (notifications, layouts, threads) · `EmailAttachmentProcessor` + `sprk_communication` (Communication project — hand off) · Compose / external-access / chat-persist document creates (other projects' hot paths — inventory).
+- **Sequencing discrepancy resolved**: the "SEQUENCING" table below says 058 → 080; the later records say 080 → 058. They touch disjoint code; following the later record.
 
 ### 🔔 Waiting on the OWNER
 
@@ -20,9 +27,9 @@
 2. **076 — three answers** (option B = numbering as write-path invariant I-10 owned by `RecordCreationService`): (a) Project number format — projects have NONE today; (b) random 6 digits vs a per-type sequence; (c) who verifies production matter-number uniqueness before the alternate key. Detail: the 076 POML UPDATE block.
 3. **042 UAT** — deferred by owner (no redeploy now). The shared `spaarke-bff-dev` is missing this project's routes (overwritten 9× by other projects' branch deploys) — any future deploy must come from **master**.
 
-### ⛔ Waiting on UAC-r2 PR #1029 (OPEN) — they will message on merge
+### ✅ UAC-r2 PR #1029 MERGED 2026-09-30 (`2682e8225`) — merged into this branch as `26acc00e2`
 
-Order after it lands: **080 → 058 → 059 → 060 → 068 → 075**; 077/078 done; then 079 → 090. **Every one of those POMLs now carries a "UPDATE 2026-09-30 (pre-compact handoff)" block** with this session's findings — read it at task start.
+Order: **080 (active) → 058 → 059 → 060 → 068 → 075**; 077/078 done; then 079 → 090. Their post-merge message is recorded in `notes/uac-r2-findings-2026-09-30.md` §6, including NEW finding **(e)**: the picker trims by Read but the save demands AppendTo — owner routing needed. **Every one of those POMLs now carries a "UPDATE 2026-09-30 (pre-compact handoff)" block** with this session's findings — read it at task start.
 
 ### 🧠 Facts NOT to re-derive (each cost real time this session)
 

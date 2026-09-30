@@ -204,7 +204,7 @@ public interface IOfficeService
     /// </summary>
     /// <param name="request">Create-To-Do request (name, description, contact assignee, due date, priority/effort scores, regarding).</param>
     /// <param name="userId">Authenticated user id (OBO oid).</param>
-    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> for <c>ownerid</c> attribution (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER pattern and says nothing about ownership. The create-time convention itself — caller vs BU Owner team — is task 080's to settle); null → app-owned.</param>
+    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> — an INPUT to the owner-team resolution, not the owner (task 080: every record created here is owned by a business-unit default owner team, and the create is refused with OFFICE_022 when none resolves — never app-owned).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created To Do id + name, or null when creation is unavailable (no generic-create dep injected).</returns>
     /// <remarks>
@@ -212,8 +212,8 @@ public interface IOfficeService
     /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The
     /// regarding is written via the entity-specific lookup (<c>sprk_regardingmatter</c>/<c>project</c>/<c>invoice</c>)
     /// plus the ADR-024 denormalized resolver fields (id/name, and a best-effort record-type ref). App-only create
-    /// via <see cref="IGenericEntityService"/> with <c>ownerid</c> = caller (same posture as
-    /// <see cref="QuickCreateAsync"/> — no impersonated-create helper exists in the BFF).
+    /// via <see cref="IGenericEntityService"/>, owned by a business-unit default owner team resolved record-first
+    /// (regarding record → document → communication → caller; task 080), refused with OFFICE_022 when none resolves.
     /// </para>
     /// </remarks>
     Task<CreateTodoResponse?> CreateTodoAsync(

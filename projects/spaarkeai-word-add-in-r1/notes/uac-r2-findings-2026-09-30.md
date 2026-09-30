@@ -86,3 +86,37 @@ It says `EntityAccessFilter` refuses `sprk_todo`, but `EntitySetByType` contains
 
 Without it, the impersonated entity picker fails closed. UAC-r2 recorded it as an amendment on their task 036,
 which depends on the same privilege. A live read of the BFF application user's roles would close it.
+**Still open after the #1029 merge** (UAC-r2 restated it 2026-09-30, §6).
+
+## 6. After #1029 merged — 2026-09-30 (UAC-r2 cross-session message)
+
+**#1029 merged as `2682e8225`; merged into this branch as `26acc00e2`** — no conflicts. Build 0 warnings,
+ArchTests 337/337, Office + access-control unit/contract filters 480/0 and 295/0.
+
+- **Our work won the reconciliation.** `OfficeService.cs` and `JobOwnershipFilter.cs` were taken from our
+  side wholesale. Our 062 / 064 / 067 superseded their 126 / 128 / 120; their overlapping filter branch and its
+  tests were removed. Master's only later edits to our files: `OfficeEndpoints.cs` `/office/save-debug` now
+  logs the body LENGTH only (their task 120, #1015), and one comment rename in `OfficeService.cs`.
+- **Route census.** `RouteAuthorizationGuardTests` credits `TodoSourceAccessFilter` and
+  `QuickCreateSourceAccessFilter` by name. `GET /api/office/search/matter-types` has a **Permanent** waiver;
+  the `/quickcreate` waiver is gone. A new Office route with a new filter type must be on the credited list or
+  carry a waiver, or ArchTests fail (restates §3).
+- **`IDataverseUserClient`** now lives in `Sprk.Bff.Api.Infrastructure.Dataverse` and is registered
+  unconditionally in `AddSpaarkeCore` (task 080 already assumes this).
+- **BU-name literal renamed** `"Secure Projects"` → `"Secure Record"` in `OfficeService.cs`,
+  `RecordOwnershipResolver.cs` and two Office save contract tests (their task 121). Any code 080 writes that
+  names that BU must use the new literal.
+
+### 🔔 (e) NEW — the picker trims by **Read**, the save demands **AppendTo** → owner routing needed
+
+062's impersonated entity search returns every record the user can **Read**. The save authorizes the target
+by **AppendTo**. A **View-Only** access grant (Read without AppendTo) therefore lets a user pick a record and
+then fail the save. Granting AppendTo on the role does not close it: the gap is per-record access, not the
+role. Under the owner's access model (team-owned records, BU + children depth, no sharing), the realistic
+source is a **secure record** reached through a UAC view-only grant.
+
+Fails closed (no write happens), so this is a correctness/UX defect, not a leak. The long-term fix is to make
+**"pickable" equal "savable"**: the picker either hides records without AppendTo, or shows them disabled with
+the reason. Which of the two is an owner call (it decides whether a view-only user can see the record exists
+in the pane). Filed as **ISS-010 [#1037](https://github.com/spaarke-dev/spaarke/issues/1037)**; not yet assigned
+to a task.

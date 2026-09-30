@@ -297,9 +297,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // units and Dataverse Deep depth traverses DOWNWARD (own BU plus descendants), so a child-BU user
         // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
         //
-        // Null is the pre-existing behaviour, preserved for callers outside the BFF. BFF callers resolve the
-        // team via IRecordOwnershipResolver and REFUSE when it is unresolved; they never fall through to
-        // app-only ownership, because that silently recreates the defect.
+        // Null keeps the pre-existing behaviour (the calling identity owns the row). The OFFICE writers always pass a
+        // team — OfficeDocumentPersistence refuses to call without one — and refuse the save when none resolves.
+        // Several OTHER BFF writers still pass null and so still create app-owned rows in root (Communication
+        // archive/inbound, the external portal); adopting the resolver there is GitHub #1034, not a guarantee here.
         if (request.OwningTeamId is { } owningTeamId && owningTeamId != Guid.Empty)
         {
             document["ownerid"] = new EntityReference("team", owningTeamId);

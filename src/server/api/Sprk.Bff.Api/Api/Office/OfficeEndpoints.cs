@@ -637,7 +637,11 @@ public static class OfficeEndpoints
             // shape as OFFICE_018 above; it is the request's content that is wrong, not the server's state.
             OfficeErrorCodes.CorruptDocumentPackage => ProblemDetailsHelper.OfficeValidationError(
                 error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
-            OfficeErrorCodes.VersionTargetHasNoFile or OfficeErrorCodes.VersionTargetLocked => Results.Problem(
+            // Task 080 — OFFICE_022 (no owner could be determined) joins the two version refusals: a refusal that
+            // wrote nothing, rendered with its own status and title from OfficeErrorCodes.
+            OfficeErrorCodes.VersionTargetHasNoFile
+                or OfficeErrorCodes.VersionTargetLocked
+                or OfficeErrorCodes.RecordOwnerUnresolved => Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(error.Code),
                 title: OfficeErrorCodes.GetTitle(error.Code),
                 detail: error.Message,
@@ -1510,7 +1514,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with the caller as a load-bearing owner (an unresolved caller is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. This endpoint assigns NEITHER a matter number nor a project number: both will be set by a planned separate server-side numbering component that triggers on create. Because sprk_matternumber and sprk_projectnumber are their entities' primary name attributes, records created here show a blank name in lookups and grids until that component exists. Invoice keeps the minimal name-only path with best-effort ownership.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — the caller's business-unit default owner team (an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. This endpoint assigns NEITHER a matter number nor a project number: both will be set by a planned separate server-side numbering component that triggers on create. Because sprk_matternumber and sprk_projectnumber are their entities' primary name attributes, records created here show a blank name in lookups and grids until that component exists. Invoice keeps the minimal name-only path. Every record created here is owned by the caller's business-unit default owner team (task 080); when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1552,7 +1556,8 @@ public static class OfficeEndpoints
 
     /// <summary>
     /// Create To Do endpoint handler. Creates a first-class <c>sprk_todo</c> regarding the filed record
-    /// (email-communication-intelligence-r2 #3). Owner attribution is best-effort (ADR-024).
+    /// (email-communication-intelligence-r2 #3). Owned by a business-unit default owner team, record-first; refused
+    /// with 403 OFFICE_022 when none resolves (task 080).
     /// </summary>
     private static async Task<IResult> CreateTodoAsync(
         CreateTodoRequest request,
@@ -1590,7 +1595,8 @@ public static class OfficeEndpoints
 
         try
         {
-            // Attribute ownership to the caller (ADR-024) — best-effort; unresolved → app-owned.
+            // The caller's systemuserid — one input to the owner-team resolution (task 080). The To Do is owned by a
+            // business-unit default owner TEAM, never the caller; see OfficeService.ResolveTodoOwnerTeamAsync.
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 
@@ -1616,6 +1622,26 @@ public static class OfficeEndpoints
                 "Create To Do succeeded: TodoId={TodoId}, CorrelationId={CorrelationId}", response.TodoId, traceId);
 
             return Results.Created($"/office/todo/{response.TodoId}", response);
+        }
+        catch (SdapProblemException problem)
+        {
+            // Task 080: a structured refusal — today only OFFICE_022, no owner team could be resolved. No row was
+            // written. Same rendering as the quick-create endpoint, so the generic catch below cannot turn a
+            // deliberate refusal into a 500, and it stays distinguishable from OFFICE_010's generic failure.
+            logger.LogWarning(
+                "Create To Do refused: {Code} ({Status}), CorrelationId={CorrelationId}",
+                problem.Code, problem.StatusCode, traceId);
+
+            return Results.Problem(
+                type: OfficeErrorCodes.GetTypeUri(problem.Code),
+                title: problem.Title,
+                detail: problem.Detail,
+                statusCode: problem.StatusCode,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = problem.Code,
+                    ["correlationId"] = traceId
+                });
         }
         catch (Exception ex)
         {
@@ -1874,9 +1900,10 @@ public static class OfficeEndpoints
 
         try
         {
-            // Resolve the caller's systemuserid for ownerid. For MATTER (task 030) and PROJECT (task 031) it is
-            // load-bearing: the creation service refuses an unresolved caller (403 owner_unresolved, no row written).
-            // For Invoice it stays best-effort: unresolved leaves ownerid to the Dataverse default (app user).
+            // Resolve the caller's systemuserid. For MATTER (task 030) and PROJECT (task 031) it is load-bearing: the
+            // creation service refuses an unresolved caller (403 owner_unresolved, no row written). For every type it
+            // decides the owner TEAM (task 080) — the caller's business-unit default owner team — and an unresolvable
+            // team is refused with 403 OFFICE_022. No quick-created record is app-owned any more.
             var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
             var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
 
@@ -1917,8 +1944,9 @@ public static class OfficeEndpoints
             // R3 task 081 — FR-2P2.6 + Q2 fire-and-forget membership event.
             // Per event-source-inventory.md §3A + §6.3, the QuickCreate
             // matter endpoint is the ONLY BFF-side write path for sprk_matter.
-            // The implicit ownerid Lookup is defaulted by Dataverse to the
-            // OBO caller; publish an Added event for that implicit mutation
+            // ⚠️ CORRECTED 2026-09-30 (task 080): ownerid is NOT the caller — the create is app-only and the
+            // row is owned by the caller's business-unit default owner TEAM. The event records the caller
+            // as the creator-member (ADR-034's call, flagged to UAC-r2); publish an Added event for it
             // so the junction-updater (task 084) + nightly recon (task 085)
             // observe the new association in real time when the topic is
             // provisioned and the publisher flag is on. When disabled

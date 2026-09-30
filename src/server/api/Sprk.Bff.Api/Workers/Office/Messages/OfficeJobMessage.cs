@@ -161,6 +161,22 @@ public record UploadFinalizationPayload
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? VersionSaveJobId { get; init; }
+
+    /// <summary>
+    /// Task 080 (spaarkeai-word-add-in-r1, write-path invariant I-6): the business-unit DEFAULT OWNER TEAM that
+    /// <c>SaveAsync</c> resolved for this save's document. The worker gives the SAME team to every document it
+    /// creates for the save — an email's attachment children, and the fallback create — so a parent and its
+    /// children land in the same business unit. (One transient exception: a message enqueued BEFORE this field
+    /// existed has an app-owned parent, while its children are resolved to a team — for that deploy window only.)
+    /// </summary>
+    /// <remarks>
+    /// Null for a version save (it creates no document) and for any message enqueued before this field existed;
+    /// the worker then resolves the team itself from <see cref="AssociationType"/> / <see cref="AssociationId"/>
+    /// and the message's user, through the same resolver. Omitted from the JSON when null, so a version save's
+    /// payload is byte-for-byte what it was.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? OwningTeamId { get; init; }
 }
 
 /// <summary>
