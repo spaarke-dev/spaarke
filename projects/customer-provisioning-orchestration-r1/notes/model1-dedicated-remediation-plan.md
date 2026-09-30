@@ -79,6 +79,8 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 | D10 | *(owner 2026-09-30)* Adopt the customerId standard (`^[a-z][a-z0-9]{2,7}$`, uac-r2 D-14) → T237. |
 | Q1 ✅ | *(owner 2026-09-30)* The **operator creates the Dataverse environment** and provides its name/URL at intake; **H5 verifies/adopts** it and never creates one → T228. |
 | Q2 ✅ | *(owner 2026-09-30)* Non-customer stamps get standard-compliant `Customer__Id` values (not customer-facing). Applied 2026-09-30: dev `spaarke-bff-dev` = `spaarke` (already set, healthy — left as is); demo `spaarke-bff-demo` = **`sprkdemo`** (set; app is stopped). `spaarke-bff-prod` / `rg-spaarke-platform-prod` named in the INCOMING note **does not exist** in any accessible subscription. The retired shared-tier stamp `sprksharedprod-api` → §5 Q4. |
+| D11 | *(owner 2026-09-30)* **T240 approach approved**: ONE shared add-in package + ONE Teams package; runtime customer discovery; H3 pre-authorizes the shared client apps on every customer BFF app-reg; dedicated Teams client app; CORS; code-page sign-in fix; guest-token spike first ([`g14-shared-clients-auth-chain.md`](g14-shared-clients-auth-chain.md) §4). |
+| Q4 ✅ | *(owner 2026-09-30)* Stop `sprksharedprod-api` now → **done 2026-09-30** (state `Stopped`, no slots). Decommission `rg-spaarke-shared-prod` under **T241**. |
 | (prior) | T223/T224: enum `Model1`/`Model2`; §9 Q1 Power BI F-SKU deferred (placeholder only); §9 Q2 Copilot agent per customer; §9 Q3 Redis Standard C1, verify empirically after first customer. |
 
 ---
@@ -131,8 +133,8 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 
 - ~~Q1~~ ✅ resolved → D-table row Q1 (operator creates env; H5 verifies/adopts).
 - ~~Q2~~ ✅ resolved → D-table row Q2 (dev `spaarke`, demo `sprkdemo`).
-- **Q3 — G14 design** (D9: in scope): recommendation pending the auth-chain investigation → T240.
-- **Q4 — retired shared-tier stamp `sprksharedprod-api`** (`rg-spaarke-shared-prod`, subscription "Spaarke Model 1
+- ~~Q3~~ ✅ resolved → D11.
+- ~~Q4~~ ✅ resolved (stopped; T241) — original finding kept for the record: **retired shared-tier stamp `sprksharedprod-api`** (`rg-spaarke-shared-prod`, subscription "Spaarke Model 1
   Production"): **crash-looping** (`/healthz` 503) — built from this worktree on 2026-08-24, it dies at startup
   demanding `API_CLIENT_SECRET` for Dataverse (pre-auth-v4 code; re-adding a secret is forbidden by ADR-028 A4) and
   cannot resolve `IChatClient`. Unrelated to `Customer__Id`. It is the D-12-retired shared tier. Recommendation:
@@ -172,7 +174,7 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 | **T237** | customerId standard at intake (INCOMING-CUSTOMERID-STANDARD) | Validate `^[a-z][a-z0-9]{2,7}$` at `POST /api/runs` + `intake.schema.json` + L3 skill intake (main-session, `.claude/`); `sprk_customerid` `MaxLength = 8`; re-issue non-compliant registry values + test fixtures; record abbreviation once on the registry row; `provisioning-runs/_templates/intake.md` | master merge |
 | **T238** | H4b emits `Customer__Id` (INCOMING-CUSTOMER-RUNTIME-IDENTITY) | Add `Customer__Id` = intake customerId to H4b's batched settings (manifest `per_env_settings` → regenerate); missing value = provisioning failure; H13 check that the stamp resolves via the setting, not RG derivation | master merge, T226 |
 | **T240** | Shared M365 clients → per-customer BFFs (G14, D9) | Facts + recommendation: [`g14-shared-clients-auth-chain.md`](g14-shared-clients-auth-chain.md). Recommended: ONE shared add-in + ONE Teams package; runtime customer discovery (home tenant → customer directory written by provisioning); H3 pre-authorizes the shared client apps on every customer BFF app-reg; dedicated Teams client app; CORS for client origins; fix code-page `sprk_MsalClientId` / SPA redirect (likely broken today). Spike first: B2B-guest token acquisition from Spaarke's tenant via NAA. | T227 |
-| **T241** | Decommission live shared-tier resources (Q4) | Stop `sprksharedprod-api`; inventory + delete `rg-spaarke-shared-prod` (and any other `sprkshared*` resources) after confirming no dependents; KV credential-lifecycle rule applies to any vault in it (no purge of rollback copies before 2026-11-23) | owner Q4 |
+| **T241** | Decommission live shared-tier resources (Q4 ✅) | `sprksharedprod-api` already stopped (2026-09-30). Delete `rg-spaarke-shared-prod` (subscription "Spaarke Model 1 Production"; 13 resources: `sprksharedprod-api`, `-plan`, `-openai`, `-search`, `-docintel`, `-redis`, `-servicebus`, `sprksharedprodsa`, `-logs`, `-insights`, Smart Detection, `sprk-prod-shared-bff-uami`, **KV `sprk-prod-kv`**) after confirming no dependents. Plan/Redis/Search still bill while the app is stopped — do this promptly once deps clear. 🔴 KV credential-lifecycle rule: deleting `sprk-prod-kv` deletes its live `Dataverse-ClientSecret` → **the vault may not be deleted before 2026-11-23** (delete the other 12 resources first; no purge of soft-deleted copies). | T226, T225b (remove remaining `sprksharedprod-*` references first) |
 | T239 | Task-status hygiene (non-blocking) | 74 tasks ✅ in TASK-INDEX whose POML still says `not-started` (+2 custom statuses) — reconcile from git evidence; `scripts/check-task-status-drift.ps1` parses 1 of 181 rows here (expects `\| ✅ 001 \|`, this index uses `\| 001 \| ✅ \|`) — fix parser or index format | — |
 | T221 | 23 baseline test failures | unchanged — any time | — |
 | 213.7 / 207 / 208 / 209 | pre-existing blockers | SPE runbook + constants; placeholder substitution; validator CI wiring; branch protection | T227 (213.7) |

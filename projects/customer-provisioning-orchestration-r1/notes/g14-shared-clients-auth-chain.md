@@ -50,7 +50,7 @@ and master). It cannot distinguish Model 1 customers (all share Spaarke's `tid`)
 - MSAL scopes are **runtime** parameters — a client can request a different audience without a rebuild.
 - No user → customer mapping exists anywhere today.
 
-## 4. Recommendation (pending owner confirmation)
+## 4. Recommendation — ✅ APPROVED by owner 2026-09-30 (plan D11)
 
 **Keep ONE shared add-in package and ONE Teams package — do not build per-customer instances.** The clients choose
 the customer at runtime:
