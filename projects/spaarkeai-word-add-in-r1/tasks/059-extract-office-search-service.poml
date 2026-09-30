@@ -71,6 +71,13 @@
       **The search extraction is now OPTIONAL** and comes last, only if it still looks worthwhile after the
       above. **The `line count drops by at least 250` criterion is DELETED** — it is exactly the metric
       CLAUDE.md §11.5 forbids, and the God-class LOC ratchet was retired 2026-08-20 for this reason.
+    
+      UPDATE 2026-09-30 (pre-compact handoff): the six OfficeService.cs source-scan text dependencies that UAC-r2
+      once warned could fail a behaviour-preserving move are GONE - they deleted
+      OfficeEntitySearchSecurityTrimmingTests. QuerySearchEntityAsync may be moved freely. Still binding, in
+      CommunicationsEndpoints.cs (their task-127 code): no code line may contain entityService or
+      IGenericEntityService (doc lines starting with three slashes are exempt). UAC-r2's merge kept OUR 062 search
+      (impersonation) over their 126 (OBO). Blocked on PR 1029; runs after 080 and 058.
     </background>
     <notes>
       **ORDER MATTERS.** 058 deletes `SearchDocumentsAsync` + `GenerateStubDocumentResults`, which live in this

@@ -233,6 +233,24 @@
       Ours fails loudly with a 403. **Fixing ownership does not fix that silent catch** — it only removes the
       common trigger; any transient error still lies. Those are two independent defects and this task must not
       let the ownership fix be mistaken for closing theirs.
+    
+      UPDATE 2026-09-30 (pre-compact handoff):
+      1. Now the FIRST task after UAC-r2 PR 1029 merges (owner-approved sequencing). 1029 carries OUR
+         OfficeService.cs byte-for-byte (their merge kept our 062, 064 and 067). Rebase ONTO them.
+      2. Constructor: 1029 adds the LAST optional ctor parameter, IDataverseUserClient userClient. Append this task's
+         resolver AFTER it. IDataverseUserClient (the delegated OBO Dataverse client) now lives in
+         Sprk.Bff.Api.Infrastructure.Dataverse and is registered UNCONDITIONALLY in AddSpaarkeCore - use it to read
+         the ACTING user's business unit as the user. It fails closed, with no app-only fallback.
+      3. RecordOwnershipResolver.cs: about line 250 still says the caller falls back to the acting user - no longer
+         true (commit 21969129b made it refuse). About line 270 uses TopCount 1 plus FirstOrDefault for the
+         oid to systemuser to business-unit lookup, while RecordContainerResolver uses TopCount 2 and REFUSES on
+         ambiguity. Adopt the refusing contract so one fact does not have two answers.
+      4. Owner decisions 2026-09-30: this task is now ALSO the fix for 065's residual risk (a no-record save still
+         needs the created sprk_document owned by the acting user's BU default Owner team) and for 066 (option A:
+         apply the same team-ownership convention to sprk_communication - COORDINATE with the Communication project,
+         do not reach into EmailUploadCaptureService.BuildCommunicationEntity).
+      5. Verify BOTH dimensions for any filter attached: can it resolve the type, AND does an end-user role hold the
+         right it enforces (UAC-r2 task-128 lesson).
     </background>
   </context>
 

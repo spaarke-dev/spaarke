@@ -1,6 +1,53 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## ✅ MERGED TO MASTER — **DONE 2026-09-30**
+> **Last Updated**: 2026-09-30 (by context-handoff, pre-`/compact`)
+> **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
+
+---
+
+## ⚡ Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|---|---|
+| **Active task** | **NONE** — every remaining task is gated on an **owner decision** or on **UAC-r2 PR #1029** |
+| **Closed this session** | **077** ⚠️ (Find: documents + matching records; Outlook + post-save reachable) · **078** ⚠️ (ONE unified Outlook + Word app package) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` @ `eb166d4ad`+handoff, pushed, tree clean. **14 commits ahead of master, NO open PR** (PR #960 merged earlier as `e6bc26df9`) — a new PR is needed to land them. 1 behind master |
+| **Next Action** | **1)** `gh pr view 1029 --json state` — if MERGED: `git fetch origin && git merge origin/master` (merge, not rebase — the branch is pushed), then invoke `task-execute` for **080** (append its resolver ctor param AFTER `IDataverseUserClient userClient`). **2)** If the owner has answered 076's three questions → `task-execute` **076**. **3)** Otherwise nothing is startable — report and wait. |
+
+### 🔔 Waiting on the OWNER
+
+1. **078 — observed install** (`notes/078-manifest-decision.md` §6): deploy → download artifact `spaarke-addin-unified-package` → upload the **`-TEST` zip** in admin center (Integrated apps → Upload custom apps → App type **"Teams app"**) to **Just me** → check Outlook + Word, desktop + web → **note any permission prompt** (mixing mail + document permissions in one package is undocumented) → then the production zip.
+2. **076 — three answers** (option B = numbering as write-path invariant I-10 owned by `RecordCreationService`): (a) Project number format — projects have NONE today; (b) random 6 digits vs a per-type sequence; (c) who verifies production matter-number uniqueness before the alternate key. Detail: the 076 POML UPDATE block.
+3. **042 UAT** — deferred by owner (no redeploy now). The shared `spaarke-bff-dev` is missing this project's routes (overwritten 9× by other projects' branch deploys) — any future deploy must come from **master**.
+
+### ⛔ Waiting on UAC-r2 PR #1029 (OPEN) — they will message on merge
+
+Order after it lands: **080 → 058 → 059 → 060 → 068 → 075**; 077/078 done; then 079 → 090. **Every one of those POMLs now carries a "UPDATE 2026-09-30 (pre-compact handoff)" block** with this session's findings — read it at task start.
+
+### 🧠 Facts NOT to re-derive (each cost real time this session)
+
+| Fact | Where |
+|---|---|
+| **Production runs XML for BOTH add-ins** (Outlook `outlook/outlook-manifest.xml` `5e4d66d0-…`; Word `word/word-manifest.xml` `b3965ea0-…`). ⚠️ `/outlook/manifest.xml` **404s** — a recorded trap this session still fell into once, producing two wrong claims later corrected with the owner | `notes/078-manifest-decision.md` §1 |
+| **Inspect BUILT files, not `src/`** — webpack rewrites manifests (URLs, ids, resource) | 078 note |
+| **Never name a folder `build/` under office-addins** — the repo-root `.gitignore` ignores it; 078's first commit shipped a module that was never tracked | 078 note §5; module CLAUDE.md |
+| **Job-status Dataverse fallback NEVER works** (anonymous type → `dynamic` across an assembly boundary; only the TEST assembly can see it, so tests pass while production 404s) — **task 060's fix** | `notes/uac-r2-findings-2026-09-30.md` (a) |
+| **`check-task-status-drift.ps1` cannot read this index** (parses 5 of 82 rows — the risk table); red independent of any task; verify task pairs by hand; routed to **079** | 079 POML UPDATE |
+| **ADR-051 records paging = *non-empty ⇒ more*** — owner-APPROVED path A (the per-row trim shortens pages) | spec ADR Tensions; project Decisions |
+| **`TargetEntity` is never required** (no-record saves are required); **066 = option A via 080's team-ownership convention**; every add-in user holds ≥ `Spaarke Basic User` | owner decisions below; memory |
+| **UAC-r2 retracted the OfficeService.cs source-scan guards** (059 may move `QuerySearchEntityAsync` freely); the `CommunicationsEndpoints.cs` rule stands; new Office-route filters without "Authorization" in the name → `ExplicitlyCreditedFilterTypeNames` | UAC-r2 block below |
+
+### 📦 Session commits (after the `e6bc26df9` merge)
+
+`1ce8261a4` owner decisions 065/066 · `7b7688f5c` 077 (b)+(c) · `69803493c` 042 UAT round 2 · `73c858f28` 077 (a) records · `22f6ac55e` 077 review fix (paging race) · `06823f339` 077 notes · `89be27733` researcher memory · `9d9e54e41` 077 close · `450401be7` ADR-051 approved · `e2e50a965` 078 package · `6e590d012` 078 fix (gitignored `build/`) · `d17ac8152` 078 docs + 011 corrected · `34e105ed1` 078 review fix (NO permissions) · `eb166d4ad` 078 close + UAC-r2 findings · *(this handoff: POML updates for 058/059/060/076/079/080 + this block)*
+
+### Critical context
+
+Every task that does not depend on #1029 or an owner answer is closed, through 078. What remains: the OfficeService backend track (gated on UAC-r2's #1029), 076 (gated on the owner's three answers), 079 and 090 (gated on those), plus owner-side actions (078's observed install, 042's UAT). No task is in progress; nothing is half-applied.
+
+---
+
+## 📜 HISTORY — ✅ MERGED TO MASTER — **DONE 2026-09-30**
 
 > **Last Updated**: 2026-09-30 (post-merge + owner decisions on 065 / 066)
 
