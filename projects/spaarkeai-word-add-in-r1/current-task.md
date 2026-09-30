@@ -1,5 +1,61 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
+## 🚦 MERGE TO MASTER — **NOT DONE. THIS IS THE FIRST THING TO FINISH.**
+
+> **Last Updated**: 2026-09-29 (context-handoff at 9% context; session stopped here deliberately)
+
+| Field | Value |
+|---|---|
+| **Branch HEAD** | `ce4e8be84` — **pushed**, tree clean, **0 behind master** |
+| **PR** | **#960**, marked **ready** (not draft), `mergeable=MERGEABLE` |
+| **Blocker** | `state=BLOCKED` only because **`Router` has not reported at `ce4e8be84`** — CI restarted on the push |
+| **NEXT ACTION** | 1) confirm the full BFF suite is green at `ce4e8be84`; 2) wait for `Router` = pass; 3) run `/merge-to-master` |
+
+### Verified AT `ce4e8be84` (after merging master's last 35 commits)
+
+| Gate | Result |
+|---|---|
+| Merge of master | **no conflicts**; our `OwningTeamId` in the shared `Spaarke.Dataverse/Models.cs` **survived** (both sides touched that file) |
+| Build | **0 warnings / 0 errors** |
+| ArchTests, full unfiltered | **333 / 333** — up from 326; master's 3 new guard files pass against our code |
+| Full `Sprk.Bff.Api.Tests` | ⚠️ **WAS RUNNING WHEN THIS SESSION ENDED — RESULT UNKNOWN.** It was **12,985 / 0 / 56** at the previous commit `71cd2aeff`. **Re-run it**: `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug` |
+| Publish | 45.67 MB vs 60 MB ceiling (measured at `77242c010`) |
+| CVE | none |
+
+### 🔴 Two things about the merge gate that will waste your time if you do not know them
+
+**1. `Router` is structurally gated behind the advisory tier it ignores.** `ci-router.yml:275` is
+`needs: [classify, tier1, tier2]` with `if: always()`. Tier 2 is excluded from Router's *adjudication* by
+construction (`:280-285` — a timeout reports `CANCELLED`, which an allow-list cannot cover), but Router still
+**waits for tier2 to finish**. Tier 2 burns its 30-minute cap and is cancelled (6/6 historically). So expect
+**~40 minutes** before `Router` reports, and expect exactly one non-pass check —
+`Tier 2 (Advisory) / Full Unit Tests` = `cancel` — which is **normal and not a blocker**.
+`state=UNSTABLE` (not `BLOCKED`) is the mergeable state once Router passes.
+
+**Proof it works**: at the previous commit `71cd2aeff` the final state was 37 checks — **35 pass, 1 cancel
+(Tier 2), 1 skipping (Trivy)** — with **`Router: pass / SUCCESS`**.
+
+**2. There is a TREADMILL.** Master moved **35 commits in the hour** spent waiting for one Router cycle, and it
+moved 229 and then 10 before that. If you insist on "fresh full CI at a commit that is 0-behind", the condition
+may never hold. The judgment made here, for you to accept or override: merge on the strength of **local
+verification at the exact commit** (build + full arch + full suite) plus a passed Router, rather than chasing a
+fresh Router that master will invalidate again. Master's last 35 commits were Compose-r8 wrap-up +
+field-mapping, with **no overlap** on `RecordCreationService`, `CreateTimeFieldMapping`,
+`RecordOwnershipResolver`, `OfficeService` or `OfficeEndpoints` — checked, not assumed.
+
+**Residual risk, named rather than hidden**: a *semantic* merge conflict with master that local tests miss. That
+is not hypothetical — it happened this session (UAC-r2 removed `"account"` from `validEntityTypes` while our
+test asserted an `account` target is still gated; different files, clean merge, red suite). If CI goes red on
+master after the merge, look there first.
+
+### Merge mechanics
+Use **`/merge-to-master`**, not a bare `gh pr merge` — it performs the pre-merge branch update and the
+**worktree sync** (this is a worktree; the main checkout's local `master` needs an explicit pull afterwards).
+⚠️ Before any `--delete-branch`, confirm **pending is genuinely 0** — deleting the branch while jobs are queued
+fails them at `Checkout` and looks like a quality regression (happened on PR #890).
+
+---
+
 ## 🔵 ACTIVE TASK — **077** (analysis done, implementation NOT started) — READ THIS FIRST
 
 > **Last Updated**: 2026-09-29 (by context-handoff, pre-merge-to-master)
