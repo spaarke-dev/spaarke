@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient, ApiClientError } from '@shared/services';
 import type { DocumentProfileOutcome } from './useDocumentProfile';
 
@@ -147,8 +147,11 @@ export interface UseFindRecordMatchesResult {
   error: string | null;
   /** A later page failed; rows already shown are kept and paging stops. */
   loadMoreError: string | null;
-  /** Attach to a sentinel rendered immediately after the last record row. */
-  sentinelRef: RefObject<HTMLDivElement | null>;
+  /**
+   * Attach to a sentinel rendered immediately after the last record row. A CALLBACK ref, deliberately —
+   * see the observer effect for why an object ref breaks paging here.
+   */
+  sentinelRef: (node: HTMLDivElement | null) => void;
 }
 
 function errorMessageOf(err: unknown, fallback: string): string {
@@ -210,11 +213,11 @@ export function useFindRecordMatches(seed: RecordSearchSeed | null): UseFindReco
       } catch (err) {
         if (generation !== generationRef.current) return;
         if (isFirstPage) {
-          setError(errorMessageOf(err, 'Failed to load related records.'));
+          setError(errorMessageOf(err, 'Failed to load matching records.'));
           setStatus('error');
         } else {
           // Keep what is already shown; stop paging rather than retry-looping on the sentinel.
-          setLoadMoreError(errorMessageOf(err, 'Failed to load more related records.'));
+          setLoadMoreError(errorMessageOf(err, 'Failed to load more matching records.'));
         }
         setHasMore(false);
       } finally {
@@ -246,9 +249,23 @@ export function useFindRecordMatches(seed: RecordSearchSeed | null): UseFindReco
 
     setStatus('loading');
     void fetchPage(0, generation);
+
+    // Invalidate this query's in-flight pages on a query change AND on unmount, so a late response never
+    // lands in state that no longer belongs to it.
+    return () => {
+      generationRef.current += 1;
+    };
   }, [query, fetchPage]);
 
-  const sentinelRef = useRef<HTMLDivElement>(null);
+  // ⚠️ A CALLBACK ref stored in state — NOT `useRef`. Code review of task 077 found a real race with an
+  // object ref: this hook is called in `FindView`, but the sentinel is rendered by `FindResultsList`, which
+  // mounts only once the DOCUMENTS request has loaded. Both requests fire together; if records answer
+  // first, the observer effect below runs while the sentinel does not exist yet and bails — and with an
+  // object ref nothing re-runs it when the sentinel later mounts, so records stop at page 1 forever (the
+  // exact failure ADR-051 exists to prevent). Holding the node in state makes its ARRIVAL a dependency.
+  // (`useLazyResults` does not need this: it is called in the same component that renders its sentinel.)
+  const [sentinelNode, setSentinelNode] = useState<HTMLDivElement | null>(null);
+  const sentinelRef = useCallback((node: HTMLDivElement | null) => setSentinelNode(node), []);
 
   // Sentinel-driven progressive fetch (ADR-051 / `.claude/patterns/ui/infinite-scroll-list.md`).
   // Re-created after every page (`nextOffset` in deps): an IntersectionObserver reports the CURRENT
@@ -257,7 +274,7 @@ export function useFindRecordMatches(seed: RecordSearchSeed | null): UseFindReco
   useEffect(() => {
     if (status !== 'ready' || !hasMore) return;
 
-    const node = sentinelRef.current;
+    const node = sentinelNode;
     if (!node || typeof IntersectionObserver === 'undefined') return;
 
     const generation = generationRef.current;
@@ -273,7 +290,7 @@ export function useFindRecordMatches(seed: RecordSearchSeed | null): UseFindReco
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, [status, hasMore, nextOffset, fetchPage]);
+  }, [status, hasMore, nextOffset, fetchPage, sentinelNode]);
 
   return { status, records, seedSource, isLoadingMore, hasMore, error, loadMoreError, sentinelRef };
 }

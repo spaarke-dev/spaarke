@@ -57,6 +57,22 @@
     <constraint source="this task">If Outlook cannot resolve a document identity at all, then "Find works in Outlook" may be unachievable as specified — in that case amend FR-16 with the evidence rather than leaving a permanently dead tab. Decide; do not ship the dead tab unchanged.</constraint>
   </constraints>
 
+  <justification>
+    <!-- Added retroactively 2026-09-30 by task 077's own code review (W-2): the relevant-files list named
+         only edits, but the records half needed one NEW file. CLAUDE.md section 11 / code-review step 6.6. -->
+    <component>src/client/office-addins/shared/taskpane/hooks/useFindRecordMatches.ts</component>
+    <existing>Three neighbours, each checked by reading the file: hooks/useLazyResults.ts (reveal-only DOM
+      paging over an already-fetched array); hooks/useDocumentProfile.ts (a single-record GET of one
+      sprk_document); hooks/useRelatedRecord.ts (a PURE derivation of the FR-09 related-record card from the
+      resolved identity, no network). None issues a paged search request.</existing>
+    <extension>No. useLazyResults' header states it "issues NO network requests", and the owner's 2026-09-15
+      ADR-051 exception for Find's document list rests on exactly that property, so turning it into a fetcher
+      would invalidate the exception it exists to implement. useDocumentProfile reads one record and has no
+      paging; useRelatedRecord is a different concept (the document's OWN record), one letter away in name.</extension>
+    <cost-of-doing-nothing>FR-16's acceptance criterion "Find returns documents AND records" fails: Find stays
+      documents-only, which is gap (a) of this task.</cost-of-doing-nothing>
+  </justification>
+
   <acceptance-criteria>
     <criterion testable="true">REPRODUCE-FIRST: record all three current behaviours verbatim — documents-only results, Outlook's permanent state 1, and the post-save non-transition.</criterion>
     <criterion testable="true">Find returns documents AND records, with records coming from a per-row-authorized path. State the bridge design chosen and why, and show a negative test: a record the caller cannot read does not appear.</criterion>

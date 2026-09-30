@@ -209,7 +209,7 @@ describe('FindResultsList', () => {
         hasMore: true,
         error: null,
         loadMoreError: null,
-        sentinelRef: React.createRef<HTMLDivElement>(),
+        sentinelRef: jest.fn(),
         ...overrides,
       };
     }

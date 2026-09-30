@@ -33,7 +33,7 @@ import { FindResultsList, type FindResultNode } from '../FindResultsList';
  * |---|---|
  * | No `sprk_document` | "Save this document to Spaarke…" + a control that switches to Save |
  * | Resolved, not indexed (`sprk_searchindexed` false or null — not distinguished) | "This document isn't indexed yet." + Run Index |
- * | Resolved, indexed (`sprk_searchindexed` true) | A minimal results container (task 034 fills it in) |
+ * | Resolved, indexed (`sprk_searchindexed` true) | Similar documents (task 034) and matching records (task 077) |
  *
  * **The identity outcomes task 013 can produce are richer than "exists or not".**
  * `documentIdentityService.resolveDocumentIdentity` returns one of `resolved` / `new` / `conflict` /

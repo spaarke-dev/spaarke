@@ -91,6 +91,28 @@ function Harness({ seed }: { seed: RecordSearchSeed | null }): React.ReactElemen
   );
 }
 
+/**
+ * The production shape: the hook runs in FindView, but the sentinel is rendered by FindResultsList, which
+ * mounts only once the DOCUMENTS request has loaded — so the sentinel can appear AFTER records are ready.
+ */
+function LateSentinelHarness({
+  seed,
+  showSentinel,
+}: {
+  seed: RecordSearchSeed;
+  showSentinel: boolean;
+}): React.ReactElement {
+  const result = useFindRecordMatches(seed);
+  return (
+    <div>
+      <span data-testid="status">{result.status}</span>
+      {showSentinel && result.status === 'ready' && result.hasMore && (
+        <div ref={result.sentinelRef} data-testid="sentinel" />
+      )}
+    </div>
+  );
+}
+
 beforeEach(() => {
   mockPost.mockReset();
   observerCallbacks = [];
@@ -161,6 +183,24 @@ describe('useFindRecordMatches — request and paging', () => {
     await waitFor(() => expect(screen.getByTestId('has-more').textContent).toBe('false'));
     expect(screen.queryByTestId('sentinel')).toBeNull();
     expect(screen.getByTestId('count').textContent).toBe('3');
+  });
+
+  it('still pages when the sentinel mounts AFTER records are ready — i.e. records answered before documents', async () => {
+    // Regression for a race found in code review: with an object ref the observer effect ran while the
+    // sentinel did not exist yet, bailed, and was never re-run — records stopped at page 1 forever.
+    mockPost.mockResolvedValueOnce(page(RECORD_PAGE_SIZE)).mockResolvedValueOnce(page(0));
+    const { rerender } = render(<LateSentinelHarness seed={SEED} showSentinel={false} />);
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('ready'));
+    expect(observerCallbacks).toHaveLength(0);
+
+    // The documents land; FindResultsList mounts and renders the records sentinel.
+    rerender(<LateSentinelHarness seed={SEED} showSentinel />);
+    await waitFor(() => expect(observerCallbacks.length).toBeGreaterThan(0));
+
+    act(() => scrollSentinelIntoView());
+    await waitFor(() => expect(mockPost).toHaveBeenCalledTimes(2));
+    expect(mockPost.mock.calls[1][1]).toMatchObject({ options: { offset: RECORD_PAGE_SIZE } });
   });
 
   it('stops before requesting an offset the route would reject', async () => {
