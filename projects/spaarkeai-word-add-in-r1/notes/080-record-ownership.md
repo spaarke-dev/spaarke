@@ -1,6 +1,6 @@
 # Task 080 — record ownership: assign to the acting user's BU default owner team
 
-> **Date**: 2026-09-22 · **Rigor**: FULL · opus @ xhigh · **Status**: in progress
+> **Date**: 2026-09-22 → 2026-09-30 · **Rigor**: FULL · opus @ xhigh · **Status**: ⚠️ completed with escalation (`5d870b898`) — §6
 > **Owner decision (2026-09-22)**: *"the records should be owned by the acting user's BU default owner team.
 > So if testuser1 is in spaarke business unit 1 team/business unit, then the record they create is assigned to
 > that team (not the user)."*
@@ -500,9 +500,16 @@ who saved them, and the owner's 065 rule is *"we can't 'guess'"*. They stay in r
 - **Undo:** `-RevertManifest <path printed> -Apply`.
 - **Order:** run `sprk_todo` again after `sprk_document`, so To Dos follow their documents.
 
-### 6.10 Gates
+### 6.10 Gates (commit `5d870b898`)
 
-*(filled at Step 9 — see the commit message)*
+| Gate | Result |
+|---|---|
+| Full BFF suite (single process) | **13,047 pass / 1 fail / 56 skip**. The one failure is `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort`: pre-existing, unrelated, uses a wall-clock `Task.Delay(50)`, passes 3/3 alone, and passed on the previous full run (13,042 / 0 / 56). Not in `tests/.reliability-registry.json` |
+| ArchTests | 337 / 337 |
+| Publish size (§10) | master `2682e8225` **45.48 MB** vs branch `5d870b898` **45.49 MB** → **+0.01 MB**. Fresh worktrees at short paths, `Compress-Archive` Optimal, PDBs included, **212 files each** |
+| CVE | no vulnerable packages; no package changes |
+| office-addins | tsc 68 (baseline, no new errors); `errorMessages` jest 14/14; eslint clean |
+| Seeded negative controls | 5, all went red then restored: dropped `isdefault`; unreadable target falls through to the caller; save stops passing the team; `Id` bindable again; the #1038 friendly name passed through |
 
 ### 6.11 Step 9.5 review — triage (code-review + adr-check, 22 findings)
 

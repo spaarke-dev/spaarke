@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (task 080 RESUMED after UAC-r2 #1029 merged)
+> **Last Updated**: 2026-09-30 (task 080 closed ⚠️ — task-execute Step 11 transition)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,17 +9,16 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **080** — record ownership = BU default Owner team · `tasks/080-record-ownership-assignment-pattern.poml` · FULL · opus @ xhigh · directional · **run ALONE** · 🔄 in progress |
-| **Step** | Resumed at "wire the create paths". Resolver BUILT (`Services/Dataverse/RecordOwnershipResolver.cs`) but **ZERO** create paths pass a team yet (`CreateDocumentRequest.OwningTeamId` + `OfficeDocumentPersistence(owningTeamId)` are plumbed, no caller supplies one) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` @ `26acc00e2` = master merged in (UAC-r2 #1029 = `2682e8225`), no conflicts, pushed. Build 0/0 · ArchTests 337/337 · Office/access filters 480/0 + 295/0 |
-| **Next Action** | ✅ DONE (UNCOMMITTED, build 0/0, tests green): resolver hardening (TOP 2 refuse, `IGenericEntityService`, alias via `DocumentAssociationMap.ToLogicalName`) · Office save (resolved before email capture/job/upload → `OFFICE_022`) · worker fallback + attachment children (`UploadFinalizationPayload.OwningTeamId`) · To Do record-first (`SdapProblemException(OFFICE_022)` + endpoint catch) · Invoice quick-create + Matter/Project → team · 🔒 **`POST /api/v1/documents` let the CLIENT set `OwningTeamId` + `Id`** (found by the inventory) → `[JsonIgnore]` both + server-resolved owner · tests: `RecordOwnershipResolverTests` (11), `OfficeRecordOwnershipTests` (9), `DocumentCreateOwnershipContractTests` (2), quick-create assertions → team; 4 seeded negative controls all went red. **NEXT**: notes §6 (78-site inventory from the Explore sweep + hand-offs by owning project); backfill (dry-run + reversal manifest); full suite, ArchTests, publish, CVE; code-review + adr-check; commit. `sprk_analysis` = hand off (AI zone, 5 callers; see §6). |
+| **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml` — delete the fabricated-data Office routes; read its UPDATE block: remove the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`) |
+| **Last closed** | **080** ⚠️ `5d870b898` — every Office create is owned by a BU default Owner team, record-first, or refused `OFFICE_022`. Also fixed two security defects: `/api/v1/documents` body could set owner/id, and **#1038** (a save to a SECURE record landed in the shared container). Detail: `notes/080-record-ownership.md` §6 |
+| **Branch** | `work/spaarkeai-word-add-in-r1` — master (#1029) merged in at `26acc00e2`; 080 at `5d870b898`. Push after the publish-size note. **No open PR** — a new PR is needed to land this branch |
+| **Next Action** | `task-execute` **058**. Order stays **058 → 059 → 060 → 068 → 075**, then 079 → 090 (076 when the owner answers) |
 
-### 080 — decided at resume (2026-09-30)
+### 080 — what the owner must do (not blocking 058)
 
-- **Ctor**: the post-merge `OfficeService` tail is `ICallerSystemUserResolver? callerSystemUserResolver = null` — UAC-r2's `userClient` param did NOT survive (our file won). Append `IRecordOwnershipResolver?` after `callerSystemUserResolver`.
-- **Resolver keeps app-only `IDataverseService`**, NOT `IDataverseUserClient` (the POML UPDATE suggested the latter): background paths (`UploadFinalizationWorker`, inbound email) have no user token, and one fact must have one reader. Ownership metadata (BU, default team) is not user content.
-- **NOT changed, recorded with reasons**: `sprk_workassignment` (`ownerid` is the ONLY record of the assignee; the endpoint also writes two columns that DO NOT EXIST — `sprk_matterid`, `sprk_duedate` — live schema checked) · per-user artifacts (notifications, layouts, threads) · `EmailAttachmentProcessor` + `sprk_communication` (Communication project — hand off) · Compose / external-access / chat-persist document creates (other projects' hot paths — inventory).
-- **Sequencing discrepancy resolved**: the "SEQUENCING" table below says 058 → 080; the later records say 080 → 058. They touch disjoint code; following the later record.
+1. **Backfill** (owner runs it, by the owner's own instruction): `.\scripts\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -MaxWritesPerRun 5` → open a re-owned document as **Test User 1** → then the full run → run again for `sprk_todo`. Undo: `-RevertManifest <path printed> -Apply`. Dry run (2026-09-30): 31 documents + 10 To Dos would re-own; 376 unfiled documents stay in root.
+2. **Live verification after a deploy from master**: Test User 1 (the ONLY child-BU account) saves a document and reads it; 063 Run Index + 064 document-source To Do succeed. A root account cannot tell a working fix from a no-op.
+3. **Decisions filed**: #1034 (who adopts I-6 in ~20 other BFF writers), #1035 (work-assignment assignee + two non-existent columns), #1036 (playbook ownership), #1037 (picker Read vs save AppendTo), #1038 follow-up (check for Office content already in the shared container from secure-record saves).
 
 ### 🔔 Waiting on the OWNER
 
@@ -29,7 +28,7 @@
 
 ### ✅ UAC-r2 PR #1029 MERGED 2026-09-30 (`2682e8225`) — merged into this branch as `26acc00e2`
 
-Order: **080 (active) → 058 → 059 → 060 → 068 → 075**; 077/078 done; then 079 → 090. Their post-merge message is recorded in `notes/uac-r2-findings-2026-09-30.md` §6, including NEW finding **(e)**: the picker trims by Read but the save demands AppendTo — owner routing needed. **Every one of those POMLs now carries a "UPDATE 2026-09-30 (pre-compact handoff)" block** with this session's findings — read it at task start.
+Order: ~~080~~ ⚠️ done → **058 → 059 → 060 → 068 → 075**; 077/078 done; then 079 → 090. Their post-merge message is recorded in `notes/uac-r2-findings-2026-09-30.md` §6, including NEW finding **(e)**: the picker trims by Read but the save demands AppendTo — owner routing needed. **Every one of those POMLs now carries a "UPDATE 2026-09-30 (pre-compact handoff)" block** with this session's findings — read it at task start.
 
 ### 🧠 Facts NOT to re-derive (each cost real time this session)
 

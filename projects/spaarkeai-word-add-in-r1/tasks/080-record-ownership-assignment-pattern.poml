@@ -4,7 +4,7 @@
     <title>Every BFF-created record lands in the root business unit because nothing sets an owner — establish the ownership-assignment pattern across all record entities</title>
     <phase>5 Remediation — data model</phase>
     <gate>startable. BLOCKS the real closure of 063, 064 and 066.</gate>
-    <status>not-started</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes what every app-only Dataverse create writes, and requires a data backfill. Tags include bff-api + dataverse + security. Modifies `.cs`.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -334,4 +334,29 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run ALONE — do not run concurrently with any other agent on this worktree (see notes/064-todo-source-gate.md §10).</protocol>
   </execution>
+
+  <status-note>
+    COMPLETED WITH ESCALATION 2026-09-30. Commit 5d870b898 (after UAC-r2 PR 1029 merged into this branch as 26acc00e2).
+    Every Office create is owned by a business-unit DEFAULT OWNER TEAM, record-first, or REFUSED with 403 OFFICE_022 -
+    never app-owned: the save (resolved before the email capture, job row, upload and row; the team rides the queue
+    payload so attachment children match their parent), the upload-finalization worker, To Do, quick-create
+    Matter/Project/Invoice, and POST /api/v1/documents. OfficeDocumentPersistence refuses to create without a team.
+
+    Two security defects found and fixed: (1) POST /api/v1/documents bound CreateDocumentRequest from the body, so a
+    client could set OwningTeamId and Id (both introduced on this branch) - JsonIgnore on both; (2) GitHub 1038,
+    pre-existing: the Office save passed the FRIENDLY type to RecordContainerResolver, so a save to a SECURE project
+    landed in the shared default container - fixed, with a regression test that fails on the old code.
+
+    ESCALATION - owner: criterion 5's sample -Apply of scripts/Backfill-RecordOwnership.ps1 (the owner runs backfills;
+    dry run done: 31 documents + 10 To Dos would re-own, 376 unfiled documents left in root); criteria 6 and 7 need a
+    deploy from master and a check as Test User 1. Not changed, filed: ISS-007..010 = GitHub 1034-1037 (the other BFF
+    writers, work assignment, playbooks, the picker's Read-vs-AppendTo gap). sprk_communication handed to the
+    Communication project.
+
+    Gates: full BFF suite 13,047 pass / 1 fail / 56 skip - the failure is a pre-existing wall-clock SSE test
+    (Task.Delay) that passes 3 of 3 alone and passed on the prior full run (13,042 / 0 / 56); ArchTests 337/337;
+    publish master 45.48 MB vs branch 45.49 MB (+0.01, 212 files each, Compress-Archive, fresh short-path worktrees);
+    no vulnerable packages; office-addins tsc 68 (baseline), errorMessages jest 14/14, eslint clean. Five seeded
+    negative controls went red. Step 9.5 review: 22 findings, triaged in notes/080-record-ownership.md section 6.11.
+  </status-note>
 </task>
