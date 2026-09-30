@@ -130,7 +130,19 @@ They verified **zero shared helpers** between the two methods: `SearchEntitiesAs
 `EntitySearchMeta`; `SearchDocumentsAsync`'s body references exactly one helper. Re-confirmed they do
 **not** depend on `/office/recent` or any share/attach member.
 
-### 🔴 059 / 060 — SOURCE-SCANNING GUARDS MEAN A BEHAVIOUR-PRESERVING REFACTOR CAN STILL GO RED
+### ✅ UPDATE 2026-09-30 (later) — UAC-r2 merged master; read `notes/uac-r2-findings-2026-09-30.md`
+
+- **RETRACTED: the six `OfficeService.cs` source-scan dependencies below are GONE** — UAC-r2 deleted
+  `OfficeEntitySearchSecurityTrimmingTests`. 059 may move `QuerySearchEntityAsync` freely. The
+  `CommunicationsEndpoints.cs` rule (no code line containing `entityService`/`IGenericEntityService`) still stands.
+- #1029 kept OUR 062/064/067 everywhere we overlapped; `OfficeService.cs` is our version on their branch.
+- 🔴 **Verified here: the job-status Dataverse fallback NEVER works** (anonymous type across an assembly boundary +
+  `dynamic`; only the TEST assembly can see it, so tests pass while production 404s) → **task 060**.
+- `RecordOwnershipResolver` TopCount=1 vs its sibling's refuse-on-ambiguity → **task 080**.
+- 🔴 Standing rule: a new Office-route filter whose name lacks "Authorization" must be added to
+  `ExplicitlyCreditedFilterTypeNames`. 058 must still delete the four Pending waivers.
+
+### ~~🔴 059 / 060 — SOURCE-SCANNING GUARDS MEAN A BEHAVIOUR-PRESERVING REFACTOR CAN STILL GO RED~~ (RETRACTED — see above)
 
 This is the one that most threatens the extraction tasks. UAC-r2 added guards that **read the file text**,
 so 059's and 060's "behaviour-preserving move" can fail them without changing any behaviour.
@@ -230,14 +242,14 @@ neither breaks the build, so the compiler will not catch it.
 | Field | Value |
 |---|---|
 | **Last completed** | **077** ⚠️ complete-with-escalation — `7b7688f5c` `73c858f28` `22f6ac55e` + close commit |
-| **Active task** | **078** IN PROGRESS (started 2026-09-30) — owner: *"best long-term solution — take that path now"*. Path: ONE combined unified (1.30) Spaarke package for Outlook + Word, keeping the Outlook app id so it ships as an UPDATE; standalone Word JSON output removed (it carried Outlook's id); TEST variant for a "Just me" upload; build-time icon + id checks. Plan + evidence: `notes/078-manifest-decision.md` (being written). |
+| **Active task** | **none** — 078 closed ⚠️ (owner install pending). Next: 076 awaits the owner's three answers; the OfficeService track (080 → 058 → 059 → 060 → 068 → 075) waits on UAC-r2 #1029, which now carries OUR OfficeService.cs. |
 | **Next Action** | Get the owner's answers to the three 🔔 items below, then start the task they unblock. |
 
 ### 🔔 Owner decisions — status 2026-09-30
 
 1. ✅ **077 — ADR-051 records-paging exception: APPROVED** (§6.5 path A). Recorded in the spec ADR Tensions table
    and the project Decisions log (`450401be7`).
-2. 🟢 **078 — owner: "best long-term solution, take that path now" → IMPLEMENTED.** ONE unified app package
+2. ⚠️ **078 — COMPLETE WITH ESCALATION** (owner: "best long-term solution, take that path now"). Code review found and fixed a Critical: the package granted NO permissions. ONE unified app package
    (schema 1.30) for Outlook AND Word; decision, evidence and the rollout runbook in `notes/078-manifest-decision.md`.
    ⚠️ **Two earlier claims in this file were WRONG and are corrected:** production runs **XML for BOTH hosts**
    (Outlook `outlook/outlook-manifest.xml` `5e4d66d0-…`; Word `word/word-manifest.xml` `b3965ea0-…`) — Outlook does

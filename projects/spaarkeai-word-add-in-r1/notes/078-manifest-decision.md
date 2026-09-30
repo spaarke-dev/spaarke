@@ -2,7 +2,7 @@
 
 > **Date**: 2026-09-30 · **Task**: `tasks/078-resolve-manifest-contradiction.poml` · FULL · opus @ high
 > **Owner direction**: *"what is the best long term solution — take that path now"*
-> **Commits**: `e2e50a965` (package) · `6e590d012` (fix: the merge module was gitignored) · this note
+> **Commits**: `e2e50a965` (package) · `6e590d012` (fix: the merge module was gitignored) · `d17ac8152` (docs) · `34e105ed1` (fix: permissions, §5b)
 
 ---
 
@@ -54,7 +54,7 @@ affects hiding the Word XML in **either** layout, so it does not distinguish the
 | File | Role |
 |---|---|
 | `src/client/office-addins/packaging/mergeUnifiedManifest.js` | **Pure** merge of the two host manifests into one package (details below) |
-| `src/client/office-addins/packaging/__tests__/mergeUnifiedManifest.test.ts` | 7 tests on the REAL source manifests + XML ids; registered in `ci-gated-suites.txt` |
+| `src/client/office-addins/packaging/__tests__/mergeUnifiedManifest.test.ts` | 8 tests on the REAL source manifests + XML ids (incl. permission parity, §5b); registered in `ci-gated-suites.txt` |
 | `src/client/office-addins/webpack.config.js` | `SpaarkeUnifiedPackagePlugin` emits `dist/spaarke/`: `manifest.json`, `manifest.test.json`, `color.png` (192), `outline.png` (32). Package-id config separated from the Entra id. Standalone `word/manifest.json` output **retired** |
 | `src/client/office-addins/word/commands/index.ts` | registers `quickSaveDocument` (the package's Word action) alongside `quickSave` (still used by the Word XML) |
 | `src/client/office-addins/generate-icons.mjs` + `shared/assets/icon-color-192.png` | 192×192 color icon **rendered from the owner's vector logo**; the generator can now render single targets, so adding one icon does not re-encode the ones the live add-in serves |
@@ -77,7 +77,7 @@ affects hiding the Word XML in **either** layout, so it does not distinguish the
 | Check | Result |
 |---|---|
 | Both manifests against **Microsoft's published v1.30 schema** (ajv, draft-04) | **VALID** — and two deliberately broken controls (missing `id`; invalid scope) **rejected**, so the validator discriminates. The ajv `$ref`-sibling warnings were inspected: every ignored sibling is `description`/`default`/redundant `type` — no constraint lost |
-| Merge tests | **7 / 7**; seeded: deleting the `quickSaveDocument` registration → the cross-file test red; disabling the id guard → the conflation test red; both reverted byte-identical |
+| Merge tests | **8 / 8** (the 8th is §5b's permission parity); seeded: deleting the `quickSaveDocument` registration → the cross-file test red; disabling the id guard → the conflation test red; both reverted byte-identical |
 | Packaging script | exit **1** with a 128px color icon, **0** with 192px (real `pwsh` exit codes, not a pipe's) |
 | Zips | each holds exactly `manifest.json` + `color.png` + `outline.png` at the root; CRC-valid |
 | Gated jest | **58 / 58 suites, 773 tests** |
@@ -93,7 +93,52 @@ commit (`e2e50a965`) contained a `webpack.config.js` that required a module **no
 would have gone red on a listed suite that did not exist. It worked locally only because the files existed in
 this working copy. Caught by reading the commit's staged-file list; fixed in `6e590d012` by renaming to
 `packaging/` (not force-adding: the next file anyone created there would be silently ignored again). Proven by
-building from a **fresh worktree at the fixed commit** — results appended below.
+building from a **fresh worktree at the fixed commit** (`C:\wt078f`, `6e590d012`), exactly as CI does:
+
+| Fresh-checkout check | Result |
+|---|---|
+| `packaging/mergeUnifiedManifest.js` present in the checkout | **True** |
+| a `build/` folder present (must be False) | **False** |
+| `npm install` (Spaarke.Auth, then the add-ins) | 451 + 1,371 packages |
+| `npm run build` (production, CI's env) | **exit 0**; `dist/spaarke/` = color.png, manifest.json, manifest.test.json, outline.png |
+| `Package-OfficeAddinUnified.ps1` | **exit 0**; both zips produced |
+
+Also added to the module CLAUDE.md: *do not name a folder `build/` here*.
+
+## 5b. 🔴 Code review (Step 9.5) — a Critical: the package granted NO permissions
+
+Schema-valid and green on every test, the package would still have **installed and then failed at the features it
+exists for**. Its `authorization.permissions.resourceSpecific` was **empty** — inherited from the dev-only Outlook
+JSON, which was never uploaded, so nobody had ever discovered it — and `validDomains` was missing. The live XML
+add-ins grant:
+
+| Host | XML `<Permissions>` | Unified equivalent (now granted) | Without it |
+|---|---|---|---|
+| Outlook | `ReadWriteItem` | `MailboxItem.ReadWrite.User` (Delegated) | cannot read the email or its attachments |
+| Word | `ReadWriteDocument` | `Document.ReadWrite.User` (Delegated) | cannot read the `.docx` or write the FR-02 identity stamp |
+
+**Why nothing caught it:** the v1.30 schema types `resourceSpecific[].name` as a free string (maxLength 128), so
+no schema check can verify a permission name — a wrong or missing one fails only at install or runtime.
+
+**Fix (`34e105ed1`), built so it cannot recur silently:** each host's `manifest.json` declares its permission and
+its `validDomains` (the XML `<AppDomains>`, verbatim as full `https://` origins — what Microsoft's converter emits);
+the merge takes the union; and webpack reads each live XML's `<Permissions>` so the merge **refuses to build a
+package granting less than the XML add-in it replaces** (`XML_PERMISSION_TO_RSC`). Names verified against Microsoft
+Learn ("Requesting permissions", 2026-06-30; "Understanding Outlook add-in permissions", 2025-12-02) and the output of
+Microsoft's `office-addin-manifest-converter`.
+
+**Stated honestly — two things the docs do not settle:** mixing a mail and a document permission in one package is
+**undocumented either way** (the converter's parser ignores the other family, which suggests it is safe — code
+behaviour, not a documented guarantee); and the `validDomains` format is inferred from Microsoft's tooling, not
+stated by the schema. **The TEST upload (§6 step 3) is what settles both** — watch for a permission error at install.
+
+Other review checks, all clean: a merge failure inside webpack's `processAssets` hook fails `npm run build` with
+**exit 2** even under `--no-bail` (seeded: a 4-part version); the Word `quickSaveDocument` alias is registered; the
+TEST variant carries the permissions (so the test exercises the real access) but no `alternates`.
+
+**Updated verification totals:** merge tests **8 / 8** (adds permission parity, whose negative case strips Outlook's
+permission and asserts the build refuses); gated jest **58 / 58 suites, 774 tests**; lint exit 0; tsc 68; both
+manifests VALID against v1.30 with both controls rejected; packaging exit 0.
 
 ## 6. 👤 OWNER STEPS — the rollout (these need your hands)
 
@@ -107,6 +152,8 @@ building from a **fresh worktree at the fixed commit** — results appended belo
    - **Word desktop (build ≥ 2501) and Word on the web** — the "Spaarke (TEST)" group shows *Save to Spaarke*,
      *Quick Save*, *Share*; the pane opens; Quick Save and Share run.
    - Your existing XML "Spaarke" ribbons must still be there and still work (the TEST package hides nothing).
+   - **Watch the install for a permission prompt or error** — this is where §5b's two undocumented points get
+     settled (a mail + a document permission in one package; the `validDomains` format).
 4. **If all good → production.** Upload `spaarke-addin-1.1.0.zip` the same way; assign to your user groups.
    - **Outlook**: supported clients hide the XML add-in automatically (up to 24 h).
    - **Word**: office-js #6938 — both ribbons show. Retire the Word XML **manually**: remove its assignment for
