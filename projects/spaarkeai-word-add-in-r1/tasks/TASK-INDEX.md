@@ -306,7 +306,21 @@ Gates most of Phases 1–3. Do not size Phase 1 until this closes.
 - the codified set is ONE JSON file that their task 146 extends;
 - their NFR-05 census is THEIRS: 082 must not edit `SecureBuRoleDepthAssertion*`, and their clause reads our file.
 
-082's own check is the script's `-Verify` mode. | 🔲 | FULL | **opus / high** | — | none |
+082's own check is the script's `-Verify` mode.
+
+⚠️ **COMPLETE WITH ESCALATION 2026-09-30.** Live on dev: 36 → 40, with todo/communication/event/memo Read added at
+Basic and 0 removed.
+- Negative controls REFUSED all 4 first (todo 3 of 3, `privilegeCount=36` current).
+- The positive probe was stable for 3 polls after 1 stale cached refusal. owningteam = Secure; probes deleted.
+- `-Verify` was seeded both ways, and the config guards were seeded.
+- A simulation of the guide's §5.4 shows the old `$keep` would have stripped `prvReadsprk_Document`.
+- The ONE list is `config/secure-record-owner-role.json`, with `scripts/Set-SecureRecordOwnerRolePrivileges.ps1`
+  and guide §1/§5.1–5.4/§7/§9. Handed to UAC-r2 (their tasks 145 and 146).
+- Gates: code review 0 critical (W1 and W2 fixed and seeded); ADR check 0 violations.
+
+🔔 Owner decisions: **(1)** the 32 drift privileges, recommended for removal; **(2)** NFR-05 clause 1 fails on a
+PRE-EXISTING finding (the hotmail #EXT# guest in root, via `Spaarke Basic User`), routed to UAC-r2's owner.
+Note: `notes/082-secure-owner-role.md` | ⚠️ | FULL | **opus / high** | `notes/082-secure-owner-role.md` | none |
 | 083 | **#1044, writer half: an Office-pane To Do names the person it is for.** After 080, an Office To Do with no assignee names nobody: the owner is a team, `createdby` is the BFF app user (verified live: `# mi-bff-api-dev`), and `sprk_assignedto` is written only when the user picks one. **Owner decision 2026-09-30** (via UAC-r2): use the EXISTING `sprk_assignedto` (contact) plus Created By, with no new column. **Split agreed with UAC-r2:** this task defaults `sprk_assignedto` to the caller's contact when none is chosen (Office path only). Their task 141 builds the user↔contact link, and their task 152 switches the briefing to Assigned To plus human-only Created By and covers the server generators (TaskActionCore is AI code, not ours). Impersonated creates were rejected by both projects because they widen roles. **Blocked on their task 141's link contract.** | 🔲 | FULL | sonnet / high | — | external: UAC-r2 141 |
 
 ---

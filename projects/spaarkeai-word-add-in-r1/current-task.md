@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (PR #1045 CI checked. Tasks 082 (#1046) and 083 (#1044 writer half) added, and scope agreed with UAC-r2. #1044's route and #1037 were decided by the owner.)
+> **Last Updated**: 2026-09-30 (#1045 merged `38ad83962`; 082 ⚠️ in PR #1051; next 058)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,11 +9,24 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **082** (`tasks/082-*.poml`: the Secure Record Owner role needs `Read` on `sprk_todo` and the other child tables; this project owns it by owner instruction; ISS-013 / #1046), then **058** (`tasks/058-*.poml`: delete the fabricated-data Office routes. Read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`) |
-| **Last closed** | **080** ⚠️ `5d870b898` (+ close `19c2db13a`). Every Office create is owned by a BU default Owner team, record-first, or refused with `OFFICE_022`. Full record: `notes/080-record-ownership.md` §6 (§6.11 is the review triage; §6.12 lists UAC-r2's corrections) |
-| **PR** | 🔒 **#1045** — `work/spaarkeai-word-add-in-r1` → master, opened 2026-09-30, CI was pending at handoff. **It is a SECURITY merge**: it fixes **#1038** (a secure-record Office save lands in the shared container) and **#1043** (`POST /api/v1/documents` lets a caller choose the owner team and id). **Both are LIVE on master and on `spaarke-bff-dev` (`2682e8225`).** |
-| **Branch** | `work/spaarkeai-word-add-in-r1` @ `1de0fe2f7`, pushed, tree clean. Master (#1029) merged in at `26acc00e2`; 0 behind master when the PR was opened |
-| **Next Action** | **1)** ~~`gh pr checks 1045`~~ ✅ **checked 2026-09-30: 0 pending, all Tier 1 pass, `Router` pass.** The only red is Tier 2 "Full Unit Tests", **cancelled** at its 30-min cap, not failed; legacy `Build & Test (Debug)` ran the full suite in 59 min and passed. **2)** #1044's ROUTE is decided (below). **Merging #1045 is still the OWNER's call**: do NOT merge on your own. **3)** Then `task-execute` **082**, then **058** (order: 082 → 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; **083 when UAC-r2 sends 141's link contract**) |
+| **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml`: delete the fabricated-data Office routes. Read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`). **083** is blocked until UAC-r2 sends task 141's link contract |
+| **Last closed** | **082** ⚠️ 2026-09-30, **committed LOCALLY, not pushed** (see Next Action). The Secure Record Owner role covers the child tables: live dev 36 → 40 (todo/communication/event/memo Read at Basic, 0 removed). The ONE list is `config/secure-record-owner-role.json`, plus `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` and guide edits. Record: `notes/082-secure-owner-role.md`. Before it, **080** ⚠️ `5d870b898` |
+| **PR** | ✅ **#1045 MERGED** 2026-09-30 23:40 UTC as `38ad83962` (merge commit; branch kept). #1038 + #1043 closed as fixed on master (⚠️ `spaarke-bff-dev` still runs `2682e8225` until master is deployed). 🔄 **#1051 OPEN**: task 082 (docs + script + config, no BFF). Merge when `Router` passes (it needs only `Router`) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` @ `cf255da8b` (master merged back in after #1045), pushed. Main checkout `C:/code_files/spaarke` fast-forwarded to `38ad83962` |
+| **Next Action** | **1)** When #1051's `Router` passes: `gh pr merge 1051 --merge` (no `--delete-branch`), then merge `origin/master` back into the branch. **2)** `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141). UAC-r2 has been told about #1045, 9fee1e8e2 and #1051 |
+
+### 🔔 Waiting on the OWNER (from 082)
+
+1. **The drift: 32 privileges on `Secure Record Owner` outside the list.** They are Create/Write/Delete/Assign/Share/Append/AppendTo on project, matter, work assignment and document, plus the SharePoint four at Global. Origin unrecorded; UAC-r2 did not add them, and nothing depends on them. **Recommendation: remove them** (guide §5.4, whose `$keep` now keeps the 8). Record the answer in `notes/082-secure-owner-role.md` §4.
+2. **NFR-05 clause 1 fails in dev on a PRE-EXISTING finding:** the hotmail `#EXT#` guest `Ralph Schroeder` in the root BU holds `Spaarke Basic User` Read on project and matter at a depth that reaches the Secure BU, so it can read secure records. UAC-r2 is taking it to their owner decision.
+3. **#1037 (option A, disabled with the reason)** is decided but **untasked**. The picker is ours; authoring it needs the owner's go (ISS-010).
+
+### Facts from 082 (do not re-derive)
+
+- Dataverse error for a missing owner privilege: *"Read Privilege Check For Owner failed … Principal team (…, privilegeCount=N) is missing prvRead<Table> privilege"*. The CALLER's privileges don't matter; an admin caller is refused too.
+- The privilege cache lags about one poll after a role edit: the first probe reported the OLD `privilegeCount`. Re-probe for 3 polls.
+- UAC-r2's live NFR-05 census runs with `SPAARKE_NFR05_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com SPAARKE_NFR05_REQUIRED=true AZURE_TOKEN_CREDENTIALS=AzureCliCredential` (a plain DefaultAzureCredential reaches only EnvironmentCredential in this shell).
+- `scripts/check-task-status-drift.ps1` cannot parse this project's index (status is in its own column), so it reports ~79 "one-sided" tasks and 5 "`**`" disagreements (002/005/010/030/032, from the Risk-table rows). It is pre-existing, and the real status column agrees.
 
 ### #1044: route DECIDED 2026-09-30 (owner, relayed by UAC-r2). Merging #1045 is the owner's call.
 

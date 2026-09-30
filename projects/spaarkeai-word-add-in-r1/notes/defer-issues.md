@@ -575,7 +575,7 @@ Detail: `notes/uac-r2-findings-2026-09-30.md` §9.
 
 | Field | Value |
 |---|---|
-| **Status** | Open, **tasked: 082** |
+| **Status** | **Fixed live in dev by task 082 (⚠️ 2026-09-30)**: role 36 → 40; the list is `config/secure-record-owner-role.json`. Open until the 082 PR merges. Owner decision on the 32 drift privileges is pending |
 | **Urgency** | now |
 | **Filed** | 2026-09-30 |
 | **Source** | 080 note §6.12 item 3; ownership moved to this project by owner instruction 2026-09-30 |

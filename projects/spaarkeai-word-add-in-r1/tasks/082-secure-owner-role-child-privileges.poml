@@ -4,7 +4,7 @@
     <title>The Secure Record Owner role must cover every child table that task 080 assigns to it, and the setup guide must stop removing that coverage</title>
     <phase>5 Remediation — authorization</phase>
     <gate>startable. Independent of the #1045 merge: the live role change and the guide fix do not depend on the code landing. It must be done before a secure-record To Do is expected to work.</gate>
-    <status>not-started</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a live Dataverse security role that anchors secure-record isolation. Tags include auth + security + dataverse. May add a script and a test.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -181,4 +181,36 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Run ALONE. The live role is shared with unified-access-control-r2: coordinate before writing to it.</protocol>
   </execution>
+  <status-note>
+    COMPLETED WITH ESCALATION 2026-09-30. Live on spaarkedev1: role Secure Record Owner went 36 -> 40 privileges, adding
+    prvReadsprk_Todo, prvReadsprk_Communication, prvReadsprk_Event and prvReadsprk_Memo at Basic; 0 removed.
+
+    Evidence:
+    - Negative controls REFUSED all 4 tables first (todo 3 of 3 polls; privilegeCount=36 matched the role, so the
+      result was current).
+    - The positive probe was stable over 3 consecutive polls, after 1 stale cached refusal. owningteam = the Secure
+      team. All probes were deleted; 0 remain.
+    - -Verify was seeded both ways (exit 1 naming the 4 tables, then exit 0), plus the seeded config guards.
+    - A read-only simulation of the guide's section 5.4: the new $keep keeps all 8; the old literal list would have
+      removed prvReadsprk_Document.
+
+    What shipped:
+    - The ONE list: config/secure-record-owner-role.json (8 tables).
+    - scripts/Set-SecureRecordOwnerRolePrivileges.ps1.
+    - Guide edits: sections 1, 5.1-5.4, 7 and 9.
+    - The codified set was handed to UAC-r2; their task 145 adds the census clause and their task 146 extends the set.
+
+    Quality gates: code review 0 critical (W1 replica-role refusal and W2 entry validation fixed and seeded); ADR
+    check 0 violations.
+
+    ESCALATIONS, both with the owner:
+    (1) The drift: 32 privileges outside the file (Create/Write/Delete/Assign/Share/Append/AppendTo on 4 tables, plus
+        the SharePoint four at Global). Origin unrecorded, and UAC-r2 did not add them. Recommendation: remove them
+        via guide section 5.4. The owner's answer goes in the note, section 4.
+    (2) UAC-r2's NFR-05 live census: clauses 2 and 3 PASS; clause 1 FAILS on 2 PRE-EXISTING findings outside 082's
+        inputs (the hotmail #EXT# guest in root holds Spaarke Basic User Read on project and matter at a depth that
+        reaches the Secure BU). Routed to UAC-r2's owner decision.
+
+    Detail: notes/082-secure-owner-role.md.
+  </status-note>
 </task>
