@@ -724,6 +724,7 @@ change does not belong inside a security fix — the same call `RecordSearchEndp
 
 **Found by** task 043 while path-filtering the new office-addins CI gate.
 **Owner**: whoever next touches `.github/workflows/deploy-office-addins.yml`. One-line change.
+**GitHub Issue**: [#1039](https://github.com/spaarke-dev/spaarke/issues/1039) (filed 2026-09-30 at push time — it had been recorded here only).
 
 `src/client/office-addins/webpack.config.js:101` aliases
 `@spaarke/communication-components/logic/connections/provenance` at
@@ -754,6 +755,7 @@ Detail: `notes/043-office-addins-ci-gate.md` §8 F-1.
 
 **Found by** task 043 on a from-scratch `npm install` of `src/client/office-addins`.
 **Owner**: next person editing that package's test setup. One `devDependencies` line.
+**GitHub Issue**: [#1040](https://github.com/spaarke-dev/spaarke/issues/1040) (filed 2026-09-30 at push time — it had been recorded here only).
 
 `src/client/office-addins/jest.config.js` maps `\.(css|less|scss|sass)$` → `identity-obj-proxy`,
 which appears in neither `package.json` nor `package-lock.json`, and is not installed.
@@ -770,6 +772,7 @@ Detail: `notes/043-office-addins-ci-gate.md` §8 F-4.
 
 **Found by** task 063 while closing F2 on `/send-to-index`.
 **Owner**: whoever next hardens `Api/Ai/RagEndpoints.cs`. Not this project's finding.
+**GitHub Issue**: [#1041](https://github.com/spaarke-dev/spaarke/issues/1041) (filed 2026-09-30 at push time — it had been recorded here only).
 
 `POST /api/ai/rag/index`, `/index/batch` and `/index-file` are all bound by
 `AddTenantAuthorizationFilter()` — and unlike `send-to-index` they always were, because their request
@@ -800,6 +803,7 @@ Detail: `notes/063-send-to-index-authz.md` §8.4 and §8.5.
 
 **Found by** task 063, which depends on the corrected behaviour.
 **Owner**: main session (sub-agents cannot write to `.claude/`). One paragraph.
+**GitHub Issue**: [#1042](https://github.com/spaarke-dev/spaarke/issues/1042) (filed 2026-09-30 at push time — it had been recorded here only).
 
 The "Authorization Check Pattern" section carries a ⚠️ correction dated **2026-08-20** claiming that
 `RetrievePrincipalAccess` **"has zero call sites in the repository"** and that both modes **"grant at
