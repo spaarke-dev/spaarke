@@ -32,10 +32,10 @@ public sealed record CommunicationRuleDecision(
     bool PrivilegeFlagged,
     string Reason,
     /// <summary>Days from now for the RI task's <c>sprk_duedate</c> — the matched rule's
-    /// <c>sprk_task_due_days</c>, else <see cref="CommsPolicyOptions.DefaultTaskDueDays"/>.</summary>
+    /// <c>sprk_taskduedays</c>, else <see cref="CommsPolicyOptions.DefaultTaskDueDays"/>.</summary>
     int TaskDueDays = 1,
     /// <summary>Days from now for the RI task's <c>sprk_finalduedate</c> — the matched rule's
-    /// <c>sprk_task_final_due_days</c>, else <see cref="CommsPolicyOptions.DefaultTaskFinalDueDays"/>.</summary>
+    /// <c>sprk_taskfinalduedays</c>, else <see cref="CommsPolicyOptions.DefaultTaskFinalDueDays"/>.</summary>
     int TaskFinalDueDays = 3);
 
 /// <summary>
@@ -78,8 +78,8 @@ public sealed class CommunicationRuleGate
     private const string PriorityColumn = "sprk_priority";
     // Added 2026-09-29: the RI task's due dates are DECLARED on the rule, not compiled in -- same
     // rule-wins-over-options pattern as sprk_confidencethreshold. Purpose of the rule table.
-    private const string TaskDueDaysColumn = "sprk_task_due_days";
-    private const string TaskFinalDueDaysColumn = "sprk_task_final_due_days";
+    private const string TaskDueDaysColumn = "sprk_taskduedays";
+    private const string TaskFinalDueDaysColumn = "sprk_taskfinalduedays";
 
     private static readonly string[] RuleColumns =
     {

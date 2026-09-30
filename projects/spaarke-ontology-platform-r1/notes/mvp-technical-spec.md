@@ -650,7 +650,7 @@ near-neighbours, this is the accuracy risk in the design.
 
 **The fix, fitting the existing pattern**:
 
-1. ✅ **DONE 2026-09-29** — added `sprk_classifier_guidance` (MULTILINE TEXT, 2000) to
+1. ✅ **DONE 2026-09-29** — added `sprk_classifierguidance` (MULTILINE TEXT, 2000) to
    `sprk_triagecategory`, and populated **all nine rows** with contrastive guidance.
 2. ⬜ **CODE CHANGE REQUIRED** — `LookupChoicesResolver` must emit `name — guidance` pairs into the
    **prompt**. It currently resolves `lookup:sprk_triagecategory.sprk_name`, i.e. the **name attribute
@@ -786,7 +786,7 @@ All applied to Action row `c1fa96bf-2697-f111-b8dc-7ced8ddc4a05` **and** the rep
 | 1 | **Field order: evidence before conclusions.** `summary → obligations → category → priority → reviewOutcome` (was `category` first) | ✅ live in **both** `sprk_systemprompt` *and* `sprk_outputschemajson` |
 | 2 | **Explicit abstain**: `Unclassified` taxonomy row, weight 40, guidance framing it as abstention rather than a default — `92066a73-2abc-f111-aaaf-3833c5e9614d` | ✅ live |
 | 3 | **Boundary examples**: 1 → 4, adding the three-way money boundary (Scope / budget change · Invoice / Billing · Fee / rate change) | ✅ live |
-| 4 | `sprk_classifier_guidance` populated on all ten rows | ⚠️ **inert** — `LookupChoicesResolver` reads `sprk_name` only (§14 step 2) |
+| 4 | `sprk_classifierguidance` populated on all ten rows | ⚠️ **inert** — `LookupChoicesResolver` reads `sprk_name` only (§14 step 2) |
 
 > 🚩 **The schema is the lever, not the prompt.** Structured-output decoding emits properties in the
 > order the **schema** declares them; the JPS `output.fields` list governs the rendered prompt and the

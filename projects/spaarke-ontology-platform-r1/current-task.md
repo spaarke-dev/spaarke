@@ -58,14 +58,14 @@ communication→notification loop completed for the first time ever.
 | 5 | `Deploy-ActionMirrors.ps1` could not deploy a JPS mirror and printed `UNCHANGED` | `Get-JpsSystemPrompt` + sidecar schema ownership |
 | 6 | `DailyBriefingCollector` selected `sprk_eventdescription`, which **does not exist** → the briefing was blind to tasks. **The unit test pinned the bug** (shape-only assertion) | → `sprk_description` |
 | 7 | Tasks created as `Draft(1)`; briefing filters `Open(659490001)`. **49 rows** were stranded in Draft | `TaskActionCore` sets Open explicitly |
-| 8 | RI tasks had **both** due-date fields null; briefing task channels filter by date | due dates **declared on the rule row** (`sprk_task_due_days`=1, `sprk_task_final_due_days`=3) |
+| 8 | RI tasks had **both** due-date fields null; briefing task channels filter by date | due dates **declared on the rule row** (`sprk_taskduedays`=1, `sprk_taskfinalduedays`=3) |
 
 **Prompt-structure work also shipped** (spec §16.4): output fields reordered **evidence-before-conclusions**
 in both the prompt *and* `sprk_outputschemajson` (the schema is the lever — reordering only the prompt is
 cosmetic); boundary examples 1→4 covering the three-way money boundary; an explicit `Unclassified` abstain row.
 
 **Taxonomy now has 10 rows**, incl. `Fee / rate change` (75) and `Scope / budget change` (85), plus
-`sprk_classifier_guidance` populated on all ten with contrastive tie-breakers.
+`sprk_classifierguidance` populated on all ten with contrastive tie-breakers.
 ⚠️ **The guidance is INERT** — `LookupChoicesResolver` reads `sprk_name` only (spec §14 step 2).
 
 ---

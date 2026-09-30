@@ -45,7 +45,7 @@ public sealed class CommsPolicyOptions
 
     /// <summary>
     /// Fallback for the RI task's <c>sprk_duedate</c>, in days from now, when the matched
-    /// <c>sprk_communicationrule</c> row does not set <c>sprk_task_due_days</c>. Default 1 (next day).
+    /// <c>sprk_communicationrule</c> row does not set <c>sprk_taskduedays</c>. Default 1 (next day).
     /// </summary>
     /// <remarks>
     /// Added 2026-09-29 (owner decision). The due dates are **declared on the rule row** — this is only the
@@ -60,7 +60,7 @@ public sealed class CommsPolicyOptions
 
     /// <summary>
     /// Fallback for the RI task's <c>sprk_finalduedate</c>, in days from now, when the matched rule does not
-    /// set <c>sprk_task_final_due_days</c>. Default 3 — the outer "must be done by" bound, where
+    /// set <c>sprk_taskfinalduedays</c>. Default 3 — the outer "must be done by" bound, where
     /// <see cref="DefaultTaskDueDays"/> is the target.
     /// </summary>
     public int DefaultTaskFinalDueDays { get; set; } = 3;

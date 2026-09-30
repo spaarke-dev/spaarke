@@ -193,7 +193,7 @@ public sealed class CommunicationRiActionService
             // DailyBriefingCollector's task channels read sprk_finalduedate first, fall back to sprk_duedate,
             // and FILTER BY DATE — so every RI task ever created was outside the briefing's window and could
             // never surface there, however correctly it was written. The day counts are DECLARED on the
-            // matched sprk_communicationrule row (sprk_task_due_days / sprk_task_final_due_days), falling back
+            // matched sprk_communicationrule row (sprk_taskduedays / sprk_taskfinalduedays), falling back
             // to CommsPolicyOptions — the same rule-wins-over-options pattern as the confidence threshold, so
             // an operator retunes the SLA by editing a row rather than shipping code.
             var createdAtUtc = DateTime.UtcNow;
