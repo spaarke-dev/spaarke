@@ -70,6 +70,9 @@ writes the values.
 new stamps DO get the AI Search admin key + Service Bus connection string; whether new Model 1 stamps are run
 secret-free is an H2a parameter question (note for T225b).
 
-## 5. Owner decision
+## 5. Owner decision (2026-09-30)
 
-_(pending)_
+- **`AzureOpenAI-ApiKey` → A: managed identity** (approved). Remove the manifest entry so H4b stops emitting
+  `AzureOpenAI__ApiKey` / `DocumentIntelligence__OpenAiKey`; E-2 fallback is an operator config action; H13 should
+  exercise one OpenAI call (T230).
+- **Other five + Prompt Flow / vendor labels → "Discuss first"** — no code change until discussed.
