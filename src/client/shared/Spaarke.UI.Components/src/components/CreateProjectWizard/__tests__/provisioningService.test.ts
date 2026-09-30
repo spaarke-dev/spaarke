@@ -35,8 +35,7 @@ const successBody: IProvisionProjectResponse = {
   additionalPrincipalsShared: 0,
 };
 
-const okResponse = (body: unknown) =>
-  ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+const okResponse = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
 
 const problemResponse = (status: number, problem: Record<string, unknown>) =>
   ({ ok: false, status, json: async () => problem }) as unknown as Response;
@@ -112,7 +111,7 @@ describe('provisionSecureProject — failure classification', () => {
 
   afterEach(() => consoleError.mockRestore());
 
-  it('classifies a missing Secure Project business unit as an unconfigured environment — despite the 500', async () => {
+  it('classifies a missing Secure Record business unit as an unconfigured environment — despite the 500', async () => {
     const authFetch = jest.fn().mockResolvedValue(
       problemResponse(500, {
         title: 'Internal Server Error',
@@ -143,7 +142,7 @@ describe('provisionSecureProject — failure classification', () => {
     expect(result.errorMessage).not.toContain('Internal Server Error');
     expect(result.errorMessage).not.toMatch(/HTTP\s*5\d\d/);
     // …and it names the missing setup, which is the one actionable fact.
-    expect(result.errorMessage).toMatch(/Secure Project business unit/i);
+    expect(result.errorMessage).toMatch(/Secure Record business unit/i);
     // The operator-facing text still reaches the console for support.
     expect(consoleError).toHaveBeenCalled();
   });

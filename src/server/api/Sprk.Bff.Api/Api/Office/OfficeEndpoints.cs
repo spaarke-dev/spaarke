@@ -128,8 +128,16 @@ public static class OfficeEndpoints
                 context.Request.Body.Position = 0;
                 using var reader = new StreamReader(context.Request.Body);
                 var body = await reader.ReadToEndAsync();
-                logger.LogInformation("DEBUG /office/save-debug: Raw request body ({Length} bytes): {Body}",
-                    body.Length, body);
+
+                // LENGTH ONLY, NEVER THE BODY (task 120, GitHub #1015). This previously logged the entire
+                // raw body at Information and echoed 500 characters back on a parse failure. The body is
+                // an Office SaveRequest: it carries email content, attachment payloads and document bytes.
+                // The route is .AllowAnonymous() and, although it only registers under IsDevelopment(),
+                // development environments hold real customer mail often enough that "it's only dev" is
+                // not a property worth relying on. The diagnostic value here is the SHAPE of the failure —
+                // which the structural fields below give in full — not its contents.
+                logger.LogInformation("DEBUG /office/save-debug: Received request body of {Length} bytes",
+                    body.Length);
 
                 try
                 {
@@ -160,7 +168,8 @@ public static class OfficeEndpoints
                         innerError = ex.InnerException?.Message,
                         path = ex.Path,
                         lineNumber = ex.LineNumber,
-                        bodyPreview = body.Length > 500 ? body[..500] + "..." : body
+                        bytePositionInLine = ex.BytePositionInLine,
+                        bodyLength = body.Length
                     });
                 }
             })

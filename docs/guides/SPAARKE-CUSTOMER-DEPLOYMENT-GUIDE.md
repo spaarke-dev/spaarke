@@ -485,6 +485,55 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
 - `ManagedIdentity__ClientId={uami-client-id}`
 - `Dataverse:ClientSecret` = KV reference (BFF `/health` fails fast per r3 task 061 `ValidateOnStart` if unresolved — **NFR-05**)
 
+#### 6.5.1 Customer identity (`Customer__Id`) — required per stamp
+
+> Added 2026-09-29 by `unified-access-control-r2` task 123, per decision
+> [D-14](../../projects/unified-access-control-r2/notes/D-14-customer-discriminator.md).
+
+**Every BFF stamp must be able to say which customer it serves.** `customerId` names the resource group
+and every resource inside it, and until this setting existed no line of BFF code could read it. That
+mattered because — per D-12 — `tenantId` is **identical for every Model 1 customer** (they share the
+Spaarke Entra tenant), so a `tenantId`-keyed cache key, log scope or metric dimension separates *Entra
+tenants*, not *customers*, and its tests pass anyway because there is only ever one value.
+
+| | |
+|---|---|
+| **Setting** | `Customer__Id` (configuration key `Customer:Id`) |
+| **Value** | the customerId — 3–8 chars, lowercase letters and digits, starting with a letter. See [`AZURE-RESOURCE-NAMING-CONVENTION.md` § "The `customerId` standard"](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). |
+| **Emitted by** | `infrastructure/bicep/customer.bicep` and `infrastructure/bicep/stacks/model2-full.bicep`, from the `customerId` they already hold — **no operator action on a stamp deployed from either** |
+| **Assignment authority** | Dataverse `sprk_dataverseenvironment.sprk_customerid`. Bicep CONSUMES it; nothing mints one. |
+
+**Resolution order, and what happens when it fails:**
+
+1. **`Customer__Id` if set** — the intended path.
+2. **Otherwise derived from `WEBSITE_RESOURCE_GROUP`**, which App Service sets automatically and which is
+   literally `rg-spaarke-{customerId}-{env}`. This is why an older per-customer stamp keeps working with
+   no change. ⚠️ **The derived path logs a WARNING every boot, by design** — a stamp running on the
+   fallback forever is a stamp whose settings were never finished.
+3. **Otherwise the BFF refuses to start**, with a message naming both sources. There is deliberately
+   **no default**: an absent customer identity must never resolve to a shared value. (Development and
+   Testing environments are exempt from the startup failure; there the identity simply stays unresolved
+   and throws if anything asks for it.)
+
+🔴 **Resource groups that are NOT customers.** `rg-spaarke-platform-{env}`, `rg-spaarke-shared-{env}` and
+`rg-spaarke-byok-prod` match the per-customer *shape* but name platform functions. Derivation refuses
+them by name — otherwise the platform stamp would invent `customerId = "platform"`, which is exactly the
+silently-shared value this mechanism exists to prevent. **A BFF in one of those groups must set
+`Customer__Id` explicitly**:
+
+```bash
+az webapp config appsettings set \
+  --resource-group rg-spaarke-platform-prod \
+  --name <app-service-name> \
+  --settings Customer__Id=<customerId>
+```
+
+⚠️ **Pre-existing stamps need this before the branch carrying task 123 is deployed.** `Deploy-BffApi.ps1`
+defaults to `rg-spaarke-dev` (which is not a per-customer shape at all) and documents
+`rg-spaarke-platform-prod` (deny-listed). Neither derives, and App Service runs as the `Production`
+environment, so neither is exempt from the startup failure. What customerId those pre-D-12 stamps should
+carry is an **owner decision** — do not invent one.
+
 ---
 
 ## 7. Pipeline Execution Phases (walkthrough)

@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 
 /// <summary>
 /// Test host for <c>/provision-project</c>'s write path: an in-memory <c>sprk_project</c> row, a
-/// controllable Secure Project business unit and owner team, a substituted SPE container creator, and
+/// controllable Secure Record business unit and owner team, a substituted SPE container creator, and
 /// a record of every write the endpoint issued.
 /// </summary>
 /// <remarks>
@@ -42,7 +42,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     private const string ProjectEntitySet = "sprk_projects";
 
     /// <summary>The BU name the endpoint is configured to resolve, and which this double answers for.</summary>
-    public const string SecureBuName = "Secure Project";
+    /// <remarks>
+    /// Renamed <c>Secure Project</c> → <c>Secure Record</c> by task 121 (D-12 §2). This fixture is
+    /// self-consistent — it seeds the BU and sets the config key from this same constant — so the tests
+    /// would pass under either name. It is updated anyway: a fixture that disagrees with production is
+    /// a doc that lies, and the next reader has no way to tell which name is real.
+    /// </remarks>
+    public const string SecureBuName = "Secure Record";
 
     public static readonly Guid SecureBuId = Guid.Parse("d9ec0b6f-0000-0000-0000-0000000000b0");
     public static readonly Guid SecureOwnerTeamId = Guid.Parse("daec0b6f-0000-0000-0000-0000000000e0");
@@ -226,7 +232,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             {
                 // The endpoint resolves the BU by this name. Set explicitly rather than relying on the
                 // production default, so a test proves the CONFIGURED name is honoured.
-                ["SecureProject:BusinessUnitName"] = SecureBuName,
+                ["SecureRecord:BusinessUnitName"] = SecureBuName,
                 ["SharePointEmbedded:ContainerTypeId"] = "11111111-2222-3333-4444-555555555555"
             });
         });
@@ -532,8 +538,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     // coincidence that happens to work.
                     var roster = new List<(Guid Id, string Name, bool IsDefault, int TeamType)>
                     {
-                        (DecoyAccessTeamId, "Secure Project Access", false, 1),
-                        (DecoyOwnerTeamId, "Secure Project Extra Owners", false, 0)
+                        // Derived from SecureBuName so they stay NEAR-MISSES of the real team name.
+                        // Task 121 renamed the BU; hard-coded "Secure Project ..." decoys would have
+                        // survived the rename and quietly stopped being decoys at all — a resolver that
+                        // matched on a name prefix would then pass this test while being wrong.
+                        (DecoyAccessTeamId, $"{SecureBuName} Access", false, 1),
+                        (DecoyOwnerTeamId, $"{SecureBuName} Extra Owners", false, 0)
                     };
 
                     for (var i = 0; i < OwnerTeamMatchCount; i++)

@@ -55,7 +55,7 @@ public static class UnsecureProjectEndpoint
     /// it — a deterministic, auditable owner that needs no environment setup. An environment that
     /// wants un-secured matters to land on a fixed steward sets this instead.
     /// </remarks>
-    internal const string UnsecureOwnerUserIdConfigKey = "SecureProject:UnsecureOwnerUserId";
+    internal const string UnsecureOwnerUserIdConfigKey = "SecureRecord:UnsecureOwnerUserId";
 
     private const string ReasonKey = "reasonCode";
 
@@ -71,7 +71,7 @@ public static class UnsecureProjectEndpoint
             .WithName("UnsecureProject")
             .WithSummary("Remove a project's Secure Project designation")
             .WithDescription(
-                "Reassigns ownership off the Secure Project owner team, revokes the record's explicit " +
+                "Reassigns ownership off the Secure Record owner team, revokes the record's explicit " +
                 "shares and clears sprk_issecure. Idempotent: a project that is already not secure " +
                 "returns 200 having changed nothing.")
             .Produces<UnsecureProjectResponse>(StatusCodes.Status200OK)

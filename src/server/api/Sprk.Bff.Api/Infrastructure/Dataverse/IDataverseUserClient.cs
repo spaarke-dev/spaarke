@@ -1,9 +1,11 @@
 using System.Text.Json;
 
-namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 
 /// <summary>
-/// User-context Dataverse Web API boundary for the <c>dataverse.*</c> tool namespace
+/// The BFF's user-context (OBO) Dataverse Web API boundary: every request executes under the CALLING
+/// USER's Dataverse security context, so Dataverse itself applies the caller's security model.
+/// Originally built for the <c>dataverse.*</c> tool namespace
 /// (spaarke-ai-architecture-redesign-r1 tasks 008/009, FR-P0-07).
 /// </summary>
 /// <remarks>
@@ -30,9 +32,25 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// namespace share one OBO acquisition + error-mapping path.
 /// </para>
 /// <para>
-/// ADR-013: AI-internal plumbing under <c>Services/Ai/Handlers/</c>; NOT exposed through the
-/// PublicContracts facade. ADR-015/NFR-07: implementations log identifiers, status codes,
-/// durations and counts only — never row content and never the user's token.
+/// <b>🔴 RELOCATED 2026-09-29 (unified-access-control-r2 task 126, owner-approved CLAUDE.md §6.5
+/// path C).</b> This type used to live under <c>Services/Ai/Handlers/Dataverse/</c> and its own
+/// documentation called it "AI-internal plumbing". That filing was wrong, and it had become a
+/// hazard: ADR-013 forbids CRUD code from injecting AI-internal types, so the ONE general
+/// user-context Dataverse client in the BFF was formally off-limits to every non-AI caller that
+/// needed per-user security trimming. <c>CallerRecordAccessProbe</c>'s own remarks record an earlier
+/// engineer wanting this client and being blocked by exactly the two objections the relocation
+/// removed (AI-gated registration; a CRUD→AI dependency). The load-bearing non-AI consumer today is
+/// <c>Api/Office/CommunicationsEndpoints.cs</c> (task 127, GitHub #1020). (An earlier version of this
+/// remark claimed <c>CallerRecordAccessProbe</c> already depended on this client. It never did — it
+/// only mentioned it — corrected at the 2026-09-30 merge.) Nothing about an OBO HTTP client is
+/// AI-specific. ADR-013's intent is to stop
+/// CRUD code reaching into AI internals such as <c>IOpenAiClient</c> or <c>IPlaybookService</c>;
+/// it is not served by filing a security primitive in the AI namespace. It is now general BFF
+/// infrastructure and any caller may use it.
+/// </para>
+/// <para>
+/// ADR-015/NFR-07: implementations log identifiers, status codes, durations and counts only —
+/// never row content and never the user's token.
 /// </para>
 /// </remarks>
 public interface IDataverseUserClient

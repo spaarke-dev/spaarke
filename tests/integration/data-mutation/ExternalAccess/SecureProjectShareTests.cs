@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// <c>/unsecure-project</c>.
 /// </summary>
 /// <remarks>
-/// <para><b>The defect these pin.</b> Task 021 assigned secure projects to the Secure Project business
+/// <para><b>The defect these pin.</b> Task 021 assigned secure projects to the Secure Record business
 /// unit's default owner team, which has no members — correct isolation. It issued no shares. design.md
 /// §5.1 says <i>"All human access is by explicit Dataverse share, including the creating attorney's"</i>,
 /// so provisioning completed and left a record **no human could open**: isolated, and unreachable. The

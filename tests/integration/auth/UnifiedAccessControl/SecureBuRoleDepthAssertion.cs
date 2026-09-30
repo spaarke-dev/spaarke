@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///   <c>prvReadsprk_Matter</c> at a depth that reaches the secure BU.</item>
 ///   <item>The secure BU's default owner team has <b>zero human members</b> — it owns every secure
 ///   project, so a member would read all of them by ownership (design §5.1a).</item>
-///   <item>The <c>Secure Project Owner</c> role is held by that team <b>alone</b>.</item>
+///   <item>The <c>Secure Record Owner</c> role is held by that team <b>alone</b>.</item>
 /// </list></para>
 ///
 /// <para><b>Why this is a standing assertion and not an audit.</b> Every clause above is a
@@ -45,19 +45,26 @@ public static class SecureBuRoleDepthAssertion
     };
 
     /// <summary>
-    /// The secure business unit, by name. BOTH spellings are pinned deliberately: dev provisioned
-    /// <c>Secure Project</c> (singular — live metadata, 2026-09-09) while design §5.2's target topology
-    /// names <c>Secure Projects</c> (plural). Matching only one would have made this assertion silently
-    /// inert in exactly the environment it was written for.
+    /// The secure business unit, by name.
+    ///
+    /// <para><b>ONE name as of 2026-09-29 (task 121, D-12 §2):</b> <c>Secure Record</c>, renamed from
+    /// <c>Secure Project</c> and confirmed applied to the dev environment by the owner the same day.</para>
+    ///
+    /// <para>This list previously held BOTH <c>Secure Project</c> and <c>Secure Projects</c>, because
+    /// dev had provisioned the singular (live metadata, 2026-09-09) while design §5.2 wrote the plural —
+    /// matching only one would have made this assertion silently inert in exactly the environment it was
+    /// written for. That ambiguity is resolved rather than extended: the owner chose a HARD cutover
+    /// precisely because a tolerant list that nobody ever prunes is how the original two-spelling mess
+    /// arrived. If this ever needs a second entry again, that is a signal the rename is half-applied
+    /// somewhere, not a reason to widen the list.</para>
     /// </summary>
     public static readonly IReadOnlyList<string> SecureBusinessUnitNames = new[]
     {
-        "Secure Projects",
-        "Secure Project"
+        "Secure Record"
     };
 
     /// <summary>The role that legitimately anchors ownership inside the secure BU (design §5.1a).</summary>
-    public const string SecureOwnerRoleName = "Secure Project Owner";
+    public const string SecureOwnerRoleName = "Secure Record Owner";
 
     /// <summary>
     /// The pinned administrative allow-list — the documented, accepted exception (spec Unresolved
@@ -67,7 +74,7 @@ public static class SecureBuRoleDepthAssertion
     /// <para><b>Adding to this list requires editing this file.</b> That friction is the point: the
     /// allow-list IS the accepted-risk register, so growth in it must be as visible as a code change.</para>
     ///
-    /// <para><b><c>Secure Project Owner</c> is deliberately NOT here.</b> It does not need to be: it is
+    /// <para><b><c>Secure Record Owner</c> is deliberately NOT here.</b> It does not need to be: it is
     /// granted at User (<c>Basic</c>) depth, which reaches nothing by business unit, so the depth model
     /// exempts it structurally. Allow-listing it by name would instead hide the one change that matters —
     /// somebody widening it to <c>Local</c>, <c>Deep</c> or <c>Global</c>.</para>
@@ -88,11 +95,13 @@ public static class SecureBuRoleDepthAssertion
     /// build log rather than looking like a pass.
     /// </summary>
     public const string InertMessage =
-        "Secure Projects BU not found — NFR-05 assertion inert; UAT environment setup pending. "
-        + "No business unit named 'Secure Projects' or 'Secure Project' exists in the target "
-        + "environment, so the role-depth assertion has nothing to resolve reach against and is NOT "
-        + "asserting anything on this run. This is not a pass. Create the secure business unit per "
-        + "design §5.2 and re-run.";
+        "Secure Record BU not found — NFR-05 assertion inert; UAT environment setup pending. "
+        + "No business unit named 'Secure Record' exists in the target environment, so the role-depth "
+        + "assertion has nothing to resolve reach against and is NOT asserting anything on this run. "
+        + "This is not a pass. Create the secure business unit per design §5.2 and re-run. "
+        + "⚠️ If the environment DOES have a secure BU but it is still called 'Secure Project', the "
+        + "2026-09-29 rename (task 121) is only half applied — rename the live BU rather than widening "
+        + "the list here, and see docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md §3a.";
 
     /// <summary>Evaluates the whole NFR-05 assertion against a census read from a live environment.</summary>
     public static SecureBuAssertionOutcome Evaluate(SecureBuRoleDepthCensus census)

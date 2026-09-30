@@ -162,12 +162,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             // resolved. This branch used to fall through, which was wrong, and the reason is the secure-record
             // case that RecordContainerResolver already documents (task 076,
             // notes/secure-project-workflow-review-2026-08-24.md §A): users sit in the Operations subtree
-            // while SECURE records are owned in `Secure Projects`. Falling back to the acting user's business
+            // while SECURE records are owned in `Secure Record`. Falling back to the acting user's business
             // unit would assign a secure record's child to the general Operations team — the precise isolation
             // failure that resolver refuses to make for containers, and it fails the same way here.
             //
             // Record-first already handles secure targets correctly when the read SUCCEEDS, because a secure
-            // record's own owningbusinessunit IS the Secure Project BU. The danger was only ever this
+            // record's own owningbusinessunit IS the Secure Record BU. The danger was only ever this
             // fallback. Per 076: an indeterminate answer read as "not secure" is the same isolation failure
             // with an extra step, so indeterminate must refuse.
             _logger.LogWarning(

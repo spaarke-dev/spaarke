@@ -38,7 +38,7 @@ nothing more.
 |---|---|
 | Rights | A System Administrator in the target environment |
 | Auth | `az login` to the tenant, then a token for the environment (below). `pac` is **not** used — its *active profile* may point at a different environment, which is an easy way to configure the wrong org |
-| Config | `SecureProject:BusinessUnitName` in BFF app settings, **or** accept the compiled default |
+| Config | `SecureRecord:BusinessUnitName` in BFF app settings, **or** accept the compiled default |
 
 ```powershell
 # Pin the environment explicitly. Never rely on an ambient/active profile.
@@ -59,8 +59,9 @@ $Api = "$DvUrl/api/data/v9.2"
 
 The BU is resolved **by name from configuration**, never by GUID (GUIDs differ per environment).
 
-- Default name if `SecureProject:BusinessUnitName` is unset: **`Secure Project`** — **singular**.
-  Multiple design documents said `Secure Projects`; that was wrong and would have failed every
+- Default name if `SecureRecord:BusinessUnitName` is unset: **`Secure Record`** — **singular**.
+  🔴 **Renamed from `Secure Project` on 2026-09-29** (task 121, D-12 §2). See §3a for the cutover.
+  Multiple design documents once said `Secure Projects`; that was wrong and would have failed every
   provisioning call closed with "business unit not found". A test pins the value
   (`DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed`).
 - Parent: see §6 before choosing. In dev today it is a child of the root BU, which is part of the
@@ -70,7 +71,7 @@ The BU is resolved **by name from configuration**, never by GUID (GUIDs differ p
   misconfiguration.
 
 ```powershell
-$buName = 'Secure Project'
+$buName = 'Secure Record'
 $bu = (Invoke-RestMethod "$Api/businessunits?`$select=businessunitid,name,sprk_containerid&`$filter=name eq '$buName'" -Headers $H).value
 $buId = $bu[0].businessunitid
 "BU $buName = $buId ; sprk_containerid = $($bu[0].sprk_containerid)"   # containerid MUST be null
@@ -78,6 +79,60 @@ $buId = $bu[0].businessunitid
 
 If the BU does not exist, create it (parent per §6). **Do not** create one BU per project — that
 mechanism was retired.
+
+---
+
+## 3a. 🔴 The 2026-09-29 rename — `Secure Project` → `Secure Record`
+
+**Why**: the BU holds secure rows of **three** entity types — `sprk_project`, `sprk_matter` and
+`sprk_workassignment` all carry `sprk_issecure` — so naming it after one of them described the topology
+wrongly. D-12 §2, owner-approved. It happened at that moment because **no customer deployments existed**;
+there is no later cheap moment.
+
+**What renamed** (all four, together):
+
+| Artifact | From | To |
+|---|---|---|
+| Business unit (live Dataverse) | `Secure Project` | `Secure Record` |
+| Security role (live Dataverse) | `Secure Project Owner` | `Secure Record Owner` |
+| Code default `DefaultSecureBusinessUnitName` | `Secure Project` | `Secure Record` |
+| Config section | `SecureProject:` | `SecureRecord:` |
+
+**What did NOT rename, deliberately** — these contain the words "Secure Project" for other reasons:
+
+- **`Secure Project Workspace`** — the external SPA's product name (`src/client/external-spa`). It is
+  user-facing and was not part of the decision.
+- **"a Secure Project"** as a domain concept — a `sprk_project` with `sprk_issecure = true`. The BU is
+  named for the general case; an individual secure project is still a secure project. This is why
+  `ProvisionSecureProject`, `CloseSecureProject`, the *Secure Project* toggle and the SPE container
+  display name `Secure Project — {name}` are unchanged.
+- **`Secure Project Participant`** — a Power Pages web role. Not decided; left alone.
+
+### The cutover is HARD, and here is the order
+
+There is **no transitional dual-accept**. That was considered and rejected: a tolerant name list that
+nobody ever prunes is exactly how the earlier `Secure Project` / `Secure Projects` ambiguity arrived.
+
+1. **Rename the live BU** to `Secure Record` (and the role to `Secure Record Owner`).
+2. **Deploy the code** carrying the new default.
+
+⚠️ **Between those two steps, provisioning fails closed** with *"business unit not found"* — the correct
+direction, but an error that reads like a **missing environment** rather than a rename in flight. If you
+see that error and the environment is otherwise healthy, check which half of the rename has landed before
+investigating anything else.
+
+If you must eliminate the window, set `SecureRecord:BusinessUnitName` to the *current* live name before
+step 1 and clear it after step 2 — the config value always wins over the default, which is why the key
+exists.
+
+**Verifying which half you are on:**
+
+```powershell
+# Live side: does the new BU exist?
+(Invoke-RestMethod "$Api/businessunits?`$select=name&`$filter=name eq 'Secure Record'" -Headers $H).value.Count   # 1 = renamed
+# Code side: what does the deployed build default to?
+#   -> DefaultSecureBusinessUnitName, pinned by DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed
+```
 
 ---
 
@@ -99,7 +154,7 @@ $teamId = $team[0].teamid
 
 ---
 
-## 5. Step 3 — the `Secure Project Owner` role
+## 5. Step 3 — the `Secure Record Owner` role
 
 ### 5.1 The privilege set, and why each entry survived
 
@@ -147,12 +202,12 @@ foreach ($e in @('sprk_project','sprk_matter','sprk_workassignment','sprk_servic
 
 ```powershell
 $body = @{
-  name = 'Secure Project Owner'
+  name = 'Secure Record Owner'
   'businessunitid@odata.bind' = "/businessunits($buId)"
-  description = 'Least-privilege role for the Secure Project default OWNER team. Exists only so that team can be an assignment target for secure sprk_project records. MUST NOT be granted to any user or any other team.'
+  description = 'Least-privilege role for the Secure Record default OWNER team. Exists only so that team can be an assignment target for secure sprk_project records. MUST NOT be granted to any user or any other team.'
 } | ConvertTo-Json
 Invoke-RestMethod -Method Post "$Api/roles" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes($body))
-$roleId = (Invoke-RestMethod "$Api/roles?`$select=roleid&`$filter=name eq 'Secure Project Owner' and _businessunitid_value eq $buId" -Headers $H).value[0].roleid
+$roleId = (Invoke-RestMethod "$Api/roles?`$select=roleid&`$filter=name eq 'Secure Record Owner' and _businessunitid_value eq $buId" -Headers $H).value[0].roleid
 ```
 
 **Create the role in the secure BU, not the root BU.** A role created in the root BU is auto-copied into
@@ -268,7 +323,7 @@ record. Two fixes, either of which closes it (design §5.1a-2 has measured blast
 > |---|---|
 > | Read a Matter owned by `Spaarke Business Unit 1` | ✅ visible |
 > | Read anything in **other** BUs | ✅ not visible |
-> | Read the same Matter after reassigning it to the `Secure Project` BU/team | ✅ **DENIED** |
+> | Read the same Matter after reassigning it to the secure BU/team (named `Secure Project` when this was observed; `Secure Record` since 2026-09-29) | ✅ **DENIED** |
 > | Read it after an explicit **share** | ✅ visible |
 >
 > That is the whole intended model working: `Deep` at a sibling BU cannot reach the secure BU, and
@@ -296,7 +351,7 @@ configuration is shaped correctly.
 | # | Check | Expected |
 |---|---|---|
 | 1 | Role privileges: `roles(<id>)/roleprivileges_association` | **`Read` on every `sprk_issecure` entity and nothing else** — as of 2026-08-25 exactly 3 (`prvReadsprk_Project`, `prvReadsprk_Matter`, `prvReadsprk_WorkAssignment`), each at depth mask `1` |
-| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Project Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
+| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Record Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
 | 2b | Assignment works for **each** securable type, not just projects | assign a probe `sprk_project`, `sprk_matter` **and** `sprk_workassignment`. A role covering only one type fails silently on the others until someone over-grants the team |
 | 3 | Team members: `teams(<id>)/teammembership_association` | **0** |
 | 4 | Role holders: `roles(<id>)/systemuserroles_association` | **0 users** |
@@ -329,7 +384,7 @@ session is void.
 | ❌ | Why |
 |---|---|
 | Add a human to the secure owner team | The team owns every secure project; a member reads all of them by membership. The whole safety argument is that it is memberless |
-| Grant `Secure Project Owner` to a user or any other team | Same reason. Items 4–5 of §7 assert this |
+| Grant `Secure Record Owner` to a user or any other team | Same reason. Items 4–5 of §7 assert this |
 | Add privileges "for completeness" | Every privilege must be forced by a recorded failure. Nothing beyond `Read` was |
 | Widen the depth beyond `User` | Adds reach without adding capability, and re-opens §6 |
 | Remove `sprk_project` Read from ordinary user roles | Silently disables all sharing (§6) |

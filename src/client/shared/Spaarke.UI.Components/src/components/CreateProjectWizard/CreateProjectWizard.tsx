@@ -681,7 +681,7 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 1d. Provision Secure Project infrastructure when the Secure Project toggle is enabled:
-        //     assign the project to the canonical Secure Project business unit's owner team, share
+        //     assign the project to the canonical Secure Record business unit's owner team, share
         //     it back to the creator (task 061 — the owner team is memberless, so without this the
         //     record is unreachable), then provision its own SPE container and record it. No
         //     business unit or account is created (BFF task 021, 2026-08-25).
