@@ -1,5 +1,17 @@
 # Current Task State — `unified-access-control-r2`
 
+> ## 🚨 SESSION 26 FINAL CHECKPOINT (2026-09-30; updated after merge + deploy) — READ FIRST
+> **Next action**: merge PR #1033 when `Router` passes. Then **wait on the owner**: 4 decisions (C4, C7, C9-interim, C10) + approval to file issues/author tasks for the 12 defects. Do NOT file or author until answered.
+> | | |
+> |---|---|
+> | **Merge** | ✅ `ee5b82147` committed + PUSHED (origin/master merged in; resolution owner-approved). Merged tree: ArchTests 337/337, unit 13,018/0, drift 126/126. |
+> | **PR #1029** | ✅ **MERGED 2026-09-30** as merge commit `2682e8225` (merge commit, not squash, matching #950, so the branch continues without replaying history). CI: `Router` pass, all Tier 1 green. The one red, Tier 2 "Full Unit Tests", was **cancelled at its 30-min job limit**, not a test failure; local run 13,018/0. Main repo master synced. word-add-in-r1 session notified. |
+> | **Deploy** | ✅ **BFF deployed to `spaarke-bff-dev`** from the merged tree (identical to `ee5b82147`). Package **45.48 MB** (Compress-Archive, incl. PDBs); 4 critical files SHA-256 verified; `/healthz` + `/ping` 200; CORS 2/2; `Customer__Id=spaarke` intact. |
+> | **Checkpoint PR** | Research notes (`73504f67c`) pushed → **PR #1033** (docs only). Merge when its `Router` passes. |
+> | **Research** | `notes/session26-uac-defects-and-synopsis.md` — 12 confirmed UAC defects (5 HIGH: C1 CIAM no vetoes, C2 presence-only reads, C4 Write mints access, C8 finance IDOR, C9 BU over-grant) + verified six-case synopsis. Raw: `notes/raw/session26-*`. |
+> | **Awaiting owner** | 4 decisions (C4, C7, C9-interim, C10) + approval to file issues/author tasks + re-open mis-marked tasks 037/039/A-20/A-18. See the note's top section. |
+> | **Peer (word-add-in-r1)** | Notified of merge + 4 findings in their code; they routed (a)/(b)→060, (c)→080, (d)→079. `dynamic`-on-internal-anon-type bug class: only 2 sites, both theirs. |
+>
 > **Last Updated**: **2026-09-30, session 26 — MERGE OF origin/master STAGED (resolution complete, all tests green), NOT YET COMMITTED.**
 > Branch `work/unified-access-control-r2`. PR #1029 open.
 >
