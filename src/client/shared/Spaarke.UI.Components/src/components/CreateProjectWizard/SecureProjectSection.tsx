@@ -190,9 +190,9 @@ const PROVISIONING_ITEMS: IProvisioningItem[] = [
     // placed in that BU. That is an environment invariant, not a guarantee this code
     // makes — and copy must not state it as one.
     icon: <BuildingRegular fontSize={16} />,
-    title: 'Moved into the Secure Project business unit',
+    title: 'Moved into the Secure Record business unit',
     description:
-      'The project is reassigned to the Secure Project business unit’s owner team, which by design has no people in it. Ownership therefore grants nobody access to the project.',
+      'The project is reassigned to the Secure Record business unit’s owner team, which by design has no people in it. Ownership therefore grants nobody access to the project.',
   },
   {
     // Endpoint step 5.5 (ShareToCreatorAndPrincipalsAsync): the creator is

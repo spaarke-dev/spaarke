@@ -201,10 +201,10 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
             }
 
             onEvent({
-              event: currentEvent.event,
               data: parsedData,
-              id: currentEvent.id,
-              retry: currentEvent.retry,
+              ...(currentEvent.event !== undefined ? { event: currentEvent.event } : {}),
+              ...(currentEvent.id !== undefined ? { id: currentEvent.id } : {}),
+              ...(currentEvent.retry !== undefined ? { retry: currentEvent.retry } : {}),
             });
           }
           currentEvent = {};
@@ -241,12 +241,17 @@ export function createSseConnection(url: string, options: SseClientOptions): Sse
           case 'id':
             currentEvent.id = value;
             break;
-          case 'retry':
+          case 'retry': {
+            // Braced (task 072, `no-case-declarations`): without the block, this `const`
+            // is scoped to the WHOLE switch, so it is visible — and in the temporal dead
+            // zone — inside every other case. A later `retryMs` reference added to
+            // another branch would be a ReferenceError at runtime, not a compile error.
             const retryMs = parseInt(value, 10);
             if (!isNaN(retryMs)) {
               currentEvent.retry = retryMs;
             }
             break;
+          }
           // Unknown fields are ignored per SSE spec
         }
       };

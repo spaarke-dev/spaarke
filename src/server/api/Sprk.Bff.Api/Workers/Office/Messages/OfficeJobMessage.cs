@@ -145,6 +145,22 @@ public record UploadFinalizationPayload
     /// instead of creating a new Document record.
     /// </summary>
     public Guid? DocumentId { get; init; }
+
+    /// <summary>
+    /// Task 029 (spaarkeai-word-add-in-r1): set ONLY for a VERSION save (a Document save that wrote a new SPE
+    /// version of an existing <c>sprk_document</c>), to that save's ProcessingJob id. The worker folds it into the
+    /// profile and index idempotency keys so each saved version is re-profiled and re-indexed once.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the save's job id and not a content hash.</b> It identifies the individual save: a Service Bus
+    /// redelivery or retry of the same finalization message repeats it (so those still skip), while every new save
+    /// has its own job — even one whose bytes repeat an earlier version (B, then A, then B refreshes three times),
+    /// which no content hash can tell apart.</para>
+    /// <para>Null for a first save and for every Email / Attachment save, and then omitted from the JSON, so their
+    /// payloads and keys are byte-for-byte what they were.</para>
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? VersionSaveJobId { get; init; }
 }
 
 /// <summary>

@@ -1,4 +1,23 @@
 /**
+ * 🔴 THIS SPEC DOES NOT RUN IN CI, AND DOES NOT CURRENTLY RUN ANYWHERE.
+ * ---------------------------------------------------------------------
+ * Classified by task 074 (2026-09-28). Do not read these 29 tests as coverage - no
+ * workflow executes `tests/e2e`, and they do not pass headless today.
+ *
+ * Basis (measured on the sibling word-addins/save-flow.spec.ts, which shares this exact
+ * shape - same `taskPaneUrl` default, same navigate-then-wait pattern): the taskpane
+ * BOOTS and then hangs at "Loading...", because (1) nothing intercepts the real
+ * `office.js` CDN script, so the injected Office mock is superseded and host detection
+ * reports `host: null`, and (2) the add-in's bootstrap then awaits its MSAL auth service,
+ * which cannot complete headless. Full evidence and console trace:
+ * `projects/spaarkeai-word-add-in-r1/notes/074-e2e.md`.
+ *
+ * These are authored as MOCKED HEADLESS tests whose mock is incomplete - not tests that
+ * inherently require Outlook desktop. Completing the mock is an e2e-harness build, which
+ * task 074's escalation trigger puts outside its scope. Escalated rather than silently
+ * left looking like coverage.
+ */
+/**
  * E2E Tests: Outlook Share Flow
  *
  * Tests validate the complete share flow for sharing Spaarke documents
@@ -177,8 +196,8 @@ test.describe('Share Flow - Document Search @e2e @outlook', () => {
 
   test('should show loading state during search', async ({ page }) => {
     // Add delay to search API
-    await page.route(`${testConfig.apiBaseUrl}/office/search/documents*`, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    await page.route(`${testConfig.apiBaseUrl}/office/search/documents*`, async route => {
+      await new Promise(resolve => setTimeout(resolve, 1000));
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -298,10 +317,7 @@ test.describe('Share Flow - Share as Link @e2e @outlook', () => {
     await taskPanePage.searchDocuments('doc');
 
     // Select multiple documents
-    await taskPanePage.selectMultipleDocuments([
-      'Client Agreement Q1 2026.docx',
-      'Project Proposal - Alpha.pdf',
-    ]);
+    await taskPanePage.selectMultipleDocuments(['Client Agreement Q1 2026.docx', 'Project Proposal - Alpha.pdf']);
 
     // Generate links
     await taskPanePage.generateLinkButton.click();
@@ -341,10 +357,7 @@ test.describe('Share Flow - Share as Attachment @e2e @outlook', () => {
     await taskPanePage.mockShareAttachApi(mockMultipleAttachmentsResponse);
 
     await taskPanePage.searchDocuments('doc');
-    await taskPanePage.selectMultipleDocuments([
-      'Client Agreement Q1 2026.docx',
-      'Project Proposal - Alpha.pdf',
-    ]);
+    await taskPanePage.selectMultipleDocuments(['Client Agreement Q1 2026.docx', 'Project Proposal - Alpha.pdf']);
 
     await taskPanePage.shareAsAttachment();
 
@@ -376,7 +389,7 @@ test.describe('Share Flow - Search Filters @e2e @outlook', () => {
 
   test('should filter by entity type', async ({ page }) => {
     // Mock filtered results
-    const legalDocs = mockDocuments.filter((d) => d.path.includes('/Legal/'));
+    const legalDocs = mockDocuments.filter(d => d.path.includes('/Legal/'));
     await taskPanePage.mockSearchApi(legalDocs);
 
     // Open filter dropdown and select entity type
@@ -395,7 +408,7 @@ test.describe('Share Flow - Search Filters @e2e @outlook', () => {
 
   test('should filter by date range', async ({ page }) => {
     // Mock filtered results (last 7 days)
-    const recentDocs = mockDocuments.filter((d) => {
+    const recentDocs = mockDocuments.filter(d => {
       const date = new Date(d.modifiedDate!);
       const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
       return date > weekAgo;
@@ -426,7 +439,7 @@ test.describe('Share Flow - Recent Documents @e2e @outlook', () => {
     await taskPanePage.mockOfficeComposeMode();
 
     // Mock recent documents endpoint
-    await page.route(`${testConfig.apiBaseUrl}/office/recent*`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/recent*`, route => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -499,7 +512,7 @@ test.describe('Share Flow - Error Handling @e2e @outlook', () => {
 
   test('should handle network error gracefully', async ({ page }) => {
     // Mock network failure
-    await page.route(`${testConfig.apiBaseUrl}/office/share/links`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/share/links`, route => {
       route.abort('failed');
     });
 
@@ -527,7 +540,7 @@ test.describe('Share Flow - Error Handling @e2e @outlook', () => {
   test('should allow retry after error', async ({ page }) => {
     // First request fails
     let attempts = 0;
-    await page.route(`${testConfig.apiBaseUrl}/office/share/links`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/share/links`, route => {
       attempts++;
       if (attempts === 1) {
         route.fulfill({
@@ -582,7 +595,7 @@ test.describe('Share Flow - Partial Success @e2e @outlook', () => {
 
   test('should handle partial success for multiple documents', async ({ page }) => {
     // Mock partial success - one link succeeds, one fails
-    await page.route(`${testConfig.apiBaseUrl}/office/share/links`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/share/links`, route => {
       route.fulfill({
         status: 207, // Multi-status
         contentType: 'application/json',
@@ -606,10 +619,7 @@ test.describe('Share Flow - Partial Success @e2e @outlook', () => {
     });
 
     await taskPanePage.searchDocuments('doc');
-    await taskPanePage.selectMultipleDocuments([
-      'Client Agreement Q1 2026.docx',
-      'Project Proposal - Alpha.pdf',
-    ]);
+    await taskPanePage.selectMultipleDocuments(['Client Agreement Q1 2026.docx', 'Project Proposal - Alpha.pdf']);
 
     await taskPanePage.generateLinkButton.click();
     await taskPanePage.waitForOperationComplete();
@@ -621,7 +631,7 @@ test.describe('Share Flow - Partial Success @e2e @outlook', () => {
 
   test('should show which documents failed in partial success', async ({ page }) => {
     // Mock partial attachment success
-    await page.route(`${testConfig.apiBaseUrl}/office/share/attach`, (route) => {
+    await page.route(`${testConfig.apiBaseUrl}/office/share/attach`, route => {
       route.fulfill({
         status: 207,
         contentType: 'application/json',
@@ -640,10 +650,7 @@ test.describe('Share Flow - Partial Success @e2e @outlook', () => {
     });
 
     await taskPanePage.searchDocuments('doc');
-    await taskPanePage.selectMultipleDocuments([
-      'Client Agreement Q1 2026.docx',
-      'Project Proposal - Alpha.pdf',
-    ]);
+    await taskPanePage.selectMultipleDocuments(['Client Agreement Q1 2026.docx', 'Project Proposal - Alpha.pdf']);
 
     await taskPanePage.shareAsAttachment();
 

@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// Provisioning sequence:
 ///   1. Confirm the project exists and carries <c>sprk_issecure = true</c>
-///   2. Resolve the ONE canonical Secure Project business unit, BY NAME, from configuration
+///   2. Resolve the ONE canonical Secure Record business unit, BY NAME, from configuration
 ///   3. Resolve that BU's default owner team
 ///   4. Refuse if the project is already provisioned (see <see cref="ProjectRow"/>)
 ///   5. Assign the project's owner to that team, and verify the assignment took effect
@@ -44,8 +44,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// that is gone. What replaced it, and why, in order of how badly each mattered:</para>
 ///
 /// <para><b>1. BU-per-project contradicted the design and escaped its own guardrail.</b> design.md
-/// §5.1 says verbatim "no BU-per-project proliferation" and specifies ONE <c>Secure Project</c>
-/// business unit. The old code created a child BU per project and parented it to the ROOT BU — so
+/// §5.1 says verbatim "no BU-per-project proliferation" and specifies ONE <c>Secure Record</c>
+/// business unit (named <c>Secure Project</c> until task 121 renamed it, 2026-09-29). The old code
+/// created a child BU per project and parented it to the ROOT BU — so
 /// those BUs sat OUTSIDE the BU that NFR-05's standing assertion guards. The guardrail this project
 /// exists to build would silently not have covered the records provisioning created.</para>
 ///
@@ -92,27 +93,44 @@ public static class ProvisionProjectEndpoint
 
     // ── Configuration ────────────────────────────────────────────────────────
 
-    /// <summary>Configuration key naming the canonical Secure Project business unit.</summary>
+    /// <summary>Configuration key naming the canonical Secure Record business unit.</summary>
     /// <remarks>
     /// A NAME, not a GUID, and configurable rather than compiled in. The GUID differs per environment
     /// — the BU is created as part of new-environment setup, so no id is stable across tenants — and a
     /// customer who renames the BU must not need a redeploy. Business unit names are unique per
     /// organisation, so a name lookup is deterministic.
+    /// <para>Renamed from the <c>SecureProject</c> section 2026-09-29 (task 121, D-12 §2), along with
+    /// its sibling <c>UnsecureOwnerUserId</c> — renaming one key and not the other would have split a
+    /// single config section in two. No
+    /// deployed configuration set the old key — verified by search across every <c>.json</c> in the
+    /// repo — so the rename orphaned no setting. A future key rename would not be so cheap.</para>
     /// </remarks>
-    internal const string SecureBusinessUnitNameConfigKey = "SecureProject:BusinessUnitName";
+    internal const string SecureBusinessUnitNameConfigKey = "SecureRecord:BusinessUnitName";
 
     /// <summary>
-    /// Default name of the canonical Secure Project business unit.
+    /// Default name of the canonical Secure Record business unit.
     /// </summary>
     /// <remarks>
-    /// <b>SINGULAR.</b> Verified against live Dataverse metadata 2026-08-25: the deployed BU is named
-    /// <c>Secure Project</c>. design.md §5.1 and this task's POML both wrote "Secure Projects"
-    /// (plural) — an assumed name, never checked. Shipping the plural would have made every
-    /// provisioning call fail closed with "business unit not found": the correct DIRECTION, but for a
-    /// fabricated reason, and it would have looked like a missing environment rather than a typo.
-    /// Eighth instance of "schema/name docs lose to live metadata" in this project.
+    /// <b>RENAMED 2026-09-29 (task 121, D-12 §2, owner-approved):</b> <c>Secure Project</c> →
+    /// <c>Secure Record</c>. The BU holds secure rows of THREE entity types — <c>sprk_project</c>,
+    /// <c>sprk_matter</c> and <c>sprk_workassignment</c> all carry <c>sprk_issecure</c> — so naming it
+    /// after one of them described the topology wrongly. No customer deployments existed, which is why
+    /// the rename happened at this moment and not later.
+    /// <para>🔴 THIS IS A FAIL-CLOSED LOOKUP KEY. The live BU, this default, the config key above, the
+    /// pinning test and the operator runbook move TOGETHER or provisioning stops with "business unit
+    /// not found" — an error that reads like a missing environment rather than a rename in flight. The
+    /// cutover is deliberately HARD (no transitional dual-accept): see
+    /// docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md for the ordered operator steps.</para>
+    /// <para><b>The lesson this constant already carried, preserved because it still applies.</b>
+    /// Verified against live Dataverse metadata 2026-08-25, the deployed BU was named <c>Secure
+    /// Project</c> — SINGULAR — while design.md §5.1 and the authoring task both wrote "Secure
+    /// Projects". An assumed name, never checked. Shipping the plural would have failed every
+    /// provisioning call closed: the correct DIRECTION for a fabricated reason, looking like a missing
+    /// environment rather than a typo. Eighth instance of "schema/name docs lose to live metadata" in
+    /// this project — and the reason the pinning test asserts the exact deployed string rather than a
+    /// pattern.</para>
     /// </remarks>
-    internal const string DefaultSecureBusinessUnitName = "Secure Project";
+    internal const string DefaultSecureBusinessUnitName = "Secure Record";
 
     // ── Reason codes (ProblemDetails extensions["reasonCode"]) ───────────────
     //
@@ -190,7 +208,7 @@ public static class ProvisionProjectEndpoint
             .WithName("ProvisionSecureProject")
             .WithSummary("Provision infrastructure for a new Secure Project")
             .WithDescription(
-                "Assigns the project to the canonical Secure Project business unit's default owner " +
+                "Assigns the project to the canonical Secure Record business unit's default owner " +
                 "team and provisions the project's own SPE container, recording it on the " +
                 "sprk_project record. Creates no business unit and no account.")
             .Produces<ProvisionProjectResponse>(StatusCodes.Status200OK)
@@ -267,7 +285,7 @@ public static class ProvisionProjectEndpoint
 
         var projectName = projectRow.sprk_projectname ?? request.ProjectRef ?? request.ProjectId.ToString();
 
-        // ── Step 2: Resolve the canonical Secure Project BU, by NAME ─────────
+        // ── Step 2: Resolve the canonical Secure Record BU, by NAME ─────────
         //
         // FAIL CLOSED, and never substitute. An absent or ambiguous BU must stop provisioning, not
         // fall back to the root BU or the caller's BU: either fallback would put a secure record in a
@@ -297,10 +315,10 @@ public static class ProvisionProjectEndpoint
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "[PROVISION] Failed to resolve the Secure Project business unit by name '{BuName}'",
+                "[PROVISION] Failed to resolve the Secure Record business unit by name '{BuName}'",
                 secureBuName);
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                "Failed to resolve the Secure Project business unit from Dataverse.", traceId,
+                "Failed to resolve the Secure Record business unit from Dataverse.", traceId,
                 (ReasonKey, ReasonSecureBuNotFound));
         }
 
@@ -313,7 +331,7 @@ public static class ProvisionProjectEndpoint
 
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
                 $"No business unit named '{secureBuName}' exists in this environment. The canonical " +
-                "Secure Project business unit is created during environment setup; provisioning will " +
+                "Secure Record business unit is created during environment setup; provisioning will " +
                 "not create one, and will not fall back to another business unit.",
                 traceId, (ReasonKey, ReasonSecureBuNotFound), ("businessUnitName", secureBuName));
         }
@@ -367,7 +385,7 @@ public static class ProvisionProjectEndpoint
             logger.LogError(ex,
                 "[PROVISION] Failed to resolve the default owner team for business unit {BuId}", secureBuId);
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                "Failed to resolve the Secure Project owner team from Dataverse.", traceId,
+                "Failed to resolve the Secure Record owner team from Dataverse.", traceId,
                 (ReasonKey, ReasonOwnerTeamNotFound));
         }
 
@@ -400,7 +418,7 @@ public static class ProvisionProjectEndpoint
         var ownerTeamName = ownerTeam.name ?? secureBuName;
 
         logger.LogInformation(
-            "[PROVISION] Resolved Secure Project BU '{BuName}' ({BuId}) and its default owner team " +
+            "[PROVISION] Resolved Secure Record BU '{BuName}' ({BuId}) and its default owner team " +
             "'{TeamName}' ({TeamId})", secureBuName, secureBuId, ownerTeamName, ownerTeamId);
 
         // ── Step 4: Refuse to provision an already-provisioned project ───────
@@ -415,7 +433,7 @@ public static class ProvisionProjectEndpoint
             return Problem(StatusCodes.Status409Conflict, "Conflict",
                 $"Project {request.ProjectId} was provisioned by the retired BU-per-project mechanism " +
                 "and still references its own security business unit. Migrating it to the canonical " +
-                "Secure Project business unit is a manual operation — provisioning will not do it as " +
+                "Secure Record business unit is a manual operation — provisioning will not do it as " +
                 "a side effect, because it would leave the old business unit and its container behind " +
                 "with nothing pointing at them.",
                 traceId,
@@ -432,7 +450,7 @@ public static class ProvisionProjectEndpoint
             var hasContainer = !string.IsNullOrWhiteSpace(projectRow.sprk_containerid);
 
             logger.LogWarning(
-                "[PROVISION] Project {ProjectId} is already owned by the Secure Project owner team " +
+                "[PROVISION] Project {ProjectId} is already owned by the Secure Record owner team " +
                 "{TeamId} (container recorded: {HasContainer}). Refusing to re-provision. " +
                 "TraceId={TraceId}",
                 request.ProjectId, ownerTeamId, hasContainer, traceId);
@@ -442,7 +460,7 @@ public static class ProvisionProjectEndpoint
                     ? $"Project {request.ProjectId} has already been provisioned. Re-provisioning " +
                       "would create a second SPE container and repoint the project at it, orphaning " +
                       "the documents already stored."
-                    : $"Project {request.ProjectId} is already owned by the Secure Project owner team " +
+                    : $"Project {request.ProjectId} is already owned by the Secure Record owner team " +
                       "but has no SPE container recorded, so an earlier run claimed it and then " +
                       "failed. Reassign the project's owner and retry, or record the container " +
                       "manually if one was created — the failed run's response named it.",
@@ -453,12 +471,12 @@ public static class ProvisionProjectEndpoint
                 ("speContainerId", projectRow.sprk_containerid));
         }
 
-        // ── Step 5: Assign ownership to the Secure Project owner team ────────
+        // ── Step 5: Assign ownership to the Secure Record owner team ────────
         //
         // ORDER MATTERS, and this step is deliberately FIRST of the two mutations.
         //
         // Ownership is the SECURITY step; the container is the storage step. If the container step
-        // fails after this, the project is at least correctly owned inside the Secure Project BU. If
+        // fails after this, the project is at least correctly owned inside the Secure Record BU. If
         // the order were reversed, the same failure would leave a secure project owned by its creating
         // user in an Operations business unit — strictly the worse posture of the two.
         //
@@ -474,14 +492,14 @@ public static class ProvisionProjectEndpoint
                 OwnerAssignmentOutcome.NotApplied => (
                     ReasonOwnerAssignmentNotApplied,
                     "Dataverse accepted the ownership assignment but the project is still not owned " +
-                    "by the Secure Project owner team. This is the silent-navigation-property failure " +
+                    "by the Secure Record owner team. This is the silent-navigation-property failure " +
                     "mode: an unrecognised @odata.bind property is accepted and ignored rather than " +
                     "rejected. Nothing has been provisioned."),
                 _ => (
                     ReasonOwnerAssignmentFailed,
-                    "Failed to assign the project to the Secure Project owner team. If Dataverse " +
+                    "Failed to assign the project to the Secure Record owner team. If Dataverse " +
                     "refused the assignment, the owner team most likely lacks the entity privileges " +
-                    "an assignment target must hold — see the Secure Project Owner role in " +
+                    "an assignment target must hold — see the Secure Record Owner role in " +
                     "design.md §5.1a. Nothing has been provisioned.")
             };
 
@@ -602,7 +620,7 @@ public static class ProvisionProjectEndpoint
             logger.LogError(ex,
                 "[PROVISION] Dataverse refused the ownership assignment of project {ProjectId} to " +
                 "team {TeamId}. If this is a privilege error, the owner team lacks the entity rights " +
-                "an assignment target must hold (design.md §5.1a, Secure Project Owner role).",
+                "an assignment target must hold (design.md §5.1a, Secure Record Owner role).",
                 projectId, ownerTeamId);
             return OwnerAssignmentOutcome.Failed;
         }
@@ -638,7 +656,7 @@ public static class ProvisionProjectEndpoint
         }
 
         logger.LogInformation(
-            "[PROVISION] Project {ProjectId} is now owned by the Secure Project owner team {TeamId} " +
+            "[PROVISION] Project {ProjectId} is now owned by the Secure Record owner team {TeamId} " +
             "(verified by read-back)", projectId, ownerTeamId);
 
         return OwnerAssignmentOutcome.Assigned;
@@ -765,7 +783,7 @@ public static class ProvisionProjectEndpoint
     /// </summary>
     /// <remarks>
     /// There is no rollback of the ownership assignment if this fails. That is deliberate: ownership
-    /// inside the Secure Project business unit is the safer state to be left in, so undoing it on a
+    /// inside the Secure Record business unit is the safer state to be left in, so undoing it on a
     /// container failure would move the record back OUT of the secure business unit — turning a
     /// storage failure into a disclosure.
     /// </remarks>
@@ -906,7 +924,7 @@ public static class ProvisionProjectEndpoint
     // Private types
     // =========================================================================
 
-    /// <summary>Outcome of assigning a project to the Secure Project owner team.</summary>
+    /// <summary>Outcome of assigning a project to the Secure Record owner team.</summary>
     private enum OwnerAssignmentOutcome
     {
         /// <summary>Dataverse refused the write, or the result could not be verified.</summary>
@@ -986,7 +1004,7 @@ public static class ProvisionProjectEndpoint
         /// provisioning.</para>
         ///
         /// <para>The root error was not the comparison; it was choosing a marker without checking who
-        /// else writes the field. Ownership by the Secure Project owner team is state that ONLY this
+        /// else writes the field. Ownership by the Secure Record owner team is state that ONLY this
         /// endpoint ever writes: the wizard cannot set it (it does not know the team), and the cascade
         /// copies business-unit-derived FIELDS, not ownership.</para>
         ///

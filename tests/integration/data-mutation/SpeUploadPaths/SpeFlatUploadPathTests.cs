@@ -112,6 +112,28 @@ public class SpeFlatUploadPathTests
                     ETag: null, IsFolder: false, WebUrl: null);
             });
 
+        // Task 025: OfficeStorageUploader.UploadToSpeAsync now ALWAYS calls the explicit-conflictBehavior
+        // overload (defaulting to Fail for the create path; Replace/Rename on other callers or explicit
+        // retries). None of THIS file's tests exercise collision semantics — they protect flatness /
+        // no-folder-minting, an orthogonal concern — and none seed a colliding path, so Fail and Replace
+        // are observationally identical here. Delegates to the SAME drive.Put(...) as the 4-arg setup
+        // above so both overloads share the one fake drive.
+        speMock
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(),
+                It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string path, Stream content, ConflictBehavior _, CancellationToken _) =>
+            {
+                using var ms = new MemoryStream();
+                content.Position = 0;
+                content.CopyTo(ms);
+                drive.Put(path, ms.ToArray());
+                return (FileHandleDto?)new FileHandleDto(
+                    Id: $"item-{drive.WrittenPaths.Count}", Name: path, ParentId: null, Size: ms.Length,
+                    CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                    ETag: null, IsFolder: false, WebUrl: null);
+            });
+
         // NOTE: ResolveDriveIdAsync is deliberately NOT set up — it is non-virtual, so Moq cannot
         // intercept it. It does not need to be: the real implementation returns its argument unchanged
         // when the id already starts with "b!" (SharePoint drive ids do), short-circuiting before any

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Logging;
@@ -70,19 +71,28 @@ public static class MiddlewarePipelineExtensions
                     logger.LogWarning("Re-applied CORS headers in exception handler for origin: {Origin}", origin);
                 }
 
-                await ctx.Response.WriteAsJsonAsync(new
-                {
-                    type = $"https://spaarke.com/errors/{code}",
-                    title,
-                    detail,
-                    status,
-                    correlationId = traceId,
-                    extensions = new Dictionary<string, object?>
+                // GitHub #975 (ADR-019 / RFC 7807): WriteAsJsonAsync's parameterless overload always
+                // sets Content-Type to "application/json; charset=utf-8", unconditionally overwriting
+                // the "application/problem+json" set two lines above — it never consults the response's
+                // existing header. Passing contentType explicitly (the framework's own mechanism, same
+                // 4-arg overload the convenience overloads delegate to with options: null) fixes the
+                // header without changing the serialized body in any way.
+                await ctx.Response.WriteAsJsonAsync(
+                    new
                     {
-                        ["code"] = code,
-                        ["correlationId"] = traceId
-                    }
-                });
+                        type = $"https://spaarke.com/errors/{code}",
+                        title,
+                        detail,
+                        status,
+                        correlationId = traceId,
+                        extensions = new Dictionary<string, object?>
+                        {
+                            ["code"] = code,
+                            ["correlationId"] = traceId
+                        }
+                    },
+                    options: (JsonSerializerOptions?)null,
+                    contentType: "application/problem+json");
             });
         });
 

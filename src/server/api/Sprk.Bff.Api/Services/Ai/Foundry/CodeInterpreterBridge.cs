@@ -100,12 +100,19 @@ public sealed class CodeInterpreterBridge
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
 
-        // Create an ephemeral thread — Code Interpreter is a stateless sandbox per call.
-        // Uses a synthetic tenant key to avoid polluting the resumable conversation cache.
-        const string EphemeralTenantKey = "_code_interpreter_ephemeral_";
-        var threadId = await _agentServiceClient.CreateOrResumeThreadAsync(
-            EphemeralTenantKey,
-            cancellationToken);
+        // Create a genuinely ephemeral thread — Code Interpreter is a stateless sandbox per call.
+        //
+        // 🔴 FIXED 2026-09-29 (task 122). This comment was already true as INTENT and false as CODE. It
+        // called CreateOrResumeThreadAsync with the constant "_code_interpreter_ephemeral_" in the TENANT
+        // argument — and CreateOrResume caches and RESUMES. So every code-interpreter invocation, from
+        // every user in every tenant, resumed ONE shared thread for the 60-minute TTL, accumulating each
+        // caller's prompts as context for the next. "Ephemeral" described the intent; the cache did the
+        // opposite, and the synthetic key that was supposed to avoid polluting the conversation cache is
+        // what made the pollution global.
+        //
+        // Nothing here needs to survive the call, so the fix is to stop caching rather than to invent a
+        // scope: create a fresh thread and let it go.
+        var threadId = await _agentServiceClient.CreateEphemeralThreadAsync(cancellationToken);
 
         // ADR-015: log thread ID only — never the prompt content.
         _logger.LogDebug(
@@ -149,16 +156,11 @@ public sealed class CodeInterpreterBridge
             "outputLen={OutputLen}, durationMs={DurationMs}",
             threadId, outputBuilder.Length, sw.ElapsedMilliseconds);
 
-        // Invalidate the ephemeral thread to prevent it from being re-used.
-        // Best-effort: swallow exceptions since the result has already been captured.
-        try
-        {
-            await _agentServiceClient.InvalidateThreadCacheAsync(EphemeralTenantKey, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to invalidate ephemeral Code Interpreter thread {ThreadId}", threadId);
-        }
+        // REMOVED 2026-09-29 (task 122): a best-effort cache eviction that tried to undo the caching this
+        // method should never have done. It was also racy — between the thread being cached at the start
+        // of the call and evicted here, any concurrent caller resumed it, which is precisely how one
+        // user's code-interpreter prompt became another's context. Nothing is cached now, so there is
+        // nothing to evict: CreateEphemeralThreadAsync creates the thread and lets it go.
 
         var output = outputBuilder.ToString().Trim();
         var executionLog = logBuilder.ToString().Trim();

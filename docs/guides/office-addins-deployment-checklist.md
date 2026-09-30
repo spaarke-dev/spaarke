@@ -1,7 +1,7 @@
 # Spaarke Office Add-ins Deployment Checklist
 
-> **Version**: 1.2
-> **Last Updated**: January 24, 2026
+> **Version**: 1.3
+> **Last Updated**: 2026-09-10 — corrected manifest upload guidance: use the manifest served by the deployed SWA, not a local `dist/` build; fixed Outlook build-output filename (`outlook-manifest.xml`, not `manifest.xml`)
 > **Purpose**: Pre-deployment verification for IT Administrators
 
 ---
@@ -209,10 +209,12 @@ az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthori
 
 | Add-in | Source File | Build Output |
 |--------|-------------|--------------|
-| Outlook | `outlook/outlook-manifest.xml` | `dist/outlook/manifest.xml` |
+| Outlook | `outlook/outlook-manifest.xml` | `dist/outlook/outlook-manifest.xml` |
 | Word | `word/word-manifest.xml` | `dist/word/manifest.xml` |
 
 > **Note**: Legacy `manifest-working.xml` files have been consolidated into the standardized files above.
+>
+> **Corrected 2026-09-10**: for M365 Admin Center upload, use the manifest **served by the deployed Static Web App** (e.g. `https://{swa-hostname}/outlook/outlook-manifest.xml` and `.../word/manifest.xml`), not a local `dist/` build. `webpack.config.js` substitutes the `https://localhost:3000` placeholders in the Word/unified manifests with the SWA host only when built with `NODE_ENV=production` (the CI deploy workflow sets this); a local `npm run build:dev` ships `localhost` URLs.
 
 #### Outlook Manifest (outlook-manifest.xml)
 - [ ] All URLs updated for target environment:
@@ -332,7 +334,7 @@ az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthori
 - [ ] Navigate to M365 Admin Center > Settings > Integrated apps
 - [ ] Click "Upload custom apps"
 - [ ] Select "Office Add-in"
-- [ ] Upload `dist/outlook/manifest.xml` (built from `outlook/outlook-manifest.xml`)
+- [ ] Upload the manifest served by the deployed SWA at `/outlook/outlook-manifest.xml` (not a local `dist/` build — see the Manifest File Locations note above)
 - [ ] Manifest validation passes (no errors)
 - [ ] Select deployment scope:
   - [ ] Pilot group (recommended for initial deployment)
@@ -344,7 +346,7 @@ az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query "api.preAuthori
 - [ ] Navigate to M365 Admin Center > Settings > Integrated apps
 - [ ] Click "Upload custom apps"
 - [ ] Select "Office Add-in"
-- [ ] Upload `dist/word/manifest.xml` (built from `word/word-manifest.xml`)
+- [ ] Upload the manifest served by the deployed SWA at `/word/manifest.xml` (not a local `dist/` build — see the Manifest File Locations note above)
 - [ ] Manifest validation passes (no errors)
 - [ ] Select same deployment scope as Outlook
 - [ ] Review permissions and deploy

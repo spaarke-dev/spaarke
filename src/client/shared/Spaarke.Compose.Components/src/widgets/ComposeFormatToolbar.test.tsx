@@ -1014,7 +1014,9 @@ describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + ico
     renderFormatToolbar({}, { props: { hasReview: true, onGenerateMemo: jest.fn() } });
 
     const memoTrigger = screen.getByTestId('compose-format-memo-menu');
-    expect(memoTrigger).toHaveAttribute('aria-label', 'Create Summary Memo');
+    // R8 §GAPS-5 Phase 4 — renamed to 'Review Summary document'. The assertion's INTENT is
+    // unchanged (icon-only controls must carry an accessible name); only the name moved.
+    expect(memoTrigger).toHaveAttribute('aria-label', 'Review Summary document');
     expect(memoTrigger.textContent).toBe(''); // icon-only — no visible label text
 
     // Round-4 #12: Memo now sits AFTER the format-menu group, not ahead of it.

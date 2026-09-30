@@ -41,6 +41,14 @@ cross-*subscription* prohibition is load-bearing here.
   location**: as of 2026-09-28 this group sits in the customer's **own** subscription.
 - Both use `targetScope = 'subscription'` (declarative RG creation) — the templates don't change, the
   target subscription does, per customer.
+- **Runtime handle on this boundary** (D-14, `unified-access-control-r2` task 123): the per-customer
+  stamp emits `Customer__Id` as an App Service setting, which the BFF reads through
+  `Configuration/CustomerIdentity.cs`. Absent it, the id is derived from `WEBSITE_RESOURCE_GROUP`
+  (itself `rg-spaarke-{customerId}-{env}`); absent both, the BFF **refuses to start** — there is no
+  default, because an absent customer identity must never resolve to a shared value. 🔴 The
+  `rg-spaarke-platform-{env}` group above matches the per-customer *shape*, so it is explicitly
+  **deny-listed** from derivation; a BFF deployed there must set `Customer__Id` by hand. Procedure:
+  [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § 6.5.1](../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
 
 ### 3. Dataverse Solutions
 

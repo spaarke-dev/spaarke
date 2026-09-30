@@ -8,7 +8,7 @@
  *
  *   REMOVED  child Business Unit per project (named SP-{ProjectRef})
  *   REMOVED  External Access Account per project
- *   REMOVED  umbrella-BU reuse (there is now ONE canonical `Secure Project` BU, resolved by name
+ *   REMOVED  umbrella-BU reuse (there is now ONE canonical `Secure Record` BU, resolved by name
  *            from server configuration, so there is nothing for a caller to select)
  *   REMOVED  the BU-rollback path (nothing destructive is created any more)
  *   REMOVED  the stamps `sprk_securitybuid` / `sprk_specontainerid` / `sprk_externalaccountid` —
@@ -16,7 +16,7 @@
  *            failed for five months. `sprk_externalaccount` (the real column) is the project's
  *            CLIENT lookup and must NEVER be written by provisioning.
  *
- *   NOW      1. Resolve the canonical `Secure Project` BU by name
+ *   NOW      1. Resolve the canonical `Secure Record` BU by name
  *            2. Assign the project to that BU's DEFAULT OWNER TEAM (verified by read-back)
  *            3. Create the project's own SPE container
  *            4. Record it on `sprk_containerid` — and FAIL LOUDLY if that write does not land
@@ -37,7 +37,7 @@
  * Tests validate the end-to-end secure project creation pipeline:
  *   1. Create project record with sprk_issecure = true (via Dataverse API)
  *   2. Call POST /api/v1/external-access/provision-project
- *   3. Verify the project is owned by the Secure Project BU's default owner team
+ *   3. Verify the project is owned by the Secure Record BU's default owner team
  *   4. Verify SPE container provisioned and ID returned
  *   5. Verify the project record's sprk_containerid points at it
  *   6. Clean up all test data after verification
@@ -79,14 +79,14 @@ const ENTITY_SETS = {
 const EXTERNAL_ACCESS_BASE = `${BFF_API_BASE}/api/v1/external-access`;
 
 /**
- * The canonical Secure Project business unit's name.
+ * The canonical Secure Record business unit's name.
  *
  * SINGULAR — verified against live Dataverse metadata 2026-08-25. Must match whatever the BFF's
- * `SecureProject:BusinessUnitName` is set to in the target environment (default `Secure Project`).
+ * `SecureRecord:BusinessUnitName` is set to in the target environment (default `Secure Record`).
  * This business unit is shared by every secure project and is created during environment setup;
  * tests must never delete it.
  */
-const SECURE_BU_NAME = process.env.SECURE_PROJECT_BU_NAME || 'Secure Project';
+const SECURE_BU_NAME = process.env.SECURE_RECORD_BU_NAME || 'Secure Record';
 
 // ============================================================================
 // Test data helpers
@@ -131,7 +131,7 @@ function buildNonSecureProjectPayload(projectRef: string): Record<string, unknow
 
 /** Mirrors the task-021 response shape. */
 interface ProvisionProjectResponse {
-  /** The canonical Secure Project BU — resolved by name, not created. */
+  /** The canonical Secure Record BU — resolved by name, not created. */
   businessUnitId: string;
   businessUnitName: string;
   /** That BU's default owner team, which now owns the project. */
@@ -388,7 +388,7 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
 
     // Track ONLY the SPE container-bearing project for cleanup.
     //
-    // Deliberately NOT tracking the business unit: it is the CANONICAL `Secure Project` BU, shared
+    // Deliberately NOT tracking the business unit: it is the CANONICAL `Secure Record` BU, shared
     // by every secure project and created during environment setup. The retired version of this test
     // tracked it for deletion because provisioning created it per project — running that against the
     // new endpoint would delete shared infrastructure. Nor is there an account to clean up.
@@ -400,7 +400,7 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
     expect(buRecord!.name).not.toContain('SP-'); // no per-project BU was created
 
     // ── Assert: the project is OWNED by that BU's default owner team ──────────
-    // This is the security-relevant outcome. Ownership is what puts the record in the Secure Project
+    // This is the security-relevant outcome. Ownership is what puts the record in the Secure Record
     // business unit, and per design.md §5.1a no human holds access through it.
     const projectRecord = await queryProject(projectId);
     expect(projectRecord).not.toBeNull();
@@ -422,7 +422,7 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
   // ==========================================================================
 
   // OBSOLETE (task 021, 2026-08-25): umbrella-BU reuse was one branch of "create a BU per project
-  // or reuse this one". Neither branch survives — there is ONE canonical `Secure Project` BU,
+  // or reuse this one". Neither branch survives — there is ONE canonical `Secure Record` BU,
   // resolved by name from server configuration, so a caller has no BU to select and `umbrellaBuId`
   // no longer exists on the request. Nothing to re-author: the scenario itself is gone.
   test.skip('TC-070-02: should reuse an existing umbrella BU and Account for a multi-project org', async () => {
@@ -505,7 +505,7 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
     expect(result2.status).toBe(200);
 
     // Nothing extra to track: no accounts and no per-project business units are created. The
-    // canonical Secure Project BU is shared infrastructure and must NEVER be tracked for deletion —
+    // canonical Secure Record BU is shared infrastructure and must NEVER be tracked for deletion —
     // the retired version of this test queued it twice.
 
     // The assertion this test exists for, and it survives the re-scope unchanged: each secure
@@ -665,11 +665,11 @@ test.describe('Secure Project Creation — Validation & Error Paths @e2e @secure
   // ==========================================================================
 
   // OBSOLETE (task 021): there is no caller-supplied BU to be absent. The equivalent case now is
-  // "the CONFIGURED Secure Project BU does not exist", which must fail closed with reasonCode
+  // "the CONFIGURED Secure Record BU does not exist", which must fail closed with reasonCode
   // `sdap.provision.secure_bu_not_found` and never fall back to the root or caller BU. Covered
   // offline by ProvisionProject_WhenTheSecureBusinessUnitIsAbsent_FailsClosedAndProvisionsNothing;
   // worth re-authoring here against a live environment, by temporarily pointing
-  // SecureProject:BusinessUnitName at a name that does not exist.
+  // SecureRecord:BusinessUnitName at a name that does not exist.
   test.skip('TC-070-14: should return 404 when umbrella BU does not exist', async () => {
     const projectRef = `E2E-UMBRELLA-NF-${Date.now()}`;
     const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {
@@ -795,7 +795,7 @@ test.describe('Secure Project — Infrastructure Reference Verification @e2e @se
     const provisionResult = (await response.json()) as ProvisionProjectResponse;
 
     // No account and no per-project BU are created, so there is nothing extra to clean up — and the
-    // canonical Secure Project BU must NEVER be tracked for deletion; it is shared infrastructure.
+    // canonical Secure Record BU must NEVER be tracked for deletion; it is shared infrastructure.
 
     // Query the project record directly from Dataverse to verify field persistence.
     // Every column named here exists on live sprk_project (verified 2026-08-25) — a $select naming a
@@ -835,7 +835,7 @@ test.describe('Secure Project — Infrastructure Reference Verification @e2e @se
   // OBSOLETE (task 021): the SP-{ProjectRef} convention named a per-project BU. design.md §5.1 says
   // "no BU-per-project proliferation" — and those BUs were parented to the ROOT BU, placing them
   // OUTSIDE the BU that NFR-05's standing assertion guards, so the convention was not merely
-  // redundant. The BU name is now whatever SecureProject:BusinessUnitName resolves to.
+  // redundant. The BU name is now whatever SecureRecord:BusinessUnitName resolves to.
   test.skip('TC-070-21: Business Unit must follow SP-{ProjectRef} naming convention', async () => {
     const uniqueRef = `REF-TEST-${Date.now()}`;
     const projectId = await dataverseApi.createRecord(ENTITY_SETS.project, {

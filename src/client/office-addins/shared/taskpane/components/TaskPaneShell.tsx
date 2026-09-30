@@ -13,7 +13,9 @@ import type { ThemePreference } from '../hooks/useTheme';
  *
  * Provides:
  * - Consistent header with host-specific branding
- * - Tab-based navigation (Save, Share, Search, Recent)
+ * - Tab-based navigation (r1: Save + Find, both hosts; Create To Do, Outlook only —
+ *   Share/Search/Recent remain modeled but hidden placeholders, task 015 / FR-03).
+ *   Tabs render via `TaskPaneToolbar` below, the one live tab-row renderer.
  * - Content area with error boundary
  * - Footer with version info
  * - Responsive layout for different task pane widths
@@ -124,7 +126,6 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
 }
 
 export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
-  title = 'Spaarke',
   hostType = 'outlook',
   userName,
   userEmail,
@@ -203,7 +204,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Main Content with Error Boundary */}
       <main className={contentClassName}>
         <ErrorBoundary
-          onError={onError}
+          {...(onError ? { onError } : {})}
           showDetails={showErrorDetails}
           onReset={() => {
             // Optionally navigate back to default tab on error reset
@@ -217,9 +218,9 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Footer */}
       <TaskPaneFooter
         version={version}
-        buildDate={buildDate}
+        {...(buildDate !== undefined ? { buildDate } : {})}
         appName={appName}
-        connectionStatus={connectionStatus}
+        {...(connectionStatus !== undefined ? { connectionStatus } : {})}
         showHelpLink={true}
         compact={isCompact}
       />

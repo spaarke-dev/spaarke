@@ -317,9 +317,24 @@ public class EntityAccessFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// Extract target entity from request arguments.
-    /// Supports SaveRequest with TargetEntity property.
+    /// Extract the record this request will act against, from whichever request shape carries it.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 THIS METHOD IS THE FILTER'S REACH. A request shape it does not recognise yields null, and a
+    /// null target makes the filter PASS THROUGH (see the caller) — so adding a route to
+    /// <c>AddEntityAccessFilter</c> without teaching this method its request type produces a filter
+    /// that is present, credited as a gate by <c>RouteAuthorizationGuardTests</c>' Rule A, and checks
+    /// nothing. Extend this method in the same change, and add a guard that pins the pairing.
+    /// </para>
+    /// <para>
+    /// Today only <c>SaveRequest</c> reaches this filter (<c>POST /api/office/save</c>). For
+    /// <c>POST /api/office/todo</c>, see <c>TodoSourceAccessFilter</c> (spaarkeai-word-add-in-r1 task
+    /// 064), which gates all four caller-supplied ids; a <c>CreateTodoRequest</c> branch that once lived
+    /// here (unified-access-control-r2 task 128, gating only the regarding id) was superseded by it and
+    /// removed at merge, 2026-09-30.
+    /// </para>
+    /// </remarks>
     private static SaveEntityReference? ExtractTargetEntity(EndpointFilterInvocationContext context)
     {
         foreach (var argument in context.Arguments)

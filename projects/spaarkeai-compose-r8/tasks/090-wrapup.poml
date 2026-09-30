@@ -4,7 +4,7 @@
     <title>Wrap-up — anti-clobber deploy · /test-diet · write-side fidelity doc · lessons-learned · INDEX + root §17 update</title>
     <phase>8 Wrap-up</phase>
     <gate>blocked-on-all</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Project-close mechanics and documentation; implementation was reviewed in its owning tasks.</rigor-reason>
     <model-tier>sonnet</model-tier>

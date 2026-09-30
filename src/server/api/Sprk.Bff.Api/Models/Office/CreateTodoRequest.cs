@@ -62,6 +62,25 @@ public record CreateTodoRequest
     /// <summary>Regarding record display name — written to <c>sprk_regardingrecordname</c> (best-effort).</summary>
     [MaxLength(200)]
     public string? RegardingRecordName { get; init; }
+
+    /// <summary>
+    /// The open Word document's <c>sprk_document</c> id (spaarkeai-word-add-in-r1 FR-14, task 035) — written
+    /// to <c>sprk_regardingdocument</c>. Independent of <see cref="RegardingEntityType"/> /
+    /// <see cref="RegardingRecordId"/>: when both a document and a record are known, BOTH lookups are
+    /// written to the same <c>sprk_todo</c>. See <c>notes/035-todo-regarding-decision.md</c> for why the
+    /// ADR-024 resolver fields (<c>sprk_regardingrecordid</c> / <c>-name</c> / <c>-type</c>) still describe
+    /// the RECORD, not the document, even when this is set.
+    /// </summary>
+    public Guid? DocumentId { get; init; }
+
+    /// <summary>
+    /// The Outlook email's <c>sprk_communication</c> id (spaarkeai-word-add-in-r1 FR-14, task 035) — the
+    /// Outlook counterpart to <see cref="DocumentId"/>, written to <c>sprk_regardingcommunication</c>.
+    /// Mutually exclusive with <see cref="DocumentId"/> in practice (Word resolves a document id, Outlook
+    /// resolves a communication id), but the server does not enforce that — both are independent, optional
+    /// slots.
+    /// </summary>
+    public Guid? CommunicationId { get; init; }
 }
 
 /// <summary>Response for a successful <c>POST /api/office/todo</c> — the created <c>sprk_todo</c> id + name.</summary>

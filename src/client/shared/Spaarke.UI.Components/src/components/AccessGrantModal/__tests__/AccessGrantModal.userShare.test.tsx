@@ -564,7 +564,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
   describe('secure-record owner/BU read-only display (design.md §6)', () => {
     it('renders the owner + business unit when fetchSecureOwnerInfo resolves', async () => {
       const fetchSecureOwnerInfo = jest.fn(async () => ({
-        ownerName: 'Secure Project Owner Team',
+        ownerName: 'Secure Record Owner Team',
         businessUnitName: 'Secure Project',
       }));
       renderWithTheme(<AccessGrantModal {...makeProps({ fetchSecureOwnerInfo })} />);
@@ -572,8 +572,10 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       const row = await screen.findByText(/Secure record/);
       // Both names render as <strong> children inside the same Text row —
       // assert on the row's combined textContent to avoid the substring
-      // ambiguity ("Secure Project Owner Team" also contains "Secure Project").
-      expect(row.textContent).toContain('Secure Project Owner Team');
+      // ambiguity (the team name "Secure Record Owner Team" contains the BU
+      // name "Secure Record" as a substring, so querying for either alone
+      // matches both elements).
+      expect(row.textContent).toContain('Secure Record Owner Team');
       expect(row.textContent).toContain('Business Unit: Secure Project');
     });
 

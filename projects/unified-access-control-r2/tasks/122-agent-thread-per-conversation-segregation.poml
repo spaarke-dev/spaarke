@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="unified-access-control-r2">
+  <metadata>
+    <title>Segregate the Foundry agent thread per conversation — the Redis key that decides which conversation you rejoin is a confidentiality boundary, and both of its segments are compile-time constants</title>
+    <phase>Register-driven (authored 2026-09-29, session 25; D-12 item 6 + ADR-009 subject-discrimination MUST)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an AI conversation path and changes a cache key that currently leaks conversation content between users. Tags include auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive, four call sites with four different available discriminators, and one caller whose stated intent (ephemeral) contradicts its implementation (resume-from-cache).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Signature change on AgentServiceClient fans out to four callers across Chat, Nodes, Handlers and Foundry.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, ai, cache, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>D-12 item 6 / ADR-009 "MUST (added 2026-09-28): the key part AFTER the tenant segment MUST discriminate the subject". Owner decision 2026-09-29: "It has to be fully segregated -- per tenant, per user, per conversation/session."</origin>
+  </metadata>
+
+  <prompt>A Foundry thread is a server-side conversation: SendMessageAsync appends to it and the agent replies with the whole accumulated thread as context. Redis stores which thread to rejoin. Today that key names only the tenant — so two people in the same company, chatting within an hour, rejoin the SAME conversation. Make the key name the conversation.</prompt>
+
+  <role>SPAARKE platform developer — the AI chat pipeline and the Foundry agent client. You are changing what a cached identifier means; get it wrong in the loose direction and conversations merge across users.</role>
+
+  <goal>Every cached Foundry thread is scoped to ONE conversation: the chat path by session, the playbook path by run, the legal-research path by its chat session. The code-interpreter path stops caching entirely, which is what its own comment already claims. No caller passes a compile-time constant where an identity belongs, and a test fails if any of them regresses.</goal>
+
+  <context>
+    <background>🔴 WHAT "FOUNDRY" MEANS HERE, because the repo contains three agent stacks and only one is this:
+  - `Azure.AI.Projects` 1.0.0-beta.8 → **Azure AI Foundry Agent Service** (`AgentsClient`, `CreateThreadAsync` / `CreateMessageAsync` / `CreateRunStreamingAsync`). THIS is the subject. Used by `AgentServiceClient` and `CodeInterpreterBridge`.
+  - `Microsoft.Agents.Builder` / `.Core.Models` → **Microsoft 365 Agents SDK**, used ONLY by `Api/Agent/SpaarkeAgentHandler.cs` (the Copilot/Teams channel). Not this.
+  - `Microsoft.Agents.AI` 1.0.0-rc1 → **Microsoft Agent Framework**. Referenced in the csproj, ZERO call sites (`AiModule.cs:93` claims `chatClient.AsAIAgent()` is used by SprkChatAgentFactory — it is not). Not this, and separately worth retiring.
+It is NOT Foundry IQ (a knowledge/retrieval product) and NOT Foundry Local.
+
+🔴 THE DEFECT. `TenantCache.BuildKey` (`Infrastructure/Cache/TenantCache.cs:258`) is
+`tenant:{tenantId}:{resource}:{id}:v{version}`. `AgentServiceClient` passes resource=`agent-thread`,
+id=`thread` — BOTH compile-time constants (`AgentServiceClient.cs:54-55`). So the whole key varies by the
+first argument alone. TTL 60 min, refreshed on every access (`AgentServiceOptions.ThreadCacheExpiryMinutes`).
+
+⚠️ AND THE FIRST ARGUMENT IS NOT ALWAYS A TENANT. It lands in the tenant slot, and two of four callers pass a
+literal:
+
+| Caller | line | first arg | effect |
+|---|---|---|---|
+| `Chat/Middleware/AgentServiceRoutingMiddleware.cs` | :376 | `_tenantId` | one thread per tenant, shared by every user in it |
+| `Services/Ai/Nodes/AgentServiceNodeExecutor.cs` | :170 | `config.TenantId` | same |
+| `Services/Ai/Handlers/LegalResearchHandler.cs` | :571 | 🔴 `"legal-research-grounding"` | ONE GLOBAL THREAD across every tenant and user |
+| `Services/Ai/Foundry/CodeInterpreterBridge.cs` | :106 | 🔴 `"_code_interpreter_ephemeral_"` | same — and its comment says "ephemeral … stateless sandbox per call" while calling CreateOrResume, which CACHES AND RESUMES. Intent and implementation disagree. |
+
+🔴 `tenantId` IS NOT A CUSTOMER DISCRIMINATOR (D-12). Every Model 1 customer presents Spaarke's tenantId, so
+the tenant segment separates nothing between customers and its tests pass anyway. **Customer separation is
+the dedicated per-customer Redis INSTANCE** (ADR-009 as amended; access control is per-instance, not
+per-keyspace). Do NOT try to fix customer separation in the key — see [D-14](../notes/D-14-customer-discriminator.md), which is task 123.
+This task fixes the two axes that ARE the key's job: **user** and **conversation**.
+
+✅ THE DISCRIMINATORS ALREADY EXIST — none needs inventing (verified 2026-09-29):
+  - Chat: `SprkChatAgentFactory.CreateAgentAsync` takes `sessionId` (`:367`) one line from `tenantId` (`:370`) and simply never passes it to the middleware, which is constructed with tenantId only (`:1159-1164`, ctor `:175-187`). `ChatContext` carries NO user or session, so the value must come from the factory.
+  - Playbook: `NodeExecutionContext.RunId` — `required Guid` (`Services/Ai/NodeExecutionContext.cs:30`).
+  - Legal research: `ChatInvocationContext.ChatSessionId`, already used for the correlation log id at `LegalResearchHandler.cs:295`.
+  - Code interpreter: nothing needed — it must stop caching.
+
+💡 WHY SESSION IS SUFFICIENT, AND USER IS NOT SEPARATELY REQUIRED. A chat session belongs to exactly one
+user, so session-keying subsumes user-keying for the leak AND additionally stops one user's unrelated
+questions sharing context (ask about Matter X, then Matter Y forty minutes later — X is still in the
+agent's context today). Keying by user alone would fix the leak and leave that.
+
+⚠️ LATENT, NOT LIVE. `AgentServiceOptions.Enabled` defaults **false** (`AgentServiceOptions.cs:26`) and
+`GuardEnabled()` throws before any cache access (`AgentServiceClient.cs:115`); no config sets it true. So no
+thread is created or resumed today. That makes this the cheap moment — the same reasoning that made the
+`Secure Record` rename cheap — and it means there is no cache to migrate.
+
+⚠️ THE OTHER TWO SITES IN THE ORIGINAL ITEM-6 LIST ARE **NOT** VIOLATIONS. The MUST is conditional —
+"whenever the cached value differs per principal". Verified:
+  - `AgentConfigurationService` (`agent-config:exposed-playbooks`, `:capabilities`) caches TENANT-WIDE admin
+    config; neither cached method takes a principal, and `IsRolePermittedAsync` (the only role-aware one)
+    reads options WITHOUT caching. Not a violation.
+  - `ModuleEntitlementResolver` (`approle-module-map:all`) caches the GLOBAL map as DATA; the per-user step
+    (`App-Role claims ∩ map`) runs after the read, per request. Not a violation.
+🔴 **DO NOT "fix" either.** Adding a user segment would fragment a tenant-global cache per user, multiplying
+Redis entries and misses for zero security benefit. The earlier handoff note claiming all three failed was
+wrong; task 123's note records why.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceClient.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/CodeInterpreterBridge.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentServiceRoutingMiddleware.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AgentServiceNodeExecutor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/LegalResearchHandler.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Foundry/AgentServiceOptions.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>The cache id MUST NOT be a compile-time constant on any path that caches.</constraint>
+    <constraint>No caller may pass a literal where the tenant argument belongs.</constraint>
+    <constraint>Do NOT modify AgentConfigurationService or ModuleEntitlementResolver — verified non-violations; changing them causes harm.</constraint>
+    <constraint>Do NOT attempt customer separation in the key. That is the dedicated Redis instance (ADR-009 amended) and task 123.</constraint>
+    <constraint>CodeInterpreterBridge must create a fresh thread per call rather than resume — match its own stated contract.</constraint>
+    <constraint>A missing conversation id must FAIL, not fall back to a shared default (ADR-003). A silent fallback reinstates the defect.</constraint>
+    <constraint>Update the XML docs and AgentServiceOptions comments that state the old `agent-thread:{tenantId}` key pattern — a comment describing a retired key shape is how this survived review.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-verify every line reference above, and run the affected suites green BEFORE editing.</step>
+    <step>Change `CreateOrResumeThreadAsync` (and `InvalidateThreadCacheAsync`) to require an explicit conversation scope; make the cache id carry it.</step>
+    <step>Thread `sessionId` from `SprkChatAgentFactory` into `AgentServiceRoutingMiddleware`.</step>
+    <step>Point the playbook node at `context.RunId` and legal research at `context.ChatSessionId`.</step>
+    <step>Make `CodeInterpreterBridge` create a fresh thread per call, and delete the synthetic tenant key.</step>
+    <step>Add a negative control: two different conversation scopes MUST produce different cache keys, and a constant/empty scope MUST be rejected.</step>
+    <step>Prove it by seeding — revert one caller to a constant and confirm a test fails.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A caller is found with no conversation-scope identifier in reach — do NOT invent one or reuse tenantId; escalate, because a fabricated scope silently reinstates sharing.</trigger>
+    <trigger>Any additional `CreateOrResumeThreadAsync` caller beyond the four enumerated — the inventory was incomplete.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>`CreateOrResumeThreadAsync` cannot be called without a conversation scope, enforced by the signature.</criterion>
+    <criterion>Zero compile-time-constant cache ids remain on the agent-thread path.</criterion>
+    <criterion>Two distinct sessions produce two distinct cache keys — asserted, not assumed.</criterion>
+    <criterion>An empty or whitespace conversation scope is rejected rather than defaulted.</criterion>
+    <criterion>`CodeInterpreterBridge` performs no cache read or write.</criterion>
+    <criterion>`LegalResearchHandler` passes no literal into the tenant argument.</criterion>
+    <criterion>Every XML doc / options comment stating `agent-thread:{tenantId}` is corrected.</criterion>
+    <criterion>`AgentConfigurationService` and `ModuleEntitlementResolver` are UNCHANGED.</criterion>
+    <criterion>Full Spaarke.ArchTests green; BFF unit suite green; `dotnet build src/server/api/Sprk.Bff.Api/` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 25). Corrects the item-6 scope: 1 of the 3 listed sites is a real violation, and the list missed the two constant-tenant callers, which are worse. Sibling task 123 covers the customer discriminator (D-14).</notes>
+</task>

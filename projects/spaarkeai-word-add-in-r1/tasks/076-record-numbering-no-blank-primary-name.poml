@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-13 — a pane-created Matter has a BLANK display name everywhere, because sprk_matternumber is the primary name column and nothing writes it</title>
+    <phase>5 Remediation — spec integrity</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Implements server-side record creation semantics against Dataverse. Tags include bff-api + dataverse. Modifies `.cs`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Numbering is a uniqueness-and-concurrency problem against a live primary-name column, and the owner previously re-scoped it out — the design needs to be right and explicitly re-authorized.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>`RecordCreationService.cs` is disjoint from the endpoint/authorization files in Wave A — but sequence after 062/064/065 if any is in flight, since all touch the Office server tree.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, api, office, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`sprk_matternumber` is `sprk_matter`'s primary name column and the creation path never writes it, so every Matter created from the pane shows an empty name in lookups, subgrids and the pane's own To Do regarding. Give created records a name.</prompt>
+
+  <role>SPAARKE platform developer. This is the user-visible defect the spec was written to fix.</role>
+
+  <goal>No record created from the add-in has a blank primary name.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable spec-coverage review (`notes/fable-review-2026-09-21.md` §6), which
+      escalated it from a note to a finding for a specific reason.
+
+      `sprk_matternumber` IS `sprk_matter`'s **primary name attribute** — verified live in
+      `notes/030-numbering-handoff.md` §3. `RecordCreationService` never writes it (`:124-126`, `:149-152`),
+      and its protected-attribute sets (`:172`, `:185`) deliberately close the field-mapping back door. Same
+      for `sprk_projectnumber` on `sprk_project`.
+
+      Consequence: a Matter created from the pane has an **empty display name in every lookup, every subgrid,
+      and the pane's own To Do "regarding"**.
+
+      **Why this is now a task rather than a note.** The owner re-scoped the numbering work out on 2026-09-11
+      and 09-17, and the code enforces that re-scope correctly. But the review established three things:
+      spec FR-13 and **SC-8 still require the number**; task 042 recorded SC-8 as **PASS** citing an
+      integration test — and the only integration test on that path is
+      `OfficeQuickCreateContractTests.cs:512 AssertNoMatterNumberSent`, which asserts the **opposite**; and
+      the "separate numbering project" the hand-off defers to **does not exist** — no folder under
+      `projects/`, no GitHub issue, not in `defer-issues.md`.
+
+      So the defect is real, user-visible, and has no owner anywhere. The owner has directed that review
+      findings be fixed in this project.
+
+      **The two halves are separable and that matters.** Making the record *nameable* (never blank) is the
+      user-visible fix. Implementing a full *numbering scheme* (format, uniqueness, gap-free sequence,
+      concurrency) is a larger design. If the second is out of scope, the first still must ship — a
+      deterministic non-blank name beats an empty one. Decide explicitly and record the decision.
+
+      Reference for the client-side shape: `matterService.ts:255-273` generates `{typeCode}-{random6}`;
+      live values are `PAT-191111`, `CMRCL-285858`. `projectService.ts` generates nothing at all — Matter and
+      Project are **not symmetric**, and the task must state each one's semantics separately.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">The minimum bar is: no created record has a blank primary name. Meet that even if the full numbering scheme is deferred.</constraint>
+    <constraint source="this task">Matter and Project are NOT symmetric. State the chosen semantics for each separately; do not assume one design covers both.</constraint>
+    <constraint source="this task">If a generated value must be unique, handle the collision case explicitly — a retry, a longer suffix, or a server-side sequence. An unhandled collision under concurrency is a silent data defect.</constraint>
+    <constraint source="ADR-044">Typed `Guid` / `QueryExpression` for any Dataverse lookup; no string interpolation into OData.</constraint>
+    <constraint source="this task">`AssertNoMatterNumberSent` (`OfficeQuickCreateContractTests.cs:512`) encodes the OLD re-scoped contract. It must be updated or deleted as part of this change — and SC-8's evidence in the 042 tally corrected with it.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: create a Matter and a Project from the pane and record the resulting display name in a lookup, a subgrid, and the pane's To Do regarding. Capture the blank-name evidence verbatim before fixing.</criterion>
+    <criterion testable="true">A record created from the pane has a non-blank primary name — for BOTH Matter and Project. Verified against live Dataverse, not just a unit assertion.</criterion>
+    <criterion testable="true">The chosen semantics for each entity are stated in the task note, with the scope decision (full numbering vs deterministic non-blank name) recorded explicitly and its rationale.</criterion>
+    <criterion testable="true">Collision behaviour under concurrent creation is defined and tested.</criterion>
+    <criterion testable="true">`AssertNoMatterNumberSent` is updated or deleted, and the reason recorded. The protected-attribute sets are re-evaluated — if they still need to block field-mapped writes to the number while the service itself writes it, say how that is enforced.</criterion>
+    <criterion testable="true">SC-8's evidence in `notes/` and in the 042 tally is corrected to cite a test that actually asserts what SC-8 claims.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: non-blank name for both entities, the collision case, and the protected-attribute interaction. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The owner re-scoped numbering OUT of this project twice (2026-09-11, 09-17). Before implementing a full numbering scheme, STOP and confirm the scope per CLAUDE.md §6: the blank-name fix is clearly in scope; a numbering format with business meaning is a product decision that was previously deferred deliberately.</trigger>
+    <trigger>If the number must be unique across a range that a client-side random suffix cannot guarantee, STOP and escalate — a server-side sequence is a schema and concurrency design, not a task-local choice.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Re-verify live that `sprk_matternumber` and `sprk_projectnumber` are the primary name attributes.</step>
+    <step>Reproduce the blank name end to end and capture it.</step>
+    <step>ESCALATE the scope question before implementing (see the trigger). Record the answer.</step>
+    <step>Implement the agreed scope for Matter and Project separately; handle collisions.</step>
+    <step>Update or delete `AssertNoMatterNumberSent`; correct SC-8's evidence.</step>
+    <step>Verify live in Dataverse: lookup, subgrid, To Do regarding.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/076-record-numbering.md`. Update TASK-INDEX.md: 076 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+    <file role="edit">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/notes/030-numbering-handoff.md</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-044-dataverse-query-safety.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/data-model/</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/030-numbering-handoff.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/030-creation-service-decisions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Client-side number generation (the shape live data uses)" location="src/solutions/.../matterService.ts">
+        Lines 255-273 generate `{typeCode}-{random6}`; live values are `PAT-191111`, `CMRCL-285858`. `projectService.ts` generates nothing — the two entities are not symmetric.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Fire the scope escalation BEFORE implementing.</protocol>
+  </execution>
+</task>

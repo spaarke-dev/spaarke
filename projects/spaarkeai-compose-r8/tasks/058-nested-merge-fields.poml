@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-A10 residual - carry NESTED / conditional fields, the shape real templates use; retire the nested/unterminated row</title>
     <phase>4 Track A - Fidelity</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the projection's field scanner - the component that decides what a field IS. Mis-reconstructing a nested instruction authors a DIFFERENT field: a document-correctness defect, not a cosmetic one.</rigor-reason>
     <model-tier>opus</model-tier>

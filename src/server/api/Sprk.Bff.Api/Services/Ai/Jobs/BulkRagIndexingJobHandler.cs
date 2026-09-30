@@ -308,7 +308,15 @@ public class BulkRagIndexingJobHandler : IJobHandler
                 {
                     ["source"] = "BulkIndexing",
                     ["batchJobId"] = batchJob.JobId.ToString()
-                }
+                },
+                // Task 048 (spaarkeai-word-add-in-r1): tied to ForceReindex rather than unconditional —
+                // ForceReindex is this handler's own signal that a document may already carry chunks (it
+                // is what bypasses the per-item idempotency skip above AND the "unindexed only" Dataverse
+                // filter in QueryDocumentsAsync). The default "unindexed" sweep (ScheduledRagIndexingService
+                // and the admin default) queries ONLY documents with sprk_ragindexedon eq null, so there is
+                // never a tail to trim there — matching the negative acceptance criterion without an extra
+                // search call on every scheduled run.
+                ReplaceStaleChunks = payload.ForceReindex,
             };
 
             // Call FileIndexingService using app-only authentication.

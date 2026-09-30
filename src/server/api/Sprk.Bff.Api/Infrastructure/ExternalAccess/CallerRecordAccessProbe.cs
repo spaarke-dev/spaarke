@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Identity.Client;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -27,7 +28,11 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 ///   fail-closed — but it is registered inside a compound AI gate AND behind
 ///   <c>ToolFramework:Enabled</c>. Six unconditionally-mapped routes depending on a twice-gated
 ///   service is the asymmetric-registration anti-pattern (CLAUDE.md §10 F.1 / ADR-032), and it would
-///   be a CRUD→AI dependency besides (§10 bullet 3).</description></item>
+///   be a CRUD→AI dependency besides (§10 bullet 3). <b>Both objections were removed on 2026-09-29</b>
+///   by unified-access-control-r2 task 126: the client moved to <c>Infrastructure/Dataverse/</c> (no
+///   longer AI-internal) and is now registered unconditionally in <c>AddSpaarkeCore</c>. This probe was
+///   not migrated — it predates that and works — but the reasons recorded here for avoiding the client no
+///   longer hold.</description></item>
 ///   <item><description><see cref="DataverseWebApiClient"/> — already injected into every one of
 ///   these handlers — is app-only. An app-only Write probe answers "can the APPLICATION write",
 ///   which is finding A-2 rebuilt.</description></item>
