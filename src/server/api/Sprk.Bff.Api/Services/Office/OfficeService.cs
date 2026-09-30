@@ -461,7 +461,7 @@ public class OfficeService : IOfficeService
             // What did NOT change: acting-user resolution is still deliberately kept AWAY from a save
             // that names a record. RecordContainerResolver §"Why the RECORD's business unit and not the
             // ACTING USER's" is right about that case — users sit in the Operations subtree while secure
-            // records are owned in Secure Projects, so acting-user resolution applied to a RECORD writes
+            // records are owned in Secure Record, so acting-user resolution applied to a RECORD writes
             // a secure record's content into the general Operations container. Task 076's owner sanction
             // covers exactly the no-record shape, which is the one the branch below now uses, and it is
             // the same call OBOEndpoints and ComposeService already make — no new component (CLAUDE.md §11).

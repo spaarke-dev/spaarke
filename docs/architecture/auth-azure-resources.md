@@ -339,7 +339,41 @@ const tokenScope = "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonatio
 API_APP_ID=1e40baad-e065-4aea-a8d4-4b7ab273458c
 API_CLIENT_SECRET=@Microsoft.KeyVault(SecretUri=...)
 TENANT_ID=a221a95e-6abc-4434-aecc-e48338a1b2f2
+Customer__Id=<customerId>
 ```
+
+### Customer identity — the naming/identity chain
+
+> Added 2026-09-29 by `unified-access-control-r2` task 123, per
+> [D-14](../../projects/unified-access-control-r2/notes/D-14-customer-discriminator.md).
+> Operator procedure (including what to do for a stamp that is not per-customer):
+> [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § 6.5.1](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
+
+One value threads the whole customer stamp, and the BFF now reads it:
+
+```
+customerId  (assigned at provisioning intake; stored on sprk_dataverseenvironment.sprk_customerid)
+   │
+   ├─► rg-spaarke-{customerId}-{env}          the resource group
+   │      ├─► sprk-{customerId}-{env}-kv      Key Vault  (the 8-char cap comes from THIS name)
+   │      ├─► sprk{customerId}{env}sa         Storage    (strips hyphens — collision risk)
+   │      ├─► sprk-{env}-{customerId}-uami    the BFF's managed identity
+   │      └─► tags: { customer: customerId }
+   │
+   └─► Customer__Id app setting ──► CustomerOptions ──► CustomerIdentity   ← the runtime handle
+```
+
+🔴 **`tenantId` is NOT a customer discriminator.** Per D-12 every Model 1 customer lives in the *same*
+Spaarke Entra tenant, so `tenantId` separates Entra tenants and nothing else. Anything keyed per customer
+— a cache-key prefix, a log scope, a metric dimension — takes `CustomerIdentity.Id`, never `tenantId`.
+
+⚠️ **`CustomerIdentity` is defence in depth, not the boundary.** The boundary is the dedicated
+per-customer resource: per D-12 §3 and the ADR-009 amendment, Redis access control is per-**instance**,
+not per-keyspace, so a customer-id key prefix is a convention our code enforces rather than one Redis
+enforces. Nothing here softens the dedicated-per-customer-resource decision.
+
+For the canonical user identifier — Entra `oid`, not `systemuserid`, because external CIAM contacts are
+`contact` rows with no `systemuserid` at all — see D-14 §7.
 
 ---
 

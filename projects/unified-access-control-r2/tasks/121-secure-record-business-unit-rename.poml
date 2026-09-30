@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="121" project="unified-access-control-r2">
+  <metadata>
+    <title>Rename the canonical secure business unit and its owner role — Secure Project → Secure Record — as ONE coordinated change, with the operator step the code cannot perform</title>
+    <phase>Register-driven (authored 2026-09-29, session 25; D-12 item 6, owner-approved)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the external-access provisioning path and changes a FAIL-CLOSED lookup key. Tags include auth. A partial change stops provisioning.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The name is a fail-closed lookup key spanning code, config, tests, docs and a live Dataverse artifact, and the string "Secure Project" has FOUR distinct meanings in this repo — a blind find-replace silently breaks the external SPA's product name and falsifies dated historical records.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Api/ExternalAccess/** (parallel-unsafe in this project) plus shared test fixtures used by three integration suites.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, dataverse, testing, docs</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>D-12 §2, owner-approved: "Rename Secure Project → Secure Record BU: YES. No customer deployments exist, so now is the cheapest moment." Owner decisions 2026-09-29 (session 25): the security role renames too; HARD CUTOVER plus a runbook step, accepting that dev provisioning fails closed until an operator renames the live BU.</origin>
+  </metadata>
+
+  <prompt>A business-unit NAME is the fail-closed lookup key for the entire secure-record path. Move it, and everything that reads it, in one change — while leaving alone the three other things in this repo that are also called "Secure Project" and are not this.</prompt>
+
+  <role>SPAARKE platform developer — the external-access provisioning path and the secure business-unit topology. You are moving a lookup key that fails closed; a partial move stops provisioning with an error that reads like a missing environment.</role>
+
+  <goal>The canonical secure BU is named `Secure Record` and its owner role `Secure Record Owner` throughout code, config, tests and docs; the operator runbook carries the live-rename steps in the order that makes the cutover safe; the pinning test asserts the new name and would fail if only some surfaces moved; and nothing that merely CONTAINS the words "Secure Project" for another reason has been touched.</goal>
+
+  <context>
+    <background>🔴 "SECURE PROJECT" MEANS FOUR DIFFERENT THINGS IN THIS REPO. A find-replace across the tree is the wrong instrument and will do damage that tests do not catch:
+
+1. **The business unit** — `Secure Project`. THIS is what renames. A fail-closed lookup key.
+2. **The security role** — `Secure Project Owner`. Renames too (owner decision 2026-09-29). NOT a runtime lookup key: `ProvisionProjectEndpoint.cs:484` and `:605` mention it only in error prose, and nothing resolves a role by name at runtime. It IS asserted against live metadata by `SecureBuRoleDepthAssertion.SecureOwnerRoleName`.
+3. 🔴 **The external SPA's PRODUCT NAME** — "Secure Project Workspace". This is `src/client/external-spa`, a shipped user-facing name appearing in `config/environments.json:45`, `config/spaarke-resources.yaml:166,245,458`, `docs/architecture/external-access-spa-architecture.md` and `.claude/skills/power-page-deploy/SKILL.md:185`. **DO NOT RENAME.** Renaming a deploy-pipeline comment is harmless; renaming what a user sees is not, and it was not decided.
+4. **Dated historical records** in `projects/**` notes and task POMLs. These record what was true on a date. Rewriting them FALSIFIES the record. Leave them; `current-task.md` and `TASK-INDEX.md` status lines are the exception because they describe the present.
+
+VERIFIED FACTS (checked 2026-09-29 against source; verify anyway — this project has 19 prior instances of premise rot per `notes/task-accuracy-audit-2026-09-18.md`, and the code has won every time):
+- `ProvisionProjectEndpoint.cs:102` — `SecureBusinessUnitNameConfigKey = "SecureProject:BusinessUnitName"`.
+- `ProvisionProjectEndpoint.cs:115` — `DefaultSecureBusinessUnitName = "Secure Project"`.
+- `:277-280` — config value wins; the default is the fallback. The remark at `:96-101` explains WHY it is a name and configurable: the GUID differs per environment, and a customer who renames must not need a redeploy. That reasoning survives the rename unchanged.
+- ✅ **NOTHING sets the config key in any `.json`** (verified by search). So renaming the key orphans no deployed setting — but it MUST still be renamed in `ProvisionProjectTestFixture.cs:229`, which sets it.
+- `ProvisionProjectIdempotencyTests.cs:554-557` — `DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed` asserts `"Secure Project"` AND `NotEndWith("Projects")`. The second assertion pins the singular/plural lesson and must be preserved in spirit against the new name.
+- `SecureBuRoleDepthAssertion.cs:55-56` — `SecureBuNames` accepts BOTH `"Secure Projects"` and `"Secure Project"`, because design docs said plural and live metadata said singular. `:60` — `SecureOwnerRoleName = "Secure Project Owner"`. `:91-92` — the loud-skip message names both.
+- `ProvisionProjectTestFixture.cs:45` — `SecureBuName = "Secure Project"`; `:535-536` — DECOY team names `"Secure Project Access"` / `"Secure Project Extra Owners"`, which exist to prove the resolver does not match them. Renaming the decoys is optional; renaming them WRONG (so they accidentally match the new BU name) would silently weaken the test.
+- `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` — the operator runbook. This is where the live-rename procedure belongs.
+
+🔴 THE CUTOVER IS HARD, BY OWNER DECISION. Between this code landing and an operator renaming the live BU, provisioning in dev fails closed with "business unit not found". That is the correct direction and a loud failure, and it was chosen over a transitional dual-accept because a dual-accept that never gets cleaned up is exactly how the plural/singular ambiguity arrived. The runbook step is therefore not optional documentation — it is the other half of the change.
+
+⚠️ The live BU rename and the live role rename are Dataverse configuration performed by an OPERATOR. This task delivers the code, the tests, the docs and the runbook; it cannot and does not perform the rename, exactly as task 118 could not remove a security-role privilege.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectIdempotencyTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectTestFixture.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</file>
+      <file role="modify">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file role="modify">docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file role="read">projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Do NOT rename "Secure Project Workspace" — the external SPA's product name. It is a different noun.</constraint>
+    <constraint>Do NOT rewrite dated historical records in projects/** notes or completed task POMLs. They record what was true when written.</constraint>
+    <constraint>The config key, the code default, the fixture, the pinning test and the docs move in ONE commit. A partial move is the failure this task exists to avoid.</constraint>
+    <constraint>Preserve the singular/plural lesson in the pinning test rather than deleting it — restate it against the new name.</constraint>
+    <constraint>The runbook must state the ORDER of live operator steps and what breaks between them.</constraint>
+    <constraint>Do not introduce a transitional dual-accept in the production lookup. The owner chose a hard cutover.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-verify every VERIFIED FACT above at its stated line, and re-run the affected suites green BEFORE editing so a later failure is attributable.</step>
+    <step>Change the production lookup: config key, default, and the two error-prose mentions of the role.</step>
+    <step>Update the fixture, the pinning test (preserving its lesson), and the live-metadata assertion including its loud-skip message.</step>
+    <step>Update the operator runbook with the ordered live steps and the failure window; update the other operative docs.</step>
+    <step>Prove the coupling: revert ONE surface, confirm a test fails, restore it.</step>
+    <step>Run the affected suites plus the full arch suite and a clean build.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A surface is found that reads the BU name at runtime and is NOT listed above — the inventory was incomplete and the blast radius needs owner review before the cutover lands.</trigger>
+    <trigger>Any occurrence where renaming would change a user-facing string outside the secure-BU topology.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>`DefaultSecureBusinessUnitName` is `"Secure Record"` and the config key is `SecureRecord:BusinessUnitName`.</criterion>
+    <criterion>No production `.cs` file refers to the BU as "Secure Project" or the role as "Secure Project Owner" except where describing the historical rename.</criterion>
+    <criterion>The pinning test asserts the new name and still guards against a plural/variant regression.</criterion>
+    <criterion>`SecureBuRoleDepthAssertion` accepts `Secure Record` and its role constant is `Secure Record Owner`; the loud-skip message names the new BU.</criterion>
+    <criterion>"Secure Project Workspace" is untouched everywhere it means the external SPA — verified by search, not by assumption.</criterion>
+    <criterion>No file under `projects/**` other than `current-task.md` and `TASK-INDEX.md` is rewritten.</criterion>
+    <criterion>The operator runbook states the ordered live steps, names what fails between them, and gives the exact new BU and role names.</criterion>
+    <criterion>Reverting any single surface makes at least one test fail (demonstrated, not asserted).</criterion>
+    <criterion>Full Spaarke.ArchTests green; affected integration suites green; `dotnet build src/server/api/Sprk.Bff.Api/` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 25). D-12 item 6. Sibling of task 120; both came out of the D-12/D-13 remediation list. The live Dataverse rename is an operator action outside this task, same shape as task 118's Create-privilege removal.</notes>
+</task>

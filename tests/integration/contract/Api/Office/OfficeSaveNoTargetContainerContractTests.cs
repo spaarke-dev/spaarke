@@ -216,7 +216,7 @@ public class OfficeSaveNoTargetContainerContractTests
     /// <remarks>
     /// This is the assertion that stops task 065's change from becoming the isolation failure
     /// <c>RecordContainerResolver.ResolveForRecordAsync</c>'s own remarks warn about — users sit in the
-    /// Operations subtree while secure records are owned in Secure Projects, so acting-user resolution
+    /// Operations subtree while secure records are owned in Secure Record, so acting-user resolution
     /// applied to a RECORD would write a secure record's content into the general Operations container.
     /// The narrowing is confined to the branch where no record exists, and this pins that confinement.
     /// </remarks>

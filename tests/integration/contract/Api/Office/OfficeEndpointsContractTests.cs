@@ -132,8 +132,14 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #region Job Status Endpoint Tests
 
+    /// <summary>
+    /// A job that exists and is OWNED by the caller returns 200. Two projects independently removed this
+    /// test's dependence on the hard-coded ownerless job and the <c>JobOwnershipFilter</c> fail-open it
+    /// relied on (unified-access-control-r2 task 120, spaarkeai-word-add-in-r1 task 067); the 2026-09-30
+    /// merge kept 067's version — see the inline comment.
+    /// </summary>
     [Fact]
-    public async Task Get_OfficeJobStatus_WithKnownJob_Returns200()
+    public async Task Get_OfficeJobStatus_WhenCallerOwnsTheJob_Returns200()
     {
         // spaarkeai-word-add-in-r1 task 067: this test used to fetch the hard-coded job
         // 00000000-0000-0000-0000-000000000001 and assert 200 Running — i.e. it pinned the production
@@ -345,10 +351,14 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
     public async Task Post_OfficeCreateTodo_WithMissingName_Returns400()
     {
         // Arrange — a To Do with no name fails validation (OFFICE_007) BEFORE any create is attempted.
+        //
+        // NO caller-supplied record ids, deliberately. The route carries TodoSourceAccessFilter
+        // (spaarkeai-word-add-in-r1 task 064), which read-gates every supplied id BEFORE the handler
+        // runs; with none supplied there is nothing to probe, so the request reaches validation and this
+        // test exercises name validation in isolation, which is what it is for. A to-do with no regarding
+        // record is a legitimate personal to-do.
         var request = new CreateTodoRequest
         {
-            RegardingEntityType = "Matter",
-            RegardingRecordId = Guid.NewGuid(),
             PriorityScore = 50,
             EffortScore = 50
         };
@@ -554,6 +564,11 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #region SSE Stream Endpoint Tests
 
+    /// <summary>
+    /// Streams a job that exists and is OWNED by the caller. Two projects independently removed this
+    /// test's dependence on the hard-coded ownerless job (unified-access-control-r2 task 120 and
+    /// spaarkeai-word-add-in-r1 task 067); the merge kept 067's version — see the inline comment.
+    /// </summary>
     [Fact]
     public async Task Get_OfficeJobStream_ReturnsSSEContentType()
     {

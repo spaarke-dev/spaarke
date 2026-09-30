@@ -90,7 +90,16 @@ public static class AiModule
         // Uses Microsoft.Extensions.AI.OpenAI adapter (OpenAIChatClient) over Azure.AI.OpenAI SDK.
         // Configuration keys: AzureOpenAI:Endpoint (required), AzureOpenAI:ChatModelName (required).
         // Authentication: DefaultAzureCredential (Managed Identity in Azure, dev credentials locally).
-        // The IChatClient is consumed by SprkChatAgentFactory (AIPL-051) via chatClient.AsAIAgent().
+        // The IChatClient is consumed by SprkChatAgentFactory, which passes it DIRECTLY into the
+        // hand-written SprkChatAgent (SprkChatAgentFactory.cs ~:1092) and then wraps that in Spaarke's
+        // own middleware pipeline (ContentSafety -> CostControl -> Telemetry -> Routing -> PromptShield).
+        //
+        // 🔴 It is NOT wrapped via `chatClient.AsAIAgent()`. That is the Microsoft Agent Framework
+        // extension (Microsoft.Agents.AI), which brings its own agent/thread/run + tool-calling loop —
+        // a design AIPL-050/051 planned and the shipped implementation replaced with the middleware
+        // pipeline above. This comment asserted the call for months after it stopped being true and was
+        // the only evidence that the package was used at all; the package is now removed (#1027,
+        // unified-access-control-r2 task 125). Premise rot — a comment outliving its mechanism.
         // Registered as singleton: AzureOpenAIClient is thread-safe; ChatClient is lightweight.
         var azureOpenAiEndpoint = configuration["AzureOpenAI:Endpoint"];
         var azureOpenAiChatModel = configuration["AzureOpenAI:ChatModelName"];

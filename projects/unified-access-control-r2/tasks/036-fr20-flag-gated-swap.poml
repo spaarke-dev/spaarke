@@ -103,4 +103,33 @@
   <notes>Spec FR-20/NFR-02/NFR-03/NFR-04; design §4.4; investigation 08 §4 + §6 T2/T5 (runbook half of T5 lands here; the uac-access-control.md drift fix belongs to the docs-drift workstream, not this task). The blanket Collaborate stamp was deleted in task 033 — verify it has not crept back (grep WorkforceProjectAccessLevel = 0 hits).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <amendments date="2026-09-30" source="analysis of spaarkeai-word-add-in-r1 task 062 after the master merge">
+    <verdict>SCOPE UNCHANGED. word-add-in-r1 task 062 (merged to master 2026-09-30) did NOT do this task's work,
+    did not duplicate its seam, and did not weaken its gate. It is a SIBLING consumer of the same primitive one
+    layer below this task's swap point: 062 trims the Office add-in picker SEARCH (/api/office/search/entities)
+    by calling IImpersonatedCommunicationQuery directly; this task swaps the source of the accessible-record SET
+    in AccessibleRecordSetService.ComposeForSystemUserAsync via IImpersonatedRootSetSource, which itself calls the
+    same seam. Both terminate in DataverseWebApiService.RetrieveMultipleImpersonatedAsync. None of this task's
+    five obligations is discharged by 062 (flag + options class; the ComposeForSystemUserAsync swap; the
+    contact-grants union; Truncated propagation per NFR-03; the live NFR-04 canary), and IImpersonatedRootSetSource
+    still has ZERO consumers on master — registered-but-inert, exactly as task 035 left it. Do not close, narrow
+    or rewrite the steps. (Note the number collision: THIS project also has a task 062, the NFR-05 role-depth
+    assertion — unrelated.)</verdict>
+    <amendment n="1">062 is a SECOND shipped consumer of the impersonated-read seam in a non-Communication domain
+    (alongside the Communication read paths). That strengthens task 035's CLAUDE.md §11 reuse argument and the
+    #966 interface-rename follow-up (IImpersonatedCommunicationQuery is now generic in all but name: three consumer
+    families — Communication, the Office picker, ExternalAccess root sets).</amendment>
+    <amendment n="2">For the NFR-01 no-app-only-fallback discipline, add a SECOND canonical reference alongside
+    CommunicationThreadReadService: OfficeService's multi-query impersonated fan-out (the "all impersonated reads
+    failed → throw, do not return empty" rule, rationale "an impersonation privilege that is not configured must
+    not look like an empty tenant"). It is closer in shape to this task than the single-query communication path —
+    a per-type fan-out with a partial-failure policy.</amendment>
+    <amendment n="3">🔴 RAISES THE PRIORITY OF STEP 6. prvActOnBehalfOfAnotherUser is now a hard runtime dependency
+    of a SHIPPED, user-visible route (the Word/Outlook add-in picker), not only of the Communication read path.
+    062's own completion note records it was never verified live. A missing grant makes the picker fail (closed,
+    not leaking). The live state will likely be discovered by the add-in before this task's canary runs — a small
+    de-risking of the canary, not a substitute for it. Step 6's docs obligation (auth-deployment-setup.md §6)
+    currently has ZERO hits for the privilege on master.</amendment>
+  </amendments>
 </task>

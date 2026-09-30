@@ -109,7 +109,7 @@ public class OfficeSaveContainerProvenanceTests
     ///
     /// <para><b>The reasoning that rejected it has not been overturned — its scope has been stated.</b>
     /// <c>RecordContainerResolver.ResolveForRecordAsync</c>'s argument (users sit in the Operations
-    /// subtree while secure records are owned in Secure Projects, so acting-user resolution writes a
+    /// subtree while secure records are owned in Secure Record, so acting-user resolution writes a
     /// secure record's content into the general Operations container) is about a save that NAMES A
     /// RECORD, and that case is untouched — pinned by
     /// <c>OfficeSaveNoTargetContainerContractTests.PostOfficeSave_WithATargetEntity_DoesNotConsultTheActingUsersBusinessUnit</c>.

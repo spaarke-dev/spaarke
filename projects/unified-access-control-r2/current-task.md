@@ -1,6 +1,79 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-28, session 23 — DEPLOYMENT-MODEL REDEFINITION (the project's largest open item) + BFF/PCF DEPLOYED + a three-fault POA query fix.**
+> **Last Updated**: **2026-09-30, session 26 — MERGE OF origin/master STAGED (resolution complete, all tests green), NOT YET COMMITTED.**
+> Branch `work/unified-access-control-r2`. PR #1029 open.
+>
+> ## ⚡ QUICK RECOVERY — READ THIS FIRST
+>
+> | | |
+> |---|---|
+> | **State** | `git merge origin/master` in progress (MERGE_HEAD present), every conflict resolved and staged. Verified on the merged tree: BFF + 4 test projects build; **ArchTests 337/337; unit 13,018 pass / 0 fail**; drift 126/126. |
+> | **Next action** | Commit the merge → push → PR #1029 CI terminal → squash-merge → deploy BFF to dev. Owner authorized "proceed with merge and deploy". |
+> | **Then** | Report the six-case UAC synopsis + the verified defect list (workflow `uac-defect-verification` was running); notify the word-add-in-r1 session (see below). |
+>
+> ### 🔴 What the 2026-09-30 merge decided (owner-approved) — do not re-litigate
+> master brought ~306 commits from `spaarkeai-word-add-in-r1`, which had INDEPENDENTLY fixed three of this
+> project's security issues. Owner chose master's version each time:
+> - **#1021 `/search/entities`** → word-add-in-r1 **062** (impersonated read) kept; our **126** (OBO) dropped.
+>   Reason: ADR-028 Amendment A5 + our own task 036 point to impersonation for "what may this user see" sets.
+> - **#1022 `POST /todo`** → **064** `TodoSourceAccessFilter` kept (gates all 4 ids); our **128** dropped.
+> - **Synthetic job + `JobOwnershipFilter` fail-open** → **067** kept; our **120** production fixes dropped.
+> - **SURVIVES from us**: task **127** (#1020 communications IDOR — master never fixed it); the
+>   `IDataverseUserClient` relocation + unconditional registration (now load-bearing for 127); the `/save-debug`
+>   fix; task 120's route census; 123/125/129.
+>
+> ### Fixes applied during resolution (all verified by the audit workflow + tests)
+> - One incoherent auto-merge caught by the compiler (duplicate SSE-test block) + a second found by the audit
+>   (job-status test doc from our side on master's body).
+> - Census: credited `TodoSourceAccessFilter` + `QuickCreateSourceAccessFilter`; Permanent waiver for master's new
+>   `/search/matter-types` (reference data); `/quickcreate` waiver deleted (stale once its source read was gated);
+>   `/search/entities` waiver rewritten for impersonation; Office/communications/FileAccess descriptions corrected.
+> - Task 121's `Secure Record` rename re-applied at 5 comment sites the merge undid.
+> - `EntityAccessFilter`: dead task-128 `CreateTodoRequest` branch removed; the "filter's reach" warning kept.
+> - Correction recorded: `CallerRecordAccessProbe` NEVER depended on `IDataverseUserClient` (it only mentioned it).
+>
+> ### ⚠️ Open risks carried forward
+> 1. **`prvActOnBehalfOfAnotherUser`** on the BFF application user is UNVERIFIED — master's picker (062) fails
+>    closed without it. Task 036 amendment #3 records it.
+> 2. `NoWaiverIsStale` inspects PENDING waivers only — a Permanent waiver can outlive its premise silently (the
+>    `/quickcreate` one did). Guard extension proposed as a follow-up.
+> 3. A dozen pre-existing UAC defects surfaced by the six-case synopsis (CIAM ignores `sprk_issecure`; presence-only
+>    external read gates; external `/dataverse/fetch` has no column filter; anyone-with-Write can mint access;
+>    soft revocation; …). Being adversarially verified; NOT merge regressions.
+> 4. Master-side issues to hand to word-add-in-r1: `JobOwnershipFilter` fallback read always throws (legit owners
+>    404 after in-memory eviction); `RecordOwnershipResolver` comment/duplicate-row issues; `TodoSourceAccessFilter`
+>    remark about `EntityAccessFilter` refusing `sprk_todo`.
+>
+> ### Decisions recorded this session
+> - **D-15**: `ScopeManagementService` retired (task 129); favorites live on `sprk_navitem`.
+> - **#229 re-cut** (5 tasks) recommended; task A done (129). Pick-then-fail: the picker trims by Read, save demands
+>   AppendTo — View-Only POA shares grant Read without AppendTo BY DESIGN, so the role grant cannot close it.
+>
+> ### What closed in session 25
+>
+> ### What closed this session
+> - **Task 120 / #1015** — Office route census in `RouteAuthorizationGuardTests`. Was framed as 2 changes; was **4**. Found **10 ungated routes** → issues **#1020–#1024**; code review added **#1025**. Three production fixes incl. a **hardcoded ownerless synthetic job** in `OfficeService`, found because closing a fail-open turned two tests red that had been green *because* of the defect.
+> - **Task 121** — `Secure Project` → `Secure Record` BU + role rename. 🔴 **Owner renamed BOTH live artifacts in dev mid-task**, so dev provisioning is failing closed **until this branch is DEPLOYED**.
+> - **Task 122** — Foundry agent thread scoped per conversation. Two callers passed compile-time constants into the **tenant** slot → one global thread across every tenant. `CodeInterpreterBridge` now genuinely ephemeral.
+> - **Task 124** — the `customerId` standard. Defining it exposed a **latent deployment failure**: `maxLength(10)` admitted a value producing an invalid Key Vault name (trailing hyphen). Now 8, derived and documented.
+>
+> ### 🔴 Two corrections worth carrying
+> 1. The earlier "three failing Redis sites" note was **wrong**: only ONE violated the MUST (it is conditional — *"whenever the cached value differs per principal"*). `AgentConfigurationService` and `ModuleEntitlementResolver` are verified NON-violations and task 122 **forbids touching them**.
+> 2. I asserted Bicep could enforce the character rule via `@pattern`. **No such decorator exists in Bicep/ARM.** Only length is template-enforceable; the character rule must be enforced at provisioning intake (cpo-r1).
+>
+> ### D-14 — decided, with one nuance the owner surfaced
+> `customerId` = **3–8, lowercase alphanumeric, letter-first**. But the three rules are **not equally binding**: **max 8** is Azure-derived and Dataverse CAN enforce it (`MaxLength`); the **character set** is hard but enforceable only in intake code; **min 3** is **convention only** — every composed name is ≥10 chars even at length 1, so a short id breaks nothing. That asymmetry is why Dataverse-first is *not* brittle. Recorded in `notes/D-14-customer-discriminator.md` §6 and both naming docs.
+>
+> ### Open for the owner (unchanged)
+> Power BI shared F-SKU pool · M365 Copilot agent disposition · whether Redis **Standard** meets the performance bar · Trivy config failure (repo-wide, not ours).
+>
+> ### Handed to `customer-provisioning-orchestration-r1`
+> `INCOMING-D12-D13-REMEDIATION.md` (on master) and **`INCOMING-CUSTOMERID-STANDARD.md`** (new — intake validation, re-issuing `trial-2026-08-18`-shaped ids).
+>
+> ⚠️ **Merge hazard**: task 122 changed `OfficeService.cs` and task 120 deleted a block from it; `spaarkeai-word-add-in-r1` is active in the same file. Different lines — a candidate for the incoherent auto-merge that has bitten this project once. Nothing guards it; flag at merge time.
+>
+> Prior stamp:
+> **2026-09-28, session 23 — DEPLOYMENT-MODEL REDEFINITION (the project's largest open item) + BFF/PCF DEPLOYED + a three-fault POA query fix.**
 > HEAD `538158774`, 0 unpushed, tree clean, PR **#950**. 📖 **READ § SESSION 23 first, then
 > `notes/DEPLOYMENT-MODEL-SYNOPSIS.md`.** 🔔 **The model redefinition is AGREED but has NO decision record yet — write it first.**
 > 🔔 Immediate blocker: `POST /invite-and-grant` 500 — next action is in the session-23 block.
@@ -268,48 +341,115 @@ per-customer — sharing hits an unraisable Entra limit at customer 21.)*
   first-class on every index"* (4 sites, 2 of them MUSTs) → `D-IE-12`. A third namespace in
   `HOW-TO-INITIATE-NEW-PROJECT.md` → `D-DEVOPS-12`.
 
-### ▶ 🔴 STATE AS OF 2026-09-28 END OF SESSION 24
+### ▶ 🔴 STATE AS OF 2026-09-29 END OF SESSION 25
 
 | | |
 |---|---|
-| **PR #950** | ✅ **MERGED** to master — `38f48723e`, 228 commits, 2026-09-28T18:32:44Z |
-| Branch | in sync with master + **1 commit ahead** (the cpo-r1 handoff note) |
-| Tree | clean, all pushed |
-| Tier 1 CI | ✅ all 8 blocking gates green. ⚠️ **Trivy fails repo-wide** (`"1 configuration not found"`, 5s) — scanner-config issue, `skipping` on other PRs, **not ours**, now on master's head too |
+| **PR #950** | ✅ MERGED — `38f48723e`, 228 commits |
+| **PR #1018** | ✅ MERGED — `a1590ed34`, the cpo-r1 handoff note |
+| **PR #1019** | ✅ MERGED — `fe253d737`, item 4 surface count SIX → SEVEN |
+| **Task 120 (#1015)** | ✅ **DONE** — `e25dff77d` + `6a15b1a28`, not yet pushed at time of writing |
+| Branch | fast-forwarded to master, then 2 commits ahead |
+| Verification | ArchTests **330/330**, `Sprk.Bff.Api.Tests` **12625 passed / 0 failed**, build clean |
 
-✅ **The D-12/D-13 decisions and all six amended ADRs are ON MASTER.** That was the prerequisite for
-`cpo-r1` to proceed.
+✅ **The D-12/D-13 decisions and all six amended ADRs are ON MASTER**, and the cpo-r1 directive has been
+handed to the owner to dispatch.
+
+### ▶ ✅ TASK 120 (#1015) — DONE. What it turned out to be.
+
+The handover framed it as two changes. It was **four**, and it surfaced **eleven** issues.
+
+1. Classified both `Api/Office/*` files as `GovernedFiles/RouteLevelGate`. File count unchanged (120) —
+   `EndpointFiles()` already globbed them; only the classification was missing.
+2. Widened `FilterMarker` for `EntityAccessFilter` + `JobOwnershipFilter` as an **allow-list**. The obvious
+   `\.Add\w*Filter\s*\(` would have credited `OfficeAuthFilter` (authn), `OfficeRateLimitFilter` and
+   `IdempotencyFilter`, marking **six ungated routes authorized**.
+3. 🔴 **Rule B's discovery had the same gap** — it globs `*AuthorizationFilter.cs`, which neither Office
+   filter matches. Rule A and Rule B now derive from **ONE list**, so drift is impossible. (First draft had
+   two lists + a test they agreed; that test was **vacuous** — it iterated the list it checked.)
+4. Nested `MapGroup` resolution. `var jobs = group.MapGroup("/jobs")` reported `GET /jobs/{jobId}` — a
+   **fragment**. Route keys are what waivers match on.
+
+**Ten Pending waivers + one Permanent**, issues filed: **#1020** communications trio (ZERO filters, caller
+oid used only as a log argument, app-only reads) · **#1021** `/search/entities` tenant-wide enumeration ·
+**#1022** `/todo` regarding-record · **#1023** the two stubs · **#1024** share pair (hardcoded `true`).
+`/quickcreate` is the only Permanent.
+
+**Three production fixes**: `JobOwnershipFilter` fail-OPEN on blank `CreatedBy` (ADR-003) · `/save-debug`
+anonymous raw-body logging + 500-char echo · 🔴 a **hardcoded synthetic job on a well-known GUID in
+production code**, found because closing the fail-open turned two tests red — they were green *because* of
+the defect.
+
+**Code review found one more**: **#1025** — `/save`'s gate is **conditional**. `EntityAccessFilter` returns
+`next(context)` untouched when `TargetEntity` is absent, so a document-only save gets no per-record check.
+Rule A structurally cannot express that; it is recorded in the `GovernedFiles` reason instead.
+
+⚠️ **Publish-size**: not measured. Zero packages added (no `.csproj` touched), net code deletion. Flagged
+to the owner rather than silently skipped (root CLAUDE.md §10 bullet 4).
+
+### ▶ ✅ TASK 121 (item 5) — DONE. `Secure Project` → `Secure Record`.
+
+🔴 **The owner renamed the live BU in dev mid-task**, which INVERTED the cutover window: the live side moved
+first, so dev provisioning was failing closed until this code landed. Deploy this.
+
+**The hazard was that the string has FIVE meanings**, and a find-replace would have wrecked three of them:
+
+| Meaning | Renamed? |
+|---|---|
+| The **business unit** | ✅ yes — the decided change |
+| The **security role** `Secure Project Owner` | ✅ yes (owner decision) — never a runtime lookup key |
+| The **SPA product name** `Secure Project Workspace` | ❌ **no** — owner-confirmed, user-facing |
+| The **domain concept** "a Secure Project" (`sprk_issecure = true`) | ❌ no — `ProvisionSecureProject`, the toggle, container display names |
+| **Dated historical records** in `projects/**` | ❌ no — rewriting them falsifies the record |
+
+**Found during execution, not in the plan:** a **second config key** in the same section
+(`SecureProject:UnsecureOwnerUserId` on `UnsecureProjectEndpoint`). Renaming one key and not the other
+would have split one config section in two. Both moved to `SecureRecord:`, and a **new test**
+(`SecureRecordConfigKeys_ShareOneSection`) stops them drifting apart.
+
+**Also fixed**: the fixture's decoy team names were hard-coded `"Secure Project Access"` / `"Extra Owners"`.
+They exist to be NEAR-MISSES of the real team name — left hard-coded they would have survived the rename and
+silently stopped being decoys. Now derived from `SecureBuName`.
+
+`SecureBuRoleDepthAssertion` went from accepting **two** spellings to **one**, deliberately: the owner chose a
+hard cutover because a tolerant list nobody prunes is how the original `Secure Project`/`Secure Projects`
+ambiguity arrived. Its inert-message now tells an operator to rename the live BU rather than widen the list.
+
+Runbook §3a carries the ordered operator steps, what breaks between them, and the zero-downtime alternative.
+Coupling proven by seeding a half-applied rename → the pinning test fails.
+
+Verification: ArchTests **330/330** · BFF unit **12626/0** · client Jest **96/96** · build clean.
+
+✅ **BOTH live artifacts renamed by the owner in dev, 2026-09-29**: the business unit AND the
+`Secure Project Owner` → `Secure Record Owner` security role. Live and code now agree on both halves.
+⚠️ Dev provisioning stays failing-closed until this branch's code is DEPLOYED.
 
 ### ▶ 🔴 NEXT — in this order (owner-set 2026-09-28)
 
-**1. #1015 — Office route census in `RouteAuthorizationGuardTests`** (handed over by
-`spaarkeai-word-add-in-r1`, owner-approved). ✅ **Both halves verified by us:**
-- `Api/Office/*` appears **zero times** in `GovernedFiles` (`:111-252`), so `:581` counts the whole Office
-  surface as *"serves no document or Dataverse content"* — **false** for `/save`, `/search/entities`,
-  `/todo`, `/generate-profile`. No test would notice those routes losing a filter.
-- 🔴 **The trap**: `FilterMarker` is at **`:1528-1531`** (not 1408) and matches only
-  `\.Add\w*AuthorizationFilter\s*[<(]` or `\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>`.
-  `.AddEntityAccessFilter(` matches **neither**. **`AddJobOwnershipFilter` is the worst case — "Ownership"
-  is not in the alternation at all**, so a widening that only adds `Access` still misses it.
-- 🔴 **Both changes must land together**, and the widening needs a **negative control** or it will look
-  like it works while still missing `Ownership`.
-
-**2. Item 5 — `Secure Project` → `Secure Record`** BU rename. One coordinated change (live BU + code default
-`DefaultSecureBusinessUnitName` + config key `SecureProject:BusinessUnitName` + pinning test + docs) or
-provisioning stops. Code: `Sprk.Bff.Api/Api/ExternalAccess/*`, `tests/integration/data-mutation/ExternalAccess/*`.
-
-**3. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
+**1. Item 6 — the three Redis key sites** failing ADR-009's new subject-discrimination MUST:
 `AgentServiceClient` (`agent-thread:thread` — 🔴 cross-**USER**, latent: `Enabled` defaults false),
 `AgentConfigurationService` (`exposed-playbooks`, `capabilities`), `ModuleEntitlementResolver`
 (`approle-module-map:all`). **Required regardless** of the Redis dedication decision — dedication does not
 fix the cross-user case.
 
-### ▶ ⚠️ ONE OPEN ITEM THE OWNER MUST DECIDE
+### ▶ ✅ RESOLVED 2026-09-29 — the cpo-r1 note reached master
 
-🔴 **`projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` is NOT on master.**
-It is on this branch only (1 commit ahead). **`cpo-r1` merges master — so it will NOT see the note** unless
-it is fast-tracked to master or this branch merges again first. Either open a small PR for that one commit,
-or let it ride on the next uac-r2 merge and tell cpo-r1 to wait.
+`INCOMING-D12-D13-REMEDIATION.md` is on master via **PR #1018** (`a1590ed34`), with READ FIRST pointers in
+that project's `CLAUDE.md` and `current-task.md`. **PR #1019** (`fe253d737`) then corrected its §5 Item 4
+heading, which said "SIX-surface" while enumerating **seven** — the seventh being the ARM-artifact workflow
+the note itself calls "the harder blocker". A reader trusting the heading would have stopped one short.
+
+The owner has the dispatch directive for cpo-r1 (worktree merge gated on 326/326 before any item starts;
+then items 1–4 in order via `task-create` → `task-execute`, not implemented straight off the note).
+
+### ▶ ⚠️ COORDINATION — `spaarkeai-word-add-in-r1` shares `OfficeService.cs`
+
+Task 120 **deleted** the hardcoded synthetic job at `OfficeService.cs:663-693` (well-known GUID
+`00000000-0000-0000-0000-000000000001`, ownerless, reachable by any authenticated caller). That project is
+active in the same file. If their branch still contains the block, a merge may reintroduce it silently —
+this is a *different-lines* change, so it is a candidate for the incoherent auto-merge that has already bitten
+this project once. **Nothing guards it**: the guard tests do not assert the block's absence, because a test
+asserting "this code is gone" is the shape that rots. Flag it at merge time instead.
 
 ### ▶ Handed to `spaarkeai-word-add-in-r1` (replied 2026-09-28)
 

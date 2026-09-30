@@ -638,10 +638,24 @@ public sealed class LegalResearchHandlerTests : TypedToolHandlerTestFixture
             _groundingOverride = groundingOverride;
         }
 
+        /// <summary>
+        /// Captures the tenant + conversation scope the handler resolved, so a test can assert the
+        /// Foundry thread is scoped to the caller's own chat session rather than to a constant
+        /// (task 122 — this used to pass the literal "legal-research-grounding" as the TENANT).
+        /// </summary>
+        internal string? LastTenantId { get; private set; }
+
+        internal string? LastConversationScope { get; private set; }
+
         internal override Task<List<LegalResearchHandler.GroundingResult>> RunBingGroundingAsync(
             string sanitizedQuery,
+            string tenantId,
+            string conversationScope,
             CancellationToken cancellationToken)
         {
+            LastTenantId = tenantId;
+            LastConversationScope = conversationScope;
+
             if (_groundingOverride is not null)
                 return _groundingOverride(sanitizedQuery, cancellationToken);
 

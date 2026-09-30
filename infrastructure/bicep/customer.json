@@ -5,16 +5,16 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "4283978128937208579"
+      "templateHash": "13222070130348669019"
     }
   },
   "parameters": {
     "customerId": {
       "type": "string",
       "minLength": 3,
-      "maxLength": 10,
+      "maxLength": 8,
       "metadata": {
-        "description": "Customer identifier (lowercase, alphanumeric only). Drives all resource naming."
+        "description": "Customer identifier. 3-8 chars, lowercase letters and digits, starting with a letter. Drives all resource naming; the 8-char limit comes from the Key Vault name composed below (see AZURE-RESOURCE-NAMING-CONVENTION.md)."
       }
     },
     "environmentName": {
@@ -3096,6 +3096,7 @@
           },
           "appSettings": {
             "value": {
+              "Customer__Id": "[parameters('customerId')]",
               "AZURE_CLIENT_ID": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]",
               "ManagedIdentity__ClientId": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]",
               "Redis__Enabled": "true",
