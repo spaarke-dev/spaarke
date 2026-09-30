@@ -1,5 +1,15 @@
 # Current Task State — `unified-access-control-r2`
 
+> ## 🚨 SESSION 26 FINAL CHECKPOINT (2026-09-30, context exhausted) — READ FIRST
+> | | |
+> |---|---|
+> | **Merge** | ✅ `ee5b82147` committed + PUSHED (origin/master merged in; resolution owner-approved). Merged tree: ArchTests 337/337, unit 13,018/0, drift 126/126. |
+> | **PR #1029** | ⏳ CI was running at checkpoint (0 fail, 3 pending, `Router` not yet reported). **Next: `gh pr checks 1029` → when Router=pass, `gh pr merge 1029 --squash`, sync main repo master, then DEPLOY BFF to dev** (`scripts/Deploy-BffApi.ps1`; `Customer__Id=spaarke` already set on spaarke-bff-dev). Owner authorized merge + deploy. Then ping word-add-in-r1 session (they wait on #1029). |
+> | **Local commit** | Research notes committed LOCALLY (not pushed, to avoid restarting PR CI). **Push after #1029 merges**, via a new small PR. |
+> | **Research** | `notes/session26-uac-defects-and-synopsis.md` — 12 confirmed UAC defects (5 HIGH: C1 CIAM no vetoes, C2 presence-only reads, C4 Write mints access, C8 finance IDOR, C9 BU over-grant) + verified six-case synopsis. Raw: `notes/raw/session26-*`. |
+> | **Awaiting owner** | 4 decisions (C4, C7, C9-interim, C10) + approval to file issues/author tasks + re-open mis-marked tasks 037/039/A-20/A-18. See the note's top section. |
+> | **Peer (word-add-in-r1)** | Notified of merge + 4 findings in their code; they routed (a)/(b)→060, (c)→080, (d)→079. `dynamic`-on-internal-anon-type bug class: only 2 sites, both theirs. |
+>
 > **Last Updated**: **2026-09-30, session 26 — MERGE OF origin/master STAGED (resolution complete, all tests green), NOT YET COMMITTED.**
 > Branch `work/unified-access-control-r2`. PR #1029 open.
 >
