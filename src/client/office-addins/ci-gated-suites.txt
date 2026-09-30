@@ -138,7 +138,7 @@ shared/taskpane/hooks/__tests__/useFindRecordMatches.test.tsx
 # id separate from the Entra id; every Word executeFunction action is registered
 # in word/commands/index.ts (a dead ribbon button otherwise); no 404 icon; the TEST
 # variant hides nothing. Seeded both ways.
-build/__tests__/mergeUnifiedManifest.test.ts
+packaging/__tests__/mergeUnifiedManifest.test.ts
 # --- Send Email via Outlook (task 036, FR-15) - green from creation -----------
 # Pins: the document link is minted only through the existing share-link route
 # (no expiry override), a failed mint opens no compose window, the record link

@@ -5,7 +5,7 @@ const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const webpack = require('webpack');
 const devCerts = require('office-addin-dev-certs');
 const fs = require('fs');
-const { mergeUnifiedManifest, deriveTestVariant, PACKAGE_ICONS } = require('./build/mergeUnifiedManifest');
+const { mergeUnifiedManifest, deriveTestVariant, PACKAGE_ICONS } = require('./packaging/mergeUnifiedManifest');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -58,7 +58,7 @@ const ENV_CONFIG = {
 
 /**
  * The COMBINED Outlook + Word app package (spaarkeai-word-add-in-r1 task 078, FR-05) —
- * see build/mergeUnifiedManifest.js and projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md.
+ * see packaging/mergeUnifiedManifest.js and projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md.
  *
  * Two ids that the standalone JSON manifests used to CONFLATE are kept apart here:
  *   - ADDIN_CLIENT_ID  → the Entra app registration. Goes in `webApplicationInfo.id` ONLY.
