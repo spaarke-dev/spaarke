@@ -81,6 +81,127 @@ are using the system.”* So the all-types-failed → **500** path for a user ho
 
 ---
 
+## 📨 UAC-r2 ANSWERED 2026-09-30 — load-bearing for 058 / 059 / 060 / 080
+
+From the live `unified-access-control-r2` session, verified against source on their side. **Do not
+re-derive these; they were expensive to get.**
+
+### Merge order: WAIT for #1029, then rebase ONTO them
+
+#1029 was **one CI check from merging** (1 pending / 0 failing, all Tier 1 green, 20 ahead / 0 behind).
+They will message when it lands. **Do not touch `OfficeService.cs` until then.**
+
+### The ctor: append AFTER `userClient` for a clean add
+
+Their #1029 adds the LAST optional ctor parameter. Exact tail to rebase against:
+
+```
+        ILogger<OfficeService> logger,
+        EmailUploadCaptureService? emailUploadCapture = null,
+        DataverseWebApiClient? dataverseClient = null,
+        IGenericEntityService? genericEntityService = null,
+        IDataverseUserClient? userClient = null)          ← APPEND 080's resolver AFTER this
+```
+
+✅ **Directly useful to 080**: `IDataverseUserClient` (the DELEGATED user-OBO Dataverse client) moved to
+`Sprk.Bff.Api.Infrastructure.Dataverse`, and its DI registration moved from `AddToolFramework` (inside
+the compound AI gate) to **`AddSpaarkeCore` — unconditional**. So per-user Dataverse reads are now
+available to CRUD code. **It fails closed — no app-only fallback.** 080 needs exactly this to resolve the
+acting user's BU + default Owner team as the USER rather than as the application identity.
+
+### 🔴 058 WILL FAIL `NoWaiverIsStale` UNLESS IT REMOVES FOUR WAIVERS IN THE SAME CHANGE
+
+`tests/.../RouteAuthorizationGuardTests.cs` carries **Pending waivers** for the four routes 058 deletes:
+`/office/search/documents` + `/office/recent` (**#1023**) and `/office/share/links` +
+`/office/share/attach` (**#1024**). The guard **used** to fire only when a waived route became *gated*,
+not when it was *deleted* — **that gap is now CLOSED** (see the file's notes at `:348-349`). So deleting
+the routes without deleting the waiver entries turns the build red **in a way that looks unrelated to the
+diff**. Add this to 058's acceptance criteria.
+
+### ⚠️ 058 near-miss in naming — two helpers one character apart in meaning
+
+| Helper | Used by | Action |
+|---|---|---|
+| `GenerateStubResults` | `SearchEntitiesAsync` (UAC-r2 **KEEPS**) | ❌ **DO NOT DELETE** |
+| `GenerateStubDocumentResults` | `SearchDocumentsAsync` (058 **DELETES**) | ✅ delete |
+
+They verified **zero shared helpers** between the two methods: `SearchEntitiesAsync` uses
+`GetEntityTypesToSearch`, `GenerateStubResults`, `QuerySearchEntityAsync`, `_searchMeta`, `MapSearchRow`,
+`EntitySearchMeta`; `SearchDocumentsAsync`'s body references exactly one helper. Re-confirmed they do
+**not** depend on `/office/recent` or any share/attach member.
+
+### 🔴 059 / 060 — SOURCE-SCANNING GUARDS MEAN A BEHAVIOUR-PRESERVING REFACTOR CAN STILL GO RED
+
+This is the one that most threatens the extraction tasks. UAC-r2 added guards that **read the file text**,
+so 059's and 060's "behaviour-preserving move" can fail them without changing any behaviour.
+
+In `OfficeService.cs` the guards depend on:
+- the exact signature `private async Task<List<EntitySearchResult>> QuerySearchEntityAsync`
+- the **presence** of `_userClient!.GetAsync`
+- the **ABSENCE** of `_dataverseClient` anywhere in that method body
+- `catch (Exception ex) when (ex is not InvalidOperationException)`
+- `_userClient is null && _dataverseClient is not null`
+- `TotalCount = ordered.Count` / `HasMore = ordered.Count`
+
+In `CommunicationsEndpoints.cs`: **no code line** may contain `entityService` or `IGenericEntityService`
+(doc comments are exempt — the guard skips `///` lines).
+
+These are deliberate: reverting to the app-only client would reopen **#1020/#1021** without failing any
+behavioural test. **Treat them as part of the contract, not as incidental test brittleness.**
+
+### 🟢 065's MISSING SUBJECT, from UAC-r2's #1025 — authorize the DESTINATION CONTAINER
+
+Their open issue **#1025** covers the same pass-through from their side, and their recommendation supplies
+the piece our 065 analysis was missing. With `TargetEntity` now permanently optional by owner decision,
+065's residual is not "find a record to check" but:
+
+> **the subject CHANGES rather than disappearing.** With no related record there is no record to check,
+> but there IS still a destination (`EmailProcessing:DefaultContainerId`, `OfficeService.cs:154-163`)
+> that nothing currently authorizes anyone against.
+
+So 065's residual control set is **four** items, not three:
+
+| # | Control | Status |
+|---|---|---|
+| 1 | Container **placement** (acting-user BU → tenant default) | ✅ shipped |
+| 2 | **Ownership** of the created `sprk_document` (BU default Owner team) | → **080** |
+| 3 | Table-level **create** right on `sprk_document` | ❓ unverified |
+| 4 | **Authorize the caller against the destination CONTAINER** | 🆕 **#1025** — the missing subject |
+
+Item 4 is the honest answer to "what does a no-record save authorize against". Coordinate with UAC-r2 on
+#1025 rather than inventing a parallel mechanism.
+
+### ⚠️ A verification lesson UAC-r2 recorded against their task 128 — applies to ANY filter we attach
+
+They attached `EntityAccessFilter` to `POST /api/office/todo`, having explicitly checked that the filter
+could **resolve the entity type** — and never checked whether any end-user role grants the **right the
+filter demands** (`AppendTo`, per `OperationAccessPolicy.cs:176-185`). Until the owner's grant today that
+change would have 403'd `/office/todo` for every non-admin. `OperationAccessPolicy.cs:182-185` even
+carries a warning that AppendTo's first use *"stays permanently 403 — a silent failure"*.
+
+**The rule for us**: attaching a filter requires verifying **both** dimensions — (1) can the filter resolve
+the request/type, and (2) does any end-user role actually hold the right it enforces. Checking only (1)
+is the same failure class one dimension over. Also useful: only **two** routes carry
+`.AddEntityAccessFilter()` today — `/office/save` (`:183`) and `/office/todo` (`:1229`) — so the
+"gate present, nothing checked" surface is small and cheaply guarded. UAC-r2 is taking the general reach
+guard on their side.
+
+### ⚠️ Relevant to 065 and to 080: `ExtractTargetEntity` is the filter's REACH
+
+#1029 also changed `EntityAccessFilter` (`ExtractTargetEntity` now recognises `CreateTodoRequest`) and
+gated `POST /office/todo` with `.AddEntityAccessFilter()` (**#1022**), so that waiver is deleted rather
+than resolved.
+
+🔴 **The general lesson, in their words**: `ExtractTargetEntity` returns null for an unrecognised
+request shape, **and a null target makes the filter pass through** — so *"a route can be gated, credited
+by Rule A, and authorize nothing."* That is the SAME failure shape as 065's F4, one level up: the gate is
+present, the census counts it, and no check runs. Anyone touching `EntityAccessFilter` must check
+`ExtractTargetEntity` recognises the request type, not merely that the filter is attached.
+
+`AssociationType` / burned ordinal 3: **unchanged by #1029**, so no interaction with our hand-rebase.
+
+---
+
 ## 📍 SEQUENCING — owner-approved 2026-09-30 (supersedes 077→078→076→079→080)
 
 Rationale: **058 deletes ~800 lines from `OfficeService.cs`**, and 059/060/068/075 all refactor code in
