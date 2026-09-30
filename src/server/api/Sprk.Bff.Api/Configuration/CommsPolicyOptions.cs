@@ -42,4 +42,26 @@ public sealed class CommsPolicyOptions
     /// than a miss.
     /// </remarks>
     public double DefaultConfidenceThreshold { get; set; } = 0.45;
+
+    /// <summary>
+    /// Fallback for the RI task's <c>sprk_duedate</c>, in days from now, when the matched
+    /// <c>sprk_communicationrule</c> row does not set <c>sprk_task_due_days</c>. Default 1 (next day).
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-29 (owner decision). The due dates are **declared on the rule row** — this is only the
+    /// fallback, exactly as <see cref="DefaultConfidenceThreshold"/> is for the threshold.
+    /// <para>
+    /// These are not cosmetic. <c>DailyBriefingCollector</c>'s task channels read <c>sprk_finalduedate</c>
+    /// first, fall back to <c>sprk_duedate</c>, and **filter by date** — so a task created with neither set
+    /// cannot appear in the briefing at all. Every RI task before this change had both null.
+    /// </para>
+    /// </remarks>
+    public int DefaultTaskDueDays { get; set; } = 1;
+
+    /// <summary>
+    /// Fallback for the RI task's <c>sprk_finalduedate</c>, in days from now, when the matched rule does not
+    /// set <c>sprk_task_final_due_days</c>. Default 3 — the outer "must be done by" bound, where
+    /// <see cref="DefaultTaskDueDays"/> is the target.
+    /// </summary>
+    public int DefaultTaskFinalDueDays { get; set; } = 3;
 }

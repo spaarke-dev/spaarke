@@ -29,7 +29,10 @@ internal sealed record TaskActionInput(
     DateTime? ScheduledEnd,
     Guid? RegardingObjectId,
     string? RegardingObjectType,
-    Guid? OwnerId);
+    Guid? OwnerId,
+    /// <summary><c>sprk_finalduedate</c> — the OUTER bound, where <paramref name="ScheduledEnd"/>
+    /// (<c>sprk_duedate</c>) is the target. Optional; defaulted so existing call sites are unaffected.</summary>
+    DateTime? FinalDueDate = null);
 
 /// <summary>
 /// Session-agnostic core that builds a <c>sprk_event</c> (event type = Task) and creates it, preserving the
@@ -121,6 +124,11 @@ internal sealed class TaskActionCore
 
         if (input.ScheduledEnd.HasValue)
             entity["sprk_duedate"] = input.ScheduledEnd.Value;
+
+        // sprk_finalduedate is the OUTER bound. DailyBriefingCollector reads it FIRST and falls back to
+        // sprk_duedate, and its task channels filter by date -- a task with neither set cannot surface.
+        if (input.FinalDueDate.HasValue)
+            entity["sprk_finalduedate"] = input.FinalDueDate.Value;
 
         if (input.RegardingObjectId.HasValue && !string.IsNullOrWhiteSpace(input.RegardingObjectType))
         {
