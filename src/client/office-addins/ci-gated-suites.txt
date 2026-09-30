@@ -126,6 +126,19 @@ shared/taskpane/components/__tests__/SaveFlow.openRecord.test.tsx
 # hasMore means only "unrevealed rows", and there is no pager of any kind.
 shared/taskpane/hooks/__tests__/useLazyResults.test.tsx
 shared/taskpane/components/__tests__/FindResultsList.test.tsx
+# --- Find records half (task 077, FR-16 gap (a)) - green from creation --------
+# Pins: the seed comes from the AI profile (never invented); requests go ONLY to
+# the per-row-authorized /api/ai/search/records; a SHORT page is not the end (the
+# server's authorization trim shortens pages) and the next offset advances by the
+# REQUESTED window; paging stops before the route's offset cap. Seeded both ways.
+shared/taskpane/hooks/__tests__/useFindRecordMatches.test.tsx
+# --- Unified Outlook + Word app package (task 078, FR-05) - green from creation -
+# Runs the merge against the REAL source manifests and XML ids. Pins: Outlook ids
+# kept as authored; one host per runtime/ribbon; both XML add-ins hidden; package
+# id separate from the Entra id; every Word executeFunction action is registered
+# in word/commands/index.ts (a dead ribbon button otherwise); no 404 icon; the TEST
+# variant hides nothing. Seeded both ways.
+packaging/__tests__/mergeUnifiedManifest.test.ts
 # --- Send Email via Outlook (task 036, FR-15) - green from creation -----------
 # Pins: the document link is minted only through the existing share-link route
 # (no expiry override), a failed mint opens no compose window, the record link

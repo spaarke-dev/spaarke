@@ -9,7 +9,12 @@ module.exports = {
   // surfaced. `outlook` is included for symmetry (its `commands/` has no test file yet, but the same
   // command-context testing pattern belongs there too, and the roots list should not need touching
   // again for that follow-up).
-  roots: ['<rootDir>/shared', '<rootDir>/word', '<rootDir>/outlook'],
+  // `packaging` added by task 078 (FR-05): the unified app-package merge (`packaging/mergeUnifiedManifest.js`)
+  // is build tooling with its own suite. Verified safe the same way: `packaging/` is a new folder whose ONLY
+  // test file is task 078's, so widening surfaces no dormant suite. NOT named `build/`: the repo-root
+  // .gitignore ignores every `build/` folder, so a module there is never committed and a fresh checkout
+  // (CI included) cannot resolve webpack's require of it.
+  roots: ['<rootDir>/shared', '<rootDir>/word', '<rootDir>/outlook', '<rootDir>/packaging'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   transform: {
     '^.+\\.tsx?$': [

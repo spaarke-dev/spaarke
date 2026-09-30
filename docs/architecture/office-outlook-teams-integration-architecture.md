@@ -139,21 +139,34 @@ Auth: the caller's bearer token → BFF **OBO** → Graph/SPE + Dataverse (ADR-0
 
 | Item | As-built |
 |---|---|
-| **XML manifests** | `outlook/outlook-manifest.xml`, `word/word-manifest.xml` — for M365 Admin Center upload |
-| **Unified manifest** | `outlook/manifest.json` — carries `icons.color` (128px) + `icons.outline` (32px) |
-| **Names** | "Spaarke Outlook" / "Spaarke Word" |
-| **Icons** | white-on-black brand marks generated into `shared/assets` (`icon-color.png` 128, `icon-outline.png` 32, plus `icon-16/32/64/80/128`) via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep, not in `package.json`) |
+| **LIVE registrations (production)** | **XML for both hosts**: Outlook `outlook/outlook-manifest.xml` (`5e4d66d0-…`), Word `word/word-manifest.xml` (`b3965ea0-…`). ⚠️ Outlook's is `/outlook/outlook-manifest.xml` — `/outlook/manifest.xml` 404s (a known trap) |
+| **Unified app package (the migration target, task 078)** | ONE Microsoft 365 unified-manifest app (schema **1.30**) for **Outlook AND Word**, built by `packaging/mergeUnifiedManifest.js` into `dist/spaarke/` and zipped by `scripts/Package-OfficeAddinUnified.ps1` (CI artifact `spaarke-addin-unified-package`). Own package id `e68f3cb1-…`; `alternates.hide` names both XML add-ins. Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md` §6 |
+| **Per-host unified manifests** | `outlook/manifest.json`, `word/manifest.json` — the SOURCES of each host's half of the package. Not uploaded on their own |
+| **Names** | XML: "Spaarke Outlook" / "Spaarke Word". Unified package: "Spaarke" |
+| **Icons** | white-on-black brand marks generated into `shared/assets` via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep: `npm install --no-save sharp`; pass target names to render only those). `icon-16/32/64/80/128`, `icon-color.png` (128, XML era), **`icon-color-192.png` (the package's color icon — app packages require 192×192)**, `icon-outline.png` (32) |
 
-### Manifest rules (validated against M365 Admin Center — still binding)
+### Manifest rules — XML manifests (the live registrations; validated against M365 Admin Center)
 
 | Rule | Reason |
 |---|---|
-| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part |
-| **No** `<FunctionFile>` in the Outlook manifest | Causes validation failure |
+| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part **for XML** |
+| **No** `<FunctionFile>` in the **Outlook** XML | Causes validation failure (the Word XML has one since task 037 — Word accepts it) |
 | Single `VersionOverridesV1_0` (do not nest V1.1) | Validation failure |
 | `RuleCollection Mode="Or"` + `DisableEntityHighlighting` present | Required for Outlook read surface |
 | All icon URLs return HTTP 200 | Manifest validation fails otherwise |
 | Bump the manifest version on any change | M365 requires re-register at the new version |
+
+### Manifest rules — the unified app package (task 078)
+
+| Rule | Reason / where enforced |
+|---|---|
+| **3-part** version `X.Y.Z` — bump `UNIFIED_PACKAGE.VERSION` in `webpack.config.js` on every change | The unified manifest rejects 4-part; the admin center rejects a same-version update. The merge throws on 4-part |
+| ONE extension; every runtime and ribbon scoped to exactly ONE host; host capabilities on those nodes, not the extension | An extension-level `WordApi` requirement stops it installing in Outlook. The merge asserts it |
+| The package id is its OWN GUID — never the Entra client id, never an XML add-in id | Microsoft requires a new GUID for the unified version; the merge refuses the other two |
+| A Word `executeFunction` id that collides with an Outlook one is renamed ONLY via `WORD_FUNCTION_RENAMES` + an `Office.actions.associate` alias in `word/commands/index.ts` | The id is the registered function name — a manifest-only rename ships a dead button. A test checks every Word action is registered |
+| Every icon URL resolves; color icon 192×192, outline 32×32 | Admin-center validation. The merge repairs/refuses missing icons; the packaging script exits 1 on wrong sizes |
+| Upload as App type **"Teams app"** (a zip), not "Office Add-in" | Microsoft 365 admin deploy doc |
+| Keep BOTH XML add-ins deployed | Outlook on Mac and Word < 2501 cannot run the unified package; `hide` does not yet work in Word (office-js #6938) |
 
 ---
 
@@ -169,7 +182,7 @@ npm run typecheck          # production code is clean (0 errors); 284 errors rem
 ```
 
 - **Hosting**: Azure **Static Web App**. **Deploy runs in CI** — GitHub Actions **`deploy-office-addins.yml`** (holds the SWA secrets); it is **not** an agent-run script. Push the branch → confirm the run is green (`gh run list --workflow=deploy-office-addins.yml`).
-- **Version bumps**: `outlook/manifest.json` + `outlook/taskpane/index.tsx` (and the Word equivalents), then **M365 re-register** at the new version.
+- **Version bumps**: XML era — `outlook/outlook-manifest.xml` / `word/word-manifest.xml` (4-part) + the taskpane `index.tsx` version, then **M365 re-register**. Unified package — `UNIFIED_PACKAGE.VERSION` in `webpack.config.js` (3-part), then re-upload the CI artifact zip.
 - **Config (env-driven, not hardcoded)**: `BFF_API_BASE_URL` (defaults to `spaarke-bff-dev`), `ORG_URL` (Quick-Create Dataverse deep-link; unset → Quick Create is a safe no-op). Never pin the add-in to the dev org.
 
 ---

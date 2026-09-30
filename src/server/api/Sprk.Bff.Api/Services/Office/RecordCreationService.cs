@@ -34,12 +34,13 @@ public sealed record RecordCreationRequest
     /// <summary>Optional description (trimmed; ignored when blank).</summary>
     public string? Description { get; init; }
 
-    /// <summary>The caller's Entra object id — for logs only; ownership comes from <see cref="OwnerSystemUserId"/>.</summary>
+    /// <summary>The caller's Entra object id — for logs only; the owner comes from <see cref="OwnerSystemUserId"/>'s business unit.</summary>
     public required string CallerUserId { get; init; }
 
     /// <summary>
     /// The caller's Dataverse <c>systemuserid</c>, resolved server-side (never from the client). <b>Load-bearing</b>:
-    /// when it is absent or unparseable the service refuses rather than creating an app-owned record.
+    /// when it is absent or unparseable the service refuses rather than creating an app-owned record. It is NOT the
+    /// owner: the record is owned by this user's business-unit default owner team (task 080).
     /// </summary>
     public string? OwnerSystemUserId { get; init; }
 
@@ -70,7 +71,8 @@ public enum RecordCreationFailureKind
     /// <summary>The request cannot be honoured as given (wrong entity type, blank name).</summary>
     InvalidInput,
 
-    /// <summary>The caller has no resolvable Dataverse user, so the record cannot be owned by them.</summary>
+    /// <summary>No owner could be determined — the caller has no resolvable Dataverse user, or their business unit
+    /// has no single default owner team (task 080) — so nothing was created.</summary>
     OwnerUnresolved
 }
 
@@ -119,7 +121,8 @@ public sealed record RecordCreationResult
 ///   <c>sprk_containerid</c> is deliberately NOT written (unified-access-control-r2 task 076, W1).</description></item>
 ///   <item><description>Field Mapping Framework — one profile read, one source read, rules applied by
 ///   <see cref="CreateTimeFieldMapping"/>; a missing profile is a silent no-op.</description></item>
-///   <item><description>Owner — <c>ownerid</c> = the caller, refused when unresolved.</description></item>
+///   <item><description>Owner — <c>ownerid</c> = the caller's business-unit DEFAULT OWNER TEAM (task 080, invariant
+///   I-6); refused when the caller or the team is unresolved.</description></item>
 /// </list>
 /// <para><b><c>sprk_matternumber</c> is never written here</b> (owner decision 2026-09-11) — not directly, and not
 /// through a field-mapping rule of any type (the protected-attribute check is case-insensitive). Numbering is left to
@@ -185,19 +188,50 @@ public sealed class RecordCreationService
     private static readonly IReadOnlySet<string> ProjectProtectedAttributes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ProjectNumberAttribute, OwnerAttribute, ContainerAttribute };
 
+    internal const string TeamEntity = "team";
+
     private readonly IGenericEntityService _entities;
     private readonly IFieldMappingDataverseService _fieldMappings;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<RecordCreationService> _logger;
 
     public RecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<RecordCreationService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _fieldMappings = fieldMappings ?? throw new ArgumentNullException(nameof(fieldMappings));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <summary>
+    /// The owner of a new Matter or Project (task 080, write-path invariant I-6): the caller's business unit's DEFAULT
+    /// OWNER TEAM — owner decision 2026-09-22, "owned by the acting user's BU default owner team … not the user".
+    /// </summary>
+    /// <remarks>
+    /// <para>A new core record is filed against nothing, so the acting user's business unit is the answer. The
+    /// optional field-mapping SOURCE is not a parent — it only supplies values — so it does not decide ownership.</para>
+    /// <para>The caller's <c>systemuserid</c> is still load-bearing: an unresolved caller is refused before this runs,
+    /// and the business-unit defaults above are read from the same user, so the team and those defaults always
+    /// come from one business unit.</para>
+    /// <para>Returns <see langword="null"/> when no team resolves; the caller refuses (no row written).</para>
+    /// </remarks>
+    private Task<Guid?> ResolveOwnerTeamAsync(Guid callerSystemUserId, CancellationToken ct) =>
+        _ownership.ResolveOwningTeamAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext { CallerSystemUserId = callerSystemUserId },
+            ct);
+
+    private static RecordCreationResult OwnerTeamUnresolved(string entityLabel) =>
+        RecordCreationResult.Failed(new RecordCreationFailure(
+            RecordCreationFailureKind.OwnerUnresolved,
+            // ONE code for "no owner team" across every Office create (save, To Do, quick-create) — ADR-019: the
+            // client maps a condition by its code, so three spellings of one refusal would be three client entries.
+            Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.RecordOwnerUnresolved,
+            $"The new {entityLabel} could not be assigned to your business unit's team, so it was not created. Ask an "
+            + "administrator to check that your user has a business unit and that the unit has its default team."));
 
     /// <summary>
     /// Creates the record. Returns a structured <see cref="RecordCreationFailure"/> — never a partial write — when
@@ -292,13 +326,19 @@ public sealed class RecordCreationService
         }
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing (task 030 step 4).
-        entity[OwnerAttribute] = new EntityReference(SystemUserEntity, ownerId);
+        // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
+        if (await ResolveOwnerTeamAsync(ownerId, ct).ConfigureAwait(false) is not { } ownerTeamId)
+        {
+            return OwnerTeamUnresolved("matter");
+        }
+
+        entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
 
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "[RECORD-CREATE] Matter {MatterId} created for caller {CallerUserId}: owner={OwnerId}, warnings={WarningCount}",
-            createdId, request.CallerUserId, ownerId, warnings.Count);
+            "[RECORD-CREATE] Matter {MatterId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
+            createdId, request.CallerUserId, ownerTeamId, warnings.Count);
 
         return new RecordCreationResult
         {
@@ -373,13 +413,19 @@ public sealed class RecordCreationService
         }
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing.
-        entity[OwnerAttribute] = new EntityReference(SystemUserEntity, ownerId);
+        // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
+        if (await ResolveOwnerTeamAsync(ownerId, ct).ConfigureAwait(false) is not { } ownerTeamId)
+        {
+            return OwnerTeamUnresolved("project");
+        }
+
+        entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
 
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
-            "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner={OwnerId}, warnings={WarningCount}",
-            createdId, request.CallerUserId, ownerId, warnings.Count);
+            "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
+            createdId, request.CallerUserId, ownerTeamId, warnings.Count);
 
         return new RecordCreationResult
         {

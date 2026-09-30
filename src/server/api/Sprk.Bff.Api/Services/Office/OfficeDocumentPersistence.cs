@@ -136,6 +136,17 @@ public class OfficeDocumentPersistence
         Guid? preAssignedDocumentId = null,
         Guid? owningTeamId = null)
     {
+        // Task 080 (write-path invariant I-6): an Office document create is ALWAYS team-owned. The writers resolve the
+        // team (or refuse) before calling; a null here is a writer that skipped that step, and creating the row anyway
+        // would silently make it app-owned in the ROOT business unit — invisible to its own author. Checked before the
+        // canonical merge below, which writes, so a missing owner writes nothing at all.
+        if (owningTeamId is not { } requiredOwningTeamId || requiredOwningTeamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "An Office document create must carry its owner team (task 080). Resolve it with "
+                + "IRecordOwnershipResolver and refuse the save when none resolves; never create the row app-owned.");
+        }
+
         _logger.LogDebug(
             "Creating Document record with SPE pointers: DriveId={DriveId}, ItemId={ItemId}",
             driveId, itemId);
@@ -294,7 +305,7 @@ public class OfficeDocumentPersistence
             {
                 _logger.LogWarning(
                     "Target entity type {EntityType} has no sprk_document lookup — document will be " +
-                    "created UNASSOCIATED. Known gaps: account, contact, sprk_todo (no column exists).",
+                    "created UNASSOCIATED. Known gap: account (no column exists).",
                     request.TargetEntity.EntityType);
             }
         }

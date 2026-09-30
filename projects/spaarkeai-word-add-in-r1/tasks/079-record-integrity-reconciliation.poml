@@ -64,6 +64,18 @@
 
       **Why this task gates 090**: the wrap-up's escalation trigger 2 fires on "deferred entries that
       describe unfinished spec requirements". On an honest run today it would fire immediately.
+    
+      UPDATE 2026-09-30 (pre-compact handoff) - additional record-integrity items routed here:
+      1. scripts/check-task-status-drift.ps1 CANNOT READ this project's TASK-INDEX: it parses 5 of 82 rows, and those
+         5 come from the RISK table (rows like bold 002 then a risk sentence, near line 355), because the status
+         table puts its marker in cell 3 while the parser expects cell 1. So it is permanently red (77 unpaired plus
+         5 false drifts), which HIDES real drift: 014 and 025 (POML not-started, index done). 011 was corrected by
+         task 078. Fix the parser or the index format, then resolve each real drift from git evidence.
+      2. TodoSourceAccessFilter.cs about 116-121 says EntityAccessFilter refuses sprk_todo, but EntitySetByType
+         contains sprk_todo and todo (EntityAccessFilter.cs about 139-147). Conclusion right, premise wrong - fix the
+         comment. Source: notes/uac-r2-findings-2026-09-30.md finding d.
+      3. Task 011's close on 2026-09-18 was an XML re-upload; its ACs 6 and 7 were never met. Corrected by 078
+         (both artifacts now read completed-with-escalation). Count it among the unsupported completion claims.
     </background>
   </context>
 

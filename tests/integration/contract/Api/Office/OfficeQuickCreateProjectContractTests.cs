@@ -9,6 +9,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
 
@@ -38,6 +39,8 @@ public class OfficeQuickCreateProjectContractTests
     private const string Route = "/api/office/quickcreate/project";
 
     private static readonly Guid OwnerId = Guid.Parse("7d0e8a41-3b5c-4f2e-9a10-5c2b7e4f1a01");
+    /// <summary>Task 080: every quick-created record is owned by the caller's business-unit DEFAULT OWNER TEAM (the factory's <see cref="RecordOwnershipResolverDouble"/>), never by the caller.</summary>
+    private static readonly EntityReference OwnerTeam = new("team", RecordOwnershipResolverDouble.DefaultTeamId);
     private static readonly Guid BusinessUnitId = Guid.Parse("cb15f587-baa0-f111-aaac-000d3a99d1d7");
     private static readonly Guid SearchIndexId = Guid.Parse("fdcc183b-8b71-f111-ab0d-7ced8ddc4cc6");
     private static readonly Guid SourceProjectId = Guid.Parse("1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c01");
@@ -48,7 +51,7 @@ public class OfficeQuickCreateProjectContractTests
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Project_Returns201_OwnedByCaller_WithBusinessUnitDefaults_AndNeverANumber()
+    public async Task Post_Project_Returns201_OwnedByCallersTeam_WithBusinessUnitDefaults_AndNeverANumber()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -75,7 +78,7 @@ public class OfficeQuickCreateProjectContractTests
         project.GetAttributeValue<string>("sprk_projectname").Should().Be("Acme Migration");
         project.GetAttributeValue<string>("sprk_projectdescription").Should().Be("From Word");
         project.GetAttributeValue<EntityReference>("ownerid").Should()
-            .BeEquivalentTo(new EntityReference("systemuser", OwnerId));
+            .BeEquivalentTo(OwnerTeam);
         project.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
         project.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
         AssertNoProjectNumberSent(project);
@@ -124,7 +127,7 @@ public class OfficeQuickCreateProjectContractTests
         body.Warnings!.Single().Should().Contain("this project falls back")
             .And.NotContain("matter", "the shared BU helper must not leak the Matter noun onto the Project path");
         created.Entity!.Contains("sprk_searchindexname").Should().BeFalse();
-        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
     }
 
     // ── Field mapping ───────────────────────────────────────────────────────────────────────────────────
@@ -189,7 +192,7 @@ public class OfficeQuickCreateProjectContractTests
         // Concat, and a mis-cased, padded target alike.
         AssertNoProjectNumberSent(project);
         project.GetAttributeValue<EntityReference>("ownerid").Should()
-            .BeEquivalentTo(new EntityReference("systemuser", OwnerId));
+            .BeEquivalentTo(OwnerTeam);
         project.Contains("sprk_containerid").Should().BeFalse();
 
         body!.Warnings.Should().NotBeNull();
@@ -222,7 +225,7 @@ public class OfficeQuickCreateProjectContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().BeNull("a missing profile is a silent no-op, not a failure");
-        created.Entity!.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity!.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         created.Entity.GetAttributeValue<string>("sprk_projectname").Should().Be("No Profile Project");
         factory.Entities.Verify(
             e => e.RetrieveAsync("sprk_project", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
@@ -287,6 +290,25 @@ public class OfficeQuickCreateProjectContractTests
         // caller is refused rather than silently producing an app-owned record — the defect FR-13 exists to fix.
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("owner_unresolved");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_Project_WhenTheCallersTeamCannotBeResolved_Returns403_AndCreatesNothingAppOwned()
+    {
+        // Task 080: a RESOLVED caller whose business unit yields no default owner team is refused — creating the project
+        // anyway would leave it owned by the app user in ROOT, unreadable by the caller who made it.
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        factory.Ownership.TeamId = null;
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            Route, new QuickCreateRequest { Name = "No Team Project" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_022");
         AssertNothingCreated(factory);
     }
 

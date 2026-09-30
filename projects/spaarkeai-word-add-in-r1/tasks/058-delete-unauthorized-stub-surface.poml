@@ -98,6 +98,20 @@
 
       All are tagged `TRACKED: GitHub #229`, which is **OPEN and last updated 2026-03-13** — six months stale,
       labelled `tech-debt`, while guarding a live authorization gap.
+    
+      UPDATE 2026-09-30 (pre-compact handoff; source: notes/uac-r2-findings-2026-09-30.md and current-task.md).
+      1. RouteAuthorizationGuardTests now GOVERNS Api/Office/*. It carries four Pending waivers for exactly the routes
+         this task deletes: /office/search/documents and /office/recent (GitHub 1023), /office/share/links and
+         /office/share/attach (GitHub 1024). The guard's delete-case gap is CLOSED, so deleting a route without
+         deleting its waiver turns NoWaiverIsStale red in a way that looks unrelated to the diff. Delete all four
+         waiver entries in the SAME change.
+      2. NAMING NEAR-MISS: GenerateStubResults belongs to SearchEntitiesAsync (KEEP - UAC-r2 depends on it).
+         GenerateStubDocumentResults belongs to SearchDocumentsAsync (DELETE). UAC-r2 verified zero shared helpers.
+      3. Standing rule: a new Office-route filter whose name lacks the word Authorization must be added to
+         ExplicitlyCreditedFilterTypeNames, or Rule A reports the route ungated.
+      4. SEQUENCING: blocked on UAC-r2 PR 1029 (OfficeService.cs). After it merges, run 080 first, then this task.
+      5. Severity was already downgraded by this POML's own re-scope block: the routes read nothing, so this is
+         removal of a LATENT hazard, not a live disclosure.
     </background>
 
     <notes>

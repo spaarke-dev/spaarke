@@ -9,6 +9,7 @@
 - [Power Pages vs Entra External ID portal (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice; licensing + SPE-external story
 
 ## Word add-in / Office
+- [Word unified manifest GA status (2026-09-30)](word-unified-manifest-ga-status-2026-09-30.md) — GA Win 2501+/Mac 16.103+/web; schema 1.30; upload as "Teams app" zip; one-extension multi-host OK; hide bug #6938 for Word
 - [Word add-in save collision path (2026-09-08)](word-addin-save-collision-path-2026-09-08.md) — /api/office/save uses Replace (silent overwrite) vs OBO Fail/409
 - [Word desktop document.url for SPE (2026-09-08)](word-desktop-document-url-spe-2026-09-08.md) — AMBER; docs silent on SPE desktop; needs live probe
 - [Office Dialog for MDA record (2026-09-08)](office-dialog-mda-record-open-2026-09-08.md) — no evidence MDA works in dialog; REC read-only pane + openBrowserWindow

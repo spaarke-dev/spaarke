@@ -4,7 +4,7 @@
     <title>FR-05: migrate Word to the unified JSON manifest</title>
     <phase>1 Foundation</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed-with-escalation</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation (`word/manifest.json`) plus a build-config edit, with explicit constraints. No .cs/.ts service logic; the risk is deployment/registration, not code correctness. Quality gates skipped per the Step 3.5.5 decision tree.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -165,4 +165,19 @@
   </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <status-note>
+    CORRECTED 2026-09-30 by task 078 (its criterion: "Task 011's POML status is corrected to match reality, and its
+    ACs 6/7 are marked with their real outcome"). This POML read in-progress while TASK-INDEX showed it closed.
+
+    AC 6 (Word DESKTOP installs from the JSON) and AC 7 (Word on the WEB): NOT MET BY THIS TASK. The 2026-09-18
+    "close" was an M365 re-upload of the XML manifest (word/word-manifest.xml, 1.0.9.0), not of word/manifest.json -
+    the JSON was never installed. The Word add-in in production runs from XML to this day.
+
+    SUPERSEDED BY TASK 078. The standalone word/manifest.json output this task created is retired; Word's unified
+    manifest now ships only inside ONE combined Outlook + Word app package (schema 1.30, packaging/
+    mergeUnifiedManifest.js). ACs 6 and 7 are carried by task 078's OWNER STEP 3 - an observed install of that
+    package on Word desktop (build 2501 or later) and Word on the web. See notes/078-manifest-decision.md.
+
+    ACs 1-5 and 8-12 stand as recorded; AC 8 holds (the Word XML is retained, deliberately, as the fallback).
+  </status-note>
 </task>
