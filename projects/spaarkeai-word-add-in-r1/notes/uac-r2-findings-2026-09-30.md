@@ -120,3 +120,24 @@ Fails closed (no write happens), so this is a correctness/UX defect, not a leak.
 the reason. Which of the two is an owner call (it decides whether a view-only user can see the record exists
 in the pane). Filed as **ISS-010 [#1037](https://github.com/spaarke-dev/spaarke/issues/1037)**; not yet assigned
 to a task.
+
+## 7. UAC-r2's reply to task 080's results (2026-09-30)
+
+- **#1038 blast radius.** UAC-r2 checked all six `ResolveForRecordAsync` callers on master:
+  - `ExternalProjectDataEndpoints` (literal `sprk_project`), `ComposeService` (constant `sprk_matter`) and
+    `CommunicationContainerResolver` (names come from Dataverse lookups) are safe.
+  - The two `OBOEndpoints` record-keyed routes take the name from the route. An alias there fails **closed**
+    (409, with a misleading message).
+  - **`OfficeService` is the only caller that sends a secure save to the shared container.** It is safe only once
+    this branch lands.
+- **Dev data.** There is 1 secure project, and it has its own container. **0** documents are linked to any secure
+  project, matter or work assignment, so **no Office content reached the shared container in dev.**
+- ⚠️ **`spaarke-bff-dev` now runs master `2682e8225`** (UAC-r2's deploy, 2026-09-30). **It still carries #1038 until
+  this branch merges.** That is a reason not to leave the branch unmerged for long.
+- **Resolver hardening.** UAC-r2 is proposing to their owner that `ResolveForRecordAsync` normalize names through
+  `DocumentAssociationMap` and **refuse** a name that is not a real entity logical name. Today an unknown name reads
+  as "not securable", which fails open. This is sequenced after our merge. (The map is on master; the
+  `ToLogicalName` method it needs is ours.)
+- **The membership event's owner semantics (080 F7)** are theirs. They are raising it with their owner; **leave it
+  as-is here.**
+- **#1037 hide-vs-disable** goes to their owner along with their other decisions. #1034 and #1010 are noted.
