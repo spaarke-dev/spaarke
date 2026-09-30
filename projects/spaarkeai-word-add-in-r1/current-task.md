@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (task 080 closed ⚠️ — task-execute Step 11 transition)
+> **Last Updated**: 2026-09-30 (by context-handoff, pre-`/compact` — after PR #1045 opened)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,16 +9,56 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml` — delete the fabricated-data Office routes; read its UPDATE block: remove the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`) |
-| **Last closed** | **080** ⚠️ `5d870b898` — every Office create is owned by a BU default Owner team, record-first, or refused `OFFICE_022`. Also fixed two security defects: `/api/v1/documents` body could set owner/id, and **#1038** (a save to a SECURE record landed in the shared container). Detail: `notes/080-record-ownership.md` §6 |
-| **Branch** | `work/spaarkeai-word-add-in-r1` — master (#1029) merged in at `26acc00e2`; 080 at `5d870b898`. Push after the publish-size note. **No open PR** — a new PR is needed to land this branch |
-| **Next Action** | `task-execute` **058**. Order stays **058 → 059 → 060 → 068 → 075**, then 079 → 090 (076 when the owner answers) |
+| **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml` — delete the fabricated-data Office routes; read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`) |
+| **Last closed** | **080** ⚠️ `5d870b898` (+ close `19c2db13a`). Every Office create is owned by a BU default Owner team, record-first, or refused with `OFFICE_022`. Full record: `notes/080-record-ownership.md` §6 (§6.11 is the review triage; §6.12 lists UAC-r2's corrections) |
+| **PR** | 🔒 **#1045** — `work/spaarkeai-word-add-in-r1` → master, opened 2026-09-30, CI was pending at handoff. **It is a SECURITY merge**: it fixes **#1038** (a secure-record Office save lands in the shared container) and **#1043** (`POST /api/v1/documents` lets a caller choose the owner team and id). **Both are LIVE on master and on `spaarke-bff-dev` (`2682e8225`).** |
+| **Branch** | `work/spaarkeai-word-add-in-r1` @ `1de0fe2f7`, pushed, tree clean. Master (#1029) merged in at `26acc00e2`; 0 behind master when the PR was opened |
+| **Next Action** | **1)** `gh pr checks 1045` — confirm `grep -c pending` is 0 and there is no Tier 1 failure. **2)** The OWNER decides **#1044** (below) before merge; do NOT merge on your own. **3)** Then `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers) |
+
+### 🔔 Owner decision BLOCKING the #1045 merge
+
+**#1044 — a regression introduced by 080: team-owned To Dos drop out of the Daily Briefing.** `DailyBriefingCollector`
+filters to-dos on `owninguser = caller` (`:1027`, `ScopeToOwner` `:430-432`). `sprk_todo` has no other user-typed "for
+whom" column (verified), so there is NO data-only guard. The options, in the issue:
+
+1. To Dos stay CALLER-owned (a personal-task exception to team ownership).
+2. Add a "for" user column that the briefing filters on — the likely long-term fix; it overlaps UAC-r2's "who is
+   notified" design.
+3. Accept the regression until that design lands.
+
+Also stated in the PR: saves filed to a SECURE project will likely FAIL until UAC-r2's C10 grants child-table
+privileges to "Secure Record Owner". This is inferred from the guide, untested, and fails closed.
 
 ### 080 — what the owner must do (not blocking 058)
 
-1. **Backfill** (owner runs it, by the owner's own instruction): `.\scripts\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -MaxWritesPerRun 5` → open a re-owned document as **Test User 1** → then the full run → run again for `sprk_todo`. Undo: `-RevertManifest <path printed> -Apply`. Dry run (2026-09-30): 31 documents + 10 To Dos would re-own; 376 unfiled documents stay in root.
-2. **Live verification after a deploy from master**: Test User 1 (the ONLY child-BU account) saves a document and reads it; 063 Run Index + 064 document-source To Do succeed. A root account cannot tell a working fix from a no-op.
-3. **Decisions filed**: #1034 (who adopts I-6 in ~20 other BFF writers), #1035 (work-assignment assignee + two non-existent columns), #1036 (playbook ownership), #1037 (picker Read vs save AppendTo), #1038 follow-up (check for Office content already in the shared container from secure-record saves).
+1. **Backfill** (the owner runs it, by the owner's own instruction): `.\scripts\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -MaxWritesPerRun 5` → open a re-owned document as **Test User 1** → then the full run → run again for `sprk_todo`. Undo: `-RevertManifest <path printed> -Apply`. Dry run: 31 documents + 10 To Dos would re-own; 376 unfiled documents stay in root.
+2. **Live verification after a deploy from master**: as Test User 1 (the ONLY child-BU account), save a document and read it back; confirm 063 Run Index and 064 document-source To Do succeed.
+3. **Filed**:
+   - #1034: ~20 other BFF writers
+   - #1035: work assignment
+   - #1036: playbooks
+   - #1037: picker Read vs AppendTo
+   - #1039–#1042: older deferrals, now filed
+   - #1043 / #1038: the security fixes in #1045
+   - #1044: the regression above
+
+### Session commits (after `6bf83c87c`)
+
+- `26acc00e2` merge master (#1029)
+- `5d870b898` 080 implementation
+- `19c2db13a` 080 close
+- `999d64d6d` #1038 blast radius
+- `4534039f8` deferrals filed (#1039–#1042)
+- `1de0fe2f7` corrections (#1043 IS on master; #1044)
+
+### ⚠️ Facts NOT to re-derive (added this session)
+
+| Fact | Where |
+|---|---|
+| The Office save accepts ONLY friendly types (`matter`, `project`…). Anything keyed on logical names must map through `DocumentAssociationMap.ToLogicalName` (the single alias table) | #1038; resolver |
+| `CreateDocumentRequest` is bound `[FromBody]` by `POST /api/v1/documents`; any property added to it is a wire field unless `[JsonIgnore]` | #1043 |
+| Test oid in the Office test hosts is `"test-user-oid"` (not a GUID); the Office test factories register `RecordOwnershipResolverDouble` (`factory.Ownership`) | `OfficeEndpointsContractTests.cs` |
+| The full BFF suite has one pre-existing wall-clock flake: `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort` (`Task.Delay`) | note §6.10 |
 
 ### 🔔 Waiting on the OWNER
 
@@ -43,13 +83,25 @@ Order: ~~080~~ ⚠️ done → **058 → 059 → 060 → 068 → 075**; 077/078 
 | **`TargetEntity` is never required** (no-record saves are required); **066 = option A via 080's team-ownership convention**; every add-in user holds ≥ `Spaarke Basic User` | owner decisions below; memory |
 | **UAC-r2 retracted the OfficeService.cs source-scan guards** (059 may move `QuerySearchEntityAsync` freely); the `CommunicationsEndpoints.cs` rule stands; new Office-route filters without "Authorization" in the name → `ExplicitlyCreditedFilterTypeNames` | UAC-r2 block below |
 
-### 📦 Session commits (after the `e6bc26df9` merge)
+### 📦 Earlier session commits (after the `e6bc26df9` merge, before `6bf83c87c`)
 
 `1ce8261a4` owner decisions 065/066 · `7b7688f5c` 077 (b)+(c) · `69803493c` 042 UAT round 2 · `73c858f28` 077 (a) records · `22f6ac55e` 077 review fix (paging race) · `06823f339` 077 notes · `89be27733` researcher memory · `9d9e54e41` 077 close · `450401be7` ADR-051 approved · `e2e50a965` 078 package · `6e590d012` 078 fix (gitignored `build/`) · `d17ac8152` 078 docs + 011 corrected · `34e105ed1` 078 review fix (NO permissions) · `eb166d4ad` 078 close + UAC-r2 findings · *(this handoff: POML updates for 058/059/060/076/079/080 + this block)*
 
 ### Critical context
 
-Every task that does not depend on #1029 or an owner answer is closed, through 078. What remains: the OfficeService backend track (gated on UAC-r2's #1029), 076 (gated on the owner's three answers), 079 and 090 (gated on those), plus owner-side actions (078's observed install, 042's UAT). No task is in progress; nothing is half-applied.
+UAC-r2's #1029 has merged, 080 is closed ⚠️, and the branch is up for merge as **PR #1045**, a security merge. What
+remains:
+
+- **The OfficeService track:** 058 → 059 → 060 → 068 → 075. Startable now; 058 is next.
+- **076:** gated on the owner's three answers.
+- **079 and 090:** follow the tasks above.
+- **Owner-side actions:**
+  - the #1044 decision, before #1045 merges
+  - 080's backfill `-Apply` and the live check as Test User 1
+  - 078's observed install
+  - 042's UAT
+
+No task is in progress, and nothing is half-applied.
 
 ---
 
