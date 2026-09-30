@@ -17,7 +17,7 @@
 |---|---|---|
 | Hosting tenant | Spaarke tenant | Customer tenant |
 | Dataverse environment | Dedicated, Spaarke Power Platform tenant | Dedicated, customer tenant |
-| Dataverse solutions | **Managed** (trial/sandbox may use unmanaged — special case, out of scope) | Managed |
+| Dataverse solutions | **Managed by default; unmanaged on explicit instruction** (D8) | Managed |
 | Azure subscription + RG | **Dedicated per customer**, Spaarke-owned + Spaarke-billed | Dedicated, customer-owned |
 | SPE container type | `Spaarke Model 1` (`standard` — **Spaarke pays**) | `Spaarke Model 2` (`directToCustomer`) |
 | SPE containers | Spaarke tenant (customer-tenant variant deferred — §6) | Customer tenant |
@@ -36,7 +36,7 @@ SPE container types + owning apps, Office add-in SWA + Teams app packages, and t
 | Area | Resource | Naming | Created by |
 |---|---|---|---|
 | Prereq (manual) | Azure subscription | operator-chosen (manual prereq, D4) | Operator |
-| Prereq (manual) | Dataverse environment | operator-chosen (manual prereq, D4) | Operator / H5 — see §5 Q1 |
+| Prereq (manual) | Dataverse environment | operator-chosen (manual prereq, D4) | Operator creates; H5 verifies/adopts (Q1 ✅) |
 | Entra | BFF app registration (D-13) | `Spaarke BFF - {CustomerName}` | H3 |
 | Entra | FIC on BFF app-reg | `spaarke-uami-trust` | H3 |
 | Entra | UAMI | `mi-spaarke-{customerId}-prod` | H2a |
