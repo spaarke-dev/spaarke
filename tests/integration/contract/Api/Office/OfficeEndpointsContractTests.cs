@@ -334,10 +334,19 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
     public async Task Post_OfficeCreateTodo_WithMissingName_Returns400()
     {
         // Arrange — a To Do with no name fails validation (OFFICE_007) BEFORE any create is attempted.
+        //
+        // ⚠️ NO regarding record, deliberately, and the omission is load-bearing since task 128
+        // (#1022) gated this route with AddEntityAccessFilter. Authorization now runs BEFORE shape
+        // validation, so a request naming a regarding record the caller cannot access is DENIED rather
+        // than told its payload is malformed — which is the correct order (an unauthorized caller
+        // should not learn whether their body was well-formed) and is pinned by
+        // Post_OfficeCreateTodo_WithInaccessibleRegardingRecord_IsDeniedBeforeValidation below.
+        //
+        // A to-do with no regarding record is a legitimate personal to-do: there is no pre-existing
+        // resource to authorize against, the filter passes through, and this test gets to exercise
+        // name validation in isolation, which is what it is for.
         var request = new CreateTodoRequest
         {
-            RegardingEntityType = "Matter",
-            RegardingRecordId = Guid.NewGuid(),
             PriorityScore = 50,
             EffortScore = 50
         };
@@ -347,6 +356,36 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WithInaccessibleRegardingRecord_IsDeniedBeforeValidation()
+    {
+        // task 128 / #1022. This route was the only live unauthorized WRITE on the Office surface: it
+        // attached an sprk_todo to a caller-named, pre-existing record with nothing checking access,
+        // through the app identity.
+        //
+        // The request body is ALSO invalid (no Name). That is the point: the response must be the
+        // authorization outcome, not the validation outcome. Returning 400 here would tell a caller
+        // who may not touch the record that their payload was malformed — a small oracle, and the
+        // wrong order.
+        var request = new CreateTodoRequest
+        {
+            RegardingEntityType = "Matter",
+            RegardingRecordId = Guid.NewGuid(), // a record this caller has no access to
+            PriorityScore = 50,
+            EffortScore = 50
+        };
+
+        var response = await _client.PostAsJsonAsync("/api/office/todo", request);
+
+        response.StatusCode.Should().NotBe(
+            HttpStatusCode.Created,
+            "a to-do must not be written against a record the caller cannot access");
+        response.StatusCode.Should().NotBe(
+            HttpStatusCode.BadRequest,
+            "authorization must be decided BEFORE shape validation, so an unauthorized caller does not "
+            + "learn whether their payload was well-formed");
     }
 
     [Fact]

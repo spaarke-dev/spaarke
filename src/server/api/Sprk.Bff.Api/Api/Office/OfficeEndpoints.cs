@@ -1208,7 +1208,16 @@ public static class OfficeEndpoints
 
         // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
         // (email-communication-intelligence-r2 #3). Regarding = the record the email was filed to.
-        // Authorization: OfficeAuthFilter validates user authentication.
+        // Authentication: OfficeAuthFilter (authentication ONLY — it reaches no resource).
+        // Authorization: AddEntityAccessFilter, on the REGARDING record (#1022 / task 128). Added
+        //   2026-09-29; before that this route was the only live unauthorized WRITE on the Office
+        //   surface — it attached a to-do to a caller-named pre-existing record with no per-record
+        //   check, through the app identity. `/save` above had carried this filter all along; this
+        //   route simply never got it.
+        //   NOTE the regarding pair is OPTIONAL: a to-do with no regarding record is a legitimate
+        //   personal to-do, and the filter passes through for it because there is genuinely nothing
+        //   to authorize against. Distinct from /quickcreate (Permanent waiver), which creates the
+        //   record itself and so has no pre-existing resource to check.
         // Rate Limit: reuses the QuickCreate category (both are low-frequency inline creates).
         group.MapPost("/todo", CreateTodoAsync)
             .WithName("OfficeCreateTodo")
@@ -1217,6 +1226,7 @@ public static class OfficeEndpoints
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter()
             .AddOfficeAuthFilter()
+            .AddEntityAccessFilter() // #1022 / task 128 — gate the REGARDING record
             .Accepts<CreateTodoRequest>("application/json")
             .Produces<CreateTodoResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)

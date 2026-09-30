@@ -531,8 +531,12 @@ public class RouteAuthorizationGuardTests
         // NINE Pending entries and ONE Permanent landed together, which is unusual enough to say why: this
         // is not nine new holes, it is one blind spot being opened. (This header said TEN until 2026-09-29
         // — a miscount in the very file whose job is to prevent drift, found by the task-126 audit.
-        // As of 2026-09-29, tasks 126 and 127 resolved FOUR of them — /search/entities and the three
-        // /communications reads — leaving FIVE Pending and FIVE Permanent.)
+        // As of 2026-09-29, tasks 126, 127 and 128 resolved FIVE of them — /search/entities, the three
+        // /communications reads, and POST /todo — leaving FOUR Pending and FIVE Permanent.
+        // POST /todo has NO waiver entry at all now: unlike the others it carries a real endpoint
+        // filter (.AddEntityAccessFilter), so Rule A credits it and no waiver is needed. That is the
+        // outcome to prefer — a waiver, even a Permanent one, is a note explaining why the mechanical
+        // check cannot see the control.)
         // Api/Office/* was never in GovernedFiles, so
         // the whole surface was classified "serves neither document nor Dataverse content" by omission —
         // and FilterMarker could not have recognised its gates even if it had been, because the Office
@@ -601,12 +605,6 @@ public class RouteAuthorizationGuardTests
         new Waiver("GET /api/office/recent", WaiverKind.Pending, "#1023",
             "Authentication filter only. Stub data today; the service's own TODO says 'Validate user still "
             + "has access to each item'. Same latent-until-implemented shape as /search/documents."),
-
-        new Waiver("POST /api/office/todo", WaiverKind.Pending, "#1022",
-            "Authentication filter only. Creates an sprk_todo against a caller-supplied REGARDING record "
-            + "with nothing verifying access to it. 🔴 Deliberately NOT waived Permanent alongside "
-            + "/quickcreate below: the regarding record ALREADY EXISTS, so there is a resource to "
-            + "authorize. /api/office/save shows the fix on this same surface (.AddEntityAccessFilter())."),
 
         new Waiver("POST /api/office/share/links", WaiverKind.Pending, "#1024",
             "Authentication filter only. Mints links for caller-supplied document ids; the per-document "
