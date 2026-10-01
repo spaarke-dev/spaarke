@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (#1052 merged; next 059)
+> **Last Updated**: 2026-10-01 (by context-handoff, pre-`/compact`; #1045, #1051 and #1052 merged; no open PR; next 059)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -15,6 +15,25 @@
 | **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + a merge-back + checkpoint commits, pushed |
 | **Next Action** | `task-execute` **059** (extract the search cluster into `OfficeSearchService`; read its UPDATE block). Order after it: 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141 (which waits on an owner answer about the trusted-tenant list) |
 
+### This session (2026-09-30 → 10-01), all committed and pushed
+
+| Item | Result |
+|---|---|
+| **#1045 merged** `38ad83962` | 080 + 077 + 078 + the security fixes #1038 / #1043 (both issues closed). The owner said to "take the most efficient path" |
+| **082 ⚠️ via #1051** `b8fc4dc3e` | The Secure Record Owner role covers the child tables. LIVE in dev: 36 → 40 privileges. Adds `config/secure-record-owner-role.json` (the ONE list, which UAC-r2's 145/146 read and extend), `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` (`-Verify`) and guide §5. #1046 closed |
+| **083 authored** (blocked) | The #1044 writer half: default `sprk_assignedto` to the caller's contact. It waits on UAC-r2 141 |
+| **058 ✅ via #1052** `76a9b0fa0` | The fabricated-data Office routes were deleted; `AssociationType` moved to `Models/Office/AssociationType.cs`. #1023 and #1024 closed; #229 commented (only the 060 job-status store remains there) |
+| Issues filed | #1046 (ISS-013) |
+
+**Critical context:**
+- `spaarke-bff-dev` still runs `2682e8225`, which is PRE-#1045, so #1038/#1043 stay live THERE until someone deploys
+  master. The owner defers deploys.
+- 080's owner actions (the backfill `-Apply`, the Test User 1 live checks) are still pending; see below.
+- The required check is only `Router`. Tier 2 "Full Unit Tests" is always CANCELLED at its 30-min cap, which is not a
+  failure. The legacy `Build & Test (Debug)` takes about 60 min.
+- Merge PRs with `gh pr merge N --merge` (a merge commit, as #960 was). NEVER use `--delete-branch`; the branch
+  continues.
+
 ### Coordination with UAC-r2 (2026-09-30, late)
 
 - Their task 130 (C8 finance IDOR, **#1053**) also edits `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`,
@@ -23,11 +42,12 @@
 - **083 is blocked on their 141**, which waits on an OWNER answer about the trusted-tenant list. They will send 141's
   link contract after it executes.
 
-### 🔔 Waiting on the OWNER (from 082)
+### 🔔 Waiting on the OWNER
 
 1. **The drift: 32 privileges on `Secure Record Owner` outside the list.** They are Create/Write/Delete/Assign/Share/Append/AppendTo on project, matter, work assignment and document, plus the SharePoint four at Global. Origin unrecorded; UAC-r2 did not add them, and nothing depends on them. **Recommendation: remove them** (guide §5.4, whose `$keep` now keeps the 8). Record the answer in `notes/082-secure-owner-role.md` §4.
 2. **NFR-05 clause 1 fails in dev on a PRE-EXISTING finding:** the hotmail `#EXT#` guest `Ralph Schroeder` in the root BU holds `Spaarke Basic User` Read on project and matter at a depth that reaches the Secure BU, so it can read secure records. UAC-r2 is taking it to their owner decision.
 3. **#1037 (option A, disabled with the reason)** is decided but **untasked**. The picker is ours; authoring it needs the owner's go (ISS-010).
+4. **The trusted-tenant list** (UAC-r2's question): it blocks their task 141 (the user↔contact link), which blocks our **083** (Office To Dos back in the Daily Briefing, #1044).
 
 ### Facts from 082 (do not re-derive)
 
@@ -36,7 +56,7 @@
 - UAC-r2's live NFR-05 census runs with `SPAARKE_NFR05_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com SPAARKE_NFR05_REQUIRED=true AZURE_TOKEN_CREDENTIALS=AzureCliCredential` (a plain DefaultAzureCredential reaches only EnvironmentCredential in this shell).
 - `scripts/check-task-status-drift.ps1` cannot parse this project's index (status is in its own column), so it reports ~79 "one-sided" tasks and 5 "`**`" disagreements (002/005/010/030/032, from the Risk-table rows). It is pre-existing, and the real status column agrees.
 
-### #1044: route DECIDED 2026-09-30 (owner, relayed by UAC-r2). Merging #1045 is the owner's call.
+### #1044: route DECIDED 2026-09-30 (owner, relayed by UAC-r2). #1045 is merged; the gap stays open until 083 + UAC-r2 141/152 land.
 
 The decision: use the EXISTING `sprk_todo.sprk_assignedto` (contact) plus Created By, with no new column.
 - **Our task 083:** the Office writer defaults `sprk_assignedto` to the caller's contact. Created By is the app user
