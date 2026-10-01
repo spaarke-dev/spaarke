@@ -497,7 +497,7 @@ layouts) or team-owned (then the checks must change). Per-user matches the check
 
 | Field | Value |
 |---|---|
-| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`, 2026-10-01): disabled with the reason, via the save's own evaluator. Open until the PR merges |
+| **Status** | **Done**: task 084 (`91e73b6fc`), merged in #1082 (`d68924b93`, 2026-10-01). Disabled with the reason, via the save's own evaluator. #1037 closed. The live pane check waits on the next deploy |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-30 |
 | **Source** | UAC-r2 post-merge message 2026-09-30 (`notes/uac-r2-findings-2026-09-30.md` §6 (e)) |
@@ -610,7 +610,7 @@ Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: 
 
 | Field | Value |
 |---|---|
-| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`): the ribbon sends `target.entityType`; regression test `Issue1075_QuickSaveLogicalNameTests`. Open until the PR merges |
+| **Status** | **Done**: task 084 (`91e73b6fc`), merged in #1082 (`d68924b93`, 2026-10-01). The ribbon sends `target.entityType`; regression test `Issue1075_QuickSaveLogicalNameTests`. #1075 closed |
 | **Urgency** | before task 078's unified package is installed (latent until then) |
 | **Filed** | 2026-10-01 |
 | **Source** | Research for task 084 (code reading; not yet reproduced by a test) |
@@ -636,7 +636,7 @@ because 084 also changes which predicted record the ribbon may auto-file to.
 
 | Field | Value |
 |---|---|
-| **Status** | **Our half FIXED on the branch** (task 085, `04158652e`): the invoice quick-create writes `sprk_name`, pinned by `Issue1079_InvoiceQuickCreateNameTests` (red before, green after). The live pane check waits on the next BFF deploy from master. **The issue stays OPEN** for the other owners' three sites below |
+| **Status** | **Our half DONE**, on master via #1082 (`d68924b93`) (task 085, `04158652e`): the invoice quick-create writes `sprk_name`, pinned by `Issue1079_InvoiceQuickCreateNameTests` (red before, green after). The live pane check waits on the next BFF deploy from master. **The issue stays OPEN** for the other owners' three sites below |
 | **Urgency** | now (LIVE: every invoice quick-create from the pane fails) |
 | **Filed** | 2026-10-01 |
 | **Source** | unified-access-control-r2 task-130 verifier; confirmed live here |
@@ -708,6 +708,40 @@ returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcre
 **Estimated effort**: (A) about an hour on the 082 tooling, plus probes.
 **Blockers**: the owner's decision.
 **Related**: #1045 (080), #1046 / ISS-013 (the same mechanism), #1079 / ISS-015 (where it was found).
+
+---
+
+## ISS-017 — Office job-row reads never worked in production, and 68% of saves had no job row
+
+| Field | Value |
+|---|---|
+| **Status** | **Fixed on the branch** by task 060 (`3511668f4` + `3fb75a1a4`): typed reads, the row as the durable record, metadata-only payload. Closes when the PR merges; a live restart check waits on the next deploy |
+| **Urgency** | now |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 060's investigation; confirmed in App Insights (`spe-insights-dev-67e2xz`, 60 days) |
+| **GitHub Issue** | [#1084](https://github.com/spaarke-dev/spaarke/issues/1084) |
+
+**Description**
+
+1. **The `dynamic` reads.**
+   - `IProcessingJobService`'s two reads return **anonymous types** (`internal` to `Spaarke.Dataverse`), which the
+     BFF reads through `dynamic`.
+   - The binder checks the call site's access, so every read throws (`RuntimeBinderException`, 2026-08-25, *"'object'
+     does not contain a definition for 'Status'"*), and the callers swallow it.
+   - **Concrete failure:** 039's idempotency check never detected a duplicate in production, and a job-status poll
+     that misses memory returns 404.
+   - The test double returns an `ExpandoObject`, so tests never saw it.
+2. **The payload overflow.**
+   - `sprk_payload` received the document/attachment base64 and the email body, and the column holds at most 50,000
+     characters.
+   - **40 saves, 13 rows, 27 refusals in 60 days.** Those saves ran with an in-memory-only job id, and every later
+     status write failed with "Does Not Exist" (75 + 104).
+
+**Entry-points**: `DataverseServiceClientImpl.GetProcessingJob*Async`; `OfficeService.GetJobStatusAsync` and the
+`payload` in `SaveAsync`; `OfficeDocumentPersistence.CheckForExistingJobAsync`.
+
+**Fix**: task 060, `notes/060-job-status-store-and-extraction.md` §2–§3.
+**Related**: #229 (stale TRACKED marker).
 
 ---
 

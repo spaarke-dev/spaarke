@@ -38,7 +38,7 @@ public class OfficeDocumentPersistenceDedupTests
         var canonical = Guid.NewGuid();
         var detector = DetectorReturning(new DedupDecision("hash1", IsDuplicate: true, CanonicalDocumentId: canonical));
         var docSvc = new Mock<IDocumentDataverseService>(MockBehavior.Strict); // strict → fails if ANY create/update happens
-        var sut = new OfficeDocumentPersistence(docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
+        var sut = new OfficeDocumentPersistence(docSvc.Object, detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
 
         var result = await sut.CreateDocumentWithSpePointersAsync(
             AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
@@ -62,7 +62,7 @@ public class OfficeDocumentPersistenceDedupTests
             .Callback<string, UpdateDocumentRequest, CancellationToken>((_, u, _) => update = u)
             .Returns(Task.CompletedTask);
 
-        var sut = new OfficeDocumentPersistence(docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
+        var sut = new OfficeDocumentPersistence(docSvc.Object, detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
 
         var result = await sut.CreateDocumentWithSpePointersAsync(
             AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
@@ -103,7 +103,7 @@ public class OfficeDocumentPersistenceDedupTests
             .Returns(Task.CompletedTask);
 
         var sut = new OfficeDocumentPersistence(
-            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            docSvc.Object, detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
 
         var request = new SaveRequest
@@ -150,7 +150,7 @@ public class OfficeDocumentPersistenceDedupTests
             .Returns(Task.CompletedTask);
 
         var sut = new OfficeDocumentPersistence(
-            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            docSvc.Object, detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
 
         var request = new SaveRequest
@@ -188,7 +188,7 @@ public class OfficeDocumentPersistenceDedupTests
         var generic = new Mock<IGenericEntityService>(MockBehavior.Strict); // strict → any sprk_document link call fails the test
 
         var sut = new OfficeDocumentPersistence(
-            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            docSvc.Object, detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
 
         var request = new SaveRequest

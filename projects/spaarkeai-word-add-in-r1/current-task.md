@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (084 + 085 closed; next: one PR for both, then task 060)
+> **Last Updated**: 2026-10-01 (context-handoff: 060 done, PR #1085 open, CI re-running on the checkpoint head; next: merge #1085, then task 068)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,13 +18,51 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: ship 084 + 085 as ONE PR, then task 060
+### 🔄 ACTIVE: ship PR #1085 (task 060), then task 068
 
 | Field | Value |
 |---|---|
-| **084** | ✅ CLOSED (`91e73b6fc`): suite 13,064/0/54, gates in `notes/084-pickable-equals-savable.md` |
-| **085** | ✅ CLOSED (`04158652e`, records committed after): suite **13,065/0/54 (+1 exact)**, ArchTests 337, publish **+30 B** vs 084 (master 47,666,117 → 084 47,671,242 → 085 47,671,272 B; 212 files every side; worktrees removed). #1079 commented (stays open for the 3 other-owner sites). `notes/085-invoice-quickcreate-name.md` |
-| **Next Action** | 1) Push; open ONE PR for **084 + 085** (template `scratchpad/pr-059-body.md`; facts in `notes/084-…md` §2–5 and `notes/085-…md`). 2) When `Router` passes and `grep -c pending` = 0: `gh pr merge N --merge` (NEVER `--delete-branch`); `git -C C:/code_files/spaarke pull --ff-only origin master`; fast-forward or merge `origin/master` into the branch. 3) Report to the owner. 4) Then task **060** via task-execute |
+| **PR** | **#1085** (task 060, #1084) open. All Tier 1 checks PASSED as of the checkpoint. A checkpoint commit was then pushed (notes only), so **CI re-runs on the new head**. Body: `scratchpad/pr-060-body.md` |
+| **Next Action** | 1) Wait until `gh pr checks 1085` shows `Router` = pass AND `grep -c pending` = 0 (Tier 2 "Full Unit Tests" is advisory and may CANCEL at 30 min; the legacy `Build & Test (Debug)` takes ~60 min). 2) `gh pr merge 1085 --merge` (**NEVER `--delete-branch`**). 3) `git -C C:/code_files/spaarke pull --ff-only origin master`; `git fetch origin && git merge --ff-only origin/master` in the worktree. 4) Close #1084 with a comment (fixed by #1085; live restart check after the next deploy); ISS-017 → Done in `notes/defer-issues.md`. 5) Report to the owner. 6) Start task **068** via `task-execute` (`tasks/068-durability-siblings-dispatcher-sequences.poml`) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `d68924b93` + 060 commits `3511668f4` (code), `3fb75a1a4` (review fix), `f50b875b2` (records), + this checkpoint |
+| **Next task** | **068**: the durability siblings 060 named. (a) `OfficeProfileDispatcher`'s fire-and-forget `Task.Run`, lost on restart; deleting it drops `OfficeService`'s three optional ctor params (**19 → 16**). (b) `JobStatusService._jobSequences`, in-memory pub/sub sequence counters |
+
+### ✅ DONE 2026-10-01: task 060 (#1084 / ISS-017)
+
+- **What it found** (App Insights `spe-insights-dev-67e2xz`):
+  - Both Dataverse job reads returned ANONYMOUS types read through `dynamic`. That throws across assemblies
+    (`RuntimeBinderException`, 2026-08-25), so **the 039 idempotency check never worked live** and a job poll that
+    missed memory returned 404.
+  - **40 saves / 13 job rows / 27 `sprk_payload` > 50,000 refusals** in 60 days: the content base64 was in the payload.
+  - The pane hung on Completed-without-document, and its SSE handler used the wrong event names.
+- **Decision (written before code)**: the store is the `sprk_processingjob` row.
+  - The save's own view is kept in `sprk_result`; the workers never write it.
+  - Typed `ProcessingJobRecord` reads.
+  - ONE effective-state rule (`OfficeJobStatusService.ToEffectiveView`) for the status read AND the idempotency check,
+    with a 5-minute abandoned rule.
+  - Payload = metadata only; a create failure → `OFFICE_014`, a retryable 502, before any write.
+- **Built**: new `Services/Office/OfficeJobStatusService.cs` (stream moved verbatim); `OfficeService` ctor 20 → 19 and
+  `_jobStore` gone; the dead `Workers/Office` stub deleted; the pane always reaches an outcome, applied once.
+- **Gates**: suite **13,058/0/54** (exact); ArchTests 337; jest 62/816; lint 0; tsc 68 (0 prod); publish **+338 B**
+  (212 = 212); seeds caught 11 / 3 / 1 / 1.
+- **Records**: `notes/060-job-status-store-and-extraction.md` (§1 findings, §2 decision, §6 reds, §9 gates); POML
+  completed (with `<ui-tests>` for the live restart check); TASK-INDEX ✅; portfolio #945 = 70 done.
+- **UAC-r2 told**; they confirmed **no action** on their side (their #1083 overlaps only in different hunks of
+  `OfficeEndpointsContractTests.cs`; #1083 is a draft).
+- **App Insights recipe** (for the next investigation):
+  - get the appId with `az monitor app-insights component show -a spe-insights-dev-67e2xz -g spe-infrastructure-westus2 --query appId`;
+  - query through REST `POST https://api.applicationinsights.io/v1/apps/{appId}/query` with a token for `https://api.applicationinsights.io`;
+  - NOT `az monitor app-insights query`: Windows quoting mangles KQL;
+  - `first`, `last` and `kind` are KQL reserved words.
+
+### ✅ Shipped 2026-10-01: #1082 merged as `d68924b93` (tasks 084 + 085)
+
+- **084** (`91e73b6fc`): pickable equals savable. #1037 closed; #1075 closed.
+- **085** (`04158652e`): the invoice quick-create writes `sprk_name`. #1079 stays open for the 3 other-owner sites.
+- Suite 13,065/0/54; ArchTests 337. Publish: master 47,666,117 → 47,671,272 B (+5,155 B; 085 +30 B).
+- CI: `Router` passed, 0 pending. Tier 2 Full Unit Tests was cancelled at its 30-minute cap (advisory).
+- Real-Dataverse probe done for 085. Records: `notes/084-…md`, `notes/085-invoice-quickcreate-name.md`.
+- Portfolio #945 synced: 86 tasks, 69 ✅, Active / In progress.
 
 **Critical context:**
 - 🔔 **NEW, owner decision, BEFORE the next BFF deploy from master: ISS-016 / #1081.**
@@ -33,6 +71,10 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
     unfiled save, the quick-creates and To Do: a 5xx, not `OFFICE_022`.
   - Found by 085's live probe. Recommendation: (A) a minimal Read-only owner role on the root team, as 082 did.
     Do NOT change role config without the owner's go.
+  - **UAC-r2 depends on the decision** (their 130 confirmed-invoice create and 146 child writers both go through
+    our resolver; they will NOT fork a fix). **Message them when the owner decides.** If it becomes a resolver
+    behaviour change (e.g. a new refusal code instead of a propagated fault), they will map it to a clean 4xx on
+    130's route.
 - **Open for the owner (084 + 085):** the live checks (no deploy; the owner defers deploys), and 084's latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
 - **UAC-r2 coordination (2026-10-01):** their task 151 replaces `ISecurableEntityRegistry.IsSecurableAsync` / `IsKnownEntityAsync` with `ClassifyEntityAsync` → `EntitySecurability`. No doubles or callers on our branch; they already migrated the two doubles in `OfficeEndpointsContractTests.cs` (on master). Their task 130 edits `CallerRecordAccessProbe.cs` (`CallerHoldsPrivilegeAsync`), and so did our 084 (three members `protected virtual`, plus `GetCallerRightsForRecordsAsync`), so **expect a small overlap there. Whoever lands second rebases.**
 - **#1076 (059) merged** as `c08ef6013`.
@@ -41,7 +83,7 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 
 | Field | Value |
 |---|---|
-| **After 085** | Next task: 060 → 068 (deletes the profile dispatcher: ctor 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
+| **After 060** | Next task: 068 (deletes the profile dispatcher: ctor 19 → 16) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 

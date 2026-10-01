@@ -121,12 +121,12 @@ Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'
 
 ## BFF surface (`/api/office/*`)
 
-Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`. The logic is in `Services/Office/OfficeService.cs` (save, job status, quick-create, To Do) and `Services/Office/OfficeSearchService.cs` (every Dataverse READ the add-in makes: entity search, matter types, the To Do's record-type lookup, and per-record filing access; extracted by task 059). As-built routes:
+Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`. The logic is in `Services/Office/OfficeService.cs` (save, quick-create, To Do), `Services/Office/OfficeSearchService.cs` (every Dataverse READ the add-in makes: entity search, matter types, the To Do's record-type lookup, and per-record filing access; extracted by task 059) and `Services/Office/OfficeJobStatusService.cs` (the save's job record and its SSE stream; task 060). As-built routes:
 
 | Method + route | Purpose |
 |---|---|
 | `POST /api/office/save` (+ `/save-debug`) | Save the current email/document → queues async processing, returns a job id |
-| `GET /api/office/{jobId}` · `GET /api/office/{jobId}/stream` | Job status (poll + **SSE** progress) |
+| `GET /api/office/jobs/{jobId}` · `GET /api/office/jobs/{jobId}/stream` | Job status (poll + **SSE** progress). Read from the job's `sprk_processingjob` row, so every instance and a restarted one answer the same. The save's own view of its job is kept in `sprk_result`, because the finalization workers rewrite the row's status columns afterwards (task 060, #1084) |
 | `GET /api/office/search/entities` | Entity search (Matter/Project/Invoice/Contact) — powers RelatedToPicker + Contact assignee. Impersonated as the caller, so only records they can read are returned (task 062). **`access=file`** (Save picker only) adds a per-row **`canFile`**: whether the save would accept the row (task 084). One OBO exchange and one `WhoAmI` per request, then one `RetrievePrincipalAccess` per row, at most 4 at once and at most 50 rows. Without it, `canFile` is absent and the route costs what it did |
 | `GET /api/office/documents` | Document lookups (`/api/office/recent`, `/share/*` and `/search/documents` were deleted 2026-09-30 by spaarkeai-word-add-in-r1 task 058: fabricated data, no client) |
 | `POST /api/office/quickcreate/{entityType}` | Inline "create new record" for filing |
