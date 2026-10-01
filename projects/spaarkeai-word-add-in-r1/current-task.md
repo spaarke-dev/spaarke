@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (context-handoff, mid-085; 084 closed; 085 fix committed locally `04158652e`, not pushed; no PR open)
+> **Last Updated**: 2026-10-01 (084 + 085 closed; next: one PR for both, then task 060)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,20 +18,24 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: task 085 (#1079 our half), Step 3 of 4. FULL · sonnet@high (run on Opus)
+### 🔄 ACTIVE: ship 084 + 085 as ONE PR, then task 060
 
 | Field | Value |
 |---|---|
-| **Task** | 085: the invoice quick-create writes the non-existent `sprk_invoicename` (`tasks/085-invoice-quickcreate-name-column.poml`) |
-| **Done** | Live metadata re-checked: `sprk_invoice.PrimaryNameAttribute = sprk_name`. Regression test `tests/integration/regression/Issue1079_InvoiceQuickCreateNameTests.cs` **FAILED before the fix** ("Expected … sprk_name … but found <null>"). Fix `OfficeService.cs:1916` → `entity["sprk_name"]`. After the fix: Issue1079 + OfficeQuickCreate* **34/0/3**. Committed **`04158652e`** (local, NOT pushed) |
-| **Branch** | Local `HEAD` = `04158652e`; origin = `4466c4664` (master `c08ef6013` + 084 `91e73b6fc` + 084 records). **No PR open yet** for 084 or 085 |
-| **Next Action** | 1) Full suite (expect **13,065**/0/54 = 084's 13,064 + 1) + ArchTests 337. 2) Publish size: copy `scratchpad/publish-084.ps1`, set `Ref` to the new HEAD and paths `C:\tmp\w085m`/`w085b` (master `c08ef6013`); remove the worktrees afterwards. 3) Gates: a one-line change, so code review and ADR check are trivial; record them. 4) Write `notes/085-invoice-quickcreate-name.md`; POML 085 → completed + status-note; TASK-INDEX 085 → ✅; defer-issues ISS-015 status = our half fixed (`04158652e`); `gh issue comment 1079` (ours fixed; `DataverseIndexSyncService.cs:52-55` + 2 scripts still open, other owners). 5) Push; open ONE PR for **084 + 085** (body: `scratchpad/pr-059-body.md` is the template; 084 facts are in `notes/084-…md` §2–5). 6) When `Router` passes and nothing is pending: `gh pr merge N --merge` (NEVER `--delete-branch`); `git -C C:/code_files/spaarke pull --ff-only origin master`; fast-forward or merge `origin/master` into the branch. 7) Report to the owner |
+| **084** | ✅ CLOSED (`91e73b6fc`): suite 13,064/0/54, gates in `notes/084-pickable-equals-savable.md` |
+| **085** | ✅ CLOSED (`04158652e`, records committed after): suite **13,065/0/54 (+1 exact)**, ArchTests 337, publish **+30 B** vs 084 (master 47,666,117 → 084 47,671,242 → 085 47,671,272 B; 212 files every side; worktrees removed). #1079 commented (stays open for the 3 other-owner sites). `notes/085-invoice-quickcreate-name.md` |
+| **Next Action** | 1) Push; open ONE PR for **084 + 085** (template `scratchpad/pr-059-body.md`; facts in `notes/084-…md` §2–5 and `notes/085-…md`). 2) When `Router` passes and `grep -c pending` = 0: `gh pr merge N --merge` (NEVER `--delete-branch`); `git -C C:/code_files/spaarke pull --ff-only origin master`; fast-forward or merge `origin/master` into the branch. 3) Report to the owner. 4) Then task **060** via task-execute |
 
 **Critical context:**
-- **084 is CLOSED** ✅ (`91e73b6fc`): suite 13,064/0/54, publish +5,043 B, gates recorded in `notes/084-pickable-equals-savable.md`.
-- **084's open items for the owner:** the live check, and latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
+- 🔔 **NEW, owner decision, BEFORE the next BFF deploy from master: ISS-016 / #1081.**
+  - The root BU's default team ("Spaarke") has **0 privileges**, so Dataverse refuses to let it own anything.
+  - 080 (on master) gives it ownership for root-BU callers. That affects **9 people, including the owner**, on the
+    unfiled save, the quick-creates and To Do: a 5xx, not `OFFICE_022`.
+  - Found by 085's live probe. Recommendation: (A) a minimal Read-only owner role on the root team, as 082 did.
+    Do NOT change role config without the owner's go.
+- **Open for the owner (084 + 085):** the live checks (no deploy; the owner defers deploys), and 084's latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
+- **UAC-r2 coordination (2026-10-01):** their task 151 replaces `ISecurableEntityRegistry.IsSecurableAsync` / `IsKnownEntityAsync` with `ClassifyEntityAsync` → `EntitySecurability`. No doubles or callers on our branch; they already migrated the two doubles in `OfficeEndpointsContractTests.cs` (on master). Their task 130 edits `CallerRecordAccessProbe.cs` (`CallerHoldsPrivilegeAsync`), and so did our 084 (three members `protected virtual`, plus `GetCallerRightsForRecordsAsync`), so **expect a small overlap there. Whoever lands second rebases.**
 - **#1076 (059) merged** as `c08ef6013`.
-- UAC-r2 knows about #1079 and about our one-line `EntityAccessFilter` change (their task-151 worktree edits the same file at a different spot).
 
 **Found this session:** #1079 (ISS-015). `sprk_invoice` has no `sprk_invoicename`. Our half is task 085; `DataverseIndexSyncService.cs:52-55` and two scripts belong to others.
 

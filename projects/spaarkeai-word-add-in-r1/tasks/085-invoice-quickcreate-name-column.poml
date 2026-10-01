@@ -3,7 +3,8 @@
   <metadata>
     <title>The Office invoice quick-create writes a column that does not exist (sprk_invoicename), so it always fails (#1079, our half)</title>
     <phase>5 Remediation — write path</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-01, `04158652e`. Live metadata re-read first: `sprk_invoice.PrimaryNameAttribute = sprk_name`, no `sprk_invoicename` (escalation not fired). The Invoice branch of `QuickCreateAsync` now writes `sprk_name`. `Issue1079_InvoiceQuickCreateNameTests` FAILED before the fix ("found &lt;null&gt;") and passes after; `Issue1079` + `OfficeQuickCreate*` 34/0/3 (Matter/Project unmodified). Review re-checked every non-`None` required attribute: `sprk_regardingrecordtype` / `sprk_extractionstatus` are only ApplicationRequired, so name + owner is a valid API create. Suite 13,065/0/54 (+1 exact); ArchTests 337; publish +30 B vs 084 (212 = 212 = 212); no package change. Real-Dataverse probe: the old set was refused with 400; the new set, owned by the BU1 team, got 204, was read back and deleted. It also found ISS-016 / #1081: the root BU default team has 0 privileges, so the root-team owner check refuses (owner decision; not an 085 defect). Open, stated: the live pane check waits on the next BFF deploy from master (as Test User 1). #1079 stays open for the other owners' 3 sites. Record: `notes/085-invoice-quickcreate-name.md`.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `OfficeService.cs` (bff-api) and adds a regression test under `tests/**`.</rigor-reason>
     <model-tier>sonnet</model-tier>
