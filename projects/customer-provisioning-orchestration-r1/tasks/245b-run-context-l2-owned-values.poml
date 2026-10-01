@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="245b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Run context, part 2 (G25) — values L2 owns: artifact versions computed from the artifacts used, SPE owner-certificate vault + secret name as validated options, H9 publishes the BFF URL + build id, H13/H14 read them</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T245 (G25, notes/run-context-dataflow-gap.md)</phase>
+    <gate>blocked — T245a</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production .cs (H0 probe, H2a, H2b, H4, H4b, H8, H9, H13, H14, T6 probe, options, DAG) and their tests; root §8 test-modifying override applies.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change to idempotency keys of four handlers plus options + DAG; idempotency-key changes affect resume semantics (high blast radius).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shares HandlerRunInputs / RunContextContractTests / InterStepState / DagAdvancer with T245a, T245c, T238 (sequential by design)</parallel-reason>
+    <deps>245a</deps>
+    <tags>provisioning, l2-controlplane, provisioning-handler, config, testing, customer-provisioning</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the T245a known gaps owned by L2 itself: compute `bicepVer`, `indexVer` and `secretsVer` from the artifact each
+    handler actually uses instead of requiring them as run parameters; make the SPE owner-certificate vault and secret
+    name one validated L2 option used by H0, H8 and the T6 probe; have H9 write the BFF URL and deployed build id to
+    `InterStepState` for H13 and H14; move H13's registry URL and scripts directory to options.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane. Follow ADRs strictly. Expert in C#/.NET 10
+    options validation (ValidateOnStart), content hashing, and idempotent handler design.
+  </role>
+
+  <goal>
+    After this task: (1) no run parameter named `bicepVer`, `indexVer` or `secretsVer` is read — each handler derives its
+    idempotency version from the content of the artifact it deploys/applies (same artifact ⇒ same version); (2) H0's
+    certificate probe, H8 and the T6 probe read the SPE owner-certificate vault + secret name from one options type
+    validated at Worker startup, and the H0/H8 secret-name mismatch (`spe-owner-cert-pfx` vs `SPE-OwnerCert-Pfx`) is
+    resolved to the name that exists; (3) H9 writes `BffApiUrl` and `BffBuildId` to `InterStepState` and H13/H14 read
+    them, with H14 ← H9 in the DAG; (4) every T245b known gap in `RunContextContractTests` is gone.
+  </goal>
+
+  <context>
+    <background>
+      Evidence: notes/run-context-dataflow-gap.md. The three versions are idempotency-key components documented as
+      content hashes (H2a: git SHA of infrastructure/bicep, `H2a:74-80,270-276`; H2b: hash of the schema JSONs in
+      scripts/ai-search, `H2b:89-90,246-250`; H4/H4b: manifest content hash, `H4:84-85,163`) but computed nowhere. H12a
+      already hashes its own manifest (`FileSeedManifestReader.cs:65`) — the reference implementation. The H0 probe
+      targets the Spaarke platform vault (`KeyVaultCertBootstrapProbe.cs:30-33,55,92`) via run parameter `keyVaultName`;
+      H8 reads `keyVaultName` + optional `speCertSecretName` (`H8:112-115`, default `SpeContainerOptions.DefaultCertSecretName`
+      = `SPE-OwnerCert-Pfx`); the H0 probe checks `spe-owner-cert-pfx` — Key Vault names ignore case but not hyphens, so
+      these are different secrets. H13 requires `buildId` + `bffApiUrl` (`H13:133-136,255-261`); H9 resolves the build
+      from `latest.json` when `buildId` is absent (`H9:191-199`); H14 requires `webhookNotificationBaseUrl` = the BFF base
+      URL (`H14:107`). H13 ← H14 ← H12c and nothing depends on H9 (`DagAdvancer.cs:140-163`), so today H13/H14 can run
+      before the BFF is deployed.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/{H2aBicepInfraDeployHandler,ArmDeploymentRunner}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/KeyVaultCertBootstrapProbe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/{H8SpeContainerHandler,SpeContainerOptions}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/{T6SpeConfidentialClientTrapProbe,H13E2EAcceptanceGateHandler,H13AcceptanceOptions}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/H9BffDeployHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/H14IntegrationWiringHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/InterStepState.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/{DagAdvancer,HandlerRunInputs}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (options binding) + Worker App Service config in infrastructure/bicep (controlplane worker module) if the option needs a value there</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/ — tests of the files above + RunContextContractTests</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project — idempotency semantics (BINDING)">
+      Each computed version is a deterministic hash of the exact bytes the handler deploys/applies in this run (template
+      JSON for H2a, the index schema set for H2b, the embedded manifest for H4/H4b). The idempotency-key format strings
+      (`infra-…`, `aisearch-…`, `kv-…`, `appsettings-…`) stay unchanged. A run resumed with the same artifacts produces
+      the same key.
+    </constraint>
+    <constraint source="ADR-028 / KV credential lifecycle (BINDING)">
+      Read-only checks only against live Key Vaults (secret-name existence via the operator's own identity, NFR-11). No
+      secret is created, renamed, copied or deleted. Never touch `BFF-API-ClientSecret` (either casing),
+      `Dataverse-ClientSecret`, the soft-deleted rollback copies, or E-1 secrets.
+    </constraint>
+    <constraint source="ADR-010 / config constraints">
+      The SPE owner-certificate setting extends the existing `SpeContainerOptions` (no new options type unless H0's
+      options cannot reference it); required values validate at startup (ValidateOnStart), not at first use.
+    </constraint>
+    <constraint source="project — scope">
+      No change to `Sprk.Bff.Api`. T245c scope (H11 users, H14 Exchange group + Graph resources) is out of scope.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md</file>
+      <file>.claude/patterns/provisioning/run-context-contract.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/FileSeedManifestReader.cs (hash reference)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">For H2a, H2b, H4, H4b: locate the artifact each one uses (template source, schema files, embedded manifest) and replace the `bicepVer`/`indexVer`/`secretsVer` parameter read with a hash of those bytes (shared helper if two handlers hash the same artifact). Keep rejection codes for "artifact unreadable".</step>
+    <step order="2">Find which SPE owner-certificate secret name exists in the platform vault(s) the probes target (read-only `az keyvault secret list --query [].name` under the operator identity) and record it; make `SpeContainerOptions` carry the vault name + secret name (validated at startup); H0's probe, H8 and the T6 probe read them; drop the `keyVaultName` / `speCertSecretName` run parameters for this purpose.</step>
+    <step order="3">H9: write `InterStepState.BffApiUrl` (production slot URL of the deployed App Service) and `InterStepState.BffBuildId` (the build it deployed) with `[ProducedBy(H9)]`; H13 reads both from InterStepState; H14 reads `BffApiUrl` for its webhook base URL. DAG: H14 ← {H12c, H9}.</step>
+    <step order="4">H13 `registryDataverseUrl` / `provisioningScriptsDirectory` → `H13AcceptanceOptions` (validated, with the current defaults).</step>
+    <step order="5">Remove the T245b entries from the pinned known-gap list; declare the new inputs in HandlerRunInputs; run RunContextContractTests.</step>
+    <step order="6">Tests, build, docs (constraints/pattern pointer if the contract wording changes, design.md §6.2 keys, gap note §5), TASK-INDEX `✅ [done]`, POML status.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If neither SPE owner-certificate secret name exists in the platform vault, or both exist with different values, STOP and escalate (do not create or copy a secret).</trigger>
+    <trigger>If H2a's template source is not a single deterministic artifact (e.g. chosen per run by an operator), STOP and escalate — the version may be a release-selection decision, not a hash.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>H12a's FileSeedManifestReader already hashes its manifest (FileSeedManifestReader.cs:65); SpeContainerOptions exists (SpeContainerOptions.cs:24); H13AcceptanceOptions exists.</existing>
+    <extension>Yes — extend SpeContainerOptions and H13AcceptanceOptions and add two InterStepState properties; the only possible new code is a shared content-hash helper if two handlers hash the same artifact.</extension>
+    <cost-of-doing-nothing>Every run fails at H0 (cert vault), H2a (bicepVer), H2b (indexVer), H4/H4b (secretsVer) and H13 (buildId/bffApiUrl); H13/H14 can run before the BFF exists; H0 checks a different certificate secret than H8 uses.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">modified handler / options / DAG files listed above</output>
+    <output type="test">updated tests for each modified handler + RunContextContractTests known-gap list</output>
+    <output type="docs">notes/run-context-dataflow-gap.md §5, design.md §6.2</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">H2a, H2b, H4 and H4b succeed with no bicepVer/indexVer/secretsVer run parameter; the same artifact bytes give the same idempotency key across two runs; changed bytes give a different key.</criterion>
+    <criterion testable="true">The Worker fails startup when the SPE owner-certificate vault or secret name option is blank; H0's probe and H8 use the same configured secret name; the H0/H8 mismatch is gone.</criterion>
+    <criterion testable="true">After H9 succeeds, InterStepState has BffApiUrl and BffBuildId; H13 and H14 read them; H14 is not ready until H9 has completed.</criterion>
+    <criterion testable="true">The pinned known-gap list contains only T245c entries; RunContextContractTests pass.</criterion>
+    <criterion testable="true">Build 0/0; no new ControlPlane.Tests failures beyond the T221 baseline; ArchTests pass. Test scope: the behaviours above (determinism + change detection per version, startup validation, H9 outputs + H14 readiness). Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

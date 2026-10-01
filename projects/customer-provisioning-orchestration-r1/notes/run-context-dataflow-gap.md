@@ -64,6 +64,17 @@ those names exist only in Bicep (`customer.bicep:174,571`).
 - **InterStepState with no writer**: `ContainerTypeId` (doc says H10 writes it; nothing does — H13 falls back to
   NonSecret), `SpeConsentCorrelationId`, `S2SAppRegId`. `FicPendingPostAppServiceVerification` is written by H3 and
   read by nothing (the "H13 must discharge it" contract is not implemented).
+- **Second channel, same defect — `run.Parameters.Secrets` (H3 ↔ H4 deadlock)** (found 2026-10-01 while filing
+  T245a). H4's manifest resolver reads `KeyVaultSecretRef`s from `run.Parameters.Secrets` for `TenantId`,
+  `BFF-API-ClientId`, `BFF-API-Audience` (`from-run-parameter`) and `BFF-API-ClientSecret` (`from-existing-kv`;
+  omitted when secret-free) (`KvSecretValueResolver.cs:231-250`, `manifest.yaml:126-235`). The only writer is H3, on
+  consent-verified success (`H3EntraAppRegHandler.cs:653-659`) — and H3 depends on H4 (`DagAdvancer.cs:150`), so H4
+  fails on every real run and a resume cannot unblock it. H3 already commits ClientId/Audience to the customer vault
+  itself (`GraphAppRegistrationProvisioner.cs:223-227`); nothing supplies a `TenantId` ref at all (tenantId is a
+  non-secret intake value). Fixed in T245a step 6b.
+- H3 still builds a `BffClientSecretKvUri` reference and requires it non-blank even when the stamp is secret-free and
+  no secret is written (`GraphAppRegistrationProvisioner.cs:233-242`, `H3:316`) — harmless today (only parsed for the
+  vault name), but the reference names a secret that does not exist; revisit with G21 (secret-free default, T225b).
 - H2a's globally-namespaced name check builds the Service Bus name `sprk-{id}-{env}-sb` (`H2a:647-665`), but
   `customer.bicep:177` names it `spaarke-{id}-{env}-sbus`.
 
