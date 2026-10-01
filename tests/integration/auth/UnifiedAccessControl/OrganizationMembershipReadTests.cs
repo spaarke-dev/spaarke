@@ -185,7 +185,8 @@ public class OrganizationMembershipReadTests
 
     /// <summary>
     /// The junction <c>$filter</c> defines the WALL set, so it must carry no date term at either end.
-    /// <c>ExternalAccessQueryIntegrityGuardTests</c> pins that the call site uses this builder.
+    /// <c>ExternalAccessQueryIntegrityGuardTests</c> pins that the call site uses this builder, and
+    /// <see cref="AssertEveryJunctionReadSentExactlyTheWallFilter"/> that the request sends it unaltered.
     /// </summary>
     [Fact]
     public void BuildOrganizationMembershipFilter_IsStatecodeOnly_WithNoDateTerm()
@@ -290,6 +291,11 @@ public class OrganizationMembershipReadTests
         denyList.SubjectOrganizationsSeen.Should().BeEquivalentTo(
             new[] { OrgCurrent, OrgEnded, OrgNotStarted, OrgInactive },
             "the veto is handed the WALL set — every statecode-active membership");
+
+        // …and the SERVER-side half of the same claim. This test server does not evaluate OData, so a date
+        // term added to the junction $filter at the call site would date-bound the wall in production while
+        // every assertion above stayed green.
+        AssertEveryJunctionReadSentExactlyTheWallFilter(dataverse);
     }
 
     /// <summary>
@@ -340,6 +346,85 @@ public class OrganizationMembershipReadTests
             "the org-grant term must not even ask for org grants when memberships are unreadable — a fault must not grant");
         standing.Verify(s => s.ReadForOrganizationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "the org-expansion term must contribute nothing on a faulted read");
+    }
+
+    /// <summary>
+    /// The path that PRE-DATES ISS-019 still denies: when the REAL junction entry cannot acquire its token or
+    /// its API url, every queried candidate is denied. Task 109's new fault reporting must not have weakened it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the real entry.</b> Every other test of this path overrides
+    /// <c>ReadOrganizationMembershipsAsync</c> with a double that THROWS, so only the evaluator's catch is
+    /// pinned. A try/catch added INSIDE the real entry that maps the acquisition fault to
+    /// <see cref="ActiveOrgMemberships.None"/> — "belongs to no organization", ISS-019's exact shape — passed
+    /// every one of them (verifier finding, 2026-10-01). That is the blind spot this file's header names: a
+    /// double that throws where production does not.</para>
+    /// <para><b>Why the fault is CONFINED to the entry's acquisition.</b> The flag read and the
+    /// org-reference read share the same token and API url, and each fails closed on its own; on a grant-set
+    /// cache miss the grant read would fail to an empty set too. A fault that struck every read would
+    /// therefore deny everything whatever the junction entry did, and the test would pass under the very
+    /// weakening it exists to catch. So the grant set is served from the production cache, the fault is armed
+    /// for ONE acquisition, and the preconditions below prove both that it struck the junction entry and that
+    /// the later reads acquired normally.</para>
+    /// </remarks>
+    [Theory]
+    [InlineData("token")]
+    [InlineData("api-url")]
+    public async Task ComposeAsync_JunctionEntryCannotAcquireItsTokenOrApiUrl_DeniesEveryCandidate(string fault)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var cache = new TenantCache(
+            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            NullLogger<TenantCache>.Instance);
+
+        // "token": tokens live under the service's 5-minute refresh margin, so it never caches one and the
+        // junction entry's acquisition really reaches the credential. "api-url": a long-lived token, cached by
+        // the control, so the junction entry's ONLY configuration read is GetDataverseApiUrl's.
+        var credential = new ArmableTokenCredential(fault == "token" ? TimeSpan.FromMinutes(1) : TimeSpan.FromHours(1));
+        var serviceUrl = new ArmableServiceUrl();
+        var denyList = new OrgKeyedDenyList();
+        var sut = RealEvaluator(
+            RealParticipationService(dataverse, cache: cache, credential: credential, serviceUrl: serviceUrl),
+            denyList,
+            StandingReader().Object);
+
+        // Control: healthy, keeps its access — and warms the grant-set cache, so the candidates below exist
+        // whatever the junction entry does.
+        var healthy = await sut.ComposeAsync(ContactPrincipal(), AccessibleRecordSetService.ProjectEntity, CancellationToken.None);
+        healthy.Contains(DirectProject).Should().BeTrue("control: a healthy entry leaves the direct grant standing");
+        healthy.Contains(CurrentOrgProject).Should().BeTrue("control: and the org grant through a current membership");
+
+        dataverse.ClearRequests();
+        denyList.Calls = 0;
+        if (fault == "token")
+        {
+            credential.FailNextRequest = true;
+        }
+        else
+        {
+            serviceUrl.FailNextRead = true;
+        }
+
+        var faulted = await sut.ComposeAsync(ContactPrincipal(), AccessibleRecordSetService.ProjectEntity, CancellationToken.None);
+
+        // Preconditions — the fault struck the junction entry's acquisition, and nothing else.
+        (fault == "token" ? credential.Failures : serviceUrl.Failures).Should().Be(1,
+            "precondition: the armed acquisition fault fired exactly once");
+        dataverse.Requests.Should().NotContain(r => r.Collection == "sprk_externalrecordaccesses",
+            "precondition: the grant set came from the cache, so its candidates exist independently of the fault");
+        dataverse.Requests.Should().NotContain(r => r.Collection == "sprk_contactorganizations",
+            "precondition: the fault struck BEFORE the junction query was sent — acquisition, not the query (the " +
+            "query-fault path is ISS-019's, pinned above)");
+        dataverse.Requests.Should().Contain(r => r.Collection == "sprk_projects",
+            "precondition: the later flag read acquired its token and url normally and was sent — nothing but the " +
+            "junction entry failed, so no other read's fail-closed can deny on this test's behalf");
+
+        faulted.RecordIds.Should().BeEmpty(
+            $"a junction entry that cannot acquire its {fault} must deny EVERY queried candidate — the direct grant " +
+            "included — rather than reading as 'belongs to no organization'");
+        denyList.Calls.Should().Be(0,
+            "the veto is decided by the Unreadable outcome before the deny list is even consulted");
     }
 
     /// <summary>
@@ -406,6 +491,7 @@ public class OrganizationMembershipReadTests
         junctionReads.Should().ContainSingle("ONE junction read per resolution — a second would re-open the two-snapshot hazard");
         junctionReads[0].Select.Should().Contain("sprk_startdate").And.Contain("sprk_enddate");
         junctionReads[0].Expand.Should().Contain("sprk_Organization");
+        AssertEveryJunctionReadSentExactlyTheWallFilter(dataverse);
 
         // Both consumers fed from that one read, each with its own set.
         standing.Verify(s => s.ReadForOrganizationAsync(OrgCurrent, It.IsAny<CancellationToken>()), Times.Once,
@@ -454,15 +540,23 @@ public class OrganizationMembershipReadTests
         TenantId = "11111111-2222-3333-4444-555555555555",
     };
 
+    private const string FakeServiceUrl = "https://fake-dataverse.crm.dynamics.com";
+
     private static ExternalParticipationService RealParticipationService(
-        FakeDataverse dataverse, TimeSpan? timeout = null, ITenantCache? cache = null)
+        FakeDataverse dataverse,
+        TimeSpan? timeout = null,
+        ITenantCache? cache = null,
+        TokenCredential? credential = null,
+        ArmableServiceUrl? serviceUrl = null)
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Dataverse:ServiceUrl"] = "https://fake-dataverse.crm.dynamics.com",
-            })
-            .Build();
+        var configuration = serviceUrl is not null
+            ? new ConfigurationBuilder().Add(serviceUrl).Build()
+            : new ConfigurationBuilder()
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Dataverse:ServiceUrl"] = FakeServiceUrl,
+                })
+                .Build();
 
         // With a cache, the request carries a tid claim (the grant-set cache is skipped without one).
         var accessor = new Mock<IHttpContextAccessor>();
@@ -478,7 +572,7 @@ public class OrganizationMembershipReadTests
             dataverse.CreateClient(timeout ?? TimeSpan.FromSeconds(30)),
             cache ?? Mock.Of<ITenantCache>(),
             configuration,
-            new StaticTokenCredential(),
+            credential ?? new StaticTokenCredential(),
             accessor.Object,
             NullLogger<ExternalParticipationService>.Instance);
     }
@@ -500,6 +594,33 @@ public class OrganizationMembershipReadTests
         standing.Setup(s => s.ReadForOrganizationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(StandingGrantState.NotHeld);
         return standing;
+    }
+
+    /// <summary>
+    /// The junction <c>$filter</c> the SERVER received is EXACTLY <c>BuildOrganizationMembershipFilter</c>'s —
+    /// nothing appended, nothing inlined.
+    /// </summary>
+    /// <remarks>
+    /// That filter defines the FR-23 WALL set, which must stay <c>statecode</c>-only (owner D-2 part 2, D-10).
+    /// The builder test pins the builder; <c>ExternalAccessQueryIntegrityGuardTests</c> pins that the call site
+    /// names it. Neither sees a term APPENDED after the builder call —
+    /// <c>$"?$filter={BuildOrganizationMembershipFilter(contactId)} and (sprk_enddate eq null or …)"</c> — which
+    /// date-bounds the wall server-side, a fail-OPEN change to a veto, while every projection assertion stays
+    /// green because this test server does not evaluate OData (verifier finding, 2026-10-01). Asserting the
+    /// wire catches that edit in any form, on any line.
+    /// </remarks>
+    private static void AssertEveryJunctionReadSentExactlyTheWallFilter(FakeDataverse dataverse)
+    {
+        var filters = dataverse.Requests
+            .Where(r => r.Collection == "sprk_contactorganizations")
+            .Select(r => r.Filter)
+            .ToList();
+
+        filters.Should().NotBeEmpty("precondition: the junction was read");
+        filters.Should().OnlyContain(
+            f => f == ExternalParticipationService.BuildOrganizationMembershipFilter(ContactId),
+            "the junction $filter defines the WALL set and must reach the server exactly as the statecode-only " +
+            "builder emits it — a date term appended at the call site would narrow the ethical wall (D-2 part 2, D-10)");
     }
 
     private sealed record MembershipSpec(Guid OrganizationId, DateOnly? Start, DateOnly? End);
@@ -555,6 +676,66 @@ public class OrganizationMembershipReadTests
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => new(Token);
+    }
+
+    /// <summary>
+    /// A credential that fails the NEXT token request once it is armed, and issues tokens of a chosen lifetime
+    /// otherwise (a lifetime under the service's 5-minute refresh margin means every acquisition reaches it).
+    /// </summary>
+    private sealed class ArmableTokenCredential : TokenCredential
+    {
+        private readonly TimeSpan _lifetime;
+
+        public ArmableTokenCredential(TimeSpan lifetime) => _lifetime = lifetime;
+
+        public bool FailNextRequest { get; set; }
+
+        public int Failures { get; private set; }
+
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+        {
+            if (FailNextRequest)
+            {
+                FailNextRequest = false;
+                Failures++;
+                throw new Azure.Identity.AuthenticationFailedException("armed test fault: token acquisition failed");
+            }
+
+            return new AccessToken("test-token-not-a-credential", DateTimeOffset.UtcNow.Add(_lifetime));
+        }
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
+    }
+
+    /// <summary>
+    /// Configuration carrying <c>Dataverse:ServiceUrl</c>, whose NEXT read of that key comes back missing once
+    /// armed — the service's "Dataverse:ServiceUrl is required" fault, for exactly one acquisition.
+    /// </summary>
+    private sealed class ArmableServiceUrl : ConfigurationProvider, IConfigurationSource
+    {
+        private const string Key = "Dataverse:ServiceUrl";
+
+        public ArmableServiceUrl() => Data[Key] = FakeServiceUrl;
+
+        public bool FailNextRead { get; set; }
+
+        public int Failures { get; private set; }
+
+        public IConfigurationProvider Build(IConfigurationBuilder builder) => this;
+
+        public override bool TryGet(string key, out string? value)
+        {
+            if (FailNextRead && string.Equals(key, Key, StringComparison.OrdinalIgnoreCase))
+            {
+                FailNextRead = false;
+                Failures++;
+                value = null;
+                return false;
+            }
+
+            return base.TryGet(key, out value);
+        }
     }
 
     /// <summary>

@@ -104,9 +104,18 @@ public class ExternalAccessQueryIntegrityGuardTests
     /// ONLY (owner D-2 part 2, D-10); the date bounds belong to the conferring set and are applied in
     /// memory. <c>OrganizationMembershipReadTests</c> asserts that the builder carries no date term — but,
     /// exactly as seam 3 found for grants, asserting a builder proves nothing about a call site that
-    /// stops using it. An inlined <c>… and (sprk_enddate eq null or sprk_enddate ge …)</c> would quietly
-    /// date-bound the WALL server-side — a fail-OPEN change to a veto — while every in-memory projection
-    /// test stayed green, because those tests never see the server filter.</para>
+    /// stops using it.</para>
+    ///
+    /// <para><b>What this guard catches — and what it does NOT.</b> It catches a junction query whose
+    /// <c>$filter</c> is built WITHOUT the builder: an inlined <c>… and (sprk_enddate eq null or
+    /// sprk_enddate ge …)</c> in place of the call. It only checks that the builder's NAME appears near the
+    /// entity set, so it does <b>not</b> catch a term APPENDED after the builder call
+    /// (<c>$"?$filter={BuildOrganizationMembershipFilter(contactId)} and (sprk_enddate …)"</c>) — that
+    /// passed this guard and every unit test (verifier finding, 2026-10-01). That form is caught on the
+    /// wire instead: <c>OrganizationMembershipReadTests</c> asserts the <c>$filter</c> the junction request
+    /// actually sent EQUALS the builder's output, in both the over-match theory and the one-read test. The
+    /// two are complementary: the wire assertion covers the production call site against any edit; this
+    /// guard covers a further junction query added to this file that no behavioural test drives.</para>
     /// </remarks>
     [Fact(DisplayName = "Task 109: membership-junction queries build their $filter, never inline it")]
     public void MembershipJunctionQueriesUseTheWallSafeFilterBuilder()

@@ -145,10 +145,21 @@ its firm** (`0452ab4b-…`). **Escalation trigger 3 does not fire. Removal on de
 ### §A.1 One READ, not one FILTER
 
 The `$filter` defines the wall; the conferring set is narrowed in memory from the same rows. A date term in
-the `$filter` would date-bound the WALL — a fail-OPEN change to a veto. Pinned twice: the builder test
-(`BuildOrganizationMembershipFilter_IsStatecodeOnly_WithNoDateTerm`) and a new ArchTest
-(`MembershipJunctionQueriesUseTheWallSafeFilterBuilder`) pinning that the CALL SITE uses the builder — the
-projection tests cannot see the server filter.
+the `$filter` would date-bound the WALL — a fail-OPEN change to a veto. Pinned three ways, each covering a
+different edit:
+
+| Instrument | Catches | Does NOT catch |
+|---|---|---|
+| `BuildOrganizationMembershipFilter_IsStatecodeOnly_WithNoDateTerm` | a date term inside the BUILDER | anything at the call site |
+| ArchTest `MembershipJunctionQueriesUseTheWallSafeFilterBuilder` | a junction query built WITHOUT the builder (inlined) | a term APPENDED after the builder call — the builder's name is still in the window |
+| `AssertEveryJunctionReadSentExactlyTheWallFilter` (wire; over-match theory + one-read test) | ANY edit that changes what the junction request sends — appended, inlined, on any line | a date term inside the builder (the wire then equals the altered builder — the builder test covers it) |
+
+⚠️ **Corrected 2026-10-01 (verifier round 1).** The first version of this section said the ArchTest pinned
+the call site, and the ArchTest's own remarks claimed it prevented a date-bounded wall filter. An appended
+term — `$"?$filter={BuildOrganizationMembershipFilter(contactId)} and (sprk_enddate eq null or sprk_enddate
+ge {TodayUtc:yyyy-MM-dd})"` — passed it and all 158 affected unit tests, because the test server never
+evaluates `$filter`. The wire assertion closes it (perturbation P10); the ArchTest's remarks now state its
+real scope.
 
 ### §A.2 Null semantics
 
@@ -172,7 +183,7 @@ therefore covers precisely what the writer later makes permanent. Live count: 0.
 | Fault | Before | Now |
 |---|---|---|
 | Junction query non-success / timeout / exception | empty list → veto read "belongs to no organization" → wall's org axis silently gone (ISS-019) | `Failed` → veto denies every candidate; additive terms get an empty conferring set |
-| Token / API-url acquisition (entry throws) | `Failed` (deny-all) | unchanged |
+| Token / API-url acquisition (entry throws) | `Failed` (deny-all) | unchanged — now pinned on the REAL entry (§I.2) |
 | Caller cancellation | junction swallowed; evaluator rethrew | query reports `Failed`; the evaluator's entry rethrows (§A.5) |
 
 The `:1060-1069` constraint ("do not unify the two fail directions") holds: what is now shared is the FACT
@@ -208,6 +219,23 @@ restructuring exactly that path's fault handling and is the natural owner. Also 
 `Unreadable` signal inside the org-grant term is logged but not carried on the grant set, so a grant set
 built over a faulted junction read is still cached for one TTL (`auth.md` C12 rule — 132 owns it).
 
+⚠️ **The first hand-off is NOT yet recorded where 132 would see it** (verifier round 1, 2026-10-01). Task
+132's POML names only the second item (its criterion 4 consumes 109's `Unreadable` to avoid caching a
+faulted grant set); it says nothing about the cache-MISS second junction read. A sub-agent may not edit
+another task's POML or the shared register, so this is a **main-session action** — add to
+`tasks/132-c12-access-caches-fault-and-staleness.poml` (`<notes>`, or a `<dependency task="109">` line), or
+to `notes/defer-issues.md`:
+
+> **From task 109 (§B residual).** On a grant-set cache MISS, one composition issues TWO
+> `sprk_contactorganizations` requests: the org-grant term's own read inside `QueryGrantSetAsync`
+> (`ExternalParticipationService.QueryOrganizationGrantRowsAsync` → `QueryOrganizationMembershipsAsync`)
+> and the evaluator's `ReadOrganizationMembershipsAsync`. Same query, filter and projection; they can
+> differ only by time, and the grant set's copy is bounded by the 60 s TTL. Pre-existing since task 073,
+> counted under "grant set" by task 043 §6, so task 043's one-read criterion is met in its own sense — but
+> it is a second snapshot on the miss path. Unifying it means threading the evaluator's outcome into the
+> grant-set miss path (changes `GetGrantSetAsync`'s signature — six overriding test doubles — and the CIAM
+> `/me` surface). Decide in 132: unify, or record it as an accepted residual with that reason.
+
 ## §C. The three retired-rule artifacts — corrected
 
 1. "a former member is a deactivated row and is excluded" (HEAD `:1107-1108`; POML cited `:1081-1082`) —
@@ -224,7 +252,8 @@ strict SUPERSET of the read side's conferring set, the safe direction for a revo
 
 ## §D. Tests
 
-New: `tests/integration/auth/UnifiedAccessControl/OrganizationMembershipReadTests.cs` (KEEP `auth/`), 21 tests.
+New: `tests/integration/auth/UnifiedAccessControl/OrganizationMembershipReadTests.cs` (KEEP `auth/`), 21 tests
+at first commit; **23** after verifier round 1 (§I).
 
 | Test | Pins |
 |---|---|
@@ -243,8 +272,9 @@ New: `tests/integration/auth/UnifiedAccessControl/OrganizationMembershipReadTest
 | `GetGrantSetAsync_OrgGrantTerm_ConfersOnlyThroughCurrentMembershipsOfActiveOrganizations` | **real transport**: org-grant term (no standing gate) bounded by D-2 / D-10 / ISS-026; contact grant with inactive firm drops; plain contact grant unaffected |
 | `ComposeAsync_OrgKeyedDenyRow_StillMatchesAMemberWhoseMembershipNoLongerConfers` ×3 | **real transport**: veto over-match — ended / not-yet-started / inactive-organization |
 | `ComposeAsync_JunctionQueryFaults_DeniesEveryCandidateAndTheAdditiveTermsContributeNothing` ×3 | **real transport**: ISS-019 — 500 / 403 / timeout, both directions from one fault, with a healthy control |
+| `ComposeAsync_JunctionEntryCannotAcquireItsTokenOrApiUrl_DeniesEveryCandidate` ×2 | **real entry** (added §I.2): the pre-existing token / API-url acquisition fault still denies every candidate |
 | `GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants` | review fix W3 |
-| `ComposeAsync_OneJunctionReadPerResolution_ServesTheConferringAndTheWallSets` | one read on the wire serves both sets |
+| `ComposeAsync_OneJunctionReadPerResolution_ServesTheConferringAndTheWallSets` | one read on the wire serves both sets; its `$filter` is exactly the wall's (§I.1) |
 
 **Instrument.** The fault and over-match claims run the REAL `ExternalParticipationService` and
 `AccessibleRecordSetService` over an in-memory ASP.NET Core server (`UseTestServer`) standing in for the
@@ -278,8 +308,19 @@ and now names the token/API-url path it covers.
 | P7 | a second junction read for the veto (ISS-019's rejected suggestion) | **1 red** — the one-read test |
 | P8 | token-path catch weakened to `None` | **2 red** — entry-throws unit + seam tests |
 | P9 | caller cancellation rethrown from the query (pre-W3) | **1 red** — the cancellation test |
+| P10 | date term APPENDED after the builder at the junction call site (verifier's exact seeding) | **4 red** — three over-match cases + the one-read test (wire filter ≠ builder). ArchTest stays green, as its corrected remarks now say |
+| P11a | REAL entry swallows token + API-url acquisition into `ActiveOrgMemberships.None` (verifier's exact seeding) | **2 red** — both acquisition cases, on the main assertion (candidates `9d…01`, `9c…03` survive) |
+| P11b | real entry swallows the token fault only | **1 red** — `token` case |
+| P11c | real entry swallows the API-url fault only | **1 red** — `api-url` case |
 
-All restored; `grep PERTURBATION src/` is empty.
+All restored; `grep PERTURBATION src/` is empty. P1-P9 were taken on the first commit; P10-P11 on
+`task/uac-r2-109-f1` (affected set: 156 tests in the BFF assembly + 4 in `ExternalAccessQueryIntegrityGuardTests`).
+
+**Instrument check for §I.2's confinement** (scratch test, deleted): under P11a, an UNCONFINED fault — a
+credential that throws on every request — left the composition empty both with a cold grant-set cache
+(grant read fails to an empty set → no candidates) and a warm one (the flag read and the org-reference read
+each fail closed on the same token fault → every candidate removed). Both passed under the weakening. That
+is why the committed test arms ONE acquisition and asserts it struck only the junction entry.
 
 ## §E. Pending manual gates (no live writes were made)
 
@@ -323,3 +364,41 @@ extension: yes; cost-of-doing-nothing: without a carried fault and two named set
 silently removes the wall's organization axis, ISS-019). New `internal static` members are pure and
 extracted to be assertable (ADR-038 A2); `ContactOrgRow` / `OrganizationStateRow` widened from private for
 the same reason. **CVE**: `dotnet list package --vulnerable --include-transitive` → none.
+
+## §I. Verifier round 1 (2026-10-01) — closures, branch `task/uac-r2-109-f1`
+
+Test-only round: **no production source changed** (`git diff -- src/` is empty). Results: affected set
+156/156; full BFF unit suite **13212 passed / 0 failed / 54 skipped** (13266; the +2 are the new theory cases);
+NetArchTest **338/338**.
+
+### §I.1 GAP 1 — the wall's server filter was not pinned at the call site (verifier items 4 + 9)
+
+Closed. `AssertEveryJunctionReadSentExactlyTheWallFilter` asserts that every `sprk_contactorganizations`
+request the test server received carried a `$filter` EQUAL to `BuildOrganizationMembershipFilter(ContactId)`
+(the decoded query value round-trips exactly). Called from the over-match theory — so the criterion "date-bounding
+the VETO subject reddens the over-match test" now holds for the appended form — and from the one-read test.
+Perturbation P10 (the verifier's exact seeding): 4 red. The ArchTest's remarks, which claimed it prevented this,
+now state what it catches and what it does not (§A.1 table).
+
+### §I.2 GAP 2 — the token/API-url fail-closed path was pinned only through a double (verifier items 5 + 10)
+
+Closed. `ComposeAsync_JunctionEntryCannotAcquireItsTokenOrApiUrl_DeniesEveryCandidate` (token / api-url) runs
+the REAL `ExternalParticipationService` entry through the REAL evaluator, with the fault armed for exactly one
+acquisition (`ArmableTokenCredential` — tokens under the 5-minute refresh margin so the entry's acquisition
+reaches it; `ArmableServiceUrl` — an `IConfigurationSource` whose next `Dataverse:ServiceUrl` read is missing,
+with a cached long-lived token so the entry's only config read is `GetDataverseApiUrl`'s). Preconditions prove
+the fault fired once, struck before the junction query was sent, and left the later flag read healthy; the grant
+set comes from the production cache so the candidates exist regardless. P11a/b/c: each weakening reddens its case.
+
+Not a `Mock<HttpMessageHandler>` (the transport is the same `UseTestServer` stand-in); no DI-registration or
+ctor-null test; no new production surface.
+
+### §I.3 Residual — cache-miss second junction read (verifier item 6)
+
+Not a defect in this task (043's accounting; disclosed in §B). The hand-off was not recorded anywhere 132 reads;
+the paste-ready text is now in §B. Recording it in 132's POML or `defer-issues.md` is a **main-session** action.
+
+### §I.4 Publish size (verifier items 8 + 11)
+
+Still PENDING — skipped by run instruction; the main session measures after merge (fresh master vs branch, short
+path, Compress-Archive, equal file counts). This round changed no production source and no package.
