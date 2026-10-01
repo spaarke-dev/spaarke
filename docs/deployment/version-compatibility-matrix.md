@@ -15,7 +15,7 @@
 
 This matrix maps each supported **BFF version** × **Solution-set version** pair to a compatibility verdict. It is the authoritative query surface that **H0 preflight (upgrade mode)** consults before an upgrade run proceeds against a live customer environment.
 
-Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_provisionedon != null` has no way to verify that the pending BFF binary + Dataverse solution set is a supported pair — and design.md §4B silent-fail traps T1..T6 cascade (customer environment becomes unreachable, DE seed fails, MI-Dataverse-App-User missing, container-type replication stalls, etc.). Publishing the matrix is the mechanism that lets H0 fail **loudly + early** on an incompatible pair.
+Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_provisionedon != null` has no way to verify that the pending BFF binary + Dataverse solution set is a supported pair — and design.md §4B silent-fail traps T1..T7 cascade (customer environment becomes unreachable, DE seed fails, MI-Dataverse-App-User missing, container-type replication stalls, etc.). Publishing the matrix is the mechanism that lets H0 fail **loudly + early** on an incompatible pair.
 
 ## 2. How H0 uses this matrix (query semantics)
 

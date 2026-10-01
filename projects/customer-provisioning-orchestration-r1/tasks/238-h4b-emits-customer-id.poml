@@ -3,8 +3,8 @@
   <metadata>
     <title>H4b emits Customer__Id (INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1–§1.2) + H13 trap T7 — both slots carry Customer__Id equal to the run's customerId</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T238</phase>
-    <gate>blocked — T245a</gate>
-    <status>not-started</status>
+    <gate>none (T245a ✅)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a production H13 trap probe (.cs), changes the canonical manifest + generated script, and updates H13 composition tests; root §8 test-modifying override applies.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -114,6 +114,37 @@
     <criterion testable="true">H13 maps a T7 failure to `h13-trap-t7-failed` + QuarantineRequired; the composite verifier and composition root expect 7 trap kinds.</criterion>
     <criterion testable="true">Build 0/0; no new ControlPlane.Tests failures beyond the T221 baseline. Test scope: the probe outcomes listed, the H4b argument, the manifest load, the composition count. Anything beyond needs a one-line justification in task notes.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETION (2026-10-01). All acceptance criteria verified: ControlPlane.Tests 2077 pass / 6 fail (the T221
+    CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; ArchTests 337/337; Api, Worker, LoadTests build 0/0;
+    Invoke-CatalogGenerator.ps1 -Verify OK. Escalation trigger checked and NOT fired: the L2 identity already holds
+    Website Contributor on the customer BFF (customer-l2-bff-rbac.bicep), and H9's ArmSlotStickyAppSettingWriter
+    already issues the slot config/appsettings/list call.
+
+    DEVIATIONS:
+    (a) Rejection code is `h13-trap-T7-customer-identity`, not the POML's `h13-trap-t7-failed` (step 2, AC 3): it
+        follows all six sibling codes (`h13-trap-T{n}-{what}`); codes are external and stable, so consistency wins.
+    (b) Beyond the POML (gate findings, fix-at-discovery): H13AcceptanceOptions.TrapVerifierTimeout is now applied
+        by the T1, T5 and T7 ARM probes (it was documented as the per-probe bound but only T6 honoured it), and their
+        OperationCanceledException catch is filtered to caller cancellation — a transport/timeout cancellation is an
+        InfraFault instead of aborting the whole trap pass. T1/T5 constructors gained IOptions&lt;H13AcceptanceOptions&gt;
+        (already registered; DI resolves it).
+    (c) T7 hardening from code review: two names differing only in case with different values are AMBIGUOUS → Failed;
+        an echoed mismatched value is length-capped and control characters escaped; the Failed diagnostic carries the
+        repair command for stamps whose H4b ran before T238.
+    (d) Trap-count text T1–T6 → T1–T7 swept across code comments, design/spec/README/plan, the deployment guide
+        (incl. a §12.3 T7 verification command), the /provision-environment skill, the run-log template, the
+        version-compat matrix, the superseded guide stubs, and the root CLAUDE.md pointer row (+ CHANGELOG; that row's
+        stale "Model 1 (shared trial/SMB)" text corrected at the same time).
+    (e) The per_env source keeps the `from-intake-parameter:` prefix (customerId IS intake — the POST body field), but
+        resolves run.CustomerId, not an IntakeParameterCatalog key; the catalog header, manifest schema comment,
+        PerEnvSettingSource doc and H4b's missing-value diagnostic now say so.
+    Publish size: N/A — no Sprk.Bff.Api source changed (delta 0 by construction).
+    Test-scope justification: one test beyond the closed list — FindSetting's case-variant ambiguity (new behaviour
+    from code review). Trap-count tests now assert Enum.GetValues&lt;TrapKind&gt;().Length (pins the composite's
+    "every enum member" invariant, which its own comment said was unpinned) while T7 stays pinned by InlineData rows.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

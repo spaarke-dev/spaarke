@@ -7,6 +7,20 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-01 — silent-fail trap T7: `Customer__Id` on both BFF slots (T238, D-14)
+
+`customer-provisioning-orchestration-r1` T238 (INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1–§1.2).
+
+- **Root `CLAUDE.md`** customer-provisioning pointer row: trap catalog T1–T6 → **T1–T7**; and its stale
+  "Model 1 (shared trial/SMB)" description corrected — both models are dedicated per-customer stamps since D-12
+  (2026-09-30), the shared tier is retired.
+- **`/provision-environment` SKILL.md**: trap catalog row + handoff "Traps verified" list gain T7.
+- The mechanism: H4b writes `Customer__Id` = the run's customerId (verbatim) to BOTH App Service slots
+  (manifest `per_env_settings`, source `from-intake-parameter:customer_id`); H13 trap T7
+  (`CustomerIdentityT7Probe`) reads both slots' app settings from ARM and quarantines the run on a missing,
+  blank or different value (`h13-trap-T7-customer-identity`).
+
+---
 ###### 2026-10-01 — `check-task-status-drift.ps1` reads the layout task-create prescribes
 
 `customer-provisioning-orchestration-r1` (T245a follow-up, owner-directed).

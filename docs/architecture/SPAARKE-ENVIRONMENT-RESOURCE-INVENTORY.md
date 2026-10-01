@@ -157,7 +157,7 @@ Model 1 once T225b lands.
 | Content Safety key | Dedicated if the optional module is deployed | `ContentSafety-ApiKey` | H4 (`from-run-parameter` — a ref nothing writes) | 🔲 **T245b** |
 | Retired credentials | — | `BFF-API-ClientSecret`, `Dataverse-ClientSecret` | **Never** created, seeded or restored on secret-free stamps; never delete the live `Dataverse-ClientSecret` or purge rollback copies before **2026-11-23** ([`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md) §KV credential lifecycle) | ✅ |
 | BFF app settings (~40 across 26 IOptions sections) | Dedicated | From [`Configure-AppServiceSettings.generated.ps1`](../../scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1) | **H4b**, one batch → one restart | ✅ once T226 lands (generated from the manifest) |
-| `Customer__Id` app setting (the BFF's "which customer am I" handle; the BFF refuses to start in deployed envs without it or a derivable `rg-spaarke-{customerId}-{env}` RG) | Dedicated | = the intake `customerId`, never re-derived | `customer.bicep` emits it (master `ddfacd8ee`); **H4b** must also emit it and treat absence as a provisioning failure | 🔲 **T238** |
+| `Customer__Id` app setting (the BFF's "which customer am I" handle; the BFF refuses to start in deployed envs without it or a derivable `rg-spaarke-{customerId}-{env}` RG) | Dedicated | = the intake `customerId`, never re-derived | `customer.bicep` emits it on the production site (master `ddfacd8ee`); **H4b** writes it to both slots from the run's customerId; **H13 trap T7** fails the run when either slot lacks it or differs | ✅ **T238** (2026-10-01) |
 
 ---
 

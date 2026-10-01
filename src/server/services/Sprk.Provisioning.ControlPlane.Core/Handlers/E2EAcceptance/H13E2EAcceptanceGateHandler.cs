@@ -14,8 +14,8 @@
 //
 // SPEC / DESIGN references:
 //   - spec.md FR-18 (H13 acceptance criteria) + SC #5 (extended validate
-//     script) + SC #6 (all 6 traps re-verified) + SC #14 (cost envelope) +
-//     SC #17 (naming exit 0) + §4B (T1–T6 trap catalog) + §4C (Quarantined
+//     script) + SC #6 (all 7 traps re-verified) + SC #14 (cost envelope) +
+//     SC #17 (naming exit 0) + §4B (T1–T7 trap catalog; T7 added by task 238) + §4C (Quarantined
 //     rollback) + §4D (I1–I5 invariants) + §15 #14 (cost).
 //   - design.md §4.1 H13 row (final gate, downstream of H14) + §4B (trap
 //     catalog + owning-handler post-condition table) + §4D (5 invariants).
@@ -54,7 +54,7 @@
 //   │                                               │ blocks handoff)          │
 //   │ Extended validate script infra fault          │ Resumable                 │
 //   │ (pwsh / script missing / timeout)             │                           │
-//   │ ANY T1–T6 trap FAILED                         │ QuarantineRequired        │
+//   │ ANY T1–T7 trap FAILED                         │ QuarantineRequired        │
 //   │ (silent-fail actually manifested — SC #6)     │                           │
 //   │ Trap verifier InfraFault                      │ Resumable                 │
 //   │ (probe could not run — no verdict)            │                           │
@@ -290,14 +290,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         // Customer stamp names — H2a outputs, read from InterStepState (task 245a,
         // G25), never from run parameters. REQUIRED: a blank value used to reach
-        // the T1/T5 ARM trap probes and the cost query as "" and surface as an
+        // the T1/T5/T7 ARM trap probes and the cost query as "" and surface as an
         // InfraFault that did not say H2a's output was missing.
         var resourceGroupName = run.InterStepState.ResourceGroupName ?? string.Empty;
         if (string.IsNullOrWhiteSpace(resourceGroupName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingResourceGroupName,
                 "InterStepState.resourceGroupName is not populated — H2a (Bicep infra deploy) produces it and must " +
-                "complete before H13. The cost-envelope query and the T1/T5 ARM trap probes are scoped to it.",
+                "complete before H13. The cost-envelope query and the T1/T5/T7 ARM trap probes are scoped to it.",
                 cancellationToken).ConfigureAwait(false);
         }
         var appServiceName = run.InterStepState.AppServiceName ?? string.Empty;
@@ -305,7 +305,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingAppServiceName,
                 "InterStepState.appServiceName is not populated — H2a (Bicep infra deploy) produces it and must " +
-                "complete before H13. The T1/T5 ARM trap probes inspect this App Service.",
+                "complete before H13. The T1/T5/T7 ARM trap probes inspect this App Service.",
                 cancellationToken).ConfigureAwait(false);
         }
         var keyVaultName = run.InterStepState.KeyVaultName ?? string.Empty;
@@ -391,7 +391,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (5) Trap verifier (SC #6 — all 6 traps).
+        // (5) Trap verifier (SC #6 — all 7 traps).
         TrapCatalogVerificationResult trapResult;
         try
         {
@@ -821,6 +821,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         TrapKind.T4ExchangePolicyCount => H13Rejections.TrapT4Failed,
         TrapKind.T5SlotMiKvRbac => H13Rejections.TrapT5Failed,
         TrapKind.T6SpeConfidentialClient => H13Rejections.TrapT6Failed,
+        TrapKind.T7CustomerIdentityExplicit => H13Rejections.TrapT7Failed,
         _ => throw new InvalidOperationException($"Unmapped trap kind '{kind}'."),
     };
 

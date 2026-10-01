@@ -12,7 +12,7 @@
 //     acceptance) + SC #5 (extended validate script) + SC #6 (traps re-verified)
 //     + SC #17 (naming-conformance exit 0) + §15 #14 (cost envelope).
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H13 row +
-//     §4B (T1–T6 trap catalog) + §4C (Quarantined semantics) + §4D (I1–I5
+//     §4B (T1–T7 trap catalog) + §4C (Quarantined semantics) + §4D (I1–I5
 //     tenant-isolation invariants).
 //
 // PATTERN PARITY:
@@ -71,7 +71,7 @@ public sealed class H13AcceptanceOptions
     public TimeSpan NamingConformanceTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Maximum time to wait for a single trap verifier probe (T1–T6). Defaults
+    /// Maximum time to wait for a single trap verifier probe (T1–T7). Defaults
     /// to 3 minutes — each verifier is a bounded Graph/ARM/Dataverse REST or
     /// az CLI call.
     /// </summary>

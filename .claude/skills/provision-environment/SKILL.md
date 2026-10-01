@@ -40,7 +40,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 | L2 audience (token) | `api://spaarke.com/provisioning-controlplane-{env}` |
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
 | Handler catalog | 20 handlers per run (Model 1 Shared: 19 — skips H0.5; Model 2 Dedicated: 19 — skips H11): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14 — the 20 ids in `HandlerIds.Dispatchable` (`Sprk.Provisioning.ControlPlane.Core`), H0 included. H4-shared was retired by T226 (2026-09-30). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
-| Trap catalog | 6 traps T1-T6 (see design §4B) — each handler asserts its trap clear before reporting success |
+| Trap catalog | 7 traps T1-T7 (see design §4B) — each handler asserts its trap clear before reporting success |
 | Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests + verified at H13 acceptance |
 | Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
 | Cost envelope | Model 2 ≤ $400/mo baseline (NFR-04); Model 1 ≤ $430/mo per-customer marginal |
@@ -1872,9 +1872,9 @@ Template shape:
 | 2 | H1 rg-provision | Succeeded | 12s | |
 | 3 | H2a bicep-apply | Succeeded | 28m 14s | |
 | ... | ... | ... | ... | ... |
-| N | H13 acceptance | Succeeded | 1m 32s | 6/6 traps clear, 5/5 invariants pass |
+| N | H13 acceptance | Succeeded | 1m 32s | 7/7 traps clear, 5/5 invariants pass |
 
-## Traps verified (T1-T6)
+## Traps verified (T1-T7)
 
 - T1 (keyVaultReferenceIdentity == UAMI): ✅
 - T2 (Dataverse App User for MI): ✅
@@ -1882,6 +1882,7 @@ Template shape:
 - T4 (Exchange ApplicationAccessPolicy, 2 entries): ✅
 - T5 (both slot MIs KV RBAC): ✅ (structurally impossible post-Phase C UAMI)
 - T6 (SPE container-type conf-client cert): ✅
+- T7 (both BFF slots carry Customer__Id == customerId): ✅
 
 ## Invariants verified (I1-I5)
 
@@ -2512,7 +2513,7 @@ Dry-run is intended for pre-flight validation before a real customer deployment 
 
 | Failure | Cause | Prevention / Recovery |
 |---|---|---|
-| Step 0 skipped ("just start the run, we know the machine is fine") | Operator confidence + skill impatience | HARD STOP; prereqs are unconditional. Silent tool-version mismatches are the #1 cause of silent-fail traps T1-T6. |
+| Step 0 skipped ("just start the run, we know the machine is fine") | Operator confidence + skill impatience | HARD STOP; prereqs are unconditional. Silent tool-version mismatches are the #1 cause of silent-fail traps T1-T7. |
 | Confirmation gate bypassed with "y" | Skill accepted a partial phrase | Enforced literal string `proceed with provisioning`. Any other input re-asks. |
 | Same-customer concurrent run attempted | Operator forgot the first run is still active | L2 returns 409 via optimistic concurrency on `sprk_currentrunid`. Skill presents the existing run's status + offers to resume/poll rather than starting a second. |
 | Handler retried past its retry budget | Auto-retry logic in the skill | REMOVED — the skill never auto-retries. Operator sees failures + decides. |

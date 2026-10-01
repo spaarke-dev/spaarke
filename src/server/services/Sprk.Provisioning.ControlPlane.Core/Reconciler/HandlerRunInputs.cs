@@ -153,6 +153,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.ServiceBusFullyQualifiedNamespace)),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run
+                //  identity, which RunInputSource has no kind for and needs no declaration.)
             ],
             [HandlerIds.H5] =
             [

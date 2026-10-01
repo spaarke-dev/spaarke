@@ -3,7 +3,7 @@
 //
 // Machine-stable rejection codes + gate identifiers emitted by
 // H13E2EAcceptanceGateHandler (task 055, wave C4 Batch 4E). H13 is the FINAL
-// acceptance gate — it re-verifies EVERY T1–T6 silent-fail trap + EVERY
+// acceptance gate — it re-verifies EVERY T1–T7 silent-fail trap + EVERY
 // I1–I5 tenant-isolation invariant + naming conformance + cost envelope, and
 // gates the Dataverse registry `sprk_setupstatus → Ready` transition on the
 // aggregate pass/fail outcome.
@@ -11,7 +11,7 @@
 // SPEC / DESIGN references:
 //   - spec.md FR-18 (H13 acceptance) + SC #5 (extended validate script) +
 //     SC #6 (traps re-verified) + SC #17 (naming exit 0) + §15 #14 (cost).
-//   - design.md §4.1 H13 row + §4B (T1–T6 trap catalog) + §4C (Quarantined
+//   - design.md §4.1 H13 row + §4B (T1–T7 trap catalog) + §4C (Quarantined
 //     semantics) + §4D (I1–I5 tenant-isolation invariants).
 //
 // STABILITY: codes are string constants used by external tools. Do NOT rename;
@@ -50,10 +50,10 @@ public static class H13Rejections
 
     // ---- upstream H2a outputs (InterStepState — task 245a, G25) ----
 
-    /// <summary><c>InterStepState.resourceGroupName</c> missing — H2a (Bicep infra deploy) produces it; H13 scopes the cost-envelope query + T1/T5 ARM trap probes to it. Resumable.</summary>
+    /// <summary><c>InterStepState.resourceGroupName</c> missing — H2a (Bicep infra deploy) produces it; H13 scopes the cost-envelope query + T1/T5/T7 ARM trap probes to it. Resumable.</summary>
     public const string MissingResourceGroupName = "h13-missing-resource-group-name";
 
-    /// <summary><c>InterStepState.appServiceName</c> missing — H2a (Bicep infra deploy) produces it; the T1/T5 ARM trap probes inspect this App Service. Resumable.</summary>
+    /// <summary><c>InterStepState.appServiceName</c> missing — H2a (Bicep infra deploy) produces it; the T1/T5/T7 ARM trap probes inspect this App Service. Resumable.</summary>
     public const string MissingAppServiceName = "h13-missing-app-service-name";
 
     /// <summary><c>InterStepState.keyVaultName</c> (the CUSTOMER Key Vault) missing — H2a (Bicep infra deploy) produces it; the T5 trap probe checks slot-MI RBAC on this vault. Resumable.</summary>
@@ -102,6 +102,9 @@ public static class H13Rejections
 
     /// <summary>T6 SILENT-FAIL TRAP — the SPE container-type creation audit reveals a delegated-token creation path (public client) rather than the required app-only confidential-client one.</summary>
     public const string TrapT6Failed = "h13-trap-T6-spe-confidential-client";
+
+    /// <summary>T7 SILENT-FAIL TRAP — a BFF slot lacks <c>Customer__Id</c>, has it blank, or carries a value other than the run's customerId (task 238, D-14).</summary>
+    public const string TrapT7Failed = "h13-trap-T7-customer-identity";
 
     /// <summary>Trap verifier infra fault (Graph/ARM/Dataverse REST/az CLI blew up) — no confirmed pass/fail outcome. Resumable.</summary>
     public const string TrapVerifierInfraFault = "h13-trap-verifier-infra-fault";
@@ -171,7 +174,7 @@ public static class H13Gates
     /// <summary>Flips to Verified when the extended Validate-DeployedEnvironment.ps1 exits 0 (SC #5).</summary>
     public const string ExtendedValidationVerified = "h13-extended-validation";
 
-    /// <summary>Flips to Verified when ALL 6 §4B T1–T6 trap re-verifications pass (SC #6).</summary>
+    /// <summary>Flips to Verified when ALL 7 §4B T1–T7 trap re-verifications pass (SC #6).</summary>
     public const string TrapCatalogVerified = "h13-trap-catalog";
 
     /// <summary>Flips to Verified when ALL 5 §4D I1–I5 sample invariants pass.</summary>

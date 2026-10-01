@@ -54,6 +54,9 @@ param(
     [string]$CosmosEndpoint,
 
     [Parameter(Mandatory = $true)]
+    [string]$CustomerId,
+
+    [Parameter(Mandatory = $true)]
     [string]$KvVaultUri,
 
     [Parameter(Mandatory = $true)]
@@ -103,6 +106,7 @@ $settings = @(
     "Compose__Webhook__SigningKey=$(Format-KvRef 'Compose-Webhook-SigningKey')",
     "ConnectionStrings__Redis=$(Format-KvRef 'Redis-ConnectionString')",
     "CosmosPersistence__Endpoint=$CosmosEndpoint",
+    "Customer__Id=$CustomerId",
     "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Dataverse__EnvironmentUrl=$(Format-KvRef 'Dataverse-ServiceUrl')",
     "Dataverse__ServiceUrl=$(Format-KvRef 'Dataverse-ServiceUrl')",

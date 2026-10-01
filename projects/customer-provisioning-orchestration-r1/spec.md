@@ -37,7 +37,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 10. **Per-tenant token-metering layer** (D19) — APIM gateway or app-level custom App Insights metric keyed on `tenantId`
 11. **SPE 403 fix** (T6) — confidential-client (app-only) token in H8 with cert bootstrapped from KV
 12. **Cosmos DB provisioning added to per-customer Bicep** (R11) — BFF prereq
-13. **Silent-failure trap catalog** (§4B, T1–T6) baked into handler post-conditions
+13. **Silent-failure trap catalog** (§4B, T1–T7; T7 added 2026-10-01 by T238, D-14) baked into handler post-conditions
 
 **Tooling & infrastructure:**
 14. **Hybrid tooling stack** (§4A) — Bicep for Azure stamp; PowerShell + Package Deployer for solutions/config/SPE/AI Search indexes; Terraform Power Platform provider **deferred to first-customer engagement per M-10** (D14 remains the design intent)
@@ -67,7 +67,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 34. **Code fix**: `scripts/Register-EntraAppRegistrations.ps1:63` hardcoded Spaarke tenant DEFAULT removed (§4D I1 enforcement — `-TenantId` now Mandatory)
 
 **Acceptance:**
-35. **E2E dry run** — stand up a fresh `trial-{yyyymmdd}` customer stamp (Model 1 profile) using only the new pipeline; reach `Setup Status = Ready`; all 6 §4B silent-fail traps verified cleared; `scripts/naming-conformance-check.ps1` exits 0
+35. **E2E dry run** — stand up a fresh `trial-{yyyymmdd}` customer stamp (Model 1 profile) using only the new pipeline; reach `Setup Status = Ready`; all 7 §4B silent-fail traps verified cleared; `scripts/naming-conformance-check.ps1` exits 0
 
 ### Out of Scope
 
@@ -112,7 +112,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 | `scripts/Register-EntraAppRegistrations.ps1` | ~14 grant idempotency; single BFF app-reg only (S2S dropped); tenant hardcoded default REMOVED (v3.3 code fix — DONE 2026-08-16 in commit `1834b77bc`) |
 | `scripts/Create-NewContainerType.ps1` + `Register-*.ps1` + `New-BusinessUnitContainer.ps1` | PORT + confidential-client fix (T6) |
 | `scripts/Deploy-Release.ps1` Phase 4 | HARDEN — `customerId`-driven, no `spaarkedev1` hardcode (Gap 2) |
-| `scripts/Validate-DeployedEnvironment.ps1` | EXTEND — E2E acceptance gate (Gap 4); verify all §4B T1–T6 traps cleared |
+| `scripts/Validate-DeployedEnvironment.ps1` | EXTEND — E2E acceptance gate (Gap 4); verify all §4B T1–T7 traps cleared |
 | `scripts/Deploy-DataverseSolutions.ps1` | REUSE + EXTEND to Package Deployer for dependency-ordered import (9 solutions per §11.1a) |
 | `scripts/seed-data/Deploy-All-AI-SeedData.ps1` + `Seed-PlaybookConsumers.ps1` | PORT — basis for H12a with declarative manifest resolving two-source drift |
 | `scripts/ai-search/Deploy-AllIndexes.ps1` | REUSE — invoked by H2b (7 canonical indexes) |
@@ -150,7 +150,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 15. **FR-15 (H12a)**: AI seed chain — type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per ADR-039). Authoritative source per artifact declared in declarative seed manifest (resolves two-source drift). **Acceptance**: all seed rows present; no duplicates; playbook consumers resolve to shipped playbooks; `sprk_aimodeldeployment` rows placeholder (H12c will populate).
 16. **FR-16 (H12b, DAG-parallel with H12a)**: App-config seed — DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions. No dependency on H12a. **Acceptance**: `sprk_gridconfiguration` + `sprk_fieldmapping*` + `sprk_workspacelayout` + chart-definition records seeded per declarative manifest.
 17. **FR-17 (H12c)**: Runtime references — `sprk_aimodeldeployment` rows point at **the customer's own OpenAI deployment, in both models** (D-12 §3). `SharedPlatformOpenAiEndpoint` is a retired artifact. **Acceptance**: BFF `AzureOpenAIOptions.Endpoint` resolves to correct endpoint via env-var lookup + `sprk_aimodeldeployment` join.
-18. **FR-18 (H13)**: End-to-end acceptance gate. Extended `Validate-DeployedEnvironment.ps1` asserts EFFECTS not intentions (per R7). Checks: BFF `/health`, sample analysis, sample document upload+index, workspace-layout render, wizard field-map, **all 6 §4B T1–T6 silent-fail traps cleared**, `scripts/naming-conformance-check.ps1` exits 0, **all 5 §4D I1–I5 tenant-isolation invariants sample-verified**, cost envelope ≤ target per pricing model (§15 #14). **Acceptance**: registry `Setup Status` transitions to `Ready` only if H13 exits 0.
+18. **FR-18 (H13)**: End-to-end acceptance gate. Extended `Validate-DeployedEnvironment.ps1` asserts EFFECTS not intentions (per R7). Checks: BFF `/health`, sample analysis, sample document upload+index, workspace-layout render, wizard field-map, **all 7 §4B T1–T7 silent-fail traps cleared**, `scripts/naming-conformance-check.ps1` exits 0, **all 5 §4D I1–I5 tenant-isolation invariants sample-verified**, cost envelope ≤ target per pricing model (§15 #14). **Acceptance**: registry `Setup Status` transitions to `Ready` only if H13 exits 0.
 19. **FR-19 (H14, sub-steps DAG-parallel)**: Post-deploy integration wiring — (a) 2 Exchange `ApplicationAccessPolicy` (BFF app-reg + UAMI, action-and-verify semantics — on 0 or 1 create, on 2+ verify AppIds match else fail with drift diagnostic); (b) Graph webhook subscriptions per Communication/Email module with HMAC signing keys from H4; (c) Dataverse service-endpoint webhooks. S2S consent sub-step (d) explicitly NOT included (r3 task 060). **Acceptance**: `Get-ApplicationAccessPolicy` returns 2 entries with both principals matching; Graph subscriptions active; service-endpoint webhooks fire with correct HMAC.
 
 **L2 control plane (§4.2):**
@@ -191,7 +191,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 
 **Silent-fail trap catalog (§4B):**
 
-33. **FR-33**: Six silent-fail traps (T1–T6) baked into handler post-conditions as verified assertions (not runbook footnotes). Each handler asserts its trap is cleared before reporting success. **Acceptance**: T1 (App Service `keyVaultReferenceIdentity == UAMI`); T2 (`systemusers?$filter=applicationid eq {mi-app-id}` returns 1); T3 (UAMI SP `appRoleAssignments` includes all 15 from `GraphAppRoles.cs` — 14 populated by r1 task 005 on 2026-08-17, +1 `User.Invite.All` added by task 144 on 2026-08-20 for H11's B2BGuest preset); T4 (`Get-ApplicationAccessPolicy` returns 2 entries with both principals — H14 creates if missing, verifies drift diagnostic if 2+); T5 (both slot MIs have KV RBAC — interim; structurally impossible post-Phase C UAMI); T6 (SPE container-type creation uses confidential-client cert from KV).
+33. **FR-33**: Seven silent-fail traps (T1–T7; T7 = both BFF slots carry `Customer__Id` == the run's customerId, added 2026-10-01 by T238 per INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.2) baked into handler post-conditions as verified assertions (not runbook footnotes). Each handler asserts its trap is cleared before reporting success. **Acceptance**: T1 (App Service `keyVaultReferenceIdentity == UAMI`); T2 (`systemusers?$filter=applicationid eq {mi-app-id}` returns 1); T3 (UAMI SP `appRoleAssignments` includes all 15 from `GraphAppRoles.cs` — 14 populated by r1 task 005 on 2026-08-17, +1 `User.Invite.All` added by task 144 on 2026-08-20 for H11's B2BGuest preset); T4 (`Get-ApplicationAccessPolicy` returns 2 entries with both principals — H14 creates if missing, verifies drift diagnostic if 2+); T5 (both slot MIs have KV RBAC — interim; structurally impossible post-Phase C UAMI); T6 (SPE container-type creation uses confidential-client cert from KV).
 
 **Upgrade model (§14A — added v3.3):**
 
@@ -317,7 +317,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 
 **skill-directives = Y** — Phase D creates `.claude/skills/provision-environment/SKILL.md` (new operator skill; L3 delivery).
 
-**root-claude-md = N** — no new binding rules introduced; existing §10 BFF Hygiene + §11 Component Justification + §6.5 ADR Tensions apply as-is.
+**root-claude-md = N** — no new binding rules introduced; existing §10 BFF Hygiene + §11 Component Justification + §6.5 ADR Tensions apply as-is. *Pointer-row edits only*: tasks keep the root §17 customer-provisioning rows current (e.g. T238, 2026-10-01: trap catalog T1–T6 → T1–T7), each with a `.claude/CHANGELOG.md` entry per root §18.
 
 ### New Components (§11 three-question gate)
 
@@ -376,7 +376,7 @@ Per design.md §15 (v3.3, 23 items — corrected 2026-08-20 per Wave G-8 Batch 1
 3. [ ] **L2 sequencing + serialization + crash recovery** — dispatcher consumes `sprk-provisioning-jobs` session-serialized (`SessionId=CustomerId`, `MaxConcurrentCallsPerSession=1`); reconciler advances the DAG; per-customer serialization enforced at both admission (I5 guard, Path X creds) and transport (sessions); orphaned runs auto-resume on startup with incremented `attempt` — Verify: concurrent-run test returns 409; crash-restart test resumes from `currentPhase`; session-freeze unit test green
 4. [ ] **Gap 3 fully automated** — Entra app-reg (14 grants, idempotent), SPE container type (confidential-client per T6), Dataverse App User (interim PPAC + Graph SDK, target TF-driven per D14), Model 2 consent-capture (D18) all run unattended — Verify: E2E dry run has zero manual steps for Gap 3 items
 5. [ ] **E2E acceptance** — brand-new environment reaches `Setup Status = Ready` via new pipeline; extended `Validate-DeployedEnvironment.ps1` exits 0 asserting sample analysis + sample document upload+index + workspace-layout render + wizard field-map — Verify: `trial-{yyyymmdd}` stamp on Model 1 profile in Phase F
-6. [ ] **6 silent-fail traps cleared** — §4B T1–T6 verified by owning handler's post-condition — Verify: H13 reports each trap check with 0-failure status
+6. [ ] **7 silent-fail traps cleared** — §4B T1–T7 verified by owning handler's post-condition — Verify: H13 reports each trap check with 0-failure status
 7. [ ] **DemoExpirationService clean** — `[Obsolete]` `DemoProvisioning__Environments__*` + `__DefaultEnvironment` deleted from Azure; expiration flow verified working (R5) — Verify: `az webapp config appsettings list` shows no `DemoProvisioning__Environments*` keys
 8. [ ] **Operator skill functional** — `/provision-environment` executes full flow with confirmation gates + produces handoff report at `runs/{runId}.md` — Verify: manual invocation on trial stamp produces report + updates registry
 9. [ ] **Fleet visibility** — ProvisioningRun records in Cosmos queryable for fleet status (count, state); `sprk_currentrunid` visible on `sprk_dataverseenvironment`; in-flight-runs query pattern documented (Wave G-8 Batch 12: `docs/data-model/queries/in-flight-provisioning-runs.fetchxml` — `sprk_setupstatus` ∈ {InProgress, Issue}, since `sprk_dataverseenvironment` has never been solution-packaged in this repo per `notes/registry-column-audit-2026-08.md` §3, so a packaged MDA SavedQuery XML is not the applicable mechanism; ops imports the FetchXML into a live MDA view manually) — Verify: `az cosmosdb sql query` returns aggregate; imported MDA view (from the FetchXML doc) shows in-flight runs

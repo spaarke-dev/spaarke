@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // IE2ETrapVerifier.cs
 //
-// L2 abstraction over the 6 §4B silent-fail trap RE-verifications H13 performs
+// L2 abstraction over the 7 §4B silent-fail trap RE-verifications H13 performs
 // per spec.md SC #6. Independent from the owning handler's own post-condition
 // verify — H13 asserts EFFECTS (per R7) rather than trusting upstream handler
 // telemetry alone.
@@ -22,6 +22,7 @@
 //     - T5 slot MI KV RBAC OR UAMI structural (ARM read)
 //     - T6 SPE confidential-client creation audit (KV secret + Graph audit log
 //       sampling as a proxy for "creation was app-only")
+//     - T7 Customer__Id on both slots (ARM app-settings list — task 238)
 //   Per POML escalation trigger: if any trap verifier cannot be exercised from
 //   the test host, the production impl surfaces a distinct <see cref="TrapVerificationOutcome.InfraFault"/>
 //   which the handler classifies Resumable — the operator restarts the run
@@ -34,14 +35,14 @@
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
 /// <summary>
-/// Re-verifies all 6 §4B silent-fail traps (T1–T6) independently of the owning
+/// Re-verifies all 7 §4B silent-fail traps (T1–T7) independently of the owning
 /// handler's own post-condition. Production impl issues live Azure/Graph/
 /// Dataverse probes; test impls return canned results.
 /// </summary>
 public interface IE2ETrapVerifier
 {
     /// <summary>
-    /// Runs all 6 trap probes in a bounded fan-out and returns per-trap
+    /// Runs all 7 trap probes in a bounded fan-out and returns per-trap
     /// outcomes. Individual probe failures do NOT throw — the handler decides
     /// how to react (Quarantined on any trap failure per §4B). Aggregate infra
     /// faults MAY throw; individual probe infra faults are surfaced as
@@ -62,8 +63,8 @@ public interface IE2ETrapVerifier
 /// <param name="BffAppRegId">BFF app-reg id (H3 output) — expected T2/T4 principal.</param>
 /// <param name="UamiClientId">UAMI client id (H2a output) — expected T1/T3/T4 principal.</param>
 /// <param name="KeyVaultName">Customer KV name for T1 ref probe.</param>
-/// <param name="AppServiceName">BFF App Service name for T1/T5 ARM probe.</param>
-/// <param name="ResourceGroupName">App Service resource group for T1/T5 ARM probe.</param>
+/// <param name="AppServiceName">BFF App Service name for the T1/T5/T7 ARM probes.</param>
+/// <param name="ResourceGroupName">App Service resource group for the T1/T5/T7 ARM probes.</param>
 /// <param name="UamiObjectId">
 /// UAMI principalId / service principal object id (H2a output, InterStepState.miObjectId) — expected
 /// T2 byte-equality principal. OPTIONAL TRAILING FIELD (task 205d / punch row A41, added 2026-08-26):
@@ -97,7 +98,7 @@ public sealed record TrapVerificationRequest(
     string SpeOwnerCertKeyVaultName = "");
 
 /// <summary>
-/// The 6 §4B silent-fail traps, enumerated (matches design.md §4B verbatim).
+/// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).
 /// </summary>
 public enum TrapKind
 {
@@ -118,6 +119,13 @@ public enum TrapKind
 
     /// <summary>T6 — SPE container-type creation audit reveals confidential-client (app-only) used.</summary>
     T6SpeConfidentialClient = 6,
+
+    /// <summary>
+    /// T7 — both App Service slots carry <c>Customer__Id</c> equal to the run's customerId (task 238; D-14,
+    /// INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.2). Without it the BFF derives its identity from the resource
+    /// group with a warning — a stamp that "was never finished".
+    /// </summary>
+    T7CustomerIdentityExplicit = 7,
 }
 
 /// <summary>

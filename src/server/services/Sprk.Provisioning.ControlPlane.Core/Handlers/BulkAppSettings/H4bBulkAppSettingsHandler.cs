@@ -293,7 +293,7 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                     $"per_env_settings entry '{entry.Key}' (BFF module '{entry.IOptionsModuleName}') requires " +
                     $"'{sourceKey}' from {source.Location}, which is absent or empty" +
                     (source.ProducerHandlerId is null
-                        ? " — supply it at intake (POST /api/runs nonSecretParameters)."
+                        ? $" — supply it at intake ({source.Location})."
                         : $" — {source.ProducerHandlerId} must complete before H4b.");
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BulkAppSettingsRejectionCodes.PerEnvInputMissing, diagnostic, cancellationToken)

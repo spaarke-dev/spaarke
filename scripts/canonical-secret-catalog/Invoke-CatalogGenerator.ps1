@@ -158,7 +158,8 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:service_bus_fqns',
     'from-h3-output:bff_app_client_id',
     'from-intake-parameter:tenant_id',
-    'from-intake-parameter:container_type_id'
+    'from-intake-parameter:container_type_id',
+    'from-intake-parameter:customer_id'
 )
 
 # ---------------------------------------------------------------------------

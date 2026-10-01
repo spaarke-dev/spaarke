@@ -28,6 +28,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
+using Sprk.Provisioning.ControlPlane.Models;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -191,6 +192,24 @@ public sealed class FilePerEnvSettingsManifestTests
         entry.ParameterKey.Should().NotContain("object",
             "MiObjectId (principalId) is for RBAC assignments only -- sourcing it here " +
             "creates successfully and fails only at token exchange with AADSTS700213");
+    }
+
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_CustomerId_IsRequiredAndSourcedFromTheRunCustomerId()
+    {
+        // T238 (D-14, INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1–§1.2): H4b writes Customer__Id on both slots,
+        // and a stamp without it is a provisioning failure — so the entry must be required.
+        var manifest = NewManifest();
+        var result = await manifest.ReadAsync(CancellationToken.None);
+        var entries = ((PerEnvSettingsManifestReadResult.Success)result).Entries;
+
+        var entry = entries.Single(e => e.Key == "Customer__Id");
+
+        entry.Required.Should().BeTrue();
+        entry.ParameterKey.Should().Be("customer_id");
+        PerEnvSourceCatalog.BySourceKey["customer_id"].Resolve(
+            new ProvisioningRun { RunId = "r", CustomerId = "acme", EnvironmentId = "e", TenancyModel = "Model2", Profile = "p" })
+            .Should().Be("acme", "the value is the run's customerId");
     }
 
     [Fact]

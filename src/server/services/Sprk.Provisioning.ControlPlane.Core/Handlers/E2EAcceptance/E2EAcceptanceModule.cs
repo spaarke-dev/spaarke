@@ -58,7 +58,7 @@ public static class E2EAcceptanceModule
 
         services.Configure<H13AcceptanceOptions>(configuration.GetSection(ConfigSection));
 
-        // Production seam registrations. All 6 trap + 5 invariant probes are
+        // Production seam registrations. All 7 trap + 5 invariant probes are
         // real as of task 185 (Wave G-7 Batch G-7D) -- PlaceholderTrapVerifier
         // and PlaceholderInvariantVerifier are retained on disk UNREGISTERED
         // per this project's retirement convention.
@@ -70,7 +70,7 @@ public static class E2EAcceptanceModule
         // PlaceholderTrapVerifier's Resumable semantics for any future un-wired
         // kinds. Direct parity with the earlier IE2EInvariantVerifier composite
         // migration (Batch G-7A1 / task 174). Task 185 wires all 6 real trap
-        // probes below:
+        // probes below (task 238 adds the 7th, T7 CustomerIdentityT7Probe):
         //   - task 171 (T1) - KeyVaultReferenceIdentityT1Probe (ArmClient)
         //   - task 177 (T2) - DataverseAppUserPairT2Probe (IDataverseAppUserVerifier)
         //   - task 178 (T3) - GraphAppRoleParityT3Probe (IGraphAppRoleParityVerifier
@@ -79,6 +79,7 @@ public static class E2EAcceptanceModule
         //   - task 172 (T5) - T5SlotMiKvRbacTrapProbe (ArmClient)
         //   - task 175 (T6) - T6SpeConfidentialClientTrapProbe (TokenCredential
         //                     + IT6GraphAppOnlyProbe + H13AcceptanceOptions)
+        //   - task 238 (T7) - CustomerIdentityT7Probe (ArmClient)
         //
         // IE2EInvariantVerifier — Wave G-7 Batch G-7A1 composite migration
         // (task 174 coordinated with task 173). CompositeInvariantVerifier
@@ -125,7 +126,7 @@ public static class E2EAcceptanceModule
         services.AddSingleton<IE2EValidationRunner, E2EValidationRunner>();
         services.AddSingleton<IE2ETrapVerifier, CompositeTrapVerifier>();
         services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
-        // Task 185 (Wave G-7 Batch G-7D): 6 real ITrapProbe registrations for
+        // Task 185 (Wave G-7 Batch G-7D): 7 real ITrapProbe registrations (T7 added by task 238) for
         // the composite trap verifier. Order does not matter (composite
         // dispatches per Kind); each probe's own file header documents its
         // dependencies. IT6GraphAppOnlyProbe (registered below) is the
@@ -153,6 +154,7 @@ public static class E2EAcceptanceModule
         services.AddSingleton<ITrapProbe, T5SlotMiKvRbacTrapProbe>();                // T5 (task 172)
         services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainerTypesListAppOnlyProbe>();
         services.AddSingleton<ITrapProbe, T6SpeConfidentialClientTrapProbe>();       // T6 (task 175)
+        services.AddSingleton<ITrapProbe, CustomerIdentityT7Probe>();                // T7 (task 238, D-14 — ArmClient)
         // I1 adapter (task 173) — preserves task-170's real packaged-scripts
         // I1 check under the composite pattern by wrapping its internal-static
         // ProbeI1 in an IInvariantProbe (see PackagedScriptTenantLiteralInvariantProbe.cs

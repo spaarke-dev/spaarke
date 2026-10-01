@@ -929,8 +929,8 @@ builder.Services.AddScoped<H9BffDeployHandler>();
 // 2026-08-20) with live BFF /healthz + /ping + CORS effect probes + explicit
 // ChecksSkipped list for the Dataverse-auth-gated + Phase-B extended set
 // (Phase F rerun task 186 closes); IE2ETrapVerifier = CompositeTrapVerifier
-// dispatching per-TrapKind to the 6 registered real ITrapProbe implementations
-// (T1–T6, tasks 171/177/178/180/172/175); IE2EInvariantVerifier =
+// dispatching per-TrapKind to the 7 registered real ITrapProbe implementations
+// (T1–T7, tasks 171/177/178/180/172/175/238); IE2EInvariantVerifier =
 // CompositeInvariantVerifier dispatching to the 5 registered real
 // IInvariantProbe implementations (I1–I5, tasks 170/173/174/176/179);
 // INamingConformanceChecker = NamingConformanceChecker — pure-C# port of r3

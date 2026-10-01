@@ -111,7 +111,7 @@ public enum PerEnvSettingSource
     /// <summary>Value comes from an upstream handler's typed InterStepState output (PerEnvSourceCatalog).</summary>
     FromHandlerOutput = 2,
 
-    /// <summary>Value comes from an intake parameter (run.Parameters.NonSecret, IntakeParameterCatalog) — via PerEnvSourceCatalog.</summary>
+    /// <summary>Value comes from intake — an IntakeParameterCatalog key (run.Parameters.NonSecret) or the run's own customerId (run.CustomerId, task 238) — via PerEnvSourceCatalog.</summary>
     FromHandlerParameter = 3,
 }
 

@@ -16,7 +16,7 @@ This is the single authoritative guide for standing up a new Spaarke customer en
 ### What this guide contains
 
 - Prerequisites, tenancy-model selection, per-phase execution walkthrough (H0 through H14)
-- Tenant-isolation invariants (I1–I5) and silent-fail trap catalog (T1–T6)
+- Tenant-isolation invariants (I1–I5) and silent-fail trap catalog (T1–T7)
 - Upgrade-model reference, rollback / quarantine semantics, troubleshooting
 - Operator runbook for the **interim** manual path until `/provision-environment` skill is delivered
 
@@ -390,7 +390,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
-| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 6 T1–T6 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` |
+| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` |
 | **H14** | Post-deploy integrations | (a) 2 Exchange `ApplicationAccessPolicy` (BFF app-reg + UAMI — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | `Get-ApplicationAccessPolicy` returns 2 with both principals | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
@@ -500,7 +500,8 @@ tenants*, not *customers*, and its tests pass anyway because there is only ever 
 |---|---|
 | **Setting** | `Customer__Id` (configuration key `Customer:Id`) |
 | **Value** | the customerId — 3–8 chars, lowercase letters and digits, starting with a letter. See [`AZURE-RESOURCE-NAMING-CONVENTION.md` § "The `customerId` standard"](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). |
-| **Emitted by** | `infrastructure/bicep/customer.bicep` and `infrastructure/bicep/stacks/model2-full.bicep`, from the `customerId` they already hold — **no operator action on a stamp deployed from either** |
+| **Emitted by** | `infrastructure/bicep/customer.bicep` and `infrastructure/bicep/stacks/model2-full.bicep` (production site only), from the `customerId` they already hold; and **H4b** writes it to **both** slots from the run's customerId, verbatim (manifest `per_env_settings` → `Configure-AppServiceSettings.generated.ps1 -CustomerId`, customer-provisioning-orchestration-r1 T238) — so a staging → production swap cannot drop it. **No operator action** on a provisioned stamp |
+| **Verified by** | **H13 trap T7** (`CustomerIdentityT7Probe`): both slots must carry exactly the run's customerId; missing, blank or different on either slot quarantines the run (`h13-trap-T7-customer-identity`) |
 | **Assignment authority** | Dataverse `sprk_dataverseenvironment.sprk_customerid`. Bicep CONSUMES it; nothing mints one. |
 
 **Resolution order, and what happens when it fails:**
@@ -670,7 +671,7 @@ Three DAG-parallel sub-steps:
 - Sample document upload + AI Search indexing succeeds
 - Workspace-layout render succeeds
 - Wizard field-map succeeds
-- **All 6 §4B T1–T6 silent-fail traps cleared** (see §9)
+- **All 7 §4B T1–T7 silent-fail traps cleared** (see §9)
 - `scripts/naming-conformance-check.ps1` exits 0
 - **All 5 §4D I1–I5 tenant-isolation invariants sample-verified** (see §8)
 - Cost envelope ≤ target per pricing model
@@ -702,9 +703,9 @@ Cross-tenant data bleed is the single class of catastrophe r1 must make structur
 
 ---
 
-## 9. Silent-Fail Trap Catalog (T1 – T6)
+## 9. Silent-Fail Trap Catalog (T1 – T7)
 
-Six known-issue guardrails baked into handler post-conditions. Each has been diagnosed in production; ignoring any results in a BFF that boots but fails silently in a specific code path.
+Seven known-issue guardrails baked into handler post-conditions. Each has been diagnosed in production; ignoring any results in a BFF that boots but fails silently in a specific code path.
 
 | # | Trap | Owning handler | Verified by |
 |---|---|---|---|
@@ -714,8 +715,9 @@ Six known-issue guardrails baked into handler post-conditions. Each has been dia
 | **T4** | Missing Exchange `ApplicationAccessPolicy` → Mail.* calls 403 despite Graph permission grant | H14(a) | `Get-ApplicationAccessPolicy` returns 2 entries with both principals |
 | **T5** | Slot MI vs slot MI KV RBAC parity broken → cold-start KV-ref failure after slot swap | H4 (interim); H10 + Phase C UAMI (structural) | Both slot MIs have KV RBAC (interim); **structurally impossible post-Phase-C** |
 | **T6** | SPE container-type creation uses delegated token → 403 "public client not allowed" | H8 | Confidential-client cert bootstrapped from KV; container GET via app-only token succeeds |
+| **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1) | H4b (writes both slots) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238) |
 
-H13 acceptance gate verifies all 6 traps cleared with 0-failure status.
+H13 acceptance gate verifies all 7 traps cleared with 0-failure status.
 
 ---
 
@@ -846,7 +848,7 @@ pac admin create-environment `
 # ONLY if this exits 0 mark Setup Status = Ready in Dataverse
 ```
 
-### 12.3 Post-provisioning verification (T1 – T6 individually)
+### 12.3 Post-provisioning verification (T1 – T7 individually)
 
 Run each verification separately + record in the run's handoff notes:
 
@@ -866,6 +868,12 @@ Get-ApplicationAccessPolicy | Where-Object { $_.AppId -in @($bffAppId, $uamiAppI
 
 # T6 — SPE container GET via app-only token
 # (see auth-deployment-setup stub for the exact confidential-client invocation)
+
+# T7 — Customer__Id on BOTH slots == the customerId (§6.5.1)
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --query "[?name=='Customer__Id'].value" -o tsv
+az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
+    --slot staging --query "[?name=='Customer__Id'].value" -o tsv
 ```
 
 ### 12.4 Handoff report
@@ -873,7 +881,7 @@ Get-ApplicationAccessPolicy | Where-Object { $_.AppId -in @($bffAppId, $uamiAppI
 Record in `projects/{active-project}/runs/{runId}.md`:
 
 - CustomerId, tenancy model, all resource names + GUIDs
-- Every T1-T6 verification result (green / red)
+- Every T1-T7 verification result (green / red)
 - Every I1-I5 sample-query result
 - BFF publish-size delta vs baseline
 - Any manual gate + operator decision + timestamp

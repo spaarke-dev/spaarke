@@ -30,7 +30,7 @@
 //   AC-3   Extended validate script Failure (SC #5) → QuarantineRequired +
 //          ExtendedValidationFailed.
 //   AC-4   Extended validate script infra fault → Resumable + ExtendedValidationInfraFault.
-//   AC-5a..f Each of 6 T1–T6 trap fail branches → QuarantineRequired + distinct code.
+//   AC-5a..g Each of 7 T1–T7 trap fail branches → QuarantineRequired + distinct code.
 //   AC-6a..e Each of 5 I1–I5 invariant fail branches → QuarantineRequired + distinct code.
 //   AC-7   Trap verifier InfraFault (no failed traps) → Resumable + TrapVerifierInfraFault.
 //   AC-8   Invariant verifier InfraFault (no failed invariants) → Resumable + InvariantVerifierInfraFault.
@@ -48,7 +48,7 @@
 //   AC-16  Idempotency-key format determinism — validate-{customerId}-{buildId}.
 //   AC-17  Run not found → Resumable + RunNotFound.
 //   AC-18  HandlerId mismatch → throws InvalidOperationException.
-//   AC-19a..f Trap rejection code mapping table — each TrapKind maps to distinct code.
+//   AC-19a..g Trap rejection code mapping table — each TrapKind maps to distinct code.
 //   AC-20a..e Invariant rejection code mapping table — each InvariantKind maps to distinct code.
 //   AC-21  All infra faults present at once — first-in-priority (extended-validate
 //          infra fault) wins the diagnostic; still Resumable.
@@ -318,7 +318,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         failure.RejectionCode.Should().Be(H13Rejections.ExtendedValidationInfraFault);
     }
 
-    // ---------- AC-5 trap fail branches (6 tests) ----------
+    // ---------- AC-5 trap fail branches (7 tests) ----------
 
     [Theory]
     [InlineData(TrapKind.T1KeyVaultReferenceIdentity, H13Rejections.TrapT1Failed)]
@@ -327,6 +327,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [InlineData(TrapKind.T4ExchangePolicyCount, H13Rejections.TrapT4Failed)]
     [InlineData(TrapKind.T5SlotMiKvRbac, H13Rejections.TrapT5Failed)]
     [InlineData(TrapKind.T6SpeConfidentialClient, H13Rejections.TrapT6Failed)]
+    [InlineData(TrapKind.T7CustomerIdentityExplicit, H13Rejections.TrapT7Failed)]
     public async Task AC5_TrapFailBranch_FailsQuarantineWithDistinctCode(TrapKind failingTrap, string expectedCode)
     {
         var repo = new FakeRepository(BuildRun(), etag: $"etag-5-{failingTrap}");
@@ -693,6 +694,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [InlineData(TrapKind.T4ExchangePolicyCount, H13Rejections.TrapT4Failed)]
     [InlineData(TrapKind.T5SlotMiKvRbac, H13Rejections.TrapT5Failed)]
     [InlineData(TrapKind.T6SpeConfidentialClient, H13Rejections.TrapT6Failed)]
+    [InlineData(TrapKind.T7CustomerIdentityExplicit, H13Rejections.TrapT7Failed)]
     public void AC19_MapTrapKindToRejectionCode_IsDistinctPerTrap(TrapKind kind, string expectedCode)
     {
         H13E2EAcceptanceGateHandler.MapTrapKindToRejectionCode(kind).Should().Be(expectedCode);

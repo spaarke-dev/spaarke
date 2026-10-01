@@ -139,6 +139,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["bff_app_client_id"] = ("-BffAppClientId", "00000000-aaaa-bbbb-cccc-999999999999"),
             ["tenant_id"] = ("-TenantId", TenantId),
             ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
+            ["customer_id"] = ("-CustomerId", CustomerId),   // T238: the run's own customerId, verbatim
         };
         expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");

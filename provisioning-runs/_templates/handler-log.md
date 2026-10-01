@@ -157,7 +157,7 @@
 - Started: `{ts}`
 - Completed: `{ts}`
 - Status: `{Success | Failed}`
-- Probes run: T1-T6 (silent-fail traps) + I2-I5 (tenant-isolation invariants) — see task 204c
+- Probes run: T1-T7 (silent-fail traps) + I2-I5 (tenant-isolation invariants) — see task 204c
 - Notes: {any probe that flipped RED; per punch list HARD BLOCKER for FR-18 acceptance}
 
 ## Handler H14 (Email-processing webhook wire-up)

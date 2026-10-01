@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-01 SESSION 29 — **T245a ✅ COMPLETE** (run-context contract, G25; Step 9.5 gates applied — see POML 245a notes (a)–(m)). **Next: T238.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G25).
+> **Last Updated**: 2026-10-01 SESSION 29 — **T245a ✅ + T238 ✅** (T238 = H4b writes `Customer__Id` on both slots + H13 trap T7; gates applied). **Next: T245b.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G25).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,23 +40,30 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **238 — H4b emits `Customer__Id` + H13 trap T7** · `tasks/238-h4b-emits-customer-id.poml` · **not started** (depends only on 245a ✅) |
+| **Task** | **245b — Run context part 2: L2-owned values** · `tasks/245b-run-context-l2-owned-values.poml` · **not started** (deps 245a ✅) |
 | **Step** | 0 — invoke `task-execute` on the POML (root CLAUDE.md §4). |
-| **Next Action** | `task-execute tasks/238-h4b-emits-customer-id.poml`. Its per_env source for `Customer__Id` is the run's customerId — that is **run identity**, not an intake key: add it to `PerEnvSourceCatalog` (C#) AND `$script:AllowedPerEnvSources` (generator) — `RunContextContractTests.GeneratorPerEnvSources_AreExactlyThePerEnvSourceCatalog` fails if only one side changes — then regenerate + `-Verify`. Then T245b → T245c → plan §7. |
-| **Verified state (end of T245a)** | ControlPlane.Tests **2063 pass / 6 fail (T221 baseline `CustomerRunGuardModulePostConfigureTests`) / 1 skip**; `RunContextContractTests` 30/30; ArchTests **337/337**; Api, Worker, LoadTests build 0/0; generator `-Verify` OK; `customer.json` rebuilt. |
-| **Owner decisions (2026-10-01)** | ✅ H4 KV-bootstrap principal: grant L2's configured principal, stop granting the stamp UAMI — **approved**, executes in **T245b step 4c**. ✅ ADR-020 + ADR-038 path A rows — **approved** (spec.md). |
-| **Task status** | `scripts/check-task-status-drift.ps1` now reads the task-create layout (`| 001 | … | 🔲 [open] |`) and suffixed ids; this project reconciled — 82 stale POML statuses set from the index (each corroborated by a commit naming the task), 172 index status cells given their `[token]`, 090's ⏸ → 🔲 [open]. **Clean: 186 POMLs = 186 rows, no drift.** |
-| **Previous** | SESSION 28/29 commits: `cf77697ff` (G24 CI docs), `0d7d545f6` (G25 finding), `a69daff01` (T245a/b/c + T238 filed), then the **T245a** commit (this session). |
+| **Next Action** | `task-execute tasks/245b-run-context-l2-owned-values.poml`. Scope includes **step 4c**, owner-APPROVED 2026-10-01: H4's KV RBAC bootstrap grants L2's own configured principal (validated option; blank → Worker startup fails), stop granting the stamp UAMI Secrets Officer. Plus H7 `bffApiBaseUrl`, H13 `bffVersion`/`solutionVersion`/`clientCacheBustToken` gaps (step 4c a/b). Then T245c → plan §7. |
+| **Verified state (end of T238)** | ControlPlane.Tests **2077 pass / 6 fail (T221 baseline) / 1 skip**; ArchTests **337/337**; Api, Worker, LoadTests build 0/0; generator `-Verify` OK; task-status drift check exit 0 (186 POMLs = 186 rows). |
+| **Owner decisions (2026-10-01)** | ✅ KV-bootstrap principal fix approved (T245b 4c). ✅ ADR-020 + ADR-038 path A rows approved (spec.md). ✅ TASK-INDEX/drift checker fixed + statuses reconciled (`233ff9341`). |
+| **Branch** | Pushed through the T238 commit. master is ~58 commits ahead; only `.claude/CHANGELOG.md` overlaps (append-only) — merge master when the owner asks or before a PR. No open PR. |
+| **Previous** | SESSION 29 commits: `11bb87b15` (T245a), `233ff9341` (drift checker + status reconciliation + approvals), then T238. |
 | **Owner decisions in force** | D13 keyless stamps; G23 `spaarke-demo` → later; **"if a fix is required and you can make it, do not defer"**; user (2026-10-01): "commit and /push-to-github; then continue with next tasks". |
 
 ### Critical Context
-T245a made the run context explicit: intake values in a closed `IntakeParameterCatalog` (enforced at `POST /api/runs`,
-400 `intake-unknown-key` with `acceptedKeys`); handler outputs in `[ProducedBy]` `InterStepState` properties; every
-handler's inputs declared in `HandlerRunInputs`; `RunContextContractTests` (Roslyn source scan, DAG ancestry, manifest
-vs `customer.bicep`, generator vs `PerEnvSourceCatalog`) fails the build on any undeclared read, stale declaration or
-unreachable input. What remains is pinned there with owners (T245b, T245c, T225b, T227) — a real run (T186) needs them.
+T245a made the run context explicit and enforced (`RunContextContractTests`); T238 added `Customer__Id` on both BFF
+slots (H4b, source = the run's customerId) and H13 trap T7 that quarantines a stamp missing it. Remaining run-context
+gaps are pinned with owners (T245b, T245c, T225b, T227) — a real run (T186) needs them. T245b is next and carries the
+owner-approved KV-bootstrap principal fix.
 
 ## 📁 Files Modified This Session
+
+### SESSION 29 (2026-10-01) — T238 (H4b Customer__Id + trap T7)
+
+`manifest.yaml` + generated Configure script; `PerEnvSourceCatalog` (+ customer_id); generator closed set; new
+`CustomerIdentityT7Probe` + tests; `TrapKind.T7`, `H13RejectionCodes.TrapT7Failed`, H13 mapping, composite order,
+placeholder, DI registration; T1/T5/T7 apply `TrapVerifierTimeout` + caller-only OCE filter; trap-count docs
+T1–T7 (design, spec, README, plan, guide, skill, templates, stubs, root CLAUDE.md row + CHANGELOG); inventory row;
+INCOMING status line; POML 238 completed; TASK-INDEX 238 ✅; plan T238 ✅.
 
 ### SESSION 29 (2026-10-01) — T245a Step 9.5 gates applied + committed
 

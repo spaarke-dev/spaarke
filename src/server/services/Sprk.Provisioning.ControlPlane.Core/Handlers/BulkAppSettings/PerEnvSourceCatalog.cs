@@ -9,7 +9,10 @@
 // (`kv_vault_uri`, `cosmos_endpoint`, `tenant_id`, …) — keys nothing ever wrote,
 // so every real run failed H4b with per-env-input-missing. Each source now names
 // exactly where its value lives: a typed InterStepState property written by a
-// named handler, or an intake parameter (IntakeParameterCatalog).
+// named handler, an intake parameter (IntakeParameterCatalog), or — for
+// `from-intake-parameter:customer_id` (task 238) — the run's own customerId,
+// which is intake too (the POST /api/runs body field) but lives on
+// run.CustomerId rather than in the nonSecretParameters map.
 //
 // An unknown source, or a known source key with the wrong origin prefix, fails
 // the manifest read (FilePerEnvSettingsManifest) — the same closed-vocabulary
@@ -51,6 +54,11 @@ public static class PerEnvSourceCatalog
         Output("from-h3-output:bff_app_client_id", HandlerIds.H3, nameof(InterStepState.BffAppRegId), r => r.InterStepState.BffAppRegId),
         Intake("from-intake-parameter:tenant_id", IntakeParameterCatalog.TenantId),
         Intake("from-intake-parameter:container_type_id", IntakeParameterCatalog.ContainerTypeId),
+        // T238 (D-14): the run's own customerId — the POST /api/runs body field, validated there by
+        // CustomerIdStandard. Read verbatim: no trim, no case change, no derivation (INCOMING-CUSTOMER-
+        // RUNTIME-IDENTITY §1.1 — a second derivation is how two components end up with two spellings).
+        new("from-intake-parameter:customer_id", "customer_id", null,
+            "intake customerId (POST /api/runs body — run.CustomerId)", r => r.CustomerId),
     ];
 
     /// <summary>Accepted sources, by source key (the part after the colon; ordinal).</summary>
