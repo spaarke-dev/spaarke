@@ -51,7 +51,7 @@ same object; it now captures the original MaxLength first.
 
 **`spaarke-demo` (read-only check)**: the registry columns `sprk_customerid` and `sprk_tenancymodel` do not exist
 there (404), although the skill's Step 1f names `spaarke-demo` as the registry for `environment=demo`. A demo-env run
-would fail at the placeholder create. Not changed (outside the approval); flagged for the owner.
+would fail at the placeholder create. Not changed. **Owner 2026-09-30: address later** → plan G23.
 
 ## 4. Fixtures
 
@@ -81,11 +81,12 @@ Pre-existing break fixed: `tests/integration/Sprk.Provisioning.ControlPlane.Load
   the JSON encoder escapes `'`), S5, S6 (interactive Step 1a prompts first instead of reporting an empty id),
   S7 (as above), S9 (six Core `<param>` docs said "3-10 lowercase alphanumeric"; two envelope examples used
   `acme-corp`). Recorded: W4, W5, S3, S4, S8, S11 (below).
-- **Acceptance criterion 3 — partly NOT met as written**: `npx ajv-cli@5 compile --spec=draft2020` (no formats
-  plugin) still exits 1 on `format: uuid`, exactly as on `HEAD` before T237. With `-c ajv-formats` the schema compiles
-  and validates the sample intakes correctly (acme ✓; acme-x, platform, abcdefghi, blank displayName ✗). The CI
-  workflow fix belongs to ci-cd-unit-test-remediation-r1 → `notes/prereqs-validate-ajv-formats-coord-pr.md`.
-  `validate.ps1` and `IntakeSchemaProfileParityTests` pass.
+- **Acceptance criterion 3 — met after a follow-up fix (2026-09-30, owner: "do not defer")**: the plain
+  `npx ajv-cli@5 compile --spec=draft2020` failed on `format: uuid` (pre-existing, also on `HEAD` before T237). The
+  `provisioning-prereqs-validate` workflow now loads `ajv-formats` (`-c ajv-formats`), and the skill's batch path uses
+  the same invocation instead of `--strict false`. With it the schema compiles and validates the sample intakes
+  correctly (acme ✓; acme-x, platform, abcdefghi, blank displayName, malformed tenantId ✗). `validate.ps1` and
+  `IntakeSchemaProfileParityTests` pass. Record: `notes/prereqs-validate-ajv-formats-coord-pr.md`.
 
 ## 6. Also found (recorded, not fixed here)
 
@@ -96,9 +97,8 @@ Pre-existing break fixed: `tests/integration/Sprk.Provisioning.ControlPlane.Load
   platform row is selectable only by a compliant value (`dev` → row "Dev" via the case-insensitive Dataverse `eq`).
   Before T237 the same was effectively true ("Demo 1" has a space, the account domains contain dots), so nothing
   that worked is lost; recorded per escalation trigger 4.
-- **CI**: `provisioning-prereqs-validate.yml`'s ajv step fails on every run (`format: uuid` without ajv-formats) —
-  pre-existing; `.github/workflows` belongs to ci-cd-unit-test-remediation-r1 → coord note
-  `notes/prereqs-validate-ajv-formats-coord-pr.md`.
+- **CI** ✅ fixed (follow-up commit): `provisioning-prereqs-validate.yml`'s ajv step failed on every run (`format:
+  uuid` without ajv-formats) — see §5 criterion 3.
 - **Skill Step 1c/1e** tenancy/profile prose is pre-T224 → recorded under plan G6 (T225b). T237 fixed only the
   Step 1f `$tenancyModelMap` keys (`Model1Shared`/`Model2Dedicated` → null for every current value).
 - `ai-foundry-stack.bicep` `@maxLength(10)` composes `sprk${customerId}${environment}` as a base name — follow-up

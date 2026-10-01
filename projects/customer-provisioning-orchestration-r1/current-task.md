@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-09-30 SESSION 27 — **T226 ✅ + T237 ✅** (committed + pushed). Next: **T238** (`Customer__Id` via H4b) — POML not yet filed. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G22).
+> **Last Updated**: 2026-09-30 SESSION 27 END (context-handoff before /compact) — **T226 ✅ + T237 ✅** committed + pushed; CI `provisioning-prereqs-validate` ajv step fixed (owner: "do not defer"). Next: **T238** (`Customer__Id` via H4b) — POML not yet filed. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G24).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,25 +36,33 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 27, 2026-09-30)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 27 END, 2026-09-30)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none active.** T237 ✅ (customerId standard at intake) completed 2026-09-30 — record `notes/t237-customerid-standard.md`. T226 ✅ earlier this session. |
-| **Next task** | **T238 — H4b emits `Customer__Id`** (INCOMING-CUSTOMER-RUNTIME-IDENTITY; plan §7 row T238). No POML yet: file with `task-create`, then `task-execute`. |
-| **Status** | Working tree clean after the T237 commit (ignore `.husky/_/*` phantom autocrlf changes — byte-identical, never stage them). Verified at T237 close: builds 0/0; ControlPlane.Tests 1972 pass / 6 fail (CustomerRunGuard baseline, T221) / 1 skip; ArchTests 337/337. LIVE spaarkedev1: sprk_customerid MaxLength 8, stale `trial-2026-08-18` row Inactive, tenancymodel labels Model1/Model2. Open owner items: `spaarke-demo` has no registry columns (skill says it is the demo registry); CI ajv step red (coord note for ci-cd-r1). |
-| **After T238** | Plan §7 order: T225a → T225b (also G20, G21) → T243 (BFF DocIntel MI) → T242 (Azure Managed Redis B0 Entra) → T244 (keyless Bicep, G16, secret-bearing outputs) → T227 → T228 (G19 CreateRun fail-fast) → T229 + T230 (per-service MI proof) → T232 → T233 → T240 → T218 → T235 (ADR-028 amendment for D13) → 213.7/207/208/209 → T186. File POMLs for T237/T238/T240/T241/T242/T243/T244 as they come up. |
-| **Owner decisions (plan §2)** | D8 managed default / unmanaged on instruction · D9 add-ins+Teams in scope (T240) · D10 customerId standard (T237) · D11 T240 design · D12 Redis = Azure Managed Redis B0 HA Entra-only (T242) · **D13 keyless customer stamps** (BFF key-if-configured-else-MI; disable key auth on resources; H13 per-service MI proof; dev/demo migration = separate follow-on) · Q1 operator creates Dataverse env · Q2 `Customer__Id` dev=`spaarke`, demo=`sprkdemo` · Q4 `sprksharedprod-api` STOPPED, RG delete = T241 (KV `sprk-prod-kv` not before 2026-11-23). |
+| **Task** | **none active.** Completed this session: **T226** (`3aa5c3536`) and **T237** (`c4dc3db9d` filing, `7c7684e69` work) + the CI ajv follow-up commit. Records: `notes/t226-shared-secret-read-path.md` §7, `notes/t237-customerid-standard.md`. |
+| **Next task** | **T238 — H4b emits `Customer__Id`** (INCOMING-CUSTOMER-RUNTIME-IDENTITY; plan §7 row T238). No POML yet: say "continue" → file it with `task-create`, then `task-execute`. |
+| **Status** | Working tree clean after the last commit, except `.husky/_/*` (phantom autocrlf " M", byte-identical to HEAD — never stage them). Root `npm install` was done in this worktree (needed by the pre-commit hook). Last verified: builds 0/0; ControlPlane.Tests 1972 pass / 6 fail (CustomerRunGuardModulePostConfigureTests = T221 baseline) / 1 skip; ArchTests 337/337; BFF Onboarding 51/51; Pester 26/26; prereqs `validate.ps1` OK; `ajv compile -c ajv-formats` OK. |
+| **Owner decisions this session** | (1) T226 dispositions + D13 keyless stamps (see plan §2). (2) T237 live changes in spaarkedev1 APPROVED + applied: `sprk_customerid` MaxLength 8, stale `trial-2026-08-18` row Inactive, `sprk_tenancymodel` labels Model1/Model2. (3) **`spaarke-demo` registry gap → "address later"** (plan G23). (4) **"If there is a fix required and you can make it, address it — do not defer"** → the CI `provisioning-prereqs-validate` ajv step (failing on every PR) was fixed directly (`-c ajv-formats`), plus the skill's batch validation. |
+| **Open items (tracked in plan §4)** | G16 AI Search keys-only · G17 → T243 · G18 SPE container ids unwritten · G19 containerTypeId fail-fast at CreateRun · G20/G21 → T225b · G23 spaarke-demo registry (deferred by owner) · **G24 `docs/procedures/ci-cd-workflow.md` workflow section stale** (documents 6+ deleted workflows, omits ~17) — not started. T237 follow-ups: control-plane 400s lack a stable `errorCode` (ADR-019); `stacks/{dev,staging,prod}.bicepparam` pass >8-char customerIds to `model2-full.bicep`; skill Step 1c/1e tenancy prose pre-T224 (G6 → T225b). |
+| **After T238** | Plan §7 order: T225a → T225b (also G6, G20, G21) → T243 (BFF DocIntel MI) → T242 (Azure Managed Redis B0 Entra) → T244 (keyless Bicep, G16, secret-bearing outputs) → T227 → T228 (G19) → T229 + T230 (per-service MI proof) → T232 → T233 → T240 → T218 → T235 (ADR-028 amendment for D13) → 213.7/207/208/209 → T186. |
 
 ### Critical Context
 Model 1 = per-customer dedicated stamp; Model 2 out of scope. After T226 no customer secret comes from a shared
 service; the two remaining keys (Redis, Document Intelligence) are interim under D13 and go with T242 / T243.
 Before T186 can run, plan §4 G16–G21 must be closed (AI Search Entra auth, DocIntel MI, SPE container-id writes,
-containerTypeId fail-fast, Model 1 template routing, secret-free default for new stamps).
+containerTypeId fail-fast, Model 1 template routing, secret-free default for new stamps). Since T237 a customerId
+must match `^[a-z][a-z0-9]{2,7}$` and must not be `platform`/`shared`/`byok` (API, schema, skill, scripts); the
+customer's full name goes in `displayName` → `sprk_name`. Test fixtures must use compliant ids.
 
 ## 📁 Files Modified This Session
 
 ### SESSION 27 (2026-09-30) — T226 + T237 closed
+
+CI follow-up commit (owner "do not defer"): `.github/workflows/provisioning-prereqs-validate.yml` ajv step loads
+ajv-formats; skill Step 1.0 batch validation uses the same `npx -p ajv-cli@5 -p ajv-formats@3` invocation; coord note
+marked APPLIED; plan G23 (spaarke-demo, deferred) + G24 (CI doc stale); CHANGELOG.
+
 
 T237 commit: `CustomerIdStandard` (Core) + CreateRun 400 (standard + reserved ids); intake schema pattern/`displayName`;
 skill Step 1a/1a-bis/1f; scripts `ValidatePattern` + Deploy-Release lookup; `Add-CustomerIdColumn.ps1` MaxLength

@@ -22,6 +22,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
   Keys are now `Model1` / `Model2`, and a missing mapping stops the step.
 - Examples use compliant ids (`acme`, not `trial-acme-2026-08-18`). The Step 1c/1e tenancy and profile prose is still
   pre-T224; that is recorded under plan gap G6 for T225b.
+- **Step 1.0 batch validation** now runs `npx -p ajv-cli@5 -p ajv-formats@3 ajv validate --spec=draft2020 -c ajv-formats`
+  (same as the `provisioning-prereqs-validate` CI step, which was failing on every run without the formats plugin).
+  The old `--strict false` silently skipped `format: uuid`, so a malformed `tenantId` passed batch validation.
 
 ---
 ###### 2026-09-30 — provisioning docs follow T226: H4-shared retired, secret-catalog pattern rewritten

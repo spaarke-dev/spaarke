@@ -3,7 +3,9 @@
 > **Author**: customer-provisioning-orchestration-r1 T237 (2026-09-30)
 > **Target owner**: `ci-cd-unit-test-remediation-r1` (owns `.github/workflows/**` since it reactivated 2026-08-27 —
 > see `projects/INDEX.md`). This project does **not** edit the workflow.
-> **Status**: proposed, not applied.
+> **Status**: ✅ **APPLIED 2026-09-30** by this project on the owner's instruction ("if there is a fix required and you
+> can make it then please address it, do not defer"). No open PR or master change touched the workflow at the time.
+> The skill's batch validation got the same fix (below).
 
 ## What fails
 
@@ -46,8 +48,11 @@ silently ignore it.
 `902bebc49c` (its `validate-inputs` job checked "lowercase alphanumeric, 3-10 chars"; the customerId standard is now
 3-8, starting with a letter — T237).
 
-## Related (this project's side, not part of the workflow fix)
+## Related — also fixed 2026-09-30
 
-The `/provision-environment` batch path validates intakes with `ajv validate --spec draft2020 --strict false`, so
-`uuid` formats are ignored there too. Switching it to `-c ajv-formats` needs `ajv-formats` on the operator machine
-(the skill already recommends `npm i -g ajv-cli ajv-formats`); left for a later skill task.
+The `/provision-environment` batch path validated intakes with `ajv validate --spec draft2020 --strict false`, which
+silently skipped `format: uuid` on `tenantId` (the §4D I1 field). It now runs the same `npx -p ajv-cli@5 -p
+ajv-formats@3 ajv validate --spec=draft2020 -c ajv-formats` as CI — no global install needed. Verified: a valid intake
+passes (exit 0); `tenantId: "not-a-guid"` is rejected (exit 1), which the old invocation accepted.
+
+The stale `ci-cd-workflow.md` section is NOT fixed here: that doc's whole workflow section is out of date (plan G24).

@@ -46,9 +46,14 @@ jobs:
         shell: pwsh
         run: ./scripts/provisioning-prereqs/validate.ps1
 
+      # ajv-formats is loaded so `format: uuid` (tenantId / subscriptionId) compiles and is actually checked.
+      # Without it ajv-cli's strict mode rejects the unknown format and this step failed on every run
+      # (customer-provisioning-orchestration-r1, 2026-09-30). `--strict=false` would also pass but would
+      # silently stop checking the formats.
       - name: Validate intake.schema.json is a valid JSON Schema (Draft 2020-12)
         shell: bash
         run: |
-          npx --yes ajv-cli@5 compile \
+          npx --yes -p ajv-cli@5 -p ajv-formats@3 ajv compile \
             --spec=draft2020 \
+            -c ajv-formats \
             -s scripts/provisioning-prereqs/intake.schema.json

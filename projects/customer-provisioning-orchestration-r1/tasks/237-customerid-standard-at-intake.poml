@@ -219,9 +219,9 @@
       now able to correct an existing column); stale trial-2026-08-18 placeholder deactivated (not deleted);
       sprk_tenancymodel labels → Model1/Model2 (G22). spaarke-demo lacks the registry columns (flagged, not changed).
     - ~45 fixture files moved to compliant ids; LoadTests compile break (since 2026-08-28) fixed.
-    Acceptance: criteria 1, 2, 4-10 met. Criterion 3 met except `ajv compile` without ajv-formats, which fails on
-    format:uuid exactly as before T237 (with -c ajv-formats it compiles + validates correctly) → CI coord note
-    notes/prereqs-validate-ajv-formats-coord-pr.md (workflows owned by ci-cd-unit-test-remediation-r1).
+    Acceptance: criteria 1-10 met. Criterion 3's `ajv compile` failed on format:uuid (pre-existing, also on HEAD);
+    fixed in a follow-up commit on the owner's instruction — the CI workflow and the skill's batch path now load
+    ajv-formats (notes/prereqs-validate-ajv-formats-coord-pr.md).
     Verification: builds 0/0 (ControlPlane Api/Worker/Tests, Sprk.Bff.Api, BFF unit + integration tests, LoadTests);
     ControlPlane.Tests 1972 pass / 6 fail (CustomerRunGuard baseline) / 1 skip; ArchTests 337/337; BFF Onboarding +
     CustomerIdResolver 51/51; Pester 26/26; validate.ps1 OK. BFF change = one doc comment (publish size N/A).

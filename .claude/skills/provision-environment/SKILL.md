@@ -589,10 +589,12 @@ if ($BatchIntakeFile) {
   $repoRoot = git rev-parse --show-toplevel
   $schemaPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/intake.schema.json'
 
-  # Validate against schema. Preferred: ajv-cli (npm i -g ajv-cli ajv-formats).
-  # Fallback: any Draft 2020-12 validator the operator has (e.g., check-jsonschema).
-  $validationOutput = & ajv validate `
-    --spec draft2020 --strict false `
+  # Validate against schema with ajv-cli + ajv-formats via npx (no global install needed; same invocation as the
+  # provisioning-prereqs-validate CI workflow). ajv-formats makes `format: uuid` on tenantId / subscriptionId
+  # actually checked — the previous `--strict false` silently skipped it (fixed 2026-09-30).
+  # Fallback if npx is unavailable: any Draft 2020-12 validator that checks formats (e.g., check-jsonschema).
+  $validationOutput = & npx --yes -p ajv-cli@5 -p ajv-formats@3 ajv validate `
+    --spec=draft2020 -c ajv-formats `
     -s $schemaPath -d $BatchIntakeFile 2>&1
   if ($LASTEXITCODE -ne 0) {
     Write-Error "Batch intake failed JSON Schema validation ($schemaPath):`n$validationOutput"
