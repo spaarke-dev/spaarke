@@ -177,6 +177,15 @@ public class EntityAccessFilter : IEndpointFilter
         return false;
     }
 
+    /// <summary>
+    /// Every type spelling this table accepts — for the LOCKSTEP guard only
+    /// (<c>AssociationTypeLockstepTests</c>, task 151 review), which must enumerate the keys to prove each one is
+    /// also a <c>DocumentAssociationMap</c> spelling naming the SAME entity. Internal (test assembly via
+    /// <c>InternalsVisibleTo</c>, ADR-038 Amendment A2): production callers keep the <see cref="TryResolveEntitySet"/>
+    /// shape, so a miss still has exactly one legal interpretation.
+    /// </summary>
+    internal static IEnumerable<string> SupportedEntityTypes => EntitySetByType.Keys;
+
     public EntityAccessFilter(
         CallerRecordAccessProbe probe,
         ILogger<EntityAccessFilter>? logger = null)
