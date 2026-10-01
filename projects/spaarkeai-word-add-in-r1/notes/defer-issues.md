@@ -497,7 +497,7 @@ layouts) or team-owned (then the checks must change). Per-user matches the check
 
 | Field | Value |
 |---|---|
-| **Status** | Open; **tasked as 084** (2026-10-01) |
+| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`, 2026-10-01): disabled with the reason, via the save's own evaluator. Open until the PR merges |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-30 |
 | **Source** | UAC-r2 post-merge message 2026-09-30 (`notes/uac-r2-findings-2026-09-30.md` §6 (e)) |
@@ -610,7 +610,7 @@ Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: 
 
 | Field | Value |
 |---|---|
-| **Status** | Open; **tasked as 084** (part c), with #1037 |
+| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`): the ribbon sends `target.entityType`; regression test `Issue1075_QuickSaveLogicalNameTests`. Open until the PR merges |
 | **Urgency** | before task 078's unified package is installed (latent until then) |
 | **Filed** | 2026-10-01 |
 | **Source** | Research for task 084 (code reading; not yet reproduced by a test) |
@@ -636,7 +636,7 @@ because 084 also changes which predicted record the ribbon may auto-file to.
 
 | Field | Value |
 |---|---|
-| **Status** | Open; our half (`OfficeService.QuickCreateAsync`) to be tasked after 084. The other sites belong to other owners and are named in the issue |
+| **Status** | Open; our half (`OfficeService.QuickCreateAsync`) is **task 085**. The other sites belong to other owners and are named in the issue |
 | **Urgency** | now (LIVE: every invoice quick-create from the pane fails) |
 | **Filed** | 2026-10-01 |
 | **Source** | unified-access-control-r2 task-130 verifier; confirmed live here |

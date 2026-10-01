@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (owner decisions actioned; 084 authored; **059 closed**; next 084)
+> **Last Updated**: 2026-10-01 (059 merged as #1076; **084 closed**; 085 authored for #1079; next 085)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -20,11 +20,13 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **084** (`tasks/084-pickable-equals-savable.poml`, opus @ high; deps 059 ✅): pickable equals savable (#1037 + #1075). The search code it edits now lives in `Services/Office/OfficeSearchService.cs`. **083** stays blocked until UAC-r2 sends 141's link contract (141 is not in their current batch) |
-| **Last closed** | **059** ✅ 2026-10-01 `913dafa2f`: `OfficeSearchService` extracted (entity search + matter types + the To Do's `sprk_recordtype_ref` lookup); ctor 21 → 20, 5 optional deps required, dead null branches and the stub search deleted; the dispatcher's 3 params left to **068**. Suite 13,040/0/54, identical; ArchTests 337; publish −1,917 B. ⚠️ Search log lines now carry the category `OfficeSearchService`. Record: `notes/059-extract-office-search-service.md`. Before it: **058** ✅ (#1052) |
-| **PR** | 🟡 **#1076** (059 + the 2026-10-01 owner-decision records), opened 2026-10-01; CI running. Merge with `gh pr merge 1076 --merge` (NEVER `--delete-branch`) once `Router` passes (Tier 2 "Full Unit Tests" CANCELLED at its 30-min cap is not a failure). Then `git -C C:/code_files/spaarke pull --ff-only origin master` and merge `origin/master` back. Earlier: ✅ #1045 · ✅ #1051 (082) · ✅ #1052 (058) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + 059 + record commits |
-| **Next Action** | `task-execute` **084**. Order after it: 060 → 068 (deletes the profile dispatcher and its 3 optional ctor params, 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
+| **Active task** | **none in progress.** Next: **085** (`tasks/085-invoice-quickcreate-name-column.poml`, sonnet@high): the Office invoice quick-create writes the non-existent `sprk_invoicename` (#1079, ISS-015; LIVE broken). Small; it goes into the same PR as 084. Then 060 → 068 → 075, 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
+| **Last closed** | **084** ✅ 2026-10-01 `91e73b6fc`: pickable equals savable (#1037 + #1075). Per-row `canFile` from the save's own evaluator; disabled with the reason; ribbon fixed (friendly type; no auto-file; `replaceAsync`; 150-character limit). Parity test over 6 masks; suite 13,064/0/54 (+24 exact); publish +5,043 B. ⚠️ Open: live check, and latency on the real BFF (modelled ≈0.71 s p50 from a workstation). `notes/084-pickable-equals-savable.md`. Before it: **059** ✅ (#1076 merged `c08ef6013`) |
+| **PR** | 084's PR: opened after this checkpoint (see git log). Merge with `gh pr merge N --merge` once `Router` passes and nothing is pending; NEVER `--delete-branch`; then pull the main checkout and fast-forward or merge `origin/master` back |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `c08ef6013` + 084 + records |
+| **Next Action** | `task-execute` **085**, then report to the owner |
+
+**Found this session:** #1079 (ISS-015). `sprk_invoice` has no `sprk_invoicename`. Ours is task 085; `DataverseIndexSyncService.cs:52-55` and two scripts belong to others (routed in the issue; UAC-r2 told).
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 
