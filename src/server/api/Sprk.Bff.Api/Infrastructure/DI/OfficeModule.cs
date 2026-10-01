@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
@@ -45,6 +46,14 @@ public static class OfficeModule
         // unconditionally, and its deps (DataverseWebApiClient, IImpersonatedCommunicationQuery) are unconditional
         // singletons from SpeAdminModule and CommunicationModule.
         services.AddScoped<OfficeSearchService>();
+
+        // Task 060 (#1084): the save's job record (create, transitions, the idempotency lookup, the status read, the
+        // SSE stream), stored on the Dataverse row instead of a static in-memory dictionary. Concrete (ADR-010) and
+        // UNCONDITIONAL: the job routes map unconditionally, and its deps (IProcessingJobService, IJobStatusService)
+        // are unconditional. TimeProvider decides when a non-terminal job is abandoned; idempotent, as in the other
+        // modules that use it.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<OfficeJobStatusService>();
 
         // FR-C3 content de-dup detector (Tier-1 exact quickXorHash). Concrete, scoped (ADR-010); reused by
         // every document-creating upload path (email-attachment today; Compose next). Non-fatal by design.

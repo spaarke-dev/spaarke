@@ -86,6 +86,7 @@ shared/taskpane/components/__tests__/DocumentProfileSection.test.tsx
 # save-as-new; `indeterminate` is never treated as new; each OFFICE_016-019
 # refusal has a way forward; the override sends no existingDocumentId.
 shared/taskpane/hooks/__tests__/useSaveFlow.versionSave.test.ts
+shared/taskpane/hooks/__tests__/useSaveFlow.terminalOutcome.test.ts
 shared/taskpane/components/__tests__/SaveModeSection.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
 

@@ -567,11 +567,29 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     savedContextRef.current = null;
   }, [cleanup]);
 
+  // Task 060 (#1084): a job reported Completed that names no document, on a save with no version target to fall back
+  // on. It matched neither completion branch, so the pane sat on "processing" forever with no error. It is a terminal
+  // outcome the user must see. Not recoverable from here: the save may well have written the document, and a blind
+  // retry is exactly what the duplicate check exists to absorb.
+  const failUnconfirmedCompletion = useCallback(() => {
+    const errorMsg: ErrorMessage = {
+      title: 'Save Not Confirmed',
+      message:
+        'The save finished, but Spaarke could not confirm which document it created. Check the record before saving again.',
+      type: 'error',
+      recoverable: false,
+    };
+    setError(errorMsg);
+    setFlowState('error');
+    onError?.(errorMsg);
+  }, [onError]);
+
   // Handle SSE event
   const handleSseEvent = useCallback(
     (event: SseEvent) => {
-      // SSE events have different structures based on event type
-      // Server sends events like: progress, stage, complete, failed, heartbeat
+      // The server's event names are SseHelper.EventTypes: connected, progress, stage-update, job-complete, job-failed,
+      // heartbeat, error. Task 060: this handler listened for 'stage' / 'complete' / 'failed', which the server never
+      // sends, so its completion branch could not fire. Both spellings are accepted.
       const eventType = event.event || 'message';
       const data = event.data as Record<string, unknown>;
 
@@ -597,7 +615,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             ...(stages !== undefined ? { stages } : {}),
           };
         });
-      } else if (eventType === 'stage') {
+      } else if (eventType === 'stage' || eventType === 'stage-update') {
         // Stage update: { stage: string, status: string, timestamp: string }
         const stageName = data.stage as string;
         const stageStatus = data.status as string;
@@ -616,7 +634,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           );
           return { ...prev, ...(stages !== undefined ? { stages } : {}) };
         });
-      } else if (eventType === 'complete') {
+      } else if (eventType === 'complete' || eventType === 'job-complete') {
         // Completion: { jobId: string, documentId?: string, documentUrl?: string }. A VERSION save falls back to
         // the document it named (task 024) — see activeVersionDocumentIdRef.
         const documentId = (data.documentId as string | undefined) ?? activeVersionDocumentIdRef.current ?? undefined;
@@ -627,16 +645,19 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           setSavedDocumentUrl(documentUrl || null);
           setFlowState('complete');
           onComplete?.(documentId, documentUrl || '');
+        } else {
+          failUnconfirmedCompletion();
         }
         cleanup();
-      } else if (eventType === 'failed' || eventType === 'error') {
-        // Error: { code: string, message: string, retryable?: boolean }
+      } else if (eventType === 'failed' || eventType === 'job-failed' || eventType === 'error') {
+        // Error: { errorCode: string, errorMessage: string, retryable?: boolean } (SseHelper's JobFailedPayload and
+        // ErrorPayload). `message` is the older spelling, kept.
         if (activeVersionSaveRef.current) {
           versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
         }
         const errorMsg: ErrorMessage = {
           title: 'Processing Failed',
-          message: (data.message as string) || 'An error occurred during processing.',
+          message: (data.message as string) || (data.errorMessage as string) || 'An error occurred during processing.',
           type: 'error',
           recoverable: (data.retryable as boolean) ?? true,
         };
@@ -647,7 +668,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       }
       // Ignore heartbeat events
     },
-    [cleanup, onComplete, onError]
+    [cleanup, failUnconfirmedCompletion, onComplete, onError]
   );
 
   // Poll for job status
@@ -761,6 +782,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
             setSavedDocumentUrl(documentUrl || null);
             setFlowState('complete');
             onComplete?.(documentId, documentUrl || '');
+          } else if (status.status === 'Completed') {
+            failUnconfirmedCompletion();
           } else if (status.status === 'Failed') {
             if (activeVersionSaveRef.current) {
               versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
@@ -800,7 +823,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
     },
-    [apiBaseUrl, cleanup, getAccessToken, onComplete, onError]
+    [apiBaseUrl, cleanup, failUnconfirmedCompletion, getAccessToken, onComplete, onError]
   );
 
   // Start SSE connection with polling fallback.

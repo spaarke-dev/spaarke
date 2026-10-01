@@ -68,7 +68,6 @@ public class OfficeDocumentPersistence
     internal const int DocumentNameMaxLength = 850;
 
     private readonly IDocumentDataverseService _documentService;
-    private readonly IProcessingJobService _jobService;
     private readonly ContentDedupDetector _dedupDetector;
     private readonly ILogger<OfficeDocumentPersistence> _logger;
     // FR-C2 (task 022): the seams for the office-upload half — record the SAVING USER on the canonical
@@ -80,14 +79,12 @@ public class OfficeDocumentPersistence
 
     public OfficeDocumentPersistence(
         IDocumentDataverseService documentService,
-        IProcessingJobService jobService,
         ContentDedupDetector dedupDetector,
         ILogger<OfficeDocumentPersistence> logger,
         ICommunicationDataverseService? communicationService = null,
         IGenericEntityService? genericEntityService = null)
     {
         _documentService = documentService;
-        _jobService = jobService;
         _dedupDetector = dedupDetector;
         _logger = logger;
         _communicationService = communicationService;
@@ -840,117 +837,6 @@ public class OfficeDocumentPersistence
     }
 
     /// <summary>
-    /// Updates ProcessingJob status in Dataverse.
-    /// </summary>
-    public async Task UpdateJobStatusInDataverseAsync(
-        Guid jobId,
-        JobStatus status,
-        string phase,
-        int progress,
-        string? errorMessage,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var dataverseStatus = status switch
-            {
-                JobStatus.Queued => 0,
-                JobStatus.Running => 1,
-                JobStatus.Completed => 2,
-                JobStatus.Failed => 3,
-                JobStatus.Cancelled => 4,
-                _ => 1
-            };
-
-            await _jobService.UpdateProcessingJobAsync(jobId, new
-            {
-                Status = dataverseStatus,
-                Progress = progress,
-                CurrentStage = phase,
-                ErrorMessage = errorMessage,
-                CompletedDate = status is JobStatus.Completed or JobStatus.Failed
-                    ? DateTime.UtcNow
-                    : (DateTime?)null
-            }, cancellationToken);
-
-            _logger.LogDebug(
-                "ProcessingJob {JobId} status updated: {Status}, {Phase}, {Progress}%",
-                jobId, status, phase, progress);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to update ProcessingJob {JobId} status in Dataverse", jobId);
-        }
-    }
-
-    /// <summary>
-    /// Checks for an existing ProcessingJob with the given idempotency key.
-    /// Uses IDataverseService to query for existing jobs.
-    /// </summary>
-    public async Task<JobStatusResponse?> CheckForExistingJobAsync(
-        string idempotencyKey,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug("Checking for existing job with idempotency key");
-
-        try
-        {
-            var existingJob = await _jobService.GetProcessingJobByIdempotencyKeyAsync(
-                idempotencyKey,
-                cancellationToken);
-
-            if (existingJob == null)
-            {
-                return null;
-            }
-
-            // Map the dynamic result to JobStatusResponse
-            dynamic job = existingJob;
-
-            var status = MapDataverseStatusToJobStatus((int?)job.Status);
-            var jobType = MapDataverseJobTypeToJobType((int?)job.JobType);
-
-            // Task 039 (finding 2): a FAILED or CANCELLED attempt is not a performed operation, so it cannot make
-            // a retry a duplicate. Before this, a same-key retry after any failure (OFFICE_012 upload, OFFICE_019
-            // lock, a save that threw) was answered Duplicate with the failed job and wrote nothing, forever. The
-            // row consulted is the NEWEST with this key (the query orders by createdon), so a failed attempt can
-            // never shadow a later one that completed.
-            if (status is JobStatus.Failed or JobStatus.Cancelled)
-            {
-                _logger.LogInformation(
-                    "Existing job {JobId} with this idempotency key is {Status}; treating the request as a new attempt",
-                    (Guid)job.Id,
-                    status);
-                return null;
-            }
-
-            _logger.LogInformation(
-                "Found existing job {JobId} with idempotency key, status: {Status}",
-                (Guid)job.Id,
-                status);
-
-            return new JobStatusResponse
-            {
-                JobId = (Guid)job.Id,
-                Status = status,
-                JobType = jobType,
-                Progress = (int?)job.Progress ?? 0,
-                CurrentPhase = null, // Not stored in ProcessingJob
-                CompletedPhases = new List<CompletedPhase>(),
-                CreatedAt = DateTimeOffset.UtcNow, // Not returned by query
-                CreatedBy = null
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Error checking for existing job by idempotency key, treating as no duplicate");
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Generates a Dataverse URL for a document record.
     /// </summary>
     public static string GenerateDataverseUrl(Guid documentId)
@@ -958,37 +844,5 @@ public class OfficeDocumentPersistence
         const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
         const string appId = "729afe6d-ca73-f011-b4cb-6045bdd8b757";
         return $"{dataverseBaseUrl}/main.aspx?appid={appId}&pagetype=entityrecord&etn=sprk_document&id={documentId}";
-    }
-
-    /// <summary>
-    /// Maps Dataverse ProcessingJob status option set value to JobStatus enum.
-    /// </summary>
-    public static JobStatus MapDataverseStatusToJobStatus(int? statusValue)
-    {
-        return statusValue switch
-        {
-            0 => JobStatus.Queued,
-            1 => JobStatus.Running,
-            2 => JobStatus.Completed,
-            3 => JobStatus.Failed,
-            4 => JobStatus.Cancelled,
-            _ => JobStatus.Queued
-        };
-    }
-
-    /// <summary>
-    /// Maps Dataverse ProcessingJob job type option set value to JobType enum.
-    /// </summary>
-    public static JobType MapDataverseJobTypeToJobType(int? jobTypeValue)
-    {
-        return jobTypeValue switch
-        {
-            0 => JobType.DocumentSave,
-            1 => JobType.EmailSave,
-            2 => JobType.AttachmentSave,
-            3 => JobType.AiProcessing,
-            4 => JobType.Indexing,
-            _ => JobType.DocumentSave
-        };
     }
 }
