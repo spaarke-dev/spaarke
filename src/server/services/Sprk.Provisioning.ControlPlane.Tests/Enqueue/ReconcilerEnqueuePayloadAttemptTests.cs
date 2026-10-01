@@ -58,7 +58,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Enqueue;
 
 public sealed class ReconcilerEnqueuePayloadAttemptTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
 
     // -----------------------------------------------------------------------
@@ -190,7 +190,7 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
         HandlerId = "H1",
         RunId = TestRunId,
         CustomerId = TestCustomerId,
-        ParametersJson = "{\"customerId\":\"test-customer\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"action\":\"reconciler-advance\",\"handlerId\":\"H1\"}",
+        ParametersJson = "{\"customerId\":\"testcust\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"action\":\"reconciler-advance\",\"handlerId\":\"H1\"}",
         EnqueuedAt = DateTimeOffset.Parse("2026-08-19T12:00:00Z"),
         Attempt = attempt,
     };

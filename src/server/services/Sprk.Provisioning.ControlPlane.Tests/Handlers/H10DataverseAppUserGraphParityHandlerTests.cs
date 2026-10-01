@@ -445,7 +445,7 @@ public sealed class H10DataverseAppUserGraphParityHandlerTests
         k1.Should().Be(k2);
         k1.Should().Be("appuser-acme");
 
-        var k3 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("other-customer");
+        var k3 = H10DataverseAppUserGraphParityHandler.BuildIdempotencyKey("other");
         k3.Should().NotBe(k1);
     }
 

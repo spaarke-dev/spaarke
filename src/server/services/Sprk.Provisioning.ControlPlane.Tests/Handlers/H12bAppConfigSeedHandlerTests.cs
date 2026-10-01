@@ -46,7 +46,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H12bAppConfigSeedHandlerTests : IDisposable
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-appconfig-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string DataverseUrl = "https://acme.crm.dynamics.com";
@@ -165,8 +165,8 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
     [Fact]
     public void AC3_BuildIdempotencyKey_UsesExpectedFormat()
     {
-        var key = H12bAppConfigSeedHandler.BuildIdempotencyKey("cust-x", "MANIFESTHASH");
-        key.Should().Be("h12b-cust-x-MANIFESTHASH");
+        var key = H12bAppConfigSeedHandler.BuildIdempotencyKey("custx", "MANIFESTHASH");
+        key.Should().Be("h12b-custx-MANIFESTHASH");
     }
 
     [Fact]

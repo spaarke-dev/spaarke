@@ -84,7 +84,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H0PreflightHandlerTests
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-preflight-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
 

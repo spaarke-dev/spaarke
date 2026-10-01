@@ -62,7 +62,7 @@ public interface ISeedManifestRunner
 /// the <c>DefaultAzureCredential</c> token acquisition (§4D I5 — explicit
 /// per-tenant scope, never a default-tenant credential).
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>
 /// <param name="TargetDataverseUrl">Target customer Dataverse env URL (e.g. https://spaarke-acme.crm.dynamics.com). Populated by H5/H6 into <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.DataverseEnvUrl"/>.</param>
 public sealed record SeedManifestInvocationRequest(

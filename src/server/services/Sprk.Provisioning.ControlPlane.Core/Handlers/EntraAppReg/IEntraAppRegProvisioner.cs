@@ -85,7 +85,7 @@ public sealed record PendingKvSecretWrite(string VaultName, string SecretName, s
 /// Post-task-222 (D-13): fires for BOTH tenancy models — every customer gets
 /// their own BFF app-reg in both models.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — MUST be explicit, never default).</param>
 /// <param name="VaultName">Target Key Vault name (e.g. <c>sprk-acme-prod-kv</c>). Client secret + ClientId + Audience are all written here under their canonical §7.9 names.</param>
 /// <param name="UamiPrincipalId">

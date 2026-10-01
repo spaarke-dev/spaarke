@@ -168,7 +168,7 @@ public sealed class ServiceBusSmokeTests : IAsyncLifetime
         var envelope = NewEnvelope(
             handlerId: "H0-Preflight",
             runId: $"smoke-{Guid.NewGuid():N}",
-            customerId: $"smoke-{Environment.MachineName.ToLowerInvariant()}-{Guid.NewGuid():N}",
+            customerId: "s" + Guid.NewGuid().ToString("N")[..7],
             parameters: "{\"smoke\":true}",
             enqueuedAt: DateTimeOffset.UtcNow);
 

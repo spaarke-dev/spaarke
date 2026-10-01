@@ -33,7 +33,7 @@ public class H13BuildPromotedColumnsTests
         // H0 upgrade-mode detection reads this column on the next run.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust-1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters(),
             InterStepState = new InterStepState(),
         };
@@ -53,7 +53,7 @@ public class H13BuildPromotedColumnsTests
         // is present in the dictionary.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust-1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters(),
             InterStepState = new InterStepState(),
         };
@@ -72,7 +72,7 @@ public class H13BuildPromotedColumnsTests
     {
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust-1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret =
@@ -113,7 +113,7 @@ public class H13BuildPromotedColumnsTests
         // InterStepState is the authoritative source per design.md §6.2 (H10 output).
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust-1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret = { ["containerTypeId"] = "fallback-from-params" },
@@ -136,7 +136,7 @@ public class H13BuildPromotedColumnsTests
         // Fallback for test hosts / upgrade-only runs that don't re-run H10.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust-1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret = { ["containerTypeId"] = "fallback-value" },
@@ -157,7 +157,7 @@ public class H13BuildPromotedColumnsTests
         // 400ing the PATCH.
         var run = new ProvisioningRun
         {
-            RunId = "run-1", CustomerId = "cust-1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
                 NonSecret =

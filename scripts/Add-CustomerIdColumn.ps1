@@ -6,7 +6,7 @@
     Companion to scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 (task 023).
     Adds the 13th column that task 023 forgot to author but which L2 code REQUIRES:
 
-      - sprk_customerid: String(64), Recommended — the ALT-KEY used by
+      - sprk_customerid: String(8), Recommended — the ALT-KEY used by
         Sprk.Provisioning.ControlPlane.Core/Concurrency/DataverseRegistryConcurrencyStore
         (CustomerIdColumn) and CustomerRunGuard for row lookup via
         $filter=sprk_customerid eq '{id}' pattern.
@@ -14,7 +14,16 @@
     Also registers sprk_customerid as an alternate key on the entity to
     enforce uniqueness + provide index protection for lookups.
 
-    Idempotent: skips column + alt-key if already present.
+    Idempotent: skips column + alt-key if already present. If the column exists with a
+    MaxLength other than 8 (it was created as 64 before T237), the column is updated to 8 —
+    after checking that no row holds a longer value (the script stops if one does).
+
+    MaxLength 8 is the customerId standard's hard rule (T237 / owner D10;
+    docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "The customerId standard"):
+    customer.bicep's Key Vault name sprk-{customerId}-{env}-kv must fit 24 characters
+    without ending in a hyphen. The character rule (^[a-z][a-z0-9]{2,7}$) cannot be
+    enforced by a text column — it is enforced at intake (POST /api/runs, intake schema,
+    /provision-environment Step 1a).
 
 .PARAMETER EnvironmentDomain
     Full Dataverse environment domain, e.g. spaarkedev1.crm.dynamics.com
@@ -37,6 +46,8 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+$CustomerIdMaxLength = 8
+$CustomerIdDescription = "Customer short-id: the customerId standard ^[a-z][a-z0-9]{2,7}$ (3-8 lowercase letters/digits, starts with a letter; docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). MaxLength 8 is the only part a text column can enforce; the character rule is enforced at intake. ALT-KEY used by L2 CustomerRunGuard + DataverseRegistryConcurrencyStore via `$filter=sprk_customerid eq '{id}'`. Added 2026-08-26 (task 199); MaxLength 64 -> 8 by T237 (2026-09-30)."
 $token = az account get-access-token --resource "https://$EnvironmentDomain" --query accessToken -o tsv
 if (-not $token) { Write-Error "Failed to get token"; exit 1 }
 Write-Host "Token acquired" -ForegroundColor Green
@@ -94,15 +105,45 @@ try {
 Write-Host "`nStep 1: Add sprk_customerid column" -ForegroundColor Cyan
 
 if (Test-AttributeExists "sprk_customerid") {
-    Write-Host "  = sprk_customerid (already present - skipped)" -ForegroundColor Yellow
+    # T237: an existing column created at MaxLength 64 is corrected to 8 — but never below a value
+    # already stored (that would need a re-issued id, which is an owner decision).
+    $attrPath = "EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='sprk_customerid')"
+    $current = Invoke-DV -Ep "$attrPath/Microsoft.Dynamics.CRM.StringAttributeMetadata"
+    if (-not $current.Success) { Write-Host "  x read sprk_customerid metadata: $($current.Error)" -ForegroundColor Red; exit 1 }
+    $attr = $current.Data
+    $originalMaxLength = $attr.MaxLength   # captured before $attr is modified below (same object as $current.Data)
+    if ($attr.MaxLength -eq $CustomerIdMaxLength) {
+        Write-Host "  = sprk_customerid (already present, MaxLength $CustomerIdMaxLength - skipped)" -ForegroundColor Yellow
+    } else {
+        $rows = Invoke-DV -Ep "sprk_dataverseenvironments?`$select=sprk_customerid&`$filter=sprk_customerid ne null"
+        if (-not $rows.Success) { Write-Host "  x read existing sprk_customerid values: $($rows.Error)" -ForegroundColor Red; exit 1 }
+        $tooLong = @($rows.Data.value | Where-Object { $_.sprk_customerid.Length -gt $CustomerIdMaxLength })
+        if ($tooLong.Count -gt 0) {
+            Write-Host "  x $($tooLong.Count) row(s) hold a sprk_customerid longer than $CustomerIdMaxLength ($(($tooLong | ForEach-Object { $_.sprk_customerid }) -join ', ')). Re-issue those ids first (owner decision) - MaxLength NOT changed." -ForegroundColor Red
+            exit 1
+        }
+        $attr.PSObject.Properties.Remove('@odata.context')
+        $attr | Add-Member -NotePropertyName '@odata.type' -NotePropertyValue 'Microsoft.Dynamics.CRM.StringAttributeMetadata' -Force
+        $attr.MaxLength = $CustomerIdMaxLength
+        $attr.Description = New-Label $CustomerIdDescription
+        try {
+            Invoke-RestMethod -Uri "$BaseUrl/$attrPath" -Method PUT -UseBasicParsing -ErrorAction Stop `
+                -Headers ($headers + @{ 'MSCRM.MergeLabels' = 'true' }) `
+                -Body ($attr | ConvertTo-Json -Depth 20 -Compress) | Out-Null
+            Write-Host "  ~ sprk_customerid MaxLength $originalMaxLength -> $CustomerIdMaxLength" -ForegroundColor Green
+        } catch {
+            Write-Host "  x update sprk_customerid MaxLength: $($_.Exception.Message)" -ForegroundColor Red
+            exit 1
+        }
+    }
 } else {
     $r = Invoke-DV -Ep "EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes" -Method "POST" -Body @{
         "@odata.type"   = "Microsoft.Dynamics.CRM.StringAttributeMetadata"
         "SchemaName"    = "sprk_customerid"
         "RequiredLevel" = @{ "Value" = "Recommended" }
-        "MaxLength"     = 64
+        "MaxLength"     = $CustomerIdMaxLength
         "DisplayName"   = New-Label "Customer ID"
-        "Description"   = New-Label "Customer short-id (kebab-case, 3-32 chars per intake.schema.json pattern). ALT-KEY used by L2 CustomerRunGuard + DataverseRegistryConcurrencyStore for row lookup via `$filter=sprk_customerid eq '{id}'`. Missing from task 023 script (2026-08-17); added 2026-08-26 during first live batch dispatch of task 186 (r1 reconciliation task 199)."
+        "Description"   = New-Label $CustomerIdDescription
     }
     if ($r.Success) { Write-Host "  + sprk_customerid" -ForegroundColor Green }
     else            { Write-Host "  x sprk_customerid: $($r.Error)" -ForegroundColor Red; exit 1 }

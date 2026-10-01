@@ -46,7 +46,7 @@ public sealed class ServiceBusEnvelopeSizeGuardTests
         {
             HandlerId = "H4b",
             RunId = "00000000-0000-0000-0000-000000000001",
-            CustomerId = "size-guard-test",
+            CustomerId = "sizegrd",
             ParametersJson = "{\"pad\":\"" + padding + "\"}",
             EnqueuedAt = DateTimeOffset.UnixEpoch,
         };

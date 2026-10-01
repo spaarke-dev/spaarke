@@ -86,7 +86,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Api;
 /// </summary>
 public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust"; // T237: customerId standard ^[a-z][a-z0-9]{2,7}$
     private const string TestTenantId = "11111111-1111-1111-1111-111111111111";
     private const string TestObjectId = "22222222-2222-2222-2222-222222222222";
 
@@ -759,6 +759,96 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
+    // T237 (owner D10 / INCOMING-CUSTOMERID-STANDARD §3.1) — CreateRun enforces the
+    // customerId standard ^[a-z][a-z0-9]{2,7}$ before the registry lookup, any Cosmos
+    // write and any enqueue. Reject, never repair (no trimming / lower-casing).
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("ab")]          // 2 chars
+    [InlineData("abcdefghi")]   // 9 chars
+    [InlineData("Acme")]        // uppercase
+    [InlineData("acme-x")]      // hyphen
+    [InlineData("1acme")]       // leading digit
+    [InlineData("acme_x")]      // underscore
+    [InlineData(" acme")]       // leading space — not trimmed
+    public async Task PostRuns_NonCompliantCustomerId_Returns400_BeforeRegistryCosmosOrEnqueue(string customerId)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var registry = new StubRegistryClient();
+        factory.ReplaceRegistryClient(registry);
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest(customerId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("customerId standard", "the diagnostic must name the rule the value broke");
+        ReadProblemDetail(body).Should().Contain($"'{customerId}'", "the diagnostic must echo the rejected value");
+        registry.LookupCount.Should().Be(0, "the standard is checked before the REG-07 registry lookup");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("platform")]    // rg-spaarke-platform-{env} hosts the BFF + L2
+    [InlineData("shared")]
+    [InlineData("byok")]
+    public async Task PostRuns_ReservedCustomerId_Returns400_BeforeRegistryCosmosOrEnqueue(string customerId)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var registry = new StubRegistryClient();
+        factory.ReplaceRegistryClient(registry);
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest(customerId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        ReadProblemDetail(await response.Content.ReadAsStringAsync()).Should().Contain($"customerId '{customerId}' is reserved");
+        registry.LookupCount.Should().Be(0);
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("abc")]         // 3 chars — lower bound
+    [InlineData("abcdefgh")]    // 8 chars — upper bound
+    public async Task PostRuns_CompliantCustomerIdAtLengthBounds_Returns202(string customerId)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest(customerId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Should().ContainSingle(r => r.CustomerId == customerId);
+    }
+
+    // ProblemDetails JSON escapes ' as ', so assert on the parsed detail, not the raw body.
+    private static string ReadProblemDetail(string body)
+        => System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("detail").GetString() ?? string.Empty;
+
+    private static HttpRequestMessage BuildValidCreateRunRequest(string customerId)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+        return request;
+    }
+
+    // -------------------------------------------------------------------------
     // ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
     // 2026-08-27) — CreateRun MUST reject invalid tenancyModel × profile
     // pairs at the HTTP surface, mirroring intake.schema.json's allOf logic.
@@ -1029,7 +1119,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         {
             Snapshot = new Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot(
                 EnvironmentId: "env-1",
-                CustomerId: "OTHER-CUSTOMER",
+                CustomerId: "other",
                 TenantId: "11111111-1111-1111-1111-111111111111",
                 SetupStatus: "InProgress",
                 CurrentRunId: null),
@@ -1059,7 +1149,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             "REG-07 — cross-customer environmentId must fail-fast with 400.");
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("REG-07");
-        body.Should().Contain("OTHER-CUSTOMER");
+        ReadProblemDetail(body).Should().Contain("belongs to customer 'other'");
         factory.Repository.CreatedRuns.Should().BeEmpty(
             because: "REG-07 must reject BEFORE the Cosmos write.");
     }
@@ -1478,10 +1568,12 @@ internal sealed class StubRegistryClient : Sprk.Provisioning.ControlPlane.Regist
 {
     public Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot? Snapshot { get; set; }
     public Exception? ThrowOnLookup { get; set; }
+    public int LookupCount { get; private set; }
 
     public Task<Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(
         string environmentId, CancellationToken cancellationToken)
     {
+        LookupCount++;
         if (ThrowOnLookup is { } ex) throw ex;
         return Task.FromResult(Snapshot);
     }

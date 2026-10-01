@@ -51,8 +51,8 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Concurrency;
 /// </summary>
 public sealed class CustomerRunGuardTests
 {
-    private const string CustomerA = "acme-corp";
-    private const string CustomerB = "beta-industries";
+    private const string CustomerA = "acme";
+    private const string CustomerB = "beta";
     private const string RunA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     private const string RunB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 

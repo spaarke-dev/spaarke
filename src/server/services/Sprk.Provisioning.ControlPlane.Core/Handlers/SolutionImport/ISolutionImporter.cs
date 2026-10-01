@@ -76,7 +76,7 @@ public interface ISolutionImporter
 /// record; the caller (<see cref="H6SolutionImportHandler"/>) constructs one
 /// per run.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — MUST be explicit, never default).</param>
 /// <param name="ClientId">BFF Entra app registration id (H3 output — populated by upstream H3 into InterStepState.BffAppRegId).</param>
 /// <param name="ClientSecret">

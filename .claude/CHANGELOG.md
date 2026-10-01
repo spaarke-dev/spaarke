@@ -7,6 +7,23 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-30 — `/provision-environment` enforces the customerId standard and records the display name (T237)
+
+`customer-provisioning-orchestration-r1` T237 (owner D10, adopting unified-access-control-r2 D-14).
+
+- **Step 1a** now validates `customerId` against the standard `^[a-z][a-z0-9]{2,7}$` (case-sensitive, `\z`-anchored;
+  re-prompt in interactive mode, hard stop in batch), refuses the reserved ids `platform` / `shared` / `byok`
+  (they name non-customer resource groups — the BFF already refuses them), and tells the operator to abbreviate long
+  names once (`northwind` → `nwind`). It used to describe a kebab-case 3–32-character id with no check at all.
+- **New Step 1a-bis `displayName`** — the customer's full name, written to `sprk_name` on the registry placeholder so
+  the id ↔ name decision is recorded once. `intake.schema.json` gained the matching optional property.
+- 🔴 **Step 1f fix**: `$tenancyModelMap` was still keyed `Model1Shared` / `Model2Dedicated`, so after T224 renamed the
+  values the lookup returned `$null` and every placeholder row would have been written without `sprk_tenancymodel`.
+  Keys are now `Model1` / `Model2`, and a missing mapping stops the step.
+- Examples use compliant ids (`acme`, not `trial-acme-2026-08-18`). The Step 1c/1e tenancy and profile prose is still
+  pre-T224; that is recorded under plan gap G6 for T225b.
+
+---
 ###### 2026-09-30 — provisioning docs follow T226: H4-shared retired, secret-catalog pattern rewritten
 
 `customer-provisioning-orchestration-r1` T226 retired the H4-shared handler (it copied keys from the

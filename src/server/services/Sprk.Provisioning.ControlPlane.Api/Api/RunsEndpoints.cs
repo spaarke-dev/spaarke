@@ -112,6 +112,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Provisioning.ControlPlane.Concurrency;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -382,6 +383,24 @@ public static class RunsEndpoints
         if (string.IsNullOrWhiteSpace(request.CustomerId))
         {
             return BadRequest(httpContext, "customerId is required.");
+        }
+        // T237 (owner D10 / INCOMING-CUSTOMERID-STANDARD §3.1): the customerId standard is enforced
+        // HERE — ARM has no @pattern and the Dataverse column has no regex, so nothing later can catch
+        // a hyphenated id (silent storage-account collision) or an over-long one (customer.bicep's Key
+        // Vault name ends in a hyphen → H2a fails). Reject, never repair; checked before the registry
+        // lookup, the run guard, any Cosmos write and any enqueue.
+        if (!CustomerIdStandard.IsValid(request.CustomerId))
+        {
+            return BadRequest(httpContext,
+                $"customerId '{request.CustomerId}' does not match the customerId standard {CustomerIdStandard.Pattern}: " +
+                $"{CustomerIdStandard.Description}. Abbreviate longer customer names at intake (northwind -> nwind) " +
+                "and record the full name as the registry row's display name.");
+        }
+        if (CustomerIdStandard.IsReserved(request.CustomerId))
+        {
+            return BadRequest(httpContext,
+                $"customerId '{request.CustomerId}' is reserved: it names a non-customer resource group " +
+                $"(rg-spaarke-{request.CustomerId}-{{env}}). Reserved ids: {string.Join(", ", CustomerIdStandard.ReservedIds)}.");
         }
         if (string.IsNullOrWhiteSpace(request.EnvironmentId))
         {

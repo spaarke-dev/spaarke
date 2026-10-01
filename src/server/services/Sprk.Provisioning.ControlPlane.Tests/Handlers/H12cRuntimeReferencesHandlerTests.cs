@@ -45,7 +45,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H12cRuntimeReferencesHandlerTests
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-runtimerefs-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string DataverseUrl = "https://acme.crm.dynamics.com";
@@ -168,8 +168,8 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public void BuildIdempotencyKey_UsesExpectedFormat()
     {
-        var key = H12cRuntimeReferencesHandler.BuildIdempotencyKey("cust-x", "Model2", "ABCDEF");
-        key.Should().Be("h12c-cust-x-Model2-ABCDEF");
+        var key = H12cRuntimeReferencesHandler.BuildIdempotencyKey("custx", "Model2", "ABCDEF");
+        key.Should().Be("h12c-custx-Model2-ABCDEF");
     }
 
     [Fact]
@@ -251,7 +251,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         run.CompletedPhases.Add(new CompletedPhase
         {
             Phase = "H12a",
-            IdempotencyKey = "h12a-acme-corp-somehash",
+            IdempotencyKey = "h12a-acme-somehash",
             StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
             CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
             JobId = "prior-job",
@@ -549,7 +549,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
             run.CompletedPhases.Add(new CompletedPhase
             {
                 Phase = "H12a",
-                IdempotencyKey = "h12a-acme-corp-somehash",
+                IdempotencyKey = "h12a-acme-somehash",
                 StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
                 CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
                 JobId = "prior-job-a",
@@ -557,7 +557,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
             run.CompletedPhases.Add(new CompletedPhase
             {
                 Phase = "H12b",
-                IdempotencyKey = "h12b-acme-corp-somehash",
+                IdempotencyKey = "h12b-acme-somehash",
                 StartedAt = DateTimeOffset.UtcNow.AddMinutes(-3),
                 CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
                 JobId = "prior-job-b",

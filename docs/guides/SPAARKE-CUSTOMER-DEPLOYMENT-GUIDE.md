@@ -144,7 +144,7 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 
 | Item | Example | Where to find |
 |---|---|---|
-| Customer ID | `acme` (lowercase, 3-10 alphanumeric) | Assigned per customer intake |
+| Customer ID | `acme` — the customerId standard: 3-8 lowercase letters and digits, starting with a letter ([naming convention](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)) | Assigned once at customer intake; abbreviate longer names (`northwind` → `nwind`) |
 | Customer display name | "Acme Legal Services" | Customer intake |
 | Target subscription ID | `2ff9ee48-...` | Azure Portal > Subscriptions |
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |

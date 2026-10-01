@@ -105,7 +105,7 @@ public sealed class LongHandlerScenario
         // Step 1 — POST /api/runs; expect 202 with Location + a well-under-
         //          budget elapsed time.
         // ------------------------------------------------------------------
-        const string customerId = "long-handler-customer";
+        const string customerId = "longhdlr";
         var postSw = Stopwatch.StartNew();
         HttpResponseMessage postResponse = await client.SendAsync(BuildPostRequest(customerId));
         postSw.Stop();

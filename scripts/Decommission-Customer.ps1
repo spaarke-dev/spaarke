@@ -23,7 +23,7 @@
       - Each step verifies before proceeding
 
 .PARAMETER CustomerId
-    Customer identifier (lowercase, alphanumeric, 3-10 chars).
+    Customer identifier — the customerId standard ^[a-z][a-z0-9]{2,7}$ (AZURE-RESOURCE-NAMING-CONVENTION.md).
     Must match the CustomerId used during provisioning.
 
 .PARAMETER Environment
@@ -90,7 +90,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
-    [ValidatePattern('^[a-z0-9]{3,10}$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (AZURE-RESOURCE-NAMING-CONVENTION.md; T237)
     [string]$CustomerId,
 
     [ValidateSet("dev", "staging", "prod")]
@@ -123,6 +123,14 @@ $PlatformResourceGroups = @(
     "rg-spaarke-platform-prod",
     "rg-spaarke-platform-staging",
     "rg-spaarke-platform-dev",
+    # T237: the other reserved customerId segments (CustomerIdStandard.ReservedIds) — the
+    # rg-spaarke-{id}-{env} safety regex alone would accept them.
+    "rg-spaarke-shared-prod",
+    "rg-spaarke-shared-staging",
+    "rg-spaarke-shared-dev",
+    "rg-spaarke-byok-prod",
+    "rg-spaarke-byok-staging",
+    "rg-spaarke-byok-dev",
     "spe-infrastructure-westus2"
 )
 
@@ -276,7 +284,7 @@ else {
 Write-StepHeader -Step 2 -Total $TotalSteps -Description "Safety checks"
 
 # 2a: Verify resource group name matches expected pattern
-$expectedPattern = "^rg-spaarke-[a-z0-9]{3,10}-(dev|staging|prod)$"
+$expectedPattern = "^rg-spaarke-[a-z][a-z0-9]{2,7}-(dev|staging|prod)$"  # customerId standard segment (T237)
 if ($ResourceGroupName -notmatch $expectedPattern) {
     Write-Log "SAFETY BLOCK: Resource group name '$ResourceGroupName' does not match expected pattern: $expectedPattern" -Level ERROR
     Write-Log "This prevents accidental deletion of non-customer resource groups." -Level ERROR

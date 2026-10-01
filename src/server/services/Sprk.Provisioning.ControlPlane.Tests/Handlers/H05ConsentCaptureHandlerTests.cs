@@ -33,7 +33,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H05ConsentCaptureHandlerTests
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string TenantId = "11111111-1111-1111-1111-111111111111";
     private const string RunId = "01HZZ-run-0001";
 
@@ -105,7 +105,7 @@ public sealed class H05ConsentCaptureHandlerTests
     {
         // Envelope carries one customerId; payload carries a different one.
         // This would cross a Cosmos partition boundary (§4D I3) — reject up front.
-        var payload = new ConsentCapturePayload { CustomerId = "different-customer", TenantId = TenantId };
+        var payload = new ConsentCapturePayload { CustomerId = "diffcust", TenantId = TenantId };
         var envelope = NewEnvelope(customerId: CustomerId, parametersJson: SerializePayload(payload));
         var handler = NewHandler(new StubRegistry(), new StubEnqueuer());
 

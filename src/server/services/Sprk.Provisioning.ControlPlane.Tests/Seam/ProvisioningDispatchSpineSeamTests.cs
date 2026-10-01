@@ -202,7 +202,7 @@ public sealed class ProvisioningDispatchSpineSeamTests : IAsyncLifetime
             return; // env-guarded skip
         }
 
-        var customerId = $"seam-dispatch-{Guid.NewGuid():N}";
+        var customerId = "d" + Guid.NewGuid().ToString("N")[..7];
         var runId = Guid.NewGuid().ToString("D");
 
         // ARRANGE -- seed a run already past H0 (the entry-point handler,
@@ -327,7 +327,7 @@ public sealed class ProvisioningDispatchSpineSeamTests : IAsyncLifetime
             return; // env-guarded skip
         }
 
-        var customerId = $"seam-terminal-{Guid.NewGuid():N}";
+        var customerId = "t" + Guid.NewGuid().ToString("N")[..7];
         var runId = Guid.NewGuid().ToString("D");
 
         // ARRANGE -- a run already in a terminal status. CosmosActiveRunScanner's

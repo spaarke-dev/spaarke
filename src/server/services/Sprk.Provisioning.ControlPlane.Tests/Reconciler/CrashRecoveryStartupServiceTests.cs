@@ -56,7 +56,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 /// </summary>
 public sealed class CrashRecoveryStartupServiceTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000060";
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-08-18T12:00:00Z");
 
@@ -339,13 +339,13 @@ public sealed class CrashRecoveryStartupServiceTests
     {
         var run1 = MakeRun(RunStatus.Running,
             runId: "00000000-0000-0000-0000-000000000101",
-            customerId: "customer-a",
+            customerId: "custa",
             currentPhase: "H2a",
             createdAgo: TimeSpan.FromMinutes(30),
             completedPhases: Array.Empty<(string, TimeSpan)>());
         var run2 = MakeRun(RunStatus.Running,
             runId: "00000000-0000-0000-0000-000000000102",
-            customerId: "customer-b",
+            customerId: "custb",
             currentPhase: "H5",
             createdAgo: TimeSpan.FromMinutes(30),
             completedPhases: Array.Empty<(string, TimeSpan)>());

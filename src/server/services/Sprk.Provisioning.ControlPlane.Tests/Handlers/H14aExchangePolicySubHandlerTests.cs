@@ -159,7 +159,7 @@ public sealed class H14aExchangePolicySubHandlerTests
         k1.Should().Be(k2, "the hash sorts inputs before hashing — order of the 2-entry set must not matter");
         k1.Should().StartWith($"h14-{CustomerId}-exchange-");
 
-        var k3 = H14aExchangePolicySubHandler.BuildIdempotencyKey("other-customer", new[] { BffAppRegId, UamiClientId });
+        var k3 = H14aExchangePolicySubHandler.BuildIdempotencyKey("other", new[] { BffAppRegId, UamiClientId });
         k3.Should().NotBe(k1);
     }
 

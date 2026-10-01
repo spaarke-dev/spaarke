@@ -30,6 +30,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Sprk.Provisioning.ControlPlane.Api;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Api;
@@ -87,6 +88,24 @@ public sealed class IntakeSchemaProfileParityTests
             "the field carries the BAT-03 batch-mode operator attestation (const 'proceed with " +
             "provisioning'). Without it in `required[]`, ajv validation silently passes intakes " +
             "that would then hard-stop at SKILL.md Step 1.0 line 515. See Bucket A HIGH#2 SESSION 18.");
+    }
+
+    /// <summary>
+    /// T237: batch-mode intake (ajv against the schema) and the CreateRun edge
+    /// (<see cref="CustomerIdStandard"/>) must apply the SAME customerId rule — otherwise a batch
+    /// file passes ajv and is then refused by the API, or the reverse.
+    /// </summary>
+    [Fact]
+    public void CustomerIdPattern_MatchesCustomerIdStandard_Exactly()
+    {
+        var schemaPath = ResolveRepoRelativePath(IntakeSchemaRelativePath);
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+
+        var pattern = doc.RootElement.GetProperty("properties").GetProperty("customerId").GetProperty("pattern").GetString();
+
+        pattern.Should().Be(CustomerIdStandard.Pattern,
+            "intake.schema.json customerId.pattern and CustomerIdStandard.Pattern (enforced at POST /api/runs) " +
+            "MUST be the same rule — see AZURE-RESOURCE-NAMING-CONVENTION.md § \"The customerId standard\".");
     }
 
     // -------------------------------------------------------------------------

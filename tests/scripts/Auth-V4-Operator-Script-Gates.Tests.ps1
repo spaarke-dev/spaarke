@@ -138,9 +138,9 @@ Describe "Test-SpaarkeSecretFreeMarker (A38c)" {
             $global:LASTEXITCODE = 0
             return ""
         }
-        (Test-SpaarkeSecretFreeMarker -KeyVaultName 'kv-acme-1-kv' -CustomerId 'acme-1') | Should Be $false
-        (Test-SpaarkeSecretFreeMarker -KeyVaultName 'kv-acme-2-kv' -CustomerId 'acme-2') | Should Be $true
-        (Test-SpaarkeSecretFreeMarker -KeyVaultName 'kv-acme-3-kv' -CustomerId 'acme-3') | Should Be $false
+        (Test-SpaarkeSecretFreeMarker -KeyVaultName 'kv-acme-1-kv' -CustomerId 'acme1') | Should Be $false
+        (Test-SpaarkeSecretFreeMarker -KeyVaultName 'kv-acme-2-kv' -CustomerId 'acme2') | Should Be $true
+        (Test-SpaarkeSecretFreeMarker -KeyVaultName 'kv-acme-3-kv' -CustomerId 'acme3') | Should Be $false
     }
 }
 

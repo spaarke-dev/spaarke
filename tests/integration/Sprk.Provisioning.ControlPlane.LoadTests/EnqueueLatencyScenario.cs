@@ -69,7 +69,7 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
         // Warm-up so JIT + DI compilation is out of the timed window.
         for (var i = 0; i < WarmupN; i++)
         {
-            using var warmup = BuildRequest($"warmup-{i}");
+            using var warmup = BuildRequest($"warm{i}");
             using var warmupResponse = await client.SendAsync(warmup);
             warmupResponse.EnsureSuccessStatusCode();
         }
@@ -93,7 +93,7 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
             async (i, ct) =>
             {
                 var sw = Stopwatch.StartNew();
-                using var request = BuildRequest($"customer-load-{i}");
+                using var request = BuildRequest($"load{i}");
                 using var response = await client.SendAsync(request, ct);
                 sw.Stop();
                 samples[i] = sw.ElapsedMilliseconds;

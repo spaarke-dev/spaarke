@@ -372,7 +372,7 @@ public sealed class H11UserProvisioningHandlerTests
         k1.Should().Be(k2);
         k1.Should().Be("users-acme");
 
-        var k3 = H11UserProvisioningHandler.BuildIdempotencyKey("other-customer");
+        var k3 = H11UserProvisioningHandler.BuildIdempotencyKey("other");
         k3.Should().NotBe(k1);
     }
 

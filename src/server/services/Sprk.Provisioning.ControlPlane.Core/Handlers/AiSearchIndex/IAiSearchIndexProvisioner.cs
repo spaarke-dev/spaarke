@@ -60,7 +60,7 @@ public interface IAiSearchIndexProvisioner
 /// from <see cref="Models.ProvisioningRun.Parameters"/> +
 /// <see cref="Models.InterStepState.AiSearchEndpoint"/> populated by H2a.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>
 /// <param name="EnvironmentName">Target environment (<c>dev</c> / <c>staging</c> / <c>prod</c> / <c>demo</c>) — the script's <c>-Environment</c> parameter.</param>
 /// <param name="SearchEndpoint">Customer's dedicated AI Search endpoint URI from H2a's <see cref="Models.InterStepState.AiSearchEndpoint"/>. Empty for Model 1 (not used).</param>

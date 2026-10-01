@@ -7,7 +7,7 @@
 
 | Field | Value | Source | Notes |
 |---|---|---|---|
-| `customerId` | `{customerId}` | operator | slug; matches `sprk_dataverseenvironment.sprk_customerid` |
+| `customerId` | `{customerId}` | operator | **The customerId standard** `^[a-z][a-z0-9]{2,7}$` — 3-8 lowercase letters and digits, starting with a letter, no hyphens ([`AZURE-RESOURCE-NAMING-CONVENTION.md`](../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) § "The customerId standard"). Abbreviate a longer name once, here (`northwind` → `nwind`). Stored in `sprk_dataverseenvironment.sprk_customerid`; enforced by skill Step 1a, `intake.schema.json` and `POST /api/runs`. |
 | `tenantId` | `{tenantId}` | operator | **explicit per NFR-11 (I1)** — never inferred |
 | `environmentId` | `{environmentId}` | operator | `sprk_dataverseenvironment` GUID placeholder created in skill Step 1 pre-POST |
 | `tenancyModel` | `Model1 \| Model2` | operator | drives the **Lighthouse-delegation + admin-consent** requirement (Model 2 only). *Amended 2026-09-28 (D-12): was "H4-per-tenant vs H4-shared handler branching" — there is no shared handler surface.* |
@@ -17,7 +17,7 @@
 
 | Field | Value | Default | Notes |
 |---|---|---|---|
-| `displayName` | `{displayName}` | (customerId) | for handoff-report + CLAUDE.md |
+| `displayName` | `{displayName}` | (customerId) | The customer's full name (e.g. `Northwind Traders`). Written to `sprk_dataverseenvironment.sprk_name` next to the id, so the abbreviation is recorded once on the registry row. Also used in the handoff report. |
 | `region` | `{region}` | westus2 | for platform resources; H2a OpenAI may override to westus3 per F4 |
 | `upgradeMode` | `{upgradeMode}` | Auto | matches `sprk_dataverseenvironment.sprk_upgrademode` |
 | `subscriptionId` | `{subscriptionId}` | **required — no default** | 🔴 **One Azure subscription per customer in BOTH models** (ADR-027 amended 2026-09-28). There is no platform-default subscription to fall back to. |

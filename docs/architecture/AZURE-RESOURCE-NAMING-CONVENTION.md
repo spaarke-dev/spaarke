@@ -312,6 +312,12 @@ relax it rather than to reject the customer.
 Names longer than 8 characters are abbreviated at intake — `northwind` → `nwind`. The abbreviation is a
 decision made once, at onboarding, and recorded on the registry row; it is not re-derived anywhere.
 
+**Reserved: `platform`, `shared`, `byok`.** They match the pattern but already occupy the customerId position in
+non-customer resource-group names — `rg-spaarke-platform-{env}` (the BFF and the L2 control plane),
+`rg-spaarke-shared-{env}` (the retired Model 1 tier), `rg-spaarke-byok-prod`. A customer with one of these ids would
+deploy into that group. Intake refuses them (`CustomerIdStandard.ReservedIds`), and the BFF refuses to derive them
+at runtime (`CustomerIdResolver`).
+
 ---
 
 ### SharePoint Embedded (SPE) Resources

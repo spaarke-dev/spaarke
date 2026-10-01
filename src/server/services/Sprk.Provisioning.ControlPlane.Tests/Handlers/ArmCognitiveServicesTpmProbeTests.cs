@@ -130,7 +130,7 @@ public sealed class ArmCognitiveServicesTpmProbeTests
         });
         var probe = new ArmCognitiveServicesTpmProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmCognitiveServicesTpmProbe>.Instance);
         var input = new PreflightProbeInput(
-            "acme-corp", "tenant-1",
+            "acme", "tenant-1",
             new Dictionary<string, string> { ["region"] = Region, ["subscriptionId"] = SubscriptionId });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
@@ -146,7 +146,7 @@ public sealed class ArmCognitiveServicesTpmProbeTests
         var handler = ArmSdkTestFakes.NewHandler(_ => throw new InvalidOperationException("must not call ARM"));
         var probe = new ArmCognitiveServicesTpmProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmCognitiveServicesTpmProbe>.Instance);
         var input = new PreflightProbeInput(
-            "acme-corp", "tenant-1",
+            "acme", "tenant-1",
             new Dictionary<string, string> { ["subscriptionId"] = SubscriptionId }); // no region
 
         var result = await probe.CheckAsync(input, CancellationToken.None);

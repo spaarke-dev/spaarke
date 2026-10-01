@@ -63,7 +63,7 @@ public interface IBicepDeployRunner
 /// <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.Parameters"/>
 /// + <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>
 /// <param name="SubscriptionId">Target subscription id (ADR-027 D4 — customer subscription, never platform).</param>
 /// <param name="TenancyModel">

@@ -73,7 +73,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H4bBulkAppSettingsHandlerTests
 {
-    private const string CustomerId = "acme-prod";
+    private const string CustomerId = "acmeprod";
     private const string RunId = "01j9-h4b-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string SubscriptionId = "sub-h4b-prod";

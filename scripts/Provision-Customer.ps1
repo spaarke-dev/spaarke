@@ -28,8 +28,8 @@
     The demo environment is provisioned using this exact script (FR-06).
 
 .PARAMETER CustomerId
-    Customer identifier (lowercase, alphanumeric, 3-10 chars).
-    Drives all resource naming: rg-spaarke-{customerId}-prod, sprk-{customerId}-prod-kv, etc.
+    Customer identifier — the customerId standard ^[a-z][a-z0-9]{2,7}$: 3-8 lowercase letters and digits,
+    starting with a letter (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). Drives all resource naming: rg-spaarke-{customerId}-prod, sprk-{customerId}-prod-kv, etc.
 
 .PARAMETER DisplayName
     Human-readable customer name for display purposes and Dataverse environment.
@@ -118,7 +118,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9]{3,10}$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (AZURE-RESOURCE-NAMING-CONVENTION.md; T237)
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]

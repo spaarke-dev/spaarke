@@ -6,7 +6,7 @@
   "tokenMap": {
     "customerId": {
       "source": "intake",
-      "shape": "kebab-case string, 3-32 chars, starts with letter",
+      "shape": "customerId standard ^[a-z][a-z0-9]{2,7}$ (3-8 lowercase letters/digits, starts with a letter; AZURE-RESOURCE-NAMING-CONVENTION.md)",
       "populatedBy": "intake.schema.json customerId property (skill Step 1a)",
       "note": "Session variable; per-customer prereqs (once_per_customer) reference this."
     },

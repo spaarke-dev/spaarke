@@ -58,7 +58,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 /// </summary>
 public sealed class StateReconcilerServiceTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
 
     // -----------------------------------------------------------------------

@@ -157,13 +157,13 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         var fake = new CapturingFakeClient(new RegistryUpdateOutcome.Success());
         var updater = NewUpdater(fake);
         var request = NewRequest(
-            customerId: "trial-2026-08-20",
+            customerId: "trial20",
             runId: "65109e91-5968-4300-933e-9e79dea4109c",
             environmentId: "87d7b4a7-399b-f111-b8de-7ced8ddc4a05");
 
         await updater.TransitionToReadyAsync(request, CancellationToken.None);
 
-        fake.LastUpdate!.CustomerIdForLog.Should().Be("trial-2026-08-20");
+        fake.LastUpdate!.CustomerIdForLog.Should().Be("trial20");
         fake.LastUpdate.RunIdForLog.Should().Be("65109e91-5968-4300-933e-9e79dea4109c");
         fake.LastUpdate.EnvironmentId.Should().Be("87d7b4a7-399b-f111-b8de-7ced8ddc4a05");
     }
@@ -230,7 +230,7 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         => new(client, NullLogger<DataverseRegistrySetupStatusUpdater>.Instance);
 
     private static RegistrySetupStatusUpdateRequest NewRequest(
-        string customerId = "trial-2026-08-20",
+        string customerId = "trial20",
         string runId = "run-abc-def",
         string tenantId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
         string environmentId = "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",

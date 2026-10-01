@@ -9,8 +9,16 @@
   "properties": {
     "customerId": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9-]{2,31}$",
-      "description": "kebab-case, 3-32 chars, starts with letter (matches skill Step 1a and L2 API validation)"
+      "pattern": "^[a-z][a-z0-9]{2,7}$",
+      "not": { "enum": ["platform", "shared", "byok"] },
+      "description": "The customerId standard: 3-8 lowercase letters and digits, starting with a letter (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § 'The customerId standard'). No hyphens. Abbreviate longer customer names here, once (northwind -> nwind), and put the full name in displayName. Reserved (they name non-customer resource groups): platform, shared, byok. The same rule is enforced at POST /api/runs (CustomerIdStandard) and in skill Step 1a."
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S",
+      "description": "The customer's full name (e.g. 'Northwind Traders'). Written to sprk_dataverseenvironment.sprk_name next to sprk_customerid, so the id-to-name decision is recorded once on the registry row and never re-derived. Optional; defaults to customerId."
     },
     "tenantId": {
       "type": "string",
@@ -155,6 +163,7 @@
   "examples": [
     {
       "customerId": "trial1",
+      "displayName": "Spaarke Trial 1",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
       "tenancyModel": "Model1",
       "controlPlaneEnv": "dev",
@@ -172,7 +181,8 @@
       "costEnvelopePolicy": "abortOnOverrun"
     },
     {
-      "customerId": "acme-corp",
+      "customerId": "acme",
+      "displayName": "Acme Corporation",
       "tenantId": "12345678-1234-1234-1234-123456789012",
       "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
       "tenancyModel": "Model2",

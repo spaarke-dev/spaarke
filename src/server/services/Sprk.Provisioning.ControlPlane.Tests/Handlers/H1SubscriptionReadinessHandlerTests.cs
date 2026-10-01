@@ -42,7 +42,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H1SubscriptionReadinessHandlerTests
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-subready-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string SubscriptionId = "22222222-3333-4444-5555-666666666666";

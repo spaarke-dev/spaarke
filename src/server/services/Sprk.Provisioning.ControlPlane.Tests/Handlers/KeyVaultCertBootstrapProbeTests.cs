@@ -114,7 +114,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
             NullLogger<KeyVaultCertBootstrapProbe>.Instance,
             timeProvider);
         var input = new PreflightProbeInput(
-            "acme-corp", "tenant-1", new Dictionary<string, string> { ["keyVaultName"] = KeyVaultName });
+            "acme", "tenant-1", new Dictionary<string, string> { ["keyVaultName"] = KeyVaultName });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
@@ -136,7 +136,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
             NullLogger<KeyVaultCertBootstrapProbe>.Instance,
             new TestTimeProvider(Now));
         var input = new PreflightProbeInput(
-            "acme-corp", "tenant-1", new Dictionary<string, string> { ["keyVaultName"] = KeyVaultName });
+            "acme", "tenant-1", new Dictionary<string, string> { ["keyVaultName"] = KeyVaultName });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
@@ -153,7 +153,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
             new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) },
             NullLogger<KeyVaultCertBootstrapProbe>.Instance,
             new TestTimeProvider(Now));
-        var input = new PreflightProbeInput("acme-corp", "tenant-1", new Dictionary<string, string>());
+        var input = new PreflightProbeInput("acme", "tenant-1", new Dictionary<string, string>());
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 

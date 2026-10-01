@@ -98,7 +98,7 @@ param(
 
     [string]$Location = 'westus2',
 
-    [ValidatePattern('^[a-z0-9]{3,10}$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (T237)
     [string]$TestCustomerId = 'itsttest',
 
     [ValidateSet('dev', 'staging', 'prod')]

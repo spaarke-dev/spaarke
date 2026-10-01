@@ -602,6 +602,7 @@ if ($BatchIntakeFile) {
   # Pre-fill from validated intake (skips 1a-1e interactive prompts)
   $intake         = Get-Content $BatchIntakeFile -Raw | ConvertFrom-Json -Depth 10
   $customerId     = $intake.customerId
+  $displayName    = if ($intake.displayName) { $intake.displayName } else { $intake.customerId }  # T237 — full customer name, recorded once on the registry row (sprk_name)
   $tenantId       = $intake.tenantId
   $tenancyModel   = $intake.tenancyModel
   $environment    = $intake.controlPlaneEnv    # ISH-12 rename SESSION 18 — intake field is `controlPlaneEnv`; local var stays `$environment` for existing downstream references
@@ -674,7 +675,35 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
 
 #### 1a. `customerId` (required)
 
-- Format: `[a-z][a-z0-9-]{2,31}` (kebab-case, 3-32 chars, starts alpha)
+- Format: **the customerId standard** `^[a-z][a-z0-9]{2,7}$` — 3-8 lowercase letters and digits, starting with a
+  letter, **no hyphens** ([`AZURE-RESOURCE-NAMING-CONVENTION.md` § "The customerId standard"](../../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)).
+  Max 8 because `customer.bicep`'s Key Vault name `sprk-{customerId}-{env}-kv` must fit 24 characters without
+  ending in a hyphen; no hyphens because the storage-account name strips them (`acme-x` and `acmex` would share
+  one account). Neither Bicep nor the Dataverse column can enforce the character rule — **this step and
+  `POST /api/runs` are the enforcement points.**
+- **Abbreviate once, here.** A customer name longer than 8 characters is shortened by the operator now
+  (`northwind` → `nwind`) and the full name goes in `displayName` (1a-bis). Nothing downstream re-derives the id.
+- Validate before anything else in Step 1 (both modes). Case-sensitive (`-cmatch`) and anchored with `\z`, so
+  `Acme` and a value with a trailing newline are rejected rather than repaired:
+
+  ```powershell
+  # T237 (owner D10): reject, never repair — no trimming, lower-casing or auto-abbreviation.
+  # Reserved ids name NON-customer resource groups (rg-spaarke-platform-{env} hosts the BFF + L2).
+  $reservedIds = @('platform', 'shared', 'byok')
+  if (-not $script:SkipInteractiveIntake -and [string]::IsNullOrEmpty($customerId)) {
+    $customerId = Read-Host 'customerId (3-8 lowercase letters/digits, starts with a letter)'
+  }
+  while (($customerId -cnotmatch '^[a-z][a-z0-9]{2,7}\z') -or ($customerId -cin $reservedIds)) {
+    $why = if ($customerId -cin $reservedIds) { "is reserved (names a non-customer resource group)" } else { "does not match the customerId standard ^[a-z][a-z0-9]{2,7}`$ (3-8 lowercase letters/digits, starts with a letter; no hyphens)" }
+    if ($script:SkipInteractiveIntake) {
+      Write-Error "[skill] Batch HARD STOP: customerId '$customerId' $why. Fix the intake file (the schema should have caught this)."
+      exit 1
+    }
+    Write-Host "customerId '$customerId' $why." -ForegroundColor Yellow
+    Write-Host "Abbreviate a longer customer name (northwind -> nwind); the full name is captured next as displayName."
+    $customerId = Read-Host 'customerId'
+  }
+  ```
 - **Uniqueness / upgrade detection** (per Wave 0 Decision 2 / SKILL-02 fix, SESSION 15): probe the `sprk_dataverseenvironment` registry via Dataverse MCP alt-key filter on `sprk_customerid`. Earlier drafts of this skill probed a non-existent `GET /api/runs?customerId=` L2 endpoint (that endpoint has never existed — `RunsEndpoints.cs` maps only 7 routes, none of which is list-by-customerId).
 
   ```powershell
@@ -729,6 +758,20 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
   Fallback if Dataverse MCP disconnected: `pac data query --entity sprk_dataverseenvironment --filter "sprk_customerid eq '$customerId'"` OR raw Web API GET with operator's `az` token. See Fallback Matrix F1.
 - If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
 - If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
+
+#### 1a-bis. `displayName` (optional — the customer's full name)
+
+- The customer's full name, e.g. `Northwind Traders`. Written to `sprk_dataverseenvironment.sprk_name` next to
+  `sprk_customerid` by the Step 1f placeholder create, so the id ↔ name decision is **recorded once on the
+  registry row** (T237 / INCOMING-CUSTOMERID-STANDARD §3.3). Defaults to `customerId`.
+- Batch mode: `intake.displayName` (pre-filled above). Interactive mode:
+
+  ```powershell
+  if (-not $script:SkipInteractiveIntake) {
+    $displayName = Read-Host "displayName (customer's full name) [$customerId]"
+    if ([string]::IsNullOrWhiteSpace($displayName)) { $displayName = $customerId }
+  }
+  ```
 
 #### 1b. `tenantId` (required per I1 invariant — NEVER default)
 
@@ -814,15 +857,20 @@ The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvir
 $envTypeMap = @{ 'dev' = 0; 'demo' = 1; 'sandbox' = 2; 'trial' = 3; 'partner' = 4; 'training' = 5; 'prod' = 6 }
 $envType    = $envTypeMap[$environment]
 
-# tenancyModel (intake) -> sprk_tenancymodel option-set integer (Model1Shared=0, Model2Dedicated=1)
-$tenancyModelMap = @{ 'Model1Shared' = 0; 'Model2Dedicated' = 1 }
+# tenancyModel (intake) -> sprk_tenancymodel option-set integer. T224 renamed the values to Model1/Model2
+# (integers unchanged); the old keys made this lookup return $null for every current intake value (fixed T237).
+$tenancyModelMap = @{ 'Model1' = 0; 'Model2' = 1 }
 $tenancyModelInt = $tenancyModelMap[$tenancyModel]
+if ($null -eq $tenancyModelInt) {
+  Write-Error "❌ tenancyModel '$tenancyModel' has no sprk_tenancymodel mapping (expected Model1 or Model2). Refusing to write a placeholder row without it."
+  exit 1
+}
 
 $placeholderPayload = @{
   entityName = 'sprk_dataverseenvironment'
   attributes = @{
     # --- Required fields (NOT NULL per live schema) ---
-    sprk_name             = $customerId                                 # Recommended: customerId doubles as human-readable name; H10 may replace with friendly name at completion
+    sprk_name             = $displayName                                # T237: the customer's full name (1a-bis; defaults to customerId) — recorded once next to the id
     sprk_environmenttype  = $envType                                    # Choice: enum int per environment
     sprk_dataverseurl     = "https://placeholder-$customerId.crm.dynamics.com"  # H5 promotes this to the real URL when it creates the customer's Dataverse env
     sprk_isactive         = $true
@@ -841,8 +889,14 @@ $environmentId = $mcpResponse.sprk_dataverseenvironmentid
 Fallback path (per §4.3a.5) — if MCP disconnected, use `pac data create`:
 
 ```powershell
+# --attributes is a ';'/'='-delimited string: a display name containing either character would corrupt it.
+# Fall back to the id for sprk_name and say so; the full name can be set on the row afterwards.
+if ($displayName -match '[;=]') {
+  Write-Warning "displayName '$displayName' contains ';' or '=' — the pac fallback writes sprk_name=$customerId instead. Set the full name on the registry row afterwards."
+  $displayName = $customerId
+}
 $environmentId = pac data create --entity sprk_dataverseenvironment `
-  --attributes "sprk_name=$customerId;sprk_environmenttype=$envType;sprk_dataverseurl=https://placeholder-$customerId.crm.dynamics.com;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
+  --attributes "sprk_name=$displayName;sprk_environmenttype=$envType;sprk_dataverseurl=https://placeholder-$customerId.crm.dynamics.com;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
@@ -892,7 +946,8 @@ The placeholder is later promoted to real state by H10/H13 (setup registry updat
 
 ```
 INTAKE SUMMARY
-  customerId:      trial-acme-2026-08-18
+  customerId:      acme
+  displayName:     Acme Corporation
   tenantId:        12345678-...-...-...  (customer tenant)
   tenancyModel:    Model1Shared
   controlPlaneEnv: dev
@@ -939,7 +994,7 @@ PREFLIGHT (H0) RESULT
   [PASS] Azure OpenAI TPM headroom OK (projected 187/2000 sum-across-models)
   [PASS] App Service plan tier available in westus2
   [PASS] SPE container-type headroom OK (7,442 of 10,000 remaining)
-  [PASS] DNS pre-check: trial-acme-2026-08-18.spaarke.com not reserved
+  [PASS] DNS pre-check: acme.spaarke.com not reserved
   [PASS] Spaarke tenant reachable (Model 1)
   [PASS] Estimated cost: $412/mo (within $430 Model 1 marginal envelope)
   [PASS] Estimated duration: 42 min (H1-H14, no lead-time gates)
@@ -1112,7 +1167,7 @@ Present the full run plan:
 ```
 RUN PLAN
 
-  customerId:    trial-acme-2026-08-18
+  customerId:    acme
   tenantId:      12345678-...
   tenancyModel:  Model1Shared
   profile:       dev
@@ -1260,7 +1315,7 @@ L2 returns 202 within 100ms and the reconciler picks up H0 within ~5s. L2's stat
 Poll `GET /api/runs/{runId}?customerId={customerId}` at **10s intervals**. The `?customerId=` query parameter is MANDATORY per `RunsEndpoints.cs:582` (`TryValidateRouteAndPartition` returns 400 if missing).
 
 ```powershell
-# URL-encode customerId per RFC 3986; assume already-safe kebab-case per Step 1a validation but escape defensively.
+# URL-encode customerId per RFC 3986; Step 1a already enforced the customerId standard (lowercase letters + digits only), but escape defensively.
 # Bucket B LOW#4 SESSION 18 (customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we):
 # implement token auto-refresh on 401 with a bounded retry counter — Prior version was prose-only.
 # A Model 2 run entering H0.5 waiting on customer admin consent + 45min operator idle would blow past the
@@ -2360,7 +2415,7 @@ Lifetime ~1 hour. Fallback matrix handles mid-run expiry.
 Support a `--dry-run` flag on the slash command:
 
 ```
-/provision-environment trial-acme-2026-08-18 --dry-run
+/provision-environment acme --dry-run
 ```
 
 Behavior differences:
@@ -2372,7 +2427,7 @@ Behavior differences:
 - Step 5 skipped (no gates in dry-run)
 - Step 6 writes handoff report labeled `runs/{runId}-DRYRUN.md` and does NOT touch `sprk_dataverseenvironment`
 
-Dry-run is intended for pre-flight validation before a real customer deployment (e.g., "prove we can provision trial-acme without actually doing it").
+Dry-run is intended for pre-flight validation before a real customer deployment (e.g., "prove we can provision acme without actually doing it").
 
 ---
 

@@ -61,7 +61,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 
 public sealed class HandlerOutcomeApplierTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
 
     // -----------------------------------------------------------------------
@@ -79,7 +79,7 @@ public sealed class HandlerOutcomeApplierTests
         var run = MakeRun(RunStatus.Running, "H0", "H1");
 
         var applied = await sut.ApplyHandlerOutcomeAsync(
-            run, ifMatchEtag: "etag-1", outcome: new HandlerResult.Success("h2a-test-customer-idem"), handlerId: "H2a", CancellationToken.None);
+            run, ifMatchEtag: "etag-1", outcome: new HandlerResult.Success("h2a-testcust-idem"), handlerId: "H2a", CancellationToken.None);
 
         applied.TargetStatus.Should().Be(RunStatus.Running, "Success returns the run's CURRENT status unchanged.");
         applied.Reenqueued.Should().BeFalse();

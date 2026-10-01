@@ -67,7 +67,7 @@ public class DataverseEnvironmentRecord
     public string? AdminEmails { get; set; }
 
     // ---- customer-provisioning-orchestration-r1 task 199 (2026-08-27) ----
-    /// <summary>Customer short-id (kebab-case). ALT-KEY on sprk_customerid_key. Used by L2 CustomerRunGuard + DataverseRegistryConcurrencyStore.</summary>
+    /// <summary>Customer short-id — the customerId standard <c>^[a-z][a-z0-9]{2,7}$</c> (see <see cref="Sprk.Bff.Api.Configuration.CustomerIdResolver.CustomerIdPattern"/>). ALT-KEY on sprk_customerid_key. Used by L2 CustomerRunGuard + DataverseRegistryConcurrencyStore.</summary>
     public string? CustomerId { get; set; }
 
     // ---- task 023 v2-rolled-forward additions (design.md §6.1) ----
