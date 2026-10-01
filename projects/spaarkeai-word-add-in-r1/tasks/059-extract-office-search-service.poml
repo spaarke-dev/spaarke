@@ -4,7 +4,8 @@
     <title>Extract the search cluster out of OfficeService into OfficeSearchService</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>blocked until 058 AND 068 merge — 058 deletes SearchDocumentsAsync from this same cluster, and 068 removes the three dispatcher ctor params. RE-SCOPED 2026-09-21: the primary work is now the six optional ctor params, not the search extraction. See the RE-SCOPE block in background.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-01, `913dafa2f`. Ctor 21 → 20 (5 optional deps made required; the dispatcher's 3 left to 068, which deletes it). Dead null branches deleted, including the stub search. `OfficeSearchService` extracted (entity search + matter types + the To Do's `sprk_recordtype_ref` lookup); `IOfficeService` has no member change. Mapping tests: qualifier-only changes. Full suite 13,040/0/54 (identical to the previous run); ArchTests 337/337; publish −1,917 B (212 files each side). Record: `notes/059-extract-office-search-service.md`.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.cs` on the deployed Office spine; tags include bff-api. A pure move with no behaviour change is still a change to a hot-path file shared with another active worktree.</rigor-reason>
     <model-tier>sonnet</model-tier>

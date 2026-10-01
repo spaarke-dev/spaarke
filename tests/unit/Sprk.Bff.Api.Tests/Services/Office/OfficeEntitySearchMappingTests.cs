@@ -9,14 +9,14 @@ namespace Sprk.Bff.Api.Tests.Services.Office;
 /// <summary>
 /// Proves the real Dataverse "File to" entity search (task 026 / #229) maps Web API JSON rows to
 /// <see cref="EntitySearchResult"/> correctly, replacing the old <c>GenerateStubResults</c> fixtures.
-/// Tests the pure mapper (<see cref="OfficeService.MapSearchRow"/>) — no mocks, no HTTP.
+/// Tests the pure mapper (<see cref="OfficeSearchService.MapSearchRow"/>) — no mocks, no HTTP.
 /// </summary>
 public class OfficeEntitySearchMappingTests
 {
-    private static readonly OfficeService.EntitySearchMeta MatterMeta =
+    private static readonly OfficeSearchService.EntitySearchMeta MatterMeta =
         new("sprk_matters", "sprk_matterid", "sprk_mattername", "sprk_matternumber", "sprk_matterdescription");
 
-    private static readonly OfficeService.EntitySearchMeta ContactMeta =
+    private static readonly OfficeSearchService.EntitySearchMeta ContactMeta =
         new("contacts", "contactid", "fullname", null, "jobtitle");
 
     private static Dictionary<string, JsonElement> Row(string json) =>
@@ -36,7 +36,7 @@ public class OfficeEntitySearchMappingTests
         }
         """);
 
-        var result = OfficeService.MapSearchRow(AssociationEntityType.Matter, MatterMeta, row);
+        var result = OfficeSearchService.MapSearchRow(AssociationEntityType.Matter, MatterMeta, row);
 
         result.Should().NotBeNull();
         result!.Id.Should().Be(id);
@@ -59,7 +59,7 @@ public class OfficeEntitySearchMappingTests
         }
         """);
 
-        var result = OfficeService.MapSearchRow(AssociationEntityType.Contact, ContactMeta, row);
+        var result = OfficeSearchService.MapSearchRow(AssociationEntityType.Contact, ContactMeta, row);
 
         result.Should().NotBeNull();
         result!.LogicalName.Should().Be("contact");
@@ -74,7 +74,7 @@ public class OfficeEntitySearchMappingTests
         { "sprk_matterid": "{{Guid.NewGuid()}}", "sprk_matternumber": "MAT-2026-002" }
         """);
 
-        OfficeService.MapSearchRow(AssociationEntityType.Matter, MatterMeta, row)
+        OfficeSearchService.MapSearchRow(AssociationEntityType.Matter, MatterMeta, row)
             .Should().BeNull("an unnamed record must never surface in the picker");
     }
 
@@ -85,7 +85,7 @@ public class OfficeEntitySearchMappingTests
         { "contactid": "{{Guid.NewGuid()}}", "fullname": "   " }
         """);
 
-        OfficeService.MapSearchRow(AssociationEntityType.Contact, ContactMeta, row)
+        OfficeSearchService.MapSearchRow(AssociationEntityType.Contact, ContactMeta, row)
             .Should().BeNull();
     }
 }

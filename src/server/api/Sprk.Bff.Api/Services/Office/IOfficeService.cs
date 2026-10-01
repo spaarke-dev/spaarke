@@ -158,7 +158,7 @@ public interface IOfficeService
     /// <param name="userId">Authenticated user id (OBO oid).</param>
     /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> — an INPUT to the owner-team resolution, not the owner (task 080: every record created here is owned by a business-unit default owner team, and the create is refused with OFFICE_022 when none resolves — never app-owned).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The created To Do id + name, or null when creation is unavailable (no generic-create dep injected).</returns>
+    /// <returns>The created To Do id + name, or null when the request carries no name (the endpoint validates the name first, so this is a defensive guard).</returns>
     /// <remarks>
     /// <para>
     /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The

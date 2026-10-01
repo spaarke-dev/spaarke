@@ -497,7 +497,7 @@ layouts) or team-owned (then the checks must change). Per-user matches the check
 
 | Field | Value |
 |---|---|
-| **Status** | Open |
+| **Status** | Open; **tasked as 084** (2026-10-01) |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-30 |
 | **Source** | UAC-r2 post-merge message 2026-09-30 (`notes/uac-r2-findings-2026-09-30.md` §6 (e)) |
@@ -522,8 +522,13 @@ Which is an owner call — it decides whether a view-only user can see in the pa
 
 **Estimated effort**: ~1 day (per-row AppendTo evaluation for a page of results).
 **Blockers**: ~~owner decision (hide vs disable)~~ **DECIDED 2026-09-30: option A, show the record DISABLED with the
-reason** (UAC-r2 `session27` note; relayed again 2026-09-30). The picker is this project's code (062 + the pane), but
-no task has been authored yet. 🔔 That needs the owner's go, because it expands scope.
+reason** (UAC-r2 `session27` note; relayed again 2026-09-30). ✅ **Owner go 2026-10-01 ("yes write the task"): tasked
+as 084.** Research for 084 corrected two facts here:
+- The search is app-only with `MSCRMCallerID` impersonation, not the user client.
+- `POST /api/office/todo` demands **Read** (`TodoSourceAccessFilter`), not AppendTo; only `/save` demands AppendTo.
+
+It also found that Outlook's suggestion cards and the ribbon quick-save offer filing targets too, so 084 covers all
+three.
 **Related**: tasks 062, 065; UAC-r2 task 128's verification lesson (check that a role holds the right a filter demands).
 
 ---
@@ -575,7 +580,7 @@ Detail: `notes/uac-r2-findings-2026-09-30.md` §9.
 
 | Field | Value |
 |---|---|
-| **Status** | **Fixed live in dev by task 082 (⚠️ 2026-09-30)**: role 36 → 40; the list is `config/secure-record-owner-role.json`. Open until the 082 PR merges. Owner decision on the 32 drift privileges is pending |
+| **Status** | **Fixed live in dev by task 082 (⚠️ 2026-09-30)**: role 36 → 40; the list is `config/secure-record-owner-role.json`. #1051 merged. **Drift decided and removed 2026-10-01** (owner: *"yes can remove them if not needed"*): role 40 → 8, proven by probes (082 note §4.1) |
 | **Urgency** | now |
 | **Filed** | 2026-09-30 |
 | **Source** | 080 note §6.12 item 3; ownership moved to this project by owner instruction 2026-09-30 |
@@ -598,6 +603,32 @@ Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: 
 - The guide edits are ours.
 - The ONE codified JSON set is extended by their task 146.
 - The NFR-05 census clause is theirs and reads our file.
+
+---
+
+## ISS-014 — The Outlook ribbon quick-save sends the LOGICAL name, so the save refuses every predicted quick-save (`OFFICE_002`)
+
+| Field | Value |
+|---|---|
+| **Status** | Open; **tasked as 084** (part c), with #1037 |
+| **Urgency** | before task 078's unified package is installed (latent until then) |
+| **Filed** | 2026-10-01 |
+| **Source** | Research for task 084 (code reading; not yet reproduced by a test) |
+| **GitHub Issue** | [#1075](https://github.com/spaarke-dev/spaarke/issues/1075) |
+
+- `quickSaveHelpers.ts:81-85` sends `targetEntity.entityType = target.logicalName` (`"sprk_matter"`), and
+  `quickSaveHelpers.test.ts:37` pins that value.
+- `ValidateSaveRequest` (`OfficeEndpoints.cs:444-455`) accepts only friendly names (`matter`, `project`, …) and returns
+  400 `OFFICE_002` for anything else.
+- `EntityAccessFilter` accepts both forms, so the request reaches the handler and is refused there.
+- The pane's own save sends the friendly name and is unaffected. The predicted object already carries the friendly
+  `entityType` (`communicationSuggestionsService.ts:162-169`).
+
+**Why it is latent:** the button exists only in the unified JSON manifest (`outlook/manifest.json:101`). Production
+Outlook runs the XML manifest, which has no quick-save button. Installing task 078's package makes the bug live.
+
+**Fix:** send `target.entityType`, reproduced first by a contract test (`"sprk_matter"` → 400). It is in task 084
+because 084 also changes which predicted record the ribbon may auto-file to.
 
 ---
 

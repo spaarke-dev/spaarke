@@ -40,6 +40,12 @@ public static class OfficeModule
         services.AddScoped<OfficeJobQueue>();
         services.AddScoped<OfficeStorageUploader>();
 
+        // Task 059: the add-in's Dataverse READS (entity search, matter types, the To Do's sprk_recordtype_ref
+        // lookup), extracted from OfficeService. Concrete (ADR-010) and UNCONDITIONAL: the search routes map
+        // unconditionally, and its deps (DataverseWebApiClient, IImpersonatedCommunicationQuery) are unconditional
+        // singletons from SpeAdminModule and CommunicationModule.
+        services.AddScoped<OfficeSearchService>();
+
         // FR-C3 content de-dup detector (Tier-1 exact quickXorHash). Concrete, scoped (ADR-010); reused by
         // every document-creating upload path (email-attachment today; Compose next). Non-fatal by design.
         services.AddScoped<ContentDedupDetector>();
@@ -67,8 +73,7 @@ public static class OfficeModule
         //   - QuickCreate: 5 requests/minute/user
         //   - Search: 30 requests/minute/user
         //   - Jobs: 60 requests/minute/user
-        //   - Share: 20 requests/minute/user
-        //   - Recent: 30 requests/minute/user
+        //   (Share and Recent were removed with their routes by task 058.)
         services.AddOptions<OfficeRateLimitOptions>()
             .BindConfiguration(OfficeRateLimitOptions.SectionName)
             .ValidateDataAnnotations()
