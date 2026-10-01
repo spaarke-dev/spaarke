@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (059 merged as #1076; **084 closed**; 085 authored for #1079; next 085)
+> **Last Updated**: 2026-10-01 (context-handoff, mid-085; 084 closed; 085 fix committed locally `04158652e`, not pushed; no PR open)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,15 +18,26 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
+### 🔄 ACTIVE: task 085 (#1079 our half), Step 3 of 4. FULL · sonnet@high (run on Opus)
+
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **085** (`tasks/085-invoice-quickcreate-name-column.poml`, sonnet@high): the Office invoice quick-create writes the non-existent `sprk_invoicename` (#1079, ISS-015; LIVE broken). Small; it goes into the same PR as 084. Then 060 → 068 → 075, 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
-| **Last closed** | **084** ✅ 2026-10-01 `91e73b6fc`: pickable equals savable (#1037 + #1075). Per-row `canFile` from the save's own evaluator; disabled with the reason; ribbon fixed (friendly type; no auto-file; `replaceAsync`; 150-character limit). Parity test over 6 masks; suite 13,064/0/54 (+24 exact); publish +5,043 B. ⚠️ Open: live check, and latency on the real BFF (modelled ≈0.71 s p50 from a workstation). `notes/084-pickable-equals-savable.md`. Before it: **059** ✅ (#1076 merged `c08ef6013`) |
-| **PR** | 084's PR: opened after this checkpoint (see git log). Merge with `gh pr merge N --merge` once `Router` passes and nothing is pending; NEVER `--delete-branch`; then pull the main checkout and fast-forward or merge `origin/master` back |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `c08ef6013` + 084 + records |
-| **Next Action** | `task-execute` **085**, then report to the owner |
+| **Task** | 085: the invoice quick-create writes the non-existent `sprk_invoicename` (`tasks/085-invoice-quickcreate-name-column.poml`) |
+| **Done** | Live metadata re-checked: `sprk_invoice.PrimaryNameAttribute = sprk_name`. Regression test `tests/integration/regression/Issue1079_InvoiceQuickCreateNameTests.cs` **FAILED before the fix** ("Expected … sprk_name … but found <null>"). Fix `OfficeService.cs:1916` → `entity["sprk_name"]`. After the fix: Issue1079 + OfficeQuickCreate* **34/0/3**. Committed **`04158652e`** (local, NOT pushed) |
+| **Branch** | Local `HEAD` = `04158652e`; origin = `4466c4664` (master `c08ef6013` + 084 `91e73b6fc` + 084 records). **No PR open yet** for 084 or 085 |
+| **Next Action** | 1) Full suite (expect **13,065**/0/54 = 084's 13,064 + 1) + ArchTests 337. 2) Publish size: copy `scratchpad/publish-084.ps1`, set `Ref` to the new HEAD and paths `C:\tmp\w085m`/`w085b` (master `c08ef6013`); remove the worktrees afterwards. 3) Gates: a one-line change, so code review and ADR check are trivial; record them. 4) Write `notes/085-invoice-quickcreate-name.md`; POML 085 → completed + status-note; TASK-INDEX 085 → ✅; defer-issues ISS-015 status = our half fixed (`04158652e`); `gh issue comment 1079` (ours fixed; `DataverseIndexSyncService.cs:52-55` + 2 scripts still open, other owners). 5) Push; open ONE PR for **084 + 085** (body: `scratchpad/pr-059-body.md` is the template; 084 facts are in `notes/084-…md` §2–5). 6) When `Router` passes and nothing is pending: `gh pr merge N --merge` (NEVER `--delete-branch`); `git -C C:/code_files/spaarke pull --ff-only origin master`; fast-forward or merge `origin/master` into the branch. 7) Report to the owner |
 
-**Found this session:** #1079 (ISS-015). `sprk_invoice` has no `sprk_invoicename`. Ours is task 085; `DataverseIndexSyncService.cs:52-55` and two scripts belong to others (routed in the issue; UAC-r2 told).
+**Critical context:**
+- **084 is CLOSED** ✅ (`91e73b6fc`): suite 13,064/0/54, publish +5,043 B, gates recorded in `notes/084-pickable-equals-savable.md`.
+- **084's open items for the owner:** the live check, and latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
+- **#1076 (059) merged** as `c08ef6013`.
+- UAC-r2 knows about #1079 and about our one-line `EntityAccessFilter` change (their task-151 worktree edits the same file at a different spot).
+
+**Found this session:** #1079 (ISS-015). `sprk_invoice` has no `sprk_invoicename`. Our half is task 085; `DataverseIndexSyncService.cs:52-55` and two scripts belong to others.
+
+| Field | Value |
+|---|---|
+| **After 085** | Next task: 060 → 068 (deletes the profile dispatcher: ctor 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 
