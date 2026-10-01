@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (060 done, `3511668f4` + `3fb75a1a4`, #1084; next: one PR for 060, then task 068)
+> **Last Updated**: 2026-10-01 (context-handoff: 060 done, PR #1085 open, CI re-running on the checkpoint head; next: merge #1085, then task 068)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,26 +18,42 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔲 NEXT: task 068 (`tasks/068-durability-siblings-dispatcher-sequences.poml`): the durability siblings 060 named: the `OfficeProfileDispatcher` fire-and-forget `Task.Run` and `JobStatusService._jobSequences`. Not started
-
-### ✅ DONE 2026-10-01: task 060 (`3511668f4` + `3fb75a1a4`), #1084 / ISS-017. Ship: ONE PR for 060, merge after `Router` passes (never `--delete-branch`)
-
-- Suite **13,058/0/54** (exact); ArchTests 337; jest 62/816; lint 0; tsc 68 (0 prod); publish **+338 B** (212 = 212).
-- Full record: `notes/060-job-status-store-and-extraction.md` (§1 findings with App Insights evidence, §2 decision, §6 reds, §9 gates).
-- **Tell UAC-r2** when the PR is open: it changes `OfficeEndpointsContractTests.cs` (the world double: job rows, typed reads) near their #1083 edits. Whoever lands second rebases.
-
-#### (060 working record, kept until the PR merges)
+### 🔄 ACTIVE: ship PR #1085 (task 060), then task 068
 
 | Field | Value |
 |---|---|
-| **Task** | 060: the Office job-status store (`tasks/060-job-status-store-and-extraction.poml`). The `private static ConcurrentDictionary` in `OfficeService` loses in-flight job status on restart or a second instance; the Dataverse fallback never works (anonymous type + `dynamic` across assemblies) |
-| **Status** | in-progress (started 2026-10-01) |
-| **Gate** | ✅ 058, 059, 067 done; 080 merged (#1045); PR #1029 merged. Conflict check: UAC-r2 **#1083** open, touches `OfficeEndpointsContractTests.cs` only on this surface. 060 modifies no existing test, so no overlap |
-| **Done** | Investigation + **decision written BEFORE code**: `notes/060-job-status-store-and-extraction.md` §1–§5. Store = **(a) the Dataverse row**; the save's own view as JSON in `sprk_result` (workers never write it); payload drops content; typed `ProcessingJobRecord` reads; one effective-state rule (incl. 5-min abandoned rule) for BOTH the status read and the 039 idempotency check; row-create failure → `OFFICE_014` refusal before SPE. Dead stub `Workers/Office/(I)OfficeJobStatusService` + its test to be deleted (name clash) |
-| **Production evidence (App Insights `spe-insights-dev-67e2xz`, appId via `az monitor app-insights component show`; query via REST `api.applicationinsights.io/v1/apps/{appId}/query`, NOT `az … query` (quoting breaks); `first`/`last`/`kind` are KQL reserved)** | `RuntimeBinderException` 2026-08-25 in `OfficeDocumentPersistence` ("'object' does not contain a definition for 'Status'") → **039 idempotency never worked live**. **40 saves / 13 rows / 27 `sprk_payload` > 50,000 refusals** in 60 days → 68% of saves had no durable job |
-| **Steps 1–5 DONE (uncommitted)** | #1084 filed (ISS-017). Reds recorded (note §6): 6 new + 5 EXISTING false-green 039/047/025 tests red with the faithful anonymous shape. Implemented: `ProcessingJobRecord` (Spaarke.Dataverse, typed reads); `Services/Office/OfficeJobStatusService.cs` (create/record/find/get/stream, `ToEffectiveView`, `BuildPayload`); OfficeService ctor 20→19, `_jobStore` gone, create failure → OFFICE_014; OfficeDocumentPersistence job members + dep removed (6 dedup-test ctor args removed); OfficeModule registration; dead `Workers/Office/(I)OfficeJobStatusService` + test deleted; JobOwnershipFilter comments; client `useSaveFlow` terminal error + server SSE names. **All 446 Office tests green; 19 new server tests; seeds caught (11 / 3); client 51/51 (5 reds first)** |
-| **Next Action** | Step 6 gates: full BFF suite (expect 13,065 + new − deleted stub tests; RECONCILE), ArchTests, office-addins jest (gated) + lint + typecheck + build, publish size (fresh master vs branch), CVE; code-review + adr-check; note §7+ (decisions 5.1, SSE name fix, gates, ctor 20→19); POML/TASK-INDEX; commit; PR |
-| **Branch** | `work/spaarkeai-word-add-in-r1`, master `d68924b93` + 1 notes commit (`669d09a06`) |
+| **PR** | **#1085** (task 060, #1084) open. All Tier 1 checks PASSED as of the checkpoint. A checkpoint commit was then pushed (notes only), so **CI re-runs on the new head**. Body: `scratchpad/pr-060-body.md` |
+| **Next Action** | 1) Wait until `gh pr checks 1085` shows `Router` = pass AND `grep -c pending` = 0 (Tier 2 "Full Unit Tests" is advisory and may CANCEL at 30 min; the legacy `Build & Test (Debug)` takes ~60 min). 2) `gh pr merge 1085 --merge` (**NEVER `--delete-branch`**). 3) `git -C C:/code_files/spaarke pull --ff-only origin master`; `git fetch origin && git merge --ff-only origin/master` in the worktree. 4) Close #1084 with a comment (fixed by #1085; live restart check after the next deploy); ISS-017 → Done in `notes/defer-issues.md`. 5) Report to the owner. 6) Start task **068** via `task-execute` (`tasks/068-durability-siblings-dispatcher-sequences.poml`) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `d68924b93` + 060 commits `3511668f4` (code), `3fb75a1a4` (review fix), `f50b875b2` (records), + this checkpoint |
+| **Next task** | **068**: the durability siblings 060 named. (a) `OfficeProfileDispatcher`'s fire-and-forget `Task.Run`, lost on restart; deleting it drops `OfficeService`'s three optional ctor params (**19 → 16**). (b) `JobStatusService._jobSequences`, in-memory pub/sub sequence counters |
+
+### ✅ DONE 2026-10-01: task 060 (#1084 / ISS-017)
+
+- **What it found** (App Insights `spe-insights-dev-67e2xz`):
+  - Both Dataverse job reads returned ANONYMOUS types read through `dynamic`. That throws across assemblies
+    (`RuntimeBinderException`, 2026-08-25), so **the 039 idempotency check never worked live** and a job poll that
+    missed memory returned 404.
+  - **40 saves / 13 job rows / 27 `sprk_payload` > 50,000 refusals** in 60 days: the content base64 was in the payload.
+  - The pane hung on Completed-without-document, and its SSE handler used the wrong event names.
+- **Decision (written before code)**: the store is the `sprk_processingjob` row.
+  - The save's own view is kept in `sprk_result`; the workers never write it.
+  - Typed `ProcessingJobRecord` reads.
+  - ONE effective-state rule (`OfficeJobStatusService.ToEffectiveView`) for the status read AND the idempotency check,
+    with a 5-minute abandoned rule.
+  - Payload = metadata only; a create failure → `OFFICE_014`, a retryable 502, before any write.
+- **Built**: new `Services/Office/OfficeJobStatusService.cs` (stream moved verbatim); `OfficeService` ctor 20 → 19 and
+  `_jobStore` gone; the dead `Workers/Office` stub deleted; the pane always reaches an outcome, applied once.
+- **Gates**: suite **13,058/0/54** (exact); ArchTests 337; jest 62/816; lint 0; tsc 68 (0 prod); publish **+338 B**
+  (212 = 212); seeds caught 11 / 3 / 1 / 1.
+- **Records**: `notes/060-job-status-store-and-extraction.md` (§1 findings, §2 decision, §6 reds, §9 gates); POML
+  completed (with `<ui-tests>` for the live restart check); TASK-INDEX ✅; portfolio #945 = 70 done.
+- **UAC-r2 told**; they confirmed **no action** on their side (their #1083 overlaps only in different hunks of
+  `OfficeEndpointsContractTests.cs`; #1083 is a draft).
+- **App Insights recipe** (for the next investigation):
+  - get the appId with `az monitor app-insights component show -a spe-insights-dev-67e2xz -g spe-infrastructure-westus2 --query appId`;
+  - query through REST `POST https://api.applicationinsights.io/v1/apps/{appId}/query` with a token for `https://api.applicationinsights.io`;
+  - NOT `az monitor app-insights query`: Windows quoting mangles KQL;
+  - `first`, `last` and `kind` are KQL reserved words.
 
 ### ✅ Shipped 2026-10-01: #1082 merged as `d68924b93` (tasks 084 + 085)
 
@@ -67,7 +83,7 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 
 | Field | Value |
 |---|---|
-| **After 085** | Next task: 060 → 068 (deletes the profile dispatcher: ctor 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
+| **After 060** | Next task: 068 (deletes the profile dispatcher: ctor 19 → 16) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 
