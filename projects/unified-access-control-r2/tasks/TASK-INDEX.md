@@ -823,6 +823,12 @@ These tasks close the **12 verified UAC defects** (C1–C12, `notes/session26-ua
 - The secure chain: **151 → 144 → 133 → 143 → 142 → 036**, and **144 → 145 → 146 → 149 → 148 → 147**. 150 follows 144 and 151.
 - 146 and 149 ship together; 149's deployment gate may pull 148 and 147 forward.
 
+**GitHub issues (filed 2026-09-30):**
+- **New:** 130 #1053 · 131 #1055 · 132 #1056 · 133 #1054 · 134 #1057 · 135 #1058 · 136 #1059 · 137 #1060 · 138 #1061 · 139 #1062 · 140 #1063 · 141 #1064 · 142 #1065 · 143 #1066 · 147 #1069 · 148 #1070 · 149 #1071 · 150 #1067 · 151 #1068 · 152 #1073 · 056 #1072 · 036 (C9 per-record rights) #1074.
+- **Existing, now linked:** 144 → #967 · 145 → #1046 (word-add-in-r1 082) · 146 → #1034 · 137 → #1006, #999.
+
+**Owner decisions:** 51 decisions, consolidated from 147 escalation triggers, are in `notes/raw/session27-owner-questions.json`. They are presented to the owner in session 27. Each task's triggers stay binding until answered.
+
 **First parallel batch** (no deps, file-disjoint, no open owner question blocks the start): **130, 131, 134**. **151** is next, now that #1045 is merged into this branch.
 
 ## Execution sequence — dependency-ordered (owner, 2026-09-15)
