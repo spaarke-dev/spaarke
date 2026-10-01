@@ -330,6 +330,49 @@ public class ChildRecordContainerResolutionTests
         world.RootReads().Should().Be(0);
     }
 
+    [Fact(DisplayName = "Task 155 f2: a Dataverse HTTP TIMEOUT (TaskCanceledException, caller token live) on the child row or the root is the typed 503 — not a generic 500")]
+    public async Task DataverseTimeout_SurfacingAsTaskCanceled_IsTheTyped503()
+    {
+        var childTimeout = new World()
+            .WithRecordFault("sprk_todo", new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"))
+            .WithBusinessUnit(BusinessUnitContainer);
+        var rootTimeout = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithRootFault("sprk_project", ProjectId, new TaskCanceledException("HttpClient.Timeout"))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var world in new[] { childTimeout, rootTimeout })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, CancellationToken.None);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>(
+                "a timeout is an unreadable row — the caller did not cancel")).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(503);
+            world.Reads("businessunit").Should().Be(0);
+        }
+    }
+
+    [Fact(DisplayName = "Task 155 f2: a CALLER cancellation still propagates as cancellation — it is not re-labelled as an unreadable row")]
+    public async Task CallerCancellation_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        var childCancelled = new World()
+            .WithRecordFault("sprk_todo", new OperationCanceledException(cts.Token));
+        var rootCancelled = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithRootFault("sprk_project", ProjectId, new OperationCanceledException(cts.Token));
+
+        foreach (var world in new[] { childCancelled, rootCancelled })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, cts.Token);
+
+            await act.Should().ThrowAsync<OperationCanceledException>();
+        }
+    }
+
     [Fact(DisplayName = "Task 155: a CHILD row that does NOT EXIST still answers container_record_not_found 404 — not re-labelled as unreadable")]
     public async Task Todo_ThatDoesNotExist_StillAnswersRecordNotFound()
     {
@@ -397,6 +440,16 @@ public class ChildRecordContainerResolutionTests
     [InlineData("sprk_todo", "sprk_regardinganalysis")]
     [InlineData("sprk_event", "sprk_regardingcommunication")]
     [InlineData("sprk_event", "sprk_regardingevent")]
+    [InlineData("sprk_event", "sprk_regardinginvoice")]
+    [InlineData("sprk_event", "sprk_regardinganalysis")]
+    // Task 155 f2: root-owned NON-core regardings (agreement / report card → sprk_regarding{matter,project};
+    // budget → typed sprk_matter / sprk_project; live spaarkedev1 2026-10-01).
+    [InlineData("sprk_todo", "sprk_regardingagreement")]
+    [InlineData("sprk_todo", "sprk_regardingbudget")]
+    [InlineData("sprk_todo", "sprk_regardingreportcard")]
+    [InlineData("sprk_event", "sprk_regardingagreement")]
+    [InlineData("sprk_event", "sprk_regardingbudget")]
+    [InlineData("sprk_event", "sprk_regardingreportcard")]
     public async Task Child_FiledUnderAnotherChild_IsRefusedAsUnverifiable(string entity, string intermediateColumn)
     {
         // The stamp says "non-secure project". Nothing re-stamps this record when its communication is re-filed
@@ -417,6 +470,58 @@ public class ChildRecordContainerResolutionTests
 
         world.Reads("businessunit").Should().Be(0);
         world.RootReads().Should().Be(0, "the stamp is not consulted at all — consulting it is the papering-over");
+    }
+
+    [Theory(DisplayName = "Task 155 f2: a child whose ONLY regarding is an agreement / budget / report card (no root stamp at all) is refused — never the BU container")]
+    [InlineData("sprk_todo", "sprk_regardingreportcard")]
+    [InlineData("sprk_todo", "sprk_regardingagreement")]
+    [InlineData("sprk_todo", "sprk_regardingbudget")]
+    [InlineData("sprk_event", "sprk_regardingreportcard")]
+    [InlineData("sprk_event", "sprk_regardingagreement")]
+    [InlineData("sprk_event", "sprk_regardingbudget")]
+    public async Task Child_UnderARootOwnedNonCoreRecord_WithNoStamp_IsRefused(string entity, string column)
+    {
+        // The live dev shape (to-do a01477e8-… → report card 9d1477e8-… → matter b68299c6-…): CoreAncestorResolver
+        // does not classify report cards, so the to-do carries NO sprk_regarding{core}. Before f2 this read "no root"
+        // and resolved to the BU container, even if the matter is SECURE — and the report card was never read.
+        var world = new World()
+            .WithChild(entity, intermediate: (column, CommunicationId))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync(entity, ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>(
+                "'no stamp' here is not 'no root' — the record it is filed under belongs to a matter or project")).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0, "a shared container must never be in scope");
+    }
+
+    [Theory(DisplayName = "Task 155 f2: the ONE record read requests every root link AND every intermediate column — Dataverse returns nothing it was not asked for")]
+    [InlineData("sprk_todo",
+        "sprk_regardingproject,sprk_regardingmatter,sprk_regardingworkassignment,sprk_regardingservicerequest,"
+        + "sprk_regardinganalysis,sprk_regardingcommunication,sprk_regardingdocument,sprk_regardingevent,"
+        + "sprk_regardinginvoice,sprk_regardingagreement,sprk_regardingbudget,sprk_regardingreportcard")]
+    [InlineData("sprk_event",
+        "sprk_regardingproject,sprk_regardingmatter,sprk_regardingworkassignment,sprk_regardingservicerequest,"
+        + "sprk_regardinganalysis,sprk_regardingcommunication,sprk_regardingevent,sprk_regardinginvoice,"
+        + "sprk_regardingagreement,sprk_regardingbudget,sprk_regardingreportcard")]
+    [InlineData("sprk_invoice", "sprk_matter,sprk_project")]
+    public async Task ChildRecordRead_RequestsEveryLinkAndIntermediateColumn(string entity, string expectedCsv)
+    {
+        // Pinned against a LITERAL list verified on live spaarkedev1 (2026-10-01), not against ChildAncestorLinks
+        // itself, so both "dropped from the table" and "dropped from the read" go red.
+        var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
+            .WithChild(entity, isSecure: entity == "sprk_invoice" ? false : null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        await world.Resolver().ResolveForRecordAsync(entity, ChildId);
+
+        world.ColumnsRead(entity).Should().Contain(expectedCsv.Split(','));
     }
 
     [Fact(DisplayName = "Task 155 (escalation trigger 1): a CHILD type whose root link is not known is refused without a read")]
@@ -603,9 +708,30 @@ public class ChildRecordContainerResolutionTests
                 {
                     var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
                     return _rows.TryGetValue(key, out var row)
-                        ? Task.FromResult(row())
+                        ? Task.FromResult(OnlyRequestedColumns(row(), call.ArgAt<string[]>(2)))
                         : throw new InvalidOperationException($"Unmodelled read: {key.Item1} {key.Item2}");
                 });
+        }
+
+        /// <summary>
+        /// Faithful to Dataverse (task 155 f2): a Retrieve returns ONLY the requested columns. A double that returned
+        /// the whole row hid a real dependency — the "filed under another record" refusal only fires when the
+        /// intermediate columns ride on the record read; leave them out and the column reads as "not set".
+        /// </summary>
+        private static Entity OnlyRequestedColumns(Entity row, string[]? columns)
+        {
+            if (row is null || columns is null)
+            {
+                return row!;
+            }
+
+            var projected = new Entity(row.LogicalName, row.Id);
+            foreach (var column in columns.Where(row.Contains))
+            {
+                projected[column] = row[column];
+            }
+
+            return projected;
         }
 
         public World WithChild(
@@ -632,7 +758,9 @@ public class ChildRecordContainerResolutionTests
             if (typedProject is { } tp) row["sprk_project"] = new EntityReference("sprk_project", tp);
             if (isSecure is { } secure) row["sprk_issecure"] = secure;
             if (ownContainer is not null) row["sprk_containerid"] = ownContainer;
-            if (intermediate is { } i) row[i.Column] = new EntityReference("sprk_communication", i.Id);
+            // sprk_regarding{x} targets sprk_{x} for every intermediate column on to-do and event (live metadata).
+            if (intermediate is { } i)
+                row[i.Column] = new EntityReference("sprk_" + i.Column["sprk_regarding".Length..], i.Id);
 
             _rows[(entity, ChildId)] = () => row;
             return this;

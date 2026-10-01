@@ -257,7 +257,7 @@ public sealed class RecordContainerResolver
             record = await ReadRecordAsync(normalizedEntity, recordId, [.. columns], ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (
-            ancestorLinks is not null && ex is not SdapProblemException and not OperationCanceledException)
+            ancestorLinks is not null && ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
         {
             // For a CHILD this read IS its link to its root, so an unreadable row is an unreadable ancestor link
             // (task 155 AC4). It already failed closed — nothing below ran — but as a raw fault the record-keyed
@@ -459,6 +459,11 @@ public sealed class RecordContainerResolver
     /// code of its own so the owner's eventual choice (read the intermediate live, cascade re-stamps on
     /// re-file, or accept) can replace exactly this branch.</para>
     ///
+    /// <para>The same refusal covers a child filed under an AGREEMENT, BUDGET or REPORT CARD (task 155 f2). Those
+    /// belong to a matter / project but are not in <see cref="CoreAncestorResolver"/>'s child taxonomy, so the
+    /// child carries no root stamp at all; resolving it would read "no root" and pick the business-unit container
+    /// even when the matter is secure.</para>
+    ///
     /// <para><b>Cost</b> (task 155 constraint): the child's links rode on the record read the caller already made;
     /// each linked root that CAN be secure costs one read of its flag and container — one in practice. A root
     /// type that cannot carry <c>sprk_issecure</c> (e.g. <c>sprk_servicerequest</c> in dev) is never read. The
@@ -478,10 +483,11 @@ public sealed class RecordContainerResolver
         if (intermediates.Count > 0)
         {
             _logger.LogWarning(
-                "[SECURE-CONTAINER] REFUSED {Entity} {RecordId}: it is filed under another child record ({Columns}), "
-                + "so its project/matter/work-assignment link is a denormalized stamp that is not refreshed when "
-                + "that record is re-filed. It cannot be verified that it does not sit under a SECURE record "
-                + "({Code}).",
+                "[SECURE-CONTAINER] REFUSED {Entity} {RecordId}: it is filed under another record that belongs to a "
+                + "project/matter/work assignment ({Columns}), so its own row either carries only a denormalized "
+                + "stamp of that root (not refreshed when the record is re-filed) or — for an agreement, budget or "
+                + "report card — no root link at all. It cannot be verified that it does not sit under a SECURE "
+                + "record ({Code}).",
                 normalizedEntity, recordId, string.Join(", ", intermediates), AncestorUnverifiableCode);
 
             throw new SdapProblemException(
@@ -543,7 +549,7 @@ public sealed class RecordContainerResolver
                     statusCode: 409,
                     logDetail: $"{linkColumn} -> {ancestorEntity} {link.Id} (not found)");
             }
-            catch (Exception ex) when (ex is not SdapProblemException and not OperationCanceledException)
+            catch (Exception ex) when (ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
             {
                 // Unreadable is UNKNOWN, and unknown never becomes "not secure" (ADR-003). 503: retryable.
                 _logger.LogError(ex,
@@ -639,6 +645,14 @@ public sealed class RecordContainerResolver
         return decision;
     }
 
+    /// <summary>
+    /// True only when the CALLER cancelled (task 155 f2). A Dataverse HTTP timeout also surfaces as a
+    /// <see cref="TaskCanceledException"/>, but with the caller's token still live — that is an unreadable row, and
+    /// it gets the typed, retryable 503 rather than escaping as a generic 500.
+    /// </summary>
+    private static bool IsCallerCancellation(Exception ex, CancellationToken ct)
+        => ex is OperationCanceledException && ct.IsCancellationRequested;
+
     /// <param name="reason">Response-safe: names entity TYPES only, never another record's id.</param>
     /// <param name="logDetail">Ids and columns for the operator; logged, never returned to the caller.</param>
     private SdapProblemException AncestorUnresolved(
@@ -663,7 +677,10 @@ public sealed class RecordContainerResolver
     /// <c>sprk_event</c> carry all four <c>sprk_regarding{core}</c> columns (<see cref="CoreAncestorResolver.CoreAncestorLookups"/>,
     /// referenced rather than restated); <c>sprk_invoice</c> carries none of them and links through its typed
     /// <c>sprk_matter</c> / <c>sprk_project</c> lookups instead. The intermediate columns are each entity's
-    /// regarding lookups whose target is itself in <see cref="CoreAncestorResolver.ChildRecordEntities"/>.</para>
+    /// regarding lookups whose target is itself in <see cref="CoreAncestorResolver.ChildRecordEntities"/>, PLUS
+    /// those whose target is a root-owned non-core record (agreement, budget, report card — task 155 f2). Every
+    /// other regarding lookup on <c>sprk_todo</c> / <c>sprk_event</c> (contact, sprk_organization, account) targets
+    /// a PARTY record with no project / matter / work-assignment link (verified live), so it is no ancestor.</para>
     ///
     /// <para><b>A child type NOT listed is refused</b> (<see cref="AncestorUnresolvedCode"/>), never read as
     /// "no ancestor" — task 155 escalation trigger 1. <c>sprk_communication</c>, <c>sprk_document</c> and
@@ -677,17 +694,35 @@ public sealed class RecordContainerResolver
         private static readonly IReadOnlyList<(string AncestorEntity, string LinkColumn)> RegardingCoreLinks =
             CoreAncestorResolver.CoreAncestorLookups.Select(l => (l.EntityType, l.LookupAttribute)).ToArray();
 
+        /// <summary>
+        /// Regarding columns whose target is a NON-CORE record that itself belongs to a project / matter (task 155
+        /// f2). Live spaarkedev1 (read-only, 2026-10-01): <c>sprk_agreement</c> and <c>sprk_reportcard</c> link
+        /// to their root through <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>, <c>sprk_budget</c>
+        /// through typed <c>sprk_matter</c> / <c>sprk_project</c>. None of the three is in
+        /// <see cref="CoreAncestorResolver.ChildRecordEntities"/>, so a to-do or event filed under one carries NO
+        /// <c>sprk_regarding{core}</c> stamp at all — reading only its root columns finds nothing and would send a
+        /// SECURE matter's content to the business-unit container. They are refused exactly like a child filed
+        /// under another child. (Party records — contact, sprk_organization, account — have no root link and are
+        /// not listed: a to-do about a person is not under a matter.)
+        /// </summary>
+        private static readonly IReadOnlyList<string> RootOwnedNonCoreRegardings =
+            ["sprk_regardingagreement", "sprk_regardingbudget", "sprk_regardingreportcard"];
+
         private static readonly IReadOnlyDictionary<string, ChildAncestorLinks> ByEntity =
             new Dictionary<string, ChildAncestorLinks>(StringComparer.Ordinal)
             {
                 ["sprk_todo"] = new(
                     RegardingCoreLinks,
-                    ["sprk_regardinganalysis", "sprk_regardingcommunication", "sprk_regardingdocument",
-                     "sprk_regardingevent", "sprk_regardinginvoice"]),
+                    [
+                        "sprk_regardinganalysis", "sprk_regardingcommunication", "sprk_regardingdocument",
+                        "sprk_regardingevent", "sprk_regardinginvoice", .. RootOwnedNonCoreRegardings,
+                    ]),
                 ["sprk_event"] = new(
                     RegardingCoreLinks,
-                    ["sprk_regardinganalysis", "sprk_regardingcommunication", "sprk_regardingevent",
-                     "sprk_regardinginvoice"]),
+                    [
+                        "sprk_regardinganalysis", "sprk_regardingcommunication", "sprk_regardingevent",
+                        "sprk_regardinginvoice", .. RootOwnedNonCoreRegardings,
+                    ]),
                 ["sprk_invoice"] = new(
                     [("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter")],
                     []),
@@ -704,7 +739,13 @@ public sealed class RecordContainerResolver
         /// <summary>Root entity → the column on the child that links to it.</summary>
         public IReadOnlyList<(string AncestorEntity, string LinkColumn)> RootLinks { get; }
 
-        /// <summary>Regarding columns that point at ANOTHER child record (whose root is only a denormalized stamp here).</summary>
+        /// <summary>
+        /// Regarding columns that point at a record which ITSELF belongs to a root — another child (whose root is
+        /// only a denormalized stamp here) or a root-owned non-core record (agreement, budget, report card: no
+        /// stamp at all). Any of them set means this row cannot answer "which root?", so the record is refused.
+        /// These MUST ride on the record read: Dataverse returns only the requested columns, so a column left out
+        /// of <see cref="AllColumns"/> reads as "not set" and silently disables the refusal.
+        /// </summary>
         public IReadOnlyList<string> IntermediateColumns { get; }
 
         /// <summary>Every column the record read must carry for the decision.</summary>

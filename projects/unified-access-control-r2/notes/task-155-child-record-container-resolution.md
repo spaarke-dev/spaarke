@@ -195,4 +195,61 @@ is not a child (`CoreAncestorResolver`: unclassified), so it takes its own busin
   - The owner's choice for escalation trigger 2, option (a), (b) or (c).
   - The AC7 live gate (above).
   - The taxonomy observation for agreement, budget, report card and organization, which belongs to tasks 146/147.
+    **Superseded in f2:** the container REFUSAL for agreement / budget / report card is now added here (below);
+    only the access-taxonomy half remains with 146/147.
   - The SPE-membership 403 observation.
+
+## Round f2: second adversarial-verifier findings (branch `task/uac-r2-155-f2`)
+
+- **BLOCKING, closed: a to-do / event filed under an agreement, budget or report card.** These three belong to a
+  matter or project (live spaarkedev1, read-only, 2026-10-01: `sprk_agreement` and `sprk_reportcard` via
+  `sprk_regardingmatter` / `sprk_regardingproject`; `sprk_budget` via typed `sprk_matter` / `sprk_project`), but
+  `CoreAncestorResolver` does not classify them, so the child carries **no** `sprk_regarding{core}` stamp. The
+  resolver read "no root" and returned the business-unit container — shared, even under a SECURE matter. On the
+  OBO routes that was a new byte path (before task 155 it was a 409). `sprk_regardingagreement`,
+  `sprk_regardingbudget` and `sprk_regardingreportcard` are now in `ChildAncestorLinks.IntermediateColumns` for
+  both `sprk_todo` and `sprk_event`, so they refuse with `container_ancestor_unverifiable` (409) exactly like a child
+  under another child. Live dev has one record in this shape (to-do `a01477e8-…` → report card `9d1477e8-…` →
+  matter `b68299c6-…`, not secure today); 0 events.
+- **Every other regarding column checked live.** `sprk_todo`: agreement, analysis, budget, communication, contact,
+  document, event, invoice, matter, organization, project, reportcard, servicerequest, workassignment.
+  `sprk_event`: the same minus document, plus account. The remaining non-root targets — `contact`,
+  `sprk_organization`, `account` — are PARTY records with no project / matter / work-assignment lookup (verified
+  by describe). `contact` and `sprk_organization` carry an `sprk_invoice` lookup, but that is a party → invoice
+  reference, not ownership (a person is not under an invoice), so they are not ancestors and are not refused.
+  Flagged for the owner in case that reading is wrong.
+- **The guard is now proven to bite.** The test double returned the whole row whatever was requested, so dropping
+  the intermediate columns from the read left 101 tests green. `ChildRecordContainerResolutionTests`' double now
+  returns ONLY the requested columns, as Dataverse does, and a new theory pins the read's columns against a LITERAL
+  live-verified list (to-do, event, invoice). The verifier's exact seed (`AllColumns => RootLinks...`) now turns
+  23 tests red.
+- **Typed 503 on a Dataverse timeout.** The catch filters excluded every `OperationCanceledException`, so an HTTP
+  timeout (`TaskCanceledException`, caller token live) escaped as a generic 500. Both filters now exclude only a
+  CALLER cancellation (`ex is OperationCanceledException && ct.IsCancellationRequested`); a timeout is an unreadable
+  row and gets `container_ancestor_unresolved` 503. Caller cancellation still propagates (pinned).
+- **Office-level pins** (`OfficeSaveNoTargetContainerContractTests` §4, over the real mapped `POST /api/office/save`):
+  a to-do with no secure root lands in the to-do's OWN business-unit container (not the tenant default, not the
+  acting user's business unit); a to-do filed under a report card is refused (`container_ancestor_unverifiable`)
+  with nothing uploaded; a target that does not exist is refused (`container_record_not_found`) with nothing
+  uploaded. The Office save renders every resolver refusal in its pre-existing 400 "Save failed: {code}: …" shape
+  (`OfficeService.SaveAsync`'s catch), so the code, not the status, identifies the refusal there.
+
+**Mutation proof (f2):**
+
+| Mutation | Tests that failed |
+|---|---|
+| S1 (verifier's seed): `AllColumns` drops `IntermediateColumns` | 23 |
+| S2: the three new columns removed from to-do / event | 14 |
+| S3: invoice's `sprk_project` link removed | 2 (column pin + two-secure-roots) |
+| S4: OCE filter back to "any OperationCanceledException" | 1 (timeout → 503) |
+| S4b: OCE filter never excludes | 1 (caller cancellation propagates) |
+| S5a: no business-unit derivation for children | 1 (Office to-do → BU container) |
+| S5b: = S2, Office suite | 1 (Office report card refused) |
+| S5c: not-found read as an empty row | 1 (Office missing target refused) |
+
+**Still open after f2:** escalation trigger 2's owner choice (a)/(b)/(c) — which now also covers the agreement /
+budget / report card shape (option (b) would need `CoreAncestorResolver` to classify those three as children so
+they get stamped; option (a) reads the intermediate's root live); the AC7 live gate (now also: an upload to a to-do
+filed under a report card must answer 409 `container_ancestor_unverifiable`); the read-budget note (a child
+carrying two root stamps costs two root reads — needed to detect the two-secure-roots ambiguity, documented as
+"one in practice"); the SPE-membership 403 observation.

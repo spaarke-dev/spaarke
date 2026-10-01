@@ -130,7 +130,8 @@ public static class OBOEndpoints
                 // secure_record_container_missing (409, the root has none), container_ancestor_ambiguous (409,
                 // two secure roots), container_ancestor_unresolved (409, or 503 when the child's own row or its
                 // root could not be read), container_ancestor_unverifiable (409, filed under another child, whose root link is a
-                // stamp that can be stale). Otherwise the record's own business-unit container. Before task 155
+                // stamp that can be stale, or under an agreement / budget / report card, which leave no root link on
+                // the row at all). Otherwise the record's own business-unit container. Before task 155
                 // every to-do / event / contact upload landed in the Unresolved branch below.
                 var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
 
