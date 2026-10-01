@@ -223,4 +223,39 @@ NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no 
   <amendments>
     <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: F3 = removing Secure is limited to Full Access holders plus the creator, enforced server-side in the unsecure endpoint (securing stays open to Write-holders). F5 superseded: securing an existing standard record is a RIBBON BUTTON on project/matter/work-assignment forms (enabled with 148, per F7). NEW owner UX requirement (assignment pending research): a red notification banner on secure records, linking to Share/Manage Access where possible.</amendment>
   </amendments>
+  <amendments>
+    <amendment n="UX" date="2026-10-01" source="owner round 3b UX + session27-ux-research (notes/session27-ux-research-ethical-wall-secure.md, disposition row 4 and the sprk_issecure findings)">(1) PREMISE CORRECTION — there is no form control to lock.
+- No live form or view on the three roots references sprk_issecure. The only reference is the default "Attributes" view (live research, spaarkedev1, 2026-10-01).
+- So "make the form control read-only" has nothing to act on, wherever it appears: prompt, goal (4), relevant-files (main and quick-create form controls), step 6, step 7's "form edit" check and the ui-test "Secure flag is read-only on the form". Do not add the field to a form in order to lock it. If step 1's live inventory DOES find a form referencing it, the original read-only step applies to that form.
+- What STILL applies, unchanged:
+  - the field-level security lock (IsSecured, the reader profile and the BFF-writer profile, the no-masking rules);
+  - endpoint-only writes;
+  - step 1's live inventory, which must still cover business rules, classic workflows and flows. The research checked forms and views. The "visible when sprk_issecure = true" business rule in `src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md:205` is a design-document placement, not verified live.
+- Replace that ui-test's check with: the live inventory shows no form references the field, and a non-admin Web API PATCH of sprk_issecure is refused while the read returns the true value (the existing NEGATIVE and NO MASKING gates).
+- The red "this record is secure" banner the owner asked for is task 153, not this task.
+
+(2) THE SECURE/UNSECURE SURFACE JOINS TASK 142's SHARED "Access" RIBBON GROUP. This settles step 5's surface choice and its "choice of secure/unsecure surface" escalation trigger; the R3b amendment already made it a ribbon button, F3 answers the "WHO may unsecure" trigger, and F7 answers the "Securing an EXISTING record ... before task 148" trigger.
+- Add "Make Secure" and "Remove Secure" to the ONE Access group that task 142 defines, in task 142's ONE ribbon source file (`infrastructure/dataverse/ribbon/AccessRibbons/`) and ONE command script (`Spaarke.Access.Ribbon`). REBASE on 142's group: no second group, no second ribbon file, no second script, no second MSAL chain.
+- The work-assignment form ribbon is NOT in source control (`infrastructure/dataverse/ribbon/WorkAssignmentRibbons/` holds only the `createtodo-button.xml` merge snippet). Task 142 exports and checks it in; build on 142's checked-in export, re-exported fresh before editing (the same before/after command-list check as 142).
+- Secure state for the enable rules: `sprk_issecure` is on no form, so a ribbon ValueRule cannot read it. The script reads it with `Xrm.WebApi.retrieveRecord` (every user can read it under this task's reader profile — the NO MASKING gate). A read failure hides BOTH commands (fail closed).
+- Make Secure: available when the record is not secure and the caller has Write (the cached `can-manage-access` enable rule from 142's script). Enabled only together with task 148 (R3b, F7): it is not imported into the ribbon until 148's provisioning transition is deployed in that environment, in the same release. It confirms first; the confirmation copy (what 148's transition does to existing children and files) is AUTHORED copy obtained from the owner, as this task's existing "ask for authored copy" trigger requires for new user-facing wording, not implementer wording. It calls 144's generalized provision endpoint.
+- Remove Secure: available when the record is secure and the caller has Write. The server's unsecure endpoint enforces owner F3 (Full Access holders plus the creator), and a refusal shows the endpoint's ProblemDetails message. The client does not decide who may unsecure; the enable rule only hides the command from callers without Write.
+- Both refresh the form and show the outcome as 142's script does. ADR-006 permits a thin ribbon-command script. No new BFF endpoint.
+
+SEQUENCING / ESCALATION TRIGGER. The ribbon part of step 5 waits for task 142's Access group (a PARTIAL dependency: "142 (ribbon step only)" — not a whole-task `deps` entry, which would hold the FLS lock behind 142). If this task reaches step 5 before 142 has merged, STOP the ribbon work and tell the orchestrator. Do not create the group here. The field-level security lock, the server changes and the wizard changes do not wait.
+
+ADDITIONAL ACCEPTANCE (closed set):
+- (a) Make Secure and Remove Secure appear inside 142's Access group on all three main forms, from 142's file and script;
+- (b) Make Secure is absent from the ribbon in any environment where 148's transition is not deployed, and present (subject to (e)) where it is;
+- (c) Remove Secure by a Collaborate holder who is not the creator is refused with the F3 message shown, and the record stays secure; Remove Secure by the creator, and by a Full Access holder, succeeds;
+- (d) every command on 142's before-import list, plus Update Access, is present and runs after import;
+- (e) a Read-only user sees neither Make Secure nor Remove Secure; on a secure record Make Secure is hidden, and on a non-secure record Remove Secure is hidden;
+- (f) a failed read of `sprk_issecure` hides both commands.
+
+ADDITIONAL UI TESTS (binding — part of this task's ui-tests):
+- Access group: on a secure project, open Access. Expected: Update Access and Remove Secure are listed, and Make Secure is not.
+- Make Secure (after 148): on a non-secure matter, as a Write-holder, open Access and choose Make Secure; confirm. Expected: the authored confirmation copy, then the record reads secure after refresh.
+- F3 refusal: as a Collaborate holder who is not the creator, choose Remove Secure. Expected: the endpoint's refusal message, and the record stays secure.
+- Read-only user: on a secure and on a non-secure work assignment, open Access. Expected: neither Make Secure nor Remove Secure is available.</amendment>
+  </amendments>
 </task>

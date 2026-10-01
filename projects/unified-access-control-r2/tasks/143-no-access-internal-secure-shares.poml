@@ -257,4 +257,24 @@ Deactivating an entry lifts the veto (schema Business Rule 2) but does not re-cr
   <amendments>
     <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: N2 = hide the record in Teams/SPA for a walled user whose access comes from a team/role/BU (MDA still admits; recorded section 6.5 path A exception); N5 = enforce share removal only when the entry's author has Write on the record, otherwise save as "not enforced" with a notice; N6 = refuse to provision a secure project whose referenced organizations wall off the provisioning user, with a clear message. NEW owner UX requirements (assignment to tasks pending research): a red notification banner on any record subject to a No Access restriction linking to a No Access list modal; a way to add and to view No Access entries for a record AND for an organization.</amendment>
   </amendments>
+  <amendments>
+    <amendment n="UX" date="2026-10-01" source="owner round 3b UX + session27-ux-research (notes/session27-ux-research-ethical-wall-secure.md, disposition row 5)">NEW DEPENDENCY: task 154.
+
+The sprk_noaccessentry main form is unusable today. Its "Information" form holds ONLY the Name field (live research, spaarkedev1), so subject, object and reason cannot be entered, and `sprk_objectrecordid` is free text (String(50), `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:69`).
+
+This task's form-based enforcement depends on that form:
+- `sprk_noaccessentry_postsave.js`, registered on that main form;
+- the "Saving a No Access entry removes the share" ui-test;
+- live gate 14 (ii) through (v): (ii) and (v) author entries in MDA, and (iii) and (iv) act on the entry (ii) authored.
+
+Task 154 delivers the usable entry form (with real views and a site map entry). This task therefore DEPENDS ON 154 for its form-registered post-save script, its ui-test and its live gate — a PARTIAL dependency. The server work (column, reader, guard, enforcer, enforce endpoint, job, veto) does not wait for 154, which is why 154 is stated here rather than as a whole-task `deps` entry that would block it; the orchestrator records it in TASK-INDEX as "154 (form steps only)".
+
+SEQUENCING WITH 154:
+- This task creates `sprk_subjectsystemuser`. Whichever of the two lands second puts that field on 154's form, as one of the exactly-one-of-three subjects. The form steps here do not start until the form carries it: gate 14 (ii) names a systemuser subject.
+- The post-save script is registered on 154's form, with `sprk_bff_auth.js` registered ahead of it.
+- The N5 "not enforced: author lacks Write on record" outcome (criterion 8a, R3b amendment) is shown as that form's post-save notification.
+- Gate 14 (ii) needs an author who can create entries (per O2's answer — under the recommendation, the access-administrator role) AND holds Write on the project; an author without Write gets "not enforced" (N5) and the gate does not pass on that author.
+
+CROSS-REFERENCE (O2). The research found that "Spaarke Core User" holds Global Read on sprk_noaccessentry, so every core user can read every entry's Reason. That undermines this task's refusal contract ("does not reveal the entry's reason text"). Who may read the table is open owner question O2, carried as an escalation trigger in 064 and 067 (recommendation: remove Read from Spaarke Core User, grant Read/Write to a dedicated access-administrator role, everyone else sees only the banner, and Write-holders see entries through Manage Access via the BFF). This task does not decide O2. ESCALATION TRIGGER: if O2 is still open when this task reaches its live gate, STOP and ask — the refusal contract cannot be signed off while every core user can read every Reason. Record O2's answer in this task's notes before the live gate.</amendment>
+  </amendments>
 </task>
