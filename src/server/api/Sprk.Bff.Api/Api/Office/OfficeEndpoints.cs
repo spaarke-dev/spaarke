@@ -1073,7 +1073,12 @@ public static class OfficeEndpoints
     /// <param name="type">Comma-separated entity types to filter (Matter, Project, Invoice, Account, Contact).</param>
     /// <param name="skip">Number of results to skip for pagination (default: 0).</param>
     /// <param name="top">Maximum results to return (default: 20, max: 50).</param>
+    /// <param name="access">
+    /// <c>file</c> asks for each result's <c>canFile</c>: whether <c>POST /api/office/save</c> would accept it as
+    /// the target (task 084, #1037). Any other value, or none, leaves <c>canFile</c> unset and costs nothing.
+    /// </param>
     /// <param name="officeService">Office service for search operations.</param>
+    /// <param name="searchService">Evaluates <c>canFile</c> with the save's own rights check (task 084).</param>
     /// <param name="callerResolver">Resolves the caller's Dataverse systemuserid for the impersonated read (task 062).</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="context">HTTP context for user claims.</param>
@@ -1084,7 +1089,9 @@ public static class OfficeEndpoints
         string? type,
         int? skip,
         int? top,
+        string? access,
         IOfficeService officeService,
+        OfficeSearchService searchService,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         ILogger<Program> logger,
         HttpContext context,
@@ -1190,6 +1197,15 @@ public static class OfficeEndpoints
         {
             var response = await officeService.SearchEntitiesAsync(
                 request, userId, callerSystemUserId, cancellationToken);
+
+            // Task 084 (#1037): "pickable equals savable". The Save tab's picker asks with access=file, and each
+            // row then says whether the save would accept it, decided by the save's own rights check. The To Do
+            // assignee search does not ask, and pays nothing.
+            if (string.Equals(access, "file", StringComparison.OrdinalIgnoreCase))
+            {
+                response = await searchService.ApplyFilingAccessAsync(
+                    response, TokenHelper.ExtractBearerTokenOrNull(context), cancellationToken);
+            }
 
             // Add correlation ID to response
             response = response with { CorrelationId = traceId };

@@ -1913,7 +1913,10 @@ public class OfficeService : IOfficeService
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
 
         var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
-        entity["sprk_invoicename"] = name;
+        // sprk_name is sprk_invoice's primary name attribute (live metadata, 2026-10-01). This wrote
+        // "sprk_invoicename", which sprk_invoice does not have, so Dataverse refused every invoice quick-create
+        // (#1079, task 085). sprk_billingevent is the entity that has a sprk_invoicename column.
+        entity["sprk_name"] = name;
 
         // Ownership (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER
         // pattern and says nothing about ownerid, a miscitation corrected 2026-09-22). Task 080 (invariant I-6): the

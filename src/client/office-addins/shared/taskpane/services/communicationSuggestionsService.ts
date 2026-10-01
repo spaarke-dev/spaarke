@@ -21,7 +21,8 @@ import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
  *
  * Flow:
  *   1. GET /api/office/communications/by-message-id/{internetMessageId}/suggestions
- *      → 200 { communicationId, subject, suggestions } when the email is captured,
+ *      → 200 { communicationId, subject, suggestions, names, filingAccess } when the email is captured
+ *        (`filingAccess`, task 084: per-candidate "can the caller file here", keyed by targetId),
  *      → 404 when it is not yet captured (email just arrived / never filed).
  *   2. On 404 (or no usable candidate) → return null → the caller opens the picker
  *      with NO pre-selection and requires an explicit choice (FR-B2 fallback; never
@@ -66,6 +67,19 @@ interface CommunicationSuggestionsWire {
   suggestions: SuggestAssociationsWire;
   /** Server-resolved display names keyed by candidate targetId (the provenance stores only ids). */
   names?: Record<string, string>;
+  /**
+   * Task 084 (#1037): whether the caller can FILE to each candidate, keyed by candidate targetId (same
+   * shape as `names`), decided by the save's own evaluator. `false` → the save would refuse it; `true`
+   * or an absent key → selectable. Not part of the candidate model: it is applied AFTER the shared
+   * `derivePrimaryReview` (ADR-045 — ranking and the model are untouched).
+   */
+  filingAccess?: Record<string, boolean>;
+}
+
+/** The engine's shared review model, plus the per-candidate filing access the suggestions route returned. */
+interface SuggestionsModel {
+  model: PrimaryReviewModel;
+  filingAccess?: Record<string, boolean>;
 }
 
 /**
@@ -93,12 +107,24 @@ export interface RelatedCandidate extends EntitySearchResult {
   matchReason?: string;
 }
 
-/** Dataverse logical name → the add-in picker's EntityType (only the 5 the picker supports). */
-const LOGICAL_TO_ENTITY_TYPE: Record<string, EntityType> = {
+/**
+ * Dataverse logical name → the add-in picker's EntityType, for the engine candidates the add-in can
+ * FILE to. A logical name not listed here maps to null (no card, no ribbon prediction).
+ *
+ * Exported for task 084's #1075 guard: the ribbon quick-save sends `EntitySearchResult.entityType` (a
+ * value from this map) as the save's `targetEntity.entityType`, so every value here must be a name the
+ * save accepts (`OfficeEndpoints.ValidateSaveRequest`). `quickSaveHelpers.test.ts` pins that.
+ *
+ * `account` is deliberately NOT listed (task 084): the save stopped accepting "account" on 2026-09-04
+ * (unified-access-control-r2 — `sprk_document` has no account lookup), so an Account prediction could
+ * only produce a ribbon quick-save refused with 400 OFFICE_002. Unmapped, it now gets the same "no
+ * prediction → open the pane" path as any other type the add-in cannot file to. The Save picker never
+ * offered Account cards (its chips are Matter/Project/Invoice), so the pane is unchanged.
+ */
+export const LOGICAL_TO_ENTITY_TYPE: Readonly<Record<string, EntityType>> = {
   sprk_matter: 'Matter',
   sprk_project: 'Project',
   sprk_invoice: 'Invoice',
-  account: 'Account',
   contact: 'Contact',
 };
 
@@ -154,27 +180,38 @@ function toProvenanceDoc(suggestions: SuggestAssociationsWire, names?: Record<st
 /**
  * Map a shared `PrimaryCandidate` to the picker's `EntitySearchResult`. Returns
  * `null` when the predicted entity type is not one the add-in picker supports (the
- * engine can predict types — organization, service request, event — the picker's
- * 5-type model can't represent; those simply get no pre-selection rather than a
+ * engine can predict types — organization, service request, event, account — that
+ * `LOGICAL_TO_ENTITY_TYPE` does not map; those simply get no pre-selection rather than a
  * broken chip).
+ *
+ * Task 084: `canFile` is set from the route's `filingAccess` map ONLY when it has a key for this
+ * candidate's targetId — an absent key leaves `canFile` absent (selectable, as before).
  */
-function candidateToEntity(candidate: PrimaryCandidate): EntitySearchResult | null {
+function candidateToEntity(
+  candidate: PrimaryCandidate,
+  filingAccess?: Record<string, boolean>
+): EntitySearchResult | null {
   const entityType = LOGICAL_TO_ENTITY_TYPE[candidate.entity];
   if (!entityType) return null;
   // Prefer the record number (e.g. matter number) then the human match reason.
   const displayInfo = candidate.recordNumber ?? candidate.matchReason;
+  const canFile = filingAccess?.[candidate.targetId];
   return {
     id: candidate.targetId,
     entityType,
     logicalName: candidate.entity,
     name: candidate.targetName,
     ...(displayInfo ? { displayInfo } : {}),
+    ...(canFile !== undefined ? { canFile } : {}),
   };
 }
 
 /** Map a shared `PrimaryCandidate` to a `RelatedCandidate` (entity + confidence), or null for unsupported types. */
-function candidateToRelated(candidate: PrimaryCandidate): RelatedCandidate | null {
-  const entity = candidateToEntity(candidate);
+function candidateToRelated(
+  candidate: PrimaryCandidate,
+  filingAccess?: Record<string, boolean>
+): RelatedCandidate | null {
+  const entity = candidateToEntity(candidate, filingAccess);
   if (!entity) return null;
   return {
     ...entity,
@@ -198,7 +235,7 @@ function candidateToRelated(candidate: PrimaryCandidate): RelatedCandidate | nul
  *   should treat a throw as "no pre-selection" (best-effort — a failed prediction
  *   must never block the manual save flow).
  */
-async function fetchModel(internetMessageId: string | undefined): Promise<PrimaryReviewModel | null> {
+async function fetchModel(internetMessageId: string | undefined): Promise<SuggestionsModel | null> {
   if (!internetMessageId) return null;
   const trimmed = internetMessageId.trim();
   if (trimmed.length === 0) return null;
@@ -216,25 +253,29 @@ async function fetchModel(internetMessageId: string | undefined): Promise<Primar
   if (!response?.suggestions) return null;
 
   // SAME candidate model as the code page (no fork; ADR-045). Server-resolved display
-  // names are folded into the model's `targetName` (the field it is designed to receive).
-  return derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
+  // names are folded into the model's `targetName` (the field it is designed to receive). Filing access
+  // (task 084) is NOT folded in — it rides alongside and is applied when mapping to the picker's shape.
+  const model = derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
+  return { model, ...(response.filingAccess ? { filingAccess: response.filingAccess } : {}) };
 }
 
 export async function fetchEnginePreSelection(
   internetMessageId: string | undefined
 ): Promise<EnginePreSelection | null> {
-  const model = await fetchModel(internetMessageId);
-  if (!model) return null;
+  const fetched = await fetchModel(internetMessageId);
+  if (!fetched) return null;
+  const { model, filingAccess } = fetched;
 
   const predictedCandidate = model.primary ?? model.candidates[0];
   if (!predictedCandidate) return null;
 
-  const predicted = candidateToEntity(predictedCandidate);
+  // `predicted.canFile === false` tells the ribbon quick-save NOT to auto-file (task 084).
+  const predicted = candidateToEntity(predictedCandidate, filingAccess);
   if (!predicted) return null;
 
   const alternates = model.candidates
     .filter(c => !(c.entity === predictedCandidate.entity && c.targetId === predictedCandidate.targetId))
-    .map(candidateToEntity)
+    .map(c => candidateToEntity(c, filingAccess))
     .filter((e): e is EntitySearchResult => e !== null);
 
   return { predicted, alternates, model };
@@ -248,7 +289,10 @@ export async function fetchEnginePreSelection(
  * throw should be treated as "no candidates" by the caller.
  */
 export async function fetchRelatedCandidates(internetMessageId: string | undefined): Promise<RelatedCandidate[]> {
-  const model = await fetchModel(internetMessageId);
-  if (!model) return [];
-  return model.candidates.map(candidateToRelated).filter((c): c is RelatedCandidate => c !== null);
+  const fetched = await fetchModel(internetMessageId);
+  if (!fetched) return [];
+  const { model, filingAccess } = fetched;
+  return model.candidates
+    .map(c => candidateToRelated(c, filingAccess))
+    .filter((c): c is RelatedCandidate => c !== null);
 }

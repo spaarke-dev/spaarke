@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (owner decisions actioned; 084 authored; **059 closed**; next 084)
+> **Last Updated**: 2026-10-01 (084 + 085 closed; next: one PR for both, then task 060)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,13 +18,30 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
+### 🔄 ACTIVE: ship 084 + 085 as ONE PR, then task 060
+
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **084** (`tasks/084-pickable-equals-savable.poml`, opus @ high; deps 059 ✅): pickable equals savable (#1037 + #1075). The search code it edits now lives in `Services/Office/OfficeSearchService.cs`. **083** stays blocked until UAC-r2 sends 141's link contract (141 is not in their current batch) |
-| **Last closed** | **059** ✅ 2026-10-01 `913dafa2f`: `OfficeSearchService` extracted (entity search + matter types + the To Do's `sprk_recordtype_ref` lookup); ctor 21 → 20, 5 optional deps required, dead null branches and the stub search deleted; the dispatcher's 3 params left to **068**. Suite 13,040/0/54, identical; ArchTests 337; publish −1,917 B. ⚠️ Search log lines now carry the category `OfficeSearchService`. Record: `notes/059-extract-office-search-service.md`. Before it: **058** ✅ (#1052) |
-| **PR** | 🟡 **#1076** (059 + the 2026-10-01 owner-decision records), opened 2026-10-01; CI running. Merge with `gh pr merge 1076 --merge` (NEVER `--delete-branch`) once `Router` passes (Tier 2 "Full Unit Tests" CANCELLED at its 30-min cap is not a failure). Then `git -C C:/code_files/spaarke pull --ff-only origin master` and merge `origin/master` back. Earlier: ✅ #1045 · ✅ #1051 (082) · ✅ #1052 (058) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + 059 + record commits |
-| **Next Action** | `task-execute` **084**. Order after it: 060 → 068 (deletes the profile dispatcher and its 3 optional ctor params, 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
+| **084** | ✅ CLOSED (`91e73b6fc`): suite 13,064/0/54, gates in `notes/084-pickable-equals-savable.md` |
+| **085** | ✅ CLOSED (`04158652e`, records committed after): suite **13,065/0/54 (+1 exact)**, ArchTests 337, publish **+30 B** vs 084 (master 47,666,117 → 084 47,671,242 → 085 47,671,272 B; 212 files every side; worktrees removed). #1079 commented (stays open for the 3 other-owner sites). `notes/085-invoice-quickcreate-name.md` |
+| **Next Action** | 1) Push; open ONE PR for **084 + 085** (template `scratchpad/pr-059-body.md`; facts in `notes/084-…md` §2–5 and `notes/085-…md`). 2) When `Router` passes and `grep -c pending` = 0: `gh pr merge N --merge` (NEVER `--delete-branch`); `git -C C:/code_files/spaarke pull --ff-only origin master`; fast-forward or merge `origin/master` into the branch. 3) Report to the owner. 4) Then task **060** via task-execute |
+
+**Critical context:**
+- 🔔 **NEW, owner decision, BEFORE the next BFF deploy from master: ISS-016 / #1081.**
+  - The root BU's default team ("Spaarke") has **0 privileges**, so Dataverse refuses to let it own anything.
+  - 080 (on master) gives it ownership for root-BU callers. That affects **9 people, including the owner**, on the
+    unfiled save, the quick-creates and To Do: a 5xx, not `OFFICE_022`.
+  - Found by 085's live probe. Recommendation: (A) a minimal Read-only owner role on the root team, as 082 did.
+    Do NOT change role config without the owner's go.
+- **Open for the owner (084 + 085):** the live checks (no deploy; the owner defers deploys), and 084's latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
+- **UAC-r2 coordination (2026-10-01):** their task 151 replaces `ISecurableEntityRegistry.IsSecurableAsync` / `IsKnownEntityAsync` with `ClassifyEntityAsync` → `EntitySecurability`. No doubles or callers on our branch; they already migrated the two doubles in `OfficeEndpointsContractTests.cs` (on master). Their task 130 edits `CallerRecordAccessProbe.cs` (`CallerHoldsPrivilegeAsync`), and so did our 084 (three members `protected virtual`, plus `GetCallerRightsForRecordsAsync`), so **expect a small overlap there. Whoever lands second rebases.**
+- **#1076 (059) merged** as `c08ef6013`.
+
+**Found this session:** #1079 (ISS-015). `sprk_invoice` has no `sprk_invoicename`. Our half is task 085; `DataverseIndexSyncService.cs:52-55` and two scripts belong to others.
+
+| Field | Value |
+|---|---|
+| **After 085** | Next task: 060 → 068 (deletes the profile dispatcher: ctor 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 

@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Communication;
 
@@ -42,16 +45,147 @@ public class OfficeSearchService
     // interface name.
     private readonly IImpersonatedCommunicationQuery _impersonatedQuery;
 
+    // Task 084 (#1037): the save's own per-record rights probe (OBO RetrievePrincipalAccess, as the caller), so
+    // the picker can mark each record it offers with whether the save would accept it. See
+    // EvaluateFilingAccessAsync.
+    private readonly CallerRecordAccessProbe _accessProbe;
+
     private readonly ILogger<OfficeSearchService> _logger;
+
+    /// <summary>
+    /// Most records one request has filing access evaluated for (task 084). The picker asks for one type at
+    /// <c>top=10</c>, so it never reaches this; a larger request gets <c>null</c> ("not checked") past it.
+    /// </summary>
+    internal const int MaxFilingAccessChecks = 50;
 
     public OfficeSearchService(
         DataverseWebApiClient dataverseClient,
         IImpersonatedCommunicationQuery impersonatedQuery,
+        CallerRecordAccessProbe accessProbe,
         ILogger<OfficeSearchService> logger)
     {
         _dataverseClient = dataverseClient;
         _impersonatedQuery = impersonatedQuery;
+        _accessProbe = accessProbe;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// For each target, whether <c>POST /api/office/save</c> would accept it as the record to file to:
+    /// <c>true</c> or <c>false</c>, or <c>null</c> when it was not checked (past <see cref="MaxFilingAccessChecks"/>).
+    /// </summary>
+    /// <param name="targets">
+    /// Each record as the type SPELLING the client will send in the save's <c>TargetEntity.EntityType</c>
+    /// (the friendly name, e.g. <c>Matter</c>; a logical name also resolves) and its id.
+    /// </param>
+    /// <param name="callerBearerToken">The caller's bearer token from the inbound request.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <remarks>
+    /// <para><b>"Pickable equals savable" (task 084, #1037).</b> The picker's search returns every record the
+    /// caller can READ; the save authorizes its target by APPENDTO. Without this, a user holding Read but not
+    /// AppendTo on a record (realistically a secure record shared view-only) can pick it, and the save is then
+    /// refused. The owner decided to show such a record disabled, with the reason, rather than hide it.</para>
+    ///
+    /// <para><b>The save's evaluator, not a copy of it.</b> Each verdict is made by the same three pieces the
+    /// save's <see cref="Api.Filters.EntityAccessFilter"/> uses:
+    /// <list type="number">
+    ///   <item><description><see cref="Api.Filters.EntityAccessFilter.TryResolveEntitySet"/>, the one type →
+    ///   entity-set map. A type it cannot resolve is <c>false</c>, because the save refuses it (400
+    ///   <c>OFFICE_002</c>);</description></item>
+    ///   <item><description><see cref="CallerRecordAccessProbe"/>, the same OBO <c>RetrievePrincipalAccess</c> as
+    ///   the caller;</description></item>
+    ///   <item><description><see cref="OperationAccessPolicy.HasRequiredRights"/> for
+    ///   <see cref="Api.Filters.EntityAccessFilter.AssociateOperation"/>, so the required right is read from the
+    ///   one place that defines it.</description></item>
+    /// </list>
+    /// Any probe failure answers <see cref="AccessRights.None"/>, which is <c>false</c> here and a refusal at the
+    /// save. A doubtful record is never shown as fileable.</para>
+    ///
+    /// <para><b>Cost.</b> One OBO exchange and one <c>WhoAmI</c> per call, then one <c>RetrievePrincipalAccess</c>
+    /// per record, at most <see cref="CallerRecordAccessProbe.MaxConcurrentRecordLookups"/> at once. Only callers
+    /// that ask pay it; the To Do assignee search does not.</para>
+    /// </remarks>
+    public async Task<IReadOnlyList<bool?>> EvaluateFilingAccessAsync(
+        IReadOnlyList<(string EntityType, Guid RecordId)> targets,
+        string? callerBearerToken,
+        CancellationToken cancellationToken = default)
+    {
+        var verdicts = new bool?[targets.Count];
+        var lookupIndexByTarget = new int[targets.Count];
+        var lookups = new List<(string EntitySet, Guid RecordId)>();
+
+        for (var i = 0; i < targets.Count; i++)
+        {
+            lookupIndexByTarget[i] = -1;
+            var (entityType, recordId) = targets[i];
+
+            // The save refuses both of these before any rights question (400 OFFICE_002 / an empty target id),
+            // so they are not fileable whatever the caller holds.
+            if (recordId == Guid.Empty || !EntityAccessFilter.TryResolveEntitySet(entityType, out var entitySet))
+            {
+                verdicts[i] = false;
+                continue;
+            }
+
+            if (lookups.Count >= MaxFilingAccessChecks)
+                continue; // null: not checked
+
+            lookupIndexByTarget[i] = lookups.Count;
+            lookups.Add((entitySet, recordId));
+        }
+
+        if (lookups.Count == 0)
+            return verdicts;
+
+        var rights = await _accessProbe
+            .GetCallerRightsForRecordsAsync(callerBearerToken, lookups, cancellationToken)
+            .ConfigureAwait(false);
+
+        for (var i = 0; i < targets.Count; i++)
+        {
+            if (lookupIndexByTarget[i] >= 0)
+            {
+                verdicts[i] = OperationAccessPolicy.HasRequiredRights(
+                    rights[lookupIndexByTarget[i]], EntityAccessFilter.AssociateOperation);
+            }
+        }
+
+        return verdicts;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="response"/> with each result's <see cref="EntitySearchResult.CanFile"/> set by
+    /// <see cref="EvaluateFilingAccessAsync"/>. Used for <c>GET /api/office/search/entities?access=file</c>.
+    /// </summary>
+    /// <remarks>
+    /// Each row is evaluated on its FRIENDLY type (<see cref="EntitySearchResult.EntityType"/>, e.g. <c>Matter</c>),
+    /// which is exactly the string the pane sends to the save as <c>TargetEntity.EntityType</c>.
+    /// </remarks>
+    public async Task<EntitySearchResponse> ApplyFilingAccessAsync(
+        EntitySearchResponse response,
+        string? callerBearerToken,
+        CancellationToken cancellationToken = default)
+    {
+        if (response.Results.Count == 0)
+            return response;
+
+        var verdicts = await EvaluateFilingAccessAsync(
+            response.Results.Select(r => (r.EntityType.ToString(), r.Id)).ToList(),
+            callerBearerToken,
+            cancellationToken).ConfigureAwait(false);
+
+        var annotated = response.Results
+            .Select((row, i) => row with { CanFile = verdicts[i] })
+            .ToList();
+
+        _logger.LogInformation(
+            "Filing access evaluated for {Count} search result(s): {Fileable} fileable, {NotFileable} not, {Unchecked} unchecked",
+            annotated.Count,
+            annotated.Count(r => r.CanFile == true),
+            annotated.Count(r => r.CanFile == false),
+            annotated.Count(r => r.CanFile is null));
+
+        return response with { Results = annotated };
     }
 
     /// <inheritdoc cref="IOfficeService.SearchEntitiesAsync"/>

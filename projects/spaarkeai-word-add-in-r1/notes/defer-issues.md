@@ -497,7 +497,7 @@ layouts) or team-owned (then the checks must change). Per-user matches the check
 
 | Field | Value |
 |---|---|
-| **Status** | Open; **tasked as 084** (2026-10-01) |
+| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`, 2026-10-01): disabled with the reason, via the save's own evaluator. Open until the PR merges |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-30 |
 | **Source** | UAC-r2 post-merge message 2026-09-30 (`notes/uac-r2-findings-2026-09-30.md` §6 (e)) |
@@ -610,7 +610,7 @@ Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: 
 
 | Field | Value |
 |---|---|
-| **Status** | Open; **tasked as 084** (part c), with #1037 |
+| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`): the ribbon sends `target.entityType`; regression test `Issue1075_QuickSaveLogicalNameTests`. Open until the PR merges |
 | **Urgency** | before task 078's unified package is installed (latent until then) |
 | **Filed** | 2026-10-01 |
 | **Source** | Research for task 084 (code reading; not yet reproduced by a test) |
@@ -629,6 +629,85 @@ Outlook runs the XML manifest, which has no quick-save button. Installing task 0
 
 **Fix:** send `target.entityType`, reproduced first by a contract test (`"sprk_matter"` → 400). It is in task 084
 because 084 also changes which predicted record the ribbon may auto-file to.
+
+---
+
+## ISS-015 — `sprk_invoice` has no `sprk_invoicename` column: the Office invoice quick-create always fails
+
+| Field | Value |
+|---|---|
+| **Status** | **Our half FIXED on the branch** (task 085, `04158652e`): the invoice quick-create writes `sprk_name`, pinned by `Issue1079_InvoiceQuickCreateNameTests` (red before, green after). The live pane check waits on the next BFF deploy from master. **The issue stays OPEN** for the other owners' three sites below |
+| **Urgency** | now (LIVE: every invoice quick-create from the pane fails) |
+| **Filed** | 2026-10-01 |
+| **Source** | unified-access-control-r2 task-130 verifier; confirmed live here |
+| **GitHub Issue** | [#1079](https://github.com/spaarke-dev/spaarke/issues/1079) |
+
+- `OfficeService.cs:1916` writes `entity["sprk_invoicename"] = name`. The column does not exist; `sprk_invoice`'s
+  primary name is `sprk_name` (live metadata, 2026-10-01).
+- It was introduced by #934 (`f5fee2141`). No test asserts the invoice name attribute.
+- Fix: write `sprk_name`, with a regression test that asserts the attribute name.
+- Same wrong column, NOT ours:
+  - `Services/RecordMatching/DataverseIndexSyncService.cs:52-55` (invoices likely missing from the records index);
+  - `scripts/ai-search/Sync-RecordsToIndex.ps1`;
+  - `scripts/backfill-multi-container-multi-index/...ParentRecords.ps1`.
+- `sprk_billingevent.sprk_invoicename` does exist, so references on that entity are correct.
+- **Found by 085's review:**
+  - `Sync-RecordsToIndex.ps1` also selects `sprk_invoicedescription`, which does not exist either (the real column
+    is `sprk_description`).
+  - `spaarke-ai-azure-setup-dev-r1/notes/phase-5-ingestion-evidence.md` had already recorded "0 invoices" indexed
+    because of this column, and filed it as backlog. So invoices have likely never been in the records index.
+  - Both points were added to #1079.
+
+---
+
+## ISS-016 — The root BU's default team has no roles, so Dataverse refuses any Office create it would own
+
+| Field | Value |
+|---|---|
+| **Status** | Open. **🔔 Owner decision** (security configuration, CLAUDE.md §6) |
+| **Urgency** | now: before the next BFF deploy from master (080 is on master via #1045, not deployed) |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 085's live real-Dataverse probe (push-to-github Step 1.7) |
+| **GitHub Issue** | [#1081](https://github.com/spaarke-dev/spaarke/issues/1081) |
+
+**Description**
+
+Dataverse refuses to make a team the owner of a row unless that team holds Read on the row's table. The caller's
+privileges don't matter; an admin is refused too, the same mechanism as ISS-013. In dev, the **root** BU's default
+team **"Spaarke"** (`09fbf21c-1872-f011-b4cb-7c1e52671ad0`) has **0 privileges** (`RetrieveTeamPrivileges`). Task
+080's `RecordOwnershipResolver` returns that team in two cases: a root-BU caller with no target record, and a target
+that is itself root-owned.
+
+**Concrete failure:** after the next deploy from master, the **9 interactive people in the root BU, the owner's
+account among them**, get a 5xx on the unfiled save, the Matter / Project / Invoice quick-creates and To Do creates.
+It is a 5xx, not `OFFICE_022`, because the resolver propagates Dataverse faults by design. 080's backfill also plans
+7 To Dos to the root team, which would be refused too.
+
+Live, 2026-10-01: an invoice owned by the root team was refused (*"Read Privilege Check For Owner … privilegeCount=0 …
+missing prvReadsprk_Invoice"*). The same create owned by the "Spaarke Business Unit 1" team (725 privileges, Read Deep)
+returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcreate-name.md` §2.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs:317-356` (no root-BU exclusion).
+- `GET {org}/api/data/v9.2/teams(09fbf21c-1872-f011-b4cb-7c1e52671ad0)/Microsoft.Dynamics.CRM.RetrieveTeamPrivileges()`
+  returns `RolePrivileges: []`.
+- The precedent: `config/secure-record-owner-role.json` + `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` (082).
+
+**Suggested fix: the owner chooses**
+
+- **(A) Recommended:** a minimal owner role on the root default team, as 082 did:
+  - Read only, Basic depth, on `sprk_document`, `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_todo` and
+    `sprk_communication`;
+  - codified in `config/` and the setup guide;
+  - side effect: every root-BU member gains Basic Read on rows owned by the root team.
+- **(B)** The resolver refuses the root team with `OFFICE_022`. That is a clean refusal, but root users still cannot
+  create anything.
+- **(C)** Move the 9 people into child BUs.
+
+**Estimated effort**: (A) about an hour on the 082 tooling, plus probes.
+**Blockers**: the owner's decision.
+**Related**: #1045 (080), #1046 / ISS-013 (the same mechanism), #1079 / ISS-015 (where it was found).
 
 ---
 

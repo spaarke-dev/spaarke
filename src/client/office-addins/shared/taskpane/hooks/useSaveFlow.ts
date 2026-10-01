@@ -321,7 +321,10 @@ function getLastAssociation(): EntitySearchResult | null {
 
   try {
     const stored = sessionStorage.getItem(LAST_ASSOCIATION_KEY);
-    return stored ? JSON.parse(stored) : null;
+    const entity = stored ? (JSON.parse(stored) as EntitySearchResult) : null;
+    // Task 084: this restore is a pre-selection path, and a record the caller cannot file to is never
+    // pre-selected (the save would refuse it).
+    return entity?.canFile === false ? null : entity;
   } catch {
     return null;
   }

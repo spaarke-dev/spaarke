@@ -6,8 +6,10 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Office;
 
 namespace Sprk.Bff.Api.Api.Office;
 
@@ -321,6 +323,7 @@ public static class OfficeCommunicationsEndpoints
         IDataverseUserClient userClient,
         CommunicationService communicationService,
         IncomingAssociationResolver associationResolver,
+        OfficeSearchService searchService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -376,17 +379,24 @@ public static class OfficeCommunicationsEndpoints
             // reusing the same per-entity name-field map the denorm writer uses (RegardingNameFields).
             var names = await ResolveCandidateNamesAsync(userClient, suggestions.Candidates, logger, ct);
 
+            // Task 084 (#1037): "pickable equals savable". The pane renders these candidates as selectable cards
+            // and the ribbon quick-save files straight to the top one, so each named candidate also says whether
+            // POST /api/office/save would accept it, from the save's own rights check (OfficeSearchService).
+            var filingAccess = await ResolveCandidateFilingAccessAsync(
+                searchService, suggestions.Candidates, names, TokenHelper.ExtractBearerTokenOrNull(context), ct);
+
             logger.LogInformation(
-                "Returning engine suggestions for sprk_communication {CommunicationId} ({NameCount} names resolved), " +
-                "UserId={UserId}, CorrelationId={CorrelationId}",
-                communicationId, names.Count, userId, traceId);
+                "Returning engine suggestions for sprk_communication {CommunicationId} ({NameCount} names resolved, " +
+                "{FilingCount} filing verdicts), UserId={UserId}, CorrelationId={CorrelationId}",
+                communicationId, names.Count, filingAccess.Count, userId, traceId);
 
             return Results.Ok(new CommunicationSuggestionsResponse
             {
                 CommunicationId = communicationId,
                 Subject = subject,
                 Suggestions = suggestions,
-                Names = names
+                Names = names,
+                FilingAccess = filingAccess
             });
         }
         catch (Exception ex)
@@ -459,6 +469,51 @@ public static class OfficeCommunicationsEndpoints
             }
         }
         return names;
+    }
+
+    /// <summary>
+    /// Whether the caller can file to each NAMED candidate (task 084), keyed by candidate <c>targetId</c>.
+    /// </summary>
+    /// <remarks>
+    /// Only candidates that resolved a name are evaluated. A candidate without one is a record the caller
+    /// cannot read (see <see cref="ResolveCandidateNamesAsync"/>), and the client drops it, so asking whether
+    /// it is fileable would cost a Dataverse call for nothing. The type is the candidate's LOGICAL name;
+    /// <c>EntityAccessFilter.TryResolveEntitySet</c> maps it to the same collection as the friendly name the
+    /// client sends to the save, so the verdict is the save's.
+    /// </remarks>
+    internal static async Task<IReadOnlyDictionary<string, bool>> ResolveCandidateFilingAccessAsync(
+        OfficeSearchService searchService,
+        IReadOnlyList<SuggestedCandidate> candidates,
+        IReadOnlyDictionary<string, string> names,
+        string? callerBearerToken,
+        CancellationToken ct)
+    {
+        var targets = new List<(string EntityType, Guid RecordId)>();
+        var targetIds = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in candidates)
+        {
+            if (!names.ContainsKey(c.TargetId)) continue;
+            if (!Guid.TryParse(c.TargetId, out var recordId)) continue;
+            if (!seen.Add(c.TargetId)) continue;
+
+            targets.Add((c.TargetEntity, recordId));
+            targetIds.Add(c.TargetId);
+        }
+
+        var filingAccess = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        if (targets.Count == 0)
+            return filingAccess;
+
+        var verdicts = await searchService.EvaluateFilingAccessAsync(targets, callerBearerToken, ct);
+        for (var i = 0; i < targets.Count; i++)
+        {
+            // null = not checked (past the per-request cap): leave the key out, so the client treats it as today.
+            if (verdicts[i] is { } canFile)
+                filingAccess[targetIds[i]] = canFile;
+        }
+
+        return filingAccess;
     }
 
     /// <summary>
@@ -601,6 +656,14 @@ public sealed class CommunicationSuggestionsResponse
     /// (which is designed to be catalog-resolved). Absent keys fall back to the id (task 042).
     /// </summary>
     public IReadOnlyDictionary<string, string> Names { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Whether the caller can file a document to each named candidate, keyed by candidate <c>targetId</c>
+    /// (task 084, #1037). <c>false</c> means <c>POST /api/office/save</c> would refuse it as the target: the pane
+    /// shows it disabled with the reason, and the ribbon quick-save does not auto-file to it. An absent key means
+    /// not checked; the client treats it as selectable and the save remains the enforcement.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> FilingAccess { get; init; } = new Dictionary<string, bool>();
 }
 
 /// <summary>
