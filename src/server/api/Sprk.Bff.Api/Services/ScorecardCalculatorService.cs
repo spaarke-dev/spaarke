@@ -221,7 +221,9 @@ public sealed class ScorecardCalculatorService
             ["sprk_outcomecompliancegrade_average"] = outcomeAverage
         };
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(entityName, parentId, fields, ct);
+        // UPDATE-ONLY (task 130): never create — see FinanceRollupService. A missing parent surfaces as
+        // KeyNotFoundException, which the endpoint renders as the uniform 404.
+        await _fieldMappingService.UpdateExistingRecordFieldsAsync(entityName, parentId, fields, ct);
 
         _logger.LogDebug("Updated {EntityName} {ParentId} grade fields", entityName, parentId);
     }

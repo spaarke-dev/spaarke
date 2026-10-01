@@ -285,6 +285,138 @@ public class CallerRecordAccessProbe
     }
 
     /// <summary>
+    /// Whether the CALLER holds the named Dataverse table privilege (e.g. <c>prvCreatesprk_Invoice</c>) at
+    /// any depth, as Dataverse itself reports it.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added by unified-access-control-r2 task 130 (owner decision G5, 2026-10-01): confirming an
+    /// AI-classified document as an invoice creates the <c>sprk_invoice</c> APP-ONLY (owned by the matter's
+    /// team, never the user), but only for a caller who could create an invoice themselves. A record right
+    /// cannot answer that — there is no record yet — so this asks the table privilege.</para>
+    ///
+    /// <para><b>Why here, and why OBO rather than <c>UserPrivilegeChecker</c></b> (CLAUDE.md §11). That checker
+    /// answers only <i>Read</i> privileges, impersonates with the app identity (the caller's id is DATA, the
+    /// A-2 shape this class's remarks reject), and caches the set for up to 24 h — an owner who removes
+    /// Create from a role would see it honoured a day later, against the round-3 "minutes, not hours" rule.
+    /// This class already owns the one caller-scoped credential path: <c>WhoAmI()</c> on the caller's OBO
+    /// token, then <c>systemusers({me})/RetrieveUserSetOfPrivilegesByNames</c> — the caller asking about
+    /// themselves, uncached.</para>
+    ///
+    /// <para><b>Fail closed.</b> No token, a failed exchange, an unresolved caller, a non-success response, an
+    /// unparseable body, or any exception answers <c>false</c>.</para>
+    /// </remarks>
+    public virtual async Task<bool> CallerHoldsPrivilegeAsync(
+        string? callerBearerToken,
+        string privilegeName,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(privilegeName)
+            || string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Privilege check {Privilege} cannot run: hasToken={HasToken}, canDoObo={CanDoObo}, " +
+                "hasEnvironmentUrl={HasEnvironmentUrl}. Denying (fail closed).",
+                FallbackMarker, privilegeName, !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable,
+                !string.IsNullOrEmpty(_environmentUrl));
+
+            return false;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"privilege {privilegeName}", ct).ConfigureAwait(false);
+        if (dataverseToken is null)
+        {
+            return false;
+        }
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+        {
+            return false;
+        }
+
+        var names = JsonSerializer.Serialize(new[] { privilegeName });
+        var url = $"{_environmentUrl}/api/data/v9.2/systemusers({callerSystemUserId.Value})"
+                  + "/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)"
+                  + $"?@p1={Uri.EscapeDataString(names)}";
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "[{Marker}] RetrieveUserSetOfPrivilegesByNames returned {StatusCode} for {Privilege}. Denying.",
+                    FallbackMarker, (int)response.StatusCode, privilegeName);
+                return false;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var holds = ResponseGrantsPrivilege(body, privilegeName);
+
+            _logger.LogInformation("[DELEGATION] Caller holds {Privilege}: {Holds}", privilegeName, holds);
+            return holds;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[{Marker}] RetrieveUserSetOfPrivilegesByNames threw for {Privilege}. Denying.", FallbackMarker, privilegeName);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads a <c>RetrieveUserSetOfPrivilegesByNames</c> response: <c>true</c> only when its
+    /// <c>RolePrivileges</c> array names <paramref name="privilegeName"/> (any depth). Anything else —
+    /// an empty array, a different privilege, a missing array, malformed JSON — is <c>false</c>.
+    /// </summary>
+    /// <remarks>Pure and <c>internal</c> so the wire-format reading is assertable without a transport mock
+    /// (ADR-038 ban B1) — the same reason as <see cref="NotFoundRetryDelay"/>. Response shape verified against
+    /// spaarkedev1 2026-10-01 (read-only): <c>{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvCreatesprk_Invoice",…}]}</c>.</remarks>
+    internal static bool ResponseGrantsPrivilege(string? responseBody, string privilegeName)
+    {
+        if (string.IsNullOrWhiteSpace(responseBody) || string.IsNullOrWhiteSpace(privilegeName))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(responseBody);
+            if (!document.RootElement.TryGetProperty("RolePrivileges", out var privileges)
+                || privileges.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var privilege in privileges.EnumerateArray())
+            {
+                if (privilege.ValueKind == JsonValueKind.Object
+                    && privilege.TryGetProperty("PrivilegeName", out var name)
+                    && name.ValueKind == JsonValueKind.String
+                    && string.Equals(name.GetString(), privilegeName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Exchanges the caller's bearer token for a Dataverse token on their behalf, or <c>null</c> on
     /// any failure (already logged).
     /// </summary>
