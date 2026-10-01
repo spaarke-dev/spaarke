@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-09-30 (058 ✅ closed; #1045 + #1051 merged; next 059)
+> **Last Updated**: 2026-10-01 (#1052 merged; next 059)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -11,9 +11,17 @@
 |---|---|
 | **Active task** | **none in progress.** Next: **059** (`tasks/059-*.poml`: extract the search cluster into `OfficeSearchService`). Read its UPDATE block: 058's deletions shrank `OfficeService` to about 3,090 lines, and `GenerateStubResults` stays with `SearchEntitiesAsync`. **083** is blocked until UAC-r2 sends 141's link contract |
 | **Last closed** | **058** ✅ 2026-09-30 `8d56d47eb` (+ close commit): the fabricated-data Office routes were deleted. That closed a LATENT hazard, not a live gap. Suite 13,040/0/54, which reconciles exactly; publish −0.028 MB. Record: `notes/058-delete-unauthorized-stub-surface.md`. Before it: **082** ⚠️ (#1051 merged) |
-| **PR** | ✅ #1045 merged `38ad83962` · ✅ #1051 (082) merged `b8fc4dc3e` · 🔄 **#1052 OPEN**: task 058 (`8d56d47eb` + `fefeb65cf`), BFF route deletions. A background watch (`bnb0iy8uj`) waits for `Router`; then `gh pr merge 1052 --merge` (no `--delete-branch`) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` @ `fefeb65cf`, pushed, tree clean (= master `b8fc4dc3e` + 058) |
-| **Next Action** | **1)** When #1052's `Router` passes: `gh pr merge 1052 --merge`, then `git -C C:/code_files/spaarke pull --ff-only origin master` and merge `origin/master` back into the branch. Close #1023 and #1024 (both commented). **2)** `task-execute` **059** on a fresh PR (order: 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141) |
+| **PR** | ✅ #1045 `38ad83962` · ✅ #1051 (082) `b8fc4dc3e` · ✅ **#1052 (058) `76a9b0fa0`**, all merged 2026-09-30/10-01. #1023 and #1024 closed. **No open PR**; 059 opens the next one |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + a merge-back + checkpoint commits, pushed |
+| **Next Action** | `task-execute` **059** (extract the search cluster into `OfficeSearchService`; read its UPDATE block). Order after it: 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141 (which waits on an owner answer about the trusted-tenant list) |
+
+### Coordination with UAC-r2 (2026-09-30, late)
+
+- Their task 130 (C8 finance IDOR, **#1053**) also edits `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`,
+  adding Api/Finance and ScorecardCalculatorEndpoints to the census. **Whichever lands second rebases**; they rebase if
+  #1052 merges first.
+- **083 is blocked on their 141**, which waits on an OWNER answer about the trusted-tenant list. They will send 141's
+  link contract after it executes.
 
 ### 🔔 Waiting on the OWNER (from 082)
 
