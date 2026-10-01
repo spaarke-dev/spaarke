@@ -497,7 +497,7 @@ layouts) or team-owned (then the checks must change). Per-user matches the check
 
 | Field | Value |
 |---|---|
-| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`, 2026-10-01): disabled with the reason, via the save's own evaluator. Open until the PR merges |
+| **Status** | **Done**: task 084 (`91e73b6fc`), merged in #1082 (`d68924b93`, 2026-10-01). Disabled with the reason, via the save's own evaluator. #1037 closed. The live pane check waits on the next deploy |
 | **Urgency** | next-round |
 | **Filed** | 2026-09-30 |
 | **Source** | UAC-r2 post-merge message 2026-09-30 (`notes/uac-r2-findings-2026-09-30.md` §6 (e)) |
@@ -610,7 +610,7 @@ Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: 
 
 | Field | Value |
 |---|---|
-| **Status** | **Fixed on the branch by task 084** (`91e73b6fc`): the ribbon sends `target.entityType`; regression test `Issue1075_QuickSaveLogicalNameTests`. Open until the PR merges |
+| **Status** | **Done**: task 084 (`91e73b6fc`), merged in #1082 (`d68924b93`, 2026-10-01). The ribbon sends `target.entityType`; regression test `Issue1075_QuickSaveLogicalNameTests`. #1075 closed |
 | **Urgency** | before task 078's unified package is installed (latent until then) |
 | **Filed** | 2026-10-01 |
 | **Source** | Research for task 084 (code reading; not yet reproduced by a test) |
@@ -636,7 +636,7 @@ because 084 also changes which predicted record the ribbon may auto-file to.
 
 | Field | Value |
 |---|---|
-| **Status** | **Our half FIXED on the branch** (task 085, `04158652e`): the invoice quick-create writes `sprk_name`, pinned by `Issue1079_InvoiceQuickCreateNameTests` (red before, green after). The live pane check waits on the next BFF deploy from master. **The issue stays OPEN** for the other owners' three sites below |
+| **Status** | **Our half DONE**, on master via #1082 (`d68924b93`) (task 085, `04158652e`): the invoice quick-create writes `sprk_name`, pinned by `Issue1079_InvoiceQuickCreateNameTests` (red before, green after). The live pane check waits on the next BFF deploy from master. **The issue stays OPEN** for the other owners' three sites below |
 | **Urgency** | now (LIVE: every invoice quick-create from the pane fails) |
 | **Filed** | 2026-10-01 |
 | **Source** | unified-access-control-r2 task-130 verifier; confirmed live here |

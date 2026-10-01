@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (084 + 085 closed; next: one PR for both, then task 060)
+> **Last Updated**: 2026-10-01 (#1082 merged `d68924b93` = 084 + 085; ISS-016 / #1081 filed for the owner; next: task 060)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,13 +18,23 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: ship 084 + 085 as ONE PR, then task 060
+### 🔲 NEXT: task 060 (not started)
 
 | Field | Value |
 |---|---|
-| **084** | ✅ CLOSED (`91e73b6fc`): suite 13,064/0/54, gates in `notes/084-pickable-equals-savable.md` |
-| **085** | ✅ CLOSED (`04158652e`, records committed after): suite **13,065/0/54 (+1 exact)**, ArchTests 337, publish **+30 B** vs 084 (master 47,666,117 → 084 47,671,242 → 085 47,671,272 B; 212 files every side; worktrees removed). #1079 commented (stays open for the 3 other-owner sites). `notes/085-invoice-quickcreate-name.md` |
-| **Next Action** | 1) Push; open ONE PR for **084 + 085** (template `scratchpad/pr-059-body.md`; facts in `notes/084-…md` §2–5 and `notes/085-…md`). 2) When `Router` passes and `grep -c pending` = 0: `gh pr merge N --merge` (NEVER `--delete-branch`); `git -C C:/code_files/spaarke pull --ff-only origin master`; fast-forward or merge `origin/master` into the branch. 3) Report to the owner. 4) Then task **060** via task-execute |
+| **Task** | 060: the Office job-status store (`tasks/060-job-status-store-and-extraction.poml`). The `private static ConcurrentDictionary` in `OfficeService` loses in-flight job status on restart or a second instance |
+| **Status** | not-started |
+| **Next Action** | Invoke `task-execute` for 060 (Step 0.5 rigor + conflict-check: BFF hot path; UAC-r2 is active on `CallerRecordAccessProbe.cs` / `OfficeService.cs` neighbours) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `d68924b93` (fast-forwarded after the #1082 merge) |
+
+### ✅ Shipped 2026-10-01: #1082 merged as `d68924b93` (tasks 084 + 085)
+
+- **084** (`91e73b6fc`): pickable equals savable. #1037 closed; #1075 closed.
+- **085** (`04158652e`): the invoice quick-create writes `sprk_name`. #1079 stays open for the 3 other-owner sites.
+- Suite 13,065/0/54; ArchTests 337. Publish: master 47,666,117 → 47,671,272 B (+5,155 B; 085 +30 B).
+- CI: `Router` passed, 0 pending. Tier 2 Full Unit Tests was cancelled at its 30-minute cap (advisory).
+- Real-Dataverse probe done for 085. Records: `notes/084-…md`, `notes/085-invoice-quickcreate-name.md`.
+- Portfolio #945 synced: 86 tasks, 69 ✅, Active / In progress.
 
 **Critical context:**
 - 🔔 **NEW, owner decision, BEFORE the next BFF deploy from master: ISS-016 / #1081.**
@@ -33,6 +43,10 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
     unfiled save, the quick-creates and To Do: a 5xx, not `OFFICE_022`.
   - Found by 085's live probe. Recommendation: (A) a minimal Read-only owner role on the root team, as 082 did.
     Do NOT change role config without the owner's go.
+  - **UAC-r2 depends on the decision** (their 130 confirmed-invoice create and 146 child writers both go through
+    our resolver; they will NOT fork a fix). **Message them when the owner decides.** If it becomes a resolver
+    behaviour change (e.g. a new refusal code instead of a propagated fault), they will map it to a clean 4xx on
+    130's route.
 - **Open for the owner (084 + 085):** the live checks (no deploy; the owner defers deploys), and 084's latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
 - **UAC-r2 coordination (2026-10-01):** their task 151 replaces `ISecurableEntityRegistry.IsSecurableAsync` / `IsKnownEntityAsync` with `ClassifyEntityAsync` → `EntitySecurability`. No doubles or callers on our branch; they already migrated the two doubles in `OfficeEndpointsContractTests.cs` (on master). Their task 130 edits `CallerRecordAccessProbe.cs` (`CallerHoldsPrivilegeAsync`), and so did our 084 (three members `protected virtual`, plus `GetCallerRightsForRecordsAsync`), so **expect a small overlap there. Whoever lands second rebases.**
 - **#1076 (059) merged** as `c08ef6013`.
