@@ -495,6 +495,15 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   const abortControllerRef = useRef<AbortController | null>(null);
   const pollingRetryCountRef = useRef<number>(0);
   const maxPollingRetries = 3;
+  // Task 060: the job's terminal outcome is applied ONCE. Polling and SSE both track the job, and since task 060 the
+  // SSE completion branch is live, so a stream event and an in-flight poll response can both reach a terminal branch.
+  // Whichever arrives first wins; the other is ignored. Reset when tracking starts.
+  const terminalOutcomeAppliedRef = useRef(false);
+  const claimTerminalOutcome = useCallback((): boolean => {
+    if (terminalOutcomeAppliedRef.current) return false;
+    terminalOutcomeAppliedRef.current = true;
+    return true;
+  }, []);
   // FR-11 (task 024): whether the save in flight is a VERSION save, and how many version-save attempts have
   // FAILED in this pane session (see VersionIdempotencyParts.failedAttempts). Deliberately NOT reset by
   // reset(): the counter must only grow, or a later identical re-send could reproduce a failed attempt's
@@ -635,6 +644,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           return { ...prev, ...(stages !== undefined ? { stages } : {}) };
         });
       } else if (eventType === 'complete' || eventType === 'job-complete') {
+        if (!claimTerminalOutcome()) return;
         // Completion: { jobId: string, documentId?: string, documentUrl?: string }. A VERSION save falls back to
         // the document it named (task 024) — see activeVersionDocumentIdRef.
         const documentId = (data.documentId as string | undefined) ?? activeVersionDocumentIdRef.current ?? undefined;
@@ -652,6 +662,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       } else if (eventType === 'failed' || eventType === 'job-failed' || eventType === 'error') {
         // Error: { errorCode: string, errorMessage: string, retryable?: boolean } (SseHelper's JobFailedPayload and
         // ErrorPayload). `message` is the older spelling, kept.
+        if (!claimTerminalOutcome()) return;
         if (activeVersionSaveRef.current) {
           versionFailuresRef.current += 1; // a retry must not reuse the failed job's key (task 024)
         }
@@ -668,7 +679,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
       }
       // Ignore heartbeat events
     },
-    [cleanup, failUnconfirmedCompletion, onComplete, onError]
+    [claimTerminalOutcome, cleanup, failUnconfirmedCompletion, onComplete, onError]
   );
 
   // Poll for job status
@@ -777,6 +788,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
 
         // Check for completion
         if (status.status === 'Completed' || status.status === 'Failed') {
+          if (!claimTerminalOutcome()) return;
           if (status.status === 'Completed' && documentId) {
             setSavedDocumentId(documentId);
             setSavedDocumentUrl(documentUrl || null);
@@ -823,7 +835,7 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         }
       }
     },
-    [apiBaseUrl, cleanup, failUnconfirmedCompletion, getAccessToken, onComplete, onError]
+    [apiBaseUrl, claimTerminalOutcome, cleanup, failUnconfirmedCompletion, getAccessToken, onComplete, onError]
   );
 
   // Start SSE connection with polling fallback.
@@ -836,8 +848,9 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
     async (jobId: string, streamUrl: string) => {
       setFlowState('processing');
 
-      // Reset retry counter at start of tracking
+      // Reset retry counter and the terminal-outcome claim at start of tracking
       pollingRetryCountRef.current = 0;
+      terminalOutcomeAppliedRef.current = false;
 
       // Initialize job status with standard stages
       const initialStages: StageStatus[] = [

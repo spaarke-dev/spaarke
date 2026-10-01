@@ -172,6 +172,39 @@ describe('useSaveFlow — the SSE path uses the server’s event names (task 060
     expect(result.current.savedDocumentId).toBe(VERSION_DOCUMENT_ID);
   });
 
+  it('a poll answer that lands after the stream already completed the save is ignored, so onComplete fires once', async () => {
+    // Polling and SSE both track the job. With the SSE completion branch live, an in-flight poll can land after the
+    // stream has completed the save.
+    let releasePoll: (response: unknown) => void = () => undefined;
+    mockFetch.mockImplementation(async (url: string) =>
+      String(url).includes('/api/office/save')
+        ? json(202, { jobId: 'job-1', statusUrl: '/api/office/jobs/job-1', streamUrl: '/api/office/jobs/job-1/stream' })
+        : new Promise(resolve => {
+            releasePoll = resolve;
+          })
+    );
+    const { result, onComplete } = renderSaveFlow();
+    await act(async () => {
+      await result.current.startSave(wordContext());
+    });
+
+    act(() => sseOptions().onEvent({ event: 'job-complete', data: { jobId: 'job-1', documentId: DOCUMENT_ID } }));
+    await waitFor(() => expect(result.current.flowState).toBe('complete'));
+    await act(async () => {
+      releasePoll(
+        json(200, {
+          jobId: 'job-1',
+          status: 'Completed',
+          completedPhases: [],
+          result: { artifact: { type: 'Document', id: DOCUMENT_ID } },
+        })
+      );
+    });
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(result.current.flowState).toBe('complete');
+  });
+
   it('job-failed shows the server’s errorMessage and honours retryable', async () => {
     serverAnswers({ status: 'Running' });
     const { result } = renderSaveFlow();
