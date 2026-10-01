@@ -190,7 +190,10 @@ public sealed class FinanceRollupService
             totalSpend, invoiceCount, currentMonthSpend, totalBudget,
             remainingBudget, utilization, velocity ?? 0m, averageInvoice, timelineJson);
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(parentEntityName, parentId, fields, ct);
+        // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
+        // authorization check (or a background job's stale id) would be recreated as an empty row carrying
+        // only these rollup fields. A missing parent surfaces as KeyNotFoundException → the endpoint's uniform 404.
+        await _fieldMappingService.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, fields, ct);
 
         _logger.LogInformation(
             "Finance rollup complete for {Entity} {EntityId}: " +

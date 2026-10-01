@@ -81,8 +81,10 @@ public class OperationPolicyCharacterizationTests
     ///   "read"                       → DataverseDocumentsEndpoints.cs:443,
     ///                                  FileAccessEndpoints.cs:118 (eml-render),
     ///                                  ChatDocumentEndpoints.cs:915
-    ///   "finance.read"               → FinanceEndpoints.cs:18, :51, :65
-    ///   "finance.confirm"            → FinanceEndpoints.cs:23, :37
+    ///   "finance.read"               → FinanceEndpoints.cs (summary route, search resolver),
+    ///                                  FinanceRollupEndpoints.cs + ScorecardCalculatorEndpoints.cs
+    ///                                  (the four recalculate routes) — re-pointed by task 130
+    ///   "finance.confirm"            → FinanceEndpoints.cs confirm/reject resolvers (body DocumentId)
     ///   "entity.associate_document"  → EntityAccessFilter.cs:64 (OfficeEndpoints.cs:173)
     ///
     /// Before task 003 none was a policy key, so each site returned 403 for every caller regardless

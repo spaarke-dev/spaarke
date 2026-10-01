@@ -130,19 +130,18 @@ public class ScorecardCalculatorErrorTests
     [Fact]
     public async Task Error_DataverseUpdateThrows_ServicePropagatesException()
     {
-        // Arrange - queries succeed but UpdateRecordFieldsAsync throws
+        // Arrange - queries succeed but UpdateExistingRecordFieldsAsync throws
         var matterId = Guid.NewGuid();
         SetupAreaAssessments(matterId, Guidelines, CreateAssessment(GradeBPlus));
         SetupAreaAssessments(matterId, Budget, CreateAssessment(GradeB));
         SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeCPlus));
 
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Dataverse update failed"));
 
         // Act & Assert - the service currently propagates the update exception.
@@ -162,12 +161,11 @@ public class ScorecardCalculatorErrorTests
         SetupAreaAssessments(matterId, Outcomes, CreateAssessment(GradeCPlus));
 
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
+                It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("Update failed"));
 
         // Act - ignore the exception to verify queries executed
@@ -413,14 +411,13 @@ public class ScorecardCalculatorErrorTests
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
-                (_, _, fields, _, _) => capturedFields = fields)
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>(
+                (_, _, fields, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act

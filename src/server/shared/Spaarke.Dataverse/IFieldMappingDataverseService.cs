@@ -47,6 +47,26 @@ public interface IFieldMappingDataverseService
         CancellationToken ct = default,
         Guid? impersonateSystemUserId = null);
 
+    /// <summary>
+    /// Updates fields on an EXISTING record and never creates one. Same app-only PATCH as
+    /// <see cref="UpdateRecordFieldsAsync"/>, plus <c>If-Match: *</c>, which turns Dataverse's default
+    /// upsert into update-only.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a separate method (unified-access-control-r2 task 130).</b> A Web API PATCH without
+    /// <c>If-Match</c> UPSERTS: if the id does not exist, Dataverse creates a row with it. That default is
+    /// load-bearing elsewhere — <c>InvoiceReviewService</c> creates its invoice by PATCHing a fresh GUID — so
+    /// it cannot be changed on <see cref="UpdateRecordFieldsAsync"/>. The recalculate routes must not create:
+    /// a matter or project deleted between the authorization check and the rollup write would otherwise come
+    /// back as an empty row carrying only derived rollup fields.</para>
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">The record does not exist (Dataverse refused the precondition).</exception>
+    Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default);
+
     Task<FieldMappingProfileEntity?> GetFieldMappingProfileWithRulesAsync(
         string sourceEntity,
         string targetEntity,
