@@ -56,6 +56,7 @@ public static class FinanceEndpoints
                 "Marks a classified document as not an invoice. " +
                 "Updates the document status to RejectedNotInvoice. No invoice record is created.")
             .Produces<InvoiceReviewRejectResult>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
@@ -337,6 +338,15 @@ public static class FinanceEndpoints
                     ["correlationId"] = correlationId,
                 });
         }
+        catch (InvoiceReviewException ex)
+        {
+            // 409: the document is linked to an invoice (confirmed), or kept changing. Nothing was written.
+            logger.LogWarning(ex,
+                "Invoice review rejection refused ({Failure}). DocumentId={DocumentId}, CorrelationId={CorrelationId}",
+                ex.Failure, request.DocumentId, correlationId);
+
+            return ConfirmFailure(ex, correlationId);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -355,7 +365,8 @@ public static class FinanceEndpoints
     }
 
     /// <summary>
-    /// Renders an <see cref="InvoiceReviewException"/>. Every message states what was and was not saved, and any
+    /// Renders an <see cref="InvoiceReviewException"/> from confirm — and reject's refusals (linked document, kept
+    /// changing), which carry no invoice id. Every message states what was and was not saved, and any
     /// failure AFTER the invoice row exists names that row's id — the caller (and support) must be able to find it.
     /// A retry is safe in every case: confirm resumes from the invoice the document is already linked to.
     /// </summary>
@@ -366,6 +377,8 @@ public static class FinanceEndpoints
             InvoiceReviewFailure.DocumentNotFound => (StatusCodes.Status404NotFound, "Document Not Found"),
             InvoiceReviewFailure.DocumentLinkedToAnotherInvoice => (StatusCodes.Status409Conflict, "Document Already Linked"),
             InvoiceReviewFailure.DocumentChangedConcurrently => (StatusCodes.Status409Conflict, "Document Changed"),
+            InvoiceReviewFailure.ReviewDecisionChanged => (StatusCodes.Status409Conflict, "Review Decision Changed"),
+            InvoiceReviewFailure.DocumentLinkedToInvoice => (StatusCodes.Status409Conflict, "Document Already Confirmed"),
             InvoiceReviewFailure.OwnerTeamUnresolved => (StatusCodes.Status403Forbidden, "Invoice Not Created"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };

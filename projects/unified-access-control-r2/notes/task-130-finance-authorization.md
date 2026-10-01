@@ -389,7 +389,7 @@ Live facts read for this round (spaarkedev1, read-only GETs / Dataverse SQL, 202
    `Confirm_CreateResponseLost_ButTheRowWasCreated_…`, `Confirm_CreateResponseLost_AndTheRowCannotBeRemoved_…`,
    `Confirm_LinkResponseLost_ButTheLinkLanded_…`; wire: `ConditionalLinkWriteTests` (weak ETag sent; 412 →
    `DBConcurrencyException`, not "not found"; 404 → `KeyNotFoundException`).
-   **Residuals (recorded, not closable in-process):** (a) both racers run the status write and submit extraction with
+   **Residuals (recorded, not closable in-process) — (a) and (b) CLOSED by fix round 3, §11.8 items 1 and 4:** (a) both racers run the status write and submit extraction with
    the SAME idempotency key, used as the Service Bus `MessageId` — a second message is suppressed only if the queue
    has duplicate detection enabled (not verified here), otherwise the job runs twice for one invoice (the job's own
    idempotency is out of scope); the loser's returned `jobId`/`statusUrl` may name a suppressed message. (b) A
@@ -425,7 +425,7 @@ Live facts read for this round (spaarkedev1, read-only GETs / Dataverse SQL, 202
    environment). Unresolvable → left unset with a warning (the `TodoRegardingBuilder` precedent; the column is
    form-level required only, as the 6 null live rows show). **Not done (scope):** the 4 typed live invoices also carry
    `sprk_regardingrecordid` / `sprk_regardingrecordname`; the item asked for the type only, so the other resolver
-   fields are left for an owner call.
+   fields are left for an owner call. → Done in fix round 3, §11.8 item 5.
 
 **§11 justification (new surface this round):**
 
@@ -460,3 +460,116 @@ cleared them. Any future seed script should `touch` after restoring.
 
 **Suites (2026-10-01, on the committed tree):** BFF unit suite **13176 passed / 56 skipped / 0 failed** (13232);
 ArchTests **340/340**. Affected filter (finance + auth + invoice review + new files): 206 passed / 1 skipped.
+
+### 11.8 Fix round 3 (branch `task/uac-r2-130c`, 2026-10-01) — residuals closed under "nothing knowingly deferred"
+
+Live facts used this round (read-only):
+
+| Fact | Live value |
+|---|---|
+| `sdap-jobs` queue (namespace `spaarke-servicebus-dev`) | `requiresDuplicateDetection = false` (verified by the orchestrator 2026-10-01; immutable on an existing queue) — a same-`MessageId` submission is NOT suppressed (also ADR-004 A1 MUST NOT) |
+| `sprk_invoice` resolver columns (`describe tables/sprk_invoice`) | `sprk_regardingrecordid` NVARCHAR(100), `sprk_regardingrecordname` NVARCHAR(100), `sprk_regardingrecordnumber` NVARCHAR(1000), `sprk_regardingrecordurl` URL(250), `sprk_regardingrecordtype` lookup |
+| the 4 typed live invoices (Dataverse SQL) | ALL FIVE resolver fields set: type = `e8547bb4-…` (Matter row), id = the matter id (lowercase "D"), number = the matter's `sprk_matternumber` (`REAL-2026-123456.01` / `.02`), url = absolute `https://spaarkedev1…/main.aspx?appid=…&pagetype=entityrecord&etn=sprk_matter&id=<matter>`, name = see next row |
+| name vs the matter (audit) | 1 invoice's name equals matter `2444af6d`'s current `sprk_mattername`. The other 3 (matter `b68299c6`, created 2026-07-08) say "Real estate transaction analysis" while the matter is now "Real Estate Transaction Matter": its audit shows `sprk_mattername` = "Real estate transaction analysis" until 2026-07-17 (→ "Smith v Smith" → 2026-08-25 "Real Estate Transaction Matter"). So name = the matter's `sprk_mattername` **at creation** (denormalized, not kept in sync) — consistent with the convention |
+| `sprk_recordtype_ref` Matter row | `sprk_regardingrecordnumberfield = sprk_matternumber`, `sprk_regardingfield = sprk_regardingmatter` |
+
+1. **Duplicate extraction job — closed for the race loser.** When the conditional link 412s and the re-read finds the
+   document linked to an invoice for the same matter and vendor, the confirm deletes its own invoice and returns
+   `InvoiceReviewResult { InvoiceId = <winner's>, JobId = null, StatusUrl = null, ExtractionAlreadyQueued = true }`
+   (202, no `Location`) — it submits NO job and writes NO status (the winner owns both). `JobId` / `StatusUrl` became
+   nullable; no job id is fabricated. Tests: `Confirm_TwoConcurrentConfirms_SameMatter_LeaveExactlyOneInvoice_AndOneExtractionJob_InEitherOrder`
+   (both orders: exactly one submitted job, the winner's; loser `JobId` null, flag true; one link, one status write);
+   contract `Confirm_LostTheRaceToAConcurrentConfirm_Is202_WithNoJobId_AndExtractionAlreadyQueued`.
+   **Handler defence in depth — NOT added, because it cannot be done cheaply or correctly with state the handler has:**
+   (i) `InvoiceExtractionJobHandler.LoadInvoiceRecordAsync` never reads the invoice (placeholder, GitHub #229);
+   (ii) `sprk_extractionstatus` has no in-progress value (NotRun / Extracted / Failed) and "Extracted" is never written —
+   the handler's success path relies on the OutputOrchestrator mapping, which its own remarks record as unreachable;
+   (iii) its "Failed" write goes through `IDocumentDataverseService.UpdateDocumentFieldsAsync(invoiceId, …)`, i.e. it
+   updates a `sprk_document` row with the INVOICE's id (non-existent → the exception is swallowed as a warning), so the
+   invoice never shows Failed either; (iv) the only de-dupe store, `IIdempotencyService`, is not injected here and,
+   per ADR-004 A1, is check-then-set and fails open (#984) — wiring it would claim a guarantee it does not give.
+   (iii) is a related defect outside this task's files (recorded below, not fixed).
+2. **Spurious 409 `document_changed` — closed.** On a 412 the confirm re-reads the document BEFORE deleting anything;
+   if it is still unlinked and its review decision unchanged (an unrelated write, e.g. profiling/indexing status), the
+   conditional link is retried on the fresh version, at most `MaxConditionalWriteAttempts` = 3 attempts in total,
+   then the invoice is deleted and 409 `document_changed` returned. Tests:
+   `Confirm_AnUnrelatedWriteBetweenReadAndLink_IsRetried_AndSucceedsWithExactlyOneInvoice` (2 link attempts, one
+   invoice, nothing deleted) and `Confirm_DocumentChangedOnEveryLinkAttempt_Is409AfterTheBound_AndLeavesNoInvoice`
+   (exactly 3 attempts, then 409, invoice gone).
+3. **Confirm vs reject — defined and implemented.** Outcome: **whichever decision is written first stands; the other
+   is refused with a 409 and writes nothing.** Mechanics: (a) reject reads link + version; a linked document is
+   refused 409 `sdap.finance.invoice_review.document_linked_to_invoice` (the invoice id is logged, never returned);
+   its status write is `If-Match` on the version read (412 → re-read → linked → 409; unrelated write → retried, bound
+   3 → 409 `document_changed`). (b) The confirm's link re-check after a 412 compares the review decision with its
+   first read: changed (a reject landed) → invoice deleted, 409 `sdap.finance.invoice_review.review_decision_changed`.
+   A document that was ALREADY rejected when the confirm read it can still be confirmed (a deliberate re-decision).
+   (c) The confirm's step-3 status write is `If-Match` too — on the version read after its own link, after checking the
+   document still points at its invoice (resume path: the version of the resume read). Re-pointed meanwhile →
+   `StatusNotUpdated` naming the invoice, ConfirmedInvoice NOT written. The endpoint renders reject's refusals via the
+   same `ConfirmFailure` (409; `ProducesProblem(409)` added to reject). **Behaviour change:** reject on a confirmed
+   (linked) document used to flip it to RejectedNotInvoice and leave the invoice linked; it is now refused. Tests:
+   `ConfirmLinksFirst_ThenAConcurrentReject_TheRejectIs409_AndConfirmedStands`,
+   `RejectLandsFirst_BetweenAConfirmsReadAndLink_TheConfirmIs409_AndRejectedStands`,
+   `Confirm_DocumentRelinkedBetweenLinkAndStatus_TheStatusIsNotWritten_AndTheInvoiceIsNamed`,
+   `Reject_DocumentLinkedToAnInvoice_Is409_WithNoWrite_AndNeverNamesTheInvoice`, `Reject_DocumentGone_ThrowsNotFound_WithNoWrite`,
+   `Reject_DocumentChangedOnEveryAttempt_Is409AfterTheBound_WithNoWrite`, contract `Reject_Refused_Is409_WithItsReasonCode_AndNoInvoiceId` (×2).
+4. **Orphan over-report (residual b) — closed.** A delete that reports failure is followed by a read-back
+   (`CancellationToken.None`): row gone → treated as removed (the caller reports its clean failure — `link_failed` /
+   `document_changed` / …, or the original create failure — and names no invoice); row present →
+   `link_failed_invoice_orphaned` naming it; read-back also failed → same code, message "may not have been removed".
+   Applied to both delete sites (link compensation and the lost-create clean-up). Tests:
+   `Confirm_LinkFails_AndTheUndoResponseIsLostButTheInvoiceIsGone_ReportsTheCleanFailure`,
+   `Confirm_CreateResponseLost_AndTheUndoResponseLostToo_ButTheRowIsGone_ReportsTheOriginalFailure`; the existing
+   orphan tests now also assert the row is still there.
+5. **Regarding columns — the convention is clear, followed.** `TodoRegardingBuilder` populates type + id + name + url
+   together (ADR-024: "never independently"); `IncomingAssociationResolver` adds `sprk_regardingrecordnumber`
+   (ADR-024 concise: MUST populate all 5). The confirm now writes, with the type: `sprk_regardingrecordid` = matter id
+   (lowercase "D"), `sprk_regardingrecordname` = the matter's `sprk_mattername` (empty when unknown, capped at 100),
+   `sprk_regardingrecordnumber` = its `sprk_matternumber` (only when set, capped at 1000), `sprk_regardingrecordurl` =
+   `/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=<id>` (the RELATIVE form both server builders write; the 4
+   live rows carry an absolute URL with an app id because a client wrote them — the server has no app id). The matter
+   is read (one GET) before the create, so a failure saves nothing. Tests: the create-payload test (all five) and
+   `Confirm_RegardingNameIsCappedAtTheLiveColumnLength_AndANumberlessMatterOmitsTheNumber`.
+
+**§11 justification (new surface this round):** no new endpoint, DI registration, package or column. Extensions of
+existing types only: `InvoiceReviewResult.ExtractionAlreadyQueued` (+ nullable `JobId`/`StatusUrl`) — without it the
+race loser must either fabricate a job id or submit a second job; `InvoiceReviewFailure.ReviewDecisionChanged` /
+`.DocumentLinkedToInvoice` — without them a concurrent reject is silently overwritten or a confirmed document silently
+un-confirmed. Writes reuse round 2's `UpdateRecordFieldsIfUnchangedAsync`.
+
+**Seeded, run, watched fail, restored (2026-10-01)** — each seed applied to the committed-to-be source, the affected
+filter run, the file restored from a backup with `cp` and then `touch`ed (round 2's stale-mtime lesson):
+
+| # | Seed | Failed |
+|---|---|---|
+| S1 | race loser falls through to status + enqueue | both orders of `Confirm_TwoConcurrentConfirms_…OneExtractionJob…` |
+| S2 | bound = 1 (no retry) | `…UnrelatedWrite…IsRetried…`, `…ChangedOnEveryLinkAttempt…`, `Reject_…ChangedOnEveryAttempt…`, `ConfirmLinksFirst_…` |
+| S2b | bound = 10 (effectively unbounded) | `…ChangedOnEveryLinkAttempt…Is409AfterTheBound…`, `Reject_…ChangedOnEveryAttempt…` |
+| S3a | reject does not refuse a linked document | `Reject_DocumentLinkedToAnInvoice…`, `ConfirmLinksFirst_ThenAConcurrentReject…` |
+| S3b | reject's status write unconditional | `Reject_WithNotes_…ConditionallyAndUpdateOnly`, `Reject_…ChangedOnEveryAttempt…`, `ConfirmLinksFirst_…` |
+| S3c | confirm ignores a changed review decision | `RejectLandsFirst_BetweenAConfirmsReadAndLink…` |
+| S3d | confirm's status write unconditional | `Confirm_WritesCreateThenLinkThenStatus…`, `Confirm_DocumentRelinkedBetweenLinkAndStatus…`, `Confirm_StatusUpdateFails_…` |
+| S4a | delete failure → always "still exists" (no read-back) | both `…UndoResponse…Lost…Gone…` tests |
+| S4b | delete failure → always "removed" | `Confirm_LinkFailsAndTheUndoFails_NamesTheOrphanedInvoice`, `Confirm_CreateResponseLost_AndTheRowCannotBeRemoved…` |
+| S5 | regarding name + url dropped | the create-payload test, `Confirm_RegardingNameIsCapped…` |
+| S6 | reject endpoint does not render `InvoiceReviewException` | `Reject_Refused_Is409_WithItsReasonCode…` (×2) |
+
+**Remaining residuals (not closable inside this task — each with its reason):**
+
+- **R1 — a confirm that STARTS after another has linked (no 412) still queues a job.** Its first read finds the
+  same-matter link and resumes. It cannot tell an in-flight or completed confirm from an earlier attempt that failed
+  before queuing (`StatusNotUpdated` / `ExtractionNotQueued`), which a retry MUST re-queue — and the same holds for a
+  user repeating a successful confirm. With duplicate detection off, that is a second job run. Closing it needs
+  durable per-invoice "extraction queued" state (a schema addition) or an atomic receive-side claim in the job
+  pipeline (ADR-004 A1 / #984) — both outside this task. Item 1 closed the 412 race only.
+- **R2 — `ExtractionAlreadyQueued` trusts that the concurrent linker was a confirm.** If something else (e.g. an MDA
+  user setting the lookup by hand) links the document to a same-matter/vendor invoice in the same window, nothing
+  queues extraction and the status is not set. Exotic; recorded.
+- **R3 — re-pointed between link and status** (item 3c): the error names the invoice, which is then no longer linked
+  to the document — manual clean-up, as the message says.
+- **Related defect (not fixed, outside the task's files):** `InvoiceExtractionJobHandler.UpdateInvoiceExtractionStatusAsync`
+  writes the invoice's extraction status to `sprk_document` with the invoice id (item 1 (iii)).
+- Round 2 residuals (c) and (d) stand as recorded in §11.7.
+
+**Suites (2026-10-01, on the committed tree):** BFF unit suite **13190 passed / 56 skipped / 0 failed** (13246);
+ArchTests **340/340**. Affected filter (`FinanceInvoiceReview` + `FinanceEndpointsAuthorizationContractTests`): 110/110.

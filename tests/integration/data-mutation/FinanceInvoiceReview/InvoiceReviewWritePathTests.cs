@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceInvoiceReview;
 
 /// <summary>
 /// What the invoice-review confirm and reject paths WRITE, in what order, and what they leave behind when a write
-/// fails (unified-access-control-r2 task 130, owner decision G5 2026-10-01).
+/// fails or races (unified-access-control-r2 task 130, owner decision G5 2026-10-01; fix rounds 2 and 3).
 /// </summary>
 /// <remarks>
 /// <para><b>The live schema</b> (spaarkedev1, read-only metadata, 2026-10-01): <c>sprk_invoice</c> has no lookup to
@@ -26,19 +26,23 @@ namespace Sprk.Bff.Api.Tests.DataMutation.FinanceInvoiceReview;
 /// <c>sprk_reviewernotes</c>, <c>sprk_createdon</c> and <c>sprk_document.sprk_invoicerejectionnotes</c> do not
 /// exist (the notes column is <c>sprk_invoicereviewnotes</c>).</para>
 /// <para><b>Order and atomicity</b>: create invoice → link document (conditional on the document's version) → set
-/// review status LAST. A failed link deletes the invoice it just created; a failed status update names the invoice
-/// and a retry resumes from the link; a concurrent confirm that linked first is resumed or refused, never
-/// overwritten.</para>
+/// review status LAST (conditional too). A failed link deletes the invoice it just created; a failed status update
+/// names the invoice and a retry resumes from the link; a concurrent confirm that linked first is answered with,
+/// never overwritten, and its extraction is never queued twice; a reject refuses a linked document.</para>
 /// <para>Substitution is at the Dataverse service seams (<see cref="IFieldMappingDataverseService"/>,
 /// <see cref="IGenericEntityService"/>, <see cref="ICommunicationDataverseService"/>), the ownership resolver and the
 /// job queue's own method boundary. The write seam is a hand-written double that keeps row state (including each
 /// row's version, as Dataverse does) so the asserted thing is the exact sequence of writes and what remains — no
-/// HTTP handler is mocked (ADR-038). Interleavings are driven by explicit gates, never by sleeps.</para>
+/// HTTP handler is mocked (ADR-038). Interleavings are driven by explicit gates and hooks, never by sleeps.</para>
 /// </remarks>
 public class InvoiceReviewWritePathTests
 {
     private static readonly Guid TeamId = Guid.Parse("7e4a0000-0000-4000-8000-000000000130");
     private static readonly Guid MatterRecordTypeId = Guid.Parse("e8547bb4-8600-f111-8407-7c1e520aa4df"); // spaarkedev1 'sprk_matter' row
+
+    private const int ToReview = 100000000;
+    private const int Confirmed = 100000001;
+    private const int Rejected = 100000002;
 
     private readonly RecordingRecords _records = new();
     private readonly Mock<IGenericEntityService> _entities = new(MockBehavior.Strict);
@@ -84,12 +88,16 @@ public class InvoiceReviewWritePathTests
         _records.Writes.Select(w => (w.Kind, w.Entity)).Should().Equal(
             (WriteKind.Upsert, "sprk_invoice"),
             (WriteKind.UpdateIfUnchanged, "sprk_document"),
-            (WriteKind.UpdateExisting, "sprk_document"));
+            (WriteKind.UpdateIfUnchanged, "sprk_document"));
         _records.Writes[1].Fields.Should().ContainKey("sprk_Invoice@odata.bind", "the second write is the link");
         _records.Writes[1].ExpectedVersion.Should().Be(1, "the link is conditional on the version the resume check read");
         _records.Writes[2].Fields.Should().ContainKey("sprk_invoicereviewstatus", "the status is the LAST write");
+        _records.Writes[2].ExpectedVersion.Should().Be(2, "the status is conditional on the version read AFTER the link");
 
         result.InvoiceId.Should().Be(_records.Writes[0].Id);
+        result.JobId.Should().NotBeNull();
+        result.StatusUrl.Should().Be($"/api/finance/jobs/{result.JobId}/status");
+        result.ExtractionAlreadyQueued.Should().BeFalse();
         _submitted.Should().ContainSingle().Which.IdempotencyKey.Should().Be($"invoice-extraction-{result.InvoiceId}");
     }
 
@@ -105,6 +113,8 @@ public class InvoiceReviewWritePathTests
         };
         _records.ExistingDocument(request.DocumentId);
         _records.Vendor(request.VendorOrgId, "Acme LLP");
+        _records.Matter(request.MatterId, "Real estate transaction analysis", "REAL-2026-123456.01");
+        var matterId = request.MatterId.ToString("D").ToLowerInvariant();
 
         await Sut().ConfirmInvoiceAsync(request, "corr-2");
 
@@ -114,13 +124,19 @@ public class InvoiceReviewWritePathTests
             ["ownerid@odata.bind"] = $"/teams({TeamId})",
             ["sprk_Matter@odata.bind"] = $"/sprk_matters({request.MatterId})",
             ["sprk_vendororg@odata.bind"] = $"/sprk_organizations({request.VendorOrgId})",
-            ["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({MatterRecordTypeId})",
             ["sprk_name"] = "Acme LLP - INV-77",
             ["sprk_invoicestatus"] = 100000000,
             ["sprk_extractionstatus"] = 100000000,
             ["sprk_invoicenumber"] = "INV-77",
             ["sprk_invoicedate"] = request.InvoiceDate!.Value,
             ["sprk_totalamount"] = 1234.5m,
+            // ADR-024 resolver fields, populated together as TodoRegardingBuilder / IncomingAssociationResolver do
+            // and as the 4 typed live invoices carry them (spaarkedev1, read-only 2026-10-01).
+            ["sprk_regardingrecordtype@odata.bind"] = $"/sprk_recordtype_refs({MatterRecordTypeId})",
+            ["sprk_regardingrecordid"] = matterId,
+            ["sprk_regardingrecordname"] = "Real estate transaction analysis",
+            ["sprk_regardingrecordnumber"] = "REAL-2026-123456.01",
+            ["sprk_regardingrecordurl"] = $"/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={matterId}",
         });
         create.Keys.Should().NotContain(k => k.StartsWith('_') && k.EndsWith("_value"),
             "the Web API does not accept _x_value keys as a lookup write");
@@ -139,10 +155,25 @@ public class InvoiceReviewWritePathTests
     }
 
     [Fact]
+    public async Task Confirm_RegardingNameIsCappedAtTheLiveColumnLength_AndANumberlessMatterOmitsTheNumber()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        _records.Matter(request.MatterId, new string('m', 150), number: null);
+
+        await Sut().ConfirmInvoiceAsync(request, "corr-2c");
+
+        var create = _records.Writes[0].Fields;
+        ((string)create["sprk_regardingrecordname"]!).Length.Should().Be(100, "sprk_invoice.sprk_regardingrecordname is 100 chars live");
+        create.Should().NotContainKey("sprk_regardingrecordnumber");
+    }
+
+    [Fact]
     public async Task Confirm_MatterRecordTypeUnresolved_CreatesWithoutTheRegardingType()
     {
         // ApplicationRequired is form-level only; live invoices exist without it. Unresolvable → left unset, never
-        // a guessed id (the TodoRegardingBuilder precedent).
+        // a guessed id (the TodoRegardingBuilder precedent) — the other resolver fields are still written.
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId);
         _records.Vendor(request.VendorOrgId, "Acme LLP");
@@ -152,6 +183,7 @@ public class InvoiceReviewWritePathTests
         await Sut().ConfirmInvoiceAsync(request, "corr-2b");
 
         _records.Writes[0].Fields.Should().NotContainKey("sprk_regardingrecordtype@odata.bind");
+        _records.Writes[0].Fields.Should().ContainKey("sprk_regardingrecordid");
     }
 
     [Fact]
@@ -243,6 +275,25 @@ public class InvoiceReviewWritePathTests
         failure.Failure.Should().Be(InvoiceReviewFailure.CreateFailedInvoiceMayRemain);
         failure.InvoiceId.Should().Be(createdId);
         failure.Message.Should().Contain(createdId.ToString());
+        _records.Exists("sprk_invoice", createdId).Should().BeTrue("the precondition of naming it: it is still there");
+    }
+
+    [Fact]
+    public async Task Confirm_CreateResponseLost_AndTheUndoResponseLostToo_ButTheRowIsGone_ReportsTheOriginalFailure()
+    {
+        // Residual (b), create leg: the delete removed the row and only its response was lost. Reading the row back
+        // shows it gone, so nothing "may remain" — the original failure stands.
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        _records.FailUpsertAfterApplying = new TaskCanceledException("timed out");
+        DeletesApplyButTheirResponseIsLost();
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-5d");
+
+        await act.Should().ThrowAsync<TaskCanceledException>();
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        _records.Exists("sprk_invoice", createdId).Should().BeFalse();
     }
 
     [Fact]
@@ -321,7 +372,29 @@ public class InvoiceReviewWritePathTests
         failure.Failure.Should().Be(InvoiceReviewFailure.LinkFailedInvoiceNotRemoved);
         failure.InvoiceId.Should().Be(createdId);
         failure.Message.Should().Contain(createdId.ToString());
+        _records.Exists("sprk_invoice", createdId).Should().BeTrue("orphaned is reported only for an invoice that is still there");
         _records.Writes.Should().NotContain(w => w.Fields.ContainsKey("sprk_invoicereviewstatus"));
+    }
+
+    [Fact]
+    public async Task Confirm_LinkFails_AndTheUndoResponseIsLostButTheInvoiceIsGone_ReportsTheCleanFailure()
+    {
+        // Residual (b): the compensating delete removed the row; only its response was lost. Read back → gone, so
+        // the error must not claim an orphan (and must not name an invoice that does not exist).
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        _records.FailDocumentLink = new HttpRequestException("503");
+        DeletesApplyButTheirResponseIsLost();
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-7b");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        failure.Failure.Should().Be(InvoiceReviewFailure.LinkFailed);
+        failure.InvoiceId.Should().BeNull();
+        failure.Message.Should().NotContain(createdId.ToString());
+        _records.Exists("sprk_invoice", createdId).Should().BeFalse();
     }
 
     [Fact]
@@ -350,8 +423,9 @@ public class InvoiceReviewWritePathTests
         var retry = await Sut().ConfirmInvoiceAsync(request, "corr-8b");
 
         retry.InvoiceId.Should().Be(invoiceId);
-        _records.Writes.Should().ContainSingle("the retry neither creates nor re-links — it only finishes the status")
-            .Which.Fields["sprk_invoicereviewstatus"].Should().Be(100000001);
+        var statusWrite = _records.Writes.Should().ContainSingle("the retry neither creates nor re-links — it only finishes the status").Subject;
+        statusWrite.Fields["sprk_invoicereviewstatus"].Should().Be(100000001);
+        statusWrite.Kind.Should().Be(WriteKind.UpdateIfUnchanged, "the resume's status write is conditional on the version it read");
         _submitted.Should().ContainSingle().Which.IdempotencyKey.Should().Be($"invoice-extraction-{invoiceId}");
     }
 
@@ -402,18 +476,20 @@ public class InvoiceReviewWritePathTests
     }
 
     // =========================================================================================
-    // Confirm — two concurrent confirms of the same document (task 130 fix round, item 1)
+    // Confirm — two concurrent confirms of the same document (round 2 item 1; round 3 item 1)
     // =========================================================================================
 
     /// <summary>
     /// Both confirms read the document at the SAME version before either links (held at the create step by a
-    /// gate). Whichever links first wins; the other's conditional link fails (412), it deletes its own invoice
-    /// and resumes with the winner's. Exactly one invoice remains — in both orders.
+    /// gate). Whichever links first wins; the other's conditional link fails (412), it deletes its own invoice and
+    /// answers with the winner's — WITHOUT a second extraction job (sdap-jobs has duplicate detection off, so a
+    /// same-key submission would run twice) and without inventing a job id. Exactly one invoice, one job — both orders.
     /// </summary>
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Confirm_TwoConcurrentConfirms_SameMatter_LeaveExactlyOneInvoice_InEitherOrder(bool firstReaderLinksFirst)
+    public async Task Confirm_TwoConcurrentConfirms_SameMatter_LeaveExactlyOneInvoice_AndOneExtractionJob_InEitherOrder(
+        bool firstReaderLinksFirst)
     {
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId);
@@ -438,13 +514,25 @@ public class InvoiceReviewWritePathTests
         var loserResult = await loserTask;
 
         winnerResult.InvoiceId.Should().Be(winner);
-        loserResult.InvoiceId.Should().Be(winner, "the loser resumes with the invoice that was linked first");
+        winnerResult.JobId.Should().NotBeNull();
+        winnerResult.ExtractionAlreadyQueued.Should().BeFalse();
+
+        loserResult.InvoiceId.Should().Be(winner, "the loser answers with the invoice that was linked first");
+        loserResult.JobId.Should().BeNull("the loser queued nothing, and a job id is never fabricated");
+        loserResult.StatusUrl.Should().BeNull();
+        loserResult.ExtractionAlreadyQueued.Should().BeTrue();
+
+        _submitted.Should().ContainSingle("ONE extraction job for ONE invoice — the loser does not submit a second")
+            .Which.JobId.Should().Be(winnerResult.JobId!.Value);
+        _submitted[0].IdempotencyKey.Should().Be($"invoice-extraction-{winner}");
+
         _records.LinkOf(request.DocumentId).Should().Be(winner, "the first link is never overwritten");
         _records.Exists("sprk_invoice", winner).Should().BeTrue();
         _records.Exists("sprk_invoice", loser).Should().BeFalse("the loser deletes the invoice it created — no orphan");
         _deleted.Select(d => d.Id).Should().Equal(loser);
-        _records.Writes.Count(w => w.Kind == WriteKind.UpdateIfUnchanged).Should().Be(1, "only one link was applied");
-        _submitted.Select(j => j.IdempotencyKey).Should().AllBe($"invoice-extraction-{winner}");
+        _records.Writes.Count(w => w.Fields.ContainsKey("sprk_Invoice@odata.bind")).Should().Be(1, "only one link was applied");
+        _records.Writes.Count(w => w.Fields.ContainsKey("sprk_invoicereviewstatus")).Should().Be(1, "only the winner writes the status");
+        _records.StatusOf(request.DocumentId).Should().Be(Confirmed);
     }
 
     [Theory]
@@ -481,19 +569,64 @@ public class InvoiceReviewWritePathTests
         _submitted.Should().ContainSingle().Which.IdempotencyKey.Should().Be($"invoice-extraction-{winner}");
     }
 
+    // =========================================================================================
+    // Confirm — an unrelated write between the read and the link (round 3 item 2)
+    // =========================================================================================
+
     [Fact]
-    public async Task Confirm_DocumentChangedWithoutALinkBetweenCheckAndLink_Is409_AndLeavesNoInvoice()
+    public async Task Confirm_AnUnrelatedWriteBetweenReadAndLink_IsRetried_AndSucceedsWithExactlyOneInvoice()
     {
         var request = NewRequest();
         _records.ExistingDocument(request.DocumentId);
         _records.Vendor(request.VendorOrgId, "Acme LLP");
-        _records.OnUpsertApplied = () => _records.TouchDocument(request.DocumentId); // someone edits the document
+        var touched = false;
+        _records.BeforeConditionalWrite = fields =>
+        {
+            // e.g. a profiling / indexing status update lands once, after the read and before the first link
+            if (fields.ContainsKey("sprk_Invoice@odata.bind") && !touched)
+            {
+                touched = true;
+                _records.TouchDocument(request.DocumentId);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var result = await Sut().ConfirmInvoiceAsync(request, "corr-12a");
+
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        result.InvoiceId.Should().Be(createdId);
+        _records.LinkAttempts.Should().Be(2, "the first link met the unrelated write (412) and the second used the fresh version");
+        _records.LinkOf(request.DocumentId).Should().Be(createdId);
+        _records.Exists("sprk_invoice", createdId).Should().BeTrue();
+        _entities.VerifyNoOtherCalls(); // nothing deleted — the retry kept the invoice
+        _records.StatusOf(request.DocumentId).Should().Be(Confirmed);
+        _submitted.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Confirm_DocumentChangedOnEveryLinkAttempt_Is409AfterTheBound_AndLeavesNoInvoice()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        _records.BeforeConditionalWrite = fields =>
+        {
+            if (fields.ContainsKey("sprk_Invoice@odata.bind"))
+            {
+                _records.TouchDocument(request.DocumentId); // a writer that never lets the version stand still
+            }
+
+            return Task.CompletedTask;
+        };
         AllowInvoiceDeletes();
 
-        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-12");
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-12b");
 
         var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
         failure.Failure.Should().Be(InvoiceReviewFailure.DocumentChangedConcurrently);
+        failure.ReasonCode.Should().Be("sdap.finance.invoice_review.document_changed");
+        _records.LinkAttempts.Should().Be(3, "at most 3 attempts in total");
         var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
         _records.Exists("sprk_invoice", createdId).Should().BeFalse();
         _records.LinkOf(request.DocumentId).Should().BeNull();
@@ -502,24 +635,168 @@ public class InvoiceReviewWritePathTests
     }
 
     // =========================================================================================
+    // Confirm vs reject (round 3 item 3)
+    // =========================================================================================
+
+    [Fact]
+    public async Task ConfirmLinksFirst_ThenAConcurrentReject_TheRejectIs409_AndConfirmedStands()
+    {
+        // The reject reads the document (unlinked, version 1); before its write, a confirm links and confirms it.
+        // The reject's conditional write fails (412), its re-read sees the link, and it refuses — it does not
+        // overwrite ConfirmedInvoice.
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        InvoiceReviewResult? confirmed = null;
+        _records.BeforeConditionalWrite = async fields =>
+        {
+            if (confirmed is null && fields.TryGetValue("sprk_invoicereviewstatus", out var s) && (int)s! == Rejected)
+            {
+                confirmed = await Sut().ConfirmInvoiceAsync(request, "corr-confirm");
+            }
+        };
+
+        var act = () => Sut().RejectInvoiceAsync(
+            new InvoiceReviewRejectRequest { DocumentId = request.DocumentId, Notes = "not an invoice" }, "corr-reject");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.DocumentLinkedToInvoice);
+        failure.ReasonCode.Should().Be("sdap.finance.invoice_review.document_linked_to_invoice");
+        failure.InvoiceId.Should().BeNull();
+        confirmed.Should().NotBeNull();
+        failure.Message.Should().NotContain(confirmed!.InvoiceId.ToString());
+        _records.StatusOf(request.DocumentId).Should().Be(Confirmed, "the reject did not overwrite the confirmation");
+        _records.LinkOf(request.DocumentId).Should().Be(confirmed.InvoiceId);
+        _records.Writes.Where(w => w.Fields.ContainsKey("sprk_invoicereviewstatus"))
+            .Select(w => (int)w.Fields["sprk_invoicereviewstatus"]!)
+            .Should().NotContain(Rejected);
+    }
+
+    [Fact]
+    public async Task RejectLandsFirst_BetweenAConfirmsReadAndLink_TheConfirmIs409_AndRejectedStands()
+    {
+        // The confirm reads the document (unlinked, ToReview); while its invoice is being created, a reject lands.
+        // The confirm's link fails (412), its re-read sees the review decision changed, and it deletes its invoice
+        // and refuses — it does not link (and later mark Confirmed) over the reject.
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        AllowInvoiceDeletes();
+        _records.OnUpsertAppliedAsync = () => Sut().RejectInvoiceAsync(
+            new InvoiceReviewRejectRequest { DocumentId = request.DocumentId, Notes = "statement" }, "corr-reject");
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-confirm");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.ReviewDecisionChanged);
+        failure.ReasonCode.Should().Be("sdap.finance.invoice_review.review_decision_changed");
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        _records.Exists("sprk_invoice", createdId).Should().BeFalse("the refused confirm removed its invoice");
+        _records.LinkOf(request.DocumentId).Should().BeNull();
+        _records.StatusOf(request.DocumentId).Should().Be(Rejected, "the reject stands");
+        _records.LinkAttempts.Should().Be(1, "a changed decision is not retried");
+        _submitted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Confirm_DocumentRelinkedBetweenLinkAndStatus_TheStatusIsNotWritten_AndTheInvoiceIsNamed()
+    {
+        // Proves the confirm's own status write is conditional AND checks the link it is confirming: someone
+        // re-points the document after this confirm linked it; the status write 412s, the re-read sees another
+        // link, and ConfirmedInvoice is NOT written over it.
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId, reviewStatus: ToReview);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        var relinked = false;
+        _records.BeforeConditionalWrite = fields =>
+        {
+            if (!relinked && fields.ContainsKey("sprk_invoicereviewstatus"))
+            {
+                relinked = true;
+                _records.SetLink(request.DocumentId, Guid.NewGuid());
+            }
+
+            return Task.CompletedTask;
+        };
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-13");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        failure.Failure.Should().Be(InvoiceReviewFailure.StatusNotUpdated);
+        failure.InvoiceId.Should().Be(createdId);
+        _records.StatusOf(request.DocumentId).Should().Be(ToReview, "nothing marked the re-pointed document confirmed");
+        _submitted.Should().BeEmpty();
+    }
+
+    // =========================================================================================
     // Reject
     // =========================================================================================
 
     [Fact]
-    public async Task Reject_WithNotes_WritesTheLiveNotesColumn_UpdateOnly()
+    public async Task Reject_WithNotes_WritesTheLiveNotesColumn_ConditionallyAndUpdateOnly()
     {
         var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId);
 
         await Sut().RejectInvoiceAsync(
-            new InvoiceReviewRejectRequest { DocumentId = documentId, Notes = "statement, not an invoice" }, "corr-13");
+            new InvoiceReviewRejectRequest { DocumentId = documentId, Notes = "statement, not an invoice" }, "corr-14");
 
         var write = _records.Writes.Should().ContainSingle().Subject;
-        write.Kind.Should().Be(WriteKind.UpdateExisting, "a document deleted after the check must not be recreated");
+        write.Kind.Should().Be(WriteKind.UpdateIfUnchanged, "conditional on the version read — never creates, never overwrites unseen");
+        write.ExpectedVersion.Should().Be(1);
         write.Entity.Should().Be("sprk_document");
         write.Id.Should().Be(documentId);
         write.Fields["sprk_invoicereviewstatus"].Should().Be(100000002);
         write.Fields["sprk_invoicereviewnotes"].Should().Be("statement, not an invoice");
         write.Fields.Keys.Should().NotContain("sprk_invoicerejectionnotes", "that column does not exist on live sprk_document");
+    }
+
+    [Fact]
+    public async Task Reject_DocumentLinkedToAnInvoice_Is409_WithNoWrite_AndNeverNamesTheInvoice()
+    {
+        var documentId = Guid.NewGuid();
+        var invoiceId = Guid.NewGuid();
+        _records.ExistingDocument(documentId, linkedInvoiceId: invoiceId, reviewStatus: Confirmed);
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-15");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.DocumentLinkedToInvoice);
+        failure.InvoiceId.Should().BeNull();
+        failure.Message.Should().NotContain(invoiceId.ToString()).And.NotContainEquivalentOf(invoiceId.ToString("N"));
+        _records.Writes.Should().BeEmpty();
+        _records.StatusOf(documentId).Should().Be(Confirmed);
+    }
+
+    [Fact]
+    public async Task Reject_DocumentGone_ThrowsNotFound_WithNoWrite()
+    {
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = Guid.NewGuid() }, "corr-16");
+
+        await act.Should().ThrowAsync<KeyNotFoundException>();
+        _records.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reject_DocumentChangedOnEveryAttempt_Is409AfterTheBound_WithNoWrite()
+    {
+        var documentId = Guid.NewGuid();
+        _records.ExistingDocument(documentId);
+        var attempts = 0;
+        _records.BeforeConditionalWrite = _ =>
+        {
+            attempts++;
+            _records.TouchDocument(documentId);
+            return Task.CompletedTask;
+        };
+
+        var act = () => Sut().RejectInvoiceAsync(new InvoiceReviewRejectRequest { DocumentId = documentId }, "corr-17");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>())
+            .Which.Failure.Should().Be(InvoiceReviewFailure.DocumentChangedConcurrently);
+        attempts.Should().Be(3);
+        _records.Writes.Should().BeEmpty();
     }
 
     // =========================================================================================
@@ -567,6 +844,16 @@ public class InvoiceReviewWritePathTests
                 return Task.CompletedTask;
             });
 
+    /// <summary>A delete that removes the row and then loses its response (throws, as a timeout would).</summary>
+    private void DeletesApplyButTheirResponseIsLost() =>
+        _entities.Setup(e => e.DeleteAsync("sprk_invoice", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns<string, Guid, CancellationToken>((_, id, token) =>
+            {
+                _deleted.Add((id, token));
+                _records.Remove("sprk_invoice", id);
+                return Task.FromException(new TaskCanceledException("the delete timed out after it was applied"));
+            });
+
     private static InvoiceReviewConfirmRequest NewRequest() => new()
     {
         DocumentId = Guid.NewGuid(),
@@ -601,9 +888,10 @@ public class InvoiceReviewWritePathTests
     /// Hand-written <see cref="IFieldMappingDataverseService"/> that keeps row state like Dataverse: reads answer
     /// from registered rows (an empty dictionary for an unknown row, as the live Web API implementation does);
     /// every successful write is recorded and applied; a document's <c>versionnumber</c> rises on every write and
-    /// the conditional write refuses a stale one with <see cref="DBConcurrencyException"/> (the live 412). A write
-    /// configured to fail throws and is not applied — unless it is an "after applying" failure, which models a
-    /// lost response. A cancelled token throws before anything happens, as the real transport does.
+    /// the conditional write refuses a stale one with <see cref="DBConcurrencyException"/> (the live 412) and an
+    /// absent row with <see cref="KeyNotFoundException"/> (the live 404). A write configured to fail throws and is not
+    /// applied — unless it is an "after applying" failure, which models a lost response. A cancelled token throws
+    /// before anything happens, as the real transport does. Hooks run other writers at exact points.
     /// </summary>
     internal sealed class RecordingRecords : IFieldMappingDataverseService
     {
@@ -617,11 +905,19 @@ public class InvoiceReviewWritePathTests
         public Exception? FailDocumentLinkAfterApplying { get; set; }
         public Exception? FailDocumentStatus { get; set; }
         public Action? OnUpsertApplied { get; set; }
+        public Func<Task>? OnUpsertAppliedAsync { get; set; }
 
-        public void ExistingDocument(Guid id, Guid? linkedInvoiceId = null) =>
+        /// <summary>Runs at the start of every conditional write, BEFORE its version is checked — another writer's slot.</summary>
+        public Func<Dictionary<string, object?>, Task>? BeforeConditionalWrite { get; set; }
+
+        /// <summary>Conditional document writes that carried the link, applied or refused.</summary>
+        public int LinkAttempts { get; private set; }
+
+        public void ExistingDocument(Guid id, Guid? linkedInvoiceId = null, int? reviewStatus = null) =>
             _rows[("sprk_document", id)] = new()
             {
                 ["_sprk_invoice_value"] = linkedInvoiceId?.ToString(),
+                ["sprk_invoicereviewstatus"] = reviewStatus is null ? null : (long)reviewStatus.Value,
                 ["versionnumber"] = 1L,
             };
 
@@ -635,7 +931,17 @@ public class InvoiceReviewWritePathTests
         public void Vendor(Guid id, string name) =>
             _rows[("sprk_organization", id)] = new() { ["sprk_organizationname"] = name };
 
+        public void Matter(Guid id, string name, string? number) =>
+            _rows[("sprk_matter", id)] = new() { ["sprk_mattername"] = name, ["sprk_matternumber"] = number };
+
         public void TouchDocument(Guid id) => Bump(_rows[("sprk_document", id)]);
+
+        public void SetLink(Guid documentId, Guid invoiceId)
+        {
+            var row = _rows[("sprk_document", documentId)];
+            row["_sprk_invoice_value"] = invoiceId.ToString();
+            Bump(row);
+        }
 
         public bool Exists(string entity, Guid id) => _rows.ContainsKey((entity, id));
 
@@ -644,6 +950,10 @@ public class InvoiceReviewWritePathTests
         public Guid? LinkOf(Guid documentId) =>
             _rows.TryGetValue(("sprk_document", documentId), out var row)
             && row["_sprk_invoice_value"] is string raw ? Guid.Parse(raw) : null;
+
+        public int? StatusOf(Guid documentId) =>
+            _rows.TryGetValue(("sprk_document", documentId), out var row)
+            && row["sprk_invoicereviewstatus"] is long status ? (int)status : null;
 
         public CreateGate HoldCreates(int count) => _gate = new CreateGate(count);
 
@@ -680,6 +990,10 @@ public class InvoiceReviewWritePathTests
             }
 
             OnUpsertApplied?.Invoke();
+            if (OnUpsertAppliedAsync is not null)
+            {
+                await OnUpsertAppliedAsync();
+            }
 
             if (FailUpsertAfterApplying is not null)
             {
@@ -699,56 +1013,73 @@ public class InvoiceReviewWritePathTests
             string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
-            if (entityLogicalName == "sprk_document" && fields.ContainsKey("sprk_invoicereviewstatus") && FailDocumentStatus is not null)
-            {
-                return Task.FromException(FailDocumentStatus);
-            }
-
             Writes.Add(new Write(WriteKind.UpdateExisting, entityLogicalName, recordId, new(fields)));
             if (_rows.TryGetValue((entityLogicalName, recordId), out var row))
             {
-                if (BoundId(fields, "sprk_Invoice@odata.bind") is { } invoiceId)
-                {
-                    row["_sprk_invoice_value"] = invoiceId.ToString(); // an UNconditional link overwrites
-                }
-
-                Bump(row);
+                Apply(row, fields); // an UNconditional write overwrites whatever is there
             }
 
             return Task.CompletedTask;
         }
 
-        public Task UpdateRecordFieldsIfUnchangedAsync(
+        public async Task UpdateRecordFieldsIfUnchangedAsync(
             string entityLogicalName, Guid recordId, Dictionary<string, object?> fields, long expectedVersion,
             CancellationToken ct = default)
         {
             ct.ThrowIfCancellationRequested();
-            if (entityLogicalName == "sprk_document" && FailDocumentLink is not null)
+            var isLink = fields.ContainsKey("sprk_Invoice@odata.bind");
+            if (isLink)
             {
-                return Task.FromException(FailDocumentLink);
+                LinkAttempts++;
+            }
+
+            if (BeforeConditionalWrite is not null)
+            {
+                await BeforeConditionalWrite(fields);
+            }
+
+            if (entityLogicalName == "sprk_document" && isLink && FailDocumentLink is not null)
+            {
+                throw FailDocumentLink;
+            }
+
+            if (entityLogicalName == "sprk_document" && fields.ContainsKey("sprk_invoicereviewstatus") && FailDocumentStatus is not null)
+            {
+                throw FailDocumentStatus;
             }
 
             if (!_rows.TryGetValue((entityLogicalName, recordId), out var row))
             {
-                return Task.FromException(new KeyNotFoundException($"{entityLogicalName} record was not found."));
+                throw new KeyNotFoundException($"{entityLogicalName} record was not found.");
             }
 
             if ((long)row["versionnumber"]! != expectedVersion)
             {
-                return Task.FromException(new DBConcurrencyException("412 Precondition Failed"));
+                throw new DBConcurrencyException("412 Precondition Failed");
             }
 
             Writes.Add(new Write(WriteKind.UpdateIfUnchanged, entityLogicalName, recordId, new(fields), expectedVersion));
+            Apply(row, fields);
+
+            if (isLink && FailDocumentLinkAfterApplying is not null)
+            {
+                throw FailDocumentLinkAfterApplying;
+            }
+        }
+
+        private static void Apply(Dictionary<string, object?> row, Dictionary<string, object?> fields)
+        {
             if (BoundId(fields, "sprk_Invoice@odata.bind") is { } invoiceId)
             {
                 row["_sprk_invoice_value"] = invoiceId.ToString();
             }
 
-            Bump(row);
+            if (fields.TryGetValue("sprk_invoicereviewstatus", out var status) && status is int value)
+            {
+                row["sprk_invoicereviewstatus"] = (long)value; // the Web API reads an option set back as a number (long)
+            }
 
-            return FailDocumentLinkAfterApplying is not null
-                ? Task.FromException(FailDocumentLinkAfterApplying)
-                : Task.CompletedTask;
+            Bump(row);
         }
 
         private static void Bump(Dictionary<string, object?> row) =>

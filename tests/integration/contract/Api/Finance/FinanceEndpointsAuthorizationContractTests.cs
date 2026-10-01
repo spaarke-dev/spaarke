@@ -512,6 +512,7 @@ public class FinanceEndpointsAuthorizationContractTests
     {
         { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, false },
         { InvoiceReviewFailure.DocumentChangedConcurrently, HttpStatusCode.Conflict, false },
+        { InvoiceReviewFailure.ReviewDecisionChanged, HttpStatusCode.Conflict, false },
         { InvoiceReviewFailure.OwnerTeamUnresolved, HttpStatusCode.Forbidden, false },
         { InvoiceReviewFailure.LinkFailed, HttpStatusCode.InternalServerError, false },
         { InvoiceReviewFailure.LinkFailedInvoiceNotRemoved, HttpStatusCode.InternalServerError, true },
@@ -567,6 +568,28 @@ public class FinanceEndpointsAuthorizationContractTests
             new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true),
             new AccessCall(AccessPath.Record, VendorOrganizations, body.VendorOrgId, HasToken: true));
         host.Probe.Calls.Should().Equal(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true));
+    }
+
+    [Fact]
+    public async Task Confirm_LostTheRaceToAConcurrentConfirm_Is202_WithNoJobId_AndExtractionAlreadyQueued()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        var winnersInvoice = Guid.NewGuid();
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(
+                It.Is<InvoiceReviewConfirmRequest>(q => q.DocumentId == body.DocumentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new InvoiceReviewResult { InvoiceId = winnersInvoice, ExtractionAlreadyQueued = true });
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        response.Headers.Location.Should().BeNull("no job of this request's exists to poll");
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["invoiceId"]!.GetValue<string>().Should().Be(winnersInvoice.ToString());
+        json["jobId"].Should().BeNull("a job id is never fabricated");
+        json["statusUrl"].Should().BeNull();
+        json["extractionAlreadyQueued"]!.GetValue<bool>().Should().BeTrue();
     }
 
     [Fact]
@@ -676,6 +699,34 @@ public class FinanceEndpointsAuthorizationContractTests
         var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
         json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.document_not_found");
         json["title"]!.GetValue<string>().Should().Be("Document Not Found");
+    }
+
+    public static TheoryData<InvoiceReviewFailure, string> RejectRefusals => new()
+    {
+        { InvoiceReviewFailure.DocumentLinkedToInvoice, "sdap.finance.invoice_review.document_linked_to_invoice" },
+        { InvoiceReviewFailure.DocumentChangedConcurrently, "sdap.finance.invoice_review.document_changed" },
+    };
+
+    [Theory]
+    [MemberData(nameof(RejectRefusals))]
+    public async Task Reject_Refused_Is409_WithItsReasonCode_AndNoInvoiceId(InvoiceReviewFailure failure, string reasonCode)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceReviewException(failure, "refused; nothing was saved"));
+
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["reasonCode"]!.GetValue<string>().Should().Be(reasonCode);
+        json.Should().NotContainKey("invoiceId");
     }
 
     // =========================================================================================
