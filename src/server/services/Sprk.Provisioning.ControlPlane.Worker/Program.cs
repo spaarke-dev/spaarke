@@ -518,9 +518,9 @@ builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
 // applier — KV resource tag (spaarke-secret-free-identity=true, via ArmClient
 // GenericResource — no new package) + sprk_dataverseenvironment.
 // sprk_credentialmode (via the task-112 registry client's A38a
-// UpdateCredentialModeAsync extension). Consumed by BOTH H4 (per-tenant
-// vault; Model 2 dispatch fan-out = once per vault) and H4-shared (shared
-// vault). Inert until KvSecretsPopulationOptions.RequireSecretFreeIdentity
+// UpdateCredentialModeAsync extension). Consumed by H4 (per-customer
+// vault; dispatch fan-out = once per vault). Inert until
+// KvSecretsPopulationOptions.RequireSecretFreeIdentity
 // is set for an environment (default false). ADR-032: registered
 // UNCONDITIONALLY — no feature-gate branch; the option gates behavior inside
 // the handlers, not the DI graph.
@@ -533,8 +533,8 @@ builder.Services.AddSingleton<ISecretFreeMarkerApplier>(sp =>
     return new ArmSecretFreeMarkerApplier(armClient, registryClient, logger);
 });
 // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl Wave 2.5
-// 2026-08-27): operator KV RBAC bootstrapper — shared singleton consumed by
-// BOTH H4 and H4-shared. Real Azure.ResourceManager.Authorization
+// 2026-08-27): operator KV RBAC bootstrapper — singleton consumed by H4
+// (H4-shared, its second consumer, retired T226). Real Azure.ResourceManager.Authorization
 // RoleAssignmentCollection PUT (replaced the Wave-2 log-and-return-Success
 // scaffold). ArmClient factory-lambda-constructed with the shared UAMI-pinned
 // TokenCredential (parity with sibling H4 collaborators above).
@@ -546,27 +546,6 @@ builder.Services.AddSingleton<IOperatorKvRbacBootstrapper>(sp =>
     return new ArmOperatorKvRbacBootstrapper(armClient, logger);
 });
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
-
-// Task 200: H4-shared handler + two new collaborator seams (source-service
-// key extractor + shared-KV per-secret accessor). Reuses H4's IKvSecretManifest
-// (from-shared-service entries filtered in the handler), IArmKeyVaultRefProbe
-// (T1 post-condition), and KvSecretsPopulationOptions (no divergent knobs
-// required today). ArmClient instance reuses the shared UAMI-pinned
-// TokenCredential singleton via the same factory-lambda pattern as the H4
-// collaborators above.
-builder.Services.AddSingleton<ISourceServiceKeyExtractor>(sp =>
-{
-    var credential = sp.GetRequiredService<TokenCredential>();
-    var armClient = new Azure.ResourceManager.ArmClient(credential);
-    return new SdkSourceServiceKeyExtractor(armClient);
-});
-builder.Services.AddSingleton<ISharedKvSecretAccessor>(sp =>
-{
-    var credential = sp.GetRequiredService<TokenCredential>();
-    var logger = sp.GetRequiredService<ILogger<SecretClientKvSharedSecretAccessor>>();
-    return new SecretClientKvSharedSecretAccessor(credential, logger);
-});
-builder.Services.AddScoped<H4SharedKvSecretsPopulationHandler>();
 
 // Task 201: H4b BulkAppSettings handler + three collaborator seams
 // (IPerEnvSettingsManifest — reads the same embedded manifest.yaml as
@@ -586,8 +565,8 @@ builder.Services.AddScoped<H4SharedKvSecretsPopulationHandler>();
 // Placement Justification (CLAUDE.md §10): H4b lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H4b
 // uses IProvisioningRunRepository (task 037) + the three dedicated seams;
-// no BFF-facade dependencies. Runs AFTER H4 (task 047) + H4-shared (task
-// 200) — KV must be seeded so the KV-ref settings resolve when the batched
+// no BFF-facade dependencies. Runs AFTER H4 (task 047) — KV must be
+// seeded so the KV-ref settings resolve when the batched
 // Configure script writes them — and BEFORE H9 (BFF deploy).
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):

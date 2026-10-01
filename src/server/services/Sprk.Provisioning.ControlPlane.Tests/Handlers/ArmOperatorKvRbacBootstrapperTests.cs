@@ -273,7 +273,7 @@ public sealed class ArmOperatorKvRbacBootstrapperTests
     /// RBAC-enabled KV, subscription-Owner operator, first data-plane write
     /// fails 403 unless the role is bootstrapped first". This test proves the
     /// live impl PUTs the role assignment against the vault scope and returns
-    /// a Success outcome that H4/H4-shared can act on. The full end-to-end
+    /// a Success outcome that H4 can act on. The full end-to-end
     /// wiring (bootstrap → writer) is proven by the existing
     /// <c>Handler09_OperatorKvRbacBootstrap_Failure_FailsResumable_NoWriterCall</c>
     /// test in H4KvSecretsPopulationHandlerTests.cs — inverting that test's

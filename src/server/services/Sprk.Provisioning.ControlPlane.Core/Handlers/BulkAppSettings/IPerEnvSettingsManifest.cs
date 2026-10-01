@@ -28,7 +28,7 @@
 //   have a DIFFERENT contract (no vault target, no rotation, no ADR-028
 //   cleartext-never-in-handler rule — literals are cleartext BY DEFINITION),
 //   and widening KvSecretEntry to hold both flavors would corrupt the
-//   secrets-focused contract every other H4/H4-shared reader consumes.
+//   secrets-focused contract the H4 reader consumes.
 //
 // THREAD-SAFETY:
 //   Implementations MUST be thread-safe (Singleton lifetime). The manifest is

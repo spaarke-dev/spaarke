@@ -25,13 +25,19 @@
 //   T6  Entries are sorted alphabetically by CanonicalName (ordinal —
 //       determinism contract).
 //
-//   A38a (task 205a, 2026-08-25 — secret-free served-entry filter):
-//   A38a-1  RequireSecretFreeIdentity=true EXCLUDES the three omit targets
-//           from served entries (count shrinks by exactly 3); manifest.yaml
+//   T226 (2026-09-30): from-shared-service retired; from-topology-constants
+//   (SPE-ContainerTypeId, task 214) now parses — before T226 the reader rejected
+//   it, so EVERY ReadAsync against the real manifest returned Failure. The keys
+//   the owner removed from the process must not be served.
+//
+//   A38a (task 205a, 2026-08-25 — secret-free served-entry filter; target set
+//   reduced to BFF-API-ClientSecret by T226):
+//   A38a-1  RequireSecretFreeIdentity=true EXCLUDES the omit target
+//           from served entries (count shrinks by exactly 1); manifest.yaml
 //           rows unchanged (the raw document still parses them — proven by
 //           the default-branch tests above against the SAME embedded yaml).
-//   A38a-2  Default options (false) INCLUDE all three targets.
-//   A38a-3  Q3 Path A rollback (both flags true) re-INCLUDES all three.
+//   A38a-2  Default options (false) INCLUDE the target.
+//   A38a-3  Q3 Path A rollback (both flags true) re-INCLUDES the target.
 //   A38a-4  Dataverse-ClientSecret served under BOTH branches (§6.5 record).
 //   A38a-5  :151 BINDING invariant still fires on synthetic yaml MISSING
 //           BFF-API-ClientSecret / with never_delete=false — EVEN WITH the
@@ -39,7 +45,7 @@
 //           invariant; regression protection for the invariant's location).
 //   A38a-6  Filter + invariant ordering: synthetic yaml WITH the required
 //           rows + secret-free active → Success (invariant passed against
-//           raw yaml) with the three targets absent from SERVED entries.
+//           raw yaml) with the target absent from SERVED entries.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -96,12 +102,12 @@ public sealed class FileKvSecretManifestTests
     [Theory]
     [InlineData("Dataverse-ClientSecret", KvSecretValueSource.FromExistingKvSecret)]
     [InlineData("TenantId", KvSecretValueSource.FromRunParameters)]
-    // Task 200: AiSearch--AdminKey flipped from-bicep-output → from-shared-service
-    // when the F19 automation manifest additions landed (Phase A of task 200).
-    // Kept as an inline case here because it exercises the FromSharedService
-    // parser mapping end-to-end against the real embedded manifest.
-    [InlineData("AiSearch--AdminKey", KvSecretValueSource.FromSharedService)]
-    [InlineData("SPE-ContainerTypeId", KvSecretValueSource.FromBicepOutput)]
+    // T226: Redis is written by customer.bicep from the customer's own cache.
+    [InlineData("Redis-ConnectionString", KvSecretValueSource.FromBicepOutput)]
+    // T226: task 214's from-topology-constants — the reader rejected it before T226.
+    [InlineData("SPE-ContainerTypeId", KvSecretValueSource.FromTopologyConstants)]
+    // T226 / owner D13: interim key from the customer's own Document Intelligence (T243 removes it).
+    [InlineData("DocumentIntelligence-ApiKey", KvSecretValueSource.FromBicepOutput)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]
     public async Task ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly(string canonicalName, KvSecretValueSource expected)
     {
@@ -127,31 +133,66 @@ public sealed class FileKvSecretManifestTests
         secondSuccess.Entries.Count.Should().Be(firstSuccess.Entries.Count);
     }
 
-    // Task 200: from-shared-service entries MUST carry a non-empty ServiceRef
-    // (parser enforces conditional-required; downstream H4-shared handler
-    // parses it as '<type>:<az-resource-name>'). Non-shared-service entries
-    // MUST leave ServiceRef null (no leakage of the shared-only field into
-    // the per-tenant flow).
-    [Fact]
-    public async Task ReadAsync_RealEmbeddedManifest_FromSharedServiceEntries_CarryServiceRef()
+    // T226 (owner 2026-09-30): these keys were removed from the process — the BFF
+    // reaches Service Bus, AI Search and OpenAI with the stamp UAMI, nothing reads
+    // the Storage connection string, and Prompt Flow is retired
+    // (D5). If one reappears in the catalog, H4b would emit a KV reference for it and
+    // an unresolvable reference reaches the BFF as a literal "key".
+    [Theory]
+    [InlineData("AiSearch--AdminKey")]
+    [InlineData("ServiceBus-ConnectionString")]
+    [InlineData("Storage-ConnectionString")]
+    [InlineData("AzureOpenAI-ApiKey")]
+    [InlineData("PromptFlow-Endpoint")]
+    [InlineData("PromptFlow-Key")]
+    public async Task ReadAsync_RealEmbeddedManifest_DoesNotServeKeyRemovedFromTheProcess(string canonicalName)
     {
         var manifest = NewManifest();
 
         var result = await manifest.ReadAsync(CancellationToken.None);
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
-        var sharedEntries = success.Entries
-            .Where(e => e.ValueSource == KvSecretValueSource.FromSharedService)
-            .ToList();
-        sharedEntries.Should().NotBeEmpty("Phase A of task 200 added 6 shared-service entries");
-        sharedEntries.Should().OnlyContain(e => !string.IsNullOrWhiteSpace(e.ServiceRef));
-        sharedEntries.Should().OnlyContain(e => e.ServiceRef!.Contains(':'),
-            "service_ref format is '<type>:<az-resource-name>'");
+        success.Entries.Should().NotContain(e => e.CanonicalName == canonicalName);
+    }
 
-        var nonSharedEntries = success.Entries
-            .Where(e => e.ValueSource != KvSecretValueSource.FromSharedService);
-        nonSharedEntries.Should().OnlyContain(e => e.ServiceRef == null,
-            "ServiceRef is scoped to from-shared-service entries only — no leakage");
+    // T226: H4 projects topology constants from run parameters through a fixed map. A
+    // from-topology-constants entry with no mapping fails on every run; a mapping with no
+    // entry is dead code.
+    [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_TopologyConstantsMatchH4ParameterMap()
+    {
+        var result = await NewManifest().ReadAsync(CancellationToken.None);
+
+        var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
+        var topologyConstants = success.Entries
+            .Where(e => e.ValueSource == KvSecretValueSource.FromTopologyConstants)
+            .Select(e => e.CanonicalName);
+        H4KvSecretsPopulationHandler.TopologyConstantParameterKeys.Keys.Should().BeEquivalentTo(topologyConstants);
+    }
+
+    // T226: from-shared-service is no longer a value_source. A manifest that still
+    // carries one must be refused, not served with the entry silently skipped.
+    [Fact]
+    public void ParseYaml_UnrecognizedValueSource_IsRefusedNamingTheEntry()
+    {
+        const string yaml = """
+            secrets:
+              - canonical_name: "Dataverse-ClientSecret"
+                never_delete: true
+                value_source: "from-existing-kv"
+              - canonical_name: "BFF-API-ClientSecret"
+                never_delete: true
+                value_source: "from-existing-kv"
+              - canonical_name: "Redis-ConnectionString"
+                never_delete: false
+                value_source: "from-shared-service"
+            """;
+
+        var result = NewManifest().ParseYamlForTest(yaml);
+
+        var failure = result.Should().BeOfType<KvSecretManifestReadResult.Failure>().Subject;
+        failure.Diagnostic.Should().Contain("Redis-ConnectionString");
+        failure.Diagnostic.Should().Contain("unrecognized value_source 'from-shared-service'");
     }
 
     [Fact]
@@ -173,26 +214,24 @@ public sealed class FileKvSecretManifestTests
     private static readonly string[] A38aOmitTargets =
     {
         "BFF-API-ClientSecret",
-        "ServiceBus-ConnectionString",
-        "AiSearch--AdminKey",
     };
 
     [Fact]
-    public void A38a_OmitTargetSet_ContainsExactlyTheThreeTargets_AndNeverDataverseClientSecret()
+    public void A38a_OmitTargetSet_ContainsExactlyBffApiClientSecret_AndNeverDataverseClientSecret()
     {
-        FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().HaveCount(3);
+        FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().HaveCount(1);
         FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().Contain(A38aOmitTargets);
         FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().NotContain("Dataverse-ClientSecret",
             "Q3 Path A rollback copy stays unconditional until the 2026-11-23 sunset (§6.5 record 2026-08-25)");
     }
 
     [Fact]
-    public async Task A38a_SecretFreeTrue_ExcludesThreeTargets_CountShrinksByExactlyThree()
+    public async Task A38a_SecretFreeTrue_ExcludesTarget_CountShrinksByExactlyOne()
     {
         var baseline = await NewManifest().ReadAsync(CancellationToken.None);
         var baselineSuccess = baseline.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         baselineSuccess.Entries.Select(e => e.CanonicalName).Should().Contain(A38aOmitTargets,
-            "the manifest.yaml rows themselves are UNCHANGED — the default branch serves all three");
+            "the manifest.yaml rows themselves are UNCHANGED — the default branch serves the target");
 
         var filtered = await NewManifest(new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true })
             .ReadAsync(CancellationToken.None);
@@ -200,12 +239,12 @@ public sealed class FileKvSecretManifestTests
         var filteredSuccess = filtered.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         filteredSuccess.Entries.Select(e => e.CanonicalName).Should().NotContain(A38aOmitTargets,
             "auth-v4 §9.1 — OMIT is the signal on secret-free environments");
-        filteredSuccess.Entries.Count.Should().Be(baselineSuccess.Entries.Count - 3,
-            "exactly the three A38a targets are filtered — nothing else");
+        filteredSuccess.Entries.Count.Should().Be(baselineSuccess.Entries.Count - 1,
+            "exactly the A38a target is filtered — nothing else");
     }
 
     [Fact]
-    public async Task A38a_SecretFreeFalse_Default_IncludesAllThreeTargets()
+    public async Task A38a_SecretFreeFalse_Default_IncludesTarget()
     {
         var result = await NewManifest().ReadAsync(CancellationToken.None);
 
@@ -215,7 +254,7 @@ public sealed class FileKvSecretManifestTests
     }
 
     [Fact]
-    public async Task A38a_Q3PathARollback_ReIncludesAllThreeTargets()
+    public async Task A38a_Q3PathARollback_ReIncludesTarget()
     {
         var result = await NewManifest(new KvSecretsPopulationOptions
         {
@@ -225,7 +264,7 @@ public sealed class FileKvSecretManifestTests
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         success.Entries.Select(e => e.CanonicalName).Should().Contain(A38aOmitTargets,
-            "Q3 Path A rollback re-includes ONLY the three A38a targets (regression path)");
+            "Q3 Path A rollback re-includes the A38a target (regression path)");
     }
 
     [Theory]
@@ -255,14 +294,6 @@ public sealed class FileKvSecretManifestTests
           - canonical_name: "BFF-API-ClientSecret"
             never_delete: true
             value_source: "from-existing-kv"
-          - canonical_name: "ServiceBus-ConnectionString"
-            never_delete: false
-            value_source: "from-shared-service"
-            service_ref: "servicebus:sprksharedprod-servicebus"
-          - canonical_name: "AiSearch--AdminKey"
-            never_delete: false
-            value_source: "from-shared-service"
-            service_ref: "search:sprksharedprod-search"
           - canonical_name: "Some-Other-Secret"
             never_delete: false
             value_source: "generated"
@@ -323,7 +354,7 @@ public sealed class FileKvSecretManifestTests
     public void A38a_FilterIsDownstreamOfInvariant_YamlRowsPresent_ServedEntriesFiltered()
     {
         // The invariant PASSES (both never-delete rows present in the raw
-        // yaml) and THEN the filter removes the three targets from the
+        // yaml) and THEN the filter removes the target from the
         // SERVED list — the exact "omit is a served-entry filter, NOT a yaml
         // row deletion" contract from the peer escalation record.
         var result = NewManifest(new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true })
@@ -332,7 +363,7 @@ public sealed class FileKvSecretManifestTests
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         success.Entries.Select(e => e.CanonicalName).Should().BeEquivalentTo(
             new[] { "Dataverse-ClientSecret", "Some-Other-Secret" },
-            "BFF-API-ClientSecret + ServiceBus-ConnectionString + AiSearch--AdminKey are filtered from " +
-            "SERVED entries; Dataverse-ClientSecret + unrelated entries stay");
+            "BFF-API-ClientSecret is filtered from SERVED entries; Dataverse-ClientSecret + " +
+            "unrelated entries stay");
     }
 }

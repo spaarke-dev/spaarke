@@ -7,6 +7,32 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-30 — provisioning docs follow T226: H4-shared retired, secret-catalog pattern rewritten
+
+`customer-provisioning-orchestration-r1` T226 retired the H4-shared handler (it copied keys from the
+`sprksharedprod-*` services into a shared vault — a cross-customer isolation break under the dedicated-stamp
+model) and the `from-shared-service` value source. The procedure surface still described both.
+
+- **`patterns/provisioning/manifest-driven-secret-catalog.md` — rewritten against the code.** The previous
+  version documented a `source: { type }` field the manifest has never had (the field is `value_source`), said
+  the generator emits deployment-guide sections (it emits four `generated/` artifacts), and pointed at a test
+  project that does not exist. It now lists the closed `value_source` set and its writers, the owner D13
+  keyless-first rule, the literal-string hazard of an unresolvable KV reference, and the places a new
+  `value_source` must change (task 214 changed none of the four code places, so every H4 run failed
+  `ManifestReadFailed`).
+- **`patterns/provisioning/handler-registration-completeness.md` — corrected against the code.** It described
+  `AddKeyedTransient`, `ExecuteAsync`, `HandlerResult.Failed`, lower-case ids and a "3-file dance"; the code uses
+  `AddKeyedScoped` factory forwarders, `HandleAsync`, `Success`/`Failure(FailureClass, …)`, `"H4"`-style ids, and
+  a new handler also needs `Dispatchable` + a `DagAdvancer.HandlerDependencies` entry (the HANDLER-01 failure).
+  Dispatchable count 21 → 20.
+- **`constraints/provisioning.md`** — same handler-contract corrections; H4-shared removed as a drift-detection
+  handler; the non-existent `HandlerIdempotencyTests` reference replaced; test path corrected.
+- **`skills/provision-environment/SKILL.md`** — 🔴 **Step 4.0 now sends `containerTypeId`**: Step 0.5b read it but
+  the run payload omitted it, so every run would fail H4's `SPE-ContainerTypeId` write and H8. Step 0.5b skips
+  `status: retired` prerequisites (they used to run an empty recipe and report a pass). Handler catalog, DAG
+  ordering and `subscriptionId` consumers no longer list H4-shared.
+
+---
 ###### 2026-09-28 — five ADRs amended for D-12: no shared Model 1 tier (owner-approved)
 
 Owner chose "amend all five" after the D-12 doc sweep found 51 BLOCKING files (recorded: 13). CLAUDE.md

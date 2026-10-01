@@ -378,14 +378,14 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
             : new HashSet<string>(StringComparer.Ordinal);
 
         // Row A38a (task 205a, 2026-08-25 — auth-v4 §9.1 OMIT-is-the-signal):
-        // on secret-free environments, union the three A38a targets into the
+        // on secret-free environments, union the A38a targets into the
         // EXISTING task-126 FR-39 omit seam above (same
         // KvSecretWriteRequest.OmitCanonicalNames -> KvSecretWriteAction.Omitted
         // path the operator's ficOmitSecretNames parameter uses — no parallel
         // seam, per task 125's "no special-casing" commitment). This is
         // defense-in-depth BEHIND FileKvSecretManifest's served-entry filter:
-        // it also protects the emergency StaticKvSecretManifest DI-revert,
-        // which serves the targets unfiltered. Q3 Path A rollback re-includes
+        // it also protects against any manifest implementation that serves the
+        // targets unfiltered. Q3 Path A rollback re-includes
         // them; Dataverse-ClientSecret is never in the target set (§6.5
         // record 2026-08-25, sunset 2026-11-23).
         var secretFreeOmitActive = _options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback;
@@ -461,21 +461,13 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        // Task 200: FromSharedService entries belong to
-        // H4SharedKvSecretsPopulationHandler (targets the SHARED KV, not the
-        // per-tenant KV). Filter them out here BEFORE the writer sees them so
-        // the KvSecretValueResolver never hits its FromSharedService branch
-        // during a per-tenant H4 run. The manifest is the single source of
-        // truth for both flows; the tier-split lives in the handler.
-        var perTenantEntries = entries
-            .Where(e => e.ValueSource != KvSecretValueSource.FromSharedService)
-            .ToList();
+        // T226 (2026-09-30): every manifest entry targets the customer's own vault —
+        // the former from-shared-service split (task 200 H4-shared) is retired.
 
         _logger.LogInformation(
             "H4 manifest loaded: runId={RunId} customerId={CustomerId} entryCount={EntryCount} " +
-            "perTenantCount={PerTenantCount} sharedSkipped={SharedSkipped} upgradeMode={UpgradeMode} rotate={Rotate}",
-            envelope.RunId, envelope.CustomerId, entries.Count, perTenantEntries.Count,
-            entries.Count - perTenantEntries.Count, upgradeMode, rotateExisting);
+            "upgradeMode={UpgradeMode} rotate={Rotate}",
+            envelope.RunId, envelope.CustomerId, entries.Count, upgradeMode, rotateExisting);
 
         // (5.5) HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18:
         //       bootstrap KV Secrets Officer role on the target vault for the
@@ -534,11 +526,12 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 CustomerId: envelope.CustomerId,
                 TargetKeyVaultName: keyVaultName,
                 SubscriptionId: subscriptionId,
-                Entries: perTenantEntries,
+                Entries: entries,
                 UpgradeMode: upgradeMode,
                 RotateExisting: rotateExisting,
                 SecretParameters: new Dictionary<string, KeyVaultSecretRef>(run.Parameters.Secrets, StringComparer.Ordinal),
-                OmitCanonicalNames: omitCanonicalNames);
+                OmitCanonicalNames: omitCanonicalNames,
+                TopologyConstantValues: BuildTopologyConstantValues(run.Parameters.NonSecret));
             writeOutcome = await _writer.WriteAsync(writeRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -846,6 +839,35 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// T226 — manifest canonical name → the NON-SECRET run parameter that carries its topology-constant
+    /// value (manifest <c>value_source: from-topology-constants</c>). H8 reads the same parameter key.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> TopologyConstantParameterKeys =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["SPE-ContainerTypeId"] = SpeContainer.H8SpeContainerHandler.ContainerTypeIdParameterKey,
+        };
+
+    /// <summary>
+    /// Projects the run's non-secret parameters onto the canonical names in
+    /// <see cref="TopologyConstantParameterKeys"/>. Absent / blank parameters are left out, so the
+    /// resolver reports the missing value against the canonical name.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BuildTopologyConstantValues(
+        IDictionary<string, string> nonSecretParameters)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (canonicalName, parameterKey) in TopologyConstantParameterKeys)
+        {
+            if (TryGetNonEmpty(nonSecretParameters, parameterKey, out var value))
+            {
+                values[canonicalName] = value.Trim();
+            }
+        }
+        return values;
     }
 
     private static bool TryGetNonEmpty(

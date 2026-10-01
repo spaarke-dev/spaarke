@@ -59,22 +59,13 @@ public static class HandlerIds
     public const string H4 = "H4";
 
     /// <summary>
-    /// H4-shared (task 200) -- shared-tier KV secrets population via
-    /// Azure.ResourceManager SDK extraction from source services
-    /// (AI Search / Cognitive Services / Service Bus / Storage / Redis).
-    /// Sibling of H4; targets the SHARED KV, not per-tenant. Owns the
-    /// F19 automation gap; runs BEFORE H4b (task 201) + H9 (task 052).
-    /// </summary>
-    public const string H4Shared = "H4-shared";
-
-    /// <summary>
     /// H4b (task 201) -- BulkAppSettings handler. Thin wrapper around task
     /// 084's shipped Configure-AppServiceSettings.generated.ps1 (extended
     /// by task 201 with per_env_settings). Applies ALL required BFF app
     /// settings (KV refs + per-env literals) in ONE batched call → ONE App
     /// Service restart cycle, then polls /healthz + parses container docker
     /// logs on failure. Kills the F20/F20a progressive-fail-fast chain.
-    /// Runs AFTER H4 + H4-shared, BEFORE H9.
+    /// Runs AFTER H4, BEFORE H9.
     /// </summary>
     public const string H4b = "H4b";
 
@@ -143,6 +134,6 @@ public static class HandlerIds
     /// </summary>
     public static readonly IReadOnlyList<string> Dispatchable =
     [
-        H0, H05, H1, H2a, H2b, H3, H4, H4Shared, H4b, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
+        H0, H05, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
     ];
 }

@@ -214,6 +214,8 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 "has not completed SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md OR SKILL payload construction was bypassed.",
                 cancellationToken).ConfigureAwait(false);
         }
+        // T226: H4 writes the trimmed value to the vault (BuildTopologyConstantValues); Graph gets the same id.
+        containerTypeId = containerTypeId.Trim();
         if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,

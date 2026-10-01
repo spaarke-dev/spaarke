@@ -589,19 +589,69 @@ public sealed class H4KvSecretsPopulationHandlerTests
     }
 
     // =========================================================================
+    // T226 — from-topology-constants (SPE-ContainerTypeId) projection
+    // =========================================================================
+
+    // The value reaches the run from operator-maintained spaarke-constants.yaml (via the
+    // /provision-environment intake) — surrounding whitespace would otherwise be written
+    // into the vault as part of the id.
+    [Theory]
+    [InlineData("ct-guid")]
+    [InlineData("  ct-guid\n")]
+    public void BuildTopologyConstantValues_MapsContainerTypeIdRunParameterToCanonicalName(string raw)
+    {
+        var values = H4KvSecretsPopulationHandler.BuildTopologyConstantValues(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["containerTypeId"] = raw });
+
+        values.Should().ContainSingle()
+            .Which.Should().Be(new KeyValuePair<string, string>("SPE-ContainerTypeId", "ct-guid"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void BuildTopologyConstantValues_MissingOrBlankParameter_IsLeftOut(string? raw)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (raw is not null)
+        {
+            parameters["containerTypeId"] = raw;
+        }
+
+        H4KvSecretsPopulationHandler.BuildTopologyConstantValues(parameters).Should().BeEmpty(
+            "an absent value must surface as a resolver failure against the canonical name, never a blank secret");
+    }
+
+    [Fact]
+    public async Task HandleAsync_RunWithContainerTypeId_PassesItToTheWriterAsTopologyConstant()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret["containerTypeId"] = "ct-guid";
+        var repo = new FakeRepository(run, etag: "etag-t226-topology");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.TopologyConstantValues.Should().Contain("SPE-ContainerTypeId", "ct-guid");
+    }
+
+    // =========================================================================
     // Row A38a (task 205a, 2026-08-25) — secret-free omit via the task-126
     // FR-39 OmitCanonicalNames seam + positive migration marker
     // =========================================================================
 
+    // T226: ServiceBus-ConnectionString + AiSearch--AdminKey were removed from the catalog
+    // for every stamp, leaving BFF-API-ClientSecret as the only secret-free omit target.
     private static readonly string[] A38aOmitTargets =
     {
         "BFF-API-ClientSecret",
-        "ServiceBus-ConnectionString",
-        "AiSearch--AdminKey",
     };
 
     [Fact]
-    public async Task A38a1_SecretFreeTrue_UnionsThreeTargetsIntoExistingOmitSeam()
+    public async Task A38a1_SecretFreeTrue_UnionsTargetIntoExistingOmitSeam()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-a38a1");
@@ -654,7 +704,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
         writer.LastRequest!.OmitCanonicalNames.Should().Contain("Some-Operator-Chosen-Secret");
         writer.LastRequest.OmitCanonicalNames.Should().Contain("Another-One");
         writer.LastRequest.OmitCanonicalNames.Should().Contain(A38aOmitTargets);
-        writer.LastRequest.OmitCanonicalNames.Should().HaveCount(5);
+        writer.LastRequest.OmitCanonicalNames.Should().HaveCount(3,
+            "2 operator-chosen names + the 1 remaining A38a target (T226 removed 2 targets from the catalog)");
     }
 
     [Fact]
@@ -677,7 +728,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
-            "Q3 Path A rollback re-includes the three targets (regression path)");
+            "Q3 Path A rollback re-includes the A38a target (regression path)");
         marker.CallCount.Should().Be(0,
             "a rolled-back environment is not secret-free — the positive marker MUST NOT be applied");
     }
@@ -965,7 +1016,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         // transition. Non-HANDLER-09 tests exercise the OTHER seams; the
         // bootstrap step is a no-op success gate. The live-Azure path is
         // proven by ArmOperatorKvRbacBootstrapperTests.cs (fake-transport
-        // ArmClient) and by the H4/H4-shared HANDLER-09 tests here that inject
+        // ArmClient) and by the H4 HANDLER-09 tests here that inject
         // an explicit StubOperatorKvRbacBootstrapper.
         return new H4KvSecretsPopulationHandler(
             repo, manifest, writer, patcher, probe, granter,

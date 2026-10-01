@@ -448,6 +448,21 @@ public sealed class H8SpeContainerHandlerTests
         provisioner.LastRequest.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
+    [Fact]
+    public async Task AC17_ProvisionerRequest_ContainerTypeIdIsTrimmed_LikeH4sVaultWrite()
+    {
+        // T226: H4 writes the trimmed id to SPE-ContainerTypeId; Graph must receive the same id.
+        var run = BuildRun();
+        run.Parameters.NonSecret[H8SpeContainerHandler.ContainerTypeIdParameterKey] = $"  {ContainerTypeId}\n";
+        var repo = new FakeRepository(run, etag: "etag-17b");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        provisioner.LastRequest!.ContainerTypeId.Should().Be(ContainerTypeId);
+    }
+
     // ---------- helpers ----------
 
     private static H8SpeContainerHandler BuildHandler(

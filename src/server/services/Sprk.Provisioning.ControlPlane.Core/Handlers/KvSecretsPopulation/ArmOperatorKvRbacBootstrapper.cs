@@ -97,7 +97,7 @@ public sealed class ArmOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
         ArgumentNullException.ThrowIfNull(request);
 
         // (1) Guard: PrincipalObjectId must be a well-formed non-empty Guid.
-        //     H4/H4-shared pass string.Empty when interStepState.MiObjectId is
+        //     H4 passes string.Empty when interStepState.MiObjectId is
         //     absent (upstream H2a bug) — surface as domain Failure with a
         //     specific diagnostic (Resumable per H4 classification), NEVER a
         //     silent success + downstream 403 loop.
@@ -118,7 +118,7 @@ public sealed class ArmOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
         {
             return new OperatorKvRbacBootstrapOutcome.Failure(
                 $"KV RBAC bootstrap on vault '{request.KeyVaultName}' aborted: KeyVaultResourceId is empty. " +
-                "H4/H4-shared MUST derive this from subscription + rg + vault name.");
+                "H4 MUST derive this from subscription + rg + vault name.");
         }
         if (string.IsNullOrWhiteSpace(request.RoleDefinitionId))
         {

@@ -2,7 +2,7 @@
 // ISecretFreeMarkerApplier.cs
 //
 // Row A38a (task 205a, 2026-08-25) — positive secret-free migration marker
-// seam for H4/H4-shared. Auth-v4 §9.1 sentinel ruling: OMIT is the signal for
+// seam for H4. Auth-v4 §9.1 sentinel ruling: OMIT is the signal for
 // the credential slots themselves (a sentinel value produces an opaque
 // AADSTS7000215 at runtime); the POSITIVE record that an environment has
 // migrated therefore lives OUTSIDE the credential slots, as BOTH:
@@ -23,10 +23,10 @@
 //   would mix reasons-to-change. IDataverseEnvironmentRegistryClient is
 //   REUSED for the registry half (extended with UpdateCredentialModeAsync —
 //   extension over duplication).
-//   Extension — this seam is consumed by BOTH H4 (per-tenant vault; under
-//   Model 2 the per-customer dispatch fan-out invokes H4 once per vault, so
-//   the marker lands once per vault with no new iteration pass) and
-//   H4-shared (shared vault), keeping marker semantics in ONE place.
+//   Extension — this seam is consumed by H4 (per-customer vault; the dispatch
+//   fan-out invokes H4 once per vault, so the marker lands once per vault with
+//   no new iteration pass). Task 200's H4-shared (shared vault) was a second
+//   consumer until T226 retired it (2026-09-30); marker semantics stay in ONE place.
 //   Cost-of-doing-nothing — without the positive marker, a secret-free
 //   environment is indistinguishable from a mis-seeded one; rotation /
 //   seeding scripts (A38c) have no pre-check signal and silently re-seed —
@@ -34,7 +34,7 @@
 //
 // SEAM JUSTIFICATION (ADR-010): ≥2 impls from day 1 — production
 // ArmSecretFreeMarkerApplier (ArmClient tag ops + registry client) and
-// per-unit-test stubs in H4/H4-shared handler tests.
+// per-unit-test stubs in the H4 handler tests.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;

@@ -4,14 +4,7 @@
   "title": "Spaarke Provisioning Intake",
   "description": "Batch-mode intake schema for /provision-environment skill Step 1 (`--batch <path.json>`). Authored by customer-provisioning-orchestration-r1 task 203c per punch-list row A03. Consumed by the skill's Step 1.0 batch-mode path (validated with ajv-cli or equivalent Draft 2020-12 validator BEFORE POST /api/runs). Section 1f (environmentId auto-create) still runs when `environmentId` is omitted / null.",
   "type": "object",
-  "required": [
-    "customerId",
-    "tenantId",
-    "tenancyModel",
-    "controlPlaneEnv",
-    "profile",
-    "confirmationAcknowledgment"
-  ],
+  "required": ["customerId", "tenantId", "tenancyModel", "controlPlaneEnv", "profile", "confirmationAcknowledgment"],
   "additionalProperties": false,
   "properties": {
     "customerId": {
@@ -27,7 +20,7 @@
     "subscriptionId": {
       "type": "string",
       "format": "uuid",
-      "description": "Target Azure subscription id. REQUIRED for Model2 (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1 MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H4Shared/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2 allOf below."
+      "description": "Target Azure subscription id. REQUIRED for Model2 (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1 MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2 allOf below."
     },
     "tenancyModel": {
       "type": "string",
@@ -41,11 +34,7 @@
     },
     "profile": {
       "type": "string",
-      "enum": [
-        "spaarke-hosted-model1-trial",
-        "spaarke-hosted-model2",
-        "customer-owned-model2"
-      ],
+      "enum": ["spaarke-hosted-model1-trial", "spaarke-hosted-model2", "customer-owned-model2"],
       "description": "L2 API profile enum — MUST match L2 accepted values EXACTLY (per DS-5 c6-1). Any drift = L2 400."
     },
     "environmentId": {

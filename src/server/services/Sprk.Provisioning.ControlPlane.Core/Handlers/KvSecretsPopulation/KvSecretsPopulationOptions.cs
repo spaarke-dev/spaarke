@@ -61,16 +61,15 @@ public sealed class KvSecretsPopulationOptions
     /// <summary>
     /// Row A38a (auth-v4 §10.1 Δ1/Δ2 + §9.1 OMIT-is-the-signal; task 205a,
     /// 2026-08-25). When <c>true</c>, this environment runs on secret-free
-    /// BFF identity (MI-FIC per ADR-028 A4) and the three A38a credential
-    /// slots (<see cref="FileKvSecretManifest.SecretFreeIdentityOmitTargets"/>:
-    /// <c>BFF-API-ClientSecret</c>, <c>ServiceBus-ConnectionString</c>,
-    /// <c>AiSearch--AdminKey</c>) are (a) FILTERED from the entries
+    /// BFF identity (MI-FIC per ADR-028 A4) and the A38a credential slots
+    /// (<see cref="FileKvSecretManifest.SecretFreeIdentityOmitTargets"/>: since T226
+    /// only <c>BFF-API-ClientSecret</c> — the Service Bus connection string and AI Search
+    /// admin key were removed from the catalog for every stamp) are (a) FILTERED from the entries
     /// <see cref="FileKvSecretManifest"/> serves (downstream of its BINDING
     /// never-delete invariant — manifest.yaml rows are NEVER touched) and
     /// (b) unioned into the task-126 FR-39 <c>OmitCanonicalNames</c> seam by
-    /// H4/H4-shared so the writers mark them <see cref="KvSecretWriteAction.Omitted"/>
-    /// even if a non-filtering manifest impl (emergency
-    /// <see cref="StaticKvSecretManifest"/> revert) is DI-swapped back in.
+    /// H4 so the writers mark them <see cref="KvSecretWriteAction.Omitted"/>
+    /// even if a non-filtering manifest implementation is ever registered.
     /// Mirrors the BFF App Service setting
     /// <c>Graph__Credentials__RequireSecretFreeIdentity=true</c> (§10.2 Δ3).
     /// Default <c>false</c> — today's live client-secret state is unchanged

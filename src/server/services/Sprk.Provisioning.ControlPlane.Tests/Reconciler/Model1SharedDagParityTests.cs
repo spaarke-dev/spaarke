@@ -84,17 +84,16 @@ public sealed class Model1SharedDagParityTests
     [Theory]
     [InlineData("H0")]
     [InlineData("H0,H1")]
-    [InlineData("H0,H1,H2a")]                            // 4-way fan-out post-Bicep
-    [InlineData("H0,H1,H2a,H4")]                         // H3 unlocks
-    [InlineData("H0,H1,H2a,H4,H4-shared")]               // H4b unlocks
-    [InlineData("H0,H1,H2a,H4,H4-shared,H3")]            // H8 unlocks (H9 still gated)
-    [InlineData("H0,H1,H2a,H4,H4-shared,H4b,H3")]        // H9 finally unlocks
+    [InlineData("H0,H1,H2a")]                            // 3-way fan-out post-Bicep
+    [InlineData("H0,H1,H2a,H4")]                         // H3 + H4b unlock
+    [InlineData("H0,H1,H2a,H4,H3")]                      // H8 unlocks (H9 still gated)
+    [InlineData("H0,H1,H2a,H4,H4b,H3")]                  // H9 finally unlocks
     [InlineData("H0,H1,H2a,H5")]                         // H6 unlocks
-    [InlineData("H0,H1,H2a,H5,H4,H4-shared,H6,H7,H10")]  // H11 unlocks
-    [InlineData("H0,H1,H2a,H5,H4,H4-shared,H6,H7,H10,H11")]           // H12a+H12b unlock
-    [InlineData("H0,H1,H2a,H5,H4,H4-shared,H6,H7,H10,H11,H12a,H12b")] // H12c 3-way join
-    [InlineData("H0,H1,H2a,H5,H4,H4-shared,H6,H7,H10,H11,H12a,H12b,H12c")]      // H14
-    [InlineData("H0,H1,H2a,H5,H4,H4-shared,H6,H7,H10,H11,H12a,H12b,H12c,H14")]  // H13 final
+    [InlineData("H0,H1,H2a,H5,H4,H6,H7,H10")]            // H11 unlocks
+    [InlineData("H0,H1,H2a,H5,H4,H6,H7,H10,H11")]                     // H12a+H12b unlock
+    [InlineData("H0,H1,H2a,H5,H4,H6,H7,H10,H11,H12a,H12b")]           // H12c 3-way join
+    [InlineData("H0,H1,H2a,H5,H4,H6,H7,H10,H11,H12a,H12b,H12c")]      // H14
+    [InlineData("H0,H1,H2a,H5,H4,H6,H7,H10,H11,H12a,H12b,H12c,H14")]  // H13 final
     public void ComputeReadyHandlers_IsIdenticalForBothTenancyModels(string completedCsv)
     {
         var completed = completedCsv.Split(',');
@@ -148,7 +147,7 @@ public sealed class Model1SharedDagParityTests
     //   (candidates for the deferred integration-test audit to verify are
     //   truly tenancyModel-agnostic OR to gain an explicit branch):
     //     - H4KvSecretsPopulationHandler
-    //     - H4SharedKvSecretsPopulationHandler  (name implies Model1-only usage; verify)
+    //     - (H4SharedKvSecretsPopulationHandler was listed here; RETIRED T226 2026-09-30.)
     //     - H4bBulkAppSettingsHandler
     //     - H5DataverseEnvCreationHandler
     //     - H6SolutionImportHandler

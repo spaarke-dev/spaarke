@@ -149,3 +149,97 @@ DocIntel), warnings + suggestions below.
    POML → completed + completion-notes; TASK-INDEX 226 ✅ (+ T221 note); plan §3 (manifest bullet ✅) / §4 G1 ✅;
    **ONE commit** with all T226 code (incl. the 8 deleted files) — beware: `git commit` takes everything staged;
    push.
+
+## 7. Completion record (2026-09-30, SESSION 27)
+
+**Outcome against the goal.** No provisioning run writes, and no customer BFF reads, a credential or endpoint of a
+`sprksharedprod-*` resource. `from-shared-service`, H4-shared and its DAG edge are gone (H4b ← H4 only). Final
+per-secret state (owner §5 + D13):
+
+| Secret | State after T226 | Writer | Follow-up |
+|---|---|---|---|
+| `ServiceBus-ConnectionString` | removed — BFF uses the stamp UAMI (FQNS) | — | — |
+| `AiSearch--AdminKey` | removed — BFF uses the stamp UAMI | — | G16 / T244 (service is keys-only today) |
+| `AzureOpenAI-ApiKey` | removed — BFF uses the stamp UAMI | — | T230 measures E-2 on a customer account |
+| `Storage-ConnectionString` | removed — no reader | — | — |
+| `PromptFlow-Endpoint` / `-Key` | removed (D5) | — | — |
+| `DocumentIntelligence-ApiKey` | **kept, interim** (D13) — customer's own DocIntel | `customer.bicep` | T243 removes |
+| `Redis-ConnectionString` | **kept, interim** — customer's own cache | `customer.bicep` | T242 (Azure Managed Redis, Entra-only) |
+| `BingSearch-ApiKey`, `LlamaParse-ApiKey` | unchanged; labelled Spaarke-shared vendor keys (D5) | H4 (run parameter) | — |
+
+**Also fixed (found during T226).**
+- Production defect: the C# manifest reader and the generator rejected task 214's `from-topology-constants`, so
+  **every H4 run failed `ManifestReadFailed`**. Reader, enum (`FromTopologyConstants = 6`), resolver and generator
+  now agree; H4 passes the run's `containerTypeId` (trimmed). This is the root cause of 17 of the 23 task-221
+  baseline failures (`FileKvSecretManifestTests`) — all 17 now pass; the 6 `CustomerRunGuardModulePostConfigureTests`
+  remain (T221).
+- Generator duplicate-key order: `AzureAd__TenantId` / `AzureAd__ClientId` are emitted twice (a secret's KV
+  reference and a `per_env_settings` value); `az webapp config appsettings set` keeps the last one, and the
+  unstable `Sort-Object` let T226's line removals flip TenantId to the KV reference. The sort now breaks ties by
+  insertion order (KV refs, then per-env values), so the per-env value always wins — the pre-T226 output.
+- Scope note (adr-check W3): the `from-topology-constants` fix adds code inside existing files
+  (`KvSecretValueSource.FromTopologyConstants`, `KvSecretWriteRequest.TopologyConstantValues`,
+  `H4KvSecretsPopulationHandler.BuildTopologyConstantValues`, a resolver branch). It is in scope because without
+  it H4 cannot run at all; no new type or file.
+- `StaticKvSecretManifest` deleted — unregistered, and its list had drifted (it served `AzureOpenAI-ApiKey` as a
+  random `Generated` value).
+- `prereqs.yaml` PRQ-E-06 retired (it granted the L2 identity key-reading roles on the shared services for
+  H4-shared). `validate.ps1` accepts `status: retired` entries without a recipe and the skill's Step 0.5b skips
+  them; PRQ-E-13 is scoped `once_per_customer`. The `provisioning-prereqs-validate` CI check (runs on every PR and
+  on master) was **red before T226** on PRQ-T-07 + PRQ-E-13 and is green now.
+- Docs that described the retired flow: `.claude/patterns/provisioning/manifest-driven-secret-catalog.md`
+  (rewritten against the code), `handler-registration-completeness.md`, `.claude/constraints/provisioning.md`,
+  `provision-environment` SKILL, `PROVISIONING-PREREQUISITES.md`, catalog README; `.claude/CHANGELOG.md` entry.
+
+**Quality gates — second round on the delta (code-review + adr-check, 2026-09-30).** No Critical findings.
+Applied:
+- 🔴 `/provision-environment` Step 4.0 never sent `containerTypeId` (Step 0.5b read it; H8's own diagnostic says
+  Step 4.0 populates it) → every run would fail H4's `SPE-ContainerTypeId` write and H8. The payload now sends it.
+- Generator duplicate-key tie-break (above); H8 trims `containerTypeId` like H4 (test added); a test pins H4's
+  topology-constant map to the manifest (both directions); the redundant H4b DAG test was merged into the
+  exact-set test.
+- Doc accuracy: the resource inventory rows; `handler-registration-completeness.md` and
+  `.claude/constraints/provisioning.md` corrected against the code (`AddKeyedScoped` forwarders, `HandleAsync`,
+  `Success`/`Failure(FailureClass,…)`, `Dispatchable` + `HandlerDependencies` steps, `NoHandler` dead-letter, no
+  `HandlerIdempotencyTests` class); `customer.bicep` AI Search G16 caveat; `intake.schema.json`; prerequisites guide
+  headings; `IKvSecretManifest` `FromBicepOutput` doc; `.claude/CHANGELOG.md`.
+- ADR-028 tension row added to `spec.md` § ADR Tensions (Redis + DocIntel keys, Path A, owner D13).
+- New plan gap **G21** (secret-free default for new stamps → T225b).
+Not applied (recorded): unused `OPENAI_ENDPOINT` / `AI_SEARCH_ENDPOINT` / `DOC_INTELLIGENCE_ENDPOINT` settings and
+the modules' key outputs in `customer.bicep` (T244 owns the secret-bearing outputs); `ContentSafety-ApiKey` belongs on
+the D13 backlog; `IKvSecretManifest` stays a seam (one production implementation + the H4 test double — the
+project's convention).
+
+**Final verification.** Builds 0 warnings / 0 errors (ControlPlane Api, Worker, Tests; Sprk.Bff.Api).
+ControlPlane.Tests 1937 passed / 6 failed (the `CustomerRunGuardModulePostConfigureTests` baseline only) / 1 skipped.
+ArchTests 337/337. Generator `-Verify` OK. `prereqs.yaml` validator OK. `customer.json` = fresh `az bicep build`.
+Zero `sprksharedprod` / `from-shared-service` in the manifest and generated artifacts. Zero files under
+`src/server/api/Sprk.Bff.Api/**` changed.
+
+**Pre-checks and measurements.**
+- §7.9 pre-check: no live App Service was built from `customer.bicep` (live: `spaarke-bff-dev`, `spaarke-bff-demo`,
+  `sprksharedprod-api` — none customer-shaped). T226 deletes no live Key Vault secret; it changes what a future
+  stamp writes. POML escalation trigger 1 did not fire.
+- BFF publish size: N/A — no file under `src/server/api/Sprk.Bff.Api/**` changed, no package added.
+- Model 2 (D3): `customer.bicep` is shared by both models; MI behaves identically there. No Model 2 test or DAG edge
+  depended on H4-shared.
+- Orphan risk: a queued or crash-recovered `H4-shared` message would dead-letter as `NoHandler` — harmless, and no
+  live run exists.
+
+**ADR tensions (CLAUDE.md §6.5) — documented, owner-decided** (row added to `spec.md` § ADR Tensions).
+- ADR-028 (MI for outbound calls; exceptions E-1, E-2 only): the Redis key and the Document Intelligence key are
+  non-MI outbound credentials not on the exception list. Path: keep as an **interim, time-boxed deviation** under
+  owner D13 (keyless stamps implemented incrementally), removed by T242 / T243; the ADR-028 amendment that records
+  D13 is T235.
+- ADR-028 E-2 (OpenAI 401 under MI on the dev `AIServices` account): the customer stamp uses MI for OpenAI by owner
+  decision; T230 exercises one OpenAI call on the first stamp.
+
+**Next blockers before T186 (plan §4):** G16 (AI Search keys-only + L2 Search role), G17 (→ T243), G18 (SPE
+container ids labelled `from-bicep-output`, unwritten → H4 quarantine), G19 (missing `containerTypeId` →
+QuarantineRequired, no way to add it to a run), G20 (Model 1 still deploys `model1-shared` → T225b), **G21 (new;
+adr-check W5)** — `RequireSecretFreeIdentity` defaults `false` everywhere, so H4 serves `BFF-API-ClientSecret` on a
+new stamp → T225b. `customer.bicep` still outputs the Storage + Service Bus connection strings (read only by the
+deprecated `Provision-Customer.ps1`); dropping them is already in T244.
+
+**Observation (not fixed):** `scripts/provisioning-prereqs/validate-recipe-authoring.ps1` is not wired into CI and
+fails on most recipes (missing emptiness guards) — predates T226.

@@ -118,11 +118,6 @@ Write-Host "  BINDING never-delete: $($script:BindingNeverDelete -join ', ')"
 Write-Host '=================================================================='
 Write-Host ''
 
-# ---- AiSearch--AdminKey (ai) ----
-# Purpose: Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
-# Value source: from-shared-service
-Write-Host '  SKIP: AiSearch--AdminKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source search:sprksharedprod-search)' -ForegroundColor Gray
-
 # ---- AiSearch-Endpoint (ai) ----
 # Purpose: Azure AI Search service endpoint.
 # Value source: from-bicep-output
@@ -140,11 +135,6 @@ if ($SeedPlaceholders) {
 } else {
     Write-Host '  SKIP: AppInsights-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
 }
-
-# ---- AzureOpenAI-ApiKey (ai) ----
-# Purpose: Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
-# Value source: from-shared-service
-Write-Host '  SKIP: AzureOpenAI-ApiKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source cognitiveservices:sprksharedprod-openai)' -ForegroundColor Gray
 
 # ---- AzureOpenAI-Endpoint (ai) ----
 # Purpose: Azure OpenAI resource endpoint (https://{name}.openai.azure.com/).
@@ -184,10 +174,10 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
 }
 
 # ---- BingSearch-ApiKey (ai) ----
-# Purpose: Bing Search v7 API key.
+# Purpose: Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
 # Value source: from-run-parameter
 if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BingSearch-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Bing Search v7 API key.' -Category 'ai'
+    Set-VaultSecret -Name 'BingSearch-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.' -Category 'ai'
 } else {
     Write-Host '  SKIP: BingSearch-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
 }
@@ -275,9 +265,13 @@ if ($SeedPlaceholders) {
 }
 
 # ---- DocumentIntelligence-ApiKey (ai) ----
-# Purpose: Azure Document Intelligence API key.
-# Value source: from-shared-service
-Write-Host '  SKIP: DocumentIntelligence-ApiKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source cognitiveservices:sprksharedprod-docintel)' -ForegroundColor Gray
+# Purpose: Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
+# Value source: from-bicep-output
+if ($SeedPlaceholders) {
+    Set-VaultSecret -Name 'DocumentIntelligence-ApiKey' -Value 'placeholder-from-bicep-output' -Description 'Azure Document Intelligence API key, from the customer''s OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF''s text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.' -Category 'ai'
+} else {
+    Write-Host '  SKIP: DocumentIntelligence-ApiKey (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
+}
 
 # ---- DocumentIntelligence-Endpoint (ai) ----
 # Purpose: Azure Document Intelligence endpoint.
@@ -307,41 +301,22 @@ if ($SeedPlaceholders) {
 }
 
 # ---- LlamaParse-ApiKey (ai) ----
-# Purpose: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.
+# Purpose: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
 # Value source: from-run-parameter
 if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'LlamaParse-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.' -Category 'ai'
+    Set-VaultSecret -Name 'LlamaParse-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.' -Category 'ai'
 } else {
     Write-Host '  SKIP: LlamaParse-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- PromptFlow-Endpoint (ai) ----
-# Purpose: AI Foundry Prompt Flow endpoint.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'PromptFlow-Endpoint' -Value 'placeholder-from-run-parameter' -Description 'AI Foundry Prompt Flow endpoint.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: PromptFlow-Endpoint (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- PromptFlow-Key (ai) ----
-# Purpose: AI Foundry Prompt Flow API key.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'PromptFlow-Key' -Value 'placeholder-from-run-parameter' -Description 'AI Foundry Prompt Flow API key.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: PromptFlow-Key (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- Redis-ConnectionString (data-services) ----
 # Purpose: Azure Cache for Redis connection string.
-# Value source: from-shared-service
-Write-Host '  SKIP: Redis-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source redis:sprksharedprod-redis)' -ForegroundColor Gray
-
-# ---- ServiceBus-ConnectionString (data-services) ----
-# Purpose: Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
-# Value source: from-shared-service
-Write-Host '  SKIP: ServiceBus-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source servicebus:sprksharedprod-servicebus)' -ForegroundColor Gray
+# Value source: from-bicep-output
+if ($SeedPlaceholders) {
+    Set-VaultSecret -Name 'Redis-ConnectionString' -Value 'placeholder-from-bicep-output' -Description 'Azure Cache for Redis connection string.' -Category 'data-services'
+} else {
+    Write-Host '  SKIP: Redis-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
+}
 
 # ---- SPE-CommunicationArchiveContainerId (spe) ----
 # Purpose: SPE communication-archive container ID (archived email / communication payloads).
@@ -353,13 +328,9 @@ if ($SeedPlaceholders) {
 }
 
 # ---- SPE-ContainerTypeId (spe) ----
-# Purpose: SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'SPE-ContainerTypeId' -Value 'placeholder-from-bicep-output' -Description 'SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.' -Category 'spe'
-} else {
-    Write-Host '  SKIP: SPE-ContainerTypeId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Purpose: SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
+# Value source: from-topology-constants
+Write-Host '  SKIP: SPE-ContainerTypeId (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray
 
 # ---- SPE-DefaultContainerId (spe) ----
 # Purpose: SPE default container ID (per-customer root container for uploaded files).
@@ -369,11 +340,6 @@ if ($SeedPlaceholders) {
 } else {
     Write-Host '  SKIP: SPE-DefaultContainerId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
 }
-
-# ---- Storage-ConnectionString (data-services) ----
-# Purpose: Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
-# Value source: from-shared-service
-Write-Host '  SKIP: Storage-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source storage:sprksharedprodsa)' -ForegroundColor Gray
 
 # ---- TenantId (identity) ----
 # Purpose: Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.

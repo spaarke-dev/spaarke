@@ -39,7 +39,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 | L2 REST surface | `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/clear-quarantine` |
 | L2 audience (token) | `api://spaarke.com/provisioning-controlplane-{env}` |
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
-| Handler catalog | 20 handlers per run (Model 1 Shared: 19 — skips H0.5; Model 2 Dedicated: 19 — skips H11): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4-shared / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14. Per `HandlerIds.Dispatchable` in `Sprk.Provisioning.ControlPlane.Core` — 21 registered including H0 which is entry-point (not in Dispatchable). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
+| Handler catalog | 20 handlers per run (Model 1 Shared: 19 — skips H0.5; Model 2 Dedicated: 19 — skips H11): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14 — the 20 ids in `HandlerIds.Dispatchable` (`Sprk.Provisioning.ControlPlane.Core`), H0 included. H4-shared was retired by T226 (2026-09-30). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
 | Trap catalog | 6 traps T1-T6 (see design §4B) — each handler asserts its trap clear before reporting success |
 | Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests + verified at H13 acceptance |
 | Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
@@ -223,12 +223,12 @@ git status --porcelain          # note uncommitted changes (informational; not b
 
 Runs create `runs/{runId}.md` in the operator's cwd. If cwd is not a git repo, warn: "handoff report will be written to cwd but won't be checkpointed to git — consider running from repo root."
 
-#### 0f. L2 deployment probe (COMP-04 addition SESSION 15 — verifies deployed L2 image is current AND contains H4-shared/H4b)
+#### 0f. L2 deployment probe (COMP-04 addition SESSION 15 — verifies deployed L2 image is current AND contains H4b)
 
 Before iterating prereqs.yaml or issuing the run POST, verify L2 App Service is:
 - Reachable (`az webapp show` state == Running)
 - Healthy (`/healthz` returns 200)
-- Current image (build-tag assertion — the deployed image must contain the SESSION 15 Wave 2 HANDLER-01 DAG fix; without it, H4-shared/H4b never dispatch and the whole r1 F19/F20 automation is inert on the dispatched run)
+- Current image (build-tag assertion — the deployed image must contain the SESSION 15 Wave 2 HANDLER-01 DAG fix; without it, H4b never dispatches and the r1 F20 automation is inert on the dispatched run)
 
 ```powershell
 $l2WebAppName = "spaarke-provisioning-controlplane-$env"
@@ -369,6 +369,9 @@ if ($env) { $scopesToCheck += 'once_per_env' }  # $env from arg or batch intake
 $results = @()
 foreach ($prereq in $manifest.prereqs) {
   if ($prereq.scope -notin $scopesToCheck) { continue }
+  # Retired entries keep their id (so references do not dangle) but carry no check_recipe;
+  # without this skip, `bash -c ""` exits 0 and a retired prerequisite reports as a passed check.
+  if ($prereq.status -eq 'retired') { continue }
 
   # Full substitution chain (SKILL-08 + PLX-01..10). Missing token → literal-in-cli
   # (caught by the regex sanity check below).
@@ -1122,13 +1125,12 @@ RUN PLAN
     H2b       AI Search index deploy (7 canonical indexes)
     H3        KV secret bootstrap
     H4        canonical secret population (per-tenant KV; literal values)
-    H4-shared canonical secret population from source Azure services (shared KV; extract-from-source recipes — F19; task 200)
     H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201)
     H5        Dataverse environment creation (20-min timeout for Model 2)
     H6        Dataverse solutions import (8 solutions, dependency-ordered)
     H7        env-var writes to customer env
     H8        SPE container-type creation (empirically near-instant, 25h fallback ceiling; H8.a re-verifies)
-    H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4-shared + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)
+    H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4 + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)
     H10       Dataverse App User creation (UAMI-based)
     H11       demo user provisioning (Model 1 only — trial users; skipping for Model 2)
     H12a      AI seed chain (playbooks + embeddings)
@@ -1220,7 +1222,7 @@ $body = @{
   profile       = $profile                # one of 3 enum values per Step 1e
   nonSecretParameters = @{
     tenantId                    = $tenantId              # I1 invariant per Wave 0 Decision 1
-    subscriptionId              = $resolvedSubscriptionId # ISH-02 — consumed by H1/H2a/H2b/H4/H4b/H4Shared/H8/H9/H13/H14
+    subscriptionId              = $resolvedSubscriptionId # ISH-02 — consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14
     openAiLocation              = $resolvedOpenAiLocation # Bicep param name (openAiLocation), NOT openAiRegion; intake field renamed at the boundary
     confirmationAcknowledgment  = $confirmationPhrase     # verbatim "proceed with provisioning"
     intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
@@ -1229,6 +1231,7 @@ $body = @{
     estimatedMonthlyUsd         = $estimatedMonthlyUsd    # COMP-10 gate input (Bucket A HIGH#8 SESSION 18); null → H0 log-only skips
     costEnvelopePolicy          = $script:BatchCostEnvelopePolicy  # COMP-10 gate policy (Bucket A HIGH#8 SESSION 18); default 'abortOnOverrun' in batch loader. Interactive mode leaves $script:BatchCostEnvelopePolicy null → H0 treats null as abortOnOverrun-equivalent per its default branch.
     operatorUpn                 = $operatorUpn
+    containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4 writes SPE-ContainerTypeId from it; H8 creates the container with it. Missing → both fail (T226, 2026-09-30: was read but never sent)
     # other operator-supplied intake fields (notes, etc.) can be added here; the L2 side
     # treats nonSecretParameters as a bag and ignores unknown keys (§4D-adjacent design).
     # DO NOT include the SKILL-LOCAL batch policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode /
@@ -2500,7 +2503,7 @@ Before r1 can claim E2E-no-human-interaction:
 9. **Operator-RBAC-bootstrap step** (F15): idempotent pre-H4 grant of `Key Vault Secrets Officer` to operator on every RBAC-enabled KV, via `az rest` (F15b bypass). Uses `az ad signed-in-user show` for OID auto-detect. Silent success on re-run.
 10. **Bicep hardening for kvRefIdentity + UAMI-KV RBAC** (F16): (a) reject `keyVaultReferenceIdentity='SystemAssigned'` combined with UserAssigned-only identity in the Bicep template; (b) auto-emit role assignments for attached UAMIs on referenced KVs. Backstop: T1 handler verifies + auto-remediates any drift post-deploy.
 11. **Fresh-env BFF deploy handler** (F17): H9 currently exists as a catalog name only. Needs code that (a) detects empty-App-Service state, (b) builds + zip-deploys BFF, (c) polls `/healthz` with warm-up backoff, (d) sequences AFTER F16 remediation so BFF starts in configured state (not degraded). **This session verified: 46 MB compressed publish passes NFR-01 60 MB ceiling; `az webapp deploy --type zip` uploads cleanly but Site Startup Probe fails when config chain (F20) unresolved.**
-12. **H4-shared handler + canonical secret manifest** (F19): sibling to H4 (per-tenant); H4-shared extracts keys from source Azure services (AI Search admin key, Cog Svc key1s, SB RootManageSharedAccessKey, Storage conn string, Redis composed conn string) and seeds to shared KV under canonical secret names. Initial 6-secret manifest: `AiSearch--AdminKey`, `DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`, `storage-connection-string`, `redis-connection-string` (must MATCH the App Service `@Microsoft.KeyVault(SecretName=...)` refs). **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml). Extends task 084 manifest schema with `source: { type, service-ref }` field. Includes IArmKeyVaultRefProbe post-condition (uses F16-remediated kvRefIdentity). Bicep hardening implied: L2 UAMI needs 5 new RBAC assignments on source services (`Cognitive Services User`, `Search Service Contributor`, `Azure Service Bus Data Owner`, `Storage Account Contributor`, `Redis Cache Contributor`).**
+12. **H4-shared handler + canonical secret manifest** (F19) — *H4-shared shipped (task 200) and was RETIRED by T226 (2026-09-30): customer stamps never read a shared service's credential; the manifest half stands.* Original remediation item: sibling to H4 (per-tenant); H4-shared extracts keys from source Azure services (AI Search admin key, Cog Svc key1s, SB RootManageSharedAccessKey, Storage conn string, Redis composed conn string) and seeds to shared KV under canonical secret names. Initial 6-secret manifest: `AiSearch--AdminKey`, `DocumentIntelligence-ApiKey`, `AzureOpenAI-ApiKey`, `servicebus-connection-string`, `storage-connection-string`, `redis-connection-string` (must MATCH the App Service `@Microsoft.KeyVault(SecretName=...)` refs). **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/200-implement-h4-shared-kv-source-extraction-handler.poml). Extends task 084 manifest schema with `source: { type, service-ref }` field. Includes IArmKeyVaultRefProbe post-condition (uses F16-remediated kvRefIdentity). Bicep hardening implied: L2 UAMI needs 5 new RBAC assignments on source services (`Cognitive Services User`, `Search Service Contributor`, `Azure Service Bus Data Owner`, `Storage Account Contributor`, `Redis Cache Contributor`).**
 13. **H4b-BulkAppSettings handler** (F20/F20a): CRITICAL NEW HANDLER. Reads canonical BFF app-settings template (~40 IOptions modules × ~2-4 settings each ≈ 80-160 app settings) + resolves KV refs + per-env inputs (TenantId, BFF ClientId, ContainerTypeId, WebhookSigningKeys, EmailProcessing WebhookSigningKey), calls `az webapp config appsettings set --settings k1=v1 k2=v2 ...` in single batch to trigger ONE restart cycle. Manifest source: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § App Service settings. **This handler is the difference between "BFF App Service exists" and "BFF actually boots" — without it, F20 chain progressively reveals ~40 missing configs.** **📝 Handler POML designed 2026-08-24 SESSION 3: [`projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml`](../../../projects/customer-provisioning-orchestration-r1/tasks/201-implement-h4b-bulk-appsettings-handler.poml). Introduces NEW canonical manifest at `scripts/canonical-app-settings/manifest.yaml` (sibling to task 084 secret-catalog). Diff-first idempotency preserves operator overrides. IHealthzProbe polls `/healthz` with 8-min backoff + parses container docker-logs on failure to extract fail-fast module name for actionable diagnostic. Sequencing: H4-shared || H4-per-tenant → H4b → H9 → BFF boots configured.**
 14. **F16 Bicep hardening (extend)**: (a) never emit `keyVaultReferenceIdentity='SystemAssigned'` when only UserAssigned attached, (b) auto-emit role assignments for attached UAMIs on referenced KVs — **AND** (c) via F16.5 discovery: T1 handler skips `az webapp update --set keyVaultReferenceIdentity=...` (returns Bad Request); goes straight to `az rest --method patch` on the site resource with `{"properties":{"keyVaultReferenceIdentity":"..."}}` body.
 

@@ -438,8 +438,8 @@ public static class RunsEndpoints
         // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
         // 2026-08-27): for Model2Dedicated runs, subscriptionId MUST be present
         // in nonSecretParameters (per ADR-027 D4 subscription-per-customer +
-        // intake.schema.json Model2Dedicated allOf). Ten downstream handlers
-        // (H1, H2a, H2b, H4, H4b, H4Shared, H8, H9, H13, H14) read
+        // intake.schema.json Model2Dedicated allOf). Nine downstream handlers
+        // (H1, H2a, H2b, H4, H4b, H8, H9, H13, H14) read
         // NonSecret["subscriptionId"] and hard-stop on absence — H1 typically
         // fails within ~20s with MissingSubscriptionId, and the operator has
         // no post-CreateRun add-nonSecret endpoint to recover.
@@ -461,8 +461,8 @@ public static class RunsEndpoints
         {
             return BadRequest(httpContext,
                 "nonSecretParameters['subscriptionId'] is required for tenancyModel='Model2' " +
-                "(ADR-027 D4 subscription-per-customer). Ten downstream handlers (H1/H2a/H2b/H4/H4b/" +
-                "H4Shared/H8/H9/H13/H14) read run.Parameters.NonSecret['subscriptionId']; a missing value " +
+                "(ADR-027 D4 subscription-per-customer). Nine downstream handlers (H1/H2a/H2b/H4/H4b/" +
+                "H8/H9/H13/H14) read run.Parameters.NonSecret['subscriptionId']; a missing value " +
                 "would fail H1 subscription-readiness with MissingSubscriptionId within ~20s and leave " +
                 "the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
                 "Model1 runs are exempt — the skill auto-injects the Spaarke shared sub-id.");

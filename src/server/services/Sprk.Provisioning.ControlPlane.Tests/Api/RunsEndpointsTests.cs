@@ -839,7 +839,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     // -------------------------------------------------------------------------
     // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
     // 2026-08-27) — Model2Dedicated CreateRun MUST fail-fast with 400 when
-    // nonSecretParameters['subscriptionId'] is absent. Ten downstream handlers
+    // nonSecretParameters['subscriptionId'] is absent. Nine downstream handlers
     // hard-stop on absence with MissingSubscriptionId; surfacing at intake
     // saves a minimum ~20s H1 dispatch + gives operators a fixable diagnostic.
     // Mirrors the intake.schema.json Model2Dedicated allOf constraint.

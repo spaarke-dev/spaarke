@@ -1,9 +1,15 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 2 · **Last Updated**: 2026-09-28
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 2)
+> **Version**: 3 · **Last Updated**: 2026-09-30
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 3)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v3 (2026-09-30, `customer-provisioning-orchestration-r1` T226)**: `PRQ-E-06` **retired** — it granted the L2
+> identity key-reading roles on the shared source services for the H4-shared handler, which T226 retired
+> (every customer secret now comes from the customer's own resources). `PRQ-E-13` is scoped
+> `once_per_customer` (its check needs `{customerId}`; the skill already did not run it). `validate.ps1`
+> accepts retired entries without a `check_recipe`, and the skill's Step 0.5b skips them.
 >
 > **v2 (2026-09-28, `unified-access-control-r2`)**: `PRQ-T-07` **retired** per D-12 + D-13 — there is no
 > shared/multitenant BFF app registration in either deployment model; the BFF app registration is per
@@ -47,8 +53,8 @@ Prereqs are grouped by **scope**:
 |---|---|---|
 | `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
-| `once_per_env` | 13 | `PRQ-E-01` … `PRQ-E-13` |
-| `once_per_customer` | 7 | `PRQ-C-01` … `PRQ-C-07` |
+| `once_per_env` | 11 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12`; ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_customer` | 8 | `PRQ-C-01` … `PRQ-C-07`, `PRQ-E-13` (id kept; scope corrected 2026-09-30) |
 | **Total** | **32** | |
 
 *(N.B. count is 32 not 27 in the sum — table above lists actual prereq IDs; some scopes have more entries than the 27-headline count. Authoritative count is the YAML.)*
@@ -113,7 +119,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-S-04 | L2 UAMI subscription Contributor | Spaarke admin | H2a `ArmDeploymentRunner` 403s |
 | PRQ-S-05 | Operator has Owner OR Contributor+UAA on sub | Sub owner | F15/F18 — operator KV data-plane bootstrap 403 |
 
-### Once-per-env (13)
+### Once-per-env (11 active + 1 retired)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -122,16 +128,15 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-03 | L2 UAMI Storage Blob Data Reader on artifacts storage | Spaarke admin | H2a/H9 artifact download 403 |
 | PRQ-E-04 | L2 UAMI AcrPull on platform ACR | Spaarke admin | Sidecar image pull fails at H14a dispatch |
 | PRQ-E-05 | L2 UAMI Website Contributor on target BFF App Service | Spaarke admin | H4b Kudu docker-log fetcher degraded to generic diagnostic |
-| PRQ-E-06 | L2 UAMI service-specific RBAC on 6 shared source services | Spaarke admin | H4-shared cannot extract secrets; H4b cannot bind KV refs |
+| ~~PRQ-E-06~~ | 🔴 **RETIRED 2026-09-30 (T226)** — was *"L2 UAMI service-specific RBAC on 6 shared source services"* (for the H4-shared handler) | — | **None.** No handler reads a shared service's keys; H4b never depended on these roles. |
 | PRQ-E-07 | L2 UAMI Graph app-role grants | Spaarke admin (script) | L2 H7/H10/H11/H12c 403 silently on every Graph call |
 | PRQ-E-08 | L2 UAMI Dataverse App User (Path X) on admin env | Spaarke admin | L2 cannot read/write `sprk_dataverseenvironment` registry rows |
 | PRQ-E-09 | Platform KV secrets pre-seeded | Spaarke admin (script) | L2 config validation returns garbage strings (T1-family silent fail) |
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
-| PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 
-### Once-per-customer (7)
+### Once-per-customer (8)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -142,6 +147,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-05 | Customer admin consent for that customer's BFF app registration (**Model 2 only** — Model 1 requires no H0.5 consent) | Customer tenant admin | H0.5 timeout; H10 verification fails |
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
+| PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 
 ---
 

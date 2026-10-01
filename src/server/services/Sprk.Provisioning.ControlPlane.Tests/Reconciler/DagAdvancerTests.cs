@@ -9,24 +9,23 @@
 //   1. Empty completedPhases         -> nothing ready (H0 dispatched by endpoint)
 //   2. H0 completed                  -> H1 ready
 //   3. H1 completed                  -> H2a ready
-//   4. H2a completed                 -> {H2b, H4, H4-shared, H5} ready (4-way fan-out post-Bicep;
-//                                      task 200's H4-shared joins the H2a-triggered set)
-//   5. H2a + H4 completed            -> {H2b, H3, H4-shared, H5} ready (H3 unlocks after H4)
-//   6. H2a + H4 + H4-shared complete -> {H2b, H3, H4b, H5} ready (H4b unlocks when BOTH KV
-//                                      populations complete; task 201 / F20 gate)
-//   7. H2a + H4 + H3 completed       -> {H2b, H5, H4-shared, H8} ready (H8 fires from H3; H9
+//   4. H2a completed                 -> {H2b, H4, H5} ready (3-way fan-out post-Bicep)
+//   5. H2a + H4 completed            -> {H2b, H3, H4b, H5} ready (H3 + H4b unlock after H4;
+//                                      task 201 / F20 gate — T226 retired H4-shared, so H4b
+//                                      needs H4 only)
+//   6. H2a + H4 + H3 completed       -> {H2b, H4b, H5, H8} ready (H8 fires from H3; H9
 //                                      still blocked because H4b not landed — EXEC-01 gate)
-//   8. H2a + H4 + H4-shared + H4b + H3 -> {H2b, H5, H8, H9} ready (H9 finally unlocks)
-//   9. H2a + H5 completed            -> {H2b, H4, H4-shared, H6} ready (H6 unlocks after H5)
-//  10. up through H10 completed      -> H11 ready
-//  11. H11 completed                 -> {H12a, H12b} ready (parallel — H12b does NOT need H12a)
-//  12. H12a + H12b + H2a completed   -> H12c ready (3-way join per handler code)
-//  13. H12c completed                -> H14 ready
-//  14. H14 completed                 -> H13 ready
-//  15. Terminal status Completed/Failed/Cancelled/Quarantined -> empty
-//  16. H0.5 is NEVER dispatched by the reconciler (entry point)
-//  17. Handler already in completedPhases is NEVER re-dispatched
-//  18. HANDLER-01/EXEC-01 verification shape tests (H4-shared / H4b / H9-gate)
+//   7. H2a + H4 + H4b + H3           -> {H2b, H5, H8, H9} ready (H9 finally unlocks)
+//   8. H2a + H5 completed            -> {H2b, H4, H6} ready (H6 unlocks after H5)
+//   9. up through H10 completed      -> H11 ready
+//  10. H11 completed                 -> {H12a, H12b} ready (parallel — H12b does NOT need H12a)
+//  11. H12a + H12b + H2a completed   -> H12c ready (3-way join per handler code)
+//  12. H12c completed                -> H14 ready
+//  13. H14 completed                 -> H13 ready
+//  14. Terminal status Completed/Failed/Cancelled/Quarantined -> empty
+//  15. H0.5 is NEVER dispatched by the reconciler (entry point)
+//  16. Handler already in completedPhases is NEVER re-dispatched
+//  17. HANDLER-01/EXEC-01 verification shape tests (H4b / H9-gate)
 //
 // This unit test suite is the AUTHORITATIVE regression net for the design.md
 // §4.1 DAG diagram — the DagAdvancer's HandlerDependencies dictionary and this
@@ -115,52 +114,29 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH2a_UnlocksH2bH4H4SharedH5_FourWayFanOut()
+    public void ComputeReadyHandlers_AfterH2a_UnlocksH2bH4H5_ThreeWayFanOut()
     {
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H4-shared", "H5" },
-            "design.md §4.1 DAG: H2a → {H2b, H4, H4-shared, H5} 4-way parallel post-Bicep " +
-            "(task 200's H4-shared joins the H2a-triggered set; sibling of H4 targeting shared KV).");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H5" },
+            "design.md §4.1 DAG: H2a → {H2b, H4, H5} 3-way parallel post-Bicep " +
+            "(T226 retired task 200's H4-shared — no shared vault in the dedicated model).");
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH4_UnlocksH3()
+    public void ComputeReadyHandlers_AfterH4_UnlocksH3AndH4b()
     {
-        // H2a + H4 completed; H2b + H5 + H4-shared still ready; H3 now also ready (needs H4).
+        // H2a + H4 completed; H2b + H5 still ready; H3 (needs KV) and H4b (needs the populated
+        // customer KV) now also ready. Also the HANDLER-01 check for H4b: before T226 H4b waited on
+        // H4-shared as well, which failed on every dedicated run and so blocked H4b + H9 for good.
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H3", "H4-shared", "H5" },
-            "design.md §4.1 DAG: H4 → H3 (needs KV for secrets storage); H4-shared still pending.");
-    }
-
-    [Fact]
-    public void ComputeReadyHandlers_AfterH2aCompleted_IncludesH4Shared()
-    {
-        // HANDLER-01 verification shape test: H2a completed → H4-shared must be in ready-set.
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
-
-        var ready = _sut.ComputeReadyHandlers(run);
-
-        ready.Should().Contain("H4-shared",
-            "HANDLER-01: HandlerDependencies[H4-shared] = { H2a } — completing H2a MUST make H4-shared ready.");
-    }
-
-    [Fact]
-    public void ComputeReadyHandlers_WithH4AndH4SharedCompleted_IncludesH4b()
-    {
-        // HANDLER-01 verification shape test: H4 + H4-shared completed → H4b must be ready.
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H4-shared");
-
-        var ready = _sut.ComputeReadyHandlers(run);
-
-        ready.Should().Contain("H4b",
-            "HANDLER-01: HandlerDependencies[H4b] = { H4, H4-shared } — task 201 batched " +
-            "app-settings depend on BOTH per-tenant and shared KV populations being complete.");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H3", "H4b", "H5" },
+            "design.md §4.1 DAG: H4 → H3 (needs KV for secrets storage) and H4 → H4b (batched app-settings).");
     }
 
     [Fact]
@@ -184,9 +160,9 @@ public sealed class DagAdvancerTests
     [Fact]
     public void ComputeReadyHandlers_AfterH3AndH4b_UnlocksH9()
     {
-        // EXEC-01 companion — the "green path": H3 + H4b + H4-shared + H4 all done → H9 finally ready.
+        // EXEC-01 companion — the "green path": H3 + H4b + H4 all done → H9 finally ready.
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H4", "H4-shared", "H4b", "H3");
+            "H0", "H1", "H2a", "H4", "H4b", "H3");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
@@ -218,15 +194,15 @@ public sealed class DagAdvancerTests
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H4-shared", "H6" },
-            "design.md §4.1 DAG: H5 → H6 (solution import); H4 + H4-shared still pending.");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H6" },
+            "design.md §4.1 DAG: H5 → H6 (solution import); H4 still pending.");
     }
 
     [Fact]
     public void ComputeReadyHandlers_AfterFullChainThroughH10_H11IsReady()
     {
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -239,7 +215,7 @@ public sealed class DagAdvancerTests
     public void ComputeReadyHandlers_AfterH11_UnlocksH12aAndH12b_Parallel()
     {
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10", "H11");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -253,7 +229,7 @@ public sealed class DagAdvancerTests
     {
         // H12c needs H12a + H12b + H2a — H12b missing.
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10", "H11", "H12a");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -268,7 +244,7 @@ public sealed class DagAdvancerTests
     public void ComputeReadyHandlers_H12aAndH12bAndH2a_UnlocksH12c_ThreeWayJoin()
     {
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10", "H11", "H12a", "H12b");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -281,7 +257,7 @@ public sealed class DagAdvancerTests
     public void ComputeReadyHandlers_AfterH12c_UnlocksH14()
     {
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -294,7 +270,7 @@ public sealed class DagAdvancerTests
     public void ComputeReadyHandlers_AfterH14_UnlocksH13_FinalGate()
     {
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -307,7 +283,7 @@ public sealed class DagAdvancerTests
     public void ComputeReadyHandlers_AllHandlersComplete_ReturnsEmpty()
     {
         var run = MakeRun(RunStatus.Running,
-            "H0", "H1", "H2a", "H2b", "H4", "H4-shared", "H4b", "H3", "H8", "H9",
+            "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H8", "H9",
             "H5", "H6", "H7", "H10", "H11", "H12a", "H12b", "H12c", "H14", "H13");
 
         var ready = _sut.ComputeReadyHandlers(run);
@@ -351,9 +327,8 @@ public sealed class DagAdvancerTests
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H4-shared", "H5" },
-            "WaitingOnGate is a soft-pause; unrelated downstream handlers still advance " +
-            "(includes H4-shared post task 200's DAG addition).");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H5" },
+            "WaitingOnGate is a soft-pause; unrelated downstream handlers still advance.");
     }
 
     // -----------------------------------------------------------------------
@@ -389,7 +364,7 @@ public sealed class DagAdvancerTests
     // HANDLER-12 parity — HandlerIds.Dispatchable ↔ HandlerDependencies keys
     //
     // Exactly the regression net HANDLER-01 was born from: HandlerIds.H4Shared
-    // + HandlerIds.H4b were in Dispatchable + had keyed-DI registrations + had
+    // (since retired, T226) + HandlerIds.H4b were in Dispatchable + had keyed-DI registrations + had
     // handler classes on disk, but no entry in DagAdvancer.HandlerDependencies
     // meant the reconciler NEVER dispatched them. Any future Dispatchable
     // addition without a paired DAG entry will now fail at build time here.

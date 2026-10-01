@@ -25,9 +25,9 @@
 // follow-up row in notes/task-202-punch-list.md (filed by task 205a).
 //
 // §11 JUSTIFICATION (new component, row A38a):
-//   Existing — no component evaluates cross-vault tag uniformity; H4/H4-shared
-//   each see exactly one vault per run. Extension — extracted as its own
-//   class (rather than a private helper inside H4-shared) per POML step 8
+//   Existing — no component evaluates cross-vault tag uniformity; H4 sees
+//   exactly one vault per run. Extension — extracted as its own
+//   class (rather than a private helper inside a handler) per POML step 8
 //   "if a full detector class is warranted for testability" — the N-vault
 //   evaluation is unreachable inside any single handler run, so testability
 //   REQUIRES the standalone shape. Cost-of-doing-nothing — the §5.3 missed-

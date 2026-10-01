@@ -80,11 +80,11 @@ public interface IBicepDeployRunner
 /// <param name="SignalREnabled">Feature-gate for the SignalR resource (ADR-032 Null-Object kill-switch — see §7.2 #13).</param>
 /// <param name="RequireSecretFreeIdentity">
 /// Auth-v4 §9.1 secret-free gate (customer-provisioning-orchestration-r1 punch row A38b,
-/// 2026-08-25). When true, <c>customer.bicep</c> OMITS <c>AiSearch--AdminKey</c> and
-/// <c>ServiceBus-ConnectionString</c> from the per-customer KV <c>kvSecretValues</c> map
-/// (never sentinel-valued), making <c>kv-secrets.generated.bicep</c>'s skip-if-absent guard
-/// effective. Defaults to <c>false</c> — bit-identical to pre-A38b behavior — so existing
-/// callers that do not supply it are unaffected.
+/// 2026-08-25). Still passed to <c>customer.bicep</c>, but since T226 (2026-09-30) it has NO
+/// effect there: the two keys it used to omit (<c>AiSearch--AdminKey</c>,
+/// <c>ServiceBus-ConnectionString</c>) are no longer written for ANY stamp — the BFF reaches
+/// both services with the stamp UAMI. Retained only because ARM rejects undeclared template
+/// parameters; removing it is paired with the template change (plan T225b).
 /// </param>
 /// <param name="OpenAiLocation">
 /// ISH-08 (customer-provisioning-orchestration-r1 Wave 5 punchlist, 2026-08-27):

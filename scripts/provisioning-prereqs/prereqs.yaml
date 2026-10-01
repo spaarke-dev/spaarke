@@ -31,9 +31,11 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 2
-last_updated: 2026-09-28
+manifest_version: 3
+last_updated: 2026-09-30
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 3 (2026-09-30, customer-provisioning-orchestration-r1 T226): PRQ-E-06 RETIRED
+# (H4-shared + from-shared-service retired; no shared source services in the dedicated model).
 # manifest_version 2 (2026-09-28, unified-access-control-r2): PRQ-T-07 RETIRED per D-12 + D-13
 # (no shared/multitenant BFF app registration in either model; the BFF app registration is
 # per customer and is created by H3 during the run). PRQ-C-05 remediation + name corrected.
@@ -288,22 +290,31 @@ prereqs:
     remediation: 'Emit from `platform-controlplane.bicep` (task 201 Deferred Item #1).'
     related_findings: [T201-h4b-kudu-rbac-deferred]
 
+  # RETIRED 2026-09-30 by customer-provisioning-orchestration-r1 T226.
+  #
+  # This entry required the L2 UAMI to hold key-reading roles on the SHARED source
+  # services (sprkshared{env}-openai/-docintel/-search/-servicebus/-storage/-redis) so the
+  # H4-shared handler could copy their keys into a shared vault. T226 retired H4-shared and
+  # the `from-shared-service` value source: every customer secret now comes from the
+  # customer's own resources (customer.bicep kvSecretValues), and the dedicated-stamp model
+  # has no shared source services. The role assignments it checked live in
+  # model1-shared-l2-rbac.bicep, which T225a retires with the other Model 1 templates.
+  #
+  # The id is retained (not deleted) so that references do not dangle.
   - id: PRQ-E-06
-    name: L2 UAMI has Cognitive Services User / Search Service Contributor / Service Bus Data Owner / Storage Account Contributor / Redis Cache Contributor on ALL shared source services
+    name: 'RETIRED — L2 UAMI key-reading RBAC on the shared source services (H4-shared retired by T226)'
     scope: once_per_env
-    frequency: once per env
-    owner: Spaarke platform admin
-    consequence_of_absence: H4-shared handler cannot extract credentials from source services (F19 automation blocked); H4b handler cannot bind KV refs (F20 automation blocked).
-    check_recipe:
-      cli: |
-        for svc in openai docintel search servicebus storage redis; do
-          az role assignment list --assignee {l2UamiPrincipalId} \
-            --scope "$(az resource show --resource-group rg-spaarke-shared-{env} --name sprkshared{env}-$svc --query id -o tsv)" \
-            --query "[].roleDefinitionName" -o tsv
-        done
-      expect: each row contains the appropriate role name
-    remediation: 'Extend `stacks/model1-shared.bicep` role-assignment module (task 200 Deferred Item #1). List of role/service pairs in `current-task.md` SESSION 4 handoff §RECOMMENDED.'
-    related_findings: [T200-h4shared-*, F19, F20]
+    status: retired
+    retired_on: 2026-09-30
+    retired_by: customer-provisioning-orchestration-r1 T226
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. No handler reads a shared service's keys. H4b never depended on these roles — it
+      writes KV references to the customer's own vault.
+    remediation: |
+      Nothing to do. See projects/customer-provisioning-orchestration-r1/notes/t226-shared-secret-read-path.md.
+    related_findings: [T226, D-12, F19]
 
   - id: PRQ-E-07
     name: L2 UAMI has Graph app-role grants for provisioning-relevant roles
@@ -383,7 +394,7 @@ prereqs:
 
   - id: PRQ-E-13
     name: '`sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`'
-    scope: once_per_env (per customer being provisioned; created BEFORE POST /api/runs)
+    scope: once_per_customer # per customer being provisioned; created BEFORE POST /api/runs. The E- id is kept for reference stability. (T226: the annotated scope string failed validate.ps1; it already kept the skill from running this check, as once_per_customer does.)
     frequency: per customer, per new run
     owner: operator (via skill Step 1 intake — task 203 wires the create step)
     consequence_of_absence: L2 `POST /api/runs` returns 400 (missing `environmentId`); c6-3-skill-registry-prereq.

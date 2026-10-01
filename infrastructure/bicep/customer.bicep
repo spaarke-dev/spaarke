@@ -109,7 +109,8 @@ param signalrSku string = 'Free_F1'
 
 // --- Secret-free identity gate (auth-v4 §9.1 / customer-provisioning-orchestration-r1 punch row A38b, 2026-08-25) ---
 
-@description('When true, OMIT `AiSearch--AdminKey` and `ServiceBus-ConnectionString` from the per-customer KV kvSecretValues map (auth-v4 §9.1 sentinel-free contract; A38b re-scope 2026-08-25; the downstream `kv-secrets.generated.bicep` skip-if-absent guard fires when the key is absent). Default false preserves current behavior for pre-migration envs.')
+@description('RETAINED FOR THE H2a PARAMETER CONTRACT ONLY - no effect in this template since T226 (2026-09-30). It used to omit `AiSearch--AdminKey` + `ServiceBus-ConnectionString` from kvSecretValues on secret-free stamps; both keys are now removed from the process for every stamp (the BFF reaches AI Search and Service Bus with the stamp UAMI). ArmDeploymentRunner still passes it and ARM rejects undeclared parameters, so its removal is paired with the runner change (T225b).')
+#disable-next-line no-unused-params
 param requireSecretFreeIdentity bool = false
 
 // --- ACS messaging options (messaging-communication-app-r1, task 012, FR-18) ---
@@ -580,13 +581,22 @@ module bffApi 'modules/app-service.bicep' = {
     //     names written by the kvSecrets module below (kv-secrets.generated.bicep
     //     / manifest.yaml) — NOT the legacy lowercase names model1-shared still
     //     carries for Redis/ServiceBus/Storage.
-    //   - Only secrets in this file's resolvable kvSecretValues set get KV refs.
-    //     OPENAI_API_KEY (AzureOpenAI-ApiKey, value_source=from-run-parameter) is
-    //     deliberately OMITTED: an unresolvable KV ref surfaces the literal
-    //     @Microsoft.KeyVault(...) string as the setting value and would be sent
-    //     as an API key. Absent the setting, the BFF falls back to
-    //     DefaultAzureCredential (MI) per ADR-028 — and the UAMI already holds
-    //     Cognitive Services User on the OpenAI resource (openAi module above).
+    //   - Only secrets in this file's resolvable kvSecretValues set get KV refs. An
+    //     unresolvable KV ref surfaces the literal @Microsoft.KeyVault(...) string as the
+    //     setting value, which the BFF would then send as a key.
+    //   - T226 (owner 2026-09-30): OpenAI, AI Search and Service Bus are reached with
+    //     the stamp UAMI (ADR-028) - no key setting is emitted for them. The UAMI holds
+    //     Cognitive Services User on OpenAI and Data Sender/Receiver + Index
+    //     Data/Service Contributor on Service Bus + AI Search (bffRuntimeRbac below).
+    //     H4b adds the MI selectors (ServiceBus__FullyQualifiedNamespace,
+    //     AiSearch__ManagedIdentity__Enabled). Storage's connection string was unused
+    //     by any BFF code and is not emitted. KNOWN GAP (plan G16): modules/ai-search.bicep
+    //     still creates the service keys-only, so its MI calls 403 until T244 enables
+    //     Entra auth on it.
+    //   - Document Intelligence still uses its key (owner D13 interim): the BFF only
+    //     extracts text when DocumentIntelligence__DocIntelKey is set, so H4b emits that
+    //     setting from the manifest and kvSecrets below writes the customer's own key.
+    //     T243 adds the BFF managed-identity path and removes the key.
     //   - KV references resolve only after H4 PATCHes keyVaultReferenceIdentity
     //     to the UAMI on both slots (ArmAppServiceIdentityPatcher, task 125) and
     //     the kvSecrets module has written real values. No ARM dependsOn needed:
@@ -615,21 +625,13 @@ module bffApi 'modules/app-service.bicep' = {
       Redis__ConnectionString: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Redis-ConnectionString)'
       Redis__InstanceName: 'spaarke:' // Prefix for key isolation
 
-      // Service Bus (per-customer)
-      ConnectionStrings__ServiceBus: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=ServiceBus-ConnectionString)'
-
-      // Storage (per-customer)
-      ConnectionStrings__Storage: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Storage-ConnectionString)'
-
-      // AI Services — endpoints direct from sibling-module outputs; admin key via
-      // canonical KV ref. OpenAI auth is MI-only here (see header note above).
+      // AI Services — endpoints direct from sibling-module outputs; auth is the stamp
+      // UAMI for OpenAI and AI Search (see header note above).
       OPENAI_ENDPOINT: openAi.outputs.openAiEndpoint
       AI_SEARCH_ENDPOINT: aiSearch.outputs.searchServiceEndpoint
-      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=AiSearch--AdminKey)'
 
       // Document Intelligence (per-customer, task 128b)
       DOC_INTELLIGENCE_ENDPOINT: docIntelligence.outputs.docIntelligenceEndpoint
-      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=DocumentIntelligence-ApiKey)'
 
       // Monitoring (per-customer App Insights, task 128b)
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
@@ -723,28 +725,33 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 // therefore the actual value-writer H4 depends on to no-op/succeed on these
 // entries instead of failing QuarantineRequired on a fresh customer.
 //
-// Resolvable (10) -- direct sibling-module output references:
-//   AiSearch--AdminKey, AiSearch-Endpoint, AppInsights-ConnectionString,
-//   AzureOpenAI-Endpoint, Communication-WebhookUrl, DocumentIntelligence-ApiKey,
-//   DocumentIntelligence-Endpoint, Redis-ConnectionString,
-//   ServiceBus-ConnectionString, Storage-ConnectionString
+// Resolvable (7) -- direct sibling-module output references:
+//   AiSearch-Endpoint, AppInsights-ConnectionString, AzureOpenAI-Endpoint,
+//   Communication-WebhookUrl, DocumentIntelligence-ApiKey,
+//   DocumentIntelligence-Endpoint, Redis-ConnectionString
 //
-// Secret-free-gated (2 of the above 10) -- `AiSearch--AdminKey` +
-// `ServiceBus-ConnectionString` are OMITTED (never sentinel-valued) from the
-// map when `requireSecretFreeIdentity=true` (customer-provisioning-orchestration-r1
-// punch row A38b, 2026-08-25; auth-v4 §9.1 sentinel-free contract). Omitting
-// the key -- not writing a placeholder -- is what makes the existing
-// `if (contains(secretValues, ...))` skip-if-absent guard in
-// kv-secrets.generated.bicep effective on secret-free stamps. Default false
-// keeps today's behavior bit-identical for pre-migration environments.
+// REMOVED FROM THE PROCESS (T226, owner 2026-09-30) -- the BFF reaches these services
+// with the stamp UAMI, so no key is written to the vault for them:
+//   AiSearch--AdminKey, ServiceBus-ConnectionString, AzureOpenAI-ApiKey;
+//   Storage-ConnectionString (no BFF reader at all).
+// Keys that stay for now (owner D13 keyless stamps, implemented incrementally):
+//   DocumentIntelligence-ApiKey -- the BFF's text extraction requires the key until
+//     T243 adds its managed-identity path.
+//   Redis-ConnectionString -- the BFF has no Entra path for Redis today; the Azure
+//     Managed Redis + Entra-only move is plan task T242.
 //
 // Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
 // recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
-//   SPE-ContainerTypeId, SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
-//     -> H8/H9 RUNTIME outputs (SPE container-type creation + 24h replication);
-//        no ARM-deploy-time value exists. Resolved at runtime via H4's
-//        FromRunParameters path after H8/H9 execute (expected, not a failure).
-//        Recommended owner: H8/H9 handler authors (Wave G-3, tasks 131/132).
+//   SPE-ContainerTypeId
+//     -> topology-scoped (one container type per Spaarke tier), not a customer
+//        resource. manifest value_source = from-topology-constants: H4 writes it
+//        from the run's containerTypeId parameter (the /provision-environment skill
+//        reads it from spaarke-constants.yaml).
+//   SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
+//     -> per-customer SPE containers created at RUNTIME (H8); no ARM-deploy-time
+//        value exists. KNOWN GAP (plan G18): the manifest still labels both
+//        from-bicep-output and nothing writes them, so H4 quarantines on a fresh
+//        customer until the H8 write path is wired.
 //   BFF-API-ClientId, BFF-API-Audience
 //     -> H3 (task 130) creates the per-customer BFF app-registration at RUNTIME
 //        and writes ClientId/Audience to RunParameters.Secrets. manifest.yaml
@@ -754,7 +761,7 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //        here. Recommended owner: H3 handler author (Wave G-3, task 130).
 // ============================================================================
 
-var kvSecretValuesBase = {
+var kvSecretValues = {
   'AiSearch-Endpoint': aiSearch.outputs.searchServiceEndpoint
   'AppInsights-ConnectionString': monitoring.outputs.connectionString
   'AzureOpenAI-Endpoint': openAi.outputs.openAiEndpoint
@@ -762,18 +769,7 @@ var kvSecretValuesBase = {
   'DocumentIntelligence-ApiKey': docIntelligence.outputs.docIntelligenceKey
   'DocumentIntelligence-Endpoint': docIntelligence.outputs.docIntelligenceEndpoint
   'Redis-ConnectionString': redisCache.outputs.redisConnectionString
-  'Storage-ConnectionString': storage.outputs.connectionString
 }
-
-// requireSecretFreeIdentity=true -> {} (both keys OMITTED, never sentinel-valued);
-// requireSecretFreeIdentity=false (default) -> both keys present, bit-identical
-// to pre-A38b behavior. See requireSecretFreeIdentity param @description above.
-var kvSecretValuesGated = requireSecretFreeIdentity ? {} : {
-  'AiSearch--AdminKey': aiSearch.outputs.searchServiceAdminKey
-  'ServiceBus-ConnectionString': serviceBus.outputs.serviceBusConnectionString
-}
-
-var kvSecretValues = union(kvSecretValuesBase, kvSecretValuesGated)
 
 module kvSecrets '../../scripts/canonical-secret-catalog/generated/kv-secrets.generated.bicep' = {
   scope: rg

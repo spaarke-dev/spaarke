@@ -11,7 +11,8 @@
 // BOTH KVs. Automation eliminates the manual step + prevents dead-loop
 // halts.
 //
-// This seam gates H4 + H4-shared on a bootstrap RBAC grant of "Key Vault
+// This seam gates H4 (its only consumer since T226 retired H4-shared,
+// 2026-09-30) on a bootstrap RBAC grant of "Key Vault
 // Secrets Officer" (built-in role id b86a8fe4-44ce-4948-aee5-eccb2c155cd7)
 // to the L2 caller identity on the target vault BEFORE any KV write fires.
 // Idempotent — no-op when the assignment already exists.

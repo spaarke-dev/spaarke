@@ -92,7 +92,17 @@ $scopeCounts = @{}
 foreach ($p in $m.prereqs) {
   $id = if ($p.id) { $p.id } else { '<missing-id>' }
 
-  foreach ($f in $requiredFields) {
+  # Retired entries keep their id so references do not dangle, but carry no check_recipe
+  # (Step 0.5b skips status: retired). They must say when and by whom they were retired.
+  $isRetired = $p.ContainsKey('status') -and $p.status -eq 'retired'
+  if ($p.ContainsKey('status') -and -not $isRetired) {
+    $fail += "${id}: status '$($p.status)' is not recognised (the only status value is 'retired')."
+  }
+  $fieldsForThis = if ($isRetired) {
+    @($requiredFields | Where-Object { $_ -ne 'check_recipe' }) + @('retired_on', 'retired_by')
+  } else { $requiredFields }
+
+  foreach ($f in $fieldsForThis) {
     if (-not $p.ContainsKey($f) -or $null -eq $p[$f] -or ($p[$f] -is [string] -and [string]::IsNullOrWhiteSpace($p[$f]))) {
       $fail += "$id (line ~$($p.line)): missing required field '$f'."
     }

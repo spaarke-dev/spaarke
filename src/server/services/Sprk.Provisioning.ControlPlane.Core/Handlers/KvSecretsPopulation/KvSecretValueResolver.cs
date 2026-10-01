@@ -190,17 +190,33 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                     "this resolver branch when the secret does NOT already exist. H4 has no plumbing today " +
                     "to read ARM deployment outputs directly (InterStepState is a locked enumerated POCO " +
                     "without a slot for this entry). See notes/task-126-deviations.md 'FromBicepOutput gap'.")),
-            KvSecretValueSource.FromSharedService => Task.FromResult<KvSecretValueResolution>(
-                new KvSecretValueResolution.Failed(
-                    $"value_source=FromSharedService on '{entry.CanonicalName}' is owned by " +
-                    "H4SharedKvSecretsPopulationHandler (task 200) — NOT the per-tenant H4 flow. " +
-                    "The per-tenant H4 handler filters these entries out before invoking the writer; " +
-                    "if this resolver call is reached, the per-tenant filter has regressed. See " +
-                    "H4SharedKvSecretsPopulationHandler.cs for the source-extraction pipeline.")),
+            KvSecretValueSource.FromTopologyConstants => Task.FromResult(ResolveTopologyConstant(entry, request)),
             _ => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
                     $"Unrecognized KvSecretValueSource '{entry.ValueSource}' for '{entry.CanonicalName}'.")),
         };
+    }
+
+    /// <summary>
+    /// TOPOLOGY-CONSTANT branch (T226): the value is a Spaarke-wide constant the run
+    /// carries as a non-secret parameter, projected by H4 into
+    /// <see cref="KvSecretWriteRequest.TopologyConstantValues"/>. Fails loudly when the
+    /// run has none — never a blank or fabricated secret.
+    /// </summary>
+    private static KvSecretValueResolution ResolveTopologyConstant(KvSecretEntry entry, KvSecretWriteRequest request)
+    {
+        if (request.TopologyConstantValues.TryGetValue(entry.CanonicalName, out var value)
+            && !string.IsNullOrWhiteSpace(value))
+        {
+            return new KvSecretValueResolution.Resolved(value);
+        }
+
+        return new KvSecretValueResolution.Failed(
+            $"value_source=FromTopologyConstants on '{entry.CanonicalName}' but the run carries no value for it. " +
+            "Topology constants come from spaarke-constants.yaml per_env_constants.<env> and reach the run as " +
+            "non-secret parameters (e.g. 'containerTypeId' for SPE-ContainerTypeId, set by the " +
+            "/provision-environment intake from spaarke-constants.yaml). Run parameters are fixed at intake, " +
+            "so populate the constant and start the run with it.");
     }
 
     /// <summary>

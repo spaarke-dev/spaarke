@@ -3,7 +3,7 @@
 //
 // Task 201 — machine-stable rejection codes emitted by
 // H4bBulkAppSettingsHandler. `h4b-*` prefix so operator UI can distinguish
-// H4 vs H4-shared vs H4b failures at a glance. STABILITY: strings are used
+// H4 vs H4b failures at a glance. STABILITY: strings are used
 // by external tools; do NOT rename.
 // -----------------------------------------------------------------------------
 

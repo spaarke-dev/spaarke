@@ -43,26 +43,6 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' existing = {
 // -------------------------------------------------------------------------
 // Canonical secrets (alphabetically-sorted, generator-enforced)
 // -------------------------------------------------------------------------
-// AiSearch--AdminKey — Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
-resource kv_aiSearch__AdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AiSearch--AdminKey')) {
-  parent: keyVault
-  name: 'AiSearch--AdminKey'
-  properties: {
-    value: secretValues['AiSearch--AdminKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-shared-service'
-  }
-  tags: {
-    canonicalName: 'AiSearch--AdminKey'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // AiSearch-Endpoint — Azure AI Search service endpoint.
 resource kv_aiSearch_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AiSearch-Endpoint')) {
   parent: keyVault
@@ -98,26 +78,6 @@ resource kv_appInsights_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023
     canonicalName: 'AppInsights-ConnectionString'
     category: 'monitoring'
     rotation: 'on-instrumentation-key-rotation'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
-// AzureOpenAI-ApiKey — Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
-resource kv_azureOpenAI_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'AzureOpenAI-ApiKey')) {
-  parent: keyVault
-  name: 'AzureOpenAI-ApiKey'
-  properties: {
-    value: secretValues['AzureOpenAI-ApiKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-shared-service'
-  }
-  tags: {
-    canonicalName: 'AzureOpenAI-ApiKey'
-    category: 'ai'
-    rotation: '90-days'
     neverDelete: 'false'
     managedBy: 'canonical-secret-catalog-generator'
   }
@@ -189,7 +149,7 @@ resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if
 // (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
 // of this module can therefore NEVER touch the live value.
 
-// BingSearch-ApiKey — Bing Search v7 API key.
+// BingSearch-ApiKey — Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
 resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'BingSearch-ApiKey')) {
   parent: keyVault
   name: 'BingSearch-ApiKey'
@@ -375,7 +335,7 @@ resource kv_dataverse_ServiceUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
   }
 }
 
-// DocumentIntelligence-ApiKey — Azure Document Intelligence API key.
+// DocumentIntelligence-ApiKey — Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
 resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'DocumentIntelligence-ApiKey')) {
   parent: keyVault
   name: 'DocumentIntelligence-ApiKey'
@@ -384,7 +344,7 @@ resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-
     attributes: {
       enabled: true
     }
-    contentType: 'from-shared-service'
+    contentType: 'from-bicep-output'
   }
   tags: {
     canonicalName: 'DocumentIntelligence-ApiKey'
@@ -455,7 +415,7 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
-// LlamaParse-ApiKey — LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.
+// LlamaParse-ApiKey — LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
 resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'LlamaParse-ApiKey')) {
   parent: keyVault
   name: 'LlamaParse-ApiKey'
@@ -475,46 +435,6 @@ resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = i
   }
 }
 
-// PromptFlow-Endpoint — AI Foundry Prompt Flow endpoint.
-resource kv_promptFlow_Endpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'PromptFlow-Endpoint')) {
-  parent: keyVault
-  name: 'PromptFlow-Endpoint'
-  properties: {
-    value: secretValues['PromptFlow-Endpoint']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-run-parameter'
-  }
-  tags: {
-    canonicalName: 'PromptFlow-Endpoint'
-    category: 'ai'
-    rotation: 'N/A'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
-// PromptFlow-Key — AI Foundry Prompt Flow API key.
-resource kv_promptFlow_Key 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'PromptFlow-Key')) {
-  parent: keyVault
-  name: 'PromptFlow-Key'
-  properties: {
-    value: secretValues['PromptFlow-Key']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-run-parameter'
-  }
-  tags: {
-    canonicalName: 'PromptFlow-Key'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // Redis-ConnectionString — Azure Cache for Redis connection string.
 resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Redis-ConnectionString')) {
   parent: keyVault
@@ -524,30 +444,10 @@ resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01
     attributes: {
       enabled: true
     }
-    contentType: 'from-shared-service'
+    contentType: 'from-bicep-output'
   }
   tags: {
     canonicalName: 'Redis-ConnectionString'
-    category: 'data-services'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
-// ServiceBus-ConnectionString — Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
-resource kv_serviceBus_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'ServiceBus-ConnectionString')) {
-  parent: keyVault
-  name: 'ServiceBus-ConnectionString'
-  properties: {
-    value: secretValues['ServiceBus-ConnectionString']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-shared-service'
-  }
-  tags: {
-    canonicalName: 'ServiceBus-ConnectionString'
     category: 'data-services'
     rotation: '90-days'
     neverDelete: 'false'
@@ -575,7 +475,7 @@ resource kv_sPE_CommunicationArchiveContainerId 'Microsoft.KeyVault/vaults/secre
   }
 }
 
-// SPE-ContainerTypeId — SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.
+// SPE-ContainerTypeId — SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
 resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-ContainerTypeId')) {
   parent: keyVault
   name: 'SPE-ContainerTypeId'
@@ -584,7 +484,7 @@ resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' =
     attributes: {
       enabled: true
     }
-    contentType: 'from-bicep-output'
+    contentType: 'from-topology-constants'
   }
   tags: {
     canonicalName: 'SPE-ContainerTypeId'
@@ -615,26 +515,6 @@ resource kv_sPE_DefaultContainerId 'Microsoft.KeyVault/vaults/secrets@2023-07-01
   }
 }
 
-// Storage-ConnectionString — Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
-resource kv_storage_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Storage-ConnectionString')) {
-  parent: keyVault
-  name: 'Storage-ConnectionString'
-  properties: {
-    value: secretValues['Storage-ConnectionString']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-shared-service'
-  }
-  tags: {
-    canonicalName: 'Storage-ConnectionString'
-    category: 'data-services'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // TenantId — Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
 resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'TenantId')) {
   parent: keyVault
@@ -660,10 +540,8 @@ resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contai
 // -------------------------------------------------------------------------
 
 output canonicalSecretNames array = [
-  'AiSearch--AdminKey'
   'AiSearch-Endpoint'
   'AppInsights-ConnectionString'
-  'AzureOpenAI-ApiKey'
   'AzureOpenAI-Endpoint'
   'BFF-API-Audience'
   'BFF-API-ClientId'
@@ -683,13 +561,9 @@ output canonicalSecretNames array = [
   'Email-WebhookSecret'
   'Email-WebhookSigningKey'
   'LlamaParse-ApiKey'
-  'PromptFlow-Endpoint'
-  'PromptFlow-Key'
   'Redis-ConnectionString'
-  'ServiceBus-ConnectionString'
   'SPE-CommunicationArchiveContainerId'
   'SPE-ContainerTypeId'
   'SPE-DefaultContainerId'
-  'Storage-ConnectionString'
   'TenantId'
 ]

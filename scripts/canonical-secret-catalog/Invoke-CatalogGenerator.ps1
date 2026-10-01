@@ -132,7 +132,9 @@ $script:RequiredSecretFields = @(
     'canonical_name', 'category', 'purpose', 'consumers', 'rotation_cadence',
     'never_delete', 'exception_note', 'aliases', 'value_source', 'app_settings', 'tags'
 )
-$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-shared-service', 'generated')
+# 'from-shared-service' (task 200 H4-shared) retired T226 (2026-09-30); 'from-topology-constants'
+# (task 214, SPE-ContainerTypeId) accepted from T226 — H4 writes it from the run's non-secret parameter.
+$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-topology-constants', 'generated')
 
 # Task 201 — per_env_settings schema (H4b BulkAppSettings handler).
 # Optional top-level list; when present, each entry MUST carry these fields.
@@ -250,24 +252,6 @@ function Test-ManifestShape {
 
         if ($secret.value_source -notin $script:AllowedValueSources) {
             throw "Secret '$canon' has invalid value_source '$($secret.value_source)'. Allowed: $($script:AllowedValueSources -join ', ')"
-        }
-
-        # Conditional field: `service_ref` is REQUIRED when value_source == 'from-shared-service'.
-        # Format: '<type>:<az-resource-name>' (e.g. 'search:sprksharedprod-search',
-        # 'cognitiveservices:sprksharedprod-openai'). Consumed at run time by H4-shared
-        # (SdkSourceServiceKeyExtractor) to dispatch to the right Azure.ResourceManager SDK
-        # extractor. Absent for all other value_source values (kept as optional field).
-        if ($secret.value_source -eq 'from-shared-service') {
-            if (-not $secret.ContainsKey('service_ref')) {
-                throw "Secret '$canon' has value_source='from-shared-service' but is missing required conditional field 'service_ref'. Format: '<type>:<az-resource-name>' (e.g. 'search:sprksharedprod-search')."
-            }
-            $svcRef = [string]$secret.service_ref
-            if ([string]::IsNullOrWhiteSpace($svcRef)) {
-                throw "Secret '$canon' has value_source='from-shared-service' but 'service_ref' is empty. Format: '<type>:<az-resource-name>'."
-            }
-            if ($svcRef -notmatch '^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]*$') {
-                throw "Secret '$canon' has malformed service_ref '$svcRef'. Expected '<type>:<az-resource-name>' where type is lowercase (e.g. 'search:sprksharedprod-search')."
-            }
         }
 
         # never_delete must be an actual bool — powershell-yaml maps `true`/`false` to [bool].
@@ -722,8 +706,8 @@ Write-Host ''
 
         # Emit either an unconditional seed (for from-existing-kv - never
         # overwrite live value; require -SeedPlaceholders explicitly for
-        # placeholder creation), a from-shared-service handler-populated
-        # marker (NO placeholder — H4-shared owns the write), or a conditional
+        # placeholder creation), a from-topology-constants marker (NO
+        # placeholder — H4 writes it from the run parameter), or a conditional
         # placeholder seed for the other value_sources.
         if ($source -eq 'from-existing-kv') {
             [void]$sb.Append("if (`$SeedPlaceholders -and -not `$SkipExisting) {`n")
@@ -731,15 +715,11 @@ Write-Host ''
             [void]$sb.Append("} else {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-value-source-is-existing-kv' -Description '$($purpose -replace "'","''") [BINDING never-delete: skip in seed]' -Category '$category'`n")
             [void]$sb.Append("}`n")
-        } elseif ($source -eq 'from-shared-service') {
-            # Handler-populated (H4-shared): value extracted from source service at run time.
-            # The seeder deliberately does NOT write a placeholder — the value is owned by
-            # H4SharedKvSecretsPopulationHandler which extracts fresh from the source Azure
-            # service via Azure.ResourceManager SDK and writes idempotently to shared KV.
-            # A placeholder here would be overwritten anyway and would trigger BFF fail-fast
-            # if the handler run were delayed.
-            $serviceRef = if ($secret.ContainsKey('service_ref')) { [string]$secret.service_ref } else { '<unspecified>' }
-            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-shared-service; handler-populated by H4-shared at run time from source $serviceRef)' -ForegroundColor Gray`n")
+        } elseif ($source -eq 'from-topology-constants') {
+            # Topology constant (e.g. SPE-ContainerTypeId from spaarke-constants.yaml per_env_constants):
+            # written by H4 at run time from the run's non-secret parameter. No placeholder — a placeholder
+            # would be served to the BFF as a real container-type id.
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray`n")
         } else {
             [void]$sb.Append("if (`$SeedPlaceholders) {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-$($source)' -Description '$($purpose -replace "'","''")' -Category '$category'`n")
@@ -812,6 +792,14 @@ function New-ConfigureArtifact {
     # BOTH classes emit `"<key>=<value-expression>"` strings that go into the
     # SAME array so ONE batched write is preserved. Sort by app-setting key
     # ordinal for determinism.
+    #
+    # Duplicate keys (e.g. AzureAd__TenantId is both a secret's app_setting and a
+    # per_env_settings literal): `az webapp config appsettings set` keeps the LAST
+    # value, so emission order decides the winner. Sort-Object is not stable, so
+    # without a tie-break the winner flipped whenever unrelated lines were added or
+    # removed (T226 flipped TenantId to the KV reference). Seq is the insertion
+    # order — secrets' KV refs first, then per_env_settings — so the per-env value
+    # always wins, as the per_env_settings header intends.
     $settingLines = [System.Collections.Generic.List[pscustomobject]]::new()
     foreach ($secret in $Sorted) {
         $canon = [string]$secret.canonical_name
@@ -822,6 +810,7 @@ function New-ConfigureArtifact {
         foreach ($k in $appSettings) {
             [void]$settingLines.Add([pscustomobject]@{
                 Key   = $k
+                Seq   = $settingLines.Count
                 Line  = "`"$k=`$(Format-KvRef '$canon')`""
             })
         }
@@ -835,6 +824,7 @@ function New-ConfigureArtifact {
             $litEscaped = $lit -replace "'", "''"
             [void]$settingLines.Add([pscustomobject]@{
                 Key  = $key
+                Seq  = $settingLines.Count
                 Line = "`"$key=$litEscaped`""
             })
         } else {
@@ -846,11 +836,12 @@ function New-ConfigureArtifact {
             $var = $sourceToVar[$sourceKey]
             [void]$settingLines.Add([pscustomobject]@{
                 Key  = $key
+                Seq  = $settingLines.Count
                 Line = "`"$key=`$$var`""
             })
         }
     }
-    $settingLines = @($settingLines | Sort-Object -Property Key -Culture 'en-US')
+    $settingLines = @($settingLines | Sort-Object -Property Key, Seq -Culture 'en-US')
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.Append(@"

@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-09-30 SESSION 26 END (context-handoff before /compact) — **T226 IN PROGRESS, code UNCOMMITTED on disk** (do not `git stash`/reset). Owner decisions D8–D13 recorded (D13 = keyless customer stamps). 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** then [`notes/t226-shared-secret-read-path.md`](notes/t226-shared-secret-read-path.md) §6 (exact remaining T226 work).
+> **Last Updated**: 2026-09-30 SESSION 27 — **T226 ✅ COMPLETE** (committed + pushed). Next: **T237** (customerId standard) — POML not yet filed. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G21).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,23 +36,32 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 26 END, 2026-09-30)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 27, 2026-09-30)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T226 — G1 shared-service secrets → dedicated** (`tasks/226-shared-service-secrets-to-dedicated.poml`, FULL, opus/high). Resume via `task-execute` (it detects in-progress). |
-| **Step** | Steps 1–5 done + Step 9.5 gates RUN (adr-check: 1 violation; code-review: 1 critical — both = Document Intelligence key removal; owner D13 resolves it: **keep the DocIntel key for now**). Remaining = notes §6 items 1–4: (1) restore `DocumentIntelligence-ApiKey`; (2) apply review fixes incl. main-session `.claude/` drift; (3) completion notes; (4) verify → close → ONE commit → push. |
-| **Status** | **Uncommitted T226 code on disk (~36 files incl. 8 deletions — `git status` shows them as ` D`)**. Last verified: ControlPlane Api/Worker/Tests + Sprk.Bff.Api build 0/0; ArchTests **337/337**; ControlPlane.Tests **1936 pass / 6 fail (only the pre-existing CustomerRunGuardModulePostConfigureTests) / 1 skip** — T226 fixed the 17 FileKvSecretManifestTests (root cause: task 214's `from-topology-constants` unknown to the C# reader + generator → every H4 run ManifestReadFailed). Generator `-Verify` OK. Branch: last pushed = `ca3697a6d`; local commit `278aafabd` (plan D12) + this handoff's docs commit not yet pushed if push fails — check `git log origin/work/customer-provisioning-orchestration-r1..HEAD`. |
-| **Next Action** | `task-execute T226` → open `notes/t226-shared-secret-read-path.md` §6 and do items 1→4 in order. ⚠️ `git commit` takes EVERYTHING staged — stage deliberately (a checkpoint commit swept the 8 staged deletions once this session; fixed by soft reset). |
-| **After T226** | Plan §7 order: T237 (customerId standard) → T238 (`Customer__Id` via H4b) → T225a → T225b → T243 (BFF DocIntel MI) → T242 (Azure Managed Redis B0 Entra) → T244 (keyless Bicep) → T227 → T228 → T229 + T230 (incl. per-service MI proof) → T232 → T233 → T240 (add-ins/Teams → per-customer BFFs) → T218 → T235 → 213.7/207/208/209 → T186. File POMLs for T237/T238/T240/T241/T242/T243/T244 as they come up. |
-| **Owner decisions this session (all in plan §2)** | D8 managed solutions default / unmanaged on instruction · D9 add-ins+Teams in scope (T240) · D10 customerId standard (T237) · D11 T240 design approved (one shared package + runtime customer discovery) · D12 Redis = Azure Managed Redis **B0** HA Entra-only (T242; supersedes Standard C1) · **D13 keyless customer stamps** (full ADR-028; key-if-configured-else-MI in BFF; disable key auth on resources; H13 per-service MI proof; dev/demo migration = separate follow-on) · Q1 operator creates Dataverse env, H5 verify/adopt · Q2 `Customer__Id` dev=`spaarke` (already), demo=`sprkdemo` (set) · Q4 `sprksharedprod-api` STOPPED, RG delete = T241 (KV `sprk-prod-kv` not before 2026-11-23). |
+| **Task** | **none active.** T226 ✅ (G1 — shared-service secrets → dedicated) completed 2026-09-30; record in [`notes/t226-shared-secret-read-path.md`](notes/t226-shared-secret-read-path.md) §7. |
+| **Next task** | **T237 — customerId standard `^[a-z][a-z0-9]{2,7}$` (D10)**. No POML yet: file it with `task-create` from plan §7 row T237, then run `task-execute`. |
+| **Status** | Working tree clean after the T226 commit. Verified at close: builds 0/0 (ControlPlane Api/Worker/Tests, Sprk.Bff.Api); ArchTests 337/337; ControlPlane.Tests 1937 pass / **6 fail = CustomerRunGuardModulePostConfigureTests baseline (T221)** / 1 skip; generator `-Verify` OK; `prereqs.yaml` validator OK. |
+| **After T237** | Plan §7 order: T238 (`Customer__Id` via H4b) → T225a → T225b (also G20, G21) → T243 (BFF DocIntel MI) → T242 (Azure Managed Redis B0 Entra) → T244 (keyless Bicep, G16, secret-bearing outputs) → T227 → T228 (G19 CreateRun fail-fast) → T229 + T230 (per-service MI proof) → T232 → T233 → T240 → T218 → T235 (ADR-028 amendment for D13) → 213.7/207/208/209 → T186. File POMLs for T237/T238/T240/T241/T242/T243/T244 as they come up. |
+| **Owner decisions (plan §2)** | D8 managed default / unmanaged on instruction · D9 add-ins+Teams in scope (T240) · D10 customerId standard (T237) · D11 T240 design · D12 Redis = Azure Managed Redis B0 HA Entra-only (T242) · **D13 keyless customer stamps** (BFF key-if-configured-else-MI; disable key auth on resources; H13 per-service MI proof; dev/demo migration = separate follow-on) · Q1 operator creates Dataverse env · Q2 `Customer__Id` dev=`spaarke`, demo=`sprkdemo` · Q4 `sprksharedprod-api` STOPPED, RG delete = T241 (KV `sprk-prod-kv` not before 2026-11-23). |
 
 ### Critical Context
-Model 1 = per-customer dedicated stamp; Model 2 out of scope. T226 removes the shared-vault handler (H4-shared, which
-failed every dedicated run and blocked H4b+H9) and the keys the BFF doesn't need; D13 makes "keyless stamp" the
-standard, implemented incrementally (T243/T242/T244/T230) so no stamp is ever broken in between.
+Model 1 = per-customer dedicated stamp; Model 2 out of scope. After T226 no customer secret comes from a shared
+service; the two remaining keys (Redis, Document Intelligence) are interim under D13 and go with T242 / T243.
+Before T186 can run, plan §4 G16–G21 must be closed (AI Search Entra auth, DocIntel MI, SPE container-id writes,
+containerTypeId fail-fast, Model 1 template routing, secret-free default for new stamps).
 
 ## 📁 Files Modified This Session
+
+### SESSION 27 (2026-09-30) — T226 closed
+
+One commit (T226): restored `DocumentIntelligence-ApiKey` (interim, D13); review fixes from both gate rounds;
+`StaticKvSecretManifest` deleted; generator duplicate-key tie-break; H8 trims `containerTypeId`;
+`/provision-environment` Step 4.0 sends `containerTypeId` + skips retired prerequisites; PRQ-E-06 retired +
+`validate.ps1` accepts retired entries + PRQ-E-13 scope; `.claude` pattern/constraint/skill docs corrected +
+CHANGELOG; inventory + prerequisites guide; spec ADR Tensions row; plan G1 ✅ / G21 / G19 note; TASK-INDEX 226 ✅.
+Full file list: `git show --stat` on the T226 commit.
 
 ### SESSION 26 (2026-09-30)
 
@@ -60,7 +69,7 @@ standard, implemented incrementally (T243/T242/T244/T230) so no stamp is ever br
 `d85bec3b1` G14 auth-chain notes · `6b5661763` D11/Q4 · `e4d7a5cd9` · **`40c4b2a02` master merge (365 commits)** ·
 `6bc8ed2d6` post-merge checkpoint · `c8bab8899` / `87ea3675a` / `ca3697a6d` T226 decisions. **Local**: `278aafabd` (D12) + handoff docs.
 
-**T226 — UNCOMMITTED (complete the task, then ONE commit)**:
+**T226 — was uncommitted at SESSION 26 end; landed in SESSION 27 (see above)**:
 - `scripts/canonical-secret-catalog/manifest.yaml` — 7 entries removed (SB, Storage, OpenAI key, DocIntel key*, AI Search key, PromptFlow ×2); Redis → from-bicep-output; Bing/LlamaParse labelled Spaarke-shared. *DocIntel key must be RESTORED (§6 item 1).
 - `scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1` — drops from-shared-service, accepts from-topology-constants; `generated/*` (4) regenerated.
 - `infrastructure/bicep/customer.bicep` + `customer.json` — key writes + key app-settings removed; `requireSecretFreeIdentity` kept (no-op, H2a passes it).

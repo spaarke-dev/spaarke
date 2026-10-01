@@ -83,13 +83,15 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
     }
 
     [Fact]
-    public void Dispatchable_ContainsExactlyTwentyOneIds()
+    public void Dispatchable_ContainsExactlyTwentyIds()
     {
         // Task 200 bumped 19 → 20 (added H4Shared for F19 automation —
         // shared-tier KV secrets population via source-service SDK extraction).
         // Task 201 bumped 20 → 21 (added H4b for F20/F20a automation —
         // BulkAppSettings thin wrapper around task 084's Configure script).
-        HandlerIds.Dispatchable.Should().HaveCount(21);
+        // T226 (2026-09-30) dropped 21 → 20 (retired H4Shared — every customer
+        // secret now comes from the customer's own resources).
+        HandlerIds.Dispatchable.Should().HaveCount(20);
     }
 
     [Theory]

@@ -3,7 +3,7 @@
 //
 // Task 201 — unit tests over H4bBulkAppSettingsHandler. xunit +
 // FluentAssertions + hand-rolled fakes for every seam, following the H4
-// (task 047) + H4-shared (task 200) test exemplar shape.
+// (task 047) test exemplar shape.
 //
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live pwsh / HTTP / Kudu / Azure API.
@@ -693,8 +693,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
 
     /// <summary>
     /// Matches the shape of the shipped manifest.yaml per_env_settings entries
-    /// (task 201). Kept in a helper so tests share ONE canonical entry list
-    /// (mirrors H4-shared's BuildSharedEntries).
+    /// (task 201). Kept in a helper so tests share ONE canonical entry list.
     /// </summary>
     private static IReadOnlyList<PerEnvSettingEntry> BuildStandardEntries() =>
     [

@@ -84,9 +84,9 @@ Report absolute + delta in task notes / PR description. See `.claude/constraints
 
 ## Handler registration completeness — BINDING per ADR-032 + `.claude/patterns/provisioning/handler-registration-completeness.md`
 
-- Every new `IProvisioningHandler` is a 3-file dance: `HandlerIds.cs` + `HandlerDispatchRegistrationModule.cs` + `Worker/Program.cs`. Missing any → runtime dispatch throws.
-- `HandlerRegistrationCompletenessTests` ArchTest MUST pass on every PR (currently 21/21; adding a handler → 22/22 target).
-- Handler contract: `IProvisioningHandler.ExecuteAsync(HandlerEnvelope, CancellationToken)` returns `HandlerResult` (Success | Failure | Deferred | Rollback). No other shapes accepted by the L2 dispatcher.
+- Every new `IProvisioningHandler` touches five places: `HandlerIds.cs` (const + `Dispatchable`), the handler class, its concrete + dependency registrations, the keyed forwarder in `HandlerDispatchRegistrationModule.cs`, and `DagAdvancer.HandlerDependencies`. Missing the forwarder → the Worker dead-letters the message as `NoHandler`; a missing dependency → `HandlerResolutionFailed`; a missing DAG entry → the reconciler never dispatches it.
+- `HandlerRegistrationCompletenessTests` and the HANDLER-12 parity test in `DagAdvancerTests` MUST pass on every PR (currently 20 dispatchable ids — T226 retired H4-shared on 2026-09-30; adding a handler → 21).
+- Handler contract: `IProvisioningHandler.HandleAsync(HandlerEnvelope, CancellationToken)` returns `HandlerResult` — closed: `Success(IdempotencyKey)` or `Failure(FailureClass, RejectionCode, Diagnostic)`; `FailureClass` = Resumable | RetryableWithCleanup | QuarantineRequired | SuccessfulButDrifted (design §4C).
 - Feature-gated handlers follow ADR-032 P1/P2/P3 — null-impl UNCONDITIONAL outside the gate; real-impl CONDITIONAL inside. Last-write-wins for the same key resolves correctly at runtime.
 
 ## ADR-032 F.1 asymmetric-registration — BINDING per `.claude/constraints/bff-extensions.md` § F.1
@@ -116,8 +116,8 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 ## Handler idempotency + drift-detection
 
 - Every handler MUST be idempotent. Second run of the same handler against the same customer resources produces the same end state (assuming no external drift).
-- Drift-detection handlers (H4-shared for from-shared-service secrets, H10 for setup registry) MUST audit-log the drift + rotate/repair automatically OR escalate per §6.5 (if drift indicates an ADR conflict).
-- Idempotency verified via `HandlerIdempotencyTests` (per handler). Missing test → PR blocker.
+- Drift-detection handlers (H10 for setup registry) MUST audit-log the drift + rotate/repair automatically OR escalate per §6.5 (if drift indicates an ADR conflict). (H4-shared, the former drift handler for `from-shared-service` secrets, was retired by T226 on 2026-09-30 — customer stamps never read a shared service's credential.)
+- Idempotency is verified in each handler's own test class (`src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/*Tests.cs` — re-run / already-completed cases). Missing coverage → PR blocker. (There is no shared `HandlerIdempotencyTests` class; an earlier version of this line named one.)
 
 ## Progressive fail-fast recovery — BFF startup completeness
 
@@ -159,7 +159,7 @@ If a parallel agent is accidentally dispatched to a `.claude/**` task, it will f
 
 ## Test update obligation — analogous to bff-extensions.md § F
 
-PRs modifying `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/**` MUST add/update tests in `tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/**`. Handler-registration-completeness ArchTest is the forcing function; skipping the actual behavior tests is a Critical finding.
+PRs modifying `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/**` MUST add/update tests in `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/**`. Handler-registration-completeness ArchTest is the forcing function; skipping the actual behavior tests is a Critical finding.
 
 PRs modifying `scripts/canonical-secret-catalog/manifest.yaml` MUST prove generator determinism via `Invoke-CatalogGenerator.ps1 -Verify` → exit 0.
 

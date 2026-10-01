@@ -13,8 +13,8 @@
 //
 // REGISTRY HALF — value-idempotent PATCH:
 //   Resolves the environment row via IDataverseEnvironmentRegistryClient.
-//   LookupByTenantIdAsync (sprk_tenantid is the registry's unique key; H4/
-//   H4-shared always carry tenantId per §4D I1), then PATCHes
+//   LookupByTenantIdAsync (sprk_tenantid is the registry's unique key; H4
+//   always carries tenantId per §4D I1), then PATCHes
 //   sprk_credentialmode="secret-free" via UpdateCredentialModeAsync (A38a
 //   extension of the task-112 registry client — reuse over duplicating the
 //   Path-X MI-native Dataverse plumbing per CLAUDE.md §11). PATCHing the same
