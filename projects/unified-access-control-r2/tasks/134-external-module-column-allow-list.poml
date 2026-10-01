@@ -4,7 +4,7 @@
     <title>C6 — a per-module COLUMN allow-list on the external module read seam: /fetch and /record stop returning SPE pointers and internal/FLS columns inside granted scope</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C6)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization/disclosure change on a live, unconditionally mapped external read route (.cs); tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -150,5 +150,18 @@ Independent of tasks 135-137 in logic, but parallel-unsafe under the hot-file ru
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-134">
+      Code complete; the MANUAL live gate (criterion 12) is PENDING — no deploy or live write was permitted in this run.
+      Allow-lists derived from LIVE dev data (read-only): the six sprk_gridconfiguration records, every active main
+      view of the seven module entities, EntityDefinitions primary id/name, and IsSecured (none). No escalation trigger
+      fired: no pointer, alias or aggregate in any live grid or view; nothing unreadable; only the external grid client
+      reaches the seam. Premise corrections: grid FetchXML lives in sprk_configjson (no sprk_fetchxml/sprk_layoutxml
+      columns); the external config read is DataGrid.tsx:657, not ConfigurationService/ViewService (Xrm paths); the
+      external grids expose a ViewSelector of internal main views (owner follow-up D1 in the notes). Deviation D2: the
+      primary-NAME default column is pinned by a live-metadata test, not by Register (metadata is not derivable from the
+      one permitted property); Register enforces the primary id. Perturbations P1–P4 each turned tests red, all reverted.
+      Design-register D-3 annotated (G-10 closed for this seam). Full record:
+      notes/task-134-external-module-column-allow-list.md.
+    </outcome>
   </execution>
 </task>

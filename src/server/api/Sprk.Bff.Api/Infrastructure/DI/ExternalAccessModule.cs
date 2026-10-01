@@ -221,12 +221,34 @@ public static class ExternalAccessModule
         // (CIAM → sprk_externalrecordaccess participations; workforce → accessible-record-set). Task 016
         // registers the remaining outside-counsel modules (matter/document/invoice/work-assignment) the
         // same way — AddExternalModule with one descriptor each, no framework change.
+        //
+        // COLUMN allow-lists (unified-access-control-r2 task 134, defect C6). Every descriptor declares the
+        // exact columns an external caller may read; the read seam refuses anything else before execution
+        // and strips it from the result afterwards (ExternalModuleDataEndpoints). Each list was DERIVED
+        // FROM LIVE DATA on 2026-09-30, never written from memory — a guessed list either leaks or blanks a
+        // grid. Derivation rule: (a) every attribute the module's sprk_gridconfiguration record references
+        // (attribute / condition / order); (b) every attribute of a sibling saved view the grid's
+        // ViewSelector offers AND that can render rows today, i.e. one that projects a scope-dimension
+        // attribute (a view that projects none returns 0 rows after ScopeRows, so it shows nothing today
+        // and contributes no column); (c) the scope-dimension attributes; (d) the /record default
+        // projection (primary id + primary name, from EntityDefinitions). No live grid or view references
+        // a pointer column, an alias or an aggregate. Full table: projects/unified-access-control-r2/
+        // notes/task-134-external-module-column-allow-list.md. ⚠️ Changing a grid configuration or a main
+        // view to show a new column now REQUIRES adding the column here — otherwise that grid gets a 400.
+        //
+        // sprk_project: grid 61711823 + views "Active Projects" 195ab203, "My Projects" 0e36d0a4.
+        // Primary name = sprk_projectnumber.
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "collaboration",
             RecordEntity = "sprk_project",
             RecordIdAttribute = "sprk_projectid",
             AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
+                "modifiedon", "createdon", "ownerid", "sprk_practicearea", "sprk_projecttype_ref",
+            },
         });
 
         // Task 028 (2026-08-10) — POLYMORPHIC Tier-2 scoping. Supersedes task 016's single-parent
@@ -251,6 +273,15 @@ public static class ExternalAccessModule
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
             },
+            // Grid 3af4102c only: none of the four sprk_document main views projects a scope lookup, so
+            // each renders 0 rows today and contributes no column (they would add AI-triage columns —
+            // classification, invoice hints — that no external caller can currently see). Primary name =
+            // sprk_documentname. No pointer column (sprk_graphdriveid / sprk_graphitemid / sprk_filepath …).
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
+                "sprk_project", "sprk_matter", "sprk_workassignment",
+            },
         });
 
         // Invoices — visible when attached to an accessible matter OR project (invoices carry both
@@ -265,6 +296,14 @@ public static class ExternalAccessModule
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             },
+            // Grid 3ff4102c + view "Invoice - Matter Context" b9f6d045 (the only sprk_invoice main view that
+            // projects a scope lookup, sprk_matter). Primary name = sprk_name.
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+                "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon",
+                "statecode",
+            },
         });
 
         // Work Assignments — a FIRST-CLASS ROOT (task 028): a standalone WA (no project/matter) can be
@@ -277,6 +316,14 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_workassignment",
             RecordIdAttribute = "sprk_workassignmentid",
             AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
+            // Grid 42f4102c + views "Active Work Assignments" c8391ddf, "Inactive Work Assignments"
+            // d73b2239, "My Work to Assign" b7cf5593. Primary name = sprk_name.
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
+                "sprk_responseduedate", "statuscode", "statecode", "sprk_regardingproject", "createdon",
+                "ownerid", "sprk_assignedto",
+            },
         });
 
         // Matters — a first-class ROOT (task 028; supersedes the D-016-1 always-empty stub). Scoped by
@@ -289,6 +336,13 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_matter",
             RecordIdAttribute = "sprk_matterid",
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
+            // Grid 583a2a33 + views "Active Matters" 3ba2301f, "My Matters" 6c3c5d88, "All Matters"
+            // 694cd4b7. Primary name = sprk_matternumber.
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "statecode",
+                "createdon", "sprk_mattertype", "sprk_practicearea",
+            },
         });
 
         // Service Requests (task 028) — INTERNAL-ONLY. Shows the caller's OWN submitted requests
@@ -305,6 +359,14 @@ public static class ExternalAccessModule
                 p.Plane == CallerPrincipalPlane.Workforce && p.ContactId != Guid.Empty
                     ? new HashSet<Guid> { p.ContactId }
                     : EmptyRecordIds,
+            // Grid 403e5d37 only: the one sprk_servicerequest main view ("Inactive Service Requests")
+            // does not project the scope attribute sprk_requestedby, so it renders 0 rows today.
+            // Primary name = sprk_name.
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
+                "sprk_requestedby",
+            },
         });
 
         // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own
@@ -321,6 +383,14 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_gridconfiguration",
             RecordIdAttribute = "sprk_gridconfigurationid",
             AccessibleRecordIds = _ => OutsideCounselGridConfigurationIds,
+            // The only external read of this entity is the shared DataGrid's config load,
+            // `retrieveRecord('sprk_gridconfiguration', configId, ['sprk_configjson'])`
+            // (Spaarke.UI.Components DataGrid.tsx fetchConfigRecord) + the /record default projection.
+            // No external grid lists grid configurations. Primary name = sprk_name.
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_gridconfigurationid", "sprk_name", "sprk_configjson",
+            },
         });
 
         // Accessible-record-set composition + enforcement gate (teams-app-r1 task 022, spec FR-06 /

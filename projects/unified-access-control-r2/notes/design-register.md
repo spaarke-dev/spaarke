@@ -111,7 +111,7 @@ complete for active sites.**
 |---|---|---|
 | D-1 | Expiry enforcement | **But**: the UI accepts an expiry date the system ignores. Either enforce (small — add to the read filter) or hide the input |
 | D-2 | Project/matter closure + archival semantics | A-12 suggests the existing cascade is broken anyway |
-| D-3 | Field-level visibility (show/hide by permission) | SPA simply will not expose sensitive fields for now |
+| D-3 | Field-level visibility (show/hide by permission) | SPA simply will not expose sensitive fields for now. **Premise failed where the CALLER authors the read** (investigation G-10 / session-26 defect C6): the external module seam executes caller-written FetchXML / `$select` app-only, bypassing field security. **Closed for that seam by task 134** (2026-09-30): a per-module column allow-list (`ExternalModuleDescriptor.ReadableColumns`), refused before execution and stripped after — see `notes/task-134-external-module-column-allow-list.md`. Per-permission show/hide (different columns for different callers) remains deferred |
 | D-4 | AI plane for contacts | No CIAM route reaches AI search today; A-21 means index-time trimming is unbuilt. Needs an explicit guard before the SPA gains an assistant |
 | D-5 | Notification | Partially working: fires only on **first CIAM provisioning**; a subsequent grant is silent and removal sends nothing (R3 gap 6A). Requirement was for add **and** remove |
 
