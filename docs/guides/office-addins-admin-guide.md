@@ -80,7 +80,6 @@ Users (Outlook/Word)
 |  /office/* Endpoints      |
 |  - POST /office/save      |
 |  - GET /office/search     |
-|  - POST /office/share     |
 |  - GET /office/jobs       |
 +---------------------------+
          |
@@ -450,7 +449,6 @@ Rate limits are per-user per-minute, enforced via Redis:
 | `POST /office/quickcreate/*` | 5 | Yes |
 | `GET /office/search/*` | 30 | Yes |
 | `GET /office/jobs/*` | 60 | Yes |
-| `POST /office/share/*` | 20 | Yes |
 
 **Response when rate limited**:
 - HTTP Status: `429 Too Many Requests`
@@ -739,7 +737,7 @@ rm -rf ~/Library/Containers/com.microsoft.Word/Data/Library/Caches/Microsoft/Off
 curl https://spe-api-prod-*.azurewebsites.net/healthz
 
 # Check Office endpoints (requires token)
-curl -H "Authorization: Bearer {token}" https://spe-api-prod-*.azurewebsites.net/office/recent
+curl -H "Authorization: Bearer {token}" https://spe-api-prod-*.azurewebsites.net/office/search/matter-types
 
 # Check static assets
 curl -I https://spe-office-addins-prod.azurestaticapps.net/outlook/taskpane.html

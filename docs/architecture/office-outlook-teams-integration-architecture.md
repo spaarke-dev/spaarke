@@ -123,7 +123,7 @@ Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`; logic in `Servi
 | `POST /api/office/save` (+ `/save-debug`) | Save the current email/document → queues async processing, returns a job id |
 | `GET /api/office/{jobId}` · `GET /api/office/{jobId}/stream` | Job status (poll + **SSE** progress) |
 | `GET /api/office/search/entities` | Entity search (Matter/Project/Invoice/Contact) — powers RelatedToPicker + Contact assignee |
-| `GET /api/office/documents` · `GET /api/office/recent` | Document/recent lookups |
+| `GET /api/office/documents` | Document lookups (`/api/office/recent`, `/share/*` and `/search/documents` were deleted 2026-09-30 by spaarkeai-word-add-in-r1 task 058: fabricated data, no client) |
 | `POST /api/office/quickcreate/{entityType}` | Inline "create new record" for filing |
 | `POST /api/office/todo` | **Create first-class `sprk_todo`** (r2) |
 | `POST /api/office/links` · `POST /api/office/attach` | Sharing links / attach flows |

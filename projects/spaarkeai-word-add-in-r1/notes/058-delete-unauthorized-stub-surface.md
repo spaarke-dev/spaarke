@@ -96,4 +96,25 @@ share spec used them. They reference no route, so the criteria do not require th
 
 ## 6. Gates
 
-_(filled at close-out)_
+| Gate | Result |
+|---|---|
+| Publish size (§10), fresh master vs branch, `Compress-Archive` Optimal incl. PDBs, short-path worktrees | master `b8fc4dc3e` **45.49 MB** → branch `8d56d47eb` **45.46 MB** = **−0.028 MB** (−29,093 bytes). **212 files on both sides**, so the measurement is valid. A reduction, as expected |
+| CVE | No package or csproj changes. `dotnet list package --vulnerable --include-transitive`: no vulnerable packages |
+| Code review | **0 critical, 0 warnings.** No orphaned fields: every remaining `OfficeService` field is still used, and the constructor and DI are unchanged. The `AssociationType` move is byte-identical, and the repointed 401 test keeps its coverage. **1 suggestion, deferred to task 075:** the share-only UI helpers left in `OutlookTaskPanePage` are dead |
+| ADR check | **0 violations.** ADR-001/008/010: removals only. ADR-038: the deleted tests are contract tests for deleted routes (the task's constraint: "their same-PR replacement is the route's removal"); no deletion falls under the replacement-required paths (auth, regression, data-mutation, tenant), and the one auth-flavoured contract test was **repointed, not deleted** |
+| Docs | Three docs listed the routes as live and were fixed: `office-outlook-teams-integration-architecture.md`, `sdap-overview.md` and `office-addins-admin-guide.md` (endpoint list, box diagram, rate-limit table and the health-check `curl`) |
+| Full BFF suite / ArchTests | see §7 |
+
+## 7. Suite reconciliation
+
+| | Before (080's run) | After 058 | Delta | Expected from this task |
+|---|---|---|---|---|
+| `Sprk.Bff.Api.Tests` passed | 13,047 (+1 timing flake that fails on load, so 13,048 effective) | **13,040** | **−8** | −8: share-links ×2, share-attach ×2, recent ×2 (contract), plus 2 `RateLimitFilterTests` theory rows |
+| skipped | 56 | **54** | **−2** | −2: the two document-search contract tests, which were already `Skip` |
+| failed | 1 (`SseStreamingIntegrationTests` timing flake) | **0** | | |
+| `Spaarke.ArchTests` | — | **337/337** | | The four waiver deletions keep `NoWaiverIsStale` green. The criterion's "191/191" is stale; the suite has grown |
+
+The delta matches the removals exactly. The repointed 401 test is counted in both runs. (Duration 12 m 11 s.)
+
+Coordination with task 074: `share-flow.spec.ts` (29 tests) is marked DELETED in `notes/074-e2e.md` and
+`notes/parity-checklist.md` §10. The live-host manual pass is now 80 tests.
