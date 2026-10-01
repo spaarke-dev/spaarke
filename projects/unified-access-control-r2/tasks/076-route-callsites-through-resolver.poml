@@ -94,7 +94,7 @@ So the client cutover is **three signatures**, and the 12 suppliers then have no
 
 **Classify each of the 12, do not blanket-delete.** A supplier that exists only to feed U1/U2/U3 is deleted. A supplier that feeds a **non-upload** consumer is NOT this task's to remove — it belongs to whoever owns that read:
 
-- `SemanticSearchControl/.../NavigationService.ts:354-362` builds a user→BU→container chain and passes `&containerId=` **on a navigation URL**, not an upload.
+- `SemanticSearchControl/.../NavigationService.ts:354-362` builds a user→BU→container chain and passes `&amp;containerId=` **on a navigation URL**, not an upload.
 - `LegalWorkspace/.../WorkspaceGrid.tsx:535-537` and `src/client/webresources/js/sprk_analysis_commands.js:58` likewise choose a container for a **read/command**, not bytes.
 
 For each, write one line: *deleted (fed only uploads)* / *retained, owned by task 078* / *retained, needs a new task — filed as X*. **A supplier left unclassified is a survivor**, and survivors are what this task exists to eliminate.

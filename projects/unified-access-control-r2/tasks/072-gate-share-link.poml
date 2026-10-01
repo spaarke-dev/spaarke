@@ -120,5 +120,5 @@ Four things the POML did not anticipate:
    recipients with no error signal.
 
 Also: task 074's Pending waiver for this route is deleted (stale once gated). The ArchTest waiver
-requirement was not in the POML's acceptance criteria but is implied by 074's design.
+requirement was not in the POML's acceptance criteria but is implied by 074's design.</notes>
 </task>
