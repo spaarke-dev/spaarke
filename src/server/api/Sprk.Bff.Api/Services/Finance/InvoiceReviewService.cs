@@ -495,9 +495,17 @@ public class InvoiceReviewService : IInvoiceReviewService
         Elsewhere,
     }
 
-    /// <summary>What one read of the document found: existence, version, review decision and where its link points.</summary>
+    /// <summary>
+    /// What one read of the document found: existence, version, review decision and where its link points.
+    /// <see cref="Decision"/> is the decision's full identity — status, reviewed-on stamp and notes — because every
+    /// confirm and reject writes all three: a SECOND reject of an already-rejected document leaves the status
+    /// unchanged but restamps <c>sprk_invoicereviewedon</c>, and only the stamp tells it apart from an unrelated write.
+    /// </summary>
     private readonly record struct DocumentState(
-        bool Exists, long Version, int? ReviewStatus, LinkState Link, Guid? LinkedInvoiceId);
+        bool Exists, long Version, int? ReviewStatus, LinkState Link, Guid? LinkedInvoiceId, ReviewDecision Decision);
+
+    /// <summary>A review decision as written by <see cref="BuildReviewStatusFields"/>; equal only if no decision was written in between.</summary>
+    private readonly record struct ReviewDecision(int? Status, DateTime? ReviewedOnUtc, string? Notes);
 
     /// <summary>
     /// Reads the document's link, <c>versionnumber</c> (which every conditional write is made on) and review
@@ -508,21 +516,26 @@ public class InvoiceReviewService : IInvoiceReviewService
     private async Task<DocumentState> ReadDocumentStateAsync(InvoiceReviewConfirmRequest request, CancellationToken ct)
     {
         var document = await _records.RetrieveRecordFieldsAsync(
-            DocumentEntity, request.DocumentId, new[] { DocInvoiceLinkValue, VersionNumber, DocInvoiceReviewStatus }, ct);
+            DocumentEntity, request.DocumentId,
+            new[] { DocInvoiceLinkValue, VersionNumber, DocInvoiceReviewStatus, DocInvoiceReviewedOn, DocInvoiceReviewNotes }, ct);
 
         // RetrieveRecordFieldsAsync answers an EMPTY dictionary for a missing row (and a key per requested field,
         // null-valued, for a row whose column is empty).
         if (document.Count == 0)
         {
-            return new DocumentState(false, 0, null, LinkState.None, null);
+            return new DocumentState(false, 0, null, LinkState.None, null, default);
         }
 
         var version = ReadVersion(document, "the confirmation cannot link it safely");
         var reviewStatus = TryReadInt(document, DocInvoiceReviewStatus);
+        var decision = new ReviewDecision(
+            reviewStatus,
+            TryReadUtc(document, DocInvoiceReviewedOn),
+            document.TryGetValue(DocInvoiceReviewNotes, out var notes) ? notes?.ToString() : null);
 
         if (!TryReadGuid(document, DocInvoiceLinkValue, out var linkedInvoiceId))
         {
-            return new DocumentState(true, version, reviewStatus, LinkState.None, null);
+            return new DocumentState(true, version, reviewStatus, LinkState.None, null, decision);
         }
 
         var invoice = await _records.RetrieveRecordFieldsAsync(
@@ -531,7 +544,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         if (invoice.Count == 0)
         {
             // A dangling link to a deleted invoice — nothing to resume; the new link overwrites it.
-            return new DocumentState(true, version, reviewStatus, LinkState.None, null);
+            return new DocumentState(true, version, reviewStatus, LinkState.None, null, decision);
         }
 
         var sameMatter = TryReadGuid(invoice, InvMatterValue, out var matterId) && matterId == request.MatterId;
@@ -539,7 +552,7 @@ public class InvoiceReviewService : IInvoiceReviewService
 
         if (sameMatter && sameVendor)
         {
-            return new DocumentState(true, version, reviewStatus, LinkState.SameMatterAndVendor, linkedInvoiceId);
+            return new DocumentState(true, version, reviewStatus, LinkState.SameMatterAndVendor, linkedInvoiceId, decision);
         }
 
         // The other invoice belongs to a matter or vendor the request did not name — and the caller was never
@@ -549,7 +562,7 @@ public class InvoiceReviewService : IInvoiceReviewService
             "confirmation is refused (409). The linked invoice id is not returned to the caller.",
             request.DocumentId, linkedInvoiceId);
 
-        return new DocumentState(true, version, reviewStatus, LinkState.Elsewhere, null);
+        return new DocumentState(true, version, reviewStatus, LinkState.Elsewhere, null, decision);
     }
 
     /// <summary>
@@ -828,7 +841,8 @@ public class InvoiceReviewService : IInvoiceReviewService
     ///     <item>linked to another matter's or vendor's invoice → invoice deleted, 409
     ///     <see cref="InvoiceReviewFailure.DocumentLinkedToAnotherInvoice"/>;</item>
     ///     <item>gone → invoice deleted, <see cref="InvoiceReviewFailure.DocumentNotFound"/>;</item>
-    ///     <item>still unlinked but its review decision changed (a concurrent reject) → invoice deleted, 409
+    ///     <item>still unlinked but a review decision was written in between (a concurrent reject — including a
+    ///     second reject of an already-rejected document, which changes only the reviewed-on stamp) → invoice deleted, 409
     ///     <see cref="InvoiceReviewFailure.ReviewDecisionChanged"/> — the reject stands;</item>
     ///     <item>still unlinked, decision unchanged (an unrelated write, e.g. a profiling status) → the link is
     ///     retried with the fresh version, up to <see cref="MaxConditionalWriteAttempts"/> attempts in total, then
@@ -915,7 +929,7 @@ public class InvoiceReviewService : IInvoiceReviewService
             {
                 refusal = LinkedElsewhere();
             }
-            else if (now.ReviewStatus != first.ReviewStatus)
+            else if (now.Decision != first.Decision)
             {
                 refusal = new InvoiceReviewException(
                     InvoiceReviewFailure.ReviewDecisionChanged,
@@ -1266,6 +1280,20 @@ public class InvoiceReviewService : IInvoiceReviewService
             && Guid.TryParse(raw.ToString(), out value)
             && value != Guid.Empty;
     }
+
+    /// <summary>
+    /// A date-time column as UTC, whichever shape the reader returns: the Web API answers an ISO string, the
+    /// ServiceClient a <see cref="DateTime"/>. Null when absent or unreadable.
+    /// </summary>
+    private static DateTime? TryReadUtc(Dictionary<string, object?> row, string column) =>
+        row.TryGetValue(column, out var raw) ? raw switch
+        {
+            DateTime dt => dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt.ToUniversalTime(),
+            DateTimeOffset dto => dto.UtcDateTime,
+            string text when DateTimeOffset.TryParse(
+                text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed) => parsed.UtcDateTime,
+            _ => null,
+        } : null;
 
     private static int? TryReadInt(Dictionary<string, object?> row, string column) =>
         row.TryGetValue(column, out var raw)

@@ -699,6 +699,38 @@ public class InvoiceReviewWritePathTests
     }
 
     [Fact]
+    public async Task AlreadyRejected_ASecondRejectLandsBetweenAConfirmsReadAndLink_TheConfirmIs409_AndTheRejectStands()
+    {
+        // The document is ALREADY RejectedNotInvoice when the confirm reads it (confirming it then is a deliberate
+        // re-decision, which is allowed). While the confirm's invoice is being created, someone rejects it AGAIN,
+        // with the same notes. The status does not change, so only the reviewed-on stamp shows a decision was
+        // written: the confirm must treat it as a concurrent reject (409, invoice removed), NOT as an unrelated
+        // write to retry the link over — which would leave the second reject's caller told "Rejected" while the
+        // document ends up Confirmed.
+        var request = NewRequest();
+        _records.ExistingDocument(
+            request.DocumentId, reviewStatus: Rejected, reviewedOnUtc: DateTime.UtcNow.AddDays(-1), reviewNotes: "statement");
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        AllowInvoiceDeletes();
+        _records.OnUpsertAppliedAsync = () => Sut().RejectInvoiceAsync(
+            new InvoiceReviewRejectRequest { DocumentId = request.DocumentId, Notes = "statement" }, "corr-reject-2");
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-confirm");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.ReviewDecisionChanged);
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        _records.Exists("sprk_invoice", createdId).Should().BeFalse("the refused confirm removed its invoice");
+        _records.LinkOf(request.DocumentId).Should().BeNull();
+        _records.StatusOf(request.DocumentId).Should().Be(Rejected, "the second reject stands");
+        _records.LinkAttempts.Should().Be(1, "a written decision is not retried over");
+        _records.Writes.Where(w => w.Fields.ContainsKey("sprk_invoicereviewstatus"))
+            .Select(w => (int)w.Fields["sprk_invoicereviewstatus"]!)
+            .Should().NotContain(Confirmed);
+        _submitted.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Confirm_DocumentRelinkedBetweenLinkAndStatus_TheStatusIsNotWritten_AndTheInvoiceIsNamed()
     {
         // Proves the confirm's own status write is conditional AND checks the link it is confirming: someone
@@ -913,13 +945,21 @@ public class InvoiceReviewWritePathTests
         /// <summary>Conditional document writes that carried the link, applied or refused.</summary>
         public int LinkAttempts { get; private set; }
 
-        public void ExistingDocument(Guid id, Guid? linkedInvoiceId = null, int? reviewStatus = null) =>
+        public void ExistingDocument(
+            Guid id, Guid? linkedInvoiceId = null, int? reviewStatus = null, DateTime? reviewedOnUtc = null,
+            string? reviewNotes = null) =>
             _rows[("sprk_document", id)] = new()
             {
                 ["_sprk_invoice_value"] = linkedInvoiceId?.ToString(),
                 ["sprk_invoicereviewstatus"] = reviewStatus is null ? null : (long)reviewStatus.Value,
+                ["sprk_invoicereviewedon"] = reviewedOnUtc is null ? null : AsWebApiDateTime(reviewedOnUtc.Value),
+                ["sprk_invoicereviewnotes"] = reviewNotes,
                 ["versionnumber"] = 1L,
             };
+
+        /// <summary>The Web API answers a date-time column as an ISO string at whole-second precision.</summary>
+        private static string AsWebApiDateTime(DateTime value) =>
+            value.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", System.Globalization.CultureInfo.InvariantCulture);
 
         public void Invoice(Guid id, Guid matterId, Guid vendorId) =>
             _rows[("sprk_invoice", id)] = new()
@@ -1077,6 +1117,16 @@ public class InvoiceReviewWritePathTests
             if (fields.TryGetValue("sprk_invoicereviewstatus", out var status) && status is int value)
             {
                 row["sprk_invoicereviewstatus"] = (long)value; // the Web API reads an option set back as a number (long)
+            }
+
+            if (fields.TryGetValue("sprk_invoicereviewedon", out var reviewedOn) && reviewedOn is DateTime stamp)
+            {
+                row["sprk_invoicereviewedon"] = AsWebApiDateTime(stamp);
+            }
+
+            if (fields.TryGetValue("sprk_invoicereviewnotes", out var notes))
+            {
+                row["sprk_invoicereviewnotes"] = notes;
             }
 
             Bump(row);

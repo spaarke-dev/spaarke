@@ -573,3 +573,29 @@ filter run, the file restored from a backup with `cp` and then `touch`ed (round 
 
 **Suites (2026-10-01, on the committed tree):** BFF unit suite **13190 passed / 56 skipped / 0 failed** (13246);
 ArchTests **340/340**. Affected filter (`FinanceInvoiceReview` + `FinanceEndpointsAuthorizationContractTests`): 110/110.
+
+### 11.9 Round 3 verifier gap closed in the main session (2026-10-01) + tracking
+
+**The gap the round-3 verifier found (it had not been disclosed).** The document is already `RejectedNotInvoice`. A
+confirm reads it (a deliberate re-decision, which is allowed). A SECOND reject then lands between that read and the link.
+The status does not change, so the confirm's 412 re-check, which compared `sprk_invoicereviewstatus` only, took
+the reject for an unrelated write. It then retried the link and later wrote `ConfirmedInvoice`: the second reject's caller
+was told "Rejected", but the document ended up Confirmed. The verifier's throwaway probe test confirmed this.
+
+**Fix.** The re-check now compares the decision's full identity, `ReviewDecision(status, sprk_invoicereviewedon,
+sprk_invoicereviewnotes)`. Every confirm and every reject writes all three through `BuildReviewStatusFields`, so any
+decision written in between changes the reviewed-on stamp even when the status is the same. The stamp is read
+through `TryReadUtc`, which accepts both the Web API's ISO string and the ServiceClient's `DateTime`. Notes are a second
+discriminator, for two rejects in the same second (Dataverse stores date-times to the second).
+- Test: `AlreadyRejected_ASecondRejectLandsBetweenAConfirmsReadAndLink_TheConfirmIs409_AndTheRejectStands`. The fake now
+  stores `sprk_invoicereviewedon` as the Web API does (an ISO string, whole seconds) and stores the notes.
+- Seed: reverting the comparison to status-only fails exactly this test (1 of 42 in the filter); restored.
+- An unrelated write (`TouchDocument`) still retries, because it changes neither the stamp nor the notes; the existing bound
+  tests still pass.
+
+**Tracking (nothing hidden):**
+- **R1, a second extraction job from a confirm that starts after a link** (or from a repeated confirm). It is linked on
+  **#984**: every such job carries `IdempotencyKey = invoice-extraction-{invoiceId}`, so the atomic receive-side claim
+  drops it. Live check: `sdap-jobs` has `requiresDuplicateDetection = false`, which cannot be changed on an existing queue.
+  A second run has no effect until #229 makes the handler's output reachable.
+- **The handler writes extraction status to `sprk_document` with the invoice id**: filed as **#1087**.

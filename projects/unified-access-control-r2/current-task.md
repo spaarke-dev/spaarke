@@ -20,6 +20,12 @@
 >   - **F9:** "Secure Record Owners".
 >   - **F10:** (a), handed to customer-provisioning-orchestration-r1.
 > - 🔴 **New cross-project risk #1081 (peer ISS-016).** Dev's ROOT BU default team "Spaarke" holds 0 privileges, so Dataverse refuses it as an owner. **Task 130's invoice owner comes from `RecordOwnershipResolver`**, so a root-owned matter or a root-BU caller gets a 5xx on confirm. 146 is exposed the same way. Owner decision is pending in the peer project; we do NOT fork a fix. When it is decided, map any new resolver refusal to a clean 4xx on the 130 route. Record it as a live-gate risk in the PR body.
+> - **PR #1083 opened as a DRAFT** (batch 1: 131/134/151) on 2026-10-01. It leaves draft once 130 is merged in, the suites are re-run, and branch publish size + CVE scan are done.
+> - **130 status:**
+>   - Fix round 2 (`task/uac-r2-130b` @ `29f07a4d2`) **PASSED** adversarial verification (unit 13,176/0, ArchTests 340).
+>   - Fix round 3 is running: workflow `woqdms6sw` (run `wf_5fa8277b-fee`) on `task/uac-r2-130c`. It closes the residuals: no second extraction job (dup detection is OFF on `sdap-jobs`, verified live, and the property is immutable), a bounded retry instead of a spurious 409, the confirm/reject race (conditional status writes; reject refuses a linked document), orphan over-report, and the regarding id/name convention.
+>   - **MERGE `task/uac-r2-130c` (not 130b) when verified.**
+> - **Peer PR #1085 (060)** also touches `OfficeEndpointsContractTests.cs`, on different hunks from ours.
 > - **Peer PR #1082 (084+085)** touches `CallerRecordAccessProbe.cs` (new `GetCallerRightsForRecordsAsync`; protected virtual seams) and `EntityAccessFilter.cs`. Our 130 also touches `CallerRecordAccessProbe`. Whoever lands second rebases.
 >
 > | | |
