@@ -38,7 +38,7 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <c>secure_record_container_missing</c> (409), <c>container_record_not_found</c> (404),
 /// <c>container_entity_unknown</c> (400), <c>container_ownership_ambiguous</c> (409),
 /// <c>container_ownership_indeterminate</c> (409), and for child records (task 155)
-/// <c>container_ancestor_unresolved</c> (409; 503 when the root could not be read),
+/// <c>container_ancestor_unresolved</c> (409; 503 when the child's own row or its root could not be read),
 /// <c>container_ancestor_ambiguous</c> (409) and <c>container_ancestor_unverifiable</c> (409).</para>
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
@@ -251,7 +251,32 @@ public sealed class RecordContainerResolver
             columns.AddRange(ancestorLinks.AllColumns);
         }
 
-        var record = await ReadRecordAsync(normalizedEntity, recordId, [.. columns], ct).ConfigureAwait(false);
+        Entity record;
+        try
+        {
+            record = await ReadRecordAsync(normalizedEntity, recordId, [.. columns], ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (
+            ancestorLinks is not null && ex is not SdapProblemException and not OperationCanceledException)
+        {
+            // For a CHILD this read IS its link to its root, so an unreadable row is an unreadable ancestor link
+            // (task 155 AC4). It already failed closed — nothing below ran — but as a raw fault the record-keyed
+            // routes rendered it as a generic 500 "Upload failed" carrying the exception text. Same posture and
+            // code as an unreadable ROOT: unknown never becomes "not secure", and 503 because a retry may succeed.
+            // Not-found (404) and the resolver's own refusals pass through untouched; a non-child keeps the
+            // original propagate-raw contract.
+            _logger.LogError(ex,
+                "[SECURE-CONTAINER] Could not read {Entity} {RecordId}, whose row carries its link to its project, "
+                + "matter or work assignment. Refusing rather than treating it as having no secure root ({Code}).",
+                normalizedEntity, recordId, AncestorUnresolvedCode);
+
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"This {normalizedEntity} could not be read, so its link to a project, matter or work assignment — "
+                + "and whether its content belongs in a secure container — cannot be determined. Try again.",
+                statusCode: 503,
+                logDetail: "child row read failed");
+        }
 
         var isSecure = false;
         string? ownContainerId = null;

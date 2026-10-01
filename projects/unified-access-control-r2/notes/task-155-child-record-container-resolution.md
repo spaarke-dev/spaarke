@@ -174,3 +174,25 @@ is not a child (`CoreAncestorResolver`: unclassified), so it takes its own busin
    `SELECT sprk_containerid FROM businessunit WHERE businessunitid = '<bu>'`.
 4. **Confirm the holding position.** An upload to one of the 13 to-dos filed under another record answers 409
    `container_ancestor_unverifiable`, and nothing lands in any container.
+
+## Round f1: adversarial-verifier findings (branch `task/uac-r2-155-f1`)
+
+- **AC4, unreadable ancestor LINK.** A child's own row, when unreadable (any failure except not-found), now refuses
+  with `container_ancestor_unresolved` **503**, the same refusal as an unreadable root. Before this round it was a
+  raw fault, which the record-keyed routes rendered as a generic 500 "Upload failed".
+- **Fail-closed branches the verifier proved untested** (an unknown root entity type; a null root row) now have
+  tests. The verifier's exact seeds (`continue`) turn them red.
+- **Inbound communication classification.** `IncomingCommunicationProcessor.IsPermanentContainerRefusal` skips
+  three refusals as permanent: `container_ancestor_ambiguous`, `container_ancestor_unverifiable`, and
+  `container_ancestor_unresolved` at 409. `container_ancestor_unresolved` at 503 stays transient. Before this
+  round, the permanent codes that an email regarding an INVOICE can raise fell into the retry loop.
+- **Communication → invoice → secure matter routing** is now tested end to end. The test runs the real adapter
+  over the real resolver.
+- **Route-level copy.** A test now covers the documented 409 "No storage container is configured" response.
+- **CoreAncestorResolver remark.** The stale remark that `sprk_todo` lacks `sprk_regardingservicerequest` has
+  been corrected. The example is now `sprk_invoice`.
+- **Still open:**
+  - The owner's choice for escalation trigger 2, option (a), (b) or (c).
+  - The AC7 live gate (above).
+  - The taxonomy observation for agreement, budget, report card and organization, which belongs to tasks 146/147.
+  - The SPE-membership 403 observation.

@@ -8,6 +8,8 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
 
@@ -303,15 +305,88 @@ public class ChildRecordContainerResolutionTests
         ex.StatusCode.Should().Be(409);
     }
 
-    [Fact(DisplayName = "Task 155: an unreadable CHILD (the link itself) propagates — never read as 'no ancestor'")]
-    public async Task Todo_WhoseOwnRowCannotBeRead_Propagates()
+    [Fact(DisplayName = "Task 155: an unreadable CHILD row (the ancestor LINK itself) refuses with container_ancestor_unresolved 503 — never 'no ancestor', never a raw fault")]
+    public async Task Todo_WhoseOwnRowCannotBeRead_IsRefusedWithAReasonCode()
     {
-        var world = new World().WithRecordFault("sprk_todo", new TimeoutException("Dataverse timed out"));
+        // AC4: "unreadable ancestor link ... -> refusal with a reason code". The child's row IS its link to its
+        // root. As a raw fault the record-keyed routes rendered it as a generic 500 "Upload failed"; it must be
+        // the same typed, retryable refusal as an unreadable ROOT.
+        var world = new World()
+            .WithRecordFault("sprk_todo", new TimeoutException("Dataverse timed out"))
+            .WithBusinessUnit(BusinessUnitContainer);
 
-        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, ArchiveContainer);
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
 
-        await act.Should().ThrowAsync<TimeoutException>(
-            "the explicit fallback is available, and using it on an unread link is the #1038 fail-open");
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>(
+                "the explicit fallback is available, and using it on an unread link is the #1038 fail-open")).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(503, "a transient read failure is retryable, not a verdict");
+            ex.Detail.Should().NotContain("timed out", "the raw fault text belongs in the log, not the response");
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+        world.RootReads().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155: a CHILD row that does NOT EXIST still answers container_record_not_found 404 — not re-labelled as unreadable")]
+    public async Task Todo_ThatDoesNotExist_StillAnswersRecordNotFound()
+    {
+        var world = new World().WithRecordFault("sprk_todo", new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist")));
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be("container_record_not_found",
+            "a missing record is permanent (the ingest path skips it); calling it 'unreadable, try again' would not be");
+        ex.StatusCode.Should().Be(404);
+    }
+
+    [Fact(DisplayName = "Task 155: a root link whose entity this org does NOT KNOW refuses (container_ancestor_unresolved 409) — never read as 'not secure'")]
+    public async Task Todo_LinkedToARootTypeTheOrgDoesNotKnow_IsRefused()
+    {
+        // The registry answers NotAnEntity for sprk_project (e.g. a metadata catalog that lost the entity). Reading
+        // that as "cannot be secure" and moving on would put a secure project's to-do in its BU container.
+        var world = new World(securable: ["sprk_matter", "sprk_workassignment"], unknown: ["sprk_project"])
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+        world.Reads("sprk_project").Should().Be(0, "an entity the org does not know is not read");
+    }
+
+    [Fact(DisplayName = "Task 155: a root read that returns NO ROW refuses (container_ancestor_unresolved 409) — never read as 'not secure'")]
+    public async Task Todo_WhoseRootReadReturnsNoRow_IsRefused()
+    {
+        // Defensive: production RetrieveAsync throws on not-found rather than returning null, but a null row is still
+        // an UNKNOWN answer and must refuse rather than skip the root.
+        var world = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithNullRoot("sprk_project", ProjectId)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
     }
 
     [Theory(DisplayName = "Task 155 (escalation trigger 2): a child filed under ANOTHER child is refused as unverifiable — its root link is a stamp that can be stale")]
@@ -397,6 +472,108 @@ public class ChildRecordContainerResolutionTests
     }
 
     // ============================================================================================
+    // The inbound communication pipeline — an email regarding an INVOICE (securable AND a child)
+    // ============================================================================================
+
+    private static readonly string[] SecurableWithInvoice =
+        ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"];
+
+    [Fact(DisplayName = "Task 155: an email regarding an invoice under a SECURE matter routes to the MATTER's own container, not the archive")]
+    public async Task Communication_RegardingAnInvoiceUnderASecureMatter_RoutesToTheMattersContainer()
+    {
+        // The deliberate behaviour change: CommunicationContainerResolver asks about securable regardings only, and
+        // sprk_invoice is securable live — so the invoice, now a CHILD, resolves through its secure root.
+        var world = new World(securable: SecurableWithInvoice)
+            .WithCommunicationRegardingInvoice()
+            .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var container = await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        container.Should().Be(RootContainer,
+            "the archive container is shared; an invoice under a secure matter is secure (owner C10 part 2)");
+    }
+
+    [Fact(DisplayName = "Task 155: an email regarding an invoice with NO secure root still routes to the archive container, as before")]
+    public async Task Communication_RegardingAnInvoiceUnderANonSecureMatter_RoutesToTheArchiveAsBefore()
+    {
+        var world = new World(securable: SecurableWithInvoice)
+            .WithCommunicationRegardingInvoice()
+            .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var container = await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        container.Should().Be(ArchiveContainer);
+    }
+
+    [Fact(DisplayName = "Task 155: an email regarding an invoice under TWO secure roots is refused (container_ancestor_ambiguous) and the inbound processor treats it as PERMANENT")]
+    public async Task Communication_RegardingAnInvoiceUnderTwoSecureRoots_IsAPermanentRefusal()
+    {
+        var world = new World(securable: SecurableWithInvoice)
+            .WithCommunicationRegardingInvoice()
+            .WithChild("sprk_invoice", typedMatter: MatterId, typedProject: ProjectId, isSecure: false)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, OtherRootContainer);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorAmbiguousCode);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue(
+            "retrying cannot un-link a secure root; as 'transient' it is a retry loop that loses the message capture");
+    }
+
+    [Fact(DisplayName = "Task 155: an email regarding an invoice whose root does NOT EXIST is a PERMANENT refusal (409); an UNREADABLE root is transient (503)")]
+    public async Task Communication_RegardingAnInvoiceWithAMissingOrUnreadableRoot_IsClassifiedByStatus()
+    {
+        var missing = new World(securable: SecurableWithInvoice)
+            .WithCommunicationRegardingInvoice()
+            .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
+            .WithRootFault("sprk_matter", MatterId, new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist")));
+
+        var missingAct = async () =>
+            await missing.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+        var missingEx = (await missingAct.Should().ThrowAsync<SdapProblemException>()).Which;
+        missingEx.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        missingEx.StatusCode.Should().Be(409);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(missingEx).Should().BeTrue();
+
+        var unreadable = new World(securable: SecurableWithInvoice)
+            .WithCommunicationRegardingInvoice()
+            .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
+            .WithRootFault("sprk_matter", MatterId, new TimeoutException("Dataverse timed out"));
+
+        var unreadableAct = async () =>
+            await unreadable.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+        var unreadableEx = (await unreadableAct.Should().ThrowAsync<SdapProblemException>()).Which;
+        unreadableEx.StatusCode.Should().Be(503);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(unreadableEx).Should().BeFalse(
+            "an unreadable root may answer on retry; skipping it would withhold content that has a destination");
+    }
+
+    [Theory(DisplayName = "Task 155: the inbound processor's permanent/transient split — every permanent 409 container refusal skips, every read failure retries")]
+    [InlineData("secure_record_container_missing", 409, true)]
+    [InlineData("communication_secure_container_ambiguous", 409, true)]
+    [InlineData("container_ancestor_ambiguous", 409, true)]
+    [InlineData("container_ancestor_unverifiable", 409, true)]
+    [InlineData("container_ancestor_unresolved", 409, true)]
+    [InlineData("container_ancestor_unresolved", 503, false)]
+    [InlineData("container_record_not_found", 404, false)]
+    [InlineData("securable_entities_unknown", 409, false)]
+    public void InboundProcessor_ClassifiesContainerRefusals(string code, int status, bool permanent)
+    {
+        // The last two rows pin that this task changed only the ancestor codes: pre-existing codes keep their
+        // pre-existing (propagating) classification.
+        var ex = new SdapProblemException(code, "t", statusCode: status);
+
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().Be(permanent);
+    }
+
+    // ============================================================================================
     // MACHINERY — an in-memory org
     // ============================================================================================
 
@@ -406,16 +583,19 @@ public class ChildRecordContainerResolutionTests
         private readonly Dictionary<(string Entity, Guid Id), Func<Entity>> _rows = new();
         private readonly IGenericEntityService _service = Substitute.For<IGenericEntityService>();
 
-        private static readonly HashSet<string> Known = new(StringComparer.Ordinal)
+        private readonly HashSet<string> _known = new(StringComparer.Ordinal)
         {
             "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_invoice",
             "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit"
         };
 
-        public World(string[]? securable = null)
+        /// <param name="securable">Entities carrying sprk_issecure in this world.</param>
+        /// <param name="unknown">Entities this world's org does NOT know (classified NotAnEntity).</param>
+        public World(string[]? securable = null, string[]? unknown = null)
         {
             _securable = new HashSet<string>(
                 securable ?? ["sprk_project", "sprk_matter", "sprk_workassignment"], StringComparer.Ordinal);
+            _known.ExceptWith(unknown ?? []);
 
             _service
                 .RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
@@ -434,6 +614,7 @@ public class ChildRecordContainerResolutionTests
             Guid? regardingMatter = null,
             Guid? regardingServiceRequest = null,
             Guid? typedMatter = null,
+            Guid? typedProject = null,
             bool? isSecure = null,
             string? ownContainer = null,
             (string Column, Guid Id)? intermediate = null)
@@ -448,6 +629,7 @@ public class ChildRecordContainerResolutionTests
             if (regardingServiceRequest is { } s)
                 row["sprk_regardingservicerequest"] = new EntityReference("sprk_servicerequest", s);
             if (typedMatter is { } tm) row["sprk_matter"] = new EntityReference("sprk_matter", tm);
+            if (typedProject is { } tp) row["sprk_project"] = new EntityReference("sprk_project", tp);
             if (isSecure is { } secure) row["sprk_issecure"] = secure;
             if (ownContainer is not null) row["sprk_containerid"] = ownContainer;
             if (intermediate is { } i) row[i.Column] = new EntityReference("sprk_communication", i.Id);
@@ -489,6 +671,24 @@ public class ChildRecordContainerResolutionTests
             return this;
         }
 
+        public World WithNullRoot(string entity, Guid id)
+        {
+            _rows[(entity, id)] = () => null!;
+            return this;
+        }
+
+        /// <summary>A communication whose regarding INVOICE is <see cref="ChildId"/>.</summary>
+        public World WithCommunicationRegardingInvoice()
+        {
+            var row = new Entity("sprk_communication", CommunicationId)
+            {
+                ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", ChildId)
+            };
+
+            _rows[("sprk_communication", CommunicationId)] = () => row;
+            return this;
+        }
+
         public World WithBusinessUnit(string? container)
         {
             var bu = new Entity("businessunit", BusinessUnitId);
@@ -498,15 +698,21 @@ public class ChildRecordContainerResolutionTests
             return this;
         }
 
-        public RecordContainerResolver Resolver()
+        public RecordContainerResolver Resolver() =>
+            new(Registry(), _service, NullLogger<RecordContainerResolver>.Instance);
+
+        /// <summary>The REAL communication adapter over the REAL record resolver — only Dataverse rows are doubled.</summary>
+        public CommunicationContainerResolver CommunicationResolver() =>
+            new(Resolver(), _service, Registry(), NullLogger<CommunicationContainerResolver>.Instance);
+
+        private ISecurableEntityRegistry Registry()
         {
             var registry = Substitute.For<ISecurableEntityRegistry>();
             registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), _securable, Known)));
+                .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), _securable, _known)));
             registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<IReadOnlySet<string>>(_securable));
-
-            return new RecordContainerResolver(registry, _service, NullLogger<RecordContainerResolver>.Instance);
+            return registry;
         }
 
         private IEnumerable<ICall> ReadCalls() =>

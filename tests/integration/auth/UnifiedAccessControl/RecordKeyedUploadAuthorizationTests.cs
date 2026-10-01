@@ -587,6 +587,36 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         (await response.Content.ReadAsStringAsync()).Should().Contain("secure_record_container_missing");
         _fixture.Uploads.Should().BeEmpty();
     }
+
+    [Fact(DisplayName = "Task 155: a to-do whose own row (its ancestor LINK) cannot be read answers 503 container_ancestor_unresolved — not a generic 500 — and NOTHING reaches SPE")]
+    public async Task Put_TodoWhoseRowCannotBeRead_Answers503WithAReasonCode_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoWhoseRowCannotBeRead}/files/x.txt",
+            new ByteArrayContent([9]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        body.Should().Contain(RecordContainerResolver.AncestorUnresolvedCode);
+        body.Should().NotContain("Upload failed", "the route's catch-all 500 is for faults, not for a typed refusal");
+        body.Should().NotContain(RecordKeyedUploadRouteFixture.UnreadableRowFaultText,
+            "the raw fault text belongs in the log, not the response");
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 155: an event with no ancestor whose business unit has NO container answers the documented 409 with precise copy, and NOTHING reaches SPE")]
+    public async Task Put_EventWithNoAncestor_AndABusinessUnitWithoutContainer_AnswersTheDocumented409()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/event/{RecordKeyedUploadRouteFixture.EventInBusinessUnitWithoutContainer}/files/x.txt",
+            new ByteArrayContent([10]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain("No storage container is configured");
+        body.Should().Contain("No SharePoint Embedded container could be derived for this record's business unit");
+        _fixture.Uploads.Should().BeEmpty();
+    }
 }
 
 /// <summary>Test host for <see cref="RecordKeyedUploadRouteChildRecordTests"/>. See that class.</summary>
@@ -599,6 +629,12 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     public static readonly Guid TodoUnderPlainProject = Guid.Parse("15500000-0000-0000-0000-000000000002");
     public static readonly Guid TodoUnderCommunication = Guid.Parse("15500000-0000-0000-0000-000000000003");
     public static readonly Guid TodoUnderUnprovisionedSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000004");
+    public static readonly Guid TodoWhoseRowCannotBeRead = Guid.Parse("15500000-0000-0000-0000-000000000005");
+    public static readonly Guid EventInBusinessUnitWithoutContainer = Guid.Parse("15500000-0000-0000-0000-000000000006");
+
+    public const string UnreadableRowFaultText = "Dataverse timed out reading the to-do";
+
+    private static readonly Guid BusinessUnitWithoutContainer = Guid.Parse("15500000-0000-0000-0000-00000000000f");
 
     private static readonly Guid SecureProject = Guid.Parse("15500000-0000-0000-0000-00000000000a");
     private static readonly Guid PlainProject = Guid.Parse("15500000-0000-0000-0000-00000000000b");
@@ -696,14 +732,27 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             {
                 ["sprk_containerid"] = BusinessUnitContainer
             },
+            [("sprk_event", EventInBusinessUnitWithoutContainer)] = new("sprk_event", EventInBusinessUnitWithoutContainer)
+            {
+                ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitWithoutContainer)
+            },
+            [("businessunit", BusinessUnitWithoutContainer)] = new("businessunit", BusinessUnitWithoutContainer),
         };
 
         var service = Substitute.For<IGenericEntityService>();
         service.RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(call => rows.TryGetValue((call.ArgAt<string>(0), call.ArgAt<Guid>(1)), out var row)
-                ? Task.FromResult(row)
-                : throw new InvalidOperationException(
-                    $"Unmodelled read: {call.ArgAt<string>(0)} {call.ArgAt<Guid>(1)}"));
+            .Returns(call =>
+            {
+                var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
+                if (key == ("sprk_todo", TodoWhoseRowCannotBeRead))
+                {
+                    throw new TimeoutException(UnreadableRowFaultText);
+                }
+
+                return rows.TryGetValue(key, out var row)
+                    ? Task.FromResult(row)
+                    : throw new InvalidOperationException($"Unmodelled read: {key.Item1} {key.Item2}");
+            });
         return service;
     }
 

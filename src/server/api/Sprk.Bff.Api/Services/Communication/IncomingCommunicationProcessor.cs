@@ -1012,7 +1012,8 @@ public sealed class IncomingCommunicationProcessor
     /// container does not appear because we asked again. So these are logged at Error and become a SKIP. The
     /// bytes are not written, which is the fail-closed outcome, and the <c>sprk_communication</c> row itself
     /// is already captured in Dataverse where row-level security applies. Throwing instead would produce a
-    /// retry loop that can never succeed AND would lose the message capture.</description></item>
+    /// retry loop that can never succeed AND would lose the message capture. The full set — including the
+    /// task 155 ancestor codes a regarding INVOICE can raise — is <see cref="IsPermanentContainerRefusal"/>.</description></item>
     /// <item><description><b>Transient</b> — Dataverse or the metadata service is unreachable, so
     /// securability is UNKNOWN. These PROPAGATE, because a retry genuinely may succeed and because treating
     /// "I could not find out" as "not secure" is the same isolation failure as a wrong answer. This is a
@@ -1048,8 +1049,7 @@ public sealed class IncomingCommunicationProcessor
 
             return containerId;
         }
-        catch (Infrastructure.Exceptions.SdapProblemException ex) when (
-            ex.Code is "secure_record_container_missing" or "communication_secure_container_ambiguous")
+        catch (Infrastructure.Exceptions.SdapProblemException ex) when (IsPermanentContainerRefusal(ex))
         {
             _logger.LogError(
                 ex,
@@ -1063,6 +1063,32 @@ public sealed class IncomingCommunicationProcessor
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether a container refusal is PERMANENT — retrying cannot change the answer — and so becomes a skip
+    /// in <see cref="ResolveContainerForContentAsync"/> rather than a propagated (retried) failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>Task 155 made <c>sprk_invoice</c> a CHILD for container purposes: a communication regarding an
+    /// invoice now resolves through the invoice's SECURE project / matter, and that path can refuse with the
+    /// ancestor codes. Three of them are permanent data shapes, exactly like the two original codes:
+    /// <c>container_ancestor_ambiguous</c> (the invoice links to two secure roots),
+    /// <c>container_ancestor_unverifiable</c> (filed under another child — unreachable for an invoice today,
+    /// listed so a future child regarding cannot land in the retry loop), and <c>container_ancestor_unresolved</c>
+    /// at <b>409</b> (the root does not exist, or its type is unknown). Left out, they fell into the transient
+    /// path — the retry loop that can never succeed and loses the message capture.</para>
+    ///
+    /// <para><c>container_ancestor_unresolved</c> at <b>503</b> is the opposite case — the child's row or its
+    /// root could not be READ — so it stays transient and propagates. The status code is what separates them,
+    /// so the predicate checks it rather than the code alone.</para>
+    /// </remarks>
+    internal static bool IsPermanentContainerRefusal(Infrastructure.Exceptions.SdapProblemException ex)
+        => ex.Code is "secure_record_container_missing"
+               or "communication_secure_container_ambiguous"
+               or Infrastructure.Dataverse.RecordContainerResolver.AncestorAmbiguousCode
+               or Infrastructure.Dataverse.RecordContainerResolver.AncestorUnverifiableCode
+           || (ex.Code == Infrastructure.Dataverse.RecordContainerResolver.AncestorUnresolvedCode
+               && ex.StatusCode == 409);
 
     /// <summary>
     /// Archives the incoming email as a .eml file in SPE and creates a sprk_document record.

@@ -63,6 +63,10 @@ public sealed class CommunicationContainerResolver
     /// The caller MUST NOT write the bytes anywhere in response to this.</para>
     /// <para><c>communication_secure_container_ambiguous</c> — the communication regards two different secure
     /// records with different containers, so there is no single correct destination.</para>
+    /// <para><c>container_ancestor_*</c> (task 155) — a securable regarding that is also a CHILD
+    /// (<c>sprk_invoice</c>) resolves through its secure project / matter, and can refuse as ambiguous (409),
+    /// unresolved (409 missing root; 503 unreadable) or unverifiable (409). The inbound processor's
+    /// permanent/transient split is <c>IncomingCommunicationProcessor.IsPermanentContainerRefusal</c>.</para>
     /// </exception>
     public async Task<string?> ResolveContainerAsync(
         Guid communicationId,
