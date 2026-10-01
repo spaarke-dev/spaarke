@@ -21,6 +21,28 @@ This is §8's second bootcamp SKU — *"if the buyer's pain is spend, run a LEDE
 >
 > That needs **spend + communication**. Legal Tracker has no email, and the 13-rung association ladder is our strongest shipped asset.
 >
+> ### 🔴 Correction to the correction — 2026-09-30
+>
+> **The sentence above is the aspiration, not the shipped predicate.** It implies a variance computation
+> ("18% over budget") that the MVP predicate does **not** perform. What the corrected predicate actually
+> tests (`mvp-technical-spec.md` §11.4, Path B) is:
+>
+> > A communication on this matter was classified as a **fee or scope change** in the window, **and** no
+> > **budget revision** was recorded in that window.
+>
+> Still two sources, still impossible for an incumbent — but it compares *correspondence against budget
+> movement*, not invoiced against budgeted. The spend snapshot is attached as **evidence** so the user sees
+> the position; the rule asserts no comparison it did not compute.
+>
+> **Why this correction exists.** The first cross-source predicate contained **no budget term at all** while
+> its message claimed *"unreconciled against its budget"* — single-source, and asserting what the code never
+> established. Generalized as spec **§0.3: a capability must TEST what its message CLAIMS.** Data being
+> theoretically available is not the test.
+>
+> Two consequences for scope: **`sprk_budgetrevision` is new in MVP** (verified — `sprk_budget` has no
+> revision history and Dataverse auditing is not wired), and **the `Existence` rule type is new in MVP**
+> (the predicate is an EXISTS and fitted no allowed rule body, so it could not have been saved).
+>
 > **The test to apply to every capability before scoping it** — see [`mvp-technical-spec.md`](mvp-technical-spec.md) §0:
 >
 > > **Name the data it requires that the incumbent does not hold. If you cannot, it is not differentiated.**
@@ -92,7 +114,8 @@ Where the verified gap is: **`sprk_spendsignal` is computed and stored today wit
 
 | Change | Notes |
 |---|---|
-| **`sprk_policy` + `sprk_policyversion` entities** | Two rule types only: `Threshold`, `Switch` |
+| **`sprk_policy` + `sprk_policyversion` entities** | **Three** rule types: `Threshold`, `Switch`, **`Existence`** *(added 2026-09-30 — the cross-source predicate is an EXISTS over a related entity and fitted neither of the first two; spec §3.5 refuses to save an invalid body, so the differentiated capability was unsavable without it)* |
+| **`sprk_budgetrevision` entity** | *Added 2026-09-30.* Smallest possible: matter · prior amount · new amount · `sprk_revisedon` · reason · author. **Verified necessary**: `sprk_budget` carries only `sprk_totalbudget` + `modifiedon`, with no revision rows, and auditing is not a fallback (zero `RetrieveRecordChangeHistory` usage anywhere). Path B's second conjunct cannot be expressed without it. ⚠️ `sprk_budget.modifiedon` is **not** a substitute — any unrelated edit bumps it, which would suppress a true signal |
 | **`SignalEvaluationService` reads policy rows** | Replaces `FinanceOptions` appsettings thresholds |
 | **Stamp policy code + version onto each signal** | This is what makes the "why" citable and the old signals still explicable after a threshold changes |
 
@@ -159,14 +182,23 @@ main.aspx?appid={guid}&pagetype=webresource&webresourceName=sprk_spaarkeai&navba
 5. One click sends a budget inquiry through the gate; the inquiry is tracked with an SLA; the reply resolves it with a **typed outcome**.
 6. The matter's Decision Record shows the full entry: what was proposed, the fact that triggered it, the policy version, who confirmed, and the outcome.
 7. Nothing was written back to the e-billing system.
-8. **The differentiation criterion**: at least one signal type fires on evidence the e-billing system does not hold — the cross-source rule (spend + communication). **A demo that only shows budget variance has not met the bar.**
+8. **The differentiation criterion** — *strengthened 2026-09-30*: at least one signal type fires on a predicate that **reads** both a communication field and a budget field. **A demo that only shows budget variance has not met the bar — and neither has a rule that merely *mentions* the budget in its message.**
+
+   > 🔴 **Why the wording changed.** The original read *"fires on evidence the e-billing system does not hold."*
+   > The broken first predicate — which read **no budget field at all** and fired on a classified email alone
+   > — **would have passed it**, because an email *is* evidence an e-billing system does not hold. A success
+   > criterion that the failure satisfies is not a criterion. The test is now about what the predicate
+   > **reads**, not what the signal is *about* (spec §0.3).
+
+9. **Something happens in the world.** A confirmed signal produces an Inquiry through the existing gate; the Inquiry carries an SLA; the reply resolves it with a **typed outcome** queryable per matter and per outside firm. *(This was always criterion 5 here; recorded again because `design.md` rev 1 dropped it and had to restore it — criteria that only cover detect/record/surface describe an alerting product.)*
+10. **Classifier recall meets a stated floor.** Recall on `Scope / budget change` and `Fee / rate change` is measured against a labelled set, with the floor recorded. *(New 2026-09-30. The predicate is a **conjunction**, so it inherits its weakest input — the LLM classifier. At 70% recall the differentiated claim silently misses 30% of real cases while every other criterion above still passes green.)*
 
 ## 7. Open items before this becomes a spec
 
 | # | Item | Owner |
 |---|---|---|
 | 1 | **Which MM system** for the first connector? Aderant / Elite 3E / other — determined by the first customer | Owner |
-| 2 | **Where does budget come from?** `sprk_spendsnapshot.sprk_budgetamount` exists — is it populated today, and by what? If manual, MVP is fine; if it needs the MM system, that's connector scope | Verify |
+| 2 | **Where does budget come from?** *Partly answered 2026-09-30 — now the D-1 scoping spike (`design.md` §8.1).* Verified: **`sprk_spendsnapshot` has ZERO rows**, against 2 `sprk_budget` rows and 1 `sprk_billingevent`, so the spend half of the differentiated claim is **untestable today**. Also verified: no budget **revision history** exists in any form. The spike must establish what populates the snapshot, whether that path assumes Spaarke-originated invoices (which feeds item 7), and the cheapest honest route to one over-budget matter | **Spike** |
 | 3 | **Does `sprk_spendsignal` need extending** to carry policy code + version + triggering values, or does it already? | Verify |
 | 4 | **Tell Front Door before it specs** — `sprk_servicerequest` with a direction discriminator likely absorbs both `sprk_legalrequest` and Inquiry (CM-5). Its roadmap says this decision "gates everything" | Owner |
 | 5 | **Contention** — `Services/Ai/` is owned by `spaarke-ai-architecture-redesign-r2`; **Finance is quieter, which is where the MVP's server work lands.** Favourable | Coordinate |

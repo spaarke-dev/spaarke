@@ -35,6 +35,22 @@ Other candidates that pass the test: *obligation due in 14 days, contract in iMa
 
 ---
 
+### 0.3 Consequence: a capability must TEST what its message CLAIMS `[added 2026-09-30]`
+
+The generalized form of the §11.1 failure. §11.4's first predicate contained **no budget field** while its
+message asserted *"unreconciled against its budget"*.
+
+**Data being theoretically available is not the test — the predicate must actually read it.** A capability
+that names data in its output but not in its `where` clause fails §0 regardless of what the platform holds,
+and it independently fails [AP-12](../../../.claude/FAILURE-MODES.md) as runtime-generated prose stating
+something the code never established.
+
+Corollary: the **fourth** row of the §0 table — *the record of what was decided and what resulted* — is
+unexercised by detection alone. It needs an action that changes something in the world, which is why the
+Inquiry action is back in MVP scope (`design.md` §5, criterion 10).
+
+---
+
 ## 1. The end-to-end trace, with real field names
 
 This is the whole MVP. Everything in §§2–7 exists to make this run.
@@ -163,6 +179,34 @@ interface ISignalRule {
 
 ---
 
+### 2.5.1 Resolution semantics — not optional `[added 2026-09-30, CM-9]`
+
+`sprk_spendsignal`'s idempotent upsert works today **only because its key is implicitly
+(matter, signaltype)**. That implicit key does not survive a polymorphic subject, so the generic entity must
+state it. And nothing anywhere closes a flag when the condition **clears on its own** — the budget is
+revised, the communication is later dismissed, the matter closes.
+
+Two consequences, both load-bearing:
+
+- **Stale rows accumulate and the worklist rots.** This is how internal alerting surfaces die.
+- **Suppression miscounts.** §12.2 suppresses after three dismissals. If an auto-cleared flag is
+  indistinguishable from a human dismissal, that count is wrong in **both** directions.
+
+| Field | Type | Purpose |
+|---|---|---|
+| `sprk_dedupekey` | text, **alternate key** | `signaltype + subjecttype + subjectid + periodkey`. The idempotency contract, explicit rather than implied |
+| `sprk_resolutiontype` | option set | `ConditionCleared` · `Acted` · `Dismissed` · `Superseded` · `PolicyRetired`. What suppression counts and what the scorecard reads |
+| `sprk_lastevaluated` | datetime | Staleness. Distinguishes *"still true"* from *"not re-evaluated"* |
+
+Plus a **resolution sweep** in the same evaluation pass: a flag whose predicate no longer holds is closed
+with `ConditionCleared`, never left open. Scope the sweep by changed-subject sets with a bounded full pass,
+or it will not scale.
+
+> **Decide this WITH the `sprk_signal` shape, not after it.** Taken separately, the second decision is a
+> migration.
+
+---
+
 ## 3. Policy — schema and rule body `[PROPOSED]`
 
 ### 3.1 `sprk_policy` — stable identity
@@ -182,7 +226,7 @@ interface ISignalRule {
 | `sprk_policy` | lookup | parent |
 | `sprk_versionnumber` | int | 1, 2, 3 — **never reused** |
 | `sprk_effectivefrom` / `sprk_effectiveto` | datetime | `effectiveto` null = current |
-| `sprk_ruletype` | option set | **MVP: `Threshold`, `Switch` only** |
+| `sprk_ruletype` | option set | **MVP: `Threshold`, `Switch`, `Existence`** — `Existence` added 2026-09-30 (CM-7). Without it the §11.4 predicate is an EXISTS over a related entity that fits **no** allowed body, and §3.5 refuses to save an invalid body, so **the differentiated capability was literally unsavable.** `Transition` and `Trend` stay out; `Trend` needs baselines and therefore history |
 | `sprk_rulebody` | memo (JSON) | validated per rule type |
 | `sprk_authoredby` · `sprk_approvedby` · `sprk_approvedon` | lookup/datetime | provenance |
 
@@ -219,6 +263,53 @@ interface ISignalRule {
   "then": { "suppressSignalTypes": [100000002] }   // kill-switch for VelocitySpike
 }
 ```
+
+### 3.4a Rule body — `Existence` `[added 2026-09-30, CM-7]`
+
+Asserts that a related object matching a bounded filter does, or does not, exist for the subject. Covers the
+Correlation and Absence detection shapes in their EXISTS / NOT EXISTS forms. Implemented as a FetchXML
+`link-entity` filter (outer link + null test for `notExists`), so **CM-3 holds unchanged** — the body is
+still a Dataverse filter.
+
+```jsonc
+{
+  "type": "Existence",
+  "subject": "sprk_matter",
+  "when": { },                                   // scope filter; empty = all subjects
+  "all": [                                       // every clause must hold; no cross-clause references
+    {
+      "exists": "sprk_communication",
+      "path":   "sprk_regardingmatter",
+      "filter": {
+        "sprk_triagecategory": ["8b62dd84-1fbc-f111-aaaf-3833c5e9614d",
+                                "8d62dd84-1fbc-f111-aaaf-3833c5e9614d"],
+        "sprk_receiveddate":  { ">=": "now-30d" },
+        "sprk_reviewoutcome": { "<>": 100000003 }
+      }
+    },
+    {
+      "notExists": "sprk_budgetrevision",
+      "path":   "sprk_matter",
+      "filter": { "sprk_revisedon": { ">=": "now-30d" } }
+    }
+  ],
+  "then": { }                                    // as §3.3
+}
+```
+
+**🔴 NO cross-clause variable passing.** An earlier proposal bound a value in clause 1
+(`"bind": "commitment"`) and dereferenced it in clause 2 (`"$commitment.sprk_receiveddate"`). That is **not
+one Dataverse filter** — it needs two queries plus a correlation step, which breaks CM-3 — and it
+reintroduces the very property that made predicates preferable to node graphs. The case for predicates was
+that the four hard parts of graphs (sequencing, state, **variable passing**, error handling) are absent. A
+bound reference puts one back.
+
+Clauses are therefore **independent**, each over a fixed window relative to *now*. The cost is precision: a
+budget revision could land early in the window, before the commitment, and still satisfy `notExists`. That
+imprecision is accepted for v1; a correlated variant is a later change **if** evidence shows it matters.
+
+**Filter values are ids, never labels.** `sprk_triagecategory` is named by GUID so a category rename does
+not silently change which rules match.
 
 ### 3.5 Schema validation
 
@@ -294,11 +385,11 @@ A policy may only reference fields that exist. Three kinds, and the `computed:` 
 | `sprk_proposedaction` | text | `send-budget-inquiry` |
 | `sprk_triggersignal` → spendsignal | lookup | what fired |
 | `sprk_policy` · `sprk_policyversion` | lookup | **what authorized the proposal** |
-| `sprk_factsnapshot` | memo (JSON) | **the input values at decision time**, frozen |
+| `sprk_factsnapshot` | memo (JSON) | **the input values at decision time**, frozen. 🔴 **MANDATORY, not one row among many** (2026-09-30). Ruling out bitemporality (component model §10 ADR-3) on the grounds that immutable policy versions buy ~80% of the defensibility is a fair trade — but the residual gap is that you can reconstruct *which rule was in force* and **not** *what the data said*. This field is the only thing that closes it |
 | `sprk_gateoutcome` | option set | Approved · Rejected · TimedOut · AutoApproved |
 | `sprk_actorid` → systemuser | lookup | **key on `systemuserid` so agents share the model later** |
 | `sprk_decidedon` | datetime | |
-| `sprk_resultref` | text | `sprk_servicerequest:{guid}` |
+| `sprk_resultref` | text | `sprk_servicerequest:{guid}` — **nullable, deliberately.** A Decision Record and an action record are **different objects**: a deny-path record has no action, and an action taken outside a signal has no decision. The MVP choice (persist the value that already exists at the gate) is right, but the field list must not foreclose the nullable reference |
 | `sprk_evidencerefs` | memo (JSON) | array of typed refs |
 | `sprk_hash` | text | SHA-256 over the canonical serialization, chained to prior entry per ADR-015 |
 
@@ -512,10 +603,33 @@ have any bearing on the money. The conjunction established correlation by coinci
 It was also **lagging**: "over budget" means the money is already spent, and every e-billing vendor
 reports it.
 
+**And the second attempt was wrong too — worse, and self-inflicted** `[2026-09-30]`. The v1 predicate below
+(as first written) tested **only** the communication side: it fired on any matter carrying a recent,
+non-dismissed, scope-or-fee-classified email. **Nothing in its `where` clause read spend, budget or a
+snapshot.** Two failures at once:
+
+1. **Single-source, so it failed §0** — the §0.1 claim is that the capability requires *spend + communication*;
+   the predicate required communication only. What would have shipped is *"we classified an email."*
+2. **The message asserted a conclusion the computation never reached** — *"unreconciled against its budget"*
+   when no budget was consulted. §0.3, committed on the headline claim, in the same section that says
+   *"the join is the differentiator, not the arithmetic."* **The join was what got dropped, not the
+   arithmetic.**
+
+§11.4 below is the corrected form.
+
 ### 11.2 The signal that works — leading, not lagging
 
-> **A commitment with financial consequence was made in correspondence, and the budget does not
-> reflect it yet.**
+**The aspiration** — what a user should understand the signal to mean:
+
+> A commitment with financial consequence was made in correspondence, and the budget does not reflect it yet.
+
+**What the predicate actually tests** (Path B, CM-6) — and therefore what the message may say:
+
+> A communication on this matter was classified as a **fee or scope change** within the window, **and** no
+> **budget revision** was recorded in that same window.
+
+Two conjuncts, two sources. The snapshot is attached as **evidence** so a human sees the budget position, but
+the rule asserts no comparison it did not make.
 
 Worked case: counsel emails *"given the new claims we need two more depositions, roughly $40-45k
 beyond budget."* The e-billing system shows the matter at $180k of $250k — on budget, silent, and it
@@ -534,26 +648,65 @@ sprk_spendsnapshot.sprk_matter           -> sprk_matter
 sprk_spendsnapshot.sprk_budgetamount / .sprk_invoicedamount
 ```
 
-**No new relationships are required.** The graph is connected; what is missing is a rule that walks it.
+🔴 **Corrected 2026-09-30 — one join does NOT exist.** Path B's second conjunct needs *"no budget revision
+since"*, which requires budget **with a change date**. Verified against the live environment:
+`sprk_budget` carries `sprk_totalbudget`, `modifiedon` and `versionnumber` — **no revision rows, and no
+`sprk_budgetrevision` entity exists.** Dataverse auditing is not a fallback either: component model §6 found
+**zero** `RetrieveRecordChangeHistory` usage and no audit policy.
 
-### 11.4 The predicate, v1 — deliberately unquantified
+So the smallest possible `sprk_budgetrevision` (matter · prior amount · new amount · `sprk_revisedon` ·
+reason · author) is **in MVP scope** (CM-10) and is D-1's fourth spike question.
 
-Bounded set = the literal rows `{Fee / rate change, Scope / budget change}` (section 10.1), named by
-id in the rule body. Not a prompt instruction, not a heuristic — stored ids, editable without deploy.
+> **`sprk_budget.modifiedon` is NOT an acceptable substitute.** It is tempting — a change date already
+> exists, zero new schema, testable today. **Reject it**: any unrelated field edit bumps `modifiedon`, so a
+> stray edit reads as *"the budget was revised"* and **suppresses a true signal**. That is a false
+> **negative**, the exact direction the recall-over-precision decision rules against. Recorded so nobody
+> rediscovers it as a cost saving.
+
+Otherwise the graph is connected; what is missing is a rule that walks it.
+
+### 11.4 The predicate — corrected `[rewritten 2026-09-30]`
+
+Bounded set = the literal rows `{Fee / rate change, Scope / budget change}` (§10.1), named **by id** in the
+rule body. Not a prompt instruction, not a heuristic — stored ids, editable without a deploy.
+
+Expressed as an `Existence` body (§3.4a). Two independent clauses, no cross-clause references:
 
 ```
+type:    Existence
 subject: sprk_matter
-where:   EXISTS sprk_communication c
-           c.sprk_regardingmatter   = subject
-       AND c.sprk_triagecategory   IN {8b62dd84-..., 8d62dd84-...}
-       AND c.sprk_receiveddate     >= now - 30d
-       AND c.sprk_reviewoutcome    <> 100000003        -- not Dismiss
-then:    signal "a spend-relevant commitment on this matter is unreconciled against its budget"
+all:
+  - exists    sprk_communication   via sprk_regardingmatter
+      sprk_triagecategory IN {8b62dd84-..., 8d62dd84-...}
+      sprk_receiveddate   >= now - 30d
+      sprk_reviewoutcome  <> 100000003                     -- not Dismiss
+  - notExists sprk_budgetrevision  via sprk_matter
+      sprk_revisedon      >= now - 30d
+then:
+  message   "A commitment with financial consequence was raised in the last 30 days and the budget has
+             not been revised in that period."
+  evidence  the triggering sprk_communication  +  latest sprk_spendsnapshot for the matter
+  action    send-budget-inquiry
 ```
 
-**v1 does not quantify the amount.** Extracting "$45k" from prose is new extraction work that is
-sometimes wrong; the human judges the amount. Still differentiated, because **the join is the
-differentiator, not the arithmetic.** Quantification is v2.
+**What changed from the first draft, and why each matters:**
+
+| Change | Why |
+|---|---|
+| Added the `notExists sprk_budgetrevision` clause | Without it the predicate is **single-source** and fails §0. This is the entire differentiation |
+| The message states only what the predicate tests | The first version said *"unreconciled against its budget"* having read no budget — §0.3 |
+| The snapshot moved from implied condition to explicit **evidence** | The user sees the budget position; the rule does not claim a comparison it never computed |
+| Clauses are independent, both windowed on *now* | Keeps the body a single Dataverse filter (CM-3). A bound cross-reference would reintroduce variable passing — see §3.4a |
+
+**Still deliberately unquantified.** Extracting "$45k" from prose is new extraction work that is sometimes
+wrong; the human judges the amount. The claim holds anyway, because **the join is the differentiator, not the
+arithmetic** — and this time the predicate actually contains the join.
+
+**The weakest link is the classifier, not the logic.** The predicate is a conjunction, so it inherits its
+weakest input: whether `Scope / budget change` is *detected* at all. Nothing has measured that. At 70% recall
+the differentiated claim silently misses 30% of real cases while every other success criterion still passes
+— which is why `design.md` criterion 11 makes a recall floor a gate, and §16.5's first eval case is the
+start of the corpus.
 
 ### 11.5 Two placements = two different products
 
@@ -881,7 +1034,13 @@ With the deployer working, `-Filter '*' -DryRun` reports **3 of 17 mirrors out o
 `suggest-followups` is the compose-r8 failure class **live**. Deliberately **not** deployed here — it is
 another project's domain and deploying it changes that capability's behaviour. Owner decision required.
 
-### 17.5 🔴 Still open — two defects found while diagnosing, NOT fixed
+### 17.5 🔴 Two defects found while diagnosing — now IN MVP SCOPE, not deferred
+
+> **Disposition changed 2026-09-30.** Both were filed as deferred decisions (D-6, D-7). Owner rule: *"if
+> there is work identified in the course of creating this project that can be addressed most efficiently in
+> this project, then that is the correct approach — do not defer and hand off."* This project holds the
+> complete diagnosis for both, so re-deriving them later costs more than fixing them now. They are
+> `design.md` §5 In items. The text below stands as the diagnosis.
 
 **(a) Matter numbers containing spaces are invisible to the deterministic identifier rung.**
 `IdentifierReverseLookupRung.WellFormedTokenPattern` is
