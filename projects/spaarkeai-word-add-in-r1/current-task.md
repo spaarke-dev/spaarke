@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (context-handoff: 060 done, PR #1085 open, CI re-running on the checkpoint head; next: merge #1085, then task 068)
+> **Last Updated**: 2026-10-01 (068 done and gated; ship its PR, then task 075)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,14 +18,19 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: ship PR #1085 (task 060), then task 068
+### 🔄 ACTIVE: ship task 068's PR, then task 075
 
 | Field | Value |
 |---|---|
-| **PR** | **#1085** (task 060, #1084) open. All Tier 1 checks PASSED as of the checkpoint. A checkpoint commit was then pushed (notes only), so **CI re-runs on the new head**. Body: `scratchpad/pr-060-body.md` |
-| **Next Action** | 1) Wait until `gh pr checks 1085` shows `Router` = pass AND `grep -c pending` = 0 (Tier 2 "Full Unit Tests" is advisory and may CANCEL at 30 min; the legacy `Build & Test (Debug)` takes ~60 min). 2) `gh pr merge 1085 --merge` (**NEVER `--delete-branch`**). 3) `git -C C:/code_files/spaarke pull --ff-only origin master`; `git fetch origin && git merge --ff-only origin/master` in the worktree. 4) Close #1084 with a comment (fixed by #1085; live restart check after the next deploy); ISS-017 → Done in `notes/defer-issues.md`. 5) Report to the owner. 6) Start task **068** via `task-execute` (`tasks/068-durability-siblings-dispatcher-sequences.poml`) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `d68924b93` + 060 commits `3511668f4` (code), `3fb75a1a4` (review fix), `f50b875b2` (records), + this checkpoint |
-| **Next task** | **068**: the durability siblings 060 named. (a) `OfficeProfileDispatcher`'s fire-and-forget `Task.Run`, lost on restart; deleting it drops `OfficeService`'s three optional ctor params (**19 → 16**). (b) `JobStatusService._jobSequences`, in-memory pub/sub sequence counters |
+| **068** | ✅ DONE 2026-10-01 (#1086 / ISS-018). POML completed (with `<ui-tests>` for the live restart check + `<justification>` for `OfficeProfileQueue`); TASK-INDEX ✅; project CLAUDE.md decision row. Records: `notes/068-durability-siblings.md` §1–§8 |
+| **Next Action** | 1) Commit 068 on `work/spaarkeai-word-add-in-r1` (base master `402afb657`) and push. 2) Open the PR with `scratchpad/pr-068-body.md`. 3) Wait until `Router` passes AND `grep -c pending` = 0, then `gh pr merge N --merge` (**NEVER `--delete-branch`**), `git -C C:/code_files/spaarke pull --ff-only origin master`, and `git fetch origin && git merge --ff-only origin/master` here. 4) Close #1086 (fixed; live restart check after the next deploy); ISS-018 → Done. 5) Start task **075** via `task-execute` (`tasks/075-dead-code-and-stale-premises.poml`, FULL, sonnet / high) |
+| **For the owner** | (1) `SystemCacheKeys.JobStatusSequence` (15 of 20): the allow-list asks for architecture review. (2) Generate Profile now runs app-only on the queue (same AI work; `write` checked first); the 202 is ~0.3 s slower (Service Bus submit). (3) #1090: the pane still reads once after the click. (4) #1089: six sibling handlers keep the crash half of the stale lock |
+| **068 gates** | Suite **13,071/0/54** (reconciled exactly); ArchTests 337; publish **+2,206 B** (212 = 212); no CVE; format clean; reds 7 + 1 guard; seeds 4 + 5, each caught by one test; independent review 0 critical, all 5 W fixed or filed |
+
+### ✅ Shipped 2026-10-01: #1085 merged as `402afb657` (task 060)
+
+- All 37 checks terminal: `Router` pass, Build & Test pass (1h0m45s), Tier 2 Full Unit Tests pass (26m42s), Code Quality pass. Merged with `--merge`, branch kept.
+- Main checkout and worktree fast-forwarded to `402afb657`. #1084 closed with a comment; ISS-017 → Done. The live restart check waits on the next deploy.
 
 ### ✅ DONE 2026-10-01: task 060 (#1084 / ISS-017)
 

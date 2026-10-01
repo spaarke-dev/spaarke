@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -10,7 +11,6 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
-using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Office;
@@ -81,15 +81,9 @@ public class OfficeService : IOfficeService
     private readonly ICallerSystemUserResolver _callerSystemUserResolver;
     private readonly ILogger<OfficeService> _logger;
 
-    // FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" fire-and-forget dispatch, extracted —
-    // mirrors the ComposeProfileDispatcher pattern (detached DI scope + OBO facade) without touching
-    // Services/Compose/. Built in this constructor from three optional ctor params.
-    // ⚠️ CORRECTED 2026-10-01 (task 059): this comment used to justify that construction as "ADR-010 — no new
-    // registration". ADR-010 says no such thing: it asks for concrete registrations inside feature modules
-    // (.claude/adr/ADR-010-di-minimalism.md, Constraints), which is exactly what a registered dispatcher would be.
-    // The three params remain only until task 068 deletes this dispatcher (its Task.Run loses the work on a
-    // restart) and moves the profile onto the job queue.
-    private readonly OfficeProfileDispatcher _profileDispatcher;
+    // FR-08's Generate Profile request, on the job queue (task 068, #1086). It replaced OfficeProfileDispatcher, whose
+    // Task.Run behind the 202 lost the profile on a restart, and the three optional parameters that built it.
+    private readonly OfficeProfileQueue _profileQueue;
 
     public OfficeService(
         OfficeJobStatusService jobs,
@@ -107,10 +101,8 @@ public class OfficeService : IOfficeService
         EmailUploadCaptureService emailUploadCapture,
         IGenericEntityService genericEntityService,
         ICallerSystemUserResolver callerSystemUserResolver,
-        ILogger<OfficeService> logger,
-        IServiceScopeFactory? scopeFactory = null,
-        IDocumentProfileAi? documentProfileAi = null,
-        IHostApplicationLifetime? appLifetime = null)
+        OfficeProfileQueue profileQueue,
+        ILogger<OfficeService> logger)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -133,18 +125,21 @@ public class OfficeService : IOfficeService
         _search = search;
         _genericEntityService = genericEntityService;
         _callerSystemUserResolver = callerSystemUserResolver;
+        _profileQueue = profileQueue;
         _logger = logger;
-        _profileDispatcher = new OfficeProfileDispatcher(scopeFactory, documentProfileAi, appLifetime, logger);
     }
 
     /// <inheritdoc />
-    public Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
+    public Task<GenerateProfileResult> GenerateProfileAsync(
         Guid documentId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(httpContext);
-        return Task.FromResult(_profileDispatcher.Dispatch(documentId, httpContext));
+        return _profileQueue.QueueAsync(
+            documentId,
+            httpContext.TraceIdentifier,
+            CallerResolution.ResolveObjectId(httpContext.User));
     }
 
     /// <summary>

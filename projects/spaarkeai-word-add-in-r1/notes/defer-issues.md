@@ -715,7 +715,7 @@ returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcre
 
 | Field | Value |
 |---|---|
-| **Status** | **Fixed on the branch** by task 060 (`3511668f4` + `3fb75a1a4`): typed reads, the row as the durable record, metadata-only payload. Closes when the PR merges; a live restart check waits on the next deploy |
+| **Status** | **Done** 2026-10-01: task 060, PR #1085 merged as `402afb657` (typed reads, the row as the durable record, metadata-only payload). #1084 closed. The live restart check waits on the next deploy |
 | **Urgency** | now |
 | **Filed** | 2026-10-01 |
 | **Source** | Task 060's investigation; confirmed in App Insights (`spe-insights-dev-67e2xz`, 60 days) |
@@ -742,6 +742,121 @@ returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcre
 
 **Fix**: task 060, `notes/060-job-status-store-and-extraction.md` §2–§3.
 **Related**: #229 (stale TRACKED marker).
+
+---
+
+## ISS-018 — Office background work is lost on an app restart, and SSE event numbers are per instance
+
+| Field | Value |
+|---|---|
+| **Status** | Open — task 068 in progress |
+| **Urgency** | now |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 068's investigation (`notes/068-durability-siblings.md` §1); the Redis lock behaviour verified against the .NET 10 `RedisCache` source |
+| **GitHub Issue** | [#1086](https://github.com/spaarke-dev/spaarke/issues/1086) |
+
+**Description**
+
+1. **Generate Profile is fire-and-forget.** The route returns 202, then `OfficeProfileDispatcher` runs the profile in
+   `Task.Run` under `ApplicationStopping`. A restart cancels it, and nothing was persisted.
+2. **The profile job loses its own redelivery.**
+   - `AppOnlyDocumentAnalysisJobHandler` holds a 10-minute Redis processing lock and releases it with the job's token.
+   - On a graceful stop that token is cancelled. `RedisCache.RemoveAsync` → `ConnectAsync` calls
+     `ThrowIfCancellationRequested()` first, so the release throws (caught) and the lock stays. A hard crash leaves it
+     too.
+   - `sdap-jobs` redelivers after its 5-minute lock. The handler finds the stale lock and answers "already being
+     processed by another instance" with **Success**, so the message is completed with no profile.
+   - This hits every profile a save queues, not only the button.
+3. **SSE event numbers are per instance.** `JobStatusService` numbers events from an in-memory dictionary on each
+   instance (never pruned), and the stream mixes that number line with its own counter, so ids repeat and a
+   `Last-Event-ID` reconnect can drop live events. The stream also reads its snapshot before subscribing.
+
+**Concrete failure**: a deploy while a profile runs leaves the document unprofiled, with its status stuck; a
+reconnecting SSE client can miss the job's completion. The pane polls, so it has not hung.
+
+**Entry-points**: `OfficeProfileDispatcher.Dispatch`/`RunAsync`; `AppOnlyDocumentAnalysisJobHandler.ProcessAsync`;
+`JobStatusService.GetNextSequenceAsync`; `OfficeJobStatusService.ProduceJobStatusEventsAsync`.
+
+**Fix**: task 068, `notes/068-durability-siblings.md` §2.
+**Related**: #1084 (060). Observed and not fixed by 068: `ComposeProfileDispatcher` has the same `Task.Run` shape;
+`POST /api/documents/{id}/analyze` enqueues with the bare key; the other lock users share hazard 2.
+
+---
+
+## ISS-019 — Flaky: a Communication seam test fails under full-suite load (1 s regex timeout)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — not this project's code (email-communication-intelligence-r2, `18cfcbd660`) |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 068's full-suite run: 13,065 passed / **1 failed** / 54 skipped; the failure passes alone 3 of 3 |
+| **GitHub Issue** | [#1088](https://github.com/spaarke-dev/spaarke/issues/1088) |
+
+**Description**
+
+`EmailRegardingIntentSeamTests.EnrichAsync_PresentsNewRecordReferencingExisting_StoresGatedProposalAndNotesSummary` took
+3 s in the full run and failed: *"Expected row not to be <null> because a new-record intent stores a gated
+create-new-record proposal."* Alone it passes in about 200 ms.
+
+**Likely mechanism:** `NewRecordIntentDetector` uses three `RegexOptions.Compiled` patterns with a 1-second match
+timeout and treats `RegexMatchTimeoutException` as "no intent", so under CPU load the intent is missed. Three timeouts
+fit the 3 s. Not confirmed beyond that: outside 068's scope.
+
+**Concrete failure**: an intermittent red in the BFF suite; in production, a regarding-intent proposal silently skipped
+under load.
+
+**Entry-points**: `Services/Communication/Engine/NewRecordIntentDetector.cs:50-70, :136`;
+`tests/integration/seam/Communication/EmailRegardingIntentSeamTests.cs:122-135`.
+
+---
+
+## ISS-020 — Six `sdap-jobs` handlers still drop a job whose process crashed
+
+| Field | Value |
+|---|---|
+| **Status** | Open — the graceful-stop half is fixed for every handler by task 068; the crash half only for the profile handler |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 068's independent code review (finding W5) |
+| **GitHub Issue** | [#1089](https://github.com/spaarke-dev/spaarke/issues/1089) |
+
+**Description**
+
+`EmailAnalysisJobHandler`, `ProfileSummaryJobHandler`, `RagIndexingJobHandler` (indexes Office saves),
+`AttachmentClassificationJobHandler`, `InsightsIngestJobHandler` and `IncomingMessagingJobHandler` take an ownerless
+Redis processing lock. A crash leaves it; the 5-minute redelivery finds it and is completed as "already being processed"
+with nothing done. Task 068 made `IdempotencyService.ReleaseProcessingLockAsync` always release (fixing the graceful stop
+for all of them) and made `AppOnlyDocumentAnalysisJobHandler` lock under its job's id with a one-minute takeover age.
+
+**Concrete failure**: a crash while one of these runs drops that unit of work; an Office save's index never happens.
+
+**Entry-points**: each handler's `TryAcquireProcessingLockAsync(...)` call; copy `AppOnlyDocumentAnalysisJobHandler.ProcessAsync`.
+
+---
+
+## ISS-021 — The pane reads the profile once after Generate Profile
+
+| Field | Value |
+|---|---|
+| **Status** | Open — predates 068; the server side is now truthful |
+| **Urgency** | next-round |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 068's independent code review (finding S3), confirmed in `useDocumentProfile.ts` |
+| **GitHub Issue** | [#1090](https://github.com/spaarke-dev/spaarke/issues/1090) |
+
+**Description**
+
+After the 202, `useDocumentProfile.generateProfile` shows Pending and re-reads the document once, immediately, before the
+queued job has started. The pane then shows the status from before the click and never reads again. The queued job now
+writes Pending → Completed or Failed; the pane needs to keep reading until the status leaves Pending (and to close the
+race with the job's start, either the BFF writes Pending at queue time or the pane ignores reads taken before it).
+
+**Concrete failure**: a user who regenerates a Failed profile sees "Failed" again while the new profile runs or after it
+succeeds.
+
+**Entry-points**: `src/client/office-addins/shared/taskpane/hooks/useDocumentProfile.ts` `generateProfile`; the 202 now
+carries `jobId` and `Location: /api/v1/documents/{id}`.
 
 ---
 

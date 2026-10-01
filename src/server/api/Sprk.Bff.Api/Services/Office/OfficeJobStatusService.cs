@@ -402,12 +402,25 @@ public class OfficeJobStatusService
     };
 
     // ══ SSE STREAM ══════════════════════════════════════════════════════════════════════════════════════════════════
-    // Moved verbatim from OfficeService (task 060). Only the status read changed: GetAsync(jobId, userId: null, …).
+    // Moved from OfficeService by task 060; numbering and ordering rewritten by task 068 (#1086).
 
     /// <summary>
     /// Streams the job's status as SSE events (the <c>/api/office/jobs/{jobId}/stream</c> route), resuming after
-    /// <paramref name="lastEventId"/> on reconnect. The event sequence is the stream's own and does not depend on the store.
+    /// <paramref name="lastEventId"/> on reconnect.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One number line.</b> Only events a worker published carry an id, and the id is that event's publisher
+    /// sequence, which every instance takes from one Redis counter. The connection, the snapshot, heartbeats and the
+    /// polling fallback carry no id, so they never move the client's <c>Last-Event-ID</c>. The stream used to number
+    /// those with a counter of its own and mix in the publisher's numbers, so ids repeated and a reconnect could drop
+    /// live events.
+    /// </para>
+    /// <para>
+    /// <b>Reconnect.</b> Every published event after <paramref name="lastEventId"/> is sent once; none at or before it is
+    /// sent again. Redis pub/sub keeps no history, so the state between them arrives as the unnumbered snapshot.
+    /// </para>
+    /// </remarks>
     public IAsyncEnumerable<byte[]> StreamAsync(
         Guid jobId,
         string? lastEventId,
@@ -436,6 +449,9 @@ public class OfficeJobStatusService
         System.Threading.Channels.ChannelWriter<byte[]> writer,
         CancellationToken cancellationToken)
     {
+        using var subscriptionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task? subscription = null;
+
         try
         {
             _logger.LogInformation(
@@ -443,31 +459,34 @@ public class OfficeJobStatusService
                 jobId,
                 lastEventId ?? "none");
 
-            // Parse last event ID for reconnection support
-            long startSequence = 0;
-            if (SseHelper.TryParseLastEventId(lastEventId, out var parsedJobId, out var parsedSequence))
+            // The last publisher event the client has (0 on a first connection).
+            long lastSeen = 0;
+            if (SseHelper.TryParseLastEventId(lastEventId, out var parsedJobId, out var parsedSequence) && parsedJobId == jobId)
             {
-                if (parsedJobId == jobId)
-                {
-                    startSequence = parsedSequence;
-                    _logger.LogInformation(
-                        "SSE reconnection detected for job {JobId}, resuming from sequence {Sequence}",
-                        jobId,
-                        startSequence);
-                }
+                lastSeen = parsedSequence;
+                _logger.LogInformation(
+                    "SSE reconnection detected for job {JobId}, resuming after sequence {Sequence}",
+                    jobId,
+                    lastSeen);
             }
 
-            long sequence = startSequence;
             var heartbeatInterval = TimeSpan.FromSeconds(15); // Per spec.md
-            var pollInterval = TimeSpan.FromMilliseconds(500); // Internal poll frequency
-            var lastHeartbeat = DateTimeOffset.UtcNow;
 
-            // Send initial connected event
-            sequence++;
-            var eventId = SseHelper.GenerateEventId(jobId, sequence);
-            await writer.WriteAsync(SseHelper.FormatConnected(jobId, eventId), cancellationToken);
+            // Subscribe BEFORE reading the snapshot: pub/sub keeps no history, so an event published between the read
+            // and the subscription would never be sent, and if it were the terminal one the stream would wait forever.
+            System.Threading.Channels.Channel<JobStatusUpdate>? live = null;
+            if (await _jobStatusService.IsHealthyAsync(cancellationToken))
+            {
+                live = System.Threading.Channels.Channel.CreateUnbounded<JobStatusUpdate>(
+                    new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+                var subscribed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                subscription = ReceiveLiveUpdatesAsync(jobId, live.Writer, subscribed, subscriptionCts.Token);
+                await subscribed.Task.WaitAsync(cancellationToken);
+            }
 
-            // Get initial job status and send it
+            await writer.WriteAsync(SseHelper.FormatConnected(jobId), cancellationToken);
+
+            // The snapshot: the state pub/sub cannot replay. Unnumbered.
             var currentStatus = await GetAsync(jobId, userId: null, cancellationToken);
             if (currentStatus is null)
             {
@@ -480,99 +499,57 @@ public class OfficeJobStatusService
                 return;
             }
 
-            // Send initial status
-            sequence++;
-            eventId = SseHelper.GenerateEventId(jobId, sequence);
             await writer.WriteAsync(SseHelper.FormatProgress(
                 currentStatus.Progress,
                 currentStatus.CurrentPhase,
-                eventId), cancellationToken);
+                eventId: null), cancellationToken);
 
-            // Send completed phases if any
-            if (currentStatus.CompletedPhases?.Count > 0)
+            foreach (var phase in currentStatus.CompletedPhases ?? [])
             {
-                foreach (var phase in currentStatus.CompletedPhases)
-                {
-                    // Only send phases after the reconnection point
-                    sequence++;
-                    if (sequence <= startSequence)
-                        continue;
-
-                    eventId = SseHelper.GenerateEventId(jobId, sequence);
-                    await writer.WriteAsync(SseHelper.FormatStageUpdate(
-                        phase.Name,
-                        "Completed",
-                        phase.CompletedAt,
-                        eventId), cancellationToken);
-                }
+                await writer.WriteAsync(SseHelper.FormatStageUpdate(
+                    phase.Name,
+                    "Completed",
+                    phase.CompletedAt,
+                    eventId: null), cancellationToken);
             }
 
-            // Check if job is already in terminal state
             if (currentStatus.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
             {
-                sequence++;
-                eventId = SseHelper.GenerateEventId(jobId, sequence);
-
-                if (currentStatus.Status == JobStatus.Completed)
-                {
-                    _logger.LogInformation("SSE stream: Job {JobId} already completed", jobId);
-                    await writer.WriteAsync(SseHelper.FormatJobComplete(
-                        jobId,
-                        currentStatus.Result?.Artifact?.Id,
-                        currentStatus.Result?.Artifact?.WebUrl,
-                        eventId), cancellationToken);
-                }
-                else
-                {
-                    _logger.LogInformation("SSE stream: Job {JobId} already failed/cancelled", jobId);
-                    await writer.WriteAsync(SseHelper.FormatJobFailed(
-                        jobId,
-                        currentStatus.Error?.Code ?? "OFFICE_INTERNAL",
-                        currentStatus.Error?.Message ?? "Job failed",
-                        currentStatus.Error?.Retryable ?? false,
-                        eventId), cancellationToken);
-                }
-
+                _logger.LogInformation("SSE stream: Job {JobId} already {Status}", jobId, currentStatus.Status);
+                await writer.WriteAsync(FormatTerminal(jobId, currentStatus, eventId: null), cancellationToken);
                 return;
             }
 
-            // Main streaming loop using Redis pub/sub via JobStatusService
-            // Falls back to polling if Redis subscription fails
-            var useRedisSubscription = await _jobStatusService.IsHealthyAsync(cancellationToken);
-
-            if (useRedisSubscription)
+            if (live is not null)
             {
                 _logger.LogInformation(
                     "SSE stream using Redis pub/sub for job {JobId}",
                     jobId);
 
-                // Start heartbeat task
                 using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var heartbeatTask = SendHeartbeatsAsync(
-                    jobId,
-                    writer,
-                    heartbeatInterval,
-                    heartbeatCts.Token,
-                    () => sequence);
+                var heartbeatTask = SendHeartbeatsAsync(jobId, writer, heartbeatInterval, heartbeatCts.Token);
 
                 try
                 {
-                    // Subscribe to job status updates via Redis pub/sub
-                    await foreach (var update in _jobStatusService.SubscribeToJobAsync(jobId, cancellationToken))
+                    await foreach (var update in live.Reader.ReadAllAsync(cancellationToken))
                     {
-                        // Skip updates we've already sent (based on sequence)
-                        if (update.Sequence <= startSequence)
+                        // The client already has every event up to its Last-Event-ID. If that includes the outcome,
+                        // there is nothing left to send.
+                        if (update.Sequence <= lastSeen)
                         {
                             _logger.LogDebug(
                                 "SSE stream: Skipping update with sequence {Sequence} (already sent) for job {JobId}",
                                 update.Sequence,
                                 jobId);
+                            if (IsTerminal(update.UpdateType))
+                            {
+                                return;
+                            }
+
                             continue;
                         }
 
-                        // Update our sequence tracker
-                        sequence = Math.Max(sequence, update.Sequence);
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
+                        var eventId = SseHelper.GenerateEventId(jobId, update.Sequence);
 
                         // Format and send the SSE event based on update type
                         var sseEvent = update.UpdateType switch
@@ -622,9 +599,7 @@ public class OfficeJobStatusService
                             update.Progress);
 
                         // Terminal states end the stream
-                        if (update.UpdateType is JobStatusUpdateType.JobCompleted
-                            or JobStatusUpdateType.JobFailed
-                            or JobStatusUpdateType.JobCancelled)
+                        if (IsTerminal(update.UpdateType))
                         {
                             _logger.LogInformation(
                                 "SSE stream ending for job {JobId} due to terminal state {State}",
@@ -640,14 +615,39 @@ public class OfficeJobStatusService
                     heartbeatCts.Cancel();
                     try { await heartbeatTask; } catch (OperationCanceledException) { }
                 }
+
+                // The subscription ended without an outcome (Redis dropped it, or it failed). Poll the job's row rather
+                // than closing the stream with no outcome; first check whether the outcome arrived in the meantime.
+                _logger.LogWarning(
+                    "SSE stream: the subscription for job {JobId} ended without an outcome; polling instead",
+                    jobId);
+                currentStatus = await GetAsync(jobId, userId: null, cancellationToken);
+                if (currentStatus is null)
+                {
+                    _logger.LogWarning("SSE stream: Job {JobId} was deleted during streaming", jobId);
+                    await writer.WriteAsync(SseHelper.FormatError(
+                        "OFFICE_008",
+                        "Job no longer exists",
+                        jobId.ToString()), cancellationToken);
+                    return;
+                }
+
+                if (currentStatus.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
+                {
+                    await writer.WriteAsync(FormatTerminal(jobId, currentStatus, eventId: null), cancellationToken);
+                    return;
+                }
             }
             else
             {
-                // Fallback to polling when Redis is unavailable
                 _logger.LogWarning(
                     "SSE stream falling back to polling for job {JobId} (Redis unavailable)",
                     jobId);
+            }
 
+            // Polling: Redis is unavailable, or the subscription ended early. No publisher sequence exists here, so
+            // nothing is numbered.
+            {
                 var fallbackPollInterval = TimeSpan.FromMilliseconds(500);
                 var previousStatus = currentStatus.Status;
                 var previousProgress = currentStatus.Progress;
@@ -661,9 +661,7 @@ public class OfficeJobStatusService
                     var now = DateTimeOffset.UtcNow;
                     if (now - fallbackLastHeartbeat >= heartbeatInterval)
                     {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-                        await writer.WriteAsync(SseHelper.FormatHeartbeat(now, eventId), cancellationToken);
+                        await writer.WriteAsync(SseHelper.FormatHeartbeat(now), cancellationToken);
                         fallbackLastHeartbeat = now;
                         _logger.LogDebug("SSE heartbeat sent for job {JobId}", jobId);
                     }
@@ -684,12 +682,10 @@ public class OfficeJobStatusService
                     // Send progress updates
                     if (currentStatus.Progress != previousProgress)
                     {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
                         await writer.WriteAsync(SseHelper.FormatProgress(
                             currentStatus.Progress,
                             currentStatus.CurrentPhase,
-                            eventId), cancellationToken);
+                            eventId: null), cancellationToken);
                         previousProgress = currentStatus.Progress;
                     }
 
@@ -700,13 +696,11 @@ public class OfficeJobStatusService
                         for (var i = previousCompletedPhaseCount; i < currentCompletedPhaseCount; i++)
                         {
                             var phase = currentStatus.CompletedPhases![i];
-                            sequence++;
-                            eventId = SseHelper.GenerateEventId(jobId, sequence);
                             await writer.WriteAsync(SseHelper.FormatStageUpdate(
                                 phase.Name,
                                 "Completed",
                                 phase.CompletedAt,
-                                eventId), cancellationToken);
+                                eventId: null), cancellationToken);
                         }
                         previousCompletedPhaseCount = currentCompletedPhaseCount;
                     }
@@ -714,13 +708,11 @@ public class OfficeJobStatusService
                     // Send current phase change
                     if (currentStatus.CurrentPhase != previousPhase && !string.IsNullOrEmpty(currentStatus.CurrentPhase))
                     {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
                         await writer.WriteAsync(SseHelper.FormatStageUpdate(
                             currentStatus.CurrentPhase,
                             "Running",
                             DateTimeOffset.UtcNow,
-                            eventId), cancellationToken);
+                            eventId: null), cancellationToken);
                         previousPhase = currentStatus.CurrentPhase;
                     }
 
@@ -728,26 +720,7 @@ public class OfficeJobStatusService
                     if (currentStatus.Status != previousStatus &&
                         currentStatus.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
                     {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-
-                        if (currentStatus.Status == JobStatus.Completed)
-                        {
-                            await writer.WriteAsync(SseHelper.FormatJobComplete(
-                                jobId,
-                                currentStatus.Result?.Artifact?.Id,
-                                currentStatus.Result?.Artifact?.WebUrl,
-                                eventId), cancellationToken);
-                        }
-                        else
-                        {
-                            await writer.WriteAsync(SseHelper.FormatJobFailed(
-                                jobId,
-                                currentStatus.Error?.Code ?? "OFFICE_INTERNAL",
-                                currentStatus.Error?.Message ?? $"Job {currentStatus.Status.ToString().ToLowerInvariant()}",
-                                currentStatus.Error?.Retryable ?? false,
-                                eventId), cancellationToken);
-                        }
+                        await writer.WriteAsync(FormatTerminal(jobId, currentStatus, eventId: null), cancellationToken);
                         return;
                     }
                     previousStatus = currentStatus.Status;
@@ -786,32 +759,82 @@ public class OfficeJobStatusService
         }
         finally
         {
+            subscriptionCts.Cancel();
+            if (subscription is not null)
+            {
+                await subscription;
+            }
+
             writer.Complete();
         }
     }
 
     /// <summary>
-    /// Sends heartbeat events at regular intervals to keep the SSE connection alive.
+    /// Receives the job's published updates into <paramref name="live"/>, signalling <paramref name="subscribed"/> once
+    /// the subscription is live (or has ended without becoming live, so the stream never waits on it forever).
+    /// </summary>
+    private async Task ReceiveLiveUpdatesAsync(
+        Guid jobId,
+        System.Threading.Channels.ChannelWriter<JobStatusUpdate> live,
+        TaskCompletionSource subscribed,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var update in _jobStatusService.SubscribeToJobAsync(
+                jobId, onSubscribed: () => subscribed.TrySetResult(), cancellationToken))
+            {
+                await live.WriteAsync(update, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The stream ended.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SSE stream: the subscription for job {JobId} failed", jobId);
+        }
+        finally
+        {
+            subscribed.TrySetResult();
+            live.TryComplete();
+        }
+    }
+
+    private static bool IsTerminal(JobStatusUpdateType type) =>
+        type is JobStatusUpdateType.JobCompleted or JobStatusUpdateType.JobFailed or JobStatusUpdateType.JobCancelled;
+
+    private static byte[] FormatTerminal(Guid jobId, JobStatusResponse status, string? eventId) =>
+        status.Status == JobStatus.Completed
+            ? SseHelper.FormatJobComplete(
+                jobId,
+                status.Result?.Artifact?.Id,
+                status.Result?.Artifact?.WebUrl,
+                eventId)
+            : SseHelper.FormatJobFailed(
+                jobId,
+                status.Error?.Code ?? "OFFICE_INTERNAL",
+                status.Error?.Message ?? $"Job {status.Status.ToString().ToLowerInvariant()}",
+                status.Error?.Retryable ?? false,
+                eventId);
+
+    /// <summary>
+    /// Sends heartbeat events at regular intervals to keep the SSE connection alive. Unnumbered: a heartbeat is not a
+    /// published event and must not move the client's <c>Last-Event-ID</c>.
     /// </summary>
     private async Task SendHeartbeatsAsync(
         Guid jobId,
         System.Threading.Channels.ChannelWriter<byte[]> writer,
         TimeSpan interval,
-        CancellationToken cancellationToken,
-        Func<long> getCurrentSequence)
+        CancellationToken cancellationToken)
     {
         try
         {
             while (!cancellationToken.IsCancellationRequested)
             {
                 await Task.Delay(interval, cancellationToken);
-
-                var sequence = getCurrentSequence() + 1;
-                var eventId = SseHelper.GenerateEventId(jobId, sequence);
-                var heartbeatEvent = SseHelper.FormatHeartbeat(DateTimeOffset.UtcNow, eventId);
-
-                await writer.WriteAsync(heartbeatEvent, cancellationToken);
-
+                await writer.WriteAsync(SseHelper.FormatHeartbeat(DateTimeOffset.UtcNow), cancellationToken);
                 _logger.LogDebug("SSE heartbeat sent for job {JobId}", jobId);
             }
         }

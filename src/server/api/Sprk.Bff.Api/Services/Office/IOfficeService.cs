@@ -175,31 +175,25 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// FR-08 (spaarkeai-word-add-in-r1 task 022): re-runs document profiling for the given
-    /// <c>sprk_document</c> on user request from the pane's "Generate Profile" control. Fire-and-forget,
-    /// best-effort — mirrors Compose's shipped <c>refresh-profile</c> semantics exactly: dispatches the
-    /// SAME OBO direct-Action profile pipeline (<c>IDocumentProfileAi</c>) and returns as soon as the
-    /// DISPATCH DECISION is made (fast, synchronous), never awaiting the profile itself. Unconditionally
-    /// OVERWRITES any existing profile — no confirmation, no idempotency gate (deliberately NOT the
-    /// <c>AppOnlyDocumentAnalysis</c> Service-Bus job path, whose idempotency key would silently skip an
-    /// already-profiled or Failed document).
+    /// FR-08 (task 022; durable since task 068, #1086): requests a fresh document profile for the given
+    /// <c>sprk_document</c> from the pane's "Generate Profile" control. Queues ONE <c>AppOnlyDocumentAnalysis</c>
+    /// job whose key carries this request's id (task 029's discriminator), so every click runs, including on an
+    /// already-profiled or Failed document, with no confirmation; and returns once the job is on the queue, never
+    /// awaiting the profile. See <see cref="OfficeProfileQueue"/>.
     /// </summary>
     /// <param name="documentId">The target <c>sprk_document</c> id. Caller (the endpoint filter) has
     /// already authorized <c>write</c> on this record.</param>
-    /// <param name="httpContext">The current request context — the OBO bearer token and claims are
-    /// captured from it before the background dispatch detaches.</param>
-    /// <param name="cancellationToken">Request-scope cancellation token (not used by the detached
-    /// background profile itself, which runs under the app-shutdown token instead).</param>
+    /// <param name="httpContext">The current request: its trace id is the job's correlation id, and its caller is
+    /// recorded as the requester.</param>
+    /// <param name="cancellationToken">Unused: once started, the submit is not abandoned (see
+    /// <see cref="OfficeProfileQueue.QueueAsync"/>).</param>
     /// <returns>
-    /// The dispatch outcome (<see cref="GenerateProfileDispatchOutcome"/>). The caller MUST branch on
-    /// this — coordinator-review fix: an earlier draft ignored a bare <see langword="bool"/> return and
-    /// always answered 202, which let the endpoint claim success for a profile that would never run
-    /// (compound AI gate off). Only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce
-    /// a 202; <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> and
-    /// <see cref="GenerateProfileDispatchOutcome.NoBearer"/> are honest non-success outcomes the endpoint
-    /// maps to 503 and 401 respectively.
+    /// The outcome and, when queued, the job's id (<see cref="GenerateProfileResult"/>). The caller MUST branch on it:
+    /// only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce a 202;
+    /// <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> (profiling off) and
+    /// <see cref="GenerateProfileDispatchOutcome.QueueUnavailable"/> (Service Bus refused) are 503s.
     /// </returns>
-    Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
+    Task<GenerateProfileResult> GenerateProfileAsync(
         Guid documentId,
         HttpContext httpContext,
         CancellationToken cancellationToken = default);

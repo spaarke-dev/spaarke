@@ -126,6 +126,8 @@ flowchart LR
 
 **Path C — Outlook add-in / app-only background (Node Playbook — the bug path):** the save pipeline (Part 3) enqueues an app-only analysis job → [`AppOnlyAnalysisService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/AppOnlyAnalysisService.cs) `AnalyzeDocumentAsync(documentId, "Document Profile")` (:182) → `ExecutePlaybookAnalysisAsync` (:468) → the playbook **has nodes**, so `ExecuteNodeBasedAnalysisAsync` (:691) → `PlaybookOrchestrationService.ExecuteAppOnlyAsync` (:730). **This runs the node graph, and the graph's Update Record node is what fails.**
 
+> **Office "Generate Profile" (FR-08) takes this queue too, since `spaarkeai-word-add-in-r1` task 068 (#1086).** It used to call Path B in a `Task.Run` behind its 202, which a restart lost. It now queues the same `AppOnlyDocumentAnalysis` job (`Services/Office/OfficeProfileQueue.cs`), keyed with the request's own id (`AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey`, task 029's discriminator) so every click runs. Since `f5c7687d8` (#919 Fix 2), `AppOnlyAnalysisService` routes the "Document Profile" consumer onto the direct-Action spine, so this job runs ACT-011 and `DocumentProfileOutputMapper`, not the node graph above. The Path C description above, and the "Know which spine you're on" line in Part 5, predate that fix.
+
 ### The "Document Profile" playbook graph (live, `18cf3cc8-02ec-f011-8406-7c1e520aa4df`)
 
 | Order | Node | ExecutorType | Output var | Result |

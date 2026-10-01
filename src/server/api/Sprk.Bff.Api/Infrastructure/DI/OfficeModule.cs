@@ -55,6 +55,11 @@ public static class OfficeModule
         services.TryAddSingleton(TimeProvider.System);
         services.AddScoped<OfficeJobStatusService>();
 
+        // Task 068 (#1086): the Generate Profile request, on the job queue instead of a Task.Run behind the 202.
+        // Concrete (ADR-010) and UNCONDITIONAL: the route maps unconditionally, and JobSubmissionService is an
+        // unconditional singleton (JobProcessingModule). Its optional IDocumentProfileAi is the AI gate: absent → 503.
+        services.AddScoped<OfficeProfileQueue>();
+
         // FR-C3 content de-dup detector (Tier-1 exact quickXorHash). Concrete, scoped (ADR-010); reused by
         // every document-creating upload path (email-attachment today; Compose next). Non-fatal by design.
         services.AddScoped<ContentDedupDetector>();
