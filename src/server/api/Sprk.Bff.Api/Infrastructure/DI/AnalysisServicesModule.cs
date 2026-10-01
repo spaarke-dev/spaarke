@@ -9,6 +9,7 @@ using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -804,7 +805,7 @@ public static class AnalysisServicesModule
         services.AddHttpClient<Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader,
                                Sprk.Bff.Api.Services.Ai.Classification.DataverseAgreementTypeRegistryReader>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Classification.AgreementTypeRegistryPromptAssembler>();
-        services.AddScoped<IScopeManagementService, ScopeManagementService>();
+
         services.AddScoped<IAnalysisContextBuilder, AnalysisContextBuilder>();
         // IWorkingDocumentService promoted to unconditional (task 011 Phase 1b Tier 1.5 round 3,
         // RB-T028-04 cluster residual — 2026-06-01). Phase 1c re-re-triage surfaced

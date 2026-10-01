@@ -139,6 +139,7 @@ export const StatusView: React.FC<StatusViewProps> = ({ onFetchJobs, refreshInte
       return () => clearInterval(intervalId);
     }
     return undefined;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchJobs is deliberately excluded (task 072). It is redefined on every render, so including it would tear down and re-create the polling interval on every render, resetting the cadence this effect exists to establish. The polling contract is keyed on refreshInterval alone.
   }, [refreshInterval]);
 
   const activeJobs = jobs.filter(j => j.status === 'Pending' || j.status === 'InProgress');

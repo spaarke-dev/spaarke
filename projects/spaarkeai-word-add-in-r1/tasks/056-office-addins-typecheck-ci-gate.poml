@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>No CI job typechecks office-addins — FR-18's "CI gates it going forward" was never built</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>startable — no dependencies; the workflow it extends is already merged and green</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches a hot-path CI workflow, and the deliverable IS a safety gate whose characteristic failure is SILENT — a gate that reports green while covering nothing. This same file already had to defend against a vacuous green once (the suite-count assertion at :238-263). A gate authored without code-review + adr-check is the thing this task exists to stop.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical and fully specified, with a canonical reference to copy in the same file: the existing `gated-jest` job supplies the path filters, Node 20 setup and install recipe. The one piece of judgment (classify lines, do not trust the exit code) is stated outright in the acceptance criteria rather than left to inference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`.github/workflows/**` is on the conflict-check hot-path watchlist, where the coordination rule is serial PRs only. Run /conflict-check before editing.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-workflows, testing, office-addins, typecheck, tooling</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close GitHub #996 / ISS-004: nothing typechecks `src/client/office-addins`, so a NEW production TypeScript error would be caught by no gate at all. Add a CI job that fails on production errors only, preserving the owner-approved test-file debt, and amend the three stale `spec.md` assertions that still claim the package is clean and CI-gated.</prompt>
+
+  <role>SPAARKE platform developer working on CI gating. Expertise in GitHub Actions path-filtered workflows and the repo's tiering rules. Treat "does this gate actually catch what it claims" as the deliverable — not "does the workflow file parse".</role>
+
+  <goal>A new production TypeScript error in `src/client/office-addins` turns a PR check red. The 111 accepted test-file errors continue not to. `spec.md` stops asserting a property that is not true.</goal>
+
+  <context>
+    <background>
+      Filed 2026-09-17 by task 042 while measuring spec Success Criterion 12 against the deployed build.
+      Full record: `notes/defer-issues.md` § ISS-004. GitHub: #996.
+
+      Spec criterion 12 reads *"`npm run typecheck` is clean — Verify: CI"*. Two things are wrong with that.
+
+      FIRST, it is not clean and is not meant to be. `npm run typecheck` (`tsc --noEmit --skipLibCheck`) exits 2.
+      Measured on this branch at commit 23fd17991: **111 error lines, 0 of them production, across 9 files** —
+      all under `__tests__/`, `*.test.*`, or `shared/__mocks__/office-js.ts`. That debt is a deliberate,
+      owner-approved accept (project `CLAUDE.md`, 2026-09-09, narrowed 290 to 111 on 2026-09-12).
+
+      SECOND — and this is the actual defect — **no CI job runs typecheck on this package at all.** Verified
+      again 2026-09-19: both workflows that touch `office-addins` (`office-addins-tests.yml`,
+      `deploy-office-addins.yml`) contain ZERO occurrences of `typecheck`; every `typecheck` in
+      `.github/workflows/` belongs to a different package in `sdap-ci.yml:432-485`.
+
+      Why that matters: the 2026-09-09 accept rests on a stated safety property — *"production is at 0, so new
+      production errors stand out"*. Nothing enforces it. `npm run build` is webpack and test files are not in
+      its graph; `ts-jest` runs with `isolatedModules`, which is transpile-only and type-checks nothing. So the
+      property the accept depends on is currently unenforced, which the accept itself flagged as the thing to
+      watch.
+    </background>
+
+    <expected>
+      A second job in `.github/workflows/office-addins-tests.yml`, beside `gated-jest`, that runs typecheck and
+      fails on production errors only. Plus three `spec.md` amendments and one corrected summary line.
+    </expected>
+
+    <notes>
+      THE SUBTLETY THAT DECIDES THIS TASK. `tsc` exits **2** today, on accepted debt. A step that merely runs
+      `npm run typecheck` and lets a non-zero exit fail the job would be red on every PR from the moment it
+      lands — and this repo has already written down what happens then: *"a check that is always red is a check
+      everyone learns to ignore, which is worse than no check"* (`office-addins-tests.yml:92-100`). The job MUST
+      classify the error lines and decide from the production count, NOT from the exit code.
+
+      The classification expression is already measured and proven against the live tree:
+
+        npm run typecheck 2>&amp;1 | grep "error TS" | grep -vE "__tests__|\.test\.|\.spec\.|__mocks__"
+
+      yields **0 lines** today, while the unfiltered count is 111. Use that, or an equivalent whose behaviour
+      you verify the same way — by running it.
+
+      SCOPE HONESTY. This restores a **reporting** gate, not a blocking one. Master's ruleset (21824191)
+      requires exactly one named check, `Router`, and this workflow is not in it — so a red here renders a red X
+      and the PR can still merge. Promotion to blocking needs BOTH path classification hoisted into the job AND
+      N consecutive green runs on `ubuntu-latest` (`office-addins-tests.yml:39-54`). Do not claim otherwise, and
+      do not attempt the promotion in this task.
+    </notes>
+  </context>
+
+  <justification>
+    <existing>`.github/workflows/office-addins-tests.yml` — the `gated-jest` job (path filters, Node 20, install recipe). Grep evidence 2026-09-19: `grep -c typecheck` returns **0** for both `office-addins-tests.yml` and `deploy-office-addins.yml`; all `typecheck` hits in `.github/workflows/` are `sdap-ci.yml:432-485` serving `Spaarke.UI.Components` / `AI.Widgets` / `Auth`, not this package.</existing>
+    <extension>Yes — extend that existing workflow with a second job rather than add a new workflow file. It already carries the exact path filters this gate needs, the Node 20 pin that keeps gate and nightly baseline from disagreeing for toolchain reasons, and the `npm install --legacy-peer-deps` recipe this package requires. A separate workflow would duplicate all three and let them drift.</extension>
+    <cost-of-doing-nothing>A new production TypeScript error in `src/client/office-addins` reaches master with nothing red. Concretely: `npm run build` is webpack, so test files are not in its graph; `ts-jest isolatedModules` is transpile-only; the nightly `client-tests.yml` runs jest, not tsc. The owner-approved accept of 111 test-file errors is explicitly conditioned on production staying at 0 being *visible* — and today nothing looks.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10 / shadow window">MUST NOT edit `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml`. They are frozen under the shadow-comparison window; editing any restarts the cutover clock.</constraint>
+    <constraint source="office-addins-tests.yml:67-77">MUST NOT add a `pull_request` trigger to `client-tests.yml` or make its legs conditionally blocking. It is advisory by construction across 40 packages; one package's gate does not get to change that for the other 39.</constraint>
+    <constraint source="root CLAUDE.md §12">MUST use `npm install --legacy-peer-deps --no-audit --no-fund`, never `npm ci`.</constraint>
+    <constraint source="ADR-038 / this task">MUST NOT modify, skip, or delete any test or source file to make the gate green. The gate reports what is there.</constraint>
+    <constraint source="ISS-004">The gate MUST key on production errors only. Widening the exclusion pattern to cover a production path would recreate the gap this task closes.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>A new job in `.github/workflows/office-addins-tests.yml` runs `npm run typecheck` for `src/client/office-addins`.</criterion>
+    <criterion>The job decides from the PRODUCTION error count, not from tsc's exit code. Verify by reasoning about the current tree: tsc exits 2 today, and the job must still pass.</criterion>
+    <criterion>It PASSES on the tree as it stands — measured baseline at 23fd17991: 111 total error lines, 0 production, 9 files.</criterion>
+    <criterion>REPRODUCE-FIRST: seed one real production error (e.g. in `shared/taskpane/utils/errorMessages.ts`), run the classification locally, and confirm it reports ≥1 production error. Revert it. Record the observed output in the task note.</criterion>
+    <criterion>Seed one test-file error the same way and confirm it does NOT trip the gate. Revert it. Record the output.</criterion>
+    <criterion>The job prints the production and test-file counts into `$GITHUB_STEP_SUMMARY`, so a reader sees what was covered rather than a bare pass.</criterion>
+    <criterion>`spec.md:92` (FR-18 acceptance) amended: state the accepted baseline (0 production / ~111 test-file, CI-gated on production) instead of "clean".</criterion>
+    <criterion>`spec.md:214` (criterion 12) amended to the same measured wording.</criterion>
+    <criterion>`spec.md:264` ("Typecheck debt | Clean in this project? | **Yes**") amended to reflect the accept.</criterion>
+    <criterion>`office-addins-tests.yml:275` — the Summary step prints "**Blocking.**", which the file's own corrected header at :22-37 states is false. Correct it to say it REPORTS. (FAILURE-MODES AP-12: prose outliving the mechanism.)</criterion>
+    <criterion>The task note states plainly that this is a reporting gate, not a blocking one, and names the two-part promotion path.</criterion>
+    <criterion>`actionlint` passes on the edited workflow.</criterion>
+    <criterion>None of the three frozen CI files is modified. No test or source file is modified to make the gate pass.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the gate cannot be made green on the current tree WITHOUT widening the exclusion pattern to cover a production path, STOP and escalate (root CLAUDE.md §6). Widening it would recreate exactly the gap this task closes, while leaving a green check that claims otherwise.</trigger>
+    <trigger>If the measured baseline differs from 0 production / 111 total, STOP and report the delta before writing the gate. A changed baseline means something landed since 23fd17991 and the premise needs re-checking, not accommodating.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Re-measure the baseline (`npm run typecheck`) and classify production vs test-file lines. Confirm 0 / 111 before changing anything.</step>
+    <step>Seed a production error; run the classification; confirm it is detected. Revert. Then seed a test-file error; confirm it is NOT detected. Revert. This is the reproduce-first evidence — capture both outputs verbatim.</step>
+    <step>Add the `typecheck` job to `office-addins-tests.yml`, modelled on `gated-jest` (same checkout, Node 20, `npm install --legacy-peer-deps`). No build step is needed — `tsc --noEmit` does not need `@spaarke/auth` compiled.</step>
+    <step>Emit production/test counts to `$GITHUB_STEP_SUMMARY`.</step>
+    <step>Fix the "Blocking." line in the existing Summary step.</step>
+    <step>Amend the three `spec.md` assertions.</step>
+    <step>Run `actionlint`. Write `notes/056-office-addins-typecheck-ci-gate.md` recording the baseline, both seeded-error observations, and the reporting-not-blocking scope statement.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">.github/workflows/office-addins-tests.yml</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/056-office-addins-typecheck-ci-gate.md</file>
+    <file role="read">src/client/office-addins/package.json</file>
+    <file role="read">projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+    <file role="read">projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>.github/workflows/office-addins-tests.yml</file>
+    <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/056-office-addins-typecheck-ci-gate.md</file>
+  </outputs>
+</task>

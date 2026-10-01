@@ -127,9 +127,11 @@ public class RouteAuthorizationGuardTests
     {
         // ---- Rule A applies: the per-route gate is the convention here ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes (content, download, eml-render) and URL minting "
-            + "(preview-url, view-url, office, open-links, share-link). Eight of nine routes already carry "
-            + "AddDocumentAuthorizationFilter(\"read\"); the ninth is finding #3."),
+            "/api/documents/{documentId}/* — file bytes (content, download, eml-render, preview) and URL "
+            + "minting (preview-url, view-url, office, open-links, share-link), plus POST resolve-identity "
+            + "(added by spaarkeai-word-add-in-r1 task 012). All ten routes carry AddDocumentAuthorizationFilter; "
+            + "share-link has since task 072 (finding #3), and resolve-identity pairs DocumentUrlIdentityFilter "
+            + "with it (read)."),
 
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows plus a byte download, and a container-keyed document "
@@ -189,6 +191,59 @@ public class RouteAuthorizationGuardTests
 
         new GovernedFile("Api/Ai/RecordSearchEndpoints.cs", Scope.RouteLevelGate,
             "/api/ai/search/records — Dataverse record content over the same AI search surface."),
+
+        // ---- Office add-in surface: added 2026-09-29 by task 120 (GitHub #1015) ----
+        //
+        // This census governed 14 files and did not include either of these, which classified the whole
+        // Office surface as "serves neither document nor Dataverse content" by omission. That is false:
+        // /save creates sprk_document rows and uploads bytes to SPE, /search/entities reads matter,
+        // project, invoice, account and contact content, /todo and /quickcreate write Dataverse, and all
+        // three communications routes read sprk_communication and sprk_todo.
+        //
+        // Both are RouteLevelGate rather than GroupGated. The group chain here is a bare
+        // .RequireAuthorization() with no policy name — "are you anyone?" — so there is nothing for a
+        // route to inherit. The per-route filter is the convention on this surface (/save and the two
+        // /jobs routes already follow it); the files that do not are findings, not a different design.
+        new GovernedFile("Api/Office/OfficeEndpoints.cs", Scope.RouteLevelGate,
+            "/api/office/* — the Office add-in surface. Gates as of the 2026-09-30 merge: /save carries "
+            + "AddEntityAccessFilter (+ AddOfficeVersionSaveAuthorizationFilter); both /jobs routes carry "
+            + "AddJobOwnershipFilter; POST /todo carries AddTodoSourceAccessFilter; POST /quickcreate carries "
+            + "AddQuickCreateSourceAccessFilter; generate-profile carries a document authorization filter. "
+            + "/search/entities is gated INSIDE its query (impersonated read) and /search/matter-types is "
+            + "reference data — both Permanent-waived. The document-search, recent-items and share stub routes "
+            + "were DELETED by task 058. None of the named gates was visible to this guard before task 120 widened "
+            + "FilterMarker. CAVEATS Rule A cannot express, stated so 'gated' is not read as 'gated in every "
+            + "case': (1) EntityAccessFilter passes through when a /save carries no TargetEntity "
+            + "(EntityAccessFilter.cs ExtractTargetEntity), so a new-document save with no related record "
+            + "reaches the handler with no per-record check — an owner-confirmed required use case, tracked "
+            + "on #1025, where the authorization subject is the destination container rather than a record. "
+            + "(2) QuickCreateSourceAccessFilter gates only the SOURCE read and passes through when no source "
+            + "is named; whether the caller holds CREATE privilege for the entity type is not checked, and "
+            + "the write runs on the app identity — a privilege question outside Rule A's per-resource subject."),
+
+        new GovernedFile("Api/Office/CommunicationsEndpoints.cs", Scope.RouteLevelGate,
+            "/api/office/communications/* — three routes reading sprk_communication, candidate record "
+            + "display names, and linked sprk_todo rows. No endpoint filter, BY DESIGN since task 127 "
+            + "(#1020): every read runs through IDataverseUserClient under the CALLER's Dataverse security "
+            + "context, so the delegated query is the authorization boundary; denial surfaces as the ordinary "
+            + "404 or empty list, never 403, so there is no existence oracle. The routes carry Permanent "
+            + "waivers recording that shape. (Before task 127: zero filters, app-only reads keyed solely on a "
+            + "caller-supplied id, with the caller's object id used only as a log argument.)"),
+
+        // ---- AI visualization: added 2026-09-08 by spaarkeai-word-add-in-r1 task 032 ----
+        new GovernedFile("Api/Ai/VisualizationEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/visualization/* — document names, types, keywords, SPE file ids and record URLs for "
+            + "every NEIGHBOUR of a source document, returned as graph nodes. Added 2026-09-08 by "
+            + "spaarkeai-word-add-in-r1 task 032 (plan.md finding F-b). The file was ABSENT from this "
+            + "census while carrying the exact shape the census exists to find: the cosine-KNN search in "
+            + "VisualizationService trimmed its rows by tenantId and self-exclusion alone, and "
+            + "VisualizationAuthorizationFilter authorized only the SOURCE document — so Read on one "
+            + "document served its neighbours from anywhere in the tenant. POST /related-from-content "
+            + "carried no filter at all, which is also WHY the file could not be listed here before: a "
+            + "file cannot be classified RouteLevelGate while one of its routes has no gate, so the gap "
+            + "kept itself out of the guard. Both routes now publish VisualizationAuthorization and both "
+            + "handlers refuse (500) without it; rows are authorized per document in the endpoint, the "
+            + "filter/endpoint PAIR shape Rule B was widened for in task 077."),
 
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
@@ -422,7 +477,7 @@ public class RouteAuthorizationGuardTests
         //   - Secure content can never arrive here: secure records resolve through the RECORD-keyed
         //     route and fail closed. Acting-user BU is admissible ONLY where no record exists — for a
         //     secure record it is provably the WRONG container, since users sit in the Operations
-        //     subtree while secure records are owned in `Secure Projects`.
+        //     subtree while secure records are owned in `Secure Record`.
         //
         // If someone later adds a record id to this route "for convenience", this waiver is wrong and
         // the route needs the record-keyed filter instead. That is the only way it becomes stale.
@@ -493,6 +548,108 @@ public class RouteAuthorizationGuardTests
             "COLLECTION READ. Correctness here is RESULT TRIMMING, not a per-record gate — a per-resource "
             + "filter has no single resource to check. Trimming the collection to the caller's accessible "
             + "record set is Wave 3's subject (AccessibleRecordSetService), not a waiver-able gate."),
+
+        // ---------- task 120 (GitHub #1015): the Office surface, first time it is inside the guard ----------
+        //
+        // WHY THIS BLOCK EXISTS. Api/Office/* was never in GovernedFiles, so the whole surface was
+        // classified "serves neither document nor Dataverse content" by omission — and FilterMarker could
+        // not have recognised its gates even if it had been, because the Office filters are named without
+        // the word "Authorization". Task 120 opened that blind spot on 2026-09-29 with NINE Pending waivers
+        // and ONE Permanent: not nine new holes, one blind spot. (This header said TEN at first — a miscount
+        // in the very file whose job is to prevent drift.)
+        //
+        // STATE AFTER THE 2026-09-30 MASTER MERGE — two projects closed the same holes independently, and
+        // the attribution below says which fix SURVIVED, not merely which project found it:
+        //   • /communications ×3 (#1020) — unified-access-control-r2 task 127. Permanent: query-is-the-gate.
+        //   • /search/entities (#1021)   — spaarkeai-word-add-in-r1 task 062 (impersonated read). This
+        //                                  branch's task 126 (OBO) fixed it too and was SUPERSEDED at merge.
+        //   • POST /todo (#1022)         — word-add-in-r1 task 064, TodoSourceAccessFilter: NO waiver, it is
+        //                                  a real endpoint filter credited in ExplicitlyCreditedFilterTypeNames.
+        //                                  (This branch's task 128 gated only the regarding id; superseded.)
+        //   • POST /quickcreate          — word-add-in-r1 QuickCreateSourceAccessFilter: NO waiver for the
+        //                                  same reason. Its old Permanent "CREATE, nothing to authorize"
+        //                                  waiver went stale the moment the source-record read was gated.
+        //   • /search/matter-types       — NEW from master (task 038); reference data, Permanent.
+        //   ⇒ FOUR Pending (#1023 ×2, #1024 ×2 — latent stubs; word-add-in-r1 task 058 deletes those routes
+        //     and must delete these waivers with them) and FIVE Permanent.
+        //
+        // The outcome to prefer is the /todo and /quickcreate one: a real filter Rule A can SEE. A waiver —
+        // even a Permanent one — is a note explaining why the mechanical check cannot see a control.
+        // Maintenance rule 4 still binds: never convert "someone must fix this" into "this is fine" to make
+        // a build green.
+
+        // ✅ RESOLVED 2026-09-29 by task 127. Permanent rather than deleted: the SHAPE of the control
+        // is what a future reader needs before "simplifying" it back. There is still no endpoint
+        // filter, and correctly so — the record is not known until the query resolves it, so the
+        // DELEGATED QUERY ITSELF is the authorization boundary. Denial returns the ordinary 404, never
+        // a 403: answering 403 would confirm the record exists, trading an IDOR for an existence
+        // oracle (the separation task 022 removed from bulk download).
+        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): reads through IDataverseUserClient under the CALLER's Dataverse "
+            + "security context, so a communication the caller may not read simply does not return and "
+            + "the handler 404s. Previously read app-only on a caller-supplied message id with the "
+            + "caller's object id used EXCLUSIVELY as a log argument."),
+
+        // ✅ RESOLVED 2026-09-29 by task 127 — and this one needed TWO fixes, not one. Trimming only
+        // the communication lookup would have left the worse leak intact behind a route that looked
+        // fixed: candidate DISPLAY NAMES were resolved app-only, so even an entitled caller received
+        // the names of candidate records they had no right to see.
+        new Waiver("GET /api/office/communications/by-message-id/{internetMessageId}/suggestions", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): BOTH the communication lookup AND the candidate display-name "
+            + "resolution now run under the caller's context. A candidate the caller cannot read is "
+            + "DROPPED rather than merely unnamed — returning the id alone would still disclose that "
+            + "the record exists and was associated with the email."),
+
+        // ✅ RESOLVED 2026-09-29 by task 127.
+        new Waiver("GET /api/office/communications/{commId:guid}/linked-todos", WaiverKind.Permanent, "#1020",
+            "RESOLVED (task 127): the sprk_todo query runs under the caller's context, so Dataverse "
+            + "returns only to-dos they may see. A communication the caller cannot see yields an empty "
+            + "list — indistinguishable from one that simply has no to-dos, which is the intended "
+            + "conflation. Previously filtered solely on the caller-supplied commId, app-only."),
+
+        // ✅ RESOLVED by spaarkeai-word-add-in-r1 task 062 — arrived with the 2026-09-30 master merge. This
+        // branch's task 126 fixed the same hole with a different mechanism (OBO via IDataverseUserClient) and
+        // was SUPERSEDED at merge: ADR-028 Amendment A5 sanctions app-only IMPERSONATED read for "what may
+        // this workforce user see" sets, and this project's own task 036 was headed the same way.
+        //
+        // Kept Permanent, NOT deleted, because the shape of the control is what a future reader needs
+        // before "simplifying" it: there is no endpoint filter and correctly so — there is no target record
+        // to authorize before the query runs, so the QUERY IS the boundary. TotalCount/HasMore derive from
+        // the trimmed set (a count over untrimmed matches is the same disclosure, restated).
+        //
+        // What was wrong, for the record: the search ran app-only with no user predicate, so any
+        // authenticated Office caller could enumerate every matter, project, invoice, account and contact
+        // in the tenant from a 2-character substring plus paging.
+        new Waiver("GET /api/office/search/entities", WaiverKind.Permanent, "#1021",
+            "RESOLVED (word-add-in-r1 task 062): authorization is the IMPERSONATED query itself, not an "
+            + "endpoint filter. The handler resolves the caller's Dataverse systemuserid (ICallerSystemUserResolver) "
+            + "and refuses when it cannot; OfficeService.QuerySearchEntityAsync then runs each per-type query "
+            + "app-only WITH MSCRMCallerID = that systemuserid (IImpersonatedCommunicationQuery), so Dataverse "
+            + "applies row-level security inside the query. FAILS CLOSED — no app-only fallback. Depends on the "
+            + "BFF application user holding prvActOnBehalfOfAnotherUser; without it the route errors rather "
+            + "than leaking. A per-resource filter is not applicable: the route names no single resource."),
+
+        // NEW from master (spaarkeai-word-add-in-r1 task 038). First measured by this census at the
+        // 2026-09-30 merge — master never governed Api/Office/*, so it never had to pass Rule A there.
+        new Waiver("GET /api/office/search/matter-types", WaiverKind.Permanent, "-",
+            "REFERENCE-DATA READ. Returns the active sprk_mattertype_ref rows — a small, load-once lookup list "
+            + "behind the pane's required Matter Type field (5 rows in dev), not customer record content — and "
+            + "takes no id, so a per-resource filter has no subject. If this route ever takes a record id or "
+            + "returns customer rows, this waiver is WRONG and the route needs a gate."),
+
+        // The four Pending waivers for the Office STUB routes (document search and recent items, #1023; share
+        // links and share attach, #1024) were DELETED 2026-09-30 WITH THE ROUTES by spaarkeai-word-add-in-r1
+        // task 058. All four served fabricated data behind the authentication filter only, and no client called
+        // them, so the routes were removed rather than gated.
+
+        // POST /api/office/quickcreate/{entityType} — waiver DELETED at the 2026-09-30 merge. It read
+        // "CREATE. There is no pre-existing resource to authorize", which stopped being true when
+        // spaarkeai-word-add-in-r1 added QuickCreateSourceAccessFilter: the route now reads a caller-named
+        // SOURCE record to copy fields from, and gates that read. The filter is credited in
+        // ExplicitlyCreditedFilterTypeNames, so Rule A sees the gate directly. The old waiver's two caveats
+        // were real and moved to the OfficeEndpoints GovernedFile entry rather than being lost.
+        // (NoWaiverIsStale would NOT have caught this: it inspects PENDING waivers only, so a Permanent
+        // waiver can outlive its premise silently.)
     };
 
     /// <summary>
@@ -994,9 +1151,14 @@ public class RouteAuthorizationGuardTests
     }
 
     /// <summary>
-    /// Filters that legitimately reach a decision without an authorization service — claims-only or
-    /// signature-only. Each carries a reason, for the same purpose as the waiver reasons: an unexplained
-    /// exemption here is how a decorative filter gets in.
+    /// Filters that legitimately reach a decision without an authorization service — claims-only,
+    /// signature-only, or (added 2026-09-29 by task 120) OWNER-COMPARISON: the filter loads the resource
+    /// and compares its stored creator/owner against the caller. Each carries a reason, for the same
+    /// purpose as the waiver reasons: an unexplained exemption here is how a decorative filter gets in.
+    ///
+    /// <para>The owner-comparison shape was added rather than admitting <c>IOfficeService</c> to
+    /// <see cref="DecisionServices"/>, which would have passed any filter that merely touched that
+    /// service. A category with a written reason per entry is narrower than a loose vocabulary entry.</para>
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> ClaimOnlyFilters =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -1032,6 +1194,15 @@ public class RouteAuthorizationGuardTests
                 "SPE administrative surface. Decides from admin role claims rather than per-record rights, "
                 + "because the resources are CONTAINERS and container types, which are not Dataverse rows "
                 + "and have no RetrievePrincipalAccess answer.",
+            ["JobOwnershipFilter"] =
+                "OWNER-COMPARISON. Loads the job via IOfficeService and 403s unless its CreatedBy equals "
+                + "the caller's object id — a genuine per-resource decision, but made by comparing a "
+                + "stored owner rather than by consulting an authorization service. IOfficeService is a "
+                + "general service, not an authorization seam, so it is deliberately NOT in "
+                + "DecisionServices. Its fail-OPEN — an absent or blank CreatedBy skipped the comparison "
+                + "entirely and let any authenticated caller read the job — was closed independently by "
+                + "unified-access-control-r2 task 120 and spaarkeai-word-add-in-r1 task 067 (finding F5); the "
+                + "2026-09-30 merge kept 067's version, which now denies unproven ownership per ADR-003.",
             ["ReportingAuthorizationFilter"] =
                 "Power BI embed surface. Decides from role claims checked against a configured privilege "
                 + "list (IConfiguration), not from record rights — a report is not a Dataverse row. "
@@ -1084,6 +1255,13 @@ public class RouteAuthorizationGuardTests
         // positive constraint demands be reached by widening the definition, not by waiving real gates:
         "IDataversePrivilegeChecker",    // DataverseAuthorizationFilter: HasReadPrivilegeAsync / GetReadableEntitiesAsync
         "WorkspaceLayoutService",        // WorkspaceLayoutAuthorizationFilter: GetLayoutByIdAsync(layoutId, userId) — ownership-scoped lookup, denies on mismatch
+
+        // Added 2026-09-29 by task 120, for the same reason and by the same test as the two above: Rule B
+        // was widened over the Office surface and reported EntityAccessFilter as consulting nothing. It
+        // consults this — GetCallerRightsAsync asks Dataverse RetrievePrincipalAccess as the CALLER over
+        // OBO and fails closed on every degraded path — so the finding was a gap in this vocabulary, not
+        // in the filter. Widening the definition is the correct repair; waiving a real gate is not.
+        "CallerRecordAccessProbe",       // EntityAccessFilter: GetCallerRightsAsync -> RetrievePrincipalAccess over OBO, fails closed
     };
 
     // =============================================================================================
@@ -1404,6 +1582,127 @@ public class RouteAuthorizationGuardTests
         Assert.Equal(AuthMechanism.None, commentOnly[0].Mechanism);
     }
 
+    [Fact(DisplayName = "Task 120 negative control: baseline authentication, rate limiting and idempotency are NOT gates")]
+    public void AuthFilterRecognition_NegativeControl_BaselineAuthnIsNotAGate()
+    {
+        // THE CONTROL THAT MAKES THE WIDENING SAFE. Task 120 taught FilterMarker two new filter names. The
+        // tempting version of that change was `\.Add\w*Filter\s*\(`, which would have been one line shorter
+        // and would have marked six ungated Office routes as authorized — a guard reporting green over a
+        // hole, which is strictly worse than the blind spot it replaced.
+        //
+        // Each filter below is on the real /api/office chain. None of them looks at a route id, a body, or
+        // any Dataverse record: OfficeAuthFilter checks IsAuthenticated and stashes the caller's oid
+        // (OfficeAuthFilter.cs:76-135), the rate-limit filter counts requests and is explicitly fail-OPEN,
+        // and the idempotency filter replays cached responses. If this test ever goes green-by-accident,
+        // FilterMarker has been widened past authorization into "has a filter of some kind".
+        var baselineOnly = ScanText("Api/Fake/OfficeBaseline.cs", new[]
+        {
+            "        var group = app.MapGroup(\"/api/office\").RequireAuthorization();",
+            "        group.MapGet(\"/search/entities\", SearchEntitiesAsync)",
+            "            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)",
+            "            .AddOfficeAuthFilter();",
+            "        group.MapPost(\"/todo\", CreateTodoAsync)",
+            "            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)",
+            "            .AddIdempotencyFilter()",
+            "            .AddOfficeAuthFilter();",
+        });
+
+        Assert.Equal(2, baselineOnly.Count);
+        Assert.All(baselineOnly, r => Assert.Equal(AuthMechanism.None, r.Mechanism));
+    }
+
+    [Fact(DisplayName = "Task 120 positive control: the two real Office gates ARE recognised, on the real files")]
+    public void AuthFilterRecognition_PositiveControl_OfficeGatesAreRecognised()
+    {
+        // The other half of the pair, per tests/CLAUDE.md: a detector that fires on everything is as
+        // useless as one that fires on nothing, and a guard that flags the code it protects gets deleted
+        // rather than obeyed. Run against the REAL file, not a fixture — a fixture would still pass if
+        // someone removed the filters from the shipping registration.
+        var routes = ScanFile("Api/Office/OfficeEndpoints.cs")
+            .ToDictionary(r => r.Key, r => r.Mechanism, StringComparer.Ordinal);
+
+        foreach (var key in new[]
+                 {
+                     "POST /api/office/save",                  // .AddEntityAccessFilter()
+                     "GET /api/office/jobs/{jobId:guid}",      // .AddJobOwnershipFilter()
+                     "GET /api/office/jobs/{jobId:guid}/stream",
+                     // Pinned at the 2026-09-30 merge: both arrived from spaarkeai-word-add-in-r1 and were
+                     // INVISIBLE to this guard until credited, so Rule A reported them ungated. Pinning them
+                     // here means dropping either name from ExplicitlyCreditedFilterTypeNames fails loudly
+                     // on the real file, rather than silently demoting a real gate to "needs a waiver".
+                     "POST /api/office/todo",                  // .AddTodoSourceAccessFilter()
+                     "POST /api/office/quickcreate/{entityType}", // .AddQuickCreateSourceAccessFilter()
+                 })
+        {
+            Assert.True(routes.ContainsKey(key), $"Expected to find {key} — has the route been renamed?");
+            Assert.Equal(AuthMechanism.Filter, routes[key]);
+        }
+    }
+
+    [Fact(DisplayName = "Task 120: Rule B covers every filter Rule A credits — the two widenings cannot drift apart")]
+    public void RuleBCoversEveryFilterRuleACredits()
+    {
+        // WHY THIS EXISTS. Rule A credits a route for CARRYING a filter; Rule B is the only thing that
+        // proves the filter decides anything. They read two different lists, and nothing but this test
+        // stops someone adding a name to FilterMarker (one line, obvious, in the file they are already
+        // editing) without adding it to AuthorizationFilterFiles (elsewhere, easy to miss).
+        //
+        // That drift produces the SemanticSearchAuthorizationFilter shape from the opposite direction: a
+        // filter that reads as a gate at the call site, is credited as one, and is never checked.
+        var credited = AuthorizationFilterFiles().Select(Path.GetFileName).ToHashSet(StringComparer.Ordinal);
+
+        var missing = ExplicitlyCreditedFilterFileNames
+            .Where(name => !credited.Contains(name))
+            .ToList();
+
+        Assert.True(
+            missing.Count == 0,
+            "FilterMarker credits filter(s) that Rule B never inspects:\n  " + string.Join("\n  ", missing));
+
+        // And the names must correspond to real files — a typo here disables Rule B's coverage silently.
+        var notOnDisk = ExplicitlyCreditedFilterFileNames
+            .Where(name => !Directory.EnumerateFiles(BffRoot, name, SearchOption.AllDirectories).Any())
+            .ToList();
+
+        Assert.True(
+            notOnDisk.Count == 0,
+            "ExplicitlyCreditedFilterFileNames names file(s) that do not exist. A renamed filter must be "
+            + "renamed here too, or Rule B stops covering it without anything failing:\n  "
+            + string.Join("\n  ", notOnDisk));
+    }
+
+    [Fact(DisplayName = "Task 120 negative control: a route on a NESTED group resolves to its full path, not a fragment")]
+    public void NestedGroupPrefix_NegativeControl_ResolvesThroughTheParent()
+    {
+        // Found by running the guard over the Office surface — the first governed file to nest its groups.
+        // Before this, `var jobs = group.MapGroup("/jobs")` produced `GET /jobs/{jobId}`: a FRAGMENT, not a
+        // route. Route keys are what the waiver list matches on, so a waiver would have been written
+        // against a string that several BFF surfaces could each produce, and NoWaiverIsStale would have
+        // been comparing fiction to fiction.
+        var nested = ScanText("Api/Fake/Nested.cs", new[]
+        {
+            "        var group = app.MapGroup(\"/api/office\").RequireAuthorization();",
+            "        var jobs = group.MapGroup(\"/jobs\");",
+            "        jobs.MapGet(\"/{jobId:guid}\", GetJobStatusAsync).AddJobOwnershipFilter();",
+        });
+
+        Assert.Single(nested);
+        Assert.Equal("GET /api/office/jobs/{jobId:guid}", nested[0].Key);
+
+        // Inheritance must survive the nesting too: an inner group that declares no chain of its own
+        // inherits the outer group's, or a route would lose a gate the parent legitimately carries.
+        var inherited = ScanText("Api/Fake/NestedInherit.cs", new[]
+        {
+            "        var group = app.MapGroup(\"/api/spe\").AddSpeAdminAuthorizationFilter();",
+            "        var items = group.MapGroup(\"/containers\");",
+            "        items.MapGet(\"/{id}/content\", GetContentAsync);",
+        });
+
+        Assert.Single(inherited);
+        Assert.Equal("GET /api/spe/containers/{id}/content", inherited[0].Key);
+        Assert.Equal(AuthMechanism.Filter, inherited[0].Mechanism);
+    }
+
     [Fact(DisplayName = "Task 074: the scanner reads the real governed files and finds every registration in them")]
     public void ScannerAccountsForEveryRegistrationInTheGovernedFiles()
     {
@@ -1520,14 +1819,55 @@ public class RouteAuthorizationGuardTests
 
     private static readonly Regex MapCall = new(@"\.Map(Get|Post|Put|Patch|Delete)\s*\(", RegexOptions.Compiled);
 
-    // `var docs = app.MapGroup("/api/documents")` — receiver variable -> path prefix.
+    // `var docs = app.MapGroup("/api/documents")` — receiver variable -> (parent receiver, path segment).
+    //
+    // 🔴 THE PARENT CAPTURE IS LOAD-BEARING (task 120). A group may be declared ON another group:
+    // `var jobs = group.MapGroup("/jobs")` under `var group = app.MapGroup("/api/office")`. Capturing only
+    // the literal made such a route report as `GET /jobs/{jobId:guid}` — a fragment, not a route. That is
+    // not cosmetic: route keys are what the WAIVER LIST matches on, so a waiver would have been written
+    // against an ambiguous fragment that three other BFF surfaces could also produce, and NoWaiverIsStale
+    // would have been comparing fiction to fiction. Found by running the guard over the Office surface,
+    // which is the first governed file to nest its groups.
     private static readonly Regex GroupDecl =
-        new(@"var\s+(\w+)\s*=\s*\w+\s*\.MapGroup\s*\(\s*""([^""]*)""", RegexOptions.Compiled);
+        new(@"var\s+(\w+)\s*=\s*(\w+)\s*\.MapGroup\s*\(\s*""([^""]*)""", RegexOptions.Compiled);
 
-    // A per-resource filter, in either of the two forms this codebase uses.
+    // A per-resource filter, in the forms this codebase uses.
+    //
+    // 🔴 THE THIRD ALTERNATION IS AN ALLOW-LIST ON PURPOSE (task 120, GitHub #1015). The Office surface
+    // names its filters without the word "Authorization", so neither of the first two alternations sees
+    // them. The obvious repair — matching `\.Add\w*Filter\s*\(` — would have been WRONG in the direction
+    // that matters: it would also credit AddOfficeAuthFilter, AddOfficeRateLimitFilter and
+    // AddIdempotencyFilter, marking six ungated routes as authorized. Those three are authentication,
+    // throughput and replay protection respectively; none of them looks at a route id, a body, or any
+    // Dataverse record (OfficeAuthFilter.cs:76-135 is the whole of what it does).
+    //
+    // A guard that reports green over an ungated route is worse than one with a known blind spot, so new
+    // filter names are enumerated here one at a time, each only after reading what it enforces. The cost
+    // is one line per filter; the alternative cost is a false negative nobody is looking for.
+    // AuthFilterRecognition_NegativeControl_BaselineAuthnIsNotAGate pins this.
+    //
+    // 🔴 ONE LIST, TWO CONSUMERS — Rule A's regex below and Rule B's file discovery both derive from it.
+    // The first draft of task 120 kept them as two lists and added a test that they agreed. That test was
+    // VACUOUS: it iterated the same list it checked, so adding a name to the regex alone would have passed
+    // it. Deriving both from one source makes the drift impossible rather than merely detected — which is
+    // the right instrument, because the drift produces a credited-but-never-inspected filter, i.e. the
+    // SemanticSearchAuthorizationFilter shape reached from the opposite direction.
+    private static readonly IReadOnlyList<string> ExplicitlyCreditedFilterTypeNames = new[]
+    {
+        "EntityAccessFilter",            // Office /save: OBO RetrievePrincipalAccess (AppendTo) on SaveRequest.TargetEntity, fails closed
+        "JobOwnershipFilter",            // Office /jobs: job creator vs caller, denies on mismatch AND on a blank creator
+        // Both below arrived with the 2026-09-30 master merge (spaarkeai-word-add-in-r1). Neither name contains
+        // "Authorization", so FilterMarker could not see them and Rule A reported their routes UNGATED — the
+        // same blind spot task 120 opened for the Office surface, one merge later. Each consults
+        // CallerRecordAccessProbe (in DecisionServices) and returns 403 on deny, so Rule B holds.
+        "TodoSourceAccessFilter",        // Office POST /todo (task 064): Read on EVERY caller-supplied id, one constant deny body
+        "QuickCreateSourceAccessFilter", // Office POST /quickcreate: Read on the caller-named SOURCE record it copies fields from
+    };
+
     private static readonly Regex FilterMarker = new(
         @"\.Add\w*AuthorizationFilter\s*[<(]"
-        + @"|\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>",
+        + @"|\.AddEndpointFilter\s*<\s*\w*(?:Authorization|Access)\w*Filter\s*>"
+        + "|" + string.Join("|", ExplicitlyCreditedFilterTypeNames.Select(n => $@"\.Add{n}\s*\(")),
         RegexOptions.Compiled);
 
     private static readonly Regex NamedPolicy =
@@ -1561,11 +1901,63 @@ public class RouteAuthorizationGuardTests
         var groupPrefix = new Dictionary<string, string>(StringComparer.Ordinal);
         var groupMechanism = new Dictionary<string, AuthMechanism>(StringComparer.Ordinal);
 
+        // Pass 1: record each group's own segment, its parent receiver, and its own chain.
+        var groupParent = new Dictionary<string, string>(StringComparer.Ordinal);
+        var groupSegment = new Dictionary<string, string>(StringComparer.Ordinal);
+
         foreach (Match g in GroupDecl.Matches(text))
         {
             var variable = g.Groups[1].Value;
-            groupPrefix[variable] = g.Groups[2].Value;
+            groupParent[variable] = g.Groups[2].Value;
+            groupSegment[variable] = g.Groups[3].Value;
             groupMechanism[variable] = MechanismOf(StatementFrom(text, g.Index));
+        }
+
+        // Pass 2: compose each group's FULL prefix by walking up to the root. Depth is bounded by the
+        // number of declarations, so a cycle (which C# could not compile anyway) cannot spin here.
+        foreach (var variable in groupSegment.Keys)
+        {
+            var segments = new List<string>();
+            var cursor = variable;
+            var guard = groupSegment.Count + 1;
+
+            while (guard-- > 0 && groupSegment.TryGetValue(cursor, out var segment))
+            {
+                segments.Insert(0, segment);
+                if (!groupParent.TryGetValue(cursor, out var parent) || parent == cursor)
+                {
+                    break;
+                }
+
+                cursor = parent;
+            }
+
+            groupPrefix[variable] = segments.Aggregate(string.Empty, Combine);
+        }
+
+        // A nested group inherits its parent's authorization when it declares none of its own — the same
+        // inheritance a route already gets from its group, applied one level up. Without this, a route on
+        // an inner group would lose a gate that the outer group legitimately carries.
+        foreach (var variable in groupSegment.Keys)
+        {
+            if (groupMechanism.TryGetValue(variable, out var own) && own != AuthMechanism.None)
+            {
+                continue;
+            }
+
+            var cursor = variable;
+            var guard = groupSegment.Count + 1;
+
+            while (guard-- > 0 && groupParent.TryGetValue(cursor, out var parent) && parent != cursor)
+            {
+                if (groupMechanism.TryGetValue(parent, out var inherited) && inherited != AuthMechanism.None)
+                {
+                    groupMechanism[variable] = inherited;
+                    break;
+                }
+
+                cursor = parent;
+            }
         }
 
         foreach (Match m in MapCall.Matches(text))
@@ -1811,10 +2203,27 @@ public class RouteAuthorizationGuardTests
             .Where(f => MapCall.IsMatch(Decomment(File.ReadAllText(f))))
             .OrderBy(f => f, StringComparer.Ordinal);
 
-    /// <summary>Every <c>*AuthorizationFilter.cs</c> under the BFF — Rule B's subject.</summary>
+    /// <summary>
+    /// Every filter the guard treats as a per-resource gate — Rule B's subject.
+    ///
+    /// <para>🔴 THIS MUST STAY IN STEP WITH <see cref="FilterMarker"/> (task 120, GitHub #1015). Rule A
+    /// credits a route for carrying a filter; Rule B is what proves the filter decides anything. Widening
+    /// Rule A's regex WITHOUT widening this list hands gate credit to a filter nothing ever inspects —
+    /// which is precisely the SemanticSearchAuthorizationFilter shape Rule B was written to catch, arrived
+    /// at from the opposite direction. <c>RuleBCoversEveryFilterRuleACredits</c> fails if the two drift.</para>
+    ///
+    /// <para>The <c>*AuthorizationFilter.cs</c> glob covers the naming convention; the explicit names cover
+    /// the Office surface, which does not follow it. Both halves derive from
+    /// <see cref="ExplicitlyCreditedFilterTypeNames"/>, so Rule A and Rule B cannot drift apart.</para>
+    /// </summary>
+    private static readonly IReadOnlyList<string> ExplicitlyCreditedFilterFileNames =
+        ExplicitlyCreditedFilterTypeNames.Select(n => n + ".cs").ToList();
+
     private static IEnumerable<string> AuthorizationFilterFiles()
         => Directory
-            .EnumerateFiles(BffRoot, "*AuthorizationFilter.cs", SearchOption.AllDirectories)
+            .EnumerateFiles(BffRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(f => Path.GetFileName(f).EndsWith("AuthorizationFilter.cs", StringComparison.Ordinal)
+                        || ExplicitlyCreditedFilterFileNames.Contains(Path.GetFileName(f), StringComparer.Ordinal))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
                         && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
             .OrderBy(f => f, StringComparer.Ordinal);

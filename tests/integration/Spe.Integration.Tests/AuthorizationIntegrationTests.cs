@@ -240,7 +240,6 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookOrchestrationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookSharingService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
 

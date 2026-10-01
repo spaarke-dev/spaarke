@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>The collision prompt must name the document it would write into, and must not silently discard the selected record</title>
+    <phase>2 Save flow</phase>
+    <gate>startable — deps 025 ✅, 026 ✅, 054 ✅ are all merged</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` and `.tsx` on the deployed Office save spine; tags include bff-api + security. Widens an error body, which is an authorization-disclosure question, not a cosmetic change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive judgment (escalation trigger (b) asks whether a name/association in a 409 body is a disclosure the caller cannot already obtain), plus half (2) is a contract DESIGN decision with two legitimate shapes — not a mechanical edit against a canonical reference.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`OfficeService.cs` is shared with tasks 014/025/031/052 and `SaveFlow.tsx` with 025/045/053; `unified-access-control-r2` is also live on the Office surface per projects/INDEX.md. Run /conflict-check before opening the PR.</parallel-reason>
+    <deps>025, 026, 054</deps>
+    <tags>bff-api, api, frontend, fluent-ui, office-addins, save-flow, spe, data-integrity, security, testing</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix GitHub #1005 / ISS-006: the pane's "Save as new version" collision retry writes into whichever document happens to own the colliding FILE NAME, without naming it, and silently discards the user's selected Related-to record. Make the refusal name its target, and stop discarding an explicit user selection. Both halves land together or neither does.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the BFF Office save spine (`OfficeService.SaveAsync` and its refusal paths), RFC-7807 ProblemDetails contracts, Dataverse lookup resolution, and Fluent UI v9 task-pane surfaces. Follow ADRs strictly, and treat the authorization question in the escalation section as a first-class part of the work rather than a footnote.</role>
+
+  <goal>A filename collision refusal tells the user WHICH document it would write into — by name and by what that document is filed to — and the pane never silently throws away a Related-to record the user explicitly selected. The existing non-destructive guarantee of task 025 is unchanged: a refusal still writes nothing.</goal>
+
+  <context>
+    <background>
+      Diagnosed live 2026-09-18 during task 042 UAT. Full evidence chain:
+      `projects/spaarkeai-word-add-in-r1/notes/042-uat-findings-2026-09-18.md`. Filed as
+      [#1005](https://github.com/spaarke-dev/spaarke/issues/1005) / ISS-006 in `notes/defer-issues.md`.
+
+      A create save whose file name collides is refused with `OFFICE_020` — and that refusal is CORRECT:
+      `ConflictBehavior.Fail` means SPE refuses the PUT atomically and no bytes move. Task 025 built this and
+      it works.
+
+      The defect is what the pane offers NEXT. The 409 carries `existingDocumentId`, resolved purely by
+      matching `sprk_graphdriveid` + `sprk_filename`. The pane shows "Save as new version" whenever that id is
+      present and versions the open document onto it. Because `WordAdapter.getSubject()` falls back to
+      `'Untitled Document'` (Word's Title metadata property, which is normally blank) and containers are
+      BUSINESS-UNIT scoped with a flat root, `Untitled Document.docx` is a single shared name slot for an
+      entire business unit — so the resolved "existing document" is routinely an unrelated document belonging
+      to someone else. Observed live: a patent document was written as a new SPE version of an unrelated
+      orphan row, profiled, and RAG-indexed under that row, while the matter the user had selected in the pane
+      received nothing at all.
+
+      THE BUG IS NOT THE DROPPED ASSOCIATION. `useSaveFlow.ts:937-941`
+      (`const sentEntity = versionTarget ? null : selectedEntity`) omits `targetEntity` on a version save
+      DELIBERATELY and CORRECTLY per task 023 D-4/D-5 — a version save writes to the existing document's own
+      item and re-associating it would both be inert and add an authorization check that could refuse a
+      legitimate version save. THE BUG IS THAT A FILENAME MATCH IS BEING TREATED AS DOCUMENT IDENTITY, and
+      that the pane then discards an explicit user selection without saying so.
+
+      TWO HALVES — BOTH REQUIRED, THEY MUST LAND TOGETHER (half 1 alone still discards the selection; half 2
+      alone still leaves the target unnamed):
+      (1) NAME THE TARGET. The refusal must carry enough for the pane to state WHICH document it would write
+          into — the document's name and what it is filed to — so the user can see it is not theirs. Today
+          only an opaque GUID crosses the wire.
+      (2) STOP SILENTLY DISCARDING THE USER'S CHOICE. Either do not offer the version retry when the colliding
+          document's association contradicts the user's selected Related-to record, or carry `targetEntity`
+          through and refuse server-side with a typed error. Silently dropping an explicit selection is not
+          acceptable under either shape. Choose ONE, and record why in the note.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/042-uat-findings-2026-09-18.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/026-slot-scope-decision.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/025-residual-collision-surface.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Documents/DocumentUrlIdentityResolution.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/Office/SaveResponse.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/utils/errorMessages.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlowCollision.test.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/utils/__tests__/errorMessages.collision.test.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="completed">Built the `OFFICE_020` refusal, the `fileName`/`existingDocumentId` wire fields, and the inline two-option pane choice this task corrects.</dependency>
+      <dependency task="026" status="completed">Shipped `ResolveRelatedRecordDisplayAsync` — the display/association resolver to REUSE for half (1).</dependency>
+      <dependency task="054" status="completed">Extended the refusal to Email/Attachment by comparing CONTENT. Its protected suites must still pass unmodified.</dependency>
+    </dependencies>
+  </context>
+
+  <justification>
+    <existing>`SaveError` (`src/server/api/Sprk.Bff.Api/Models/Office/SaveResponse.cs:104`) already carries the collision's `FileName` (:130) and `ExistingDocumentId` (:140), and `MapSaveErrorToProblem`'s `NameCollision` arm (`OfficeEndpoints.cs:558-570`) already emits both as ProblemDetails extensions. On the client, `describeCollisionFailure` (`errorMessages.ts:362-374`) already threads them into `ErrorMessage`. For the display data, `DocumentUrlIdentityResolution.ResolveRelatedRecordDisplayAsync` (task 026) already resolves displayName/number for the same four direct slots with a settled precedence and handles the primary-name trap.</existing>
+    <extension>YES — extend all of the above. The new fields are ADDITIVE properties on the existing `SaveError` record and the existing extensions dictionary, mirroring exactly how task 025 added `FileName`/`ExistingDocumentId`. No new endpoint, no new error code, no new resolver, no second lookup: widen the ONE existing `FindDocumentIdByLocationAsync` projection rather than issuing a second query.</extension>
+    <cost-of-doing-nothing>A user clicking the button the pane offers writes their document into an unrelated document's SPE item and Dataverse row, which is then profiled and RAG-indexed under that row — making content readable and AI-queryable by people who were never granted it — while the record they selected receives nothing and they are shown "saved". This is observed behaviour on the deployed dev build (2026-09-18), not a hypothetical.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">SCOPE — the two halves in `&lt;background&gt;` MUST land together. Shipping half (1) alone still discards the user's selection; shipping half (2) alone still leaves the target unnamed. A PR containing only one is not this task.</constraint>
+    <constraint source="project">SCOPE — task 025's non-destructive invariant is unchanged and MUST stay true: a refused collision writes no bytes, creates no `sprk_document` row, and leaves the existing item's bytes and version count untouched. This task changes only what the refusal SAYS and what the pane OFFERS.</constraint>
+    <constraint source="project">SCOPE — half (1) resolves display data by widening the EXISTING `OfficeDocumentPersistence.FindDocumentIdByLocationAsync` projection (it matches `sprk_graphdriveid` + `sprk_filename`, constants at `OfficeDocumentPersistence.cs:33-34`) and/or by reusing task 026's `ResolveRelatedRecordDisplayAsync`. MUST NOT add a second Dataverse lookup, a second display resolver, or a second collision detector (root CLAUDE.md §11).</constraint>
+    <constraint source="project">SCOPE — files this task MUST NOT change: `Services/Office/ContentDedupDetector.cs`, `Api/OBOEndpoints.cs`, `src/client/shared/Spaarke.SdapClient/**`, `src/solutions/DocumentUploadWizard/**`. Verify with `git diff --name-only` and state it in the PR.</constraint>
+    <constraint source="project">SCOPE — `OfficeImmutableSaveFileSafetyTests` and `OfficeEmailSaveNamingTests` MUST pass UNMODIFIED. They encode a live-on-master data-loss fix; task 054 was held to the same bar. Editing them to make this task pass is a failure, not a fix.</constraint>
+    <constraint source="project">SCOPE — the version-save WRITE semantics of task 023 (an item-keyed OBO write to the resolved row, which never re-associates) are NOT this task's to change. See escalation trigger (a).</constraint>
+    <constraint source="ADR-019">SCOPE — the collision refusal stays a typed ProblemDetails the client branches on. New fields are additive extensions on the EXISTING `OfficeErrorCodes.NameCollision` arm of `MapSaveErrorToProblem`; do not introduce a new error code and do not change `OFFICE_020`'s status, type URI, or `retryable` value.</constraint>
+    <constraint source="ADR-008">SCOPE — any authorization decision about what the widened 409 body may reveal is made on the endpoint's existing filter chain, not invented inside the service. Note that `ExistingDocumentId` is ALREADY returned today, so the question is specifically whether NAME and ASSOCIATION are a further disclosure. See escalation trigger (b).</constraint>
+    <constraint source="ADR-021">SCOPE — all collision UI in the pane: Fluent UI v9 semantic tokens only, no hex literals, legible in both Office themes via `useOfficeTheme`. The refusal keeps `intent="warning"`, never `"error"` — a collision is a choice, not a failure (task 025's copy convention, pinned by `errorMessages.collision.test.ts`).</constraint>
+    <constraint source="ADR-012">SCOPE — this add-in package only, per the project's standing Path A exception: MUST NOT import `@spaarke/ui-components`. This explicitly rules out `ChoiceDialog` and `.claude/patterns/ui/choice-dialog-pattern.md` as the reference — see `&lt;knowledge&gt;` for the correct in-repo anchor.</constraint>
+    <constraint source="ADR-044">SCOPE — any Dataverse GUID crossing a boundary in this task is canonicalized bare-lowercase via the shared `cleanGuid` before it leaves the client, and is never interpolated raw into an OData key predicate.</constraint>
+    <constraint source="ADR-038">SCOPE — the widened `OFFICE_020` response shape gets contract coverage in the existing Office contract suite. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host; MUST NOT import any Xrm-bound component. NFR-10: any host difference is expressed as an adapter CAPABILITY, never a `hostType` conditional inside a view.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD of `origin/master`, never the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive -Optimal` (matching `scripts/Deploy-BffApi.ps1`) and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script in this package — `npm run build` IS the production build.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for the BFF-side change per `.claude/constraints/bff-extensions.md`, cite #1005, and record which shape of half (2) was chosen and why.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office save-path collision refusal, ProblemDetails contract widening, Dataverse lookup display resolution, narrow-pane Fluent v9 surfaces</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-findings-2026-09-18.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/026-slot-scope-decision.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/025-residual-collision-surface.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="collision-messagebar-in-place" location="src/client/office-addins/shared/taskpane/components/SaveFlow.tsx">THE VISUAL ANCHOR for this task (root CLAUDE.md §11 / task-create Step 3.65): `renderCollisionState` at :1239-1260 is the shipped inline Fluent v9 `MessageBar` (`intent="warning"`, `MessageBarTitle` + `MessageBarBody` + `MessageBarActions`, buttons at :1250 and :1253-1254). EXTEND THIS COMPONENT IN PLACE — do not replace it with a dialog and do not author a new surface. It must stay legible in the narrow pane.</pattern>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. The named-document line must not overflow or truncate unreadably in the narrow task pane; a long document name needs a defined wrap/ellipsis behaviour.</pattern>
+      <pattern name="error-handling" location=".claude/patterns/api/error-handling.md">The shape of typed BFF error responses this task widens.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Any authorization on the save endpoint stays on its filter chain (ADR-008), not inside `OfficeService`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, the findings note, and the knowledge files above. Output the mandatory rigor declaration (FULL, opus, xhigh, directional) per root CLAUDE.md §8. Run `/conflict-check` — `OfficeService.cs` and `SaveFlow.tsx` are contended surfaces.</step>
+    <step order="1">Read the findings note §3 and confirm the six-step mechanism against the CODE yourself before changing anything. If your reading contradicts the note, say so and stop — an empirical disagreement about the save path is a §F.3 reproduce-first situation, not something to paper over.</step>
+    <step order="2">ANSWER ESCALATION TRIGGER (b) EXPLICITLY AND IN WRITING BEFORE WRITING THE SERVER CHANGE. The 409 already returns the colliding document's GUID today. Determine, from the endpoint's filter chain and the existing authorization model, whether adding its NAME and its ASSOCIATION is a further disclosure to a caller who may hold no rights on that document. Record the answer in the note with the evidence. If it IS a further disclosure, STOP and escalate per CLAUDE.md §6 rather than shipping it.</step>
+    <step order="3">Reproduce-first (§F.3): add the failing tests BEFORE the fix — a client test proving the pane offers to version a document it never names, and a server contract test proving the 409 carries no name/association. Show them failing for the RIGHT reason and record the failure text.</step>
+    <step order="4">Half (1) server: widen the existing `FindDocumentIdByLocationAsync` projection (or reuse task 026's `ResolveRelatedRecordDisplayAsync`) so `ResolveNameCollisionAsync` can populate new ADDITIVE display fields on `SaveError` (`SaveResponse.cs:104`), and emit them from the existing `OfficeErrorCodes.NameCollision` arm of `MapSaveErrorToProblem` (`OfficeEndpoints.cs:558-570`). Do not add a second lookup or a second resolver.</step>
+    <step order="5">Half (1) client: thread the new fields through `describeCollisionFailure` (`errorMessages.ts:362-374`) into `ErrorMessage`, and render them in `renderCollisionState` so the button reads as an action against a NAMED document ("Save as a new version of {name} — filed to {record}"). Preserve the existing behaviour when the server resolved nothing: only "Keep both" is offered.</step>
+    <step order="6">Half (2): implement the chosen shape — either withhold the version retry when the colliding document's association contradicts the user's selected Related-to record, or carry `targetEntity` and refuse server-side with a typed error. Whichever is chosen, an explicit user selection is never silently discarded. Record the decision and the rejected alternative in the note.</step>
+    <step order="7">Extend the EXISTING test files — `SaveFlowCollision.test.tsx` (6 tests today, including "a collision with no resolvable existing document offers ONLY Keep both" at :194-207) and `errorMessages.collision.test.ts` (6 pure-function tests) — plus the Office contract suite. Do not fork a parallel test file.</step>
+    <step order="8">Run `npm run typecheck` (expect the 111 total / 0 production baseline), the gated jest suites, `npm run build`; and `dotnet build` plus the full `Sprk.Bff.Api.Tests`, ArchTests, and the Office contract + integration suites. Confirm `OfficeImmutableSaveFileSafetyTests` and `OfficeEmailSaveNamingTests` are green AND unmodified (`git diff --name-only`).</step>
+    <step order="9">Measure BFF publish size against a fresh `origin/master` build per the constraint; record both absolute sizes, the delta, and the zip tool in `notes/055-publish-size.md`.</step>
+    <step order="10">Run code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="11">Update `tasks/TASK-INDEX.md` (status → ✅) and write `notes/055-collision-names-its-target.md` recording: the trigger-(b) authorization answer, which shape of half (2) was chosen and the alternative rejected, and the reproduce-first failure text.</step>
+    <step order="12">Update `notes/defer-issues.md` ISS-006 and comment on #1005 with the outcome. Do not close the issue until the fix is verified on a deployed build — this project's own ISS-005 precedent kept the issue open until live confirmation.</step>
+  </steps>
+
+  <escalation>
+    <trigger>(a) If the fix would require making a VERSION save re-associate the document to the caller's selected record — STOP and escalate. That silently re-files another user's document onto the current user's record, which is worse than the defect being fixed, and it crosses the ADR-008 authorization boundary task 023 D-4/D-5 deliberately avoided. Half (2) must be solved by withholding the offer or by refusing, never by re-associating.</trigger>
+    <trigger>(b) If returning the colliding document's NAME or ASSOCIATION in the 409 body would disclose something the caller cannot already read — STOP and escalate per CLAUDE.md §6. Task 025's own POML flagged "the 409 body would need to reveal the existing document's id or owner" as an enumeration concern, and this task widens exactly that body. Note the id is ALREADY returned today, so the question is narrowly whether name and association are a FURTHER disclosure. This must be answered in writing at step 2, before any server code is written.</trigger>
+    <trigger>(c) If `/conflict-check` shows `OfficeService.cs`, `OfficeEndpoints.cs` or `SaveFlow.tsx` being modified concurrently by another worktree (`unified-access-control-r2` is live on the Office surface), STOP, rebase, and re-run before opening the PR.</trigger>
+    <trigger>(d) If making the refusal name its target would require a second Dataverse round-trip on the refusal path that measurably changes the refusal's latency profile, STOP and surface the trade-off rather than silently accepting it — the refusal is on the user's interactive save path.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="The prompt names a document that is NOT the user's, and declining is easy">
+      <steps>
+        <step>Arrange a document in the business-unit container named `Untitled Document.docx` that is filed to a DIFFERENT record than the one under test (or to no record at all).</step>
+        <step>In Word, open a new document with no Title property set, select a Related-to record in the pane, and save.</step>
+        <step>Read the collision message and both action buttons.</step>
+      </steps>
+      <expected>The refusal names the colliding document — its name and what it is filed to — so the user can tell it is not theirs. Either the "Save as new version" action is not offered (because its association contradicts the selection), or choosing it does not silently discard the selected record. Dismissing writes nothing: no bytes, no `sprk_document` row, no SPE version.</expected>
+    </test>
+    <test name="The prompt when the colliding document legitimately IS the user's own">
+      <steps>
+        <step>Save a document to a record, then save a second document with the SAME name to the SAME record.</step>
+        <step>Read the collision message, then choose "Save as new version".</step>
+      </steps>
+      <expected>The named document is recognisably the user's own and filed to the record they selected, so the offer reads as correct. Choosing it writes a new SPE version of that document and creates no second row — task 023's version path, unchanged by this task.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark, reload the pane, trigger the collision, and view the message including the newly added document-name line.</step>
+        <step>Repeat in Light mode. Also view it with a very long document name.</step>
+      </steps>
+      <expected>Every colour resolves from a Fluent v9 semantic token with legible contrast in both themes; no hex literals in the added styles; the message keeps `intent="warning"`, never `"error"`; and a long document name wraps or ellipsises without breaking the narrow pane layout or hiding the action buttons.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF; run `Sprk.Bff.Api.Tests`, ArchTests, and the Office contract + integration suites.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (`npm run build` IS production in this package).</tool>
+    <tool name="terminal">git diff verification of the must-not-change list; publish-size measurement against a fresh master worktree.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Office/SaveResponse.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</output>
+    <output type="code">src/client/office-addins/shared/taskpane/utils/errorMessages.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/SaveFlowCollision.test.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/utils/__tests__/errorMessages.collision.test.ts</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/055-collision-names-its-target.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/055-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the colliding name is owned by a resolvable `sprk_document`, when the save is refused, then the 409 ProblemDetails carries that document's NAME and its ASSOCIATION (what it is filed to) in addition to the `fileName` and `existingDocumentId` it already carries — asserted by a contract test on the response body.</criterion>
+    <criterion testable="true">Given that 409 reaches the pane, when the collision message renders, then it names the document it would write into and what that document is filed to — asserted by a render test, not by reading the message string out of `detail`.</criterion>
+    <criterion testable="true">Given a colliding document whose association CONTRADICTS the user's selected Related-to record, when the collision message renders, then the user's explicit selection is not silently discarded: either the version retry is not offered, or it is offered and the selection is honoured/refused explicitly. Assert whichever shape was implemented, and assert the negative — that a silent drop does not occur.</criterion>
+    <criterion testable="true">Given the server could NOT resolve an owning document (an unreferenced SPE item), when the collision message renders, then ONLY "Keep both" is offered and no name is claimed — the existing behaviour pinned by `SaveFlowCollision.test.tsx:194-207` and `errorMessages.collision.test.ts` ("omits collisionExistingDocumentId…") is UNCHANGED.</criterion>
+    <criterion testable="true">Negative (non-destructive invariant, task 025): given any refused collision, when the flow completes, then the existing item's bytes and version count are unchanged, no `sprk_document` row is created or updated, and no SPE item is deleted — asserted by reading them before and after.</criterion>
+    <criterion testable="true">Negative (authorization): the trigger-(b) question is answered in writing in `notes/055-collision-names-its-target.md` with evidence from the endpoint's filter chain BEFORE the server change, and a test asserts that a caller who cannot read the colliding document does not receive its name or association.</criterion>
+    <criterion testable="true">Negative (no re-association): `git diff` shows the version-save write path still sends no `targetEntity`, and no code path re-associates an existing document to the caller's selected record.</criterion>
+    <criterion testable="true">`OFFICE_020` keeps its status code, type URI and `retryable: false`; no new error code is introduced; the refusal still renders `intent="warning"`, never `"error"`.</criterion>
+    <criterion testable="true">Reproduce-first: the new tests are shown FAILING for the right reason before the fix, and the failure text is recorded in the note; all of them pass after.</criterion>
+    <criterion testable="true">`git diff --name-only` shows NO change to `ContentDedupDetector.cs`, `Api/OBOEndpoints.cs`, `src/client/shared/Spaarke.SdapClient/**`, `src/solutions/DocumentUploadWizard/**`, `OfficeImmutableSaveFileSafetyTests` or `OfficeEmailSaveNamingTests` — and those two suites are green.</criterion>
+    <criterion testable="true">The diff adds no second Dataverse lookup on the refusal path, no second display resolver, and no second collision detector — verified by grep and stated in the PR with the grep evidence.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the collision UI renders, then every colour resolves from a Fluent v9 semantic token, no hex literal appears in the added styles, and a long document name does not break the narrow-pane layout.</criterion>
+    <criterion testable="true">`npm run typecheck` holds the 111 total / 0 production baseline; gated jest, `npm run build`, `dotnet build`, full `Sprk.Bff.Api.Tests`, ArchTests (191/191) and the Office contract + integration suites all pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a FRESH `origin/master` build with `Compress-Archive`; both absolute sizes, the delta and the tool are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above (unresolvable owner, contradicting association, unauthorized caller, long name, dark mode). Anything beyond that needs a one-line justification in the task notes. Do not add near-identical happy-path variants.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Source: GitHub #1005 / ISS-006, diagnosed 2026-09-18 from live UAT. The evidence chain — Dataverse rows, App Insights requests + RAG traces, client code, server code, and the victim row's own AI profile — is in `notes/042-uat-findings-2026-09-18.md` §2-§3. Do NOT re-run that note's superseded §4 diagnostics: App Insights retention in `spe-insights-dev-67e2xz` is ~2 hours and the relevant telemetry no longer exists.
+
+    Related, deliberately NOT in this task's scope: `Untitled Document.docx` as the default upload name is the multiplier that makes this defect reachable at all (`WordAdapter.getSubject()` returns `properties.title || 'Untitled Document'`). That is open question 8 of `notes/025-residual-collision-surface.md` and remains an OWNER decision — flag it in the final report, do not fix it here.
+
+    Also out of scope: remediating the live dev row that currently holds another document's content, profile and index chunks. This project is read-only on Dataverse; that cleanup is the operator's (findings note §8).
+
+    A 423 Locked response was observed between two 409s during the UAT sequence (16:29:49). Unexplained and low priority — recorded so it is not lost, not this task's to chase unless it recurs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load every file listed in `&lt;knowledge&gt;&lt;files&gt;` and follow task-execute's mandatory
+      pre-execution checklist. This task is FULL rigor on opus/xhigh: if the session model is lower, STOP and
+      surface it rather than executing a security-sensitive save-path change on a lower tier.
+    </protocol>
+  </execution>
+</task>

@@ -6,6 +6,10 @@
 > Container/SPE provisioning is code (`ProvisionProjectEndpoint`), not setup, and is out of scope here.
 > **Verified against**: `spaarkedev1`, 2026-08-25. Every privilege below was determined by experiment
 > against live Dataverse, not copied from a design document.
+> **Updated 2026-09-30** by `spaarkeai-word-add-in-r1` task 082. The role now also covers CHILD tables, because
+> write-path invariant I-6 (task 080) assigns a secure record's children to the owner team. The privilege list
+> moved to ONE file, [`config/secure-record-owner-role.json`](../../config/secure-record-owner-role.json), which
+> §5, §7 and the NFR-05 census read.
 
 ---
 
@@ -28,7 +32,7 @@ deny). One business unit holds secure records; that BU's **default owner team** 
 **no human members**, so nobody gains access by owning or by business unit. All human access is by
 explicit share. The team needs a security role only because **Dataverse refuses to assign a record to a
 principal that lacks Read on that entity** — the role exists to make the team a legal assignment target,
-nothing more.
+nothing more. It is the target for secure records and, since task 080, for the children filed to them.
 
 ---
 
@@ -38,7 +42,7 @@ nothing more.
 |---|---|
 | Rights | A System Administrator in the target environment |
 | Auth | `az login` to the tenant, then a token for the environment (below). `pac` is **not** used — its *active profile* may point at a different environment, which is an easy way to configure the wrong org |
-| Config | `SecureProject:BusinessUnitName` in BFF app settings, **or** accept the compiled default |
+| Config | `SecureRecord:BusinessUnitName` in BFF app settings, **or** accept the compiled default |
 
 ```powershell
 # Pin the environment explicitly. Never rely on an ambient/active profile.
@@ -59,8 +63,9 @@ $Api = "$DvUrl/api/data/v9.2"
 
 The BU is resolved **by name from configuration**, never by GUID (GUIDs differ per environment).
 
-- Default name if `SecureProject:BusinessUnitName` is unset: **`Secure Project`** — **singular**.
-  Multiple design documents said `Secure Projects`; that was wrong and would have failed every
+- Default name if `SecureRecord:BusinessUnitName` is unset: **`Secure Record`** — **singular**.
+  🔴 **Renamed from `Secure Project` on 2026-09-29** (task 121, D-12 §2). See §3a for the cutover.
+  Multiple design documents once said `Secure Projects`; that was wrong and would have failed every
   provisioning call closed with "business unit not found". A test pins the value
   (`DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed`).
 - Parent: see §6 before choosing. In dev today it is a child of the root BU, which is part of the
@@ -70,7 +75,7 @@ The BU is resolved **by name from configuration**, never by GUID (GUIDs differ p
   misconfiguration.
 
 ```powershell
-$buName = 'Secure Project'
+$buName = 'Secure Record'
 $bu = (Invoke-RestMethod "$Api/businessunits?`$select=businessunitid,name,sprk_containerid&`$filter=name eq '$buName'" -Headers $H).value
 $buId = $bu[0].businessunitid
 "BU $buName = $buId ; sprk_containerid = $($bu[0].sprk_containerid)"   # containerid MUST be null
@@ -78,6 +83,60 @@ $buId = $bu[0].businessunitid
 
 If the BU does not exist, create it (parent per §6). **Do not** create one BU per project — that
 mechanism was retired.
+
+---
+
+## 3a. 🔴 The 2026-09-29 rename — `Secure Project` → `Secure Record`
+
+**Why**: the BU holds secure rows of **three** entity types — `sprk_project`, `sprk_matter` and
+`sprk_workassignment` all carry `sprk_issecure` — so naming it after one of them described the topology
+wrongly. D-12 §2, owner-approved. It happened at that moment because **no customer deployments existed**;
+there is no later cheap moment.
+
+**What renamed** (all four, together):
+
+| Artifact | From | To |
+|---|---|---|
+| Business unit (live Dataverse) | `Secure Project` | `Secure Record` |
+| Security role (live Dataverse) | `Secure Project Owner` | `Secure Record Owner` |
+| Code default `DefaultSecureBusinessUnitName` | `Secure Project` | `Secure Record` |
+| Config section | `SecureProject:` | `SecureRecord:` |
+
+**What did NOT rename, deliberately** — these contain the words "Secure Project" for other reasons:
+
+- **`Secure Project Workspace`** — the external SPA's product name (`src/client/external-spa`). It is
+  user-facing and was not part of the decision.
+- **"a Secure Project"** as a domain concept — a `sprk_project` with `sprk_issecure = true`. The BU is
+  named for the general case; an individual secure project is still a secure project. This is why
+  `ProvisionSecureProject`, `CloseSecureProject`, the *Secure Project* toggle and the SPE container
+  display name `Secure Project — {name}` are unchanged.
+- **`Secure Project Participant`** — a Power Pages web role. Not decided; left alone.
+
+### The cutover is HARD, and here is the order
+
+There is **no transitional dual-accept**. That was considered and rejected: a tolerant name list that
+nobody ever prunes is exactly how the earlier `Secure Project` / `Secure Projects` ambiguity arrived.
+
+1. **Rename the live BU** to `Secure Record` (and the role to `Secure Record Owner`).
+2. **Deploy the code** carrying the new default.
+
+⚠️ **Between those two steps, provisioning fails closed** with *"business unit not found"* — the correct
+direction, but an error that reads like a **missing environment** rather than a rename in flight. If you
+see that error and the environment is otherwise healthy, check which half of the rename has landed before
+investigating anything else.
+
+If you must eliminate the window, set `SecureRecord:BusinessUnitName` to the *current* live name before
+step 1 and clear it after step 2 — the config value always wins over the default, which is why the key
+exists.
+
+**Verifying which half you are on:**
+
+```powershell
+# Live side: does the new BU exist?
+(Invoke-RestMethod "$Api/businessunits?`$select=name&`$filter=name eq 'Secure Record'" -Headers $H).value.Count   # 1 = renamed
+# Code side: what does the deployed build default to?
+#   -> DefaultSecureBusinessUnitName, pinned by DefaultSecureBusinessUnitName_IsTheNameActuallyDeployed
+```
 
 ---
 
@@ -99,12 +158,28 @@ $teamId = $team[0].teamid
 
 ---
 
-## 5. Step 3 — the `Secure Project Owner` role
+## 5. Step 3 — the `Secure Record Owner` role
 
 ### 5.1 The privilege set, and why each entry survived
 
-**`Read` at User (`Basic`) depth, on every entity that carries an `sprk_issecure` column — and nothing
-else.** As of 2026-08-25 that is **three** entities, confirmed from live attribute metadata:
+**`Read` at User (`Basic`) depth, on every table listed in
+[`config/secure-record-owner-role.json`](../../config/secure-record-owner-role.json), and nothing else.**
+That file is the one list. This guide, `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` and the NFR-05
+census all read it; do not copy it here. Each entry names its reason and quotes the refusal that forced it.
+There are two kinds:
+
+- **`root`**: tables that carry `sprk_issecure` (project, matter, work assignment). Provisioning assigns the
+  secure record itself to the team.
+- **`child`**: tables whose rows write-path invariant **I-6** (`RecordOwnershipResolver`, record-first) assigns
+  to the team when they are filed to a secure record. Examples are a document saved to a secure project, or a
+  To Do regarding one. Owner decision C10 part 2 adds communications, events and memos. Added 2026-09-30 by
+  `spaarkeai-word-add-in-r1` task 082, because the earlier premise that "nothing assigns children to this
+  team" stopped being true with task 080.
+
+The refusal for a missing child privilege reads exactly like the root one: *"Read Privilege Check For Owner
+failed … Principal team (…) is missing prvReadsprk_Todo privilege"*.
+
+How the three `root` entries were found (history; the file is the list):
 
 | Privilege | Depth | Why it is here |
 |---|---|---|
@@ -112,9 +187,10 @@ else.** As of 2026-08-25 that is **three** entities, confirmed from live attribu
 | `prvReadsprk_Matter` | **User (`Basic`)** | Same rule, different entity. **Found the hard way**: a first cut of this role covered only `sprk_project`, and assigning a *Matter* to the team failed — the workaround was to pile broad roles (`Spaarke Basic User` etc.) onto the owner team, which is exactly the over-grant this role exists to eliminate. |
 | `prvReadsprk_WorkAssignment` | **User (`Basic`)** | Same rule. Included pre-emptively because `sprk_workassignment` also carries `sprk_issecure`; verified by assigning a probe record. |
 
-**Derive this list from metadata, not from this table** — if a fourth entity gains an `sprk_issecure`
-column, the role must gain the matching `Read`, or assignment for that type fails and someone will
-"fix" it by over-granting the team:
+**Keep the `root` entries in step with metadata.** If a fourth entity gains an `sprk_issecure` column, add it
+to the file, or assignment for that type fails and someone will "fix" it by over-granting the team. A new
+`child` entry joins the file when a writer starts assigning that table's rows to the team; the file's
+`howToExtend` block has the procedure.
 
 ```sql
 -- entities that can be secured => entities this role must cover
@@ -135,7 +211,7 @@ foreach ($e in @('sprk_project','sprk_matter','sprk_workassignment','sprk_servic
 | `Write` | Assignment succeeds without it, stable across 3 consecutive polls. The team is an ownership anchor and never an actor; the BFF application user performs every mutation. |
 | `Create` | The team never creates. The BFF app user creates, then assigns. |
 | `Delete`, `Append`, `AppendTo`, `Share`, `Assign` | Never exercised by the assignment path. |
-| Anything on **child** entities | Nothing assigns children to this team (see design §5.1d). Granting here would be privilege without a purpose. |
+| A **child** table that is not in the file | A child table joins the file only when a writer assigns its rows to this team and the refusal has been recorded. ~~Nothing assigns children to this team (see design §5.1d).~~ That stopped being true on 2026-09-30: task 080's I-6 does, for the child tables now in the file. |
 | **Any broad role on the owner team** (`Spaarke Basic User`, `Spaarke AI Analysis User`, …) | If assignment fails, the cause is a **missing `Read` on that entity** — add the one privilege, never a whole role. A broad role on the owner team recreates the System-Administrator posture this runbook removes. |
 | **Business Unit / `Deep` / `Global` depth** | `User` depth suffices. Any wider depth lets a future team member read beyond what the team owns, and re-opens the exact hole §6 is about. |
 
@@ -147,26 +223,37 @@ foreach ($e in @('sprk_project','sprk_matter','sprk_workassignment','sprk_servic
 
 ```powershell
 $body = @{
-  name = 'Secure Project Owner'
+  name = 'Secure Record Owner'
   'businessunitid@odata.bind' = "/businessunits($buId)"
-  description = 'Least-privilege role for the Secure Project default OWNER team. Exists only so that team can be an assignment target for secure sprk_project records. MUST NOT be granted to any user or any other team.'
+  description = 'Least-privilege role for the Secure Record OWNER team. Exists only so that team can be an assignment target for secure records and the children filed to them (config/secure-record-owner-role.json). MUST NOT be granted to any user or any other team.'
 } | ConvertTo-Json
 Invoke-RestMethod -Method Post "$Api/roles" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes($body))
-$roleId = (Invoke-RestMethod "$Api/roles?`$select=roleid&`$filter=name eq 'Secure Project Owner' and _businessunitid_value eq $buId" -Headers $H).value[0].roleid
+$roleId = (Invoke-RestMethod "$Api/roles?`$select=roleid&`$filter=name eq 'Secure Record Owner' and _businessunitid_value eq $buId" -Headers $H).value[0].roleid
 ```
 
 **Create the role in the secure BU, not the root BU.** A role created in the root BU is auto-copied into
 every child BU; a role created in a child BU exists only there and can only ever be assigned to
 principals in that BU. That containment is a feature — keep it.
 
-### 5.3 Grant the one privilege
+### 5.3 Grant the privileges
 
-Resolve each entity's `Read` privilege from **entity metadata** rather than hard-coding names — the
-casing follows the schema name (`prvReadsprk_WorkAssignment`, not `prvReadsprk_workassignment`), which
-is easy to get wrong by hand:
+**Use the script.** It reads the file, resolves the business unit and the role to exactly one each, takes each
+table's `Read` privilege from entity metadata, and refuses a name mismatch. It adds only, and reads the role
+back afterwards:
 
 ```powershell
-$securable = @('sprk_project','sprk_matter','sprk_workassignment')   # re-derive per §5.1
+.\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl            # dry run: present / missing / outside the file
+.\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl -Apply     # add the missing ones, read back
+.\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl -Verify    # exit 0 = covered; exit 1 names each gap
+```
+
+The manual equivalent is below. Resolve each entity's `Read` privilege from **entity metadata** rather than
+hard-coding names. The casing follows the schema name (`prvReadsprk_WorkAssignment`, not
+`prvReadsprk_workassignment`), which is easy to get wrong by hand:
+
+```powershell
+# Run from the repository root. The ONE list:
+$securable = (Get-Content config/secure-record-owner-role.json -Raw | ConvertFrom-Json).tables.logicalName
 $privList = foreach ($e in $securable) {
     $read = (Invoke-RestMethod "$Api/EntityDefinitions(LogicalName='$e')/Privileges" -Headers $H).value |
             Where-Object { $_.PrivilegeType -eq 'Read' }
@@ -192,9 +279,18 @@ Two behaviours to know, both verified:
 - **`RemovePrivilegeRole` does** — one privilege per call, and the parameter is an **entity reference**
   named `Privilege`, *not* a GUID named `PrivilegeId` (that returns an OData parameter error).
 
+> ✅ **`spaarkedev1` was cleaned on 2026-10-01** by the owner's decision (issue #1046). The role had held **32
+> privileges outside the file**: Create/Write/Delete/Assign/Share/Append/AppendTo on project, matter, work assignment
+> and document, plus the SharePoint four at Global. Their origin was unrecorded. This strip removed them, leaving
+> the 8 Read privileges in the file. Afterwards, team-owned creates on all four of those tables still succeeded
+> across 4 polls, against a control refusal that reported `privilegeCount=8`. Record:
+> `projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md` §4.1. If the script's dry run ever lists
+> anything under "Outside the file" again, run this strip.
+
 ```powershell
-# Run this AFTER every AddPrivilegesRole call.
-$keep = @('prvReadsprk_Project','prvReadsprk_Matter','prvReadsprk_WorkAssignment')   # per §5.1
+# Run this AFTER every AddPrivilegesRole call. $keep comes from the ONE list (§5.1), so it never strips a child
+# privilege I-6 depends on. The literal three-name list that used to be here would have removed prvReadsprk_Document.
+$keep = (Get-Content config/secure-record-owner-role.json -Raw | ConvertFrom-Json).tables.privilegeName   # from the repository root
 foreach ($p in (Invoke-RestMethod "$Api/roles($roleId)/roleprivileges_association?`$select=privilegeid,name" -Headers $H).value) {
     if ($keep -contains $p.name) { continue }
     $rb = @{ Privilege = @{ '@odata.type'='Microsoft.Dynamics.CRM.privilege'; privilegeid=$p.privilegeid } } | ConvertTo-Json -Depth 5
@@ -268,7 +364,7 @@ record. Two fixes, either of which closes it (design §5.1a-2 has measured blast
 > |---|---|
 > | Read a Matter owned by `Spaarke Business Unit 1` | ✅ visible |
 > | Read anything in **other** BUs | ✅ not visible |
-> | Read the same Matter after reassigning it to the `Secure Project` BU/team | ✅ **DENIED** |
+> | Read the same Matter after reassigning it to the secure BU/team (named `Secure Project` when this was observed; `Secure Record` since 2026-09-29) | ✅ **DENIED** |
 > | Read it after an explicit **share** | ✅ visible |
 >
 > That is the whole intended model working: `Deep` at a sibling BU cannot reach the secure BU, and
@@ -295,9 +391,9 @@ configuration is shaped correctly.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | Role privileges: `roles(<id>)/roleprivileges_association` | **`Read` on every `sprk_issecure` entity and nothing else** — as of 2026-08-25 exactly 3 (`prvReadsprk_Project`, `prvReadsprk_Matter`, `prvReadsprk_WorkAssignment`), each at depth mask `1` |
-| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Project Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
-| 2b | Assignment works for **each** securable type, not just projects | assign a probe `sprk_project`, `sprk_matter` **and** `sprk_workassignment`. A role covering only one type fails silently on the others until someone over-grants the team |
+| 1 | Role privileges: `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` | **Exits 0**: `Read` at depth `1` on every table in `config/secure-record-owner-role.json` (8 as of 2026-09-30). Its "Outside the file" list should be **empty**; in `spaarkedev1` it is 32 as of 2026-09-30, pending the owner decision in §5.4 |
+| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Record Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
+| 2b | Assignment works for **each** table in the file, not just projects | assign a probe of each: the `root` tables **and** the `child` tables (e.g. a `sprk_todo` created with `ownerid@odata.bind → /teams(<teamId>)`). A role covering only some types fails silently on the others until someone over-grants the team. Delete the probes |
 | 3 | Team members: `teams(<id>)/teammembership_association` | **0** |
 | 4 | Role holders: `roles(<id>)/systemuserroles_association` | **0 users** |
 | 5 | Role holders: `roles(<id>)/teamroles_association` | **exactly 1 team** — the secure BU's default owner team |
@@ -329,7 +425,7 @@ session is void.
 | ❌ | Why |
 |---|---|
 | Add a human to the secure owner team | The team owns every secure project; a member reads all of them by membership. The whole safety argument is that it is memberless |
-| Grant `Secure Project Owner` to a user or any other team | Same reason. Items 4–5 of §7 assert this |
+| Grant `Secure Record Owner` to a user or any other team | Same reason. Items 4–5 of §7 assert this |
 | Add privileges "for completeness" | Every privilege must be forced by a recorded failure. Nothing beyond `Read` was |
 | Widen the depth beyond `User` | Adds reach without adding capability, and re-opens §6 |
 | Remove `sprk_project` Read from ordinary user roles | Silently disables all sharing (§6) |
@@ -347,6 +443,7 @@ session is void.
 | Ownership model + the empirical privilege determination | `projects/unified-access-control-r2/design.md` §5.1a |
 | The depth defect, proof, and candidate fixes | design §5.1a-2 and §5.2 |
 | Child-entity ownership (18 entities, unresolved) | design §5.1d |
+| The role's privilege list (the ONE list) + the script that applies and verifies it | [`config/secure-record-owner-role.json`](../../config/secure-record-owner-role.json), [`scripts/Set-SecureRecordOwnerRolePrivileges.ps1`](../../scripts/Set-SecureRecordOwnerRolePrivileges.ps1); why children are in it: `projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md` |
 | Container isolation (separate, unresolved) | design §5.1c → project `spaarke-secure-project-r1` |
 | NFR-05 assertion wording | `projects/unified-access-control-r2/spec.md` |
 | Provisioning code | `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs` |

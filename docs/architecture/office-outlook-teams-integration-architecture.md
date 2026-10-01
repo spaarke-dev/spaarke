@@ -1,7 +1,7 @@
 # Office Add-ins Integration Architecture
 
-> **Last Updated**: 2026-09-04
-> **Last Reviewed**: 2026-09-04
+> **Last Updated**: 2026-09-10 — corrected: React 19 (was stated as React 18); `npm run build` is the production build (no `build:prod` script); re-measured typecheck errors (0 production, 284 test-file only, was "~397")
+> **Last Reviewed**: 2026-09-10
 > **Reviewed By**: email-communication-intelligence-r2 (Pillar B add-in realignment — as-built refresh; supersedes the Apr-2026 "Dialog API" version, which predated the NAA auth cutover + the inline Create-To-Do + Word `.docx` save)
 > **Status**: Current
 > **Purpose**: Architecture of the SDAP Office Add-ins for Outlook and Word — how they are built and function today, as the entry point for any project extending them.
@@ -11,7 +11,7 @@
 
 ## Overview
 
-The SDAP Office Add-ins integrate **Outlook** and **Word** with the Spaarke platform: save emails / attachments / documents to SharePoint Embedded, file them against a Dataverse record (Matter / Project / Invoice), create first-class **To Dos** from an email, and (Outlook) surface AI triage + linked to-dos. They are **React 18 + Fluent UI v9** task-pane apps hosted on **Azure Static Web Apps**, calling the BFF's `/api/office/*` surface for every backend operation.
+The SDAP Office Add-ins integrate **Outlook** and **Word** with the Spaarke platform: save emails / attachments / documents to SharePoint Embedded, file them against a Dataverse record (Matter / Project / Invoice), create first-class **To Dos** from an email, and (Outlook) surface AI triage + linked to-dos. They are **React 19 + Fluent UI v9** task-pane apps hosted on **Azure Static Web Apps**, calling the BFF's `/api/office/*` surface for every backend operation.
 
 Two patterns make the code portable across hosts:
 - **`IHostAdapter`** (`shared/adapters/`) abstracts host differences — Outlook reads `Office.context.mailbox`, Word reads `Office.context.document` — so the UI components are host-agnostic.
@@ -56,9 +56,11 @@ src/client/office-addins/
 │   ├── manifest.json                # Unified manifest (icons.color/outline)
 │   ├── taskpane/index.tsx           # mounts <App> with the Outlook adapter
 │   └── commands/                    # ribbon command surface (e.g. ?action=createTodo)
-├── word/
-│   ├── WordHostAdapter.ts           # document access + getFileAsync(Compressed) → .docx
+├── word/                            # no host adapter here: task 010 / FR-04 deleted the duplicate
+│   │                                # word/WordHostAdapter.ts; the single Word adapter now lives in
+│   │                                # shared/adapters/ and is reached via HostAdapterFactory
 │   ├── word-manifest.xml
+│   ├── manifest.json                # Unified manifest (task 011 / FR-05)
 │   └── taskpane/index.tsx           # mounts <App>, save-only (no nav)
 ├── shared/
 │   ├── adapters/                    # IHostAdapter contract + HostAdapterFactory + Outlook/Word impls
@@ -102,7 +104,7 @@ Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'
 - Assignee is a **Contact** typeahead via `GET /api/office/search/entities?type=Contact`. Priority/Effort choice→score mapping is mirrored add-in-side in `todoChoices.ts` (sanctioned duplicate of the wizard's score tables).
 
 ### Word real `.docx` save
-- `WordHostAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation).
+- `WordAdapter.getFileAsync(Office.FileType.Compressed)` returns the actual OOXML bytes; the save uses a real `.docx` extension (previously a text approximation). (Task 010 / FR-04 consolidated the two Word adapters onto `shared/adapters/WordAdapter.ts`, reached via `HostAdapterFactory`; `word/WordHostAdapter.ts` is deleted.)
 
 ### Save flow + "Related to" filing
 - `SaveFlow` / `RelatedToPicker` present auto-matched Matter/Project/Invoice candidates (with confidence) + inline "create new record" (`POST /api/office/quickcreate/{type}`) + green-check select; the chosen record becomes the `sprk_document` regarding.
@@ -121,7 +123,7 @@ Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`; logic in `Servi
 | `POST /api/office/save` (+ `/save-debug`) | Save the current email/document → queues async processing, returns a job id |
 | `GET /api/office/{jobId}` · `GET /api/office/{jobId}/stream` | Job status (poll + **SSE** progress) |
 | `GET /api/office/search/entities` | Entity search (Matter/Project/Invoice/Contact) — powers RelatedToPicker + Contact assignee |
-| `GET /api/office/documents` · `GET /api/office/recent` | Document/recent lookups |
+| `GET /api/office/documents` | Document lookups (`/api/office/recent`, `/share/*` and `/search/documents` were deleted 2026-09-30 by spaarkeai-word-add-in-r1 task 058: fabricated data, no client) |
 | `POST /api/office/quickcreate/{entityType}` | Inline "create new record" for filing |
 | `POST /api/office/todo` | **Create first-class `sprk_todo`** (r2) |
 | `POST /api/office/links` · `POST /api/office/attach` | Sharing links / attach flows |
@@ -137,21 +139,34 @@ Auth: the caller's bearer token → BFF **OBO** → Graph/SPE + Dataverse (ADR-0
 
 | Item | As-built |
 |---|---|
-| **XML manifests** | `outlook/outlook-manifest.xml`, `word/word-manifest.xml` — for M365 Admin Center upload |
-| **Unified manifest** | `outlook/manifest.json` — carries `icons.color` (128px) + `icons.outline` (32px) |
-| **Names** | "Spaarke Outlook" / "Spaarke Word" |
-| **Icons** | white-on-black brand marks generated into `shared/assets` (`icon-color.png` 128, `icon-outline.png` 32, plus `icon-16/32/64/80/128`) via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep, not in `package.json`) |
+| **LIVE registrations (production)** | **XML for both hosts**: Outlook `outlook/outlook-manifest.xml` (`5e4d66d0-…`), Word `word/word-manifest.xml` (`b3965ea0-…`). ⚠️ Outlook's is `/outlook/outlook-manifest.xml` — `/outlook/manifest.xml` 404s (a known trap) |
+| **Unified app package (the migration target, task 078)** | ONE Microsoft 365 unified-manifest app (schema **1.30**) for **Outlook AND Word**, built by `packaging/mergeUnifiedManifest.js` into `dist/spaarke/` and zipped by `scripts/Package-OfficeAddinUnified.ps1` (CI artifact `spaarke-addin-unified-package`). Own package id `e68f3cb1-…`; `alternates.hide` names both XML add-ins. Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md` §6 |
+| **Per-host unified manifests** | `outlook/manifest.json`, `word/manifest.json` — the SOURCES of each host's half of the package. Not uploaded on their own |
+| **Names** | XML: "Spaarke Outlook" / "Spaarke Word". Unified package: "Spaarke" |
+| **Icons** | white-on-black brand marks generated into `shared/assets` via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep: `npm install --no-save sharp`; pass target names to render only those). `icon-16/32/64/80/128`, `icon-color.png` (128, XML era), **`icon-color-192.png` (the package's color icon — app packages require 192×192)**, `icon-outline.png` (32) |
 
-### Manifest rules (validated against M365 Admin Center — still binding)
+### Manifest rules — XML manifests (the live registrations; validated against M365 Admin Center)
 
 | Rule | Reason |
 |---|---|
-| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part |
-| **No** `<FunctionFile>` in the Outlook manifest | Causes validation failure |
+| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part **for XML** |
+| **No** `<FunctionFile>` in the **Outlook** XML | Causes validation failure (the Word XML has one since task 037 — Word accepts it) |
 | Single `VersionOverridesV1_0` (do not nest V1.1) | Validation failure |
 | `RuleCollection Mode="Or"` + `DisableEntityHighlighting` present | Required for Outlook read surface |
 | All icon URLs return HTTP 200 | Manifest validation fails otherwise |
 | Bump the manifest version on any change | M365 requires re-register at the new version |
+
+### Manifest rules — the unified app package (task 078)
+
+| Rule | Reason / where enforced |
+|---|---|
+| **3-part** version `X.Y.Z` — bump `UNIFIED_PACKAGE.VERSION` in `webpack.config.js` on every change | The unified manifest rejects 4-part; the admin center rejects a same-version update. The merge throws on 4-part |
+| ONE extension; every runtime and ribbon scoped to exactly ONE host; host capabilities on those nodes, not the extension | An extension-level `WordApi` requirement stops it installing in Outlook. The merge asserts it |
+| The package id is its OWN GUID — never the Entra client id, never an XML add-in id | Microsoft requires a new GUID for the unified version; the merge refuses the other two |
+| A Word `executeFunction` id that collides with an Outlook one is renamed ONLY via `WORD_FUNCTION_RENAMES` + an `Office.actions.associate` alias in `word/commands/index.ts` | The id is the registered function name — a manifest-only rename ships a dead button. A test checks every Word action is registered |
+| Every icon URL resolves; color icon 192×192, outline 32×32 | Admin-center validation. The merge repairs/refuses missing icons; the packaging script exits 1 on wrong sizes |
+| Upload as App type **"Teams app"** (a zip), not "Office Add-in" | Microsoft 365 admin deploy doc |
+| Keep BOTH XML add-ins deployed | Outlook on Mac and Word < 2501 cannot run the unified package; `hide` does not yet work in Word (office-js #6938) |
 
 ---
 
@@ -160,12 +175,14 @@ Auth: the caller's bearer token → BFF **OBO** → Graph/SPE + Dataverse (ADR-0
 ```bash
 cd src/client/office-addins
 npm install --legacy-peer-deps --no-audit --no-fund
-npm run build:dev          # (or build:prod)
-npm run typecheck          # NOTE: ~397 PRE-EXISTING exactOptional errors — filter to changed files
+npm run build:dev          # dev build; `npm run build` IS the production build — there is no `build:prod` script
+npm run typecheck          # production code is clean (0 errors); 284 errors remain, ALL in test files
+                            # (__tests__ / __mocks__ / *.test.* / *.spec.*), consciously accepted 2026-09-09
+                            # (see projects/spaarkeai-word-add-in-r1/CLAUDE.md § Decisions Made)
 ```
 
 - **Hosting**: Azure **Static Web App**. **Deploy runs in CI** — GitHub Actions **`deploy-office-addins.yml`** (holds the SWA secrets); it is **not** an agent-run script. Push the branch → confirm the run is green (`gh run list --workflow=deploy-office-addins.yml`).
-- **Version bumps**: `outlook/manifest.json` + `outlook/taskpane/index.tsx` (and the Word equivalents), then **M365 re-register** at the new version.
+- **Version bumps**: XML era — `outlook/outlook-manifest.xml` / `word/word-manifest.xml` (4-part) + the taskpane `index.tsx` version, then **M365 re-register**. Unified package — `UNIFIED_PACKAGE.VERSION` in `webpack.config.js` (3-part), then re-upload the CI artifact zip.
 - **Config (env-driven, not hardcoded)**: `BFF_API_BASE_URL` (defaults to `spaarke-bff-dev`), `ORG_URL` (Quick-Create Dataverse deep-link; unset → Quick Create is a safe no-op). Never pin the add-in to the dev org.
 
 ---

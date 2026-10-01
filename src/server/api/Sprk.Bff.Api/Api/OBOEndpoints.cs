@@ -212,7 +212,7 @@ public static class OBOEndpoints
         // ⚠️ NEVER reachable for secure content. Secure records resolve through the RECORD-keyed route
         // and fail closed. Acting-user BU is admissible ONLY where no record exists — for a secure
         // record the acting user's BU is provably the WRONG container, because users sit in the
-        // Operations subtree while secure records are owned in `Secure Projects`. Do not "generalise"
+        // Operations subtree while secure records are owned in `Secure Record`. Do not "generalise"
         // this route to accept a record id as a convenience; that reintroduces the two-keys-for-one-
         // decision shape the record-keyed contract removed.
         //

@@ -12,10 +12,6 @@
  * - GET /office/jobs/{id} - Job status polling
  * - GET /office/jobs/{id}/stream - SSE streaming (latency only, no full stream test)
  * - GET /office/search/entities - Entity typeahead search
- * - GET /office/search/documents - Document search for sharing
- * - POST /office/share/links - Generate share links
- * - POST /office/share/attach - Package attachments
- * - GET /office/recent - Recent items
  *
  * Prerequisites:
  * - k6 installed (https://k6.io/docs/getting-started/installation/)
@@ -49,19 +45,13 @@ import { uuidv4 } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 // Response time metrics by endpoint
 const saveResponseTime = new Trend('office_save_response_time_ms');
 const searchEntitiesResponseTime = new Trend('office_search_entities_response_time_ms');
-const searchDocumentsResponseTime = new Trend('office_search_documents_response_time_ms');
 const jobStatusResponseTime = new Trend('office_job_status_response_time_ms');
 const sseFirstEventTime = new Trend('office_sse_first_event_time_ms');
-const shareLinksResponseTime = new Trend('office_share_links_response_time_ms');
-const shareAttachResponseTime = new Trend('office_share_attach_response_time_ms');
-const recentResponseTime = new Trend('office_recent_response_time_ms');
 
 // Success rate metrics
 const saveSuccess = new Rate('office_save_success_rate');
 const searchSuccess = new Rate('office_search_success_rate');
 const jobStatusSuccess = new Rate('office_job_status_success_rate');
-const shareSuccess = new Rate('office_share_success_rate');
-const recentSuccess = new Rate('office_recent_success_rate');
 
 // Rate limit tracking
 const rateLimitHits = new Counter('office_rate_limit_hits');
@@ -153,11 +143,7 @@ export const options = {
         // API response time p95 < 2 seconds (NFR-01)
         'office_save_response_time_ms': ['p(95)<2000'],
         'office_search_entities_response_time_ms': ['p(95)<500'],  // Typeahead should be fast
-        'office_search_documents_response_time_ms': ['p(95)<1000'],
         'office_job_status_response_time_ms': ['p(95)<500'],
-        'office_share_links_response_time_ms': ['p(95)<2000'],
-        'office_share_attach_response_time_ms': ['p(95)<2000'],
-        'office_recent_response_time_ms': ['p(95)<500'],
 
         // SSE first event within 1 second (NFR-04)
         'office_sse_first_event_time_ms': ['p(95)<1000'],
@@ -166,8 +152,6 @@ export const options = {
         'office_save_success_rate': ['rate>0.95'],
         'office_search_success_rate': ['rate>0.99'],
         'office_job_status_success_rate': ['rate>0.99'],
-        'office_share_success_rate': ['rate>0.95'],
-        'office_recent_success_rate': ['rate>0.99'],
 
         // Overall HTTP performance
         'http_req_duration': ['p(95)<2000', 'p(99)<5000'],
@@ -384,165 +368,6 @@ function testSearchEntities(query = 'test') {
     return response;
 }
 
-/**
- * Test GET /office/search/documents endpoint
- */
-function testSearchDocuments(query = 'document') {
-    const url = `${BASE_URL}/office/search/documents?q=${encodeURIComponent(query)}&top=20`;
-
-    const startTime = Date.now();
-    const response = http.get(url, { headers: getHeaders() });
-    const duration = Date.now() - startTime;
-
-    searchDocumentsResponseTime.add(duration);
-    requestsCompleted.add(1);
-
-    const isSuccess = response.status === 200;
-    searchSuccess.add(isSuccess ? 1 : 0);
-
-    if (!checkRateLimit(response)) {
-        check(response, {
-            'search documents: success (200)': (r) => r.status === 200,
-            'search documents: has results array': (r) => {
-                try {
-                    const body = JSON.parse(r.body);
-                    return Array.isArray(body.results);
-                } catch {
-                    return false;
-                }
-            },
-            'search documents: response time < 1s': (r) => duration < 1000
-        });
-    }
-
-    return response;
-}
-
-/**
- * Test POST /office/share/links endpoint
- */
-function testShareLinks(documentId) {
-    if (!documentId || documentId === '00000000-0000-0000-0000-000000000000') {
-        // Skip if no valid document ID
-        return null;
-    }
-
-    const url = `${BASE_URL}/office/share/links`;
-    const payload = JSON.stringify({
-        documentIds: [documentId],
-        recipients: ['test@example.com'],
-        grantAccess: false,
-        role: 'ViewOnly'
-    });
-
-    const headers = getHeaders();
-    headers['X-Idempotency-Key'] = generateIdempotencyKey('share-links');
-
-    const startTime = Date.now();
-    const response = http.post(url, payload, { headers });
-    const duration = Date.now() - startTime;
-
-    shareLinksResponseTime.add(duration);
-    requestsCompleted.add(1);
-
-    const isSuccess = response.status === 200;
-    shareSuccess.add(isSuccess ? 1 : 0);
-
-    if (!checkRateLimit(response)) {
-        check(response, {
-            'share links: success (200)': (r) => r.status === 200,
-            'share links: has links array': (r) => {
-                try {
-                    const body = JSON.parse(r.body);
-                    return Array.isArray(body.links);
-                } catch {
-                    return false;
-                }
-            },
-            'share links: response time < 2s': (r) => duration < 2000
-        });
-    }
-
-    return response;
-}
-
-/**
- * Test POST /office/share/attach endpoint
- */
-function testShareAttach(documentId) {
-    if (!documentId || documentId === '00000000-0000-0000-0000-000000000000') {
-        // Skip if no valid document ID
-        return null;
-    }
-
-    const url = `${BASE_URL}/office/share/attach`;
-    const payload = JSON.stringify({
-        documentIds: [documentId],
-        deliveryMode: 'Url'
-    });
-
-    const startTime = Date.now();
-    const response = http.post(url, payload, { headers: getHeaders() });
-    const duration = Date.now() - startTime;
-
-    shareAttachResponseTime.add(duration);
-    requestsCompleted.add(1);
-
-    const isSuccess = response.status === 200;
-    shareSuccess.add(isSuccess ? 1 : 0);
-
-    if (!checkRateLimit(response)) {
-        check(response, {
-            'share attach: success (200)': (r) => r.status === 200,
-            'share attach: has attachments array': (r) => {
-                try {
-                    const body = JSON.parse(r.body);
-                    return Array.isArray(body.attachments);
-                } catch {
-                    return false;
-                }
-            },
-            'share attach: response time < 2s': (r) => duration < 2000
-        });
-    }
-
-    return response;
-}
-
-/**
- * Test GET /office/recent endpoint
- */
-function testRecent() {
-    const url = `${BASE_URL}/office/recent?top=10`;
-
-    const startTime = Date.now();
-    const response = http.get(url, { headers: getHeaders() });
-    const duration = Date.now() - startTime;
-
-    recentResponseTime.add(duration);
-    requestsCompleted.add(1);
-
-    const isSuccess = response.status === 200;
-    recentSuccess.add(isSuccess ? 1 : 0);
-
-    if (!checkRateLimit(response)) {
-        check(response, {
-            'recent: success (200)': (r) => r.status === 200,
-            'recent: has recentAssociations': (r) => {
-                try {
-                    const body = JSON.parse(r.body);
-                    return Array.isArray(body.recentAssociations);
-                } catch {
-                    return false;
-                }
-            },
-            'recent: response time < 500ms': (r) => duration < 500
-        });
-    }
-
-    return response;
-}
-
 // ============================================================================
 // Test Scenarios
 // ============================================================================
@@ -566,21 +391,6 @@ export function baselineTest() {
         testSearchEntities('test');
         sleep(0.3);
 
-        testSearchDocuments('contract');
-        sleep(0.3);
-
-        // Test recent
-        testRecent();
-        sleep(0.3);
-
-        // Test share endpoints (if document ID provided)
-        if (TEST_DOCUMENT_ID !== '00000000-0000-0000-0000-000000000000') {
-            testShareLinks(TEST_DOCUMENT_ID);
-            sleep(0.3);
-
-            testShareAttach(TEST_DOCUMENT_ID);
-            sleep(0.3);
-        }
     });
 
     sleep(1);
@@ -614,9 +424,9 @@ export function saveFlowTest() {
  */
 export function mixedLoadTest() {
     // 40% search operations (typeahead during entity selection)
-    // 30% save operations
-    // 20% job status checks
-    // 10% recent/share operations
+    // 60% save operations (each followed by a job status check)
+    // The former 30% recent-items/share slice was folded into save when those Office routes were deleted
+    // (spaarkeai-word-add-in-r1 task 058: they served fabricated data, and no client called them).
 
     const rand = Math.random();
 
@@ -626,22 +436,12 @@ export function mixedLoadTest() {
             const query = queries[Math.floor(Math.random() * queries.length)];
             testSearchEntities(query);
         });
-    } else if (rand < 0.7) {
+    } else {
         group('Mixed - Save Flow', function () {
             const jobId = testSave();
             if (jobId) {
                 sleep(1);
                 testJobStatus(jobId);
-            }
-        });
-    } else if (rand < 0.9) {
-        group('Mixed - Recent', function () {
-            testRecent();
-        });
-    } else {
-        group('Mixed - Share', function () {
-            if (TEST_DOCUMENT_ID !== '00000000-0000-0000-0000-000000000000') {
-                testShareLinks(TEST_DOCUMENT_ID);
             }
         });
     }
@@ -753,16 +553,10 @@ export function handleSummary(data) {
                 data.metrics.office_save_response_time_ms.values['p(95)'] : null,
             searchEntitiesResponseTimeP95: data.metrics.office_search_entities_response_time_ms ?
                 data.metrics.office_search_entities_response_time_ms.values['p(95)'] : null,
-            searchDocumentsResponseTimeP95: data.metrics.office_search_documents_response_time_ms ?
-                data.metrics.office_search_documents_response_time_ms.values['p(95)'] : null,
             jobStatusResponseTimeP95: data.metrics.office_job_status_response_time_ms ?
                 data.metrics.office_job_status_response_time_ms.values['p(95)'] : null,
             sseFirstEventP95: data.metrics.office_sse_first_event_time_ms ?
                 data.metrics.office_sse_first_event_time_ms.values['p(95)'] : null,
-            shareLinksResponseTimeP95: data.metrics.office_share_links_response_time_ms ?
-                data.metrics.office_share_links_response_time_ms.values['p(95)'] : null,
-            recentResponseTimeP95: data.metrics.office_recent_response_time_ms ?
-                data.metrics.office_recent_response_time_ms.values['p(95)'] : null,
 
             // Success rates
             saveSuccessRate: data.metrics.office_save_success_rate ?
@@ -771,8 +565,6 @@ export function handleSummary(data) {
                 data.metrics.office_search_success_rate.values.rate : null,
             jobStatusSuccessRate: data.metrics.office_job_status_success_rate ?
                 data.metrics.office_job_status_success_rate.values.rate : null,
-            shareSuccessRate: data.metrics.office_share_success_rate ?
-                data.metrics.office_share_success_rate.values.rate : null,
 
             // Throughput
             totalRequestsCompleted: data.metrics.office_requests_completed ?

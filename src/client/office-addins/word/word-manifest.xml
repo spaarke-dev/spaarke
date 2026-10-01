@@ -1,4 +1,15 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Legacy XML (OfficeApp) manifest for Word — retained for M365 Admin Center
+  upload and as the sideload rollback path while the unified JSON manifest
+  (`manifest.json`, same directory) is verified installing and running on
+  BOTH Word desktop and Word on the web (project spaarkeai-word-add-in-r1
+  task 011 / FR-05). `manifest.json` mirrors this file's ribbon/save-button
+  behavior and additionally declares `webApplicationInfo` (SSO identity
+  binding), which this XML manifest does not carry. Do not delete this file
+  ahead of that verification passing on both surfaces — see
+  projects/spaarkeai-word-add-in-r1/notes/011-word-manifest-migration.md.
+-->
 <OfficeApp
   xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -8,7 +19,10 @@
 
   <!-- Basic Identity -->
   <Id>b3965ea0-6942-4f17-81b3-2c645bd05ebf</Id>
-  <Version>1.0.6.0</Version>
+  <!-- Bumped 1.0.8.0 -> 1.0.9.0 by task 037 (FR-17): adds the FunctionFile + two ExecuteFunction
+       ribbon controls below. A manifest version bump requires M365 Admin Center re-registration —
+       see projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md (task 042 owns it). -->
+  <Version>1.0.9.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Word"/>
@@ -29,9 +43,42 @@
   </Hosts>
 
   <!-- Requirements -->
+  <!--
+    Requirements. MUST stay in step with the `capabilities` array in
+    `word/manifest.json` (task 019). Both are HARD INSTALL GATES: a host that
+    lacks a declared set refuses to install, which is the honest failure mode
+    (better than a runtime `undefined`).
+
+    - WordApi 1.3 - the true floor for `Word.DocumentProperties.title/author/
+      creationDate` used by `shared/adapters/WordAdapter.getItemId()`
+      (reconciled in task 011). Deliberately NOT raised to 1.4: that would move
+      the Windows floor from Version 1612 to Version 2208, and the volume-
+      licensed/LTSC floor from Office 2019 to Office 2024 - dropping Office 2019
+      AND Office 2021 LTSC.
+    - CustomXmlParts (Common API set; all Common sets are version 1.1) - gates
+      `Office.context.document.customXmlParts`, the FR-02 identity-stamp READ
+      (task 014). Chosen over `Word.Document.customXmlParts` precisely to avoid
+      the WordApi 1.4 bump. Its floor (Word web / Windows M365 sub + perpetual
+      Office 2016 / Mac / iPad) is BELOW the WordApi 1.3 floor already declared,
+      so this line excludes no host the add-in could otherwise reach.
+    - DialogApi (Common API set, version 1.1) - added by task 037 (FR-17), gates
+      `Office.context.ui.displayDialogAsync`, the quickSave/shareDocument
+      notification surface (word/commands/notify.html). Per Microsoft's
+      requirement-set documentation DialogApi 1.1 is available on the SAME
+      floor as the other Common 1.1 sets already declared here (Word web /
+      Windows M365 sub + perpetual Office 2016 / Mac / iPad) - this line is
+      believed to exclude no host beyond what WordApi 1.3 already excludes,
+      but this was NOT verified against a live host in this task (no
+      interactive Office environment was available) - see
+      notes/037-manifest-change.md and confirm at task 042's UAT.
+
+    See projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md
+  -->
   <Requirements>
     <Sets>
-      <Set Name="WordApi" MinVersion="1.1"/>
+      <Set Name="WordApi" MinVersion="1.3"/>
+      <Set Name="CustomXmlParts" MinVersion="1.1"/>
+      <Set Name="DialogApi" MinVersion="1.1"/>
     </Sets>
   </Requirements>
 
@@ -48,6 +95,11 @@
     <Hosts>
       <Host xsi:type="Document">
         <DesktopFormFactor>
+          <!-- task 037 (FR-17): the function file hosting quickSave/shareDocument. Webpack already
+               emits `word/commands.html` (webpack.config.js:161-165) from `word/commands/index.ts`;
+               this is the FIRST manifest reference to it — before this, the compiled commands were
+               unreachable from the ribbon (the defect this task fixes). -->
+          <FunctionFile resid="Commands.Url"/>
           <ExtensionPoint xsi:type="PrimaryCommandSurface">
             <OfficeTab id="TabHome">
               <Group id="SpaarkeGroup">
@@ -74,6 +126,43 @@
                     <SourceLocation resid="Taskpane.Url"/>
                   </Action>
                 </Control>
+
+                <!-- task 037 (FR-17): completes without opening the pane (`event.completed()` fires
+                     on every path — see word/commands/index.ts). -->
+                <Control xsi:type="Button" id="QuickSaveButton">
+                  <Label resid="QuickSaveButton.Label"/>
+                  <Supertip>
+                    <Title resid="QuickSaveButton.SupertipTitle"/>
+                    <Description resid="QuickSaveButton.SupertipText"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>quickSave</FunctionName>
+                  </Action>
+                </Control>
+
+                <!-- task 037 (FR-17): completes without opening the pane EXCEPT the one deliberate,
+                     documented exception (no resolved Spaarke identity yet -> open the pane so the
+                     user can save first) — see word/commands/index.ts's shareDocument doc comment. -->
+                <Control xsi:type="Button" id="ShareButton">
+                  <Label resid="ShareButton.Label"/>
+                  <Supertip>
+                    <Title resid="ShareButton.SupertipTitle"/>
+                    <Description resid="ShareButton.SupertipText"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16x16"/>
+                    <bt:Image size="32" resid="Icon.32x32"/>
+                    <bt:Image size="80" resid="Icon.80x80"/>
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>shareDocument</FunctionName>
+                  </Action>
+                </Control>
               </Group>
             </OfficeTab>
           </ExtensionPoint>
@@ -89,14 +178,23 @@
       </bt:Images>
       <bt:Urls>
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/word/taskpane.html"/>
+        <!-- task 037 (FR-17): matches webpack.config.js's emitted `word/commands.html`
+             (chunks: ['word/commands'], from word/commands/index.ts). -->
+        <bt:Url id="Commands.Url" DefaultValue="https://localhost:3000/word/commands.html"/>
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="GroupLabel" DefaultValue="Spaarke"/>
         <bt:String id="SaveButton.Label" DefaultValue="Save to Spaarke"/>
         <bt:String id="SaveButton.SupertipTitle" DefaultValue="Save to Spaarke"/>
+        <bt:String id="QuickSaveButton.Label" DefaultValue="Quick Save"/>
+        <bt:String id="QuickSaveButton.SupertipTitle" DefaultValue="Quick Save to Spaarke"/>
+        <bt:String id="ShareButton.Label" DefaultValue="Share"/>
+        <bt:String id="ShareButton.SupertipTitle" DefaultValue="Share via Spaarke"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="SaveButton.SupertipText" DefaultValue="Save this document to Spaarke DMS"/>
+        <bt:String id="QuickSaveButton.SupertipText" DefaultValue="Save this document to Spaarke DMS in one click, without opening the pane"/>
+        <bt:String id="ShareButton.SupertipText" DefaultValue="Create a Spaarke share link for this document and copy it to the clipboard"/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

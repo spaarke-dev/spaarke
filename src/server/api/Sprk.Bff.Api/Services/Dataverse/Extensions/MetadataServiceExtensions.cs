@@ -29,6 +29,9 @@ public static class MetadataServiceExtensions
     {
         services.AddScoped<MetadataService>();
         services.AddCoreAncestorResolver();
+        // Task 080: every BFF record create assigns ownerid to the acting user's BU default owner team.
+        // Registered here because Program.cs calls this method unconditionally (:81).
+        services.AddRecordOwnershipResolver();
         return services;
     }
 
@@ -72,6 +75,32 @@ public static class MetadataServiceExtensions
             },
             sp.GetRequiredService<ILogger<CoreAncestorResolver>>()));
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers <see cref="IRecordOwnershipResolver"/> — resolves the business-unit default owner team that
+    /// owns a new record: the filed record's unit, else the acting user's (spaarkeai-word-add-in-r1 task 080,
+    /// owner decisions 2026-09-22 / 2026-09-25). The Office writers use it; other BFF writers are GitHub #1034.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Registered <b>UNCONDITIONALLY</b> (ADR-010 / ADR-032). This is deliberate and load-bearing: the create
+    /// paths that consume it REFUSE when a team cannot be resolved, so a conditional or missing registration
+    /// would not degrade gracefully — it would either break every create or, worse, tempt a fallback to
+    /// app-only ownership, which is exactly the defect this resolver exists to remove.
+    /// </para>
+    /// <para>
+    /// Stateless over the singleton <see cref="IGenericEntityService"/>, so singleton. It performs two small
+    /// reads per create (target or systemuser → business unit, business unit → default owner team). Deliberately
+    /// <b>uncached</b> for now: a record create already makes several Dataverse round trips and is not a
+    /// hot path like a typeahead, and ADR-009 rules out an in-memory cache for cross-request data. If
+    /// measurement later shows it matters, the cache belongs behind <c>ITenantCache</c>, not in a static.
+    /// </para>
+    /// </remarks>
+    public static IServiceCollection AddRecordOwnershipResolver(this IServiceCollection services)
+    {
+        services.TryAddSingleton<IRecordOwnershipResolver, RecordOwnershipResolver>();
         return services;
     }
 }

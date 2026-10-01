@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>NFR-11: fix useAnnounce's out-of-tree DOM lifecycle (React 19 unmount collision)</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a production `.ts` hook that IS the NFR-11 accessibility mechanism, and touches component lifecycle. Tags include `frontend` + `accessibility`.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A well-understood React lifecycle defect with a named fix shape. Escalate if the correct fix turns out to require restructuring how the pane mounts.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `shared/taskpane/hooks/` and will move the jest suite's pass/fail counts, which any concurrent test-touching task would then misattribute.</parallel-reason>
+    <deps>017</deps>
+    <tags>frontend, office-addins, accessibility, react, testing, tech-debt</tags>
+    <estimated-effort>3-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix `useAnnounce` so its ARIA live regions are owned by React rather than appended directly to `document.body`. This is a production defect in the NFR-11 accessibility mechanism, not a test problem.</prompt>
+
+  <role>SPAARKE frontend developer. React 19 lifecycle and ARIA live regions. Follow ADR-038 — do not adjust tests to fit a broken implementation.</role>
+
+  <goal>`useAnnounce` no longer manipulates `document.body` outside React's tracked tree; announcements still reach assistive technology; and `useAnnounce.test.ts` passes on its own merits rather than by being rewritten to accommodate the defect.</goal>
+
+  <context>
+    <background>
+      Found by task 017 (2026-09-09) while proving that the `@testing-library/react` 14 → 16 bump did NOT fix the suite. 009 had hypothesized an RTL/React peer mismatch; 017 disproved it — the RTL bump changed nothing, and `useAnnounce.test.ts` still fails 16/16 with the identical `NotFoundError: The node to be removed is not a child of this node.`
+
+      The real cause is production code. `shared/taskpane/hooks/useAnnounce.ts` calls `document.body.appendChild` at lines 76 and 96 and `document.body.removeChild` at lines 102 and 106, creating polite and assertive live regions OUTSIDE React's tracked tree. React 19's unmount bookkeeping collides with that: the node it expects to manage may already be gone, or belong to a parent React does not own. No testing-library version can fix it.
+
+      This matters beyond the suite. `useAnnounce` IS the NFR-11 mechanism — "pane is keyboard-navigable with announced state changes". The 16 failing tests are detecting a real lifecycle bug in a spec-required accessibility feature.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/017-testing-library-alignment.md</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useAnnounce.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/__tests__/useAnnounce.test.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="complete">Established that the RTL version is NOT the cause, so this task starts from a correct diagnosis rather than 009's disproved one.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Prefer a React-owned target — a `createPortal` into a container the component itself renders, or regions rendered directly in the tree — over guarding `removeChild`. A parent-check guard silences the symptom while leaving the nodes outside React's ownership; only fall back to that if a portal genuinely cannot work, and say why.</constraint>
+    <constraint source="adr">ADR-038 — the failing tests are the SPEC here. Do NOT rewrite assertions to match a broken implementation, and do NOT delete or skip a test to reach green. If a test's expectation is genuinely wrong, say so explicitly with reasoning before changing it.</constraint>
+    <constraint source="project">Accessibility behavior MUST be preserved: polite and assertive regions must remain distinct, must carry their existing ARIA attributes, and must still be announced. A fix that makes tests pass but stops announcing is a regression in the NFR-11 feature this task exists to protect.</constraint>
+    <constraint source="project">Do NOT regress the production typecheck count. It is 0 as of 2026-09-09 (tasks 006/007/008); verify with `npm run typecheck` that it is still 0 when you finish.</constraint>
+    <constraint source="project">Scope is `useAnnounce` and its test. The other 11 failing suites are separate mock/assertion defects and are NOT this task's job — report their count, do not fix them.</constraint>
+    <constraint source="project">Builds: `npm run build` IS the production build; it aborts at `webpack.config.js:24` without ADDIN_CLIENT_ID / TENANT_ID / BFF_API_CLIENT_ID / BFF_API_BASE_URL (non-secret values are in `.github/workflows/deploy-office-addins.yml`). Installs use `--legacy-peer-deps --no-audit --no-fund`; never `npm ci`.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The correct fix requires changing how the pane mounts, or moving live-region ownership into a shared provider that other components depend on. That is a structural change beyond a hook fix — STOP and report the scope.</trigger>
+    <trigger>The tests turn out to encode an expectation that is itself wrong (e.g. asserting the node lands on `document.body` specifically). Report it and get the expectation confirmed before rewriting it — silently re-authoring assertions is what ADR-038 forbids.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">`useAnnounce.ts` contains no direct `document.body.appendChild` or `document.body.removeChild` call.</criterion>
+    <criterion testable="true">`useAnnounce.test.ts` passes 16/16 without assertions having been rewritten to accommodate the defect; any assertion that WAS changed is listed with its justification.</criterion>
+    <criterion testable="true">Polite and assertive live regions remain distinct and retain their ARIA attributes; a test pins that both still receive announcements.</criterion>
+    <criterion testable="true">`npm run typecheck` shows production errors still at 0.</criterion>
+    <criterion testable="true">The full suite's failing-suite count is reported before and after; suites other than `useAnnounce` are unchanged.</criterion>
+    <criterion testable="true">No test deleted or newly skipped (ADR-038).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useAnnounce.ts</output>
+    <output type="test">src/client/office-addins/shared/taskpane/hooks/__tests__/useAnnounce.test.ts</output>
+  </outputs>
+
+  <notes>
+    <completed date="2026-09-09">
+      Root cause confirmed as diagnosed (out-of-tree `document.body.appendChild`/`removeChild` in
+      `useAnnounce.ts` lines 76/96/102/106), plus TWO independent pre-existing test-harness defects that
+      also had to be fixed to reach 16/16 (empirically proven each is unrelated to the DOM-ownership bug;
+      full reasoning is in the file-level comments): (1) the module-level `requestAnimationFrame` mock's
+      implementation was silently wiped by the repo-wide jest `restoreMocks: true` before every test
+      (proven moot anyway — see next point); (2) `jest.useFakeTimers()` (modern/@sinonjs) fakes
+      `requestAnimationFrame` itself, so the custom mock was dead code the whole time — removed it, use
+      Jest's own faked rAF via `jest.advanceTimersByTime`; (3) the suite's own `afterEach` manually did
+      `document.querySelectorAll('.sr-only').forEach(el => el.remove())`, which used to be a harmless
+      belt-and-suspenders line for the OLD non-React-owned nodes but, once the nodes became React-owned,
+      ran BEFORE RTL's own cleanup (afterEach hooks run innermost-first) and rebroke unmount with the
+      SAME `NotFoundError` this task exists to fix -- self-inflicted by the test file. Confirmed via a
+      minimal repro (render-only, no announce/timers) that reproduced the error with the line present and
+      passed with it removed.
+
+      FIX SHAPE CHOSEN: "regions rendered directly in the tree" (no portal) -- `useAnnounce()` now returns
+      `liveRegion: ReactElement` (both `<div>`s built via `createElement`, refs preserved for imperative
+      `textContent` writes) that the CALLING component must render. `useAnnounceOnChange()`'s return type
+      changed `void` -> `ReactElement` for the same reason. The one production consumer, `SaveFlow.tsx`,
+      was updated to render `{liveRegion}` (2-line change: destructure + render). No portal was needed --
+      a portal was considered but rejected because these regions are `sr-only` (no visual/stacking-context
+      reason to escape the local DOM subtree) and a portal would have required a manually-created,
+      manually-appended container anyway, reintroducing exactly the kind of imperative-node-with-manual-
+      lifecycle pattern this task is fixing.
+
+      RESULT: `useAnnounce.test.ts` 19/19 passing (0 assertions weakened; +2 new tests pin distinct-region
+      announcement and double-unmount safety per the acceptance criteria; 0 tests deleted/skipped -
+      ADR-038). No production `document.body.appendChild`/`removeChild` remains in `useAnnounce.ts`.
+      Production typecheck unchanged at 0 (per the established repo convention that excludes
+      `shared/__mocks__/`, `__tests__/`, `*.test.ts(x)` -- confirmed against task 017's own methodology).
+      Full details, before/after numbers, and the flakiness caveat: main-session task report.
+
+      Neither escalation trigger fired formally as a STOP: trigger 1 (structural/shared-provider fix
+      needed) did not apply -- the fix stayed local to the hook + its one caller. Trigger 2 (a wrong test
+      expectation) came close for the `clearDelay`-adjacent tests' use of `jest.runAllTimers()` (which
+      drains the full timer queue including the far-future clear delay, contradicting the test's own
+      intent to observe the intermediate "message visible" state) -- judged as a broken TEST MECHANIC
+      (wrong flushing tool) rather than a wrong ASSERTION VALUE (every expected value was left exactly as
+      authored), so it was fixed with full disclosure in the test file's own comments rather than treated
+      as a stop-and-confirm case; reported prominently for operator review rather than silently changed.
+    </completed>
+  </notes>
+</task>

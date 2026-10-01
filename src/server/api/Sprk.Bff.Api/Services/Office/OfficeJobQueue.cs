@@ -35,6 +35,11 @@ public class OfficeJobQueue
     /// <summary>
     /// Queues a job to the Service Bus for background processing.
     /// </summary>
+    /// <param name="isVersionSave">Task 029: true only on the version-save path. Stamps
+    /// <see cref="UploadFinalizationPayload.VersionSaveJobId"/> with <paramref name="jobId"/> so the worker refreshes the
+    /// profile and index for this version. False leaves the payload exactly as before (the property is omitted).</param>
+    /// <param name="owningTeamId">Task 080: the owner team <c>SaveAsync</c> resolved for this save's document, handed
+    /// on so the worker's attachment children get the same one. Null for a version save (omitted from the payload).</param>
     public async Task QueueUploadFinalizationAsync(
         Guid jobId,
         string idempotencyKey,
@@ -46,6 +51,8 @@ public class OfficeJobQueue
         string fileName,
         long fileSize,
         Guid documentId,
+        bool isVersionSave,
+        Guid? owningTeamId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
@@ -115,7 +122,9 @@ public class OfficeJobQueue
                     RagIndex = request.TriggerAiProcessing,
                     DeepAnalysis = false
                 },
-            DocumentId = documentId
+            DocumentId = documentId,
+            VersionSaveJobId = isVersionSave ? jobId : null,
+            OwningTeamId = owningTeamId
         };
 
         // Create the job message

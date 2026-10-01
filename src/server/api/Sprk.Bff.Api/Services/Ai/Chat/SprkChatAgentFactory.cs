@@ -1161,7 +1161,11 @@ public class SprkChatAgentFactory
                 agentServiceClient,
                 agentServiceOptions,
                 _logger,
-                tenantId);
+                tenantId,
+                // task 122: scopes the Foundry thread to THIS conversation. It was available here all
+                // along — one parameter away — and the middleware was constructed with tenantId alone,
+                // which is why every user in a tenant shared one agent conversation.
+                sessionId);
         }
 
         // 5. PromptShield (OUTERMOST, F-8) — pre-LLM injection perimeter + per-turn fail-open signal.

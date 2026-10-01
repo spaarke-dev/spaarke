@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Spaarke.Dataverse;
 
 /// <summary>
@@ -8,6 +10,55 @@ public class CreateDocumentRequest
     public required string Name { get; set; }
     public required string ContainerId { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_document</c> — the acting user's business-unit DEFAULT OWNER
+    /// TEAM (owner decision, spaarkeai-word-add-in-r1 task 080). When set, <c>ownerid</c> is assigned to this
+    /// team and <c>owningbusinessunit</c> DERIVES from it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the caller supplies it rather than this library resolving it.</b> Resolving "business unit
+    /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
+    /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
+    /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
+    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
+    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
+    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
+    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
+    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
+    /// unreachable by any child-BU user at Deep depth.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
+    /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
+    /// and so the business unit — that owns the document it creates, including a secure business unit it has no
+    /// access to. The owner is a server-side decision (write-path invariant I-6), never a client input.</para>
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
+    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
+    /// save stamps the <c>sprk_document</c> GUID INTO the bytes it uploads, and on a CREATE the upload
+    /// necessarily precedes the row — so the id has to be known before Dataverse would otherwise mint it. The
+    /// BFF pre-assigns it, stamps it, uploads, and then creates the row WITH that key. The alternatives were
+    /// worse: reordering the save to create-row-before-upload changes when content dedup runs (an explicit
+    /// escalation trigger on that task), and uploading unstamped then writing a second stamped version doubles
+    /// the SPE writes and leaves a window where the stored bytes carry no stamp.</para>
+    /// <para><b>Additive and opt-in.</b> Existing callers are unchanged; this is stated explicitly in the PR
+    /// per root CLAUDE.md §10 because <c>Spaarke.Dataverse</c> is consumed beyond the BFF.</para>
+    /// <para><b>Honest cost.</b> Microsoft's guidance prefers platform-generated sequential GUIDs for
+    /// clustered-index locality. A caller-supplied random GUID is supported but gives that up for these rows —
+    /// a performance note, not a correctness one.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen primary
+    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only the Office save path sets
+    /// it, in server code (task 080 found both properties bindable; neither was intended as a wire field).</para>
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? Id { get; set; }
 }
 
 /// <summary>
@@ -36,16 +87,60 @@ public class CreateDocumentRequest
 /// confirming the column exists — a case that sets a property no column backs produces a Dataverse
 /// write error, and one that is missing produces a silently unassociated document.</para>
 ///
-/// <para>⚠️ <b>Known gaps — deliberately NOT mapped, because the column does not exist:</b>
-/// <c>account</c>, <c>contact</c> and <c>sprk_todo</c>. `account`/`contact` are nonetheless still
-/// ACCEPTED by the Office save endpoint's own allow-list, so a save filed to one of them creates an
-/// unassociated document today. That is a live behaviour gap needing an owner decision (add the
-/// columns, or reject the type at the endpoint) — it is recorded rather than silently changed here,
-/// because rejecting would alter a user-visible flow. <c>sprk_todo</c> was assumed mappable by the
-/// Q4-widening note; it is not, for the same reason.</para>
+/// <para>⚠️ <b>One known gap — deliberately NOT mapped, because no column exists: <c>account</c></b> (removed
+/// from the Office endpoint's allow-list 2026-09-04; see the alias table's remarks). CORRECTED 2026-09-30: this
+/// paragraph used to list <c>contact</c> and <c>sprk_todo</c> as unmapped too — both ARE mapped, to
+/// <c>sprk_relatedcontact</c> / <c>sprk_relatedtodo</c> (added 2026-09-04), as the alias table below shows.</para>
 /// </remarks>
 public static class DocumentAssociationMap
 {
+    /// <summary>
+    /// Every association spelling a caller may send, mapped to the entity's logical name. The ONE alias table:
+    /// <see cref="TryApply"/> resolves through it, and so does record ownership (task 080), which needs the
+    /// target's logical name to read its business unit. Two tables would drift exactly the way the four
+    /// switches this class replaced did.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <c>account</c> is deliberately ABSENT and must stay absent (owner decision, 2026-09-04).
+    /// <c>sprk_document</c> has NO account lookup in EITHER family, so a save filed to an account could only
+    /// ever land unassociated — the user believes it filed and it did not. The type was removed from the
+    /// Office endpoint's allow-list and from AssociationType rather than being accepted-and-dropped.
+    /// Spaarke's organization analogue is <c>sprk_organization</c> (<c>sprk_relatedorganization</c> /
+    /// <c>sprk_relatedvendororg</c> both exist on sprk_document); if "file to an organization" is wanted, add
+    /// THAT — do not re-add <c>account</c>.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> LogicalNameByAlias =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["matter"] = "sprk_matter",
+            ["sprk_matter"] = "sprk_matter",
+            ["project"] = "sprk_project",
+            ["sprk_project"] = "sprk_project",
+            ["invoice"] = "sprk_invoice",
+            ["sprk_invoice"] = "sprk_invoice",
+            ["workassignment"] = "sprk_workassignment",
+            ["sprk_workassignment"] = "sprk_workassignment",
+            ["event"] = "sprk_event",
+            ["sprk_event"] = "sprk_event",
+            // Added 2026-09-04 (unified-access-control-r2). Both columns EXIST and always did; the
+            // 2026-09-03 metadata check missed them because it enumerated only the bare `sprk_{type}`
+            // family and never looked at `sprk_related*`. See UpdateDocumentRequest.TodoLookup /
+            // ContactLookup for the queries that prove it.
+            ["todo"] = "sprk_todo",
+            ["sprk_todo"] = "sprk_todo",
+            ["contact"] = "contact",
+        };
+
+    /// <summary>
+    /// The logical name for an association type in either spelling (<c>matter</c> or <c>sprk_matter</c>), or
+    /// <see langword="null"/> when it is not a type a document can be associated to.
+    /// </summary>
+    public static string? ToLogicalName(string? entityTypeOrAlias) =>
+        !string.IsNullOrWhiteSpace(entityTypeOrAlias)
+        && LogicalNameByAlias.TryGetValue(entityTypeOrAlias.Trim(), out var logicalName)
+            ? logicalName
+            : null;
+
     /// <summary>
     /// Apply <paramref name="recordId"/> to the lookup matching <paramref name="entityTypeOrAlias"/>.
     /// </summary>
@@ -59,49 +154,32 @@ public static class DocumentAssociationMap
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!recordId.HasValue || recordId.Value == Guid.Empty || string.IsNullOrWhiteSpace(entityTypeOrAlias))
+        if (!recordId.HasValue || recordId.Value == Guid.Empty)
             return false;
 
-        switch (entityTypeOrAlias.Trim().ToLowerInvariant())
+        switch (ToLogicalName(entityTypeOrAlias))
         {
-            case "matter":
             case "sprk_matter":
                 request.MatterLookup = recordId;
                 return true;
-            case "project":
             case "sprk_project":
                 request.ProjectLookup = recordId;
                 return true;
-            case "invoice":
             case "sprk_invoice":
                 request.InvoiceLookup = recordId;
                 return true;
-            case "workassignment":
             case "sprk_workassignment":
                 request.WorkAssignmentLookup = recordId;
                 return true;
-            case "event":
             case "sprk_event":
                 request.EventLookup = recordId;
                 return true;
-            // Added 2026-09-04 (unified-access-control-r2). Both columns EXIST and always did; the
-            // 2026-09-03 metadata check missed them because it enumerated only the bare `sprk_{type}`
-            // family and never looked at `sprk_related*`. See UpdateDocumentRequest.TodoLookup /
-            // ContactLookup for the queries that prove it.
-            case "todo":
             case "sprk_todo":
                 request.TodoLookup = recordId;
                 return true;
             case "contact":
                 request.ContactLookup = recordId;
                 return true;
-            // ⚠️ `account` is deliberately ABSENT and must stay absent (owner decision, 2026-09-04).
-            // `sprk_document` has NO account lookup in EITHER family, so a save filed to an account
-            // could only ever land unassociated — the user believes it filed and it did not. The type
-            // was removed from the Office endpoint's allow-list and from AssociationType rather than
-            // being accepted-and-dropped. Spaarke's organization analogue is `sprk_organization`
-            // (`sprk_relatedorganization` / `sprk_relatedvendororg` both exist on sprk_document); if
-            // "file to an organization" is wanted, add THAT — do not re-add `account`.
             default:
                 return false;
         }
@@ -500,11 +578,33 @@ public class DocumentEntity
     /// <summary>Full summary (2-4 paragraphs). Maps to sprk_filesummary.</summary>
     public string? Summary { get; set; }
 
-    /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>
+    /// <summary>
+    /// Comma-separated keywords. Maps to <c>sprk_filekeywords</c> (corrected
+    /// spaarkeai-word-add-in-r1 task 021 — this comment previously said "sprk_keywords", which is
+    /// not a column on <c>sprk_document</c>; the real column is the one
+    /// <c>DataverseServiceClientImpl</c>'s writer and <c>DocumentProfileFieldMapper</c> both already use).
+    /// </summary>
     public string? Keywords { get; set; }
 
-    /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
+    /// <summary>
+    /// Document type classification (e.g., Contract, NDA, Invoice). Maps to <c>sprk_documenttype</c>,
+    /// a Choice (Picklist) column — verified live 2026-09-12. This is the Choice's DISPLAY LABEL
+    /// (from Dataverse's <c>FormattedValues</c>), not free text and not the raw option integer;
+    /// <see cref="DataverseServiceClientImpl.MapToDocumentEntity"/> is the one place that reads it —
+    /// see its remarks for the OptionSetValue-cast regression this comment exists to prevent
+    /// recurring.
+    /// </summary>
     public string? DocumentType { get; set; }
+
+    /// <summary>
+    /// AI profiling status for this document (task 021 / FR-07). Maps to the <c>sprk_filesummarystatus</c>
+    /// Choice column — exactly SEVEN values, verified live: None=100000000, Pending=100000001,
+    /// Completed=100000002, OptedOut=100000003, Failed=100000004, NotSupported=100000005,
+    /// Skipped=100000006. <c>null</c> means the column has never been set on this row (Dataverse
+    /// applies no implicit default), which callers should treat identically to None — profiling has
+    /// not been attempted.
+    /// </summary>
+    public int? SummaryStatus { get; set; }
 
     /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
     public string? Entities { get; set; }

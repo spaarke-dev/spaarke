@@ -97,7 +97,13 @@ describe('ApiClient', () => {
         correlationId: 'correlation-123',
       };
 
-      mockFetch.mockResolvedValueOnce({
+      // `mockResolvedValueOnce` armed a single response, but this test calls `apiClient.get`
+      // TWICE (the `rejects.toThrow` check below, then again to inspect the thrown error's shape).
+      // The second call drained the mock queue and got `undefined` back from `mockFetch`, which
+      // `authenticatedJsonFetch` then dereferenced as `.status` — a TypeError, not the intended
+      // `ApiClientError`. Not a `headers`-shaped gap (the review's inferred diagnosis was wrong for
+      // this suite, task 071) — `mockResolvedValue` (no `Once`) answers every call identically instead.
+      mockFetch.mockResolvedValue({
         ok: false,
         status: 404,
         json: jest.fn().mockResolvedValue(errorResponse),

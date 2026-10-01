@@ -242,7 +242,30 @@ public class ADR010_DITests
         // does NOT substitute it (no double, no second implementation), the interface has no seam,
         // and the correct action is to register the concrete per ADR-010 and drop this ceiling back
         // to 156 — NOT to leave it grandfathered because the number already moved.
-        const int knownOneToOneCeiling = 157;
+        // ───────── Ceiling raised 157 → 158, 2026-09-28 (spaarkeai-word-add-in-r1 task 080) ─────────
+        // IRecordOwnershipResolver -> RecordOwnershipResolver.
+        //
+        // Surfaced by merging master (229 commits) rather than by a new commit here: the interface
+        // has existed on this branch since db046e534, and the ratchet only saw it once master's
+        // ceiling of 157 arrived. The addition is genuinely ours, confirmed by the printed list.
+        //
+        // SEAM JUSTIFICATION, against ADR-010's "unless seam required" exception:
+        //   1. It is a NAMED architectural seam, not incidental indirection. The ADR-002 server-side
+        //      write-path guidance (now on master via #1012) designates
+        //      `Services/Dataverse/RecordOwnershipResolver.cs` the single BFF owner of invariant I-6
+        //      (owner = a business-unit default owner team). WP-1 requires exactly one owner per
+        //      invariant, so the seam is where that ownership is expressed and enforced.
+        //   2. It is a TEST seam with real doubles. The resolution order it implements is
+        //      record-first → REFUSE on a named-but-unreadable target → acting-user fallback →
+        //      REFUSE, and the two refuse branches are secure-record isolation. Those branches must
+        //      be provable without a live Dataverse, which is ADR-010's own testing-seam exception.
+        //   3. Consumers take it as an OPTIONAL dependency so the shared `Spaarke.Dataverse` library
+        //      never depends on a BFF service (create paths there receive an already-resolved team
+        //      id). Registering the concrete instead would push a BFF type across that boundary.
+        //
+        // Not grandfathering a mistake: if task 080 is ever abandoned and the resolver deleted, drop
+        // this ceiling back to 157 rather than leaving the headroom for an unreviewed interface.
+        const int knownOneToOneCeiling = 158;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
