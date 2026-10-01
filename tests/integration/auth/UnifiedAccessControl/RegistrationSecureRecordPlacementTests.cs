@@ -87,16 +87,40 @@ public class RegistrationSecureRecordPlacementTests
         _dataverse.Posts.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task CreateSystemUser_WhenTheSecureRecordLookupFails_IsRefused_FailClosed()
+    /// <summary>
+    /// An unreadable Secure Record lookup refuses (fail closed). The failure carries a REAL Dataverse error body
+    /// (<c>{"error":{...}}</c>), not an empty one: an empty body makes the JSON read throw on its own, so the refusal
+    /// would happen by accident and the non-success-status guard would be unpinned. A Dataverse-shaped body
+    /// deserializes cleanly to "no <c>value</c> collection" — zero matches, i.e. "this environment has no Secure Record
+    /// business unit" — so only the status guard stands between that body and creating the user in the Secure BU
+    /// (verifier finding, task 144 round 2). Both an outage (503) and a permission failure on the lookup (403) refuse.
+    /// </summary>
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task CreateSystemUser_WhenTheSecureRecordLookupFails_IsRefused_FailClosed(HttpStatusCode failure)
     {
-        _dataverse.FailSecureLookup = true;
+        _dataverse.SecureLookupFailure = failure;
 
         var act = () => Service().CreateSystemUserAsync(
             "oid", "Ann", "Lee", "ann@demo.com", "Demo Users", CancellationToken.None, TargetUrl);
 
         await act.Should().ThrowAsync<SecureRecordPlacementRefusedException>();
-        _dataverse.Posts.Should().BeEmpty();
+        _dataverse.Posts.Should().BeEmpty("an unreadable Secure Record lookup cannot rule the business unit out");
+    }
+
+    /// <summary>The team-membership guard fails closed on the same realistic error bodies.</summary>
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task AddUserToTeam_WhenTheSecureRecordLookupFails_IsRefused_FailClosed(HttpStatusCode failure)
+    {
+        _dataverse.SecureLookupFailure = failure;
+
+        var act = () => Service().AddUserToTeamAsync("Demo Team", CreatedUserId, CancellationToken.None, TargetUrl);
+
+        await act.Should().ThrowAsync<SecureRecordPlacementRefusedException>();
+        _dataverse.Posts.Should().BeEmpty("an unreadable Secure Record lookup cannot rule the team's business unit out");
     }
 
     [Fact]
@@ -182,7 +206,8 @@ public class RegistrationSecureRecordPlacementTests
 
         public List<string> SecureLookupHosts { get; } = new();
 
-        public bool FailSecureLookup { get; set; }
+        /// <summary>When set, the Secure Record lookup answers with this status and a Dataverse-shaped error body.</summary>
+        public HttpStatusCode? SecureLookupFailure { get; set; }
 
         public void BusinessUnit(string name, Guid id) => _businessUnits.Add((name, id));
 
@@ -211,8 +236,8 @@ public class RegistrationSecureRecordPlacementTests
                 if (isSecureLookup)
                 {
                     SecureLookupHosts.Add(uri.Host);
-                    if (FailSecureLookup)
-                        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+                    if (SecureLookupFailure is { } failure)
+                        return Task.FromResult(DataverseError(failure));
                 }
 
                 var rows = _businessUnits.Where(b => b.Name == name).Select(b => $"{{\"businessunitid\":\"{b.Id}\"}}");
@@ -239,5 +264,24 @@ public class RegistrationSecureRecordPlacementTests
 
         private static HttpResponseMessage Json(string body) =>
             new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+        /// <summary>
+        /// The error shape the Dataverse Web API actually returns — a JSON object with an <c>error</c> member and no
+        /// <c>value</c> collection. It parses as JSON, so nothing but the caller's status check marks it a failure.
+        /// </summary>
+        private static HttpResponseMessage DataverseError(HttpStatusCode status)
+        {
+            var (code, message) = status == HttpStatusCode.Forbidden
+                ? ("0x80040220", "Principal user is missing prvReadBusinessUnit privilege.")
+                : ("0x80072322", "The service is temporarily unavailable.");
+
+            return new HttpResponseMessage(status)
+            {
+                Content = new StringContent(
+                    $"{{\"error\":{{\"code\":\"{code}\",\"message\":\"{message}\"}}}}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        }
     }
 }

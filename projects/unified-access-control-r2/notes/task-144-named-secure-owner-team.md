@@ -262,3 +262,51 @@ plugin**. One new DI registration was added: the job, through `AddScheduledJob`.
 - **Step 11**: `TASK-INDEX.md` was not edited (the main session owns it), and #967 was not closed (§10.7). The POML status is set to `completed-with-escalation`, the project's existing value for code that is done while an escalation is open.
 - **`RecordType` vocabulary**: the endpoints accept `project | matter | workassignment`, the token set every other route in the group accepts (`ExternalGrantRoot.TryParse`), not the logical names in the POML's parenthetical. One vocabulary per route group; logical names would have needed a second parser.
 - **Status codes**: the new invariant refusals return 500 with a reason code, following the endpoint's existing convention for environment faults (the client classifies by reason code, not status).
+
+---
+
+## 12. Verifier round 2: fixes on `task/uac-r2-144-f1` (2026-10-01)
+
+An adversarial verifier re-ran the suites, seeded 8 perturbations (7 bit) and reviewed the migration script. It found
+one unpinned fail-closed guard, one robustness gap and three items that need a reviewer's explicit word in the PR. Each
+item, and what happened to it:
+
+| # | Verifier item | Outcome |
+|---|---|---|
+| F1 / AC9 | The status guard in `RegistrationDataverseService.EnsureNotSecureRecordBusinessUnitAsync` (`if (!response.IsSuccessStatusCode) throw`) could be deleted with every test green. The fake's failed lookup returned a 503 with an EMPTY body, so `ReadFromJsonAsync` threw on its own. With a real Dataverse error body (`{"error":{...}}`) and the guard removed, the body deserializes to `Value = null`, which reads as zero matches, "no Secure BU", and the user is created in the Secure BU (fail open). | **Fixed (test).** The fake's failure now returns a Dataverse-shaped JSON error body (`SecureLookupFailure` = the status). `CreateSystemUser_WhenTheSecureRecordLookupFails_IsRefused_FailClosed` is a theory over **503 and 403**, and a sibling theory `AddUserToTeam_WhenTheSecureRecordLookupFails_IsRefused_FailClosed` covers the team-membership guard. **Seeded** the guard off (`if (false && …)`): **4/4 red** (both theories × both statuses); restored. The shipped code is unchanged. |
+| F2 | `SecureBuRoleDepthAssertion.Evaluate` and `SecureBuRoleDepthCensusBuilder.Build` picked the Secure BU with `FirstOrDefault`. With two BUs carrying the configured name, only the first was graded, so the job and the manual gate could report isolated. | **Fixed (code).** One shared `SecureBuRoleDepthAssertion.SecureBusinessUnitsNamed`. `Evaluate`: two or more matches give a single finding with the new verdict **`SecureBusinessUnitAmbiguous`** (never a pass, never inert; the job logs it CRITICAL), naming every matching BU id. `Build`: lists users and named teams across EVERY BU bearing the name, so it over-reports rather than hiding the second. Tests: `Evaluate_WhenTwoBusinessUnitsCarryTheSecureName_ReportsAmbiguous_NeverIsolated`, `Build_WhenTwoBusinessUnitsCarryTheSecureName_ListsUsersInEachOfThem_NotJustTheFirst`, and the job test `Run_WhenTwoBusinessUnitsCarryTheSecureName_LogsCriticalAndNeverReportsIsolated`. In each, the second BU is listed AFTER the real one, so first-match grading would pass the clean one. **Seeded** P-B (the evaluator's ambiguity block off, so it grades the first match): **3 red**. P-C (the builder takes `.Take(1)`): **1 red**. Both restored with a fresh timestamp. |
+| F3 | `RecordOwnershipResolver`: a misconfigured `SecureRecord:BusinessUnitName` reads as "no Secure BU", so a child of a secure record resolves to the Secure BU's DEFAULT team. The only Dataverse-side mitigation exists after the live cutover. | **Documented and accepted; no code change.** The resolver's remarks now state the edge explicitly, and that the mitigation exists only after guide §4.3 step 4. PR callout below. |
+| B1 | `RegistrationSecureRecordPlacementTests` uses a hand-written `HttpMessageHandler` (not `Mock<HttpMessageHandler>`), declared a §6.5 path-A exception. | **Needs explicit reviewer sign-off.** PR callout below. The round-2 change keeps the same shape and adds only a realistic error body. |
+| Vocabulary | The POML lists `RecordType` as `sprk_project \| sprk_matter \| sprk_workassignment`. The code accepts the grant-route tokens `project \| matter \| workassignment` (`ExternalGrantRoot.TryParse`; `sprk_project` gets a filter 403). Recorded in §11. | **Needs explicit reviewer acceptance.** PR callout below. No code change. |
+| Escalations (a)–(c) | Assign cascade; F11 premise; NOT-ISOLATED project. | **Still open; re-evaluated read-only today** (below). Not defects. |
+| AC11 / AC12 / AC14 | Live gate; the second `-Apply` run; publish size. | **Not closable here.** AC11 and AC12 wait on the live gate and the owner decisions; AC14 waits on the main session's fresh-master measurement. |
+| Main-session items | TASK-INDEX, close #967, hand-off to word-add-in-r1 (`scripts/Backfill-RecordOwnership.ps1` would choose the Secure BU's default team). | Main session (this branch must not edit TASK-INDEX). |
+
+### Live re-check (READ-ONLY, spaarkedev1, 2026-10-01, after the fixes)
+
+- **Migration dry run** (`Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com`; GET-only before the dry-run exit):
+  - `sharetopreviousowneronassign = False`.
+  - Secure BU `d9ec0b6f`. Default team `daec0b6f`, **0 members**. **0 users** in the Secure BU.
+  - Named team **NOT RESOLVED (0)**. The role is on the **default team**.
+  - 6 Assign-cascade relationships (project/matter → `team`, `sharepointdocumentlocation`, `sharepointdocument`), **NOT ACCEPTED**.
+  - Census, 1 row: project `65a3fab2` is **NOT-ISOLATED**. It is owned by `cb15f587` (Spaarke Business Unit 1's default team), has its own container, no content and 0 shares.
+  - Unprovisioned secure matters or WAs with content: **none** (0 secure matters, 0 secure WAs).
+  - **PLAN 0 rows**; 2 STOPs; exit 2; nothing written.
+- **NFR-05 live census through the round-2 evaluator** (`SPAARKE_NFR05_DATAVERSE_URL`, `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`):
+  - 6 BUs, **exactly one** named `Secure Record` (no ambiguity finding). 282 grants (33 human), 1 owner-role holder, 0 named teams, 0 BU users.
+  - **17 findings, unchanged**:
+    - 1–15, clause 1: **Chelsea Friez** and **Lori Witkin** (`@demo.spaarke.com`; Spaarke Core User + Spaarke Office Add In User) and the hotmail `#EXT#` account (Spaarke Basic User), Deep at root, on project, matter and work assignment.
+    - 16: `SecureOwnerTeamNotResolved`.
+    - 17: `SecureOwnerRoleHeldBeyondOwnerTeam` (the default team).
+- 🔔 **The F11 stop still fires.** The owner's round-3 F11 answer rests on "the only account reaching the Secure BU through role depth is the hotmail `#EXT#` account". The live census says **three** accounts reach it, and that answer does not cover Chelsea Friez or Lori Witkin. Nothing was improvised: no role or user was touched, and no census exception was added. Owner decision needed: remove those roles from Chelsea Friez and Lori Witkin, or narrow the depth of `Spaarke Core User` / `Spaarke Office Add In User` (do not relocate users).
+
+### PR description: items the reviewer must address explicitly
+
+1. **A fail-open edge, accepted on a condition (F3).** With a misconfigured `SecureRecord:BusinessUnitName`, `RecordOwnershipResolver` resolves a child of a secure record to the Secure BU's DEFAULT team. Dataverse refuses that assignment only after the live cutover removes the `Secure Record Owner` role from the default team (guide §4.3 step 4). Until then, the only signals are provisioning's `secure_bu_not_found` refusal and the census job's inert warning.
+2. **ADR-038 B1, §6.5 path-A exception: reviewer sign-off required.** `RegistrationSecureRecordPlacementTests` uses a hand-written scripted `HttpMessageHandler` (precedent: `DataverseRecordShareWireTests`). It asserts only whether the creating POST was sent; request bodies are not asserted. Round 2 makes its failure responses carry a realistic Dataverse error body.
+3. **`RecordType` vocabulary deviation: reviewer acceptance required.** The endpoints take `project | matter | workassignment`, the tokens of the grant routes' `ExternalGrantRoot.TryParse`, as the POML's canonical reference `ResolveGrantRoot` does. They do not take the logical names in the POML constraint; a logical name gets a filter 403. There is no existing client for matter or work assignment.
+
+### Round-2 test scope beyond the stated contract (one line each)
+
+- `AddUserToTeam_WhenTheSecureRecordLookupFails_IsRefused_FailClosed`: the team-membership guard shares the status check F1 found unpinned.
+- The three ambiguity tests: verifier finding F2.

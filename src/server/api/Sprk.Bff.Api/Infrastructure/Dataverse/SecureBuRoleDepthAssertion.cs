@@ -97,15 +97,29 @@ public static class SecureBuRoleDepthAssertion
         + "2026-09-29 rename (task 121) is only half applied — rename the live BU rather than widening "
         + "the name here, and see docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md §3a.";
 
+    /// <summary>
+    /// Every business unit carrying the configured Secure Record name. Exactly one is the only gradeable shape: the
+    /// evaluator and <see cref="SecureBuRoleDepthCensusBuilder"/> both resolve through here, so neither can quietly
+    /// grade the first of two.
+    /// </summary>
+    public static IReadOnlyList<BusinessUnitNode> SecureBusinessUnitsNamed(
+        IReadOnlyList<BusinessUnitNode> businessUnits, string secureBusinessUnitName)
+    {
+        ArgumentNullException.ThrowIfNull(businessUnits);
+
+        return businessUnits
+            .Where(bu => string.Equals(bu.Name, secureBusinessUnitName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+    }
+
     /// <summary>Evaluates the whole NFR-05 assertion against a census read from a live environment.</summary>
     public static SecureBuAssertionOutcome Evaluate(SecureBuRoleDepthCensus census)
     {
         ArgumentNullException.ThrowIfNull(census);
 
-        var secureBu = census.BusinessUnits.FirstOrDefault(
-            bu => string.Equals(bu.Name, census.SecureBusinessUnitName, StringComparison.OrdinalIgnoreCase));
+        var secureBus = SecureBusinessUnitsNamed(census.BusinessUnits, census.SecureBusinessUnitName);
 
-        if (secureBu is null)
+        if (secureBus.Count == 0)
         {
             // The loud NOT-RUN. It is not a pass: Passed is false for this verdict, and the caller is
             // contracted to print the message so the inert state is visible in every run.
@@ -115,6 +129,26 @@ public static class SecureBuRoleDepthAssertion
                     SecureBuVerdict.SecureBusinessUnitNotFound, InertMessageFor(census.SecureBusinessUnitName))
             });
         }
+
+        if (secureBus.Count > 1)
+        {
+            // Task 144 (verifier round 2): two business units carry the configured name. Grading the first would let
+            // the second — which may hold users, or be reached by depth — report "isolated". Provisioning, the
+            // ownership resolver and registration all REFUSE on this ambiguity; the census refuses to render a verdict
+            // the same way, and it is a finding (never inert, never a pass).
+            return new SecureBuAssertionOutcome(new[]
+            {
+                new SecureBuFinding(
+                    SecureBuVerdict.SecureBusinessUnitAmbiguous,
+                    $"{secureBus.Count} business units are named '{census.SecureBusinessUnitName}' "
+                    + $"(SecureRecord:BusinessUnitName): {string.Join(", ", secureBus.Select(bu => $"{bu.Id} (parent {bu.ParentId?.ToString() ?? "none"})"))}. "
+                    + "Which one holds the secure records cannot be decided, so NONE is graded — isolation is UNKNOWN, "
+                    + "not proven. Provisioning, the record-ownership resolver and registration refuse on the same "
+                    + "ambiguity. Rename every business unit that is not the Secure Record BU; do not move users.")
+            });
+        }
+
+        var secureBu = secureBus[0];
 
         // A census with no depth grants at all means the QUERY is wrong, not that the environment is
         // safe: prvReadsprk_Project is held by System Administrator in every environment that has the
@@ -431,16 +465,20 @@ public static class SecureBuRoleDepthCensusBuilder
             }
         }
 
-        var secureBu = businessUnits.FirstOrDefault(
-            bu => string.Equals(bu.Name, secureBusinessUnitName, StringComparison.OrdinalIgnoreCase));
+        // EVERY business unit carrying the configured name — never the first of several (task 144, verifier round 2).
+        // With exactly one this is the Secure Record BU; with two or more the evaluator refuses to grade
+        // (SecureBusinessUnitAmbiguous), and the census still lists users and named teams across ALL of them, so its
+        // summary over-reports rather than hiding whatever sits in the second one.
+        var secureBuIds = SecureBuRoleDepthAssertion.SecureBusinessUnitsNamed(businessUnits, secureBusinessUnitName)
+            .Select(bu => bu.Id)
+            .ToHashSet();
 
-        var namedTeams = secureBu is null
-            ? new List<CensusTeam>()
-            : teams.Where(t => t.BusinessUnitId == secureBu.Id
-                               && !t.IsDefault
-                               && t.TeamType == SecureRecordOwnerTeam.OwnerTeamType
-                               && string.Equals(t.Name, secureOwnerTeamName, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+        var namedTeams = teams
+            .Where(t => secureBuIds.Contains(t.BusinessUnitId)
+                        && !t.IsDefault
+                        && t.TeamType == SecureRecordOwnerTeam.OwnerTeamType
+                        && string.Equals(t.Name, secureOwnerTeamName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
 
         var ownerTeamId = namedTeams.Count == 1 ? namedTeams[0].Id : (Guid?)null;
 
@@ -465,9 +503,10 @@ public static class SecureBuRoleDepthCensusBuilder
             ? namedTeams[0].MemberIds.Select(id => Describe(id, usersById)).ToArray()
             : Array.Empty<string>();
 
-        var secureBuUsers = secureBu is null
-            ? Array.Empty<string>()
-            : users.Where(u => u.BusinessUnitId == secureBu.Id).Select(u => Describe(u.Id, usersById)).ToArray();
+        var secureBuUsers = users
+            .Where(u => u.BusinessUnitId is { } buId && secureBuIds.Contains(buId))
+            .Select(u => Describe(u.Id, usersById))
+            .ToArray();
 
         return new SecureBuRoleDepthCensus(
             secureBusinessUnitName,
@@ -589,9 +628,11 @@ public sealed record SecureOwnerRoleHolder(string PrincipalName, bool IsSecureOw
 /// <param name="BusinessUnits">The BU tree.</param>
 /// <param name="Grants">Every effective grant of a guarded privilege.</param>
 /// <param name="SecureOwnerRoleHolders">Every holder of the owner role.</param>
-/// <param name="SecureOwnerTeamMatches">How many non-default Owner teams in the secure BU carry the configured name.</param>
+/// <param name="SecureOwnerTeamMatches">How many non-default Owner teams in the secure BU carry the configured name
+/// (across every BU bearing the secure name, when that name is ambiguous).</param>
 /// <param name="SecureOwnerTeamMembers">Every member of the named team, of any kind (empty unless it resolved).</param>
-/// <param name="SecureBusinessUnitUsers">Every systemuser in the secure BU, of any kind.</param>
+/// <param name="SecureBusinessUnitUsers">Every systemuser in the secure BU, of any kind (across every BU bearing the
+/// secure name, when that name is ambiguous).</param>
 public sealed record SecureBuRoleDepthCensus(
     string SecureBusinessUnitName,
     string SecureOwnerTeamName,
@@ -630,7 +671,13 @@ public enum SecureBuVerdict
     SecureBusinessUnitHasUsers,
 
     /// <summary>The named owner team is missing or ambiguous (task 144).</summary>
-    SecureOwnerTeamNotResolved
+    SecureOwnerTeamNotResolved,
+
+    /// <summary>
+    /// Two or more business units carry the configured Secure Record name, so none is graded (task 144). Never a pass
+    /// and never inert — isolation is unknown.
+    /// </summary>
+    SecureBusinessUnitAmbiguous
 }
 
 /// <summary>One violation, with the operator-actionable message that belongs in the log.</summary>
@@ -661,9 +708,10 @@ public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Fin
         SecureBuVerdict.AdministrativeRoleHeldByTeam => 3,
         SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam => 4,
         SecureBuVerdict.SecureOwnerTeamNotResolved => 5,
-        SecureBuVerdict.VacuousCensus => 6,
-        SecureBuVerdict.SecureBusinessUnitNotFound => 7,
-        _ => 8
+        SecureBuVerdict.SecureBusinessUnitAmbiguous => 6,
+        SecureBuVerdict.VacuousCensus => 7,
+        SecureBuVerdict.SecureBusinessUnitNotFound => 8,
+        _ => 9
     };
 
     /// <summary>

@@ -266,5 +266,42 @@ What does NOT change here: the child re-own itself and the owner role's child pr
       Also hand off to word-add-in-r1: scripts/Backfill-RecordOwnership.ps1 would choose the Secure BU's default team for
       rows there and should route it to the named team.
     </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-144-f1" round="verifier-2">
+      COMPLETED-WITH-ESCALATION (unchanged): every verifier finding closable without a live write is closed. Full record:
+      notes/task-144-named-secure-owner-team.md §12.
+
+      F1 / AC9 (the unpinned fail-closed guard). FIXED IN THE TEST. RegistrationSecureRecordPlacementTests' failed Secure BU
+      lookup now returns a Dataverse-shaped JSON error body, not an empty one. The fail-closed case is a theory over 503
+      and 403, and a sibling theory covers AddUserToTeamAsync. Seeding the status guard off turns 4/4 red. Shipped code
+      unchanged.
+
+      F2 (FirstOrDefault on the Secure BU name). FIXED IN CODE. A shared SecureBusinessUnitsNamed. Evaluate turns two or
+      more matches into one SecureBusinessUnitAmbiguous finding: never a pass, never inert, CRITICAL in the job. Build
+      lists users and named teams across every matching BU. Three tests (evaluator, builder, job). Seeds: the evaluator
+      grading the first match turns 3 red; the builder's .Take(1) turns 1 red.
+
+      F3 (resolver fail-open edge on a misconfigured BU name). ACCEPTED AND DOCUMENTED. The resolver's remarks now state
+      that the Dataverse-side mitigation exists only after guide §4.3 step 4. PR callout in note §12.
+
+      B1 (§6.5 path-A) and the RecordType vocabulary. Need explicit reviewer sign-off and acceptance in the PR (note §12
+      callouts 2 and 3).
+
+      LIVE (READ-ONLY) re-check. Dry run: plan 0 rows, 2 STOPs (named team missing; cascade not accepted), 65a3fab2
+      NOT-ISOLATED, sharetopreviousowneronassign false, 0 BU users, 0 default-team members, 0 secure matters or WAs.
+      NFR-05: one Secure BU (no ambiguity), 17 findings, unchanged. 🔔 F11 STOP STILL FIRES: Chelsea Friez and Lori
+      Witkin reach the Secure BU at Deep, in addition to the hotmail #EXT# account the owner's F11 answer covers. No
+      role or user was touched.
+
+      PLACEMENT / JUSTIFICATION (§10/§11). No new service, DI registration, endpoint, option, job or package. New surface
+      is one public static helper (SecureBuRoleDepthAssertion.SecureBusinessUnitsNamed) and one enum member
+      (SecureBuVerdict.SecureBusinessUnitAmbiguous), both in the existing evaluator.
+        existing = the two inline FirstOrDefault lookups it replaces.
+        extension = it IS those lookups, made one.
+        cost = two BUs with the secure name grade as isolated.
+
+      STILL OPEN. AC11 (live gate: owner decisions (a)-(c), then deploy). AC12 (second -Apply run: live gate). AC14
+      (publish size: the main session, fresh master). TASK-INDEX and #967 (main session). Hand-off to word-add-in-r1
+      (main session).
+    </outcome>
   </execution>
 </task>

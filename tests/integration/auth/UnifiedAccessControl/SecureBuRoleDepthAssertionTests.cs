@@ -313,7 +313,49 @@ public class SecureBuRoleDepthAssertionTests
         outcome.Message.Should().Contain("DEFAULT team");
     }
 
+    /// <summary>
+    /// Two business units carry the configured Secure Record name (task 144, verifier round 2). The census around the
+    /// FIRST one is clean, so an evaluator that graded the first match would report isolated while the second — which
+    /// could hold users or be reached by depth — went unexamined. Provisioning, the resolver and registration refuse on
+    /// this ambiguity; the assertion must too: a finding naming both, never a pass and never inert.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTwoBusinessUnitsCarryTheSecureName_ReportsAmbiguous_NeverIsolated()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            businessUnits: BusinessUnits.Append(new BusinessUnitNode(SecondSecureNamedBu, "Secure Record", SiblingBu)).ToArray()));
+
+        outcome.Passed.Should().BeFalse("which business unit holds the secure records cannot be decided");
+        outcome.IsInert.Should().BeFalse("an ambiguous secure BU is an unknown isolation state, not an absent one");
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureBusinessUnitAmbiguous);
+        outcome.Message.Should().Contain(SecureBu.ToString()).And.Contain(SecondSecureNamedBu.ToString());
+    }
+
     // ── The shared census builder (the job and the live gate compose through it) ─────────────────────
+
+    /// <summary>
+    /// The builder's half of the ambiguity rule: with two business units carrying the secure name it lists the users
+    /// of BOTH, not of whichever came first — the census over-reports rather than hiding the second unit.
+    /// </summary>
+    [Fact]
+    public void Build_WhenTwoBusinessUnitsCarryTheSecureName_ListsUsersInEachOfThem_NotJustTheFirst()
+    {
+        var userInSecond = Guid.NewGuid();
+        var someRole = Guid.NewGuid();
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits.Append(new BusinessUnitNode(SecondSecureNamedBu, "Secure Record", SiblingBu)).ToArray(),
+            new Dictionary<(Guid, string), PrivilegeDepth> { [(someRole, "prvReadsprk_Project")] = PrivilegeDepth.Basic },
+            new[] { new CensusRole(someRole, "Spaarke Basic User", RootBu, someRole) },
+            new[] { new CensusUser(userInSecond, "Second Unit User", "second@spaarke.com", IsHuman: true, SecondSecureNamedBu, new[] { someRole }) },
+            Array.Empty<CensusTeam>());
+
+        census.SecureBusinessUnitUsers.Should().ContainSingle().Which.Should().Contain("Second Unit User");
+        SecureBuRoleDepthAssertion.Evaluate(census).Verdict.Should().Be(SecureBuVerdict.SecureBusinessUnitAmbiguous);
+    }
 
     /// <summary>
     /// The builder decides which team is THE owner team: the non-default Owner team with the configured name in the
@@ -873,6 +915,9 @@ public class SecureBuRoleDepthAssertionTests
     private static readonly Guid RootBu = Guid.Parse("00000000-0000-0000-0000-0000000000a0");
     private static readonly Guid SecureBu = Guid.Parse("00000000-0000-0000-0000-0000000000b0");
     private static readonly Guid SiblingBu = Guid.Parse("00000000-0000-0000-0000-0000000000c0");
+
+    /// <summary>A second business unit that also carries the secure name — listed AFTER the real one.</summary>
+    private static readonly Guid SecondSecureNamedBu = Guid.Parse("00000000-0000-0000-0000-0000000000d0");
 
     /// <summary>Root, with the secure BU and an ordinary BU as siblings beneath it — the live dev shape.</summary>
     private static readonly BusinessUnitNode[] BusinessUnits =

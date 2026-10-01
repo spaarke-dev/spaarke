@@ -347,6 +347,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// still not silent: provisioning refuses with <c>secure_bu_not_found</c>, the census job reports the BU missing,
     /// and once the setup-guide cutover has removed the role from the default team, Dataverse refuses any assignment
     /// to it.</para>
+    /// <para><b>Documented fail-open edge — until the live cutover.</b> With a misconfigured
+    /// <c>SecureRecord:BusinessUnitName</c>, a child filed to a secure record resolves to the Secure Record BU's
+    /// DEFAULT team. Of the three mitigations above, only the last makes Dataverse refuse that assignment, and it exists
+    /// only after guide §4.3 step 4 (the <c>Secure Record Owner</c> role removed from the default team). Before that
+    /// step, the assignment succeeds and is visible only through the provisioning refusal and the census job's inert
+    /// warning. Accepted by the task-144 verifier (round 2) on that condition; the PR names it.</para>
     /// </remarks>
     private async Task<Guid?> ResolveOwnerTeamForBusinessUnitAsync(Guid businessUnitId, CancellationToken ct)
     {

@@ -168,6 +168,26 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("heartbeat status=inert"));
     }
 
+    /// <summary>
+    /// A second business unit carrying the secure name, listed AFTER the real one, holding a user. A job that graded the
+    /// first match would report this directory isolated; it must log CRITICAL and not pass (task 144, verifier round 2).
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenTwoBusinessUnitsCarryTheSecureName_LogsCriticalAndNeverReportsIsolated()
+    {
+        var secondSecureNamed = Guid.NewGuid();
+        _directory.BusinessUnit(secondSecureNamed, SecureRecordOwnerTeam.DefaultBusinessUnitName, SiblingBu);
+        _directory.User(Guid.NewGuid(), "Second Unit User", secondSecureNamed, accessMode: 0, isDisabled: false, isApplication: false);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse("which business unit holds the secure records cannot be decided");
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical
+                                           && e.Message.Contains(nameof(SecureBuVerdict.SecureBusinessUnitAmbiguous))
+                                           && e.Message.Contains(secondSecureNamed.ToString()));
+        _log.Entries.Should().NotContain(e => e.Message.Contains("heartbeat status=isolated"));
+    }
+
     [Fact]
     public async Task Run_WhenTheCensusCannotBeRead_ThrowsAfterItsHeartbeat_SoTheSchedulerRetries()
     {
