@@ -33,7 +33,8 @@ public class ExternalModuleRegistryTests
         RecordEntity = ProjectEntity,
         RecordIdAttribute = ProjectIdAttr,
         AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
-        ReadableColumns = new HashSet<string> { ProjectIdAttr },
+        PrimaryNameAttribute = "sprk_projectnumber",
+        ReadableColumns = new HashSet<string> { ProjectIdAttr, "sprk_projectnumber" },
     };
 
     private static CallerPrincipal Ciam(params Guid[] projects) => new()
@@ -109,7 +110,8 @@ public class ExternalModuleRegistryTests
             RecordEntity = "sprk_matter",
             RecordIdAttribute = "sprk_matterid",
             AccessibleRecordIds = _ => new HashSet<Guid>(),
-            ReadableColumns = new HashSet<string> { "sprk_matterid" },
+            PrimaryNameAttribute = "sprk_matternumber",
+            ReadableColumns = new HashSet<string> { "sprk_matterid", "sprk_matternumber" },
         });
 
         registry.Modules.Should().HaveCount(2);
@@ -139,7 +141,8 @@ public class ExternalModuleRegistryTests
             RecordEntity = ProjectEntity, // same entity → a Tier-2 predicate collision is a wiring bug
             RecordIdAttribute = ProjectIdAttr,
             AccessibleRecordIds = _ => new HashSet<Guid>(),
-            ReadableColumns = new HashSet<string> { ProjectIdAttr },
+            PrimaryNameAttribute = "sprk_projectnumber",
+            ReadableColumns = new HashSet<string> { ProjectIdAttr, "sprk_projectnumber" },
         });
         act.Should().Throw<InvalidOperationException>()
             .WithMessage("*already registered*", "the refusal must be the duplicate-entity one, not a column-list one");
@@ -261,9 +264,10 @@ public class ExternalModuleRegistryTests
             new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
             new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
         },
+        PrimaryNameAttribute = "sprk_documentname",
         ReadableColumns = new HashSet<string>
         {
-            "sprk_documentid", "sprk_project", "sprk_matter", "sprk_workassignment",
+            "sprk_documentid", "sprk_documentname", "sprk_project", "sprk_matter", "sprk_workassignment",
         },
     };
 

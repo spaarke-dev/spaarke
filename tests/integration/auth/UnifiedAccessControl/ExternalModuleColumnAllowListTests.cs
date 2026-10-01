@@ -83,11 +83,14 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     /// <summary>A documents module identical in scope and columns to the production one.</summary>
     private static ExternalModuleDescriptor DocumentsModule() => DocumentsModuleWithColumns(DocumentColumns);
 
-    /// <summary>The same module with an arbitrary column list — <c>null</c> is passed through as-is.</summary>
-    private static ExternalModuleDescriptor DocumentsModuleWithColumns(IReadOnlySet<string>? columns) => new()
+    /// <summary>The same module with an arbitrary column list — <c>null</c> is passed through as-is — and,
+    /// optionally, an arbitrary primary-name declaration (default: the live <c>sprk_documentname</c>).</summary>
+    private static ExternalModuleDescriptor DocumentsModuleWithColumns(
+        IReadOnlySet<string>? columns, string primaryName = "sprk_documentname") => new()
     {
         Name = "documents",
         RecordEntity = DocumentEntity,
+        PrimaryNameAttribute = primaryName,
         ScopeDimensions = new[]
         {
             new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
@@ -103,6 +106,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         RecordEntity = ProjectEntity,
         RecordIdAttribute = "sprk_projectid",
         AccessibleRecordIds = p => p.GetAccessibleProjectIds().ToHashSet(),
+        PrimaryNameAttribute = "sprk_projectnumber",
         ReadableColumns = new HashSet<string> { "sprk_projectid", "sprk_projectname", "sprk_projectnumber" },
     };
 
@@ -554,6 +558,7 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         { "blank entry", new HashSet<string>(DocumentColumns) { " " } },
         { "missing scope attribute sprk_matter", new HashSet<string>(DocumentColumns.Where(c => c != "sprk_matter")) },
         { "missing primary id", new HashSet<string>(DocumentColumns.Where(c => c != "sprk_documentid")) },
+        { "missing primary name", new HashSet<string>(DocumentColumns.Where(c => c != "sprk_documentname")) },
     };
 
     [Theory]
@@ -563,6 +568,45 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         var act = () => new ExternalModuleRegistry().Register(DocumentsModuleWithColumns(columns));
 
         act.Should().Throw<InvalidOperationException>(reason).WithMessage("*ReadableColumns*");
+    }
+
+    /// <summary>
+    /// The verifier's partial on criterion 8: a list holding the primary id but NOT the primary name would
+    /// strip the no-<c>$select</c> /record projection to an id-only record. Pins the exact refusal (and the
+    /// column it names), so the generic "*ReadableColumns*" match above cannot be satisfied by another rule.
+    /// </summary>
+    [Fact]
+    public void Register_WhenTheListLacksTheDeclaredPrimaryName_ThrowsNamingThePrimaryName()
+    {
+        var withoutName = new HashSet<string>(DocumentColumns.Where(c => c != "sprk_documentname"));
+
+        var act = () => new ExternalModuleRegistry().Register(DocumentsModuleWithColumns(withoutName));
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*primary-name attribute 'sprk_documentname'*");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    public void Register_WhenThePrimaryNameIsNotDeclared_Throws(string? primaryName)
+    {
+        // Fail-closed: an undeclared primary name cannot be checked against the list, so it is refused,
+        // never read as "no name column needed".
+        var act = () => new ExternalModuleRegistry().Register(DocumentsModuleWithColumns(DocumentColumns, primaryName!));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*must declare its PrimaryNameAttribute*");
+    }
+
+    [Fact]
+    public void Register_WhenTheDeclaredPrimaryNameIsOnTheListInAnotherCase_Accepts()
+    {
+        // The list is case-insensitive (Dataverse logical names are lower-case; a declaration's casing
+        // must not turn a correct list into a startup failure).
+        var act = () => new ExternalModuleRegistry().Register(DocumentsModuleWithColumns(DocumentColumns, "SPRK_DocumentName"));
+
+        act.Should().NotThrow();
     }
 
     public static TheoryData<string> PointerColumns
@@ -594,8 +638,10 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
     // ═════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// The live primary-name attribute of every module entity (EntityDefinitions, 2026-09-30). The no-$select
-    /// /record projection is primary id + primary name; registration checks the id, this pins the name.
+    /// The live primary-name attribute of every module entity (EntityDefinitions, 2026-09-30; re-read
+    /// read-only and unchanged on the criterion-8 follow-up). The no-$select /record projection is primary
+    /// id + primary name; registration checks the list holds the id and the DECLARED name, this pins each
+    /// declaration to the live metadata (a wrong declaration would make the registration check vacuous).
     /// </summary>
     public static TheoryData<string, string> LivePrimaryNames => new()
     {
@@ -629,8 +675,19 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         var module = ProductionRegistry().FindByEntity(entity);
 
         module.Should().NotBeNull($"'{entity}' is a registered external module");
-        module!.ReadableColumns.Should().Contain(primaryName, "the no-$select /record projection must not be blanked");
+        module!.PrimaryNameAttribute.Should().Be(primaryName, "the declaration must match live EntityDefinitions");
+        module.ReadableColumns.Should().Contain(primaryName, "the no-$select /record projection must not be blanked");
         module.ReadableColumns.Should().NotIntersectWith(ExternalModuleRegistry.PointerColumns);
+    }
+
+    [Fact]
+    public void ProductionRegistry_EveryRegisteredModule_HasItsPrimaryNamePinnedToLiveMetadata()
+    {
+        // A module added later must join LivePrimaryNames (read from EntityDefinitions), or its declared
+        // primary name is unverified and the Register check above proves nothing for it.
+        var pinned = LivePrimaryNames.Select(row => (string)row[0]).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        ProductionRegistry().Modules.Select(m => m.RecordEntity).Should().BeSubsetOf(pinned);
     }
 
     [Theory]

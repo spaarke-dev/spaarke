@@ -231,7 +231,8 @@ public static class ExternalAccessModule
         // ViewSelector offers AND that can render rows today, i.e. one that projects a scope-dimension
         // attribute (a view that projects none returns 0 rows after ScopeRows, so it shows nothing today
         // and contributes no column); (c) the scope-dimension attributes; (d) the /record default
-        // projection (primary id + primary name, from EntityDefinitions). No live grid or view references
+        // projection (primary id + primary name, from EntityDefinitions — each descriptor DECLARES its
+        // PrimaryNameAttribute and Register refuses a list missing either). No live grid or view references
         // a pointer column, an alias or an aggregate. Full table: projects/unified-access-control-r2/
         // notes/task-134-external-module-column-allow-list.md. ⚠️ Changing a grid configuration or a main
         // view to show a new column now REQUIRES adding the column here — otherwise that grid gets a 400.
@@ -244,6 +245,7 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_project",
             RecordIdAttribute = "sprk_projectid",
             AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            PrimaryNameAttribute = "sprk_projectnumber",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
@@ -277,6 +279,7 @@ public static class ExternalAccessModule
             // each renders 0 rows today and contributes no column (they would add AI-triage columns —
             // classification, invoice hints — that no external caller can currently see). Primary name =
             // sprk_documentname. No pointer column (sprk_graphdriveid / sprk_graphitemid / sprk_filepath …).
+            PrimaryNameAttribute = "sprk_documentname",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
@@ -298,6 +301,7 @@ public static class ExternalAccessModule
             },
             // Grid 3ff4102c + view "Invoice - Matter Context" b9f6d045 (the only sprk_invoice main view that
             // projects a scope lookup, sprk_matter). Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
@@ -318,6 +322,7 @@ public static class ExternalAccessModule
             AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
             // Grid 42f4102c + views "Active Work Assignments" c8391ddf, "Inactive Work Assignments"
             // d73b2239, "My Work to Assign" b7cf5593. Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
@@ -338,6 +343,7 @@ public static class ExternalAccessModule
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
             // Grid 583a2a33 + views "Active Matters" 3ba2301f, "My Matters" 6c3c5d88, "All Matters"
             // 694cd4b7. Primary name = sprk_matternumber.
+            PrimaryNameAttribute = "sprk_matternumber",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "statecode",
@@ -362,6 +368,7 @@ public static class ExternalAccessModule
             // Grid 403e5d37 only: the one sprk_servicerequest main view ("Inactive Service Requests")
             // does not project the scope attribute sprk_requestedby, so it renders 0 rows today.
             // Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
@@ -387,6 +394,7 @@ public static class ExternalAccessModule
             // `retrieveRecord('sprk_gridconfiguration', configId, ['sprk_configjson'])`
             // (Spaarke.UI.Components DataGrid.tsx fetchConfigRecord) + the /record default projection.
             // No external grid lists grid configurations. Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
             ReadableColumns = new HashSet<string>
             {
                 "sprk_gridconfigurationid", "sprk_name", "sprk_configjson",

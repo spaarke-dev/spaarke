@@ -94,6 +94,18 @@ public sealed class ExternalModuleDescriptor
     /// dimension matches. Use for child modules that roll up to more than one kind of root.</summary>
     public IReadOnlyList<ScopeDimension>? ScopeDimensions { get; init; }
 
+    /// <summary>
+    /// The primary-NAME attribute of <see cref="RecordEntity"/> (Dataverse
+    /// <c>EntityDefinitions.PrimaryNameAttribute</c>) — e.g. <c>sprk_projectnumber</c>, NOT
+    /// <c>sprk_projectname</c>. Unified-access-control-r2 task 134: the no-<c>$select</c> <c>/record</c>
+    /// read projects primary id + primary name, so <see cref="ExternalModuleRegistry.Register"/> refuses a
+    /// descriptor whose <see cref="ReadableColumns"/> lacks it (otherwise the default projection is stripped
+    /// to an id-only record). It is metadata, not derivable from the entity name, so each descriptor
+    /// declares it and <c>ExternalModuleColumnAllowListTests</c> pins every production declaration against
+    /// the live metadata.
+    /// </summary>
+    public required string PrimaryNameAttribute { get; init; }
+
     private readonly IReadOnlySet<string>? _readableColumns;
 
     /// <summary>
@@ -111,7 +123,8 @@ public sealed class ExternalModuleDescriptor
     /// </para>
     /// <para>
     /// Required, and validated at <see cref="ExternalModuleRegistry.Register"/>: non-empty, contains every
-    /// scope-dimension attribute and the primary-id attribute, and contains no SPE/Graph pointer column
+    /// scope-dimension attribute, the primary-id attribute and the declared
+    /// <see cref="PrimaryNameAttribute"/>, and contains no SPE/Graph pointer column
     /// (<see cref="ExternalModuleRegistry.PointerColumns"/>). Compared case-insensitively — the value is
     /// copied into an <see cref="StringComparer.OrdinalIgnoreCase"/> set on init, whatever comparer the
     /// caller's set used. A <c>null</c> value is kept as null so <c>Register</c> can refuse it (fail-closed:
@@ -357,11 +370,13 @@ public sealed class ExternalModuleRegistry
     ///   <c>ScopeRows</c> needs it projected, so a module that could not read it would return nothing;</item>
     ///   <item>a list missing the primary-id attribute (<c>{RecordEntity}id</c>) — the first column of the
     ///   no-<c>$select</c> default projection, and the key every grid row is identified by;</item>
+    ///   <item>a blank <see cref="ExternalModuleDescriptor.PrimaryNameAttribute"/> declaration, or a list
+    ///   missing it — the second column of that default projection;</item>
     ///   <item>any <see cref="PointerColumns"/> entry.</item>
     /// </list>
-    /// The primary-NAME attribute (the other default-projection column) is metadata, not derivable from
-    /// the descriptor; each production list's primary name is pinned against the live metadata by
-    /// <c>ExternalModuleColumnAllowListTests</c> instead.
+    /// The primary name is metadata, not derivable from the entity name, so the descriptor declares it and
+    /// <c>ExternalModuleColumnAllowListTests</c> pins each production declaration against the live
+    /// <c>EntityDefinitions.PrimaryNameAttribute</c>.
     /// </summary>
     private static void ValidateReadableColumns(
         ExternalModuleDescriptor descriptor, IReadOnlyList<ScopeDimension> dimensions)
@@ -397,6 +412,21 @@ public sealed class ExternalModuleRegistry
             throw new InvalidOperationException(
                 $"External module '{descriptor.Name}' ReadableColumns must include the primary-id attribute " +
                 $"'{primaryId}' (part of the /record default projection).");
+        }
+
+        var primaryName = descriptor.PrimaryNameAttribute;
+        if (string.IsNullOrWhiteSpace(primaryName))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' must declare its PrimaryNameAttribute " +
+                "(EntityDefinitions.PrimaryNameAttribute of the record entity) so ReadableColumns can be " +
+                "checked against the /record default projection.");
+        }
+        if (!columns.Contains(primaryName))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' ReadableColumns must include the primary-name attribute " +
+                $"'{primaryName}' (part of the /record default projection).");
         }
 
         var pointers = columns.Where(PointerColumns.Contains).ToList();

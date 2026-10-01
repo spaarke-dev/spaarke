@@ -92,11 +92,13 @@ sprk_containername, sprk_driveitemid, sprk_parentgraphitemid, sprk_parentfolderi
   `src/client/external-spa/src/widgets/GridWidgetBody.tsx` would let every allow-list shrink to its grid
   config plus scope plus default. That removes, for example, `ownerid`, `sprk_assignedto` and
   `sprk_visibilitystate` from external reach.
-- **D2: the primary-name check lives in a test, not in `Register`.** The constraint allows one new
-  descriptor property. The primary-name attribute is metadata that the descriptor cannot derive.
-  `Register` enforces the primary id (`{RecordEntity}id`, the Dataverse convention, true for all seven).
-  `ExternalModuleColumnAllowListTests.ProductionModule_ForEachRegisteredEntity_ReadsTheLivePrimaryNameAndNoPointer`
-  pins each production list's primary name against the live `EntityDefinitions` values above.
+- **D2 (SUPERSEDED by the criterion-8 follow-up, §8): the primary-name check lived in a test, not in
+  `Register`.** The original reasoning: the constraint allowed one new descriptor property and the
+  primary name is metadata the descriptor cannot derive, so `Register` enforced only the primary id and a
+  live-metadata test pinned each production list's primary name. The verifier ruled criterion 8 only
+  PARTIALLY met on exactly this point; the follow-up adds a second descriptor property
+  (`PrimaryNameAttribute`) and moves the check into `Register`. The live-metadata pin test is kept and now
+  pins the DECLARATION.
 - **D3: `/record` strips the synthetic `id` key.** `RecordService` echoes `entity.Id` as `"id"`. The
   criterion says "only allow-listed keys", and the primary-id column carries the same value, so the
   strip removes `"id"`. The only external `/record` caller reads `sprk_configjson`.
@@ -212,3 +214,62 @@ an existing non-admin workforce test user:
 
 Expected visible change: picking an internal sibling view in a ViewSelector that already showed no
 rows (e.g. Documents → "All Documents") now shows an error state instead of an empty grid (D1).
+
+## 8. Criterion-8 follow-up (verifier: PARTIALLY met) — 2026-09-30
+
+**Finding.** `Register` (`ValidateReadableColumns`) enforced the primary id (`{RecordEntity}id`) but not the
+primary NAME, the other column of the no-`$select` `/record` default projection. A future descriptor whose
+list omitted its primary name would start cleanly and strip every default `/record` read to an id-only
+record; only the production pin test would notice, and only for the seven entities in its table.
+
+**Fix.**
+- `ExternalModuleDescriptor.PrimaryNameAttribute` — a second `required` property (supersedes D2's
+  one-property reading of the CLAUDE.md §11 constraint; directed by the verifier, still no new type,
+  service, registry or filter).
+- `Register` now refuses at startup: an undeclared (null / blank) `PrimaryNameAttribute`, and a
+  `ReadableColumns` that lacks the declared name — in addition to the existing refusals.
+- All seven production descriptors declare it. **Live re-verification (READ-ONLY, `EntityDefinitions`
+  `$select=LogicalName,PrimaryIdAttribute,PrimaryNameAttribute`, spaarkedev1, 2026-09-30):**
+
+  | Entity | Primary id | Primary name |
+  |---|---|---|
+  | sprk_project | sprk_projectid | sprk_projectnumber |
+  | sprk_document | sprk_documentid | sprk_documentname |
+  | sprk_invoice | sprk_invoiceid | sprk_name |
+  | sprk_workassignment | sprk_workassignmentid | sprk_name |
+  | sprk_matter | sprk_matterid | sprk_matternumber |
+  | sprk_servicerequest | sprk_servicerequestid | sprk_name |
+  | sprk_gridconfiguration | sprk_gridconfigurationid | sprk_name |
+
+  Identical to §2's original derivation; no allow-list content changed.
+- The live-metadata pin test is kept and now also asserts each DECLARATION equals the live value (a
+  wrong declaration would make the `Register` check vacuous). A new fact fails if any registered module
+  is missing from the pin table, so a new module (e.g. task 056's three) cannot skip the live check.
+
+**New tests** (`ExternalModuleColumnAllowListTests`): seeded descriptor missing the name column throws at
+`Register` (theory row `missing primary name` + an exact-message fact naming `'sprk_documentname'`);
+undeclared name `null` / `""` / `"  "` throws; a case-differing declaration is accepted;
+`ProductionRegistry_EveryRegisteredModule_HasItsPrimaryNamePinnedToLiveMetadata`. Existing test
+descriptors (`ExternalModuleRegistryTests`, this file) declare the name and carry it on their lists.
+
+**Perturbations, all reverted (`git diff` re-checked):**
+
+| Seeded violation | Tests turned red |
+|---|---|
+| P5: primary-name membership check disabled | 2 (`missing primary name` row, `…LacksTheDeclaredPrimaryName…`) |
+| P6: undeclared-name check disabled | 3 (`…PrimaryNameIsNotDeclared…` ×3) |
+| P7: production `sprk_project` declared as `sprk_projectname` (on the list, wrong per metadata) | 1 (pin test, `sprk_project`) |
+| P8: `sprk_projectnumber` removed from the production project list | every production-registry test — the app refuses to start (`Register` throws in the fixture) |
+
+**Runs (2026-09-30, after all perturbations reverted):**
+
+| Run | Result |
+|---|---|
+| Affected classes (`ExternalModuleColumnAllowListTests`, `ExternalModuleRegistryTests`, `FetchXmlGuardSelfJoinTests`, `ExternalScopeCharacterizationTests`) | 117/117 passed |
+| Full `tests/unit/Sprk.Bff.Api.Tests` | 13,120 passed, 0 failed, 56 skipped (13,176 total; +7 new cases) |
+| `tests/Spaarke.ArchTests` | 337/337 passed |
+
+Publish size skipped per run instructions (main session measures after merge). No NuGet change.
+
+**Owner question (open, no client change): D1 / ViewSelector.** Recorded in the POML notes — whether
+external grids should set `showViewSelector={false}`, which would let every allow-list shrink.

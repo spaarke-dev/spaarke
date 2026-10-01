@@ -380,7 +380,9 @@ public static class ExternalModuleDataEndpoints
         try
         {
             // No $select ⇒ RecordService projects primary id + primary name, both on every module's list
-            // (registration + ExternalModuleColumnAllowListTests). The strip is defence in depth either way.
+            // (Register refuses a list missing the primary id or the declared PrimaryNameAttribute;
+            // ExternalModuleColumnAllowListTests pins each declaration to live metadata). The strip is
+            // defence in depth either way.
             var record = await readRecord(entityLogicalName, id, selectFields, ct).ConfigureAwait(false);
             return Results.Ok(StripToReadableColumns(record, module.ReadableColumns, keepLogicalName: false, out _));
         }
