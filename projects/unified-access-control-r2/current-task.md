@@ -4,6 +4,24 @@
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
 >
+> **PROGRESS after the handoff (2026-10-01, post-compact):**
+> - **Step 1 done.** On the merged branch, ArchTests are 337/0 and the unit suite is 13,189 passed, 0 failed, 54 skipped. Integration projects build clean.
+> - **Step 7 done.** The peer confirmed it has no doubles; the Office contract test was already migrated by 151.
+> - **Master publish baseline** (the size step): `C:\wt27m` @ `c08ef6013` is **45.46 MB / 212 files** (Compress-Archive Optimal, incl. PDBs, zip at `C:\tmp\pubsize\master.zip`). The branch side is still pending (after the 130b merge).
+> - **Housekeeping done:** `25eee2074` makes all 152 POMLs valid XML (0 errors).
+> - **Worktrees:** `wf_921a992b-425-1/2` were removed. `wf_921a992b-425-3` and `wf_aa385556-714-*` are still locked by another process.
+> - **Step 8 LAUNCHED early:** workflow `wd4apuq7r`, run `wf_fe3801ba-d23` (script under `workflows/scripts/uac-batch2-execute-*.js`). It runs four lanes, `109→135→136`, `141`, `144→145` and `155`. Each task gets an executor, a verifier and up to 2 fix rounds, on branches `task/uac-r2-{id}[-fN]`. There are **no live writes**: 144's team creation and migration and 145's role change come back as manual gates. Handoff notes land in `notes/handoffs/INCOMING-141-*` and `INCOMING-145-*`, plus `notes/141-link-contract.md`, which goes to the peer for their 083. Merge the batch-2 branches into the work branch **after** the batch-1 PR merges.
+> - **Owner answers passed to batch 2:**
+>   - **I1:** (b).
+>   - **I2:** (1).
+>   - **A2 reversed:** for 135, there are no derived terms on CIAM and nothing is retired.
+>   - **F2:** (a).
+>   - **F8:** the interim default.
+>   - **F9:** "Secure Record Owners".
+>   - **F10:** (a), handed to customer-provisioning-orchestration-r1.
+> - 🔴 **New cross-project risk #1081 (peer ISS-016).** Dev's ROOT BU default team "Spaarke" holds 0 privileges, so Dataverse refuses it as an owner. **Task 130's invoice owner comes from `RecordOwnershipResolver`**, so a root-owned matter or a root-BU caller gets a 5xx on confirm. 146 is exposed the same way. Owner decision is pending in the peer project; we do NOT fork a fix. When it is decided, map any new resolver refusal to a clean 4xx on the 130 route. Record it as a live-gate risk in the PR body.
+> - **Peer PR #1082 (084+085)** touches `CallerRecordAccessProbe.cs` (new `GetCallerRightsForRecordsAsync`; protected virtual seams) and `EntityAccessFilter.cs`. Our 130 also touches `CallerRecordAccessProbe`. Whoever lands second rebases.
+>
 > | | |
 > |---|---|
 > | **Branch state** | `work/unified-access-control-r2` HEAD `4b3661852`, **NOT pushed**. Local commits since origin: `b84cf525c` (origin/master merge, incl. #1052 + #1076), merges of task branches **131** (`bb4dd61aa`), **134** (`92d82b3d8`) and **151** (`4eabdb776`), then index/155 docs. Builds of the BFF and the unit project are clean. |
