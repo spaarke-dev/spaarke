@@ -23,6 +23,23 @@ public interface IIdempotencyService
     Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Attempts to acquire the processing lock for an event on behalf of <paramref name="ownerId"/>. The lock is held
+    /// by its owner, so the same owner may take back a lock it left behind once that lock is old enough to be a dead
+    /// attempt's: a Service Bus redelivery carries the same job and arrives only after the earlier delivery's message
+    /// lock expired. Returns false while a DIFFERENT owner holds the lock, or the same owner took it recently (a
+    /// duplicate delivery still running).
+    /// </summary>
+    /// <remarks>
+    /// Task 068 (#1086). A default method, so an implementer without owners keeps the ownerless behaviour.
+    /// </remarks>
+    Task<bool> TryAcquireProcessingLockAsync(
+        string eventId,
+        string ownerId,
+        TimeSpan? lockDuration = null,
+        CancellationToken cancellationToken = default) =>
+        TryAcquireProcessingLockAsync(eventId, lockDuration, cancellationToken);
+
+    /// <summary>
     /// Releases processing lock for an event.
     /// </summary>
     Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default);

@@ -839,11 +839,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // be analysed or indexed. Its keys therefore carry THIS save's discriminator (its ProcessingJob id, stamped
         // only by the version-save path): a redelivery or retry of the same save repeats it and still skips; every
         // new save — even one whose bytes repeat an earlier version — has its own. Every other save carries none and
-        // keeps its key string byte-for-byte.
+        // keeps its key string byte-for-byte. The format lives on the handler that reads it (task 068 shares it with
+        // the Generate Profile request).
         var versionSaveJobId = payload.VersionSaveJobId;
-        var analysisIdempotencyKey = versionSaveJobId is { } saveJobId
-            ? $"analysis-{documentId}-documentprofile-version-{saveJobId:N}"
-            : $"analysis-{documentId}-documentprofile";
+        var analysisIdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId, versionSaveJobId);
 
         _logger.LogWarning(
             "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}, VersionSaveJobId={VersionSaveJobId}",
@@ -1268,7 +1267,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
-                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
                 MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,

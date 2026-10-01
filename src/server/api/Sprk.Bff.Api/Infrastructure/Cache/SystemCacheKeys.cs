@@ -16,8 +16,10 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <para>
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
-/// 14 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; see <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c>
-/// for the per-exception three-question justification).
+/// 15 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
+/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068, its justification in its own remarks; see
+/// <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c> for the earlier per-exception
+/// three-question justification).
 /// </para>
 /// <para>
 /// AI wrappers that use the <c>"system"</c> tenant sentinel against <see cref="ITenantCache"/>
@@ -86,6 +88,17 @@ public static class SystemCacheKeys
     /// slower instance wakes; like <see cref="RecordSyncWatermark"/> it is a system-wide bookmark.
     /// </summary>
     public const string SchedulerLastFire = "scheduler-last-fire";
+
+    /// <summary>
+    /// The SSE event number line of one Office job (task 068, #1086). Site: <c>Services/Office/JobStatusService.cs</c>.
+    /// Raw key: <c>sdap:job:{jobId}:seq</c> (Redis <c>INCR</c>, 24 h sliding expiry), beside that job's own pub/sub
+    /// channel <c>sdap:job:{jobId}:status</c>.
+    /// Justification: (1) existing — it replaced a per-instance in-memory dictionary, which numbered one job's events
+    /// independently on each instance and after every restart; (2) a tenant key would not help — the job's GUID is the
+    /// unit, and every instance publishing for that job must share one counter; (3) without it a <c>Last-Event-ID</c>
+    /// reconnect skips or repeats events.
+    /// </summary>
+    public const string JobStatusSequence = "job-status-sequence";
 
     // ---- Authentication & token caches ------------------------------------
 
