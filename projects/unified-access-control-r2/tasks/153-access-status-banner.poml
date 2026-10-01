@@ -350,4 +350,7 @@ The banner deliberately never shows who is walled, why, or how many: the list st
     answered.
     </amendment>
   </amendments>
+  <amendments>
+    <amendment n="Q12" date="2026-10-01" source="owner — BINDING">Escalation (g) ANSWERED: one-time cleanup of NULL sprk_issecure to No (live 2026-10-01: 9 projects, 18 matters, 11 work assignments), and the column default set to No in the solution. Run it as an operator script that records the before/after counts and ids, under an identity that 150's field-level security permits, BEFORE the banner publishes; coordinate with 150 if the lock lands first. Escalation (f) ANSWERED: option (A). The summary route alone passes a Read-only sprk_organization → sprk_organizations resolution to its filter, with a comment citing both invariants, recorded as a project-scoped section 6.5 path-A exception in design.md and the PR. Never widen the shared EntityAccessFilter map.</amendment>
+  </amendments>
 </task>

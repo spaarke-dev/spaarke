@@ -72,6 +72,8 @@ This note records what exists today for ethical-wall (No Access) and secure-reco
 
 **Owner answers, 2026-10-01:**
 - **O2: ACCEPTED as recommended.** Remove Read on `sprk_noaccessentry` from Spaarke Core User. A dedicated access-administrator role holds Read/Write. Everyone else sees the banner, and Write-holders see a record's entries through Manage Access (the BFF reads on their behalf).
+- **Q1 (blank Secure flags), DECIDED 2026-10-01:** a one-time cleanup sets every NULL `sprk_issecure` to No (live: 9 projects, 18 matters, 11 work assignments), and the column default becomes No. The cleanup is an operator script that records the before/after counts and the record ids, ships in the solution so new environments get the default, and runs before the banner publishes (task 153).
+- **Q2 (banner on organization records), DECIDED 2026-10-01: option (A).** The banner's summary route alone passes a Read-only `sprk_organization` → `sprk_organizations` resolution to its filter, with a comment citing both invariants. This is recorded as a project-scoped §6.5 path-A exception in the design and the PR. The shared EntityAccessFilter map is never widened.
 - **O1: FINAL (2026-10-01).** This supersedes the "O1 decided" block below.
   - The owner: "a text-only banner is sufficient; no banner in the PCF; no app level banner."
   - **Banner:** the standard red `setFormNotification` text banner on the five forms.

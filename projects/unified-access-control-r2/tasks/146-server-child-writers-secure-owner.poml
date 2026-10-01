@@ -199,4 +199,7 @@ CONTACT ACCESS IS UNAFFECTED BY OWNERSHIP. Contacts reach children through app-o
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 REVERSED) Never create a record nobody can see: inbound email (or any server create) whose secure parent cannot be determined is NOT created owned by the memberless secure team. Retry transient failures; if still undeterminable, leave it unprocessed in the ingestion queue (dead-letter/hold) and alert administrators (appnotification to an admin principal) with enough detail to resolve it; nothing is written to Dataverse until resolved. Escalation trigger S5 is resolved this way.</amendment>
   </amendments>
+  <amendments>
+    <amendment n="Q12" date="2026-10-01" source="owner — BINDING">Scope confirmation (from the task 130 verifier, 2026-10-01): sprk_invoice IS a child of a secure matter or project. Its ownership is already resolved team-first by task 130 (RecordOwnershipResolver, record-first from the matter), but 146 must include sprk_invoice in its writer census and in the codified child-table set (145/082 JSON) so invoices filed to secure records are covered by every path, including Office quick-create (OfficeService) and InvoiceReviewService.</amendment>
+  </amendments>
 </task>
