@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (068 done and gated; ship its PR, then task 075)
+> **Last Updated**: 2026-10-01 (068 shipped as #1091 / `08b70d6cc`; next: task 075)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,14 +18,19 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: ship task 068's PR, then task 075
+### 🔄 ACTIVE: task 075 (dead code and stale premises) — not started
 
 | Field | Value |
 |---|---|
-| **068** | ✅ DONE 2026-10-01 (#1086 / ISS-018). POML completed (with `<ui-tests>` for the live restart check + `<justification>` for `OfficeProfileQueue`); TASK-INDEX ✅; project CLAUDE.md decision row. Records: `notes/068-durability-siblings.md` §1–§8 |
-| **Next Action** | 1) Commit 068 on `work/spaarkeai-word-add-in-r1` (base master `402afb657`) and push. 2) Open the PR with `scratchpad/pr-068-body.md`. 3) Wait until `Router` passes AND `grep -c pending` = 0, then `gh pr merge N --merge` (**NEVER `--delete-branch`**), `git -C C:/code_files/spaarke pull --ff-only origin master`, and `git fetch origin && git merge --ff-only origin/master` here. 4) Close #1086 (fixed; live restart check after the next deploy); ISS-018 → Done. 5) Start task **075** via `task-execute` (`tasks/075-dead-code-and-stale-premises.poml`, FULL, sonnet / high) |
-| **For the owner** | (1) `SystemCacheKeys.JobStatusSequence` (15 of 20): the allow-list asks for architecture review. (2) Generate Profile now runs app-only on the queue (same AI work; `write` checked first); the 202 is ~0.3 s slower (Service Bus submit). (3) #1090: the pane still reads once after the click. (4) #1089: six sibling handlers keep the crash half of the stale lock |
-| **068 gates** | Suite **13,071/0/54** (reconciled exactly); ArchTests 337; publish **+2,206 B** (212 = 212); no CVE; format clean; reds 7 + 1 guard; seeds 4 + 5, each caught by one test; independent review 0 critical, all 5 W fixed or filed |
+| **Task** | 075, `tasks/075-dead-code-and-stale-premises.poml` (FULL, sonnet / high). Start via `task-execute` |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `08b70d6cc` (clean). Commit 075 here; ship by PR, merge with `--merge` (**NEVER `--delete-branch`**) once `Router` passes and nothing is pending |
+| **Queue after 075** | 079 → 090. 076 waits on the owner's answers; 083 waits on UAC-r2's 141 |
+| **For the owner** | (1) #1081: the root BU team has no roles — decide before the next BFF deploy from master; tell UAC-r2. (2) `SystemCacheKeys.JobStatusSequence` (15 of 20) needs architecture review. (3) Generate Profile now runs app-only on the queue; the 202 is ~0.3 s slower. (4) Filed: #1088, #1089, #1090. (5) Live checks for 060 and 068 wait on that deploy (scripts in their POML `<ui-tests>`) |
+
+### ✅ Shipped 2026-10-01: #1091 merged as `08b70d6cc` (task 068, #1086 / ISS-018)
+
+- 37 checks terminal: `Router` pass, Build & Test pass (54m51s, full suite), Code Quality pass, Office server tests pass; Tier 2 Full Unit Tests cancelled at its 30-minute cap (advisory). Merged `--merge`, branch kept; both checkouts fast-forwarded. #1086 closed; ISS-018 → Done.
+- What it did: Generate Profile → one queued `AppOnlyDocumentAnalysis` job (`OfficeProfileQueue`), 202 only after the submit with `jobId` + `Location`; job locks always release and a job may take back its own lock after 1 min; SSE ids = Redis `INCR` per job, subscribe before the snapshot, polling fallback. Suite 13,071/0/54; ArchTests 337; publish +2,206 B. `notes/068-durability-siblings.md`.
 
 ### ✅ Shipped 2026-10-01: #1085 merged as `402afb657` (task 060)
 

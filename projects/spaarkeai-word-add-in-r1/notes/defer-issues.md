@@ -749,7 +749,7 @@ returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcre
 
 | Field | Value |
 |---|---|
-| **Status** | Open — task 068 in progress |
+| **Status** | **Done** 2026-10-01: task 068, PR #1091 merged as `08b70d6cc`. #1086 closed. The live restart check waits on the next deploy |
 | **Urgency** | now |
 | **Filed** | 2026-10-01 |
 | **Source** | Task 068's investigation (`notes/068-durability-siblings.md` §1); the Redis lock behaviour verified against the .NET 10 `RedisCache` source |
