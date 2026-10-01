@@ -19,6 +19,11 @@
 // 020 resolves. It is the single place the authorization boundary is composed + audited, and is the
 // authz-before-stream gate task 030 (broker document access) depends on.
 //
+// unified-access-control-r2 task 135 (defect C1): the CIAM contact (external SPA) is composed HERE too,
+// through ComposeForCiamContactAsync — the same contact-plane composition and veto pipeline as the
+// workforce contact, minus the two derived-member terms (owner decision A2; see ComposeContactPlaneAsync).
+// Before that, the CIAM strategy built its scope from the grant set alone and no veto ran on it.
+//
 // Broker-only (ADR-028 A2 NFR-02): reads membership/grant/flag data APP-ONLY against the already-
 // resolved principal (task 020). No caller-token exchange (no OBO), no Graph SDK types, no
 // AI-internal types.
@@ -31,8 +36,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
 /// Composes and evaluates the accessible-record set for a resolved <see cref="WorkforcePrincipal"/>
-/// per design.md §5 / spec FR-06. The single enforcement primitive: given a principal + entity type
-/// + record id, decide membership in the composed set (deny anything outside it).
+/// per design.md §5 / spec FR-06 — and, since task 135, for a resolved CIAM contact
+/// (<see cref="ComposeForCiamContactAsync"/>). The single enforcement primitive: given a principal + entity
+/// type + record id, decide membership in the composed set (deny anything outside it).
 /// </summary>
 /// <remarks>
 /// ADR-010 testing seam: the interface lets the endpoint filter (and task 030) be exercised against
@@ -46,6 +52,37 @@ public interface IAccessibleRecordSetService
     /// </summary>
     Task<AccessibleRecordSet> ComposeAsync(
         WorkforcePrincipal principal, string entityType, CancellationToken ct);
+
+    /// <summary>
+    /// Composes the accessible-record set of <paramref name="entityType"/> for a CIAM (Entra External ID)
+    /// contact — the external SPA's caller, already resolved to <paramref name="contactId"/> by its plane
+    /// strategy (unified-access-control-r2 task 135 · defect C1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The SAME contact-plane composition a workforce contact-only principal gets through
+    /// <see cref="ComposeAsync"/> — one implementation, not a copy: the explicit grant term with Secure
+    /// pre-max suppression (FR-22), then the deny-list veto over the contact and its organizations (FR-23),
+    /// then Restricted (FR-21, nothing contact-sourced survives).
+    /// </para>
+    /// <para>
+    /// The one difference is that the two DERIVED-MEMBER terms (standing-grant membership and organization
+    /// expansion) are not composed: a CIAM contact has never had them, and owner decision A2 (round 3,
+    /// 2026-09-30) keeps both planes as they work today. See the branch point in the shared composition.
+    /// </para>
+    /// <para>
+    /// Takes a contact id rather than a <see cref="WorkforcePrincipal"/> on purpose: a CIAM caller is not a
+    /// workforce identity, and passing one through as a <see cref="WorkforcePrincipal"/> would hand its
+    /// <c>Kind</c>, <c>TenantId</c> and <c>Oid</c> to code written for workforce callers. Identity resolution
+    /// (ADR-028 A1, oid-first) stays with the caller; this method never resolves identity.
+    /// </para>
+    /// <para>
+    /// The result's <see cref="AccessibleRecordSet.PrincipalKind"/> is
+    /// <see cref="WorkforcePrincipalKind.ContactOnly"/>: the set is a contact's, whichever plane asked.
+    /// </para>
+    /// </remarks>
+    Task<AccessibleRecordSet> ComposeForCiamContactAsync(
+        Guid contactId, string entityType, CancellationToken ct);
 
     /// <summary>
     /// The enforcement decision: is <paramref name="recordId"/> in the principal's composed
@@ -764,6 +801,25 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <inheritdoc />
+    public Task<AccessibleRecordSet> ComposeForCiamContactAsync(
+        Guid contactId, string entityType, CancellationToken ct)
+    {
+        if (contactId == Guid.Empty)
+        {
+            // An unresolved caller is denied by the strategy before it gets here; an empty id reaching this
+            // point is a caller bug, and composing for it would read as "a contact with no grants".
+            throw new ArgumentException("contactId must be a resolved contact id.", nameof(contactId));
+        }
+
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            throw new ArgumentException("entityType must not be null/empty/whitespace.", nameof(entityType));
+        }
+
+        return ComposeContactPlaneAsync(contactId, entityType, includeDerivedMemberTerms: false, ct);
+    }
+
+    /// <inheritdoc />
     public async Task<bool> IsRecordAccessibleAsync(
         WorkforcePrincipal principal, string entityType, Guid recordId, CancellationToken ct)
     {
@@ -1128,8 +1184,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         };
     }
 
-    // ── contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ───────────────
-    private async Task<AccessibleRecordSet> ComposeForContactAsync(
+    // ── workforce contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ─────
+    private Task<AccessibleRecordSet> ComposeForContactAsync(
         WorkforcePrincipal principal, string entityType, CancellationToken ct)
     {
         // A contact-only principal always carries a contactId anchor (task 020 invariant).
@@ -1137,6 +1193,26 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             ?? throw new InvalidOperationException(
                 "A ContactOnly principal must carry a ContactId anchor (task 020 invariant).");
 
+        return ComposeContactPlaneAsync(contactId, entityType, includeDerivedMemberTerms: true, ct);
+    }
+
+    /// <summary>
+    /// The ONE contact-plane composition, shared by both contact sign-ins (task 135 · defect C1): the
+    /// workforce contact-only principal (<see cref="ComposeForContactAsync"/>) and the CIAM contact
+    /// (<see cref="ComposeForCiamContactAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// Before task 135 only the workforce plane came through here; the CIAM strategy built its principal
+    /// from the grant set alone, so a contact on the No Access List, holding a grant on a Restricted record,
+    /// or inheriting an organization grant on a Secure record kept full access on a ciamlogin.com token.
+    /// Both planes now run the same grant read, the same single junction read, the same batched flag read,
+    /// the same Secure-suppressed grant term, the same deny resolution and the same
+    /// <see cref="ApplyVetoPipeline"/> call. The only difference is
+    /// <paramref name="includeDerivedMemberTerms"/>, named at its branch point below.
+    /// </remarks>
+    private async Task<AccessibleRecordSet> ComposeContactPlaneAsync(
+        Guid contactId, string entityType, bool includeDerivedMemberTerms, CancellationToken ct)
+    {
         var composed = new Dictionary<Guid, AccessRights>();
 
         // Read grants + standing membership + org expansion FIRST so the candidate id set is complete
@@ -1149,12 +1225,31 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             grantsApplied = true;
         }
 
+        // ── THE ONE PERMITTED DIFFERENCE BETWEEN THE TWO CONTACT PLANES (task 135) ─────────────────
+        // includeDerivedMemberTerms is true for the workforce contact plane and false for CIAM. It gates
+        // the two DERIVED-MEMBER terms below — standing-grant membership and organization expansion —
+        // and nothing else: the grant term, Secure suppression, the deny veto and Restricted are shared.
+        //
+        // Why the difference exists: CIAM has never had these terms, and the owner's model is that a
+        // contact gets only what it is granted (C9). Retiring them from the workforce plane was put to the
+        // owner as task 142 (C9, Assigned-To auto-grants) escalation (d). The owner answered in decision A2
+        // (round 3, 2026-09-30, REVERSED): "Standing grants and organization access STAY, as they work
+        // today, on both sign-in types. Assigned-To grants are ADDED alongside them. Nothing is retired."
+        // So this difference is an owner-signed exception — task 135 escalation option (ii) — not a
+        // pending retirement. Adding the terms to CIAM would widen CIAM beyond what it has today;
+        // removing them from the workforce plane would retire access the owner said stays. Either change
+        // is a new owner decision, not a refactor (notes/task-135-ciam-unified-veto-pipeline.md).
+        //
         // ── ONE junction read, shared by the additive org term AND the deny-veto subject (NFR-02) ──
-        // Hoisted above the membership walk because the contact's active organizations are an INPUT to
-        // it: an org-typed descriptor can only emit a condition if the identity carries org ids. The one
-        // read yields both NAMED sets (task 109): the org term below reads ConferringOrganizationIds, the
-        // veto reads WallSubjectOrganizationIds.
-        var activeOrgs = await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false);
+        // On the workforce plane it is hoisted above the membership walk because the contact's active
+        // organizations are an INPUT to it: an org-typed descriptor can only emit a condition if the
+        // identity carries org ids. The one read yields both NAMED sets (task 109): the org term below
+        // reads ConferringOrganizationIds, the veto reads WallSubjectOrganizationIds. Without the derived
+        // terms (CIAM) the veto is its only consumer, so it is read below, once there are candidates —
+        // the systemuser plane's NFR-02 gate. Null here means "not read yet", never "no organizations".
+        ActiveOrgMemberships? activeOrgs = includeDerivedMemberTerms
+            ? await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false)
+            : null;
 
         // Standing-grant runtime membership, GATED on the subject-level policy flag. The negative case is
         // load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit grants — NEVER automatic
@@ -1175,8 +1270,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // would have entered them at None, and "present but powerless" is a different — worse — answer
         // than "not accessible": it is exactly the shape that makes a UI render a row the caller cannot
         // act on. See notes/task-042-standing-grant-levels.md §4.
-        var standing = await _standingGrant.ReadForContactAsync(contactId, ct).ConfigureAwait(false);
-        var standingRights = standing.Rights;
+        //
+        // Derived-member term — not composed, and the flag not even read, on CIAM (see the plane note above).
+        var standingRights = AccessRights.None;
+        if (includeDerivedMemberTerms)
+        {
+            var standing = await _standingGrant.ReadForContactAsync(contactId, ct).ConfigureAwait(false);
+            standingRights = standing.Rights;
+        }
 
         if (standingRights != AccessRights.None)
         {
@@ -1217,12 +1318,15 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // not yet started, or under an inactive organization derives nothing (owner D-2 part 1, D-10,
         // ISS-026) — while the veto below still treats it as a wall subject. On an unreadable junction
         // the conferring set is empty, so the fault contributes nothing.
+        //
+        // Derived-member term — on CIAM `activeOrgs` is still unread (null) here, so this never runs there
+        // (see the plane note above).
         var orgTerms = new List<(AccessRights Rights, HashSet<Guid> RecordIds)>();
         var orgExpansionApplied = false;
-        if (activeOrgs.ConferringOrganizationIds.Count > 0)
+        if (includeDerivedMemberTerms && activeOrgs is { ConferringOrganizationIds.Count: > 0 } expansionOrgs)
         {
             var orgsByRights = new Dictionary<AccessRights, List<Guid>>();
-            foreach (var orgId in activeOrgs.ConferringOrganizationIds.Distinct())
+            foreach (var orgId in expansionOrgs.ConferringOrganizationIds.Distinct())
             {
                 // The reader refuses Guid.Empty (it is a caller bug there, not a subject). Skipping it
                 // here keeps a malformed junction row from turning the whole term into an exception.
@@ -1318,19 +1422,31 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Deny-veto subject = this contact's OWN id + its active organizations (task 039 / FR-23) —
         // the SAME single read the org-expansion term above consumed, so the additive term and the
         // ethical wall can never be computed from two different membership snapshots.
-        // NOTHING survives Restricted on this plane: a contact principal's every term is contact-sourced,
-        // which is precisely FR-21's "denies ALL contact principals regardless of grant source".
-        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, activeOrgs, ct)
+        // NOTHING survives Restricted on either contact plane: a contact principal's every term is
+        // contact-sourced, which is precisely FR-21's "denies ALL contact principals regardless of grant
+        // source".
+        //
+        // On CIAM the junction is read here, for the veto alone. With no candidates the veto returns
+        // before it would consult the subject, so `None` is never a fail-open there (the systemuser
+        // plane's identical gate); with candidates the read happens, and its Unreadable outcome — every
+        // fault, query-level included since task 109 — denies every candidate.
+        var subjectOrgs = activeOrgs
+            ?? (candidates.Count == 0
+                ? ActiveOrgMemberships.None
+                : await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false));
+
+        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, subjectOrgs, ct)
             .ConfigureAwait(false);
 
         ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
 
         _logger.LogInformation(
-            "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +
-            "(grants: {Grants}, standing-grant membership: {Standing}, org expansion: {OrgExpansion} over " +
-            "{OrgTerms} baseline(s), {Pages} membership page(s) total, capped: {Capped}).",
-            contactId, entityType, composed.Count, grantsApplied, standingApplied, orgExpansionApplied,
-            orgTerms.Count, membershipPages, capped);
+            "[WF-AUTHZ] Composed accessible set for contact {ContactId} ({Plane} contact plane) on " +
+            "{EntityType}: {Count} records (grants: {Grants}, standing-grant membership: {Standing}, org " +
+            "expansion: {OrgExpansion} over {OrgTerms} baseline(s), {Pages} membership page(s) total, " +
+            "capped: {Capped}).",
+            contactId, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType, composed.Count,
+            grantsApplied, standingApplied, orgExpansionApplied, orgTerms.Count, membershipPages, capped);
 
         return new AccessibleRecordSet
         {

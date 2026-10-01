@@ -4,7 +4,7 @@
     <title>C1 — one rule set for every contact sign-in: route the CIAM strategy through the SAME evaluator and veto pipeline as the workforce contact plane (Restricted, No Access List, Secure-direct-only)</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C1; re-opens the "every principal kind" claim of tasks 037 and 039)</phase>
     <gate>after-131-109</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on the live CIAM plane (/api/v1/external); tags bff-api/auth/security; changes what every outside-counsel contact can see.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -157,5 +157,46 @@ Related: tasks 037, 039, 043, 109, 131, 132, 136, 137, 138, 140 (contact-side gr
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5 unconditionally.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-135" base="task/uac-r2-109-f1" status="code-complete; manual live gate pending; publish size measured by the main session after merge">
+      Full record: projects/unified-access-control-r2/notes/task-135-ciam-unified-veto-pipeline.md.
+      - Fix: IAccessibleRecordSetService gains ComposeForCiamContactAsync(contactId, entityType, ct). It and the
+        workforce contact-only path (ComposeForContactAsync) call ONE private ComposeContactPlaneAsync, which holds
+        the only contact-plane grant read, junction read, batched flag read, Secure-suppressed grant term, deny
+        resolution and ApplyVetoPipeline call. CiamContactPrincipalStrategy keeps identity resolution unchanged and
+        maps the evaluator's rights for all three root types; RightsFromGrants is deleted; the strategy reads no
+        grant level. ApplyVetoPipeline has exactly two call sites (systemuser path, shared contact path). The false
+        parity comment and the CIAM class doc are corrected.
+      - Step 1 decision (§11 extend, do not duplicate): refactor the existing contact composition into one core with
+        one boolean (includeDerivedMemberTerms); take a contact id, never pass a CIAM caller as a WorkforcePrincipal.
+        On CIAM the junction is read after the candidate list and skipped when there are none (systemuser NFR-02 gate).
+      - Plane difference: the two derived-member terms stay on the workforce contact plane and stay OFF CIAM. Owner
+        decision A2 (round 3, 2026-09-30, binding) answered escalation 3: option (ii), an owner-signed exception.
+        Named in one comment at the branch point. Nothing added or retired beyond applying the three rules to CIAM.
+      - Escalations: trigger 1 (131) and trigger 2 (109) did not fire — both are on the base. Trigger 3 answered by
+        owner A2. Trigger 4 (access removal): READ-ONLY dev comparison, 31 active grant rows, 8 contacts, 14 records,
+        0 Restricted / 0 Secure targets, 0 No Access entries => 0 contacts and 0 records change (notes §5). Trigger 5:
+        138 not merged, so the single FR-22 predicate stays the only suppression point; no Limited case.
+      - Tests (KEEP paths): seam UnifiedEvaluatorSeamTests (CIAM FR-21 x3, FR-23 four key shapes + targeted control,
+        FR-22 x3 + survivor x3, owner model, plane parity x4 over all three roots, fail-closed x3 + escaping flag
+        fault, regression x3), auth OrganizationMembershipReadTests (CIAM junction QUERY fault over the real
+        transport, 500/403), unit CallerPrincipalResolverTests (strategy mapping; identity denies never reach the
+        evaluator). Contract fixture: stub now answers no orgs / no references and the deny reader denies nothing
+        (found empirically: the CIAM download contract test went 403 once the vetoes ran offline).
+      - Perturbations (all reverted, file byte-restored): skip the veto on CIAM -> 14 red; AccessLevel on secure
+        roots for CIAM -> 4 red; derived terms on CIAM -> 1 red; blanket organization deny -> 5 red.
+      - Runs: build 0 warnings / 0 errors; affected classes 171/171; full BFF unit suite 13,240 passed / 0 failed /
+        54 skipped (13,294); Spaarke.ArchTests 338/338. No package change, so no new CVE.
+      - Step 9.5: code-review 0 Critical (2 warnings + 3 suggestions accepted, notes §6); adr-check 0 violations.
+      - Placement (CLAUDE.md §10 / bff-extensions.md): in the BFF, inside the existing evaluator — per-request
+        authorization on /api/v1/external. New surface: one method on the existing IAccessibleRecordSetService seam
+        and one constructor dependency on the CIAM strategy. No new service, endpoint, option, job, DI registration or
+        package; ExternalAccessModule.cs not edited (strategies and evaluator are already scoped).
+        §11: existing = ComposeForContactAsync (grant term + three rules); extension = yes, one boolean, no copy;
+        cost of doing nothing = No Access / Restricted / Secure-org grants keep full access on CIAM tokens (C1).
+      - Pending manual gates: live gate (a)-(d) in notes §10 (dev, existing CIAM test contact, records restored);
+        publish size (main session, fresh worktrees); TASK-INDEX row 135 (main session).
+      - Not done (run rules): deploy, live writes, TASK-INDEX/current-task edits. Tasks 037/039 carry a dated
+        completion line for amendment n=1 and stay pending (task 136 closes them).
+    </outcome>
   </execution>
 </task>

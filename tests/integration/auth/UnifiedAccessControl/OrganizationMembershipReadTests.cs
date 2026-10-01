@@ -349,6 +349,69 @@ public class OrganizationMembershipReadTests
     }
 
     /// <summary>
+    /// 🔴 Task 135 (defect C1) — the SAME junction query fault, on the CIAM plane, through
+    /// <see cref="CiamContactPrincipalStrategy"/>. Before task 135 the CIAM strategy never read the junction for
+    /// the wall at all, so neither this fault nor a healthy organization-keyed entry could touch a ciamlogin.com
+    /// caller. Now the strategy's scope comes from the evaluator, so a query fault the read reports as
+    /// Unreadable (task 109) removes every candidate there too.
+    /// </summary>
+    /// <remarks>
+    /// Driven over the real transport for the reason this file's header gives: a double that returned
+    /// <c>Failed</c> would assert the double. The contact is resolved by the REAL oid lookup (the fake serves
+    /// <c>contacts</c>), so identity resolution is the production path, unchanged by task 135.
+    /// </remarks>
+    [Theory]
+    [InlineData("500")]
+    [InlineData("403")]
+    public async Task CiamStrategy_JunctionQueryFaults_RemovesEveryCandidateFromTheCiamPrincipal(string fault)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var denyList = new OrgKeyedDenyList();
+        var participations = RealParticipationService(dataverse);
+        var strategy = new CiamContactPrincipalStrategy(
+            participations,
+            RealEvaluator(participations, denyList, StandingReader().Object),
+            NullLogger<CiamContactPrincipalStrategy>.Instance);
+
+        // Control: healthy, the CIAM principal holds the direct grant and the current org grant.
+        var healthy = await ResolveCiamAsync(strategy);
+        healthy.GetAccessibleProjectIds().Should().Contain(new[] { DirectProject, CurrentOrgProject },
+            "control: a healthy junction leaves the CIAM contact's direct and current-org grants standing");
+
+        dataverse.ClearRequests();
+        denyList.Calls = 0;
+        dataverse.JunctionFault = (HttpStatusCode)int.Parse(fault);
+
+        var faulted = await ResolveCiamAsync(strategy);
+
+        dataverse.Requests.Should().Contain(r => r.Collection == "sprk_contactorganizations",
+            "precondition: the CIAM composition read the junction for the wall");
+        faulted.GetAccessibleProjectIds().Should().BeEmpty(
+            $"a junction {fault} on the CIAM plane must deny EVERY candidate — the direct grant included — " +
+            "instead of reading as 'belongs to no organization'");
+        denyList.Calls.Should().Be(0,
+            "the veto is decided by the Unreadable outcome before the deny list is even consulted");
+    }
+
+    private static async Task<CallerPrincipal> ResolveCiamAsync(CiamContactPrincipalStrategy strategy)
+    {
+        var context = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim("oid", CiamOid), new Claim("iss", "https://spaarketest.ciamlogin.com/tid/v2.0") },
+                "Ciam")),
+        };
+
+        var resolution = await strategy.ResolveAsync(context, CancellationToken.None);
+        resolution.IsResolved.Should().BeTrue("precondition: the CIAM contact resolves by oid through the real lookup");
+        return resolution.Principal!;
+    }
+
+    /// <summary>The CIAM caller's stable oid, bound to <see cref="ContactId"/> by the fake's <c>contacts</c> collection.</summary>
+    private const string CiamOid = "c1a00000-0000-0000-0000-0000000000c1";
+
+    /// <summary>
     /// The path that PRE-DATES ISS-019 still denies: when the REAL junction entry cannot acquire its token or
     /// its API url, every queried candidate is denied. Task 109's new fault reporting must not have weakened it.
     /// </summary>
@@ -858,6 +921,14 @@ public class OrganizationMembershipReadTests
                         ["_sprk_assignedlawfirm1_value"] = null,
                         ["_sprk_assignedlawfirm2_value"] = null,
                     }));
+                    return;
+
+                case "contacts":
+                    // Task 135: the CIAM strategy resolves its caller by oid (sprk_externalobjectid). Answer
+                    // only that lookup, and only for the bound oid, so identity resolution stays real.
+                    await WriteValueAsync(context, filter.Contains($"sprk_externalobjectid eq '{CiamOid}'", StringComparison.Ordinal)
+                        ? new[] { new Dictionary<string, object?> { ["contactid"] = ContactId } }
+                        : Array.Empty<Dictionary<string, object?>>());
                     return;
 
                 default:

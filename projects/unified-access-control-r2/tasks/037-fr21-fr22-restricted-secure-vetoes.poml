@@ -130,7 +130,8 @@ Verified: 12,082 unit passed / 0 failed; ArchTests 191/191; publish 45.47 MB vs 
     instead of None.
     The file's own parity comment (:49, "Both planes now source these from the ONE evaluator's answer") is
     false. Task 135 routes the CIAM strategy through the same flag read and veto pipeline, and uses
-    DirectAccessLevel on secure roots.</amendment>
+    DirectAccessLevel on secure roots.
+    COMPLETION (2026-10-01): amendment n=1 (C1) delivered by task 135 on 2026-10-01 (branch task/uac-r2-135); evidence: notes/task-135-ciam-unified-veto-pipeline.md. Code and tests only; its manual live gate is still pending. This task stays pending: task 136 (C2) closes it.</amendment>
     <amendment n="2" defect="C2" completing-task="136">
     FR-22 suppression on the workforce plane keeps the record id in the map with AccessRights.None
     (AccumulateTerm). The external read gates test presence, not rights: CallerPrincipalResolver.cs:161

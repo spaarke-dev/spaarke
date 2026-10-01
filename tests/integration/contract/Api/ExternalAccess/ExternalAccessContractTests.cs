@@ -655,6 +655,12 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<ExternalDataService>();
             services.AddScoped<ExternalDataService>(sp =>
                 new StubExternalDataService(sp.GetRequiredService<IHttpContextAccessor>()));
+
+            // Task 135 (C1): CIAM callers now pass the deny-list veto. Offline, the real reader fails CLOSED
+            // and would deny every record; these contract tests assert an entitled caller's contract, so the
+            // reader at its module boundary denies nothing. Veto behaviour is owned by UnifiedEvaluatorSeamTests.
+            services.RemoveAll<INoAccessListReader>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NeverDeniesReader());
         });
     }
 
@@ -759,6 +765,21 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
                 recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.None));
+
+    // Task 135 (C1): a CIAM caller is now composed by the unified evaluator, which also reads the contact's
+    // organization memberships (the deny-veto subject) and each candidate's referenced organizations. Without
+    // these overrides the base reads run against no Dataverse and fail CLOSED — every candidate denied — so
+    // this double would compose to nothing. "Belongs to no organization / references none" is the honest
+    // default for contract tests that assert what an ENTITLED caller gets; the vetoes themselves are owned by
+    // UnifiedEvaluatorSeamTests.
+    internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
+        Guid contactId, CancellationToken ct = default)
+        => Task.FromResult(ActiveOrgMemberships.None);
+
+    public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
+            recordIds.Distinct().ToDictionary(id => id, _ => ReferencedOrganizations.None));
 
     public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
     {

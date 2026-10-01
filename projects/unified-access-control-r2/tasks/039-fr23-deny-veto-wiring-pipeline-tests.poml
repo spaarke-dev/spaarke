@@ -118,7 +118,8 @@ status was changed on the index alone.</status-note>
     read. So the owner's ethical wall holds only for a person's workforce sign-in. The same contact on a
     ciamlogin.com token still lists and streams the denied record. Task 135 applies the deny-list read and
     veto on the CIAM plane, keyed on the CIAM contact and that contact's active organizations, in the same
-    order (deny, then Restricted). It adds CIAM veto tests to the CallerPrincipalResolver test suite.</amendment>
+    order (deny, then Restricted). It adds CIAM veto tests to the CallerPrincipalResolver test suite.
+    COMPLETION (2026-10-01): amendment n=1 (C1) delivered by task 135 on 2026-10-01 (branch task/uac-r2-135); evidence: notes/task-135-ciam-unified-veto-pipeline.md. The CIAM veto tests drive CiamContactPrincipalStrategy end-to-end in tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs (the strategy's own contract stays in CallerPrincipalResolverTests). The deny-then-Restricted order is the single shared ApplyVetoPipeline. Its manual live gate is still pending. This task stays pending: task 136 closes it.</amendment>
     <amendment n="2" defect="C2" related-task="136">
     The deny veto REMOVES keys, so its own effect does not depend on the presence-only gates. It is listed
     as a co-requisite because this task's pipeline tests also cover Secure pre-max suppression (see the

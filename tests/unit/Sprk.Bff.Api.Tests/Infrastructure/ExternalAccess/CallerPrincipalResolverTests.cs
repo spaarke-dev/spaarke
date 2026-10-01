@@ -21,8 +21,8 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 ///   • <see cref="WorkforcePrincipalStrategy"/> — the workforce caller's record scope is EXACTLY the
 ///     accessible-record-set (R2 NFR-08: not all projects), sourced from IAccessibleRecordSetService
 ///     for entity <c>sprk_project</c>; a resolver deny short-circuits with ProblemDetails.
-///   • <see cref="CiamContactPrincipalStrategy"/> — reproduces the legacy CIAM deny + participation
-///     resolution (R2 guardrail #3 / FR-15).
+///   • <see cref="CiamContactPrincipalStrategy"/> — reproduces the legacy CIAM identity deny semantics
+///     (R2 guardrail #3 / FR-15) and, since task 135, takes its record scope from the unified evaluator.
 /// </summary>
 public class CallerPrincipalResolverTests
 {
@@ -226,33 +226,40 @@ public class CallerPrincipalResolverTests
             It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── CIAM strategy: legacy resolution + deny semantics preserved (FR-15) ──────────────────────
+    // ── CIAM strategy: identity resolution unchanged (FR-15); record scope from the evaluator (task 135) ──
+    //
+    // The vetoes themselves (FR-21/22/23), plane parity and the fault family are pinned end-to-end through
+    // this strategy and the REAL evaluator in tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs.
+    // These unit tests pin only what the strategy itself owns: which contact it composes for, and that it
+    // maps the evaluator's answer onto the principal without reading a grant level of its own.
 
     [Fact]
-    public async Task CiamStrategy_ResolvesContactAndParticipations_PreservesAccessLevels()
+    public async Task CiamStrategy_ResolvedContact_TakesAllThreeRootScopesFromTheEvaluatorForThatContact()
     {
         var contactId = Guid.NewGuid();
-        var p1 = Guid.NewGuid();
-        var p2 = Guid.NewGuid();
+        var viewOnlyProject = Guid.NewGuid();
+        var fullProject = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var workAssignment = Guid.NewGuid();
 
         var participations = CreateParticipationServiceMock();
         participations.Setup(s => s.ResolveExternalContactAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(contactId);
-        participations.Setup(s => s.GetGrantSetAsync(contactId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ExternalGrantSet
-            {
-                Projects = new List<ExternalParticipation>
-                {
-                    new() { ProjectId = p1, AccessLevel = ExternalAccessLevel.ViewOnly },
-                    new() { ProjectId = p2, AccessLevel = ExternalAccessLevel.FullAccess }
-                },
-                MatterGrants = NoRootGrants,
-                WorkAssignmentGrants = NoRootGrants,
-            });
+
+        var accessible = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        SetupCiamComposition(accessible, contactId, "sprk_project", new Dictionary<Guid, AccessRights>
+        {
+            [viewOnlyProject] = AccessRights.Read,
+            [fullProject] = AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete,
+        });
+        SetupCiamComposition(accessible, contactId, "sprk_matter",
+            new Dictionary<Guid, AccessRights> { [matter] = AccessRights.Read });
+        SetupCiamComposition(accessible, contactId, "sprk_workassignment",
+            new Dictionary<Guid, AccessRights> { [workAssignment] = AccessRights.Read | AccessRights.Write });
 
         var strategy = new CiamContactPrincipalStrategy(
-            participations.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            participations.Object, accessible.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
 
         var ctx = new DefaultHttpContext
         {
@@ -263,15 +270,25 @@ public class CallerPrincipalResolverTests
         result.IsResolved.Should().BeTrue();
         result.Principal!.Plane.Should().Be(CallerPrincipalPlane.CiamContact);
         result.Principal.ContactId.Should().Be(contactId);
-        result.Principal.GetAccessLevel(p1).Should().Be(ExternalAccessLevel.ViewOnly);
-        result.Principal.GetAccessLevel(p2).Should().Be(ExternalAccessLevel.FullAccess);
+        result.Principal.GetEffectiveRights(viewOnlyProject).Should().Be(AccessRights.Read,
+            "a project's rights are the evaluator's, not re-derived from a grant row");
+        result.Principal.GetEffectiveRights(fullProject).Should().Be(
+            AccessRights.Read | AccessRights.Write | AccessRights.Create | AccessRights.Delete);
+        result.Principal.GetAccessibleProjectIds().Should().BeEquivalentTo(new[] { viewOnlyProject, fullProject });
+        result.Principal.MatterAccess.Should().Equal(new Dictionary<Guid, AccessRights> { [matter] = AccessRights.Read });
+        result.Principal.WorkAssignmentAccess.Should().Equal(
+            new Dictionary<Guid, AccessRights> { [workAssignment] = AccessRights.Read | AccessRights.Write });
+
+        participations.Verify(s => s.GetGrantSetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the strategy must not read grant rows itself — doing so is how the CIAM plane skipped every veto (C1)");
     }
 
     [Fact]
     public async Task CiamStrategy_MissingOidAndEmail_Returns401()
     {
+        var accessible = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
         var strategy = new CiamContactPrincipalStrategy(
-            CreateParticipationServiceMock().Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            CreateParticipationServiceMock().Object, accessible.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
 
         var result = await strategy.ResolveAsync(
             new DefaultHttpContext { User = Principal() }, CancellationToken.None);
@@ -289,8 +306,10 @@ public class CallerPrincipalResolverTests
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Guid?)null);
 
+        // Strict + no setups: a caller with no contact must never reach the evaluator.
+        var accessible = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
         var strategy = new CiamContactPrincipalStrategy(
-            participations.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            participations.Object, accessible.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
 
         var ctx = new DefaultHttpContext { User = Principal(("oid", Guid.NewGuid().ToString())) };
         var result = await strategy.ResolveAsync(ctx, CancellationToken.None);
@@ -298,6 +317,20 @@ public class CallerPrincipalResolverTests
         result.IsResolved.Should().BeFalse();
         result.Failure.Should().NotBeNull();
     }
+
+    private static void SetupCiamComposition(
+        Mock<IAccessibleRecordSetService> accessible,
+        Guid contactId,
+        string entityType,
+        IReadOnlyDictionary<Guid, AccessRights> rights)
+        => accessible.Setup(s => s.ComposeForCiamContactAsync(contactId, entityType, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entityType,
+                Rights = rights,
+                Sources = new AccessibleRecordSetSources(false, true, false),
+            });
 
     private static Mock<ExternalParticipationService> CreateParticipationServiceMock() =>
         new(

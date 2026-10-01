@@ -11,7 +11,8 @@
 // branches on if(ciam)…else…. The principal carries the caller's Tier-2 RECORD SCOPE (the set of
 // projects the caller may access), composed per plane:
 //
-//   CIAM contact  → sprk_externalrecordaccess participations (the existing model, unchanged)
+//   CIAM contact  → the common accessible-record-set, contact plane, explicit grants only
+//                   (unified-access-control-r2 task 135: the same grant term + veto pipeline as below)
 //   Workforce     → the common accessible-record-set (task 022): systemuser → ADR-034 membership;
 //                   contact → grants ∪ standing-grant membership. NEVER "all projects" (R2 NFR-08).
 //
@@ -46,9 +47,17 @@ public enum CallerPrincipalPlane
 
 /// <summary>
 /// A single project the caller may access, with the <see cref="AccessRights"/> that govern what they
-/// may do on it. Both planes now source these from the ONE evaluator's <c>(recordId → rights)</c>
-/// answer (unified-access-control-r2 task 033 / FR-19).
+/// may do on it, taken from the ONE evaluator's <c>(recordId → rights)</c> answer on both planes
+/// (unified-access-control-r2 task 033 / FR-19 for the shape): the workforce plane through
+/// <see cref="IAccessibleRecordSetService.ComposeAsync"/>, the CIAM plane through
+/// <see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>, which share one contact-plane
+/// composition and one veto pipeline.
 /// </summary>
+/// <remarks>
+/// ⚠️ Until task 135 (defect C1, 2026-10-01) this summary claimed both planes already sourced these from the
+/// evaluator. Only the workforce plane did: the CIAM strategy built them from the grant rows directly, so no
+/// Restricted, Secure or No Access rule ran on a CIAM token.
+/// </remarks>
 /// <remarks>
 /// <b>Rights are stored; the level is derived.</b> This class used to hold an
 /// <see cref="ExternalAccessLevel"/> and map it to rights on demand. That direction cannot represent
@@ -76,9 +85,15 @@ public sealed class CallerProjectAccess
     public ExternalAccessLevel? AccessLevel => ExternalAccessLevels.ToDisplayLevel(Rights);
 
     /// <summary>
-    /// Builds an entry from a grant row's level. The single conversion point for level-sourced
-    /// construction, so the mapping table stays in <see cref="ExternalAccessLevels"/>.
+    /// Builds an entry from a level. The single conversion point for level-sourced construction, so the
+    /// mapping table stays in <see cref="ExternalAccessLevels"/>.
     /// </summary>
+    /// <remarks>
+    /// ⚠️ No authorization path may build a principal from grant rows with this: a grant's level is not its
+    /// effective rights until the evaluator has applied Secure suppression and the vetoes (task 135 removed
+    /// the CIAM strategy's use of it for exactly that reason). Test fixtures that state a principal directly
+    /// are its remaining callers.
+    /// </remarks>
     public static CallerProjectAccess FromLevel(Guid projectId, ExternalAccessLevel? level) =>
         new() { ProjectId = projectId, Rights = ExternalAccessLevels.ToAccessRights(level) };
 }
@@ -314,21 +329,34 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
 }
 
 /// <summary>
-/// CIAM contact strategy — the EXISTING external-SPA resolution, unchanged (ADR-028 A1). Resolves the
-/// Dataverse contact by stable <c>oid</c> (email as first-login fallback) and loads its
-/// sprk_externalrecordaccess participations. Reproduces <c>ExternalCallerAuthorizationFilter</c>'s
-/// deny semantics byte-for-byte (R1 FR-15 / R2 guardrail #3).
+/// CIAM contact strategy — the external SPA's caller (ADR-028 A1). Resolves the Dataverse contact by
+/// stable <c>oid</c> (email as first-login fallback) exactly as before, then takes the Tier-2 record scope
+/// from the unified evaluator (<see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>), so
+/// the Restricted veto (FR-21), Secure direct-only suppression (FR-22) and the No Access List (FR-23) apply
+/// to a ciamlogin.com token exactly as they do to the same contact on a workforce token (task 135 ·
+/// defect C1). Identity resolution and its deny semantics are unchanged (R1 FR-15 / R2 guardrail #3).
 /// </summary>
+/// <remarks>
+/// Before task 135 this strategy built the principal from <c>ExternalParticipationService.GetGrantSetAsync</c>
+/// alone, on each grant's all-sources level: none of the three rules ran, so a contact on the No Access
+/// List, holding a grant on a Restricted record, or inheriting an organization grant on a Secure record kept
+/// full access here. The strategy now holds no authorization logic of its own — it maps the evaluator's
+/// <c>(recordId → rights)</c> answer onto the principal, the same way <see cref="WorkforcePrincipalStrategy"/>
+/// does. An evaluator fault propagates (the request fails); there is no grants-only fallback.
+/// </remarks>
 public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
 {
     private readonly ExternalParticipationService _participations;
+    private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<CiamContactPrincipalStrategy> _logger;
 
     public CiamContactPrincipalStrategy(
         ExternalParticipationService participations,
+        IAccessibleRecordSetService accessibleSet,
         ILogger<CiamContactPrincipalStrategy> logger)
     {
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
+        _accessibleSet = accessibleSet ?? throw new ArgumentNullException(nameof(accessibleSet));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -372,20 +400,34 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found"));
         }
 
-        // Outside-counsel access is GRANT-ONLY and explicit (task 028 / design §2): the caller sees
-        // exactly the roots granted via sprk_externalrecordaccess — projects (with level), matters, and
-        // work assignments. No membership/assignment/rollup-derived access for a CIAM partner.
-        var grantSet = await _participations
-            .GetGrantSetAsync(contactId.Value, httpContext.RequestAborted)
+        // Outside-counsel access is GRANT-ONLY and explicit (task 028 / design §2): the caller sees the
+        // roots granted via sprk_externalrecordaccess — projects, matters and work assignments, each at
+        // its granted level — and NO membership/assignment/rollup-derived access.
+        //
+        // Task 135 (C1): that grant term, and the three rules that narrow it, come from the ONE contact-
+        // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
+        // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
+        // survive (deny list, then Restricted).
+        var reqCt = httpContext.RequestAborted;
+        var accessibleProjects = await _accessibleSet
+            .ComposeForCiamContactAsync(contactId.Value, AccessibleRecordSetService.ProjectEntity, reqCt)
+            .ConfigureAwait(false);
+        var accessibleMatters = await _accessibleSet
+            .ComposeForCiamContactAsync(contactId.Value, AccessibleRecordSetService.MatterEntity, reqCt)
+            .ConfigureAwait(false);
+        var accessibleWorkAssignments = await _accessibleSet
+            .ComposeForCiamContactAsync(contactId.Value, AccessibleRecordSetService.WorkAssignmentEntity, reqCt)
             .ConfigureAwait(false);
 
-        _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — grants: {Projects} project / {Matters} matter / {Was} work-assignment",
-            contactId.Value, !string.IsNullOrEmpty(oid), grantSet.Projects.Count, grantSet.Matters.Count, grantSet.WorkAssignments.Count);
-
-        var projectAccess = grantSet.Projects
-            .Select(p => CallerProjectAccess.FromLevel(p.ProjectId, p.AccessLevel))
+        // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does.
+        var projectAccess = accessibleProjects.Rights
+            .Select(kvp => new CallerProjectAccess { ProjectId = kvp.Key, Rights = kvp.Value })
             .ToList();
+
+        _logger.LogInformation(
+            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
+            contactId.Value, !string.IsNullOrEmpty(oid), projectAccess.Count,
+            accessibleMatters.Count, accessibleWorkAssignments.Count);
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
@@ -395,37 +437,9 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             Email = email ?? string.Empty,
             Oid = oid,
             ProjectAccess = projectAccess,
-            // Task 033 / FR-19: matter + WA grants carry THEIR OWN level (task 032 added
-            // MatterGrants/WorkAssignmentGrants as the source of truth). Before this, both arrived as
-            // bare id sets and every downstream check treated membership as implying write — which is
-            // how a deliberate ViewOnly matter grant permitted edits.
-            MatterAccess = RightsFromGrants(grantSet.MatterGrants),
-            WorkAssignmentAccess = RightsFromGrants(grantSet.WorkAssignmentGrants),
+            MatterAccess = accessibleMatters.Rights,
+            WorkAssignmentAccess = accessibleWorkAssignments.Rights,
         });
-    }
-
-    /// <summary>
-    /// Projects root grants to <c>(recordId → rights)</c>, unioning duplicates HIGHEST-WINS.
-    /// </summary>
-    /// <remarks>
-    /// The union is not defensive padding: two grant rows CAN target the same record (e.g. a direct
-    /// grant plus one inherited from a different path), and <c>ToDictionary</c> would throw on the
-    /// second. Unioning matches how the evaluator composes terms, so the two agree by construction
-    /// rather than by coincidence. A null level contributes <see cref="AccessRights.None"/>, which
-    /// keeps the id in the set without widening anything (see <c>ExternalRootGrant</c>).
-    /// </remarks>
-    private static IReadOnlyDictionary<Guid, AccessRights> RightsFromGrants(
-        IReadOnlyList<ExternalRootGrant> grants)
-    {
-        var map = new Dictionary<Guid, AccessRights>();
-        foreach (var grant in grants)
-        {
-            var rights = ExternalAccessLevels.ToAccessRights(grant.AccessLevel);
-            map[grant.RecordId] = map.TryGetValue(grant.RecordId, out var existing)
-                ? existing | rights
-                : rights;
-        }
-        return map;
     }
 }
 
