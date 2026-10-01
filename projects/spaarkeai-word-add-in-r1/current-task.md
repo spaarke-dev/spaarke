@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (#1082 merged `d68924b93` = 084 + 085; ISS-016 / #1081 filed for the owner; next: task 060)
+> **Last Updated**: 2026-10-01 (060 done, `3511668f4` + `3fb75a1a4`, #1084; next: one PR for 060, then task 068)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,14 +18,26 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔲 NEXT: task 060 (not started)
+### 🔲 NEXT: task 068 (`tasks/068-durability-siblings-dispatcher-sequences.poml`): the durability siblings 060 named: the `OfficeProfileDispatcher` fire-and-forget `Task.Run` and `JobStatusService._jobSequences`. Not started
+
+### ✅ DONE 2026-10-01: task 060 (`3511668f4` + `3fb75a1a4`), #1084 / ISS-017. Ship: ONE PR for 060, merge after `Router` passes (never `--delete-branch`)
+
+- Suite **13,058/0/54** (exact); ArchTests 337; jest 62/816; lint 0; tsc 68 (0 prod); publish **+338 B** (212 = 212).
+- Full record: `notes/060-job-status-store-and-extraction.md` (§1 findings with App Insights evidence, §2 decision, §6 reds, §9 gates).
+- **Tell UAC-r2** when the PR is open: it changes `OfficeEndpointsContractTests.cs` (the world double: job rows, typed reads) near their #1083 edits. Whoever lands second rebases.
+
+#### (060 working record, kept until the PR merges)
 
 | Field | Value |
 |---|---|
-| **Task** | 060: the Office job-status store (`tasks/060-job-status-store-and-extraction.poml`). The `private static ConcurrentDictionary` in `OfficeService` loses in-flight job status on restart or a second instance |
-| **Status** | not-started |
-| **Next Action** | Invoke `task-execute` for 060 (Step 0.5 rigor + conflict-check: BFF hot path; UAC-r2 is active on `CallerRecordAccessProbe.cs` / `OfficeService.cs` neighbours) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `d68924b93` (fast-forwarded after the #1082 merge) |
+| **Task** | 060: the Office job-status store (`tasks/060-job-status-store-and-extraction.poml`). The `private static ConcurrentDictionary` in `OfficeService` loses in-flight job status on restart or a second instance; the Dataverse fallback never works (anonymous type + `dynamic` across assemblies) |
+| **Status** | in-progress (started 2026-10-01) |
+| **Gate** | ✅ 058, 059, 067 done; 080 merged (#1045); PR #1029 merged. Conflict check: UAC-r2 **#1083** open, touches `OfficeEndpointsContractTests.cs` only on this surface. 060 modifies no existing test, so no overlap |
+| **Done** | Investigation + **decision written BEFORE code**: `notes/060-job-status-store-and-extraction.md` §1–§5. Store = **(a) the Dataverse row**; the save's own view as JSON in `sprk_result` (workers never write it); payload drops content; typed `ProcessingJobRecord` reads; one effective-state rule (incl. 5-min abandoned rule) for BOTH the status read and the 039 idempotency check; row-create failure → `OFFICE_014` refusal before SPE. Dead stub `Workers/Office/(I)OfficeJobStatusService` + its test to be deleted (name clash) |
+| **Production evidence (App Insights `spe-insights-dev-67e2xz`, appId via `az monitor app-insights component show`; query via REST `api.applicationinsights.io/v1/apps/{appId}/query`, NOT `az … query` (quoting breaks); `first`/`last`/`kind` are KQL reserved)** | `RuntimeBinderException` 2026-08-25 in `OfficeDocumentPersistence` ("'object' does not contain a definition for 'Status'") → **039 idempotency never worked live**. **40 saves / 13 rows / 27 `sprk_payload` > 50,000 refusals** in 60 days → 68% of saves had no durable job |
+| **Steps 1–5 DONE (uncommitted)** | #1084 filed (ISS-017). Reds recorded (note §6): 6 new + 5 EXISTING false-green 039/047/025 tests red with the faithful anonymous shape. Implemented: `ProcessingJobRecord` (Spaarke.Dataverse, typed reads); `Services/Office/OfficeJobStatusService.cs` (create/record/find/get/stream, `ToEffectiveView`, `BuildPayload`); OfficeService ctor 20→19, `_jobStore` gone, create failure → OFFICE_014; OfficeDocumentPersistence job members + dep removed (6 dedup-test ctor args removed); OfficeModule registration; dead `Workers/Office/(I)OfficeJobStatusService` + test deleted; JobOwnershipFilter comments; client `useSaveFlow` terminal error + server SSE names. **All 446 Office tests green; 19 new server tests; seeds caught (11 / 3); client 51/51 (5 reds first)** |
+| **Next Action** | Step 6 gates: full BFF suite (expect 13,065 + new − deleted stub tests; RECONCILE), ArchTests, office-addins jest (gated) + lint + typecheck + build, publish size (fresh master vs branch), CVE; code-review + adr-check; note §7+ (decisions 5.1, SSE name fix, gates, ctor 20→19); POML/TASK-INDEX; commit; PR |
+| **Branch** | `work/spaarkeai-word-add-in-r1`, master `d68924b93` + 1 notes commit (`669d09a06`) |
 
 ### ✅ Shipped 2026-10-01: #1082 merged as `d68924b93` (tasks 084 + 085)
 

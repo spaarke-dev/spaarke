@@ -711,6 +711,40 @@ returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcre
 
 ---
 
+## ISS-017 — Office job-row reads never worked in production, and 68% of saves had no job row
+
+| Field | Value |
+|---|---|
+| **Status** | **Fixed on the branch** by task 060 (`3511668f4` + `3fb75a1a4`): typed reads, the row as the durable record, metadata-only payload. Closes when the PR merges; a live restart check waits on the next deploy |
+| **Urgency** | now |
+| **Filed** | 2026-10-01 |
+| **Source** | Task 060's investigation; confirmed in App Insights (`spe-insights-dev-67e2xz`, 60 days) |
+| **GitHub Issue** | [#1084](https://github.com/spaarke-dev/spaarke/issues/1084) |
+
+**Description**
+
+1. **The `dynamic` reads.**
+   - `IProcessingJobService`'s two reads return **anonymous types** (`internal` to `Spaarke.Dataverse`), which the
+     BFF reads through `dynamic`.
+   - The binder checks the call site's access, so every read throws (`RuntimeBinderException`, 2026-08-25, *"'object'
+     does not contain a definition for 'Status'"*), and the callers swallow it.
+   - **Concrete failure:** 039's idempotency check never detected a duplicate in production, and a job-status poll
+     that misses memory returns 404.
+   - The test double returns an `ExpandoObject`, so tests never saw it.
+2. **The payload overflow.**
+   - `sprk_payload` received the document/attachment base64 and the email body, and the column holds at most 50,000
+     characters.
+   - **40 saves, 13 rows, 27 refusals in 60 days.** Those saves ran with an in-memory-only job id, and every later
+     status write failed with "Does Not Exist" (75 + 104).
+
+**Entry-points**: `DataverseServiceClientImpl.GetProcessingJob*Async`; `OfficeService.GetJobStatusAsync` and the
+`payload` in `SaveAsync`; `OfficeDocumentPersistence.CheckForExistingJobAsync`.
+
+**Fix**: task 060, `notes/060-job-status-store-and-extraction.md` §2–§3.
+**Related**: #229 (stale TRACKED marker).
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.
