@@ -33,10 +33,10 @@ public class OfficeEndpointAuthorizationContractTests : IClassFixture<OfficeTest
     }
 
     [Fact]
-    public async Task Get_OfficeRecent_WhenUnauthenticated_Returns401()
+    public async Task Get_OfficeMatterTypes_WhenUnauthenticated_Returns401()
     {
         var client = _factory.CreateClient();
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/office/recent");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/office/search/matter-types");
         request.Headers.Add("X-Test-Unauthenticated", "true");
 
         var response = await client.SendAsync(request);

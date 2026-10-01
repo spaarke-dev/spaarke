@@ -188,10 +188,7 @@ Supports Outlook and Word add-ins for document saving, entity search, and sharin
 /api/office/jobs/{jobId}                  Async job status polling
 /api/office/jobs/{jobId}/stream           SSE job status streaming
 /api/office/search/entities               Entity search from add-in
-/api/office/search/documents              Document search from add-in
 /api/office/quickcreate/{entityType}      Quick create entity from add-in
-/api/office/share/links                   Create sharing links
-/api/office/recent                        Recent documents
 ```
 
 **Rate Limiting**: Per-endpoint limits (5-60/min depending on operation).

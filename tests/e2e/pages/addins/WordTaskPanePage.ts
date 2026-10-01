@@ -560,26 +560,6 @@ export class WordTaskPanePage {
       });
     });
   }
-
-  /**
-   * Mock recent associations API response
-   */
-  async mockRecentApi(
-    recentAssociations: EntitySearchResult[],
-    recentDocuments: Array<{ id: string; name: string }> = []
-  ): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/recent*`, route => {
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          recentAssociations,
-          recentDocuments,
-          favorites: [],
-        }),
-      });
-    });
-  }
 }
 
 export default WordTaskPanePage;

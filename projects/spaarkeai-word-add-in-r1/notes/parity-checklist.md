@@ -241,7 +241,7 @@ mistake for executing coverage.
 |---|---|---|---|
 | `tests/e2e/specs/word-addins/save-flow.spec.ts` | 32 | ❌ no | Measured: taskpane boots, hangs at `Stage 2: Initializing auth service`. Real `office.js` is never intercepted so the injected Office mock is superseded (`host: null`); MSAL then cannot complete headless. |
 | `tests/e2e/specs/outlook-addins/save-flow.spec.ts` | 48 | ❌ no | Same shape and same blockers as above. |
-| `tests/e2e/specs/outlook-addins/share-flow.spec.ts` | 29 | ❌ no | Same. |
+| `tests/e2e/specs/outlook-addins/share-flow.spec.ts` | 29 | ❌ no | ~~Same.~~ **DELETED 2026-09-30 by task 058.** It tested a share UI the pane does not have, against routes that served fabricated data and were removed. The live-host manual pass now has 80 tests (32 + 48), not 109. |
 
 **109 tests, running nowhere.** No workflow executes `tests/e2e` at all, and each spec now carries an in-file
 marker saying so, so a reader cannot mistake them for coverage.

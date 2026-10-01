@@ -4,7 +4,7 @@
     <title>Live Office endpoints serve fabricated data with NO per-document authorization — delete the unused stub surface</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>startable — no dependencies; findings confirmed against the deployed build 2026-09-19. RE-SCOPED 2026-09-21 per notes/fable-review-2026-09-21.md §2 — see the RE-SCOPE block in background.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: removes an authorization gap on a LIVE deployed route. Also a breaking contract change to `IOfficeService` (9 consumers). Tags include bff-api + security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -218,4 +218,34 @@
     <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
     <file>projects/spaarkeai-word-add-in-r1/notes/058-delete-unauthorized-stub-surface.md</file>
   </outputs>
+  <status-note>
+    COMPLETED 2026-09-30. Commit 8d56d47eb (+ close commit). This removed a LATENT hazard, not a live disclosure; the
+    live gaps are tasks 062-067.
+
+    Reproduce-first, live on spaarke-bff-dev: POST /api/office/share/links returned 200 with an identical fabricated
+    shape for a RANDOM GUID and for a real 697,393-byte PDF, which it reported as a 245,678-byte .docx. The route
+    reads nothing.
+
+    Deleted:
+    - 14 OfficeService members (-775 lines) and 4 IOfficeService members.
+    - From OfficeEndpoints (-623 lines): the routes, the share group and the recent group.
+    - 7 model files. AssociationType was MOVED verbatim to Models/Office/AssociationType.cs; ordinal 3 is still
+      burned.
+    - The rate-limit Share/Recent categories and options.
+    - useShareFlow.ts.
+    - The 4 Pending waivers, the contract-test regions, share-flow.spec.ts, the route mocks, 18 inert
+      mockRecentApi calls, and the k6 endpoint tests.
+    The 401 auth test was repointed to /search/matter-types.
+
+    Gates:
+    - Full suite 13,040 / 0 / 54, which reconciles exactly (-8 passed, -2 skipped). ArchTests 337/337.
+    - Publish 45.49 -> 45.46 MB (-0.028 MB, 212 files on each side, fresh master).
+    - CVE clean. Code review 0 critical. ADR check 0 violations.
+    - office-addins tsc 68 (baseline); lint 0.
+    - Zero route references in tracked src/ and tests/.
+    - Three docs corrected.
+    Deviation: the "caller cannot access" probe used an admin token, so a real document stood in.
+    External callers: none in the repo; telemetry has about 1 hour of history, so it is inconclusive.
+    Note: notes/058-delete-unauthorized-stub-surface.md.
+  </status-note>
 </task>

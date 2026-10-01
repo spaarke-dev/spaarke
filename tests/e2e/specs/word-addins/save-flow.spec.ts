@@ -160,7 +160,6 @@ test.describe('Word Save Flow - Document Context @e2e @word', () => {
     // Setup Word environment mock
     await taskPanePage.mockWordEnvironment('Test Contract.docx');
     await taskPanePage.mockEntitySearchApi(mockEntities);
-    await taskPanePage.mockRecentApi(mockEntities.slice(0, 2));
 
     await taskPanePage.navigateToSaveMode();
   });
@@ -206,7 +205,6 @@ test.describe('Word Save Flow - Entity Association @e2e @word', () => {
 
     await taskPanePage.mockWordEnvironment('Legal Agreement.docx');
     await taskPanePage.mockEntitySearchApi(mockEntities);
-    await taskPanePage.mockRecentApi(mockEntities.slice(0, 2));
 
     await taskPanePage.navigateToSaveMode();
     await taskPanePage.waitForDocumentContext();
