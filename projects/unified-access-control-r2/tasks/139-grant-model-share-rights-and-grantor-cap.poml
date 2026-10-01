@@ -360,4 +360,7 @@ The numeric value of each mask is derived from the Dataverse AccessRights values
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it: /unshare-user (and any revoke path this task touches) refuses to remove the LAST person with access to a secure record, with a message (not a bare 500). (A1) Whether the grantor-level cap stays for MANUAL Grant Access is awaiting owner confirmation — treat the cap as an escalation trigger, not settled, until the owner answers. Assigned-To auto-grants (142) are uncapped Collaborate per rule 5.</amendment>
   </amendments>
+  <amendments>
+    <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">A1 SETTLED: the grantor-level cap stays for MANUAL Grant Access (owner: "as you've presented it, then yes that should be the cap") — the earlier R3 escalation on the cap is resolved; implement the cap as specified. Assigned-To auto-grants (142) remain uncapped Collaborate (rule 5).</amendment>
+  </amendments>
 </task>

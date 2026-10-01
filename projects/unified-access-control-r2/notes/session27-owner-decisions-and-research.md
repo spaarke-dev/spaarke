@@ -66,6 +66,33 @@ Live fact relevant to Q8, Q4 and Q5: only **1 of 8** active interactive systemus
 - **N2 / N5 / N6.** The owner did not follow the "wall" wording (= a No Access List entry). These are re-explained and await the owner.
 - **F3.** The owner answered "a systemuser with update rights". The main session flagged that this includes every Collaborate colleague. **Awaiting confirmation.**
 
+## Owner answers, round 3b (2026-10-01). BINDING.
+
+- **A1:** the grantor-level cap STAYS for MANUAL Grant Access ("as you've presented it, then yes that should be the cap"). A Collaborate holder cannot grant Full Access. Assigned-To auto-grants follow rule 5: always Collaborate, uncapped.
+- **G5, refined.** Confirming an invoice works like this:
+  - the BFF checks AS THE USER: Create on sprk_invoice, AppendTo on the matter and vendor, Write+Append on the document;
+  - then the APP creates the invoice, OWNED BY THE TEAM (RecordOwnershipResolver, record-first from the matter), never user-owned. This is the owner's point: "same rule that assigned to the bu/team not individual".
+- **N2:** hide the record in Teams/SPA. **N5:** as recommended (enforce only when the entry author has Write on the record; otherwise "not enforced" plus a notice). **N6:** as recommended (refuse to provision, with a message).
+- **F3:** as recommended. Removing Secure is limited to Full Access holders plus the creator, enforced server-side in the unsecure endpoint. Securing stays open to Write-holders.
+- **F5, superseded by the owner's ask:** a **ribbon button** changes a standard record to secure.
+- **NEW owner UX requirements** (research running; tasks to be assigned):
+  1. **Ethical wall (No Access):**
+     - a red notification banner on any record subject to a No Access restriction, linking to a No Access list modal;
+     - a way to ADD users/contacts/organizations to the No Access list of a record or an organization;
+     - a way to SEE who is on it.
+     - The owner also asks how No Access is enforced and surfaced at the ORGANIZATION level (does sprk_organization carry the components?).
+  2. **Secure records:**
+     - a red notification banner showing a record is secure, linking to Share/Manage Access if possible;
+     - a ribbon button to change a standard record to secure.
+
+**Relayed by word-add-in-r1, 2026-10-01** (owner's words quoted by the peer; the UAC owner round 3 had already accepted I1 directly):
+- **F1 DONE live.** All 32 privileges outside `config/secure-record-owner-role.json` were removed, taking the role from 40 to 8 privileges, all Read at Basic.
+  - Proven by 16 Secure-team-owned creates (project, matter, work assignment, document), all successful, plus an `sprk_invoice` control that was refused each poll.
+  - The before-snapshot is saved for reversal. `-Verify` exits 0.
+  - ⚠️ `AddPrivilegesRole` RE-INJECTS the SharePoint four, so any `-Apply` (tasks 145/146 extending the set) must re-run the guide §5.4 strip afterwards.
+- **F11:** the owner will change the hotmail #EXT# account themselves ("this is in dev and we'll change this"). There is NO census exception; clause 1 must pass once the owner changes it.
+- **#1037** is word-add-in-r1 task 084 (option A).
+
 ## Live facts verified this session
 
 - `sprk_accesspermission` is **Standard 100000000 / Limited 100000001 / Restricted 100000002** on sprk_project, and identical on sprk_matter and sprk_workassignment.

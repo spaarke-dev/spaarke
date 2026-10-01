@@ -220,4 +220,7 @@ NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no 
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Step 6 is prescriptive; the BFF and client ship together (the client stops writing the flag in the same release the server starts setting it).</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: F3 = removing Secure is limited to Full Access holders plus the creator, enforced server-side in the unsecure endpoint (securing stays open to Write-holders). F5 superseded: securing an existing standard record is a RIBBON BUTTON on project/matter/work-assignment forms (enabled with 148, per F7). NEW owner UX requirement (assignment pending research): a red notification banner on secure records, linking to Share/Manage Access where possible.</amendment>
+  </amendments>
 </task>

@@ -142,6 +142,6 @@ NEW ENVIRONMENTS. No provisioning code creates the Secure Record BU, the owner t
     <protocol>Load all files in knowledge before starting. Coordinate with word-add-in-r1 before the first live write. Run alone: the live role is shared.</protocol>
   </execution>
   <amendments>
-    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(F11) Only one account holds "Spaarke Basic User" in dev — the owner's guest account ralph.schroeder_hotmail.com#EXT# (BU "Spaarke"), verified 2026-09-30 — so the census clause-1 finding is not structural. Record it as an owner-accepted dev exception in the census configuration, named explicitly; any other principal reaching the Secure BU still fails.</amendment>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(F11) Only one account holds "Spaarke Basic User" in dev — the owner's guest account ralph.schroeder_hotmail.com#EXT# (BU "Spaarke"), verified 2026-09-30 — so the census clause-1 finding is not structural. UPDATE 2026-10-01: the owner will change that account themselves ("this is in dev and we'll change this") — add NO census exception; clause 1 must pass on its own. Also: 082 (F1) removed the 32 drifted privileges live (role 40 to 8, all Read at Basic); AddPrivilegesRole re-injects the SharePoint four, so after any -Apply that extends the codified set, re-run the guide section 5.4 strip and -Verify.</amendment>
   </amendments>
 </task>
