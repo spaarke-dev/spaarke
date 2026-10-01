@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (all four owner decisions answered and actioned; task 084 authored; next 059)
+> **Last Updated**: 2026-10-01 (owner decisions actioned; 084 authored; **059 closed**; next 084)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -20,11 +20,11 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **059** (`tasks/059-*.poml`: extract the search cluster into `OfficeSearchService`). Read its UPDATE block: 058's deletions shrank `OfficeService` to about 3,090 lines, and `GenerateStubResults` stays with `SearchEntitiesAsync`. **084** follows 059 (it edits the extracted search). **083** is blocked until UAC-r2 sends 141's link contract |
-| **Last closed** | **058** ✅ 2026-09-30 `8d56d47eb` (+ close commit): the fabricated-data Office routes were deleted. That closed a LATENT hazard, not a live gap. Suite 13,040/0/54, which reconciles exactly; publish −0.028 MB. Record: `notes/058-delete-unauthorized-stub-surface.md`. Before it: **082** ⚠️ (#1051 merged) |
-| **PR** | ✅ #1045 `38ad83962` · ✅ #1051 (082) `b8fc4dc3e` · ✅ **#1052 (058) `76a9b0fa0`**, all merged 2026-09-30/10-01. #1023 and #1024 closed. **No open PR**; 059 opens the next one |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + a merge-back + checkpoint commits, pushed |
-| **Next Action** | `task-execute` **059** (extract the search cluster into `OfficeSearchService`; read its UPDATE block). Order after it: **084** → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
+| **Active task** | **none in progress.** Next: **084** (`tasks/084-pickable-equals-savable.poml`, opus @ high; deps 059 ✅): pickable equals savable (#1037 + #1075). The search code it edits now lives in `Services/Office/OfficeSearchService.cs`. **083** stays blocked until UAC-r2 sends 141's link contract (141 is not in their current batch) |
+| **Last closed** | **059** ✅ 2026-10-01 `913dafa2f`: `OfficeSearchService` extracted (entity search + matter types + the To Do's `sprk_recordtype_ref` lookup); ctor 21 → 20, 5 optional deps required, dead null branches and the stub search deleted; the dispatcher's 3 params left to **068**. Suite 13,040/0/54, identical; ArchTests 337; publish −1,917 B. ⚠️ Search log lines now carry the category `OfficeSearchService`. Record: `notes/059-extract-office-search-service.md`. Before it: **058** ✅ (#1052) |
+| **PR** | 059's PR: see the Session log below. Earlier: ✅ #1045 · ✅ #1051 (082) · ✅ #1052 (058) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + 059 + record commits |
+| **Next Action** | `task-execute` **084**. Order after it: 060 → 068 (deletes the profile dispatcher and its 3 optional ctor params, 20 → 17) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 

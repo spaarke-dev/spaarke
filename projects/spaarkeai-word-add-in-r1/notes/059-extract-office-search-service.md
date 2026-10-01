@@ -102,7 +102,40 @@ skips predate this task (`OfficeEndpointsContractTests`).
 
 ## 6. Gates
 
-_Filled in at Step 9.5._
+| Gate | Result |
+|---|---|
+| Build | BFF and `Sprk.Bff.Api.Tests` **0 warnings / 0 errors**. Rebuilt after the final comment and `using` edits |
+| Targeted Office tests (unmodified) | **223 / 0 / 7**. The 7 skips predate this task |
+| **Full BFF suite** | **13,040 passed / 0 failed / 54 skipped**. This is **identical** to task 058's run, which is the expected result: no test was added or removed, and nothing changed behaviour |
+| ArchTests | **337 / 337** |
+| **Publish size (§10)** | Fresh master `76a9b0fa0` **45.460 MB** (47,667,901 B) → branch `913dafa2f` **45.458 MB** (47,665,984 B) = **−1,917 bytes**. `Compress-Archive` Optimal, incl. PDBs, short-path fresh worktrees (`C:\tmp\w059m`/`w059b`, removed afterwards). **212 files on both sides**, so the measurement is valid |
+| CVE | No package or csproj change; `dotnet list package --vulnerable --include-transitive` reports **no vulnerable packages** |
+| Other test projects | `Sprk.Bff.Api.IntegrationTests` (`Phase2EndToEndFixture`) mocks `IOfficeService`, whose members are unchanged, so it is unaffected |
+
+**Code review: 0 critical.**
+- **W1 (fixed):** the comment above `OfficeEndpoints.cs` `GET /search/entities` still said "OfficeService issues the
+  search" and "See OfficeService.QuerySearchEntityAsync". Both now name `OfficeSearchService`.
+- **W2 (fixed):** `using System.Text.Json;` became unused in `OfficeService.cs`. The one remaining use is
+  fully qualified. Removed.
+- **S1 (deliberately not changed):** `ResolveRegardingRecordTypeIdAsync`'s `catch (Exception)` also catches
+  `OperationCanceledException`, so a cancelled request logs "lookup failed" and continues. This predates the task
+  and moved verbatim; changing it would break the move's no-behaviour-change rule.
+- **S2:** `OfficeService` still has 20 ctor params, against ADR-010's critical threshold of more than 7. Task 068
+  takes it to 17, and task 060's job-status extraction is the next cut.
+- **Metrics:** `OfficeSearchService` is 394 lines, over the 300-line warning threshold. It is one cohesive
+  responsibility and more than half of it is preserved remarks, so it is accepted.
+- **Verbatim check:** a line-level diff of the old region against the new file shows only the deleted stub
+  generator, the deleted null branches, the simplified forcing function and the new class shell.
+
+**ADR check: 0 violations.**
+- ADR-010: a concrete class, registered in the `AddOfficeModule` feature module; no interface.
+- ADR-032: registered unconditionally, and every dependency is unconditional.
+- ADR-008: the search authorization model is unchanged. It is still impersonated inside the query, with no filter
+  added or removed, so the route census is untouched.
+- ADR-013: no new AI dependency. `IDocumentProfileAi` is pre-existing and left for task 068.
+- ADR-019: no error code changed.
+- ADR-038: no test deleted; two unit tests changed their qualifier only, with 0 assertion changes.
+- ADR-001/007/028/044: not engaged.
 
 ## 7. Observation, not acted on
 
