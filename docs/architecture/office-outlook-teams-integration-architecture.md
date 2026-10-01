@@ -50,8 +50,9 @@ A missing / mismatched `brk-multihub://<host>` → **AADSTS7000471** ("reply add
 
 ```
 src/client/office-addins/
-├── outlook/                         # Outlook host entry
-│   ├── OutlookHostAdapter.ts        # mailbox item/attachment access
+├── outlook/                         # Outlook host entry; no host adapter here either: task 075 deleted the
+│   │                                # dead outlook/OutlookHostAdapter.ts; the pane registers
+│   │                                # shared/adapters/OutlookAdapter.ts (mailbox item/attachment access)
 │   ├── outlook-manifest.xml         # XML manifest (M365 Admin Center)
 │   ├── manifest.json                # Unified manifest (icons.color/outline)
 │   ├── taskpane/index.tsx           # mounts <App> with the Outlook adapter

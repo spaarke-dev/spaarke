@@ -835,14 +835,4 @@ public class OfficeDocumentPersistence
         await CrossPathLink.LinkDocumentToCommunicationAsync(
             _genericEntityService, documentId, communicationId, _logger, ct);
     }
-
-    /// <summary>
-    /// Generates a Dataverse URL for a document record.
-    /// </summary>
-    public static string GenerateDataverseUrl(Guid documentId)
-    {
-        const string dataverseBaseUrl = "https://spaarkedev1.crm.dynamics.com";
-        const string appId = "729afe6d-ca73-f011-b4cb-6045bdd8b757";
-        return $"{dataverseBaseUrl}/main.aspx?appid={appId}&pagetype=entityrecord&etn=sprk_document&id={documentId}";
-    }
 }

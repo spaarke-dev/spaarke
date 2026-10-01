@@ -1073,16 +1073,16 @@ public class OfficeService : IOfficeService
                     CancellationToken.None);
             }
 
-            // Include the actual exception message to aid debugging
-            // In production, consider returning a generic message and logging details server-side only
+            // Task 075: a server fault, so the caller gets a generic message and the endpoint renders a 500. The
+            // exception (logged above, with the request's correlation id) never goes on the wire: its message can
+            // carry server internals, and the full ex.ToString() this used to attach carried the stack trace.
             return new SaveResponse
             {
                 Success = false,
                 Error = new SaveError
                 {
-                    Code = "OFFICE_INTERNAL",
-                    Message = $"Save failed: {ex.Message}",
-                    Details = ex.ToString(), // Full stack trace for debugging
+                    Code = OfficeErrorCodes.InternalError,
+                    Message = "The save could not be completed. Try again; if it keeps failing, contact support with the correlation id.",
                     Retryable = true
                 }
             };

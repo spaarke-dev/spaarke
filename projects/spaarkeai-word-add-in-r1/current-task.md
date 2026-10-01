@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (068 shipped as #1091 / `08b70d6cc`; next: task 075)
+> **Last Updated**: 2026-10-01 (075 done and gated; ship its PR, then task 079)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,14 +18,14 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: task 075 (dead code and stale premises) — not started
+### 🔄 ACTIVE: ship task 075's PR, then task 079
 
 | Field | Value |
 |---|---|
-| **Task** | 075, `tasks/075-dead-code-and-stale-premises.poml` (FULL, sonnet / high). Start via `task-execute` |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `08b70d6cc` (clean). Commit 075 here; ship by PR, merge with `--merge` (**NEVER `--delete-branch`**) once `Router` passes and nothing is pending |
-| **Queue after 075** | 079 → 090. 076 waits on the owner's answers; 083 waits on UAC-r2's 141 |
-| **For the owner** | (1) #1081: the root BU team has no roles — decide before the next BFF deploy from master; tell UAC-r2. (2) `SystemCacheKeys.JobStatusSequence` (15 of 20) needs architecture review. (3) Generate Profile now runs app-only on the queue; the 202 is ~0.3 s slower. (4) Filed: #1088, #1089, #1090. (5) Live checks for 060 and 068 wait on that deploy (scripts in their POML `<ui-tests>`) |
+| **075** | ✅ DONE 2026-10-01 (`notes/075-dead-code.md`). Dead Outlook adapter deleted; one share-link minter; uncalled factory API removed; `OFFICE_INTERNAL` → 500 with no exception text; dead `GenerateDataverseUrl` deleted. Suite 13,072/0/54; ArchTests 337; publish −330 B; office-addins jest 62/817, lint 0, build OK |
+| **Next Action** | 1) Commit 075 and push; open the PR. 2) Merge after `Router` passes and nothing is pending (`gh pr merge N --merge`, **NEVER `--delete-branch`**); sync both checkouts. 3) Portfolio #945 Tasks Completed → 72. 4) Start task **079** via `task-execute` (`tasks/079-record-integrity-reconciliation.poml`: SC-6/SC-8 test citations, the FR-12 ADR-Tensions row, unsupported ✅ claims, POML status drift, 10 unparseable POMLs) |
+| **Queue after 079** | 090 (wrap-up, with the `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
+| **For the owner** | (1) #1081 before the next BFF deploy from master. (2) `SystemCacheKeys.JobStatusSequence` architecture review. (3) #1088, #1089, #1090 filed |
 
 ### ✅ Shipped 2026-10-01: #1091 merged as `08b70d6cc` (task 068, #1086 / ISS-018)
 
