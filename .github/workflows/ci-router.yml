@@ -23,10 +23,11 @@
 #   The router MUST NOT inspect commit messages for [skip ci]-style markers.
 #   Path-based dispatch via `classify` is the ONLY relief mechanism.
 #
-# SHADOW MODE (Phase 2)
-#   This workflow runs in PARALLEL with the existing `sdap-ci.yml` for ≥14
-#   days. Branch protection is NOT flipped to require `CI / Router` until
-#   task 071 (cutover). Until then, this workflow's result is observational.
+# CUTOVER DONE (was: SHADOW MODE, Phase 2)
+#   The master ruleset requires `Router` — it is the ONLY required status
+#   check (verified 2026-09-30 with
+#   `gh api repos/spaarke-dev/spaarke/rules/branches/master`). The legacy
+#   `sdap-ci.yml` still runs in parallel but is not required.
 #
 # MERGE QUEUE COMPATIBILITY (spec FR-C01)
 #   The `merge_group` trigger is included from day 1. When merge queue is

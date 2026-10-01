@@ -1,10 +1,13 @@
 name: actionlint
 
 on:
-  # Fire on all PRs (no path filter) so the 'actionlint' required-status-check
-  # always posts a status. Path filtering created a deadlock pattern on PRs
-  # that didn't touch .github/workflows/** — the check was "expected but
-  # unreported" and blocked merge indefinitely (observed on PR #322 closeout).
+  # Fire on all PRs (no path filter) so the 'actionlint' check always posts a
+  # status. Path filtering created a deadlock pattern on PRs that didn't touch
+  # .github/workflows/** while this check was required — the check was
+  # "expected but unreported" and blocked merge indefinitely (observed on PR
+  # #322 closeout). It is NOT a required check today: the master ruleset
+  # requires only 'Router' (ci-router.yml) — verified 2026-09-30 with
+  # `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
   # Actionlint is fast (~17s) so the overhead is negligible.
   pull_request:
 

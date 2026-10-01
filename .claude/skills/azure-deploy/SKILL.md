@@ -302,14 +302,12 @@ This skill documents **manual** Azure Infrastructure + Key Vault Secrets work. F
 
 | Workflow | Trigger | What It Deploys |
 |----------|---------|-----------------|
-| `.github/workflows/deploy-infrastructure.yml` | Manual trigger (`workflow_dispatch`) | Azure Infrastructure (Bicep stacks) |
-| `.github/workflows/deploy-bff-api.yml` | Auto (after CI passes on master) OR manual | BFF API — see `bff-deploy` skill |
-| `.github/workflows/deploy-office-addins.yml` | Manual trigger | Office Add-ins SWA — see `office-addins-deploy` skill |
-| `.github/workflows/deploy-platform.yml` | Manual trigger | Cross-platform deployment orchestrator |
-| `.github/workflows/deploy-promote.yml` | Manual trigger | Promote a deployed artifact between environments |
-| `.github/workflows/deploy-slot-swap.yml` | After CI green | Slot swap for App Service blue-green deploys |
+| `.github/workflows/deploy-infrastructure.yml` | PR / push on `infrastructure/bicep/**` → validate + what-if only; deploys only on `workflow_dispatch` with `deploy: true` + environment approval | Azure Infrastructure (Bicep stacks) |
+| `.github/workflows/deploy-bff-api.yml` | `workflow_dispatch` only (never on merge) | BFF API — staging slot → swap → verify, with auto-rollback; see `bff-deploy` skill |
+| `.github/workflows/deploy-office-addins.yml` | Push to `master` on add-in paths, or `workflow_dispatch` | Office Add-ins SWA — see `office-addins-deploy` skill |
+| `.github/workflows/deploy-promote.yml` | `workflow_dispatch` | Direct-target deploy to dev / staging / production (production needs reviewer approval) |
 
-**Note**: Earlier docs referenced `deploy-staging.yml` and `deploy-to-azure.yml` — these workflow files do NOT exist. The actual workflow names are listed above (verified 2026-05-17).
+**Note**: `deploy-staging.yml` and `deploy-to-azure.yml` never existed; `deploy-platform.yml` and `deploy-slot-swap.yml` were deleted (commit `902bebc49c`). Slot swaps are part of `deploy-bff-api.yml`. Full current list: [`docs/procedures/ci-cd-workflow.md`](../../../docs/procedures/ci-cd-workflow.md) (verified 2026-09-30).
 
 ### When to Use Manual vs Automated
 
@@ -398,4 +396,4 @@ Both scripts support `-SkipBuild` flag to deploy existing builds faster.
 | Key Vault secret stored but App Settings reference returns null | App Service's managed identity doesn't have `Get` permission on the Key Vault, OR the reference syntax `@Microsoft.KeyVault(SecretUri=...)` has a typo | Grant the App Service's system-assigned MI Key Vault Secrets User role. Verify reference syntax matches exactly (including the literal `@` and proper VaultName/SecretName fields). Test with `az webapp config appsettings list` to see resolved values. |
 | AI Foundry stack deploy fails with "Hub not found" mid-deploy | Resource dependencies aren't ordered correctly in the Bicep | The `ai-foundry-stack.bicep` example wires Hub → Project → Connections in correct order. Don't shortcut to deploy Project before Hub exists. |
 | Workflow `deploy-staging.yml` or `deploy-to-azure.yml` doesn't exist | Earlier docs referenced these by hopeful name; they were never created | Use the actual workflows listed in `## CI/CD Integration` (verified 2026-05-17). Fixed in this skill version. |
-| Deployment in slot 'staging' but production users still on old version | Slot swap step not run after staging validation | Slot deploys to `staging` are intentional — explicit `az webapp deployment slot swap` step is required to promote. Use `deploy-slot-swap.yml` workflow for this. |
+| Deployment in slot 'staging' but production users still on old version | Slot swap step not run after staging validation | Slot deploys to `staging` are intentional — explicit `az webapp deployment slot swap` step is required to promote. `deploy-bff-api.yml` does the swap (and verifies, with rollback); `deploy-slot-swap.yml` no longer exists. |

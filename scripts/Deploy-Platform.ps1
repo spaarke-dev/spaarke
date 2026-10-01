@@ -17,8 +17,9 @@
     The script is idempotent — safe to run multiple times (FR-10).
     No secrets are passed as parameters — all secrets use Key Vault (FR-08).
 
-    Called by: deploy-platform.yml GitHub Actions workflow
-    Can also be run manually by developers/operators.
+    Called by: no GitHub Actions workflow — deploy-platform.yml was removed 2026-06-01
+    (commit 902bebc49c, github-actions-rationalization-r1 Wave C, D-05). Run manually
+    by an operator (az login + pwsh from this repo) as shown in the examples below.
 
 .PARAMETER EnvironmentName
     Target environment name (dev, staging, prod). Used in resource naming.

@@ -7,6 +7,26 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-09-30 — `ci-cd` + `azure-deploy` skills describe the workflows that exist (plan G24)
+
+`customer-provisioning-orchestration-r1` SESSION 28 (owner: fix drift at discovery).
+
+- **`ci-cd`**: the "Primary CI Pipeline" section described `sdap-ci.yml` as the gate; it is now the CI Router
+  (`ci-router.yml` → Tier 1 blocking + Tier 2 advisory), and `Router` is the **only** required status check on
+  master (verified 2026-09-30 with `gh api repos/spaarke-dev/spaarke/rules/branches/master`). The "Supporting
+  Workflows" table listed four files that do not exist (`build-only.yml`, `dotnet.yml`, `test.yml`,
+  `auto-add-to-project.yml`); it now lists the eleven reporting/scheduled/publishing workflows that do. Merge steps,
+  diagram, troubleshooting job names, `gh run list --workflow=` and the secrets note follow. `deploy-infrastructure.yml`
+  is no longer described as auto-deploying on push (push/PR = validate + what-if; deploy = manual dispatch + approval).
+- **`azure-deploy`**: removed the deleted `deploy-platform.yml` / `deploy-slot-swap.yml` rows; corrected
+  `deploy-bff-api.yml` (dispatch only — never on merge) and `deploy-office-addins.yml` (auto on push) triggers.
+- Same pass outside `.claude/`: `docs/procedures/ci-cd-workflow.md` rewritten against all 23 workflow files; stale
+  references fixed in `docs/architecture/ci-cd-architecture.md`, `docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`,
+  `docs/procedures/{DEPENDENCY-MANAGEMENT,testing-and-code-quality}.md`, `config/coverlet-nightly.runsettings`,
+  `scripts/Deploy-Platform.ps1`; `workflows-validate.yml` / `ci-router.yml` header comments no longer claim
+  "required check" / "shadow mode".
+
+---
 ###### 2026-09-30 — `/provision-environment` enforces the customerId standard and records the display name (T237)
 
 `customer-provisioning-orchestration-r1` T237 (owner D10, adopting unified-access-control-r2 D-14).
