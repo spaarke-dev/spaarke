@@ -331,7 +331,11 @@ public static class FinanceEndpoints
                 title: "Document Not Found",
                 detail: "The document no longer exists.",
                 statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId });
+                extensions: new Dictionary<string, object?>
+                {
+                    ["reasonCode"] = InvoiceReviewException.DocumentNotFoundReasonCode,
+                    ["correlationId"] = correlationId,
+                });
         }
         catch (Exception ex)
         {
@@ -361,6 +365,7 @@ public static class FinanceEndpoints
         {
             InvoiceReviewFailure.DocumentNotFound => (StatusCodes.Status404NotFound, "Document Not Found"),
             InvoiceReviewFailure.DocumentLinkedToAnotherInvoice => (StatusCodes.Status409Conflict, "Document Already Linked"),
+            InvoiceReviewFailure.DocumentChangedConcurrently => (StatusCodes.Status409Conflict, "Document Changed"),
             InvoiceReviewFailure.OwnerTeamUnresolved => (StatusCodes.Status403Forbidden, "Invoice Not Created"),
             _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
         };
@@ -370,6 +375,18 @@ public static class FinanceEndpoints
             ["reasonCode"] = ex.ReasonCode,
             ["correlationId"] = correlationId,
         };
+
+        // The invoice another matter's document link points at was never authorized for this caller: its id is
+        // logged server-side only, never rendered — not in the detail, not as an extension (task 130 item 5).
+        if (ex.Failure == InvoiceReviewFailure.DocumentLinkedToAnotherInvoice)
+        {
+            return Results.Problem(
+                title: title,
+                detail: "The document is already linked to an invoice for a different matter or vendor. Nothing was saved.",
+                statusCode: status,
+                extensions: extensions);
+        }
+
         if (ex.InvoiceId is { } invoiceId)
         {
             extensions["invoiceId"] = invoiceId;

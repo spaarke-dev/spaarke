@@ -467,13 +467,55 @@ public class FinanceEndpointsAuthorizationContractTests
         host.VerifyNoServiceWasInvoked();
     }
 
+    [Fact]
+    public async Task Confirm_NoPrivilegeProbeRegistered_IsDenied_NeverAllowed()
+    {
+        // A host whose container has no CallerRecordAccessProbe: the Privilege-path check cannot be asked, and a
+        // check that cannot be asked must deny (fail closed) — every record right is granted, so only that guard
+        // stands between this caller and an app-only invoice create.
+        await using var host = await FinanceAuthHost.StartAsync(registerProbe: false);
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.error.system_failure");
+        host.Access.Calls.Should().HaveCount(4, "every record check ran and passed; the privilege check denied");
+        host.Probe.Calls.Should().BeEmpty("the probe is not registered, so it cannot have been asked");
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact]
+    public async Task Confirm_DocumentLinkedToAnotherMattersInvoice_Is409_AndNeverNamesThatInvoice()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        var otherInvoice = Guid.NewGuid();
+        // Even an exception that carried the other invoice (in its message and as InvoiceId) must not leak it.
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceReviewException(
+                InvoiceReviewFailure.DocumentLinkedToAnotherInvoice, $"linked to invoice {otherInvoice}", otherInvoice));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(otherInvoice.ToString()).And.NotContainEquivalentOf(otherInvoice.ToString("N"));
+        var json = JsonNode.Parse(text)!.AsObject();
+        json.Should().NotContainKey("invoiceId");
+        json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.document_linked_elsewhere");
+    }
+
     public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()
     {
         { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, false },
-        { InvoiceReviewFailure.DocumentLinkedToAnotherInvoice, HttpStatusCode.Conflict, true },
+        { InvoiceReviewFailure.DocumentChangedConcurrently, HttpStatusCode.Conflict, false },
         { InvoiceReviewFailure.OwnerTeamUnresolved, HttpStatusCode.Forbidden, false },
         { InvoiceReviewFailure.LinkFailed, HttpStatusCode.InternalServerError, false },
         { InvoiceReviewFailure.LinkFailedInvoiceNotRemoved, HttpStatusCode.InternalServerError, true },
+        { InvoiceReviewFailure.CreateFailedInvoiceMayRemain, HttpStatusCode.InternalServerError, true },
         { InvoiceReviewFailure.StatusNotUpdated, HttpStatusCode.InternalServerError, true },
         { InvoiceReviewFailure.ExtractionNotQueued, HttpStatusCode.InternalServerError, true },
     };
@@ -612,6 +654,28 @@ public class FinanceEndpointsAuthorizationContractTests
         var response = await host.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Reject_DocumentDeletedAfterTheCheck_Returns404WithReasonCode()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var documentId = Guid.NewGuid();
+        host.Access.Grant(Documents, documentId, AccessRights.Read | AccessRights.Write);
+        // The update-only status write refuses a document deleted between the check and the write.
+        host.Review.Setup(r => r.RejectInvoiceAsync(
+                It.Is<InvoiceReviewRejectRequest>(q => q.DocumentId == documentId), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new KeyNotFoundException("sprk_document record was not found."));
+
+        var request = Authenticated(HttpMethod.Post, "/api/finance/invoice-review/reject");
+        request.Content = JsonContent.Create(new { documentId });
+
+        var response = await host.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["reasonCode"]!.GetValue<string>().Should().Be("sdap.finance.invoice_review.document_not_found");
+        json["title"]!.GetValue<string>().Should().Be("Document Not Found");
     }
 
     // =========================================================================================
@@ -805,14 +869,16 @@ public class FinanceEndpointsAuthorizationContractTests
         public Mock<IFieldMappingDataverseService> RollupWrites { get; } = new(MockBehavior.Strict);
         public RollupSeam Rollup { get; private set; } = null!;
 
-        public static async Task<FinanceAuthHost> StartAsync()
+        /// <param name="registerProbe">False builds a host whose container has NO <see cref="CallerRecordAccessProbe"/>
+        /// — the configuration fault the Privilege path must deny on.</param>
+        public static async Task<FinanceAuthHost> StartAsync(bool registerProbe = true)
         {
             var host = new FinanceAuthHost();
-            await host.InitializeAsync();
+            await host.InitializeAsync(registerProbe);
             return host;
         }
 
-        private async Task InitializeAsync()
+        private async Task InitializeAsync(bool registerProbe)
         {
             var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
             builder.Logging.ClearProviders();
@@ -833,7 +899,10 @@ public class FinanceEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<IAccessDataSource>(Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
-            builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
+            if (registerProbe)
+            {
+                builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
+            }
 
             builder.Services.AddSingleton(Review.Object);
             builder.Services.AddSingleton(Search.Object);

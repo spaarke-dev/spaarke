@@ -221,6 +221,18 @@ and denied every caller. Task 130 closes the remaining half; task 003's POML is 
 > USER (Create on sprk_invoice, AppendTo on matter and vendor, Write+Append on the document), then the APP creates
 > the invoice OWNED BY THE TEAM (RecordOwnershipResolver, record-first from the matter), never user-owned.
 
+**Interpretation recorded (fix round 2): `prvCreatesprk_Invoice` held at ANY depth satisfies G5's "if user can
+create the invoice".** The check asks Dataverse whether the caller holds the Create privilege on `sprk_invoice` at
+all (`RetrieveUserSetOfPrivilegesByNames` answers the privilege with its depth — Basic / Local / Deep / Global — and
+`ResponseGrantsPrivilege` accepts any of them). It does NOT ask whether the caller could create THIS invoice with
+THIS owner. That is deliberate: the app creates the invoice owned by the matter's TEAM, not by the user, so the
+depth question ("could the user create a row owned by that team / in that BU?") does not describe what actually
+happens — a Basic-depth user could never create a team-owned row themselves, yet G5 still wants their confirm to
+work when they can create invoices. The per-record scope is carried instead by the record checks (Write+Append on
+the document, AppendTo on the matter and the vendor), which ARE asked of the specific records. If the owner wants
+the depth to matter (e.g. Basic = deny), that is a change to `ResponseGrantsPrivilege` plus a mapping from the
+team's BU to a required depth — not done, not assumed.
+
 ### 11.1 Live schema re-verified (spaarkedev1, read-only GETs, 2026-10-01)
 
 | Fact | Live value |
@@ -327,7 +339,8 @@ Seeded, run, watched fail, restored (2026-10-01):
 - **`OfficeService.QuickCreateAsync` (Invoice leg) writes `sprk_invoicename`**, which does not exist on live
   `sprk_invoice` (primary name is `sprk_name`; `sprk_invoicename` exists only as the formatted name of
   `sprk_document.sprk_invoice`). The Office "New invoice" quick-create therefore fails live. Owner: word-add-in-r1.
-- `sprk_invoice.sprk_regardingrecordtype` is ApplicationRequired (not API-enforced); confirm does not set it.
+- ~~`sprk_invoice.sprk_regardingrecordtype` is ApplicationRequired (not API-enforced); confirm does not set it.~~
+  Set by fix round 2 — see §11.7 item 8.
 - Secure matters: the resolver answers the Secure Record BU's **default** owner team. When C10 Part 1 (named
   non-default owner team, task 133) lands, the record-first answer for a secure matter must follow it.
 - `sprk_invoice.sprk_issecure` is not copied from a secure matter — child-coverage scope of C10 Part 2 (tasks 145/146).
@@ -344,3 +357,106 @@ Seeded, run, watched fail, restored (2026-10-01):
 - (i) `RetrieveUserSetOfPrivilegesByNames` under the caller's OBO token answers for that user (incl. a Create held
   only via a team role, if a test user has one). The function was verified with an admin token only.
 - (j) reject-with-notes → `sprk_invoicereviewnotes` populated.
+
+### 11.7 Fix round 2 (branch `task/uac-r2-130b`, 2026-10-01) — review items 1-8
+
+Live facts read for this round (spaarkedev1, read-only GETs / Dataverse SQL, 2026-10-01):
+
+| Fact | Live value |
+|---|---|
+| a row's ETag | `"@odata.etag":"W/\"10039914\""` with `"versionnumber":10039914` — the ETag IS the version |
+| `sprk_document_Invoice_n1` cascade | Delete = **RemoveLink** (deleting a linked invoice clears the document's lookup) |
+| `sprk_invoice.sprk_regardingrecordtype` | Lookup → `sprk_recordtype_ref`, **ApplicationRequired**, nav prop `sprk_regardingrecordtype`, rel `sprk_sprk_recordtype_ref_sprk_invoice_sprk_regardingrecordtype`; `sprk_recordtype_refs` set |
+| existing invoices' value | 10 rows read: 6 null; the 4 set ALL point at `e8547bb4-…` = the `sprk_recordtype_ref` row with `sprk_recordlogicalname = 'sprk_matter'` (and carry `sprk_regardingrecordid` = the matter id, `sprk_regardingrecordname` = the matter name) |
+
+1. **Concurrency — no partial write between two confirms.** The resume check now also reads the document's
+   `versionnumber`, and the link is `UpdateRecordFieldsIfUnchangedAsync` (`If-Match: W/"<version>"`, new on
+   `IFieldMappingDataverseService`; Web API impl; the ServiceClient impl throws like its update-only sibling). A 412
+   surfaces as `DBConcurrencyException`. On it the confirm **deletes its own just-created invoice**
+   (`CancellationToken.None`) and re-runs the resume check: the document now linked to an invoice for the same
+   matter and vendor → **resume with that invoice** (still exactly one invoice; the extraction key is per invoice);
+   linked to another matter's/vendor's invoice → 409 `document_linked_elsewhere`; changed but not linked → new 409
+   `sdap.finance.invoice_review.document_changed` ("Nothing was saved; retry"). An unreadable version refuses before
+   any write. **Lost responses:** a create that reports failure is followed by a read of the invoice id (it is ours,
+   client-generated): present → deleted, the original failure rethrown ("nothing saved"); cannot be ruled out or
+   removed → new 500 `create_failed_invoice_may_remain` naming the id. A link that reports failure is followed by a
+   read of the document: if it points at our invoice the link landed and the confirm continues (no undo); otherwise
+   the invoice is deleted as before.
+   Tests (deterministic — a create gate holds both confirms after they have read the same version, then releases
+   them in a chosen order; no sleeps): `Confirm_TwoConcurrentConfirms_SameMatter_LeaveExactlyOneInvoice_InEitherOrder`
+   (×2 orders), `Confirm_ConcurrentConfirmForAnotherMatterLinkedFirst_TheLoserIs409_AndLeavesNoInvoice` (×2),
+   `Confirm_DocumentChangedWithoutALinkBetweenCheckAndLink_Is409_AndLeavesNoInvoice`,
+   `Confirm_CreateResponseLost_ButTheRowWasCreated_…`, `Confirm_CreateResponseLost_AndTheRowCannotBeRemoved_…`,
+   `Confirm_LinkResponseLost_ButTheLinkLanded_…`; wire: `ConditionalLinkWriteTests` (weak ETag sent; 412 →
+   `DBConcurrencyException`, not "not found"; 404 → `KeyNotFoundException`).
+   **Residuals (recorded, not closable in-process):** (a) both racers run the status write and submit extraction with
+   the SAME idempotency key, used as the Service Bus `MessageId` — a second message is suppressed only if the queue
+   has duplicate detection enabled (not verified here), otherwise the job runs twice for one invoice (the job's own
+   idempotency is out of scope); the loser's returned `jobId`/`statusUrl` may name a suppressed message. (b) A
+   compensating delete whose response is lost reports `link_failed_invoice_orphaned` for an invoice that may in fact
+   be gone — over-reporting, not an orphan. (c) If the post-failure read of the document itself fails, the link is
+   treated as not landed and the invoice deleted; if it HAD landed, the RemoveLink cascade clears the document's
+   lookup, so the end state is still "nothing saved". (d) If both the create's existence read and the delete fail,
+   the invoice may remain unlinked — named in the 500 for manual removal.
+2. **"No probe registered → deny" now proven.** `FinanceAuthHost.StartAsync(registerProbe: false)`; new
+   `Confirm_NoPrivilegeProbeRegistered_IsDenied_NeverAllowed` grants every record right and expects 403
+   `system_failure` with all four record checks asked and the service untouched.
+3. **Reject on a deleted document** through the real host: `Reject_DocumentDeletedAfterTheCheck_Returns404WithReasonCode`
+   (`RejectInvoiceAsync` throws `KeyNotFoundException`). The 404 now carries `reasonCode`
+   `sdap.finance.invoice_review.document_not_found` (shared constant `InvoiceReviewException.DocumentNotFoundReasonCode`).
+4. **Compensating delete on `CancellationToken.None`**: `Confirm_RequestCancelledBetweenCreateAndLink_TheUndoStillRuns`
+   cancels the request token the moment the invoice exists; the fake transport (like the real one) throws on a
+   cancelled token, the link fails, and the delete is asserted to run with an un-cancelled token and to remove the row.
+5. **409 `document_linked_elsewhere` never names the other invoice.** The service logs the linked invoice id
+   (warning) and throws with a generic message and NO `InvoiceId`; `ConfirmFailure` additionally renders that failure
+   with a fixed detail and never adds `invoiceId` — even an exception carrying the id cannot leak it. Tests: the
+   service case asserts message + `InvoiceId`; `Confirm_DocumentLinkedToAnotherMattersInvoice_Is409_AndNeverNamesThatInvoice`
+   asserts the HTTP body (both id formats, no `invoiceId` key).
+6. **`CallerPrivilegeCheckTests.NoCallerToken_DeniesWithoutAnyExchange` isolates the token guard.** The probe is now
+   built with FULL OBO configuration (tenant, client, environment URL, an `OrderedCredentialClientProvider` whose
+   managed-identity assertion stub records every mint and then fails like an unreachable identity, so nothing reaches
+   the network). Null / empty / whitespace token → denied with ZERO mints. A control
+   (`Control_WithACallerToken_TheSameConfigurationReachesTheExchange`) proves the same configuration does reach the
+   exchange when a token is present — the previous version passed with an unconfigured probe, i.e. for the wrong reason.
+7. **G5 depth interpretation** recorded at the top of §11.
+8. **`sprk_regardingrecordtype` set** on the created invoice: `sprk_regardingrecordtype@odata.bind:
+   /sprk_recordtype_refs(<id>)`, the id resolved at runtime by `ICommunicationDataverseService.QueryRecordTypeRefAsync("sprk_matter")`
+   (the existing resolver used by `TodoRegardingBuilder` / `IncomingAssociationResolver` — the GUID differs per
+   environment). Unresolvable → left unset with a warning (the `TodoRegardingBuilder` precedent; the column is
+   form-level required only, as the 6 null live rows show). **Not done (scope):** the 4 typed live invoices also carry
+   `sprk_regardingrecordid` / `sprk_regardingrecordname`; the item asked for the type only, so the other resolver
+   fields are left for an owner call.
+
+**§11 justification (new surface this round):**
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync` | `UpdateExistingRecordFieldsAsync` (`If-Match: *`), `UpdateRecordFieldsAsync` (upsert); no other `If-Match` in `Spaarke.Dataverse` | Adding an optional version parameter to `UpdateExistingRecordFieldsAsync` would break every Moq expression-tree setup of it (CS0854) and blur its 412 = "not found" contract | Two concurrent confirms orphan an invoice (the second link overwrites the first) |
+| `InvoiceReviewFailure.DocumentChangedConcurrently` / `.CreateFailedInvoiceMayRemain` | the existing failure enum | They ARE extensions of it | A concurrent edit would surface as a generic 500; a possibly-orphaned invoice would be anonymous |
+| `ICommunicationDataverseService` dependency on `InvoiceReviewService` | `QueryRecordTypeRefAsync` (already registered, `GraphModule`) | Reuse, no new resolver | `sprk_regardingrecordtype` (ApplicationRequired) left empty on every confirmed invoice |
+
+No new DI registration, endpoint or package.
+
+**Seeded, run, watched fail, restored (2026-10-01)** — script-applied seeds, each restored byte-for-byte from a backup:
+
+| # | Seed | Result |
+|---|---|---|
+| S1 | link made unconditional (`UpdateExistingRecordFieldsAsync`) | 5/5 concurrency tests failed |
+| S1b | 412 branch does not delete its own invoice | 5/5 failed |
+| S1c | lost-create clean-up removed | 2 of 3 `ResponseLost` tests failed (the link one is unaffected, as expected) |
+| S1d | landed link treated as failed | `Confirm_LinkResponseLost…` failed |
+| S2 | no probe → allow | `Confirm_NoPrivilegeProbeRegistered…` failed |
+| S3 | reasonCode removed from reject 404 | `Reject_DocumentDeletedAfterTheCheck…` failed |
+| S4 | compensating delete given the request token | `Confirm_RequestCancelledBetweenCreateAndLink…` failed |
+| S5a | endpoint renders linked-elsewhere like any failure | the HTTP-body test failed |
+| S5b | service names the other invoice | the service test failed |
+| S6 | token guard removed from `CallerHoldsPrivilegeAsync` | 3/3 no-token cases failed (control still passes) |
+| S8 | regarding-type bind dropped | `Confirm_CreatePayload…` failed |
+
+Measurement note: the seed script restores each file with `mv` from a backup, which keeps the BACKUP's older mtime,
+so MSBuild's incremental check judged the last seeded binary (S6) up to date. The first post-seed suite runs
+therefore failed the three no-token cases against the SEEDED probe; touching the restored sources and rebuilding
+cleared them. Any future seed script should `touch` after restoring.
+
+**Suites (2026-10-01, on the committed tree):** BFF unit suite **13176 passed / 56 skipped / 0 failed** (13232);
+ArchTests **340/340**. Affected filter (finance + auth + invoice review + new files): 206 passed / 1 skipped.

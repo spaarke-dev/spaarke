@@ -1484,6 +1484,64 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         _logger.LogDebug("Existing record updated: {Entity}({Id})", entityLogicalName, recordId);
     }
 
+    /// <inheritdoc />
+    public async Task UpdateRecordFieldsIfUnchangedAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        long expectedVersion,
+        CancellationToken ct = default)
+    {
+        if (fields.Count == 0)
+        {
+            _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);
+            return;
+        }
+
+        var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
+
+        _logger.LogInformation(
+            "Updating record fields only if unchanged (If-Match version {Version}): {Entity}({Id}), {FieldCount} fields",
+            expectedVersion, entityLogicalName, recordId, fields.Count);
+
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, $"{entitySetName}({recordId})", ct);
+
+        // A Dataverse row's ETag is W/"<versionnumber>" (verified live, spaarkedev1 2026-10-01). A specific ETag
+        // also prevents create: a row that does not exist cannot match it.
+        request.Headers.IfMatch.Add(new EntityTagHeaderValue(
+            $"\"{expectedVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)}\"", isWeak: true));
+        request.Content = JsonContent.Create(fields);
+
+        using var response = await _httpClient.SendAsync(request, ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "Conditional PATCH refused: {Entity}({Id}) does not exist; nothing was written", entityLogicalName, recordId);
+            throw new KeyNotFoundException($"{entityLogicalName} record was not found.");
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.PreconditionFailed)
+        {
+            _logger.LogWarning(
+                "Conditional PATCH refused: {Entity}({Id}) changed since version {Version}; nothing was written",
+                entityLogicalName, recordId, expectedVersion);
+            throw new System.Data.DBConcurrencyException(
+                $"{entityLogicalName} record changed since it was read; the update was not applied.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "UpdateRecordFieldsIfUnchangedAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Response: {ErrorBody}",
+                response.StatusCode, entityLogicalName, recordId, string.Join(", ", fields.Keys), errorBody);
+            response.EnsureSuccessStatusCode(); // still throw for the caller
+        }
+
+        _logger.LogDebug("Record updated at expected version: {Entity}({Id})", entityLogicalName, recordId);
+    }
+
     /// <summary>
     /// Get a field mapping profile with its rules in a single request using $expand.
     /// Eliminates the second Dataverse call for rules by expanding the 1:N relationship

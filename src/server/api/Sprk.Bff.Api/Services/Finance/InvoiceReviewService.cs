@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Text.Json;
 using Spaarke.Dataverse;
@@ -22,7 +23,9 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// 3. LAST: mark the document ConfirmedInvoice (review timestamp, reviewer notes)
 /// 4. Enqueue InvoiceExtraction job: triggers Playbook B (full AI extraction) asynchronously
 /// No partial write: a failed link deletes the invoice it just created; a failed final step names the invoice
-/// and a retry resumes from the document's existing link instead of creating a second invoice.
+/// and a retry resumes from the document's existing link instead of creating a second invoice. The link is
+/// conditional on the document version read by the resume check (If-Match), so two concurrent confirms cannot
+/// both link: the loser deletes its own invoice and resumes with the winner's, or is refused (409).
 ///
 /// Per ADR-013: Extends BFF API (not a separate service).
 /// Per ADR-015: NEVER log document content or PII. Only IDs, statuses, and timings.
@@ -143,6 +146,18 @@ public enum InvoiceReviewFailure
 
     /// <summary>Everything was saved but the extraction job was not queued. Retry resumes and re-queues.</summary>
     ExtractionNotQueued,
+
+    /// <summary>
+    /// The document changed between the resume check and the link (a concurrent write that did not link it to a
+    /// matching invoice); the invoice this request created was deleted again. Nothing was saved; retry.
+    /// </summary>
+    DocumentChangedConcurrently,
+
+    /// <summary>
+    /// The invoice create did not report success, and the named invoice id could not be confirmed absent or
+    /// removed — it may exist unlinked. The document was not changed.
+    /// </summary>
+    CreateFailedInvoiceMayRemain,
 }
 
 /// <summary>
@@ -162,15 +177,20 @@ public sealed class InvoiceReviewException : Exception
     /// <summary>The invoice that exists (or existed) when the failure happened; null when none was created.</summary>
     public Guid? InvoiceId { get; }
 
+    /// <summary>The document no longer exists — shared by confirm and by reject's 404 (ADR-019).</summary>
+    public const string DocumentNotFoundReasonCode = "sdap.finance.invoice_review.document_not_found";
+
     /// <summary>Machine-readable reason (ADR-019), e.g. <c>sdap.finance.invoice_review.link_failed</c>.</summary>
     public string ReasonCode => Failure switch
     {
-        InvoiceReviewFailure.DocumentNotFound => "sdap.finance.invoice_review.document_not_found",
+        InvoiceReviewFailure.DocumentNotFound => DocumentNotFoundReasonCode,
         InvoiceReviewFailure.DocumentLinkedToAnotherInvoice => "sdap.finance.invoice_review.document_linked_elsewhere",
         InvoiceReviewFailure.OwnerTeamUnresolved => "sdap.finance.invoice_review.owner_unresolved",
         InvoiceReviewFailure.LinkFailed => "sdap.finance.invoice_review.link_failed",
         InvoiceReviewFailure.LinkFailedInvoiceNotRemoved => "sdap.finance.invoice_review.link_failed_invoice_orphaned",
         InvoiceReviewFailure.StatusNotUpdated => "sdap.finance.invoice_review.status_not_updated",
+        InvoiceReviewFailure.DocumentChangedConcurrently => "sdap.finance.invoice_review.document_changed",
+        InvoiceReviewFailure.CreateFailedInvoiceMayRemain => "sdap.finance.invoice_review.create_failed_invoice_may_remain",
         _ => "sdap.finance.invoice_review.extraction_not_queued",
     };
 }
@@ -184,6 +204,7 @@ public class InvoiceReviewService : IInvoiceReviewService
     private readonly IFieldMappingDataverseService _records;
     private readonly IGenericEntityService _entities;
     private readonly IRecordOwnershipResolver _ownership;
+    private readonly ICommunicationDataverseService _recordTypes;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<InvoiceReviewService> _logger;
@@ -204,6 +225,10 @@ public class InvoiceReviewService : IInvoiceReviewService
     private const string MatterEntitySet = "sprk_matters";
     private const string OrganizationEntitySet = "sprk_organizations";
     private const string TeamEntitySet = "teams";
+    private const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
+
+    /// <summary>Every Dataverse row's version; its ETag is <c>W/"versionnumber"</c> (verified live 2026-10-01).</summary>
+    internal const string VersionNumber = "versionnumber";
 
     // Document fields. The link column is sprk_document.sprk_invoice (relationship sprk_document_Invoice_n1,
     // navigation property sprk_Invoice); there is no lookup from the invoice to the document.
@@ -223,6 +248,11 @@ public class InvoiceReviewService : IInvoiceReviewService
     internal const string InvOwnerBind = "ownerid@odata.bind";
     internal const string InvMatterBind = "sprk_Matter@odata.bind";
     internal const string InvVendorOrgBind = "sprk_vendororg@odata.bind";
+
+    // sprk_invoice.sprk_regardingrecordtype (ApplicationRequired; lookup → sprk_recordtype_ref, navigation property
+    // sprk_regardingrecordtype — live metadata 2026-10-01). Existing typed invoices point it at the MATTER's
+    // record-type row (sprk_recordlogicalname = 'sprk_matter'); its id differs per environment, so it is resolved.
+    internal const string InvRegardingRecordTypeBind = "sprk_regardingrecordtype@odata.bind";
     internal const string InvMatterValue = "_sprk_matter_value";
     internal const string InvVendorOrgValue = "_sprk_vendororg_value";
     internal const string InvName = "sprk_name";
@@ -250,6 +280,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         IFieldMappingDataverseService records,
         IGenericEntityService entities,
         IRecordOwnershipResolver ownership,
+        ICommunicationDataverseService recordTypes,
         JobSubmissionService jobSubmissionService,
         FinanceTelemetry telemetry,
         ILogger<InvoiceReviewService> logger)
@@ -257,6 +288,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         _records = records ?? throw new ArgumentNullException(nameof(records));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -282,16 +314,19 @@ public class InvoiceReviewService : IInvoiceReviewService
 
         // Resume point: a retry after a failed final step finds the document already linked to the invoice the
         // first attempt created, and continues from there instead of creating a second one (idempotent retry).
-        var invoiceId = await FindResumableInvoiceAsync(request, ct);
+        // It also reads the document's VERSION, which the link below is conditional on.
+        var resume = await FindResumableInvoiceAsync(request, ct);
+        var invoiceId = resume.InvoiceId;
 
         if (invoiceId is null)
         {
             // Step 1: create the invoice, owned by the MATTER's team. Nothing has been written before this.
             var created = await CreateInvoiceRecordAsync(request, ct);
 
-            // Step 2: link the document to it. On failure, undo step 1 so no orphan invoice is left behind.
-            await LinkDocumentOrCompensateAsync(request.DocumentId, created, ct);
-            invoiceId = created;
+            // Step 2: link the document to it — only if the document is still at the version read above. On
+            // failure, undo step 1 so no orphan invoice is left behind. A concurrent confirm that linked first
+            // makes this resume with ITS invoice (same matter and vendor) or refuse (409).
+            invoiceId = await LinkDocumentOrCompensateAsync(request, created, resume.DocumentVersion, ct);
         }
 
         // Step 3 (LAST write): mark the document confirmed. The invoice exists and is linked; a failure here
@@ -341,15 +376,19 @@ public class InvoiceReviewService : IInvoiceReviewService
     // Resume (idempotent retry)
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /// <summary>What the resume check found: a resumable invoice (or none) and the document's version.</summary>
+    private readonly record struct ResumePoint(Guid? InvoiceId, long DocumentVersion);
+
     /// <summary>
     /// The invoice an earlier attempt already linked this document to, when it is the SAME invoice this request
-    /// would create (same matter and vendor) — or null when there is none. A link to a different matter's or
-    /// vendor's invoice is refused rather than silently re-pointed or reused.
+    /// would create (same matter and vendor) — or null when there is none — together with the document's
+    /// <c>versionnumber</c>, which the link is made conditional on. A link to a different matter's or vendor's
+    /// invoice is refused rather than silently re-pointed or reused.
     /// </summary>
-    private async Task<Guid?> FindResumableInvoiceAsync(InvoiceReviewConfirmRequest request, CancellationToken ct)
+    private async Task<ResumePoint> FindResumableInvoiceAsync(InvoiceReviewConfirmRequest request, CancellationToken ct)
     {
         var document = await _records.RetrieveRecordFieldsAsync(
-            DocumentEntity, request.DocumentId, new[] { DocInvoiceLinkValue }, ct);
+            DocumentEntity, request.DocumentId, new[] { DocInvoiceLinkValue, VersionNumber }, ct);
 
         // RetrieveRecordFieldsAsync answers an EMPTY dictionary for a missing row (and a key per requested field,
         // null-valued, for a row whose column is empty).
@@ -359,9 +398,19 @@ public class InvoiceReviewService : IInvoiceReviewService
                 InvoiceReviewFailure.DocumentNotFound, "The document no longer exists. Nothing was saved.");
         }
 
+        // Every Dataverse row has a version. Without one the link cannot be made conditional, so refuse before
+        // writing anything rather than fall back to an unconditional link that can orphan an invoice.
+        if (!document.TryGetValue(VersionNumber, out var rawVersion)
+            || rawVersion is null
+            || !long.TryParse(rawVersion.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var version))
+        {
+            throw new InvalidOperationException(
+                $"The document's {VersionNumber} could not be read, so the confirmation cannot link it safely. Nothing was saved.");
+        }
+
         if (!TryReadGuid(document, DocInvoiceLinkValue, out var linkedInvoiceId))
         {
-            return null;
+            return new ResumePoint(null, version);
         }
 
         var invoice = await _records.RetrieveRecordFieldsAsync(
@@ -370,7 +419,7 @@ public class InvoiceReviewService : IInvoiceReviewService
         if (invoice.Count == 0)
         {
             // A dangling link to a deleted invoice — nothing to resume; the new link overwrites it.
-            return null;
+            return new ResumePoint(null, version);
         }
 
         var sameMatter = TryReadGuid(invoice, InvMatterValue, out var matterId) && matterId == request.MatterId;
@@ -382,14 +431,19 @@ public class InvoiceReviewService : IInvoiceReviewService
                 "Document {DocumentId} is already linked to invoice {InvoiceId} for the same matter and vendor; " +
                 "resuming the confirmation with it (no second invoice is created).",
                 request.DocumentId, linkedInvoiceId);
-            return linkedInvoiceId;
+            return new ResumePoint(linkedInvoiceId, version);
         }
+
+        // The other invoice belongs to a matter or vendor the request did not name — and the caller was never
+        // authorized against it. Its id is logged for support and NEVER returned (task 130 item 5).
+        _logger.LogWarning(
+            "Document {DocumentId} is already linked to invoice {LinkedInvoiceId} of a different matter or vendor; " +
+            "refusing the confirmation (409). The linked invoice id is not returned to the caller.",
+            request.DocumentId, linkedInvoiceId);
 
         throw new InvoiceReviewException(
             InvoiceReviewFailure.DocumentLinkedToAnotherInvoice,
-            $"The document is already linked to invoice {linkedInvoiceId}, which belongs to a different matter or " +
-            "vendor. Nothing was saved.",
-            linkedInvoiceId);
+            "The document is already linked to an invoice for a different matter or vendor. Nothing was saved.");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -421,12 +475,23 @@ public class InvoiceReviewService : IInvoiceReviewService
         }
 
         var vendorName = await ReadVendorNameAsync(request.VendorOrgId, ct);
-        var fields = BuildInvoiceCreateFields(request, ownerTeamId.Value, vendorName);
+        var matterRecordTypeId = await ResolveMatterRecordTypeIdAsync(ct);
+        var fields = BuildInvoiceCreateFields(request, ownerTeamId.Value, vendorName, matterRecordTypeId);
 
         // A fresh GUID PATCHed without If-Match is a CREATE (Dataverse upserts) — the pattern this service has
         // always used, and the reason UpdateRecordFieldsAsync must keep its upsert semantics.
         var invoiceId = Guid.NewGuid();
-        await _records.UpdateRecordFieldsAsync(InvoiceEntity, invoiceId, fields, ct);
+        try
+        {
+            await _records.UpdateRecordFieldsAsync(InvoiceEntity, invoiceId, fields, ct);
+        }
+        catch (Exception createFailure)
+        {
+            // The create did not REPORT success — but a lost response (timeout, dropped connection, cancellation
+            // after send) can leave the row created. The id is ours, so look it up and remove it if it is there.
+            await RemoveInvoiceIfCreatedAsync(invoiceId, request.DocumentId, createFailure);
+            throw;
+        }
 
         _logger.LogInformation(
             "Created invoice record {InvoiceId} for matter {MatterId}, owned by team {TeamId}",
@@ -436,12 +501,77 @@ public class InvoiceReviewService : IInvoiceReviewService
     }
 
     /// <summary>
+    /// After a create that did not report success: deletes the invoice if it exists after all, and returns so the
+    /// original failure is rethrown ("nothing was saved"). If its existence cannot be ruled out, or it exists and
+    /// cannot be removed, throws <see cref="InvoiceReviewFailure.CreateFailedInvoiceMayRemain"/> naming it.
+    /// </summary>
+    private async Task RemoveInvoiceIfCreatedAsync(Guid invoiceId, Guid documentId, Exception createFailure)
+    {
+        try
+        {
+            // CancellationToken.None: the clean-up must run even when the request that caused it was cancelled.
+            var row = await _records.RetrieveRecordFieldsAsync(
+                InvoiceEntity, invoiceId, new[] { InvMatterValue }, CancellationToken.None);
+            if (row.Count == 0)
+            {
+                return; // never created — the original failure stands, nothing was saved
+            }
+
+            _logger.LogWarning(
+                "Invoice create for document {DocumentId} reported a failure but invoice {InvoiceId} exists (lost " +
+                "response); deleting it", documentId, invoiceId);
+            await _entities.DeleteAsync(InvoiceEntity, invoiceId, CancellationToken.None);
+        }
+        catch (Exception cleanupFailure)
+        {
+            _logger.LogError(cleanupFailure,
+                "Invoice create for document {DocumentId} failed and invoice {InvoiceId} could not be confirmed " +
+                "absent or removed. It may exist unlinked and must be checked manually.", documentId, invoiceId);
+
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.CreateFailedInvoiceMayRemain,
+                $"The invoice could not be created, and invoice {invoiceId} may exist unlinked — it could not be " +
+                "confirmed absent or removed. Report this invoice id to an administrator; the document was not changed.",
+                invoiceId, createFailure);
+        }
+    }
+
+    /// <summary>
+    /// The id of the Matter row in <c>sprk_recordtype_ref</c>, for <c>sprk_invoice.sprk_regardingrecordtype</c> —
+    /// or null when it cannot be resolved. Non-fatal (the <c>TodoRegardingBuilder</c> precedent): the column is
+    /// ApplicationRequired (form-level), not enforced by the platform, and live invoices exist without it.
+    /// </summary>
+    private async Task<Guid?> ResolveMatterRecordTypeIdAsync(CancellationToken ct)
+    {
+        try
+        {
+            var row = await _recordTypes.QueryRecordTypeRefAsync(MatterEntity, ct);
+            if (row is not null && row.Id != Guid.Empty)
+            {
+                return row.Id;
+            }
+
+            _logger.LogWarning(
+                "No active sprk_recordtype_ref row for {Entity}; the invoice's sprk_regardingrecordtype is left unset.",
+                MatterEntity);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "Resolving the sprk_recordtype_ref row for {Entity} failed; the invoice's sprk_regardingrecordtype is " +
+                "left unset.", MatterEntity);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// The create payload. Lookups bound by navigation property (<c>@odata.bind</c>) against live set names;
     /// <c>sprk_name</c> (ApplicationRequired) derived from vendor + invoice number/date. Pure, so the exact wire
     /// shape is pinned by a test.
     /// </summary>
     internal static Dictionary<string, object?> BuildInvoiceCreateFields(
-        InvoiceReviewConfirmRequest request, Guid ownerTeamId, string? vendorName)
+        InvoiceReviewConfirmRequest request, Guid ownerTeamId, string? vendorName, Guid? matterRecordTypeId = null)
     {
         var fields = new Dictionary<string, object?>
         {
@@ -466,6 +596,11 @@ public class InvoiceReviewService : IInvoiceReviewService
         if (request.TotalAmount.HasValue)
         {
             fields[InvTotalAmount] = request.TotalAmount.Value;
+        }
+
+        if (matterRecordTypeId is { } recordTypeId && recordTypeId != Guid.Empty)
+        {
+            fields[InvRegardingRecordTypeBind] = $"/{RecordTypeRefEntitySet}({recordTypeId})";
         }
 
         return fields;
@@ -504,49 +639,120 @@ public class InvoiceReviewService : IInvoiceReviewService
     // ═══════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// PATCHes the document's own lookup (<c>sprk_Invoice@odata.bind</c>) update-only. If that fails, the invoice
-    /// created in step 1 is deleted again so no unlinked invoice is left behind; if THAT fails too, the error
-    /// names the orphaned invoice.
+    /// PATCHes the document's own lookup (<c>sprk_Invoice@odata.bind</c>) ONLY IF the document is still at
+    /// <paramref name="documentVersion"/> (<c>If-Match: W/"version"</c>), and returns the invoice the confirmation
+    /// continues with.
     /// </summary>
-    private async Task LinkDocumentOrCompensateAsync(Guid documentId, Guid invoiceId, CancellationToken ct)
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item><b>Linked</b> → <paramref name="invoiceId"/>.</item>
+    ///   <item><b>The document changed</b> (412 — e.g. a concurrent confirm linked it first): the invoice created in
+    ///   step 1 is deleted, then the resume check runs again. A concurrent link to an invoice for the same matter
+    ///   and vendor is RESUMED (that invoice is returned — still exactly one invoice); a link to another matter's
+    ///   or vendor's invoice is the 409 <see cref="InvoiceReviewFailure.DocumentLinkedToAnotherInvoice"/>; any
+    ///   other change is the 409 <see cref="InvoiceReviewFailure.DocumentChangedConcurrently"/>.</item>
+    ///   <item><b>Any other failure</b>: if the response was lost but the link landed (the document now points at
+    ///   <paramref name="invoiceId"/>), the confirmation continues; otherwise the invoice is deleted again.</item>
+    /// </list>
+    /// If a needed delete fails, the error names the orphaned invoice. Every clean-up read and delete runs on
+    /// <see cref="CancellationToken.None"/>, so a cancelled request is still undone.
+    /// </remarks>
+    private async Task<Guid> LinkDocumentOrCompensateAsync(
+        InvoiceReviewConfirmRequest request, Guid invoiceId, long documentVersion, CancellationToken ct)
     {
+        var documentId = request.DocumentId;
         try
         {
-            await _records.UpdateExistingRecordFieldsAsync(
+            await _records.UpdateRecordFieldsIfUnchangedAsync(
                 DocumentEntity,
                 documentId,
                 new Dictionary<string, object?> { [DocInvoiceLinkBind] = $"/{InvoiceEntitySet}({invoiceId})" },
+                documentVersion,
                 ct);
+            return invoiceId;
+        }
+        catch (DBConcurrencyException changed)
+        {
+            _logger.LogWarning(changed,
+                "Document {DocumentId} changed after the resume check (version {Version}); deleting the invoice " +
+                "{InvoiceId} this request created and re-checking the document", documentId, documentVersion, invoiceId);
+
+            await DeleteCreatedInvoiceOrThrowAsync(documentId, invoiceId, changed);
+
+            var again = await FindResumableInvoiceAsync(request, ct);
+            if (again.InvoiceId is { } concurrentInvoiceId)
+            {
+                return concurrentInvoiceId;
+            }
+
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.DocumentChangedConcurrently,
+                "The document was changed by someone else while the invoice was being created, so the new invoice " +
+                "was removed again. Nothing was saved; retry the confirmation.",
+                inner: changed);
         }
         catch (Exception linkFailure)
         {
+            if (await LinkLandedAsync(documentId, invoiceId))
+            {
+                _logger.LogWarning(linkFailure,
+                    "Linking document {DocumentId} to invoice {InvoiceId} reported a failure, but the link is in " +
+                    "place (lost response); continuing", documentId, invoiceId);
+                return invoiceId;
+            }
+
             _logger.LogError(linkFailure,
                 "Linking document {DocumentId} to invoice {InvoiceId} failed; deleting the invoice (compensation)",
                 documentId, invoiceId);
 
-            try
-            {
-                // CancellationToken.None: the undo must run even when the request that caused it was cancelled.
-                await _entities.DeleteAsync(InvoiceEntity, invoiceId, CancellationToken.None);
-            }
-            catch (Exception compensationFailure)
-            {
-                _logger.LogError(compensationFailure,
-                    "Compensation FAILED: invoice {InvoiceId} was created but is not linked to document {DocumentId} " +
-                    "and could not be deleted. It must be removed manually.", invoiceId, documentId);
-
-                throw new InvoiceReviewException(
-                    InvoiceReviewFailure.LinkFailedInvoiceNotRemoved,
-                    $"The document could not be linked to the new invoice, and invoice {invoiceId} could not be " +
-                    "removed again. Report this invoice id to an administrator; the document was not changed.",
-                    invoiceId, linkFailure);
-            }
+            await DeleteCreatedInvoiceOrThrowAsync(documentId, invoiceId, linkFailure);
 
             throw new InvoiceReviewException(
                 InvoiceReviewFailure.LinkFailed,
                 "The document could not be linked to the new invoice, so the invoice was removed again. Nothing " +
                 "was saved; retry the confirmation.",
                 inner: linkFailure);
+        }
+    }
+
+    /// <summary>Whether the document now points at <paramref name="invoiceId"/>; false when that cannot be read.</summary>
+    private async Task<bool> LinkLandedAsync(Guid documentId, Guid invoiceId)
+    {
+        try
+        {
+            var document = await _records.RetrieveRecordFieldsAsync(
+                DocumentEntity, documentId, new[] { DocInvoiceLinkValue }, CancellationToken.None);
+            return TryReadGuid(document, DocInvoiceLinkValue, out var linked) && linked == invoiceId;
+        }
+        catch (Exception probeFailure)
+        {
+            // Unknown → treat as not linked and undo. If the link DID land, deleting the invoice clears it
+            // (sprk_document_Invoice_n1 cascades Delete as RemoveLink — live metadata 2026-10-01).
+            _logger.LogWarning(probeFailure,
+                "Could not re-read document {DocumentId} after a failed link; treating it as not linked", documentId);
+            return false;
+        }
+    }
+
+    /// <summary>Deletes the invoice this request created; if that fails, throws naming the orphaned invoice.</summary>
+    private async Task DeleteCreatedInvoiceOrThrowAsync(Guid documentId, Guid invoiceId, Exception cause)
+    {
+        try
+        {
+            // CancellationToken.None: the undo must run even when the request that caused it was cancelled.
+            await _entities.DeleteAsync(InvoiceEntity, invoiceId, CancellationToken.None);
+        }
+        catch (Exception compensationFailure)
+        {
+            _logger.LogError(compensationFailure,
+                "Compensation FAILED: invoice {InvoiceId} was created but is not linked to document {DocumentId} " +
+                "and could not be deleted. It must be removed manually.", invoiceId, documentId);
+
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.LinkFailedInvoiceNotRemoved,
+                $"The document could not be linked to the new invoice, and invoice {invoiceId} could not be " +
+                "removed again. Report this invoice id to an administrator; the document was not changed.",
+                invoiceId, cause);
         }
     }
 

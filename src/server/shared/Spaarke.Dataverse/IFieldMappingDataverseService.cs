@@ -67,6 +67,27 @@ public interface IFieldMappingDataverseService
         Dictionary<string, object?> fields,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Updates fields on an existing record ONLY IF it is still at <paramref name="expectedVersion"/> — its
+    /// <c>versionnumber</c> as read earlier. Sends <c>If-Match: W/"{expectedVersion}"</c> (a Dataverse row's
+    /// ETag is its version number), so a concurrent write in between makes this one fail instead of silently
+    /// overwriting it. Never creates.
+    /// </summary>
+    /// <remarks>
+    /// Added by unified-access-control-r2 task 130 for invoice confirm: two concurrent confirms of the same
+    /// document each created an invoice and the second link PATCH overwrote the first, orphaning an invoice.
+    /// The link is now conditional on the version read in the resume check.
+    /// </remarks>
+    /// <exception cref="KeyNotFoundException">The record does not exist.</exception>
+    /// <exception cref="System.Data.DBConcurrencyException">The record changed since
+    /// <paramref name="expectedVersion"/> was read (HTTP 412); nothing was written.</exception>
+    Task UpdateRecordFieldsIfUnchangedAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        long expectedVersion,
+        CancellationToken ct = default);
+
     Task<FieldMappingProfileEntity?> GetFieldMappingProfileWithRulesAsync(
         string sourceEntity,
         string targetEntity,
