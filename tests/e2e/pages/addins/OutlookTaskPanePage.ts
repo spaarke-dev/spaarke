@@ -19,37 +19,6 @@ export interface OutlookTaskPaneConfig {
   apiBaseUrl: string;
 }
 
-export interface DocumentSearchResult {
-  id: string;
-  name: string;
-  path: string;
-  modifiedDate?: string;
-}
-
-export interface ShareLinkResponse {
-  links: Array<{
-    documentId: string;
-    url: string;
-    title: string;
-  }>;
-  invitations?: Array<{
-    email: string;
-    status: string;
-    invitationId: string;
-  }>;
-}
-
-export interface AttachmentResponse {
-  attachments: Array<{
-    documentId: string;
-    filename: string;
-    contentType: string;
-    size: number;
-    downloadUrl: string;
-    urlExpiry: string;
-  }>;
-}
-
 /**
  * Page Object for Outlook Task Pane interactions
  */
@@ -136,9 +105,12 @@ export class OutlookTaskPanePage {
     });
 
     // Wait for Fluent UI provider to initialize
-    await this.page.waitForFunction(() => {
-      return document.querySelector('[data-fui-focus-visible]') !== null;
-    }, { timeout: timeout || this.config.initTimeout });
+    await this.page.waitForFunction(
+      () => {
+        return document.querySelector('[data-fui-focus-visible]') !== null;
+      },
+      { timeout: timeout || this.config.initTimeout }
+    );
   }
 
   /**
@@ -299,49 +271,10 @@ export class OutlookTaskPanePage {
   }
 
   /**
-   * Mock API responses for testing
-   */
-  async mockSearchApi(results: DocumentSearchResult[]): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/search/documents*`, (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ results, totalCount: results.length, hasMore: false }),
-      });
-    });
-  }
-
-  /**
-   * Mock share links API response
-   */
-  async mockShareLinksApi(response: ShareLinkResponse): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/share/links`, (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(response),
-      });
-    });
-  }
-
-  /**
-   * Mock share attachments API response
-   */
-  async mockShareAttachApi(response: AttachmentResponse): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/share/attach`, (route) => {
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify(response),
-      });
-    });
-  }
-
-  /**
    * Mock API error response
    */
   async mockApiError(endpoint: string, status: number, errorCode: string, message: string): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}${endpoint}*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}${endpoint}*`, route => {
       route.fulfill({
         status,
         contentType: 'application/json',

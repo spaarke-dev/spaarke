@@ -120,54 +120,6 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Searches for documents to share from the Office add-in.
-    /// Returns documents the user has permission to share.
-    /// </summary>
-    /// <param name="request">Search request with query, filters, and pagination.</param>
-    /// <param name="userId">Authenticated user ID for permission filtering.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Search response with matched documents and metadata for preview.</returns>
-    /// <remarks>
-    /// <para>
-    /// Searches the sprk_document entity and filters results based on:
-    /// - User's share permissions (only returns shareable documents)
-    /// - Association type/ID if specified
-    /// - Container/folder if specified
-    /// - Content type if specified
-    /// - Date range if specified
-    /// </para>
-    /// <para>
-    /// Results include thumbnail URLs and association info for UI preview.
-    /// </para>
-    /// </remarks>
-    Task<DocumentSearchResponse> SearchDocumentsAsync(
-        DocumentSearchRequest request,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Creates shareable links for the specified documents.
-    /// </summary>
-    /// <param name="request">Share links request containing document IDs and options.</param>
-    /// <param name="userId">Authenticated user ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Share links response with URLs and any invitations created.</returns>
-    /// <remarks>
-    /// <para>
-    /// Generated links resolve through Spaarke access controls. The link format
-    /// is configurable via ShareLinkBaseUrl setting.
-    /// </para>
-    /// <para>
-    /// Supports partial success - documents the user cannot share will be returned
-    /// in the Errors array, while accessible documents will have links generated.
-    /// </para>
-    /// </remarks>
-    Task<ShareLinksResponse> CreateShareLinksAsync(
-        ShareLinksRequest request,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Creates a new entity (Matter, Project, Invoice, Account, Contact) with minimal fields.
     /// </summary>
     /// <param name="entityType">Type of entity to create.</param>
@@ -206,7 +158,7 @@ public interface IOfficeService
     /// <param name="userId">Authenticated user id (OBO oid).</param>
     /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> — an INPUT to the owner-team resolution, not the owner (task 080: every record created here is owned by a business-unit default owner team, and the create is refused with OFFICE_022 when none resolves — never app-owned).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The created To Do id + name, or null when creation is unavailable (no generic-create dep injected).</returns>
+    /// <returns>The created To Do id + name, or null when the request carries no name (the endpoint validates the name first, so this is a defensive guard).</returns>
     /// <remarks>
     /// <para>
     /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The
@@ -250,61 +202,6 @@ public interface IOfficeService
     Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
         Guid documentId,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets recently used association targets and documents for the user.
-    /// </summary>
-    /// <param name="userId">Authenticated user ID.</param>
-    /// <param name="top">Maximum number of items to return per category (default: 10, max: 50).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Response containing recent associations, documents, and favorites.</returns>
-    /// <remarks>
-    /// <para>
-    /// Recent items are tracked when users save documents via the Office add-in.
-    /// Items are sorted by most recently used and filtered to only include
-    /// entities the user still has access to.
-    /// </para>
-    /// <para>
-    /// Storage mechanism: Recent items are stored in Redis sorted sets per user
-    /// for efficient retrieval. Keys expire after 30 days of inactivity.
-    /// </para>
-    /// <para>
-    /// Categories returned:
-    /// - RecentAssociations: Entities used as save targets (Matter, Project, etc.)
-    /// - RecentDocuments: Documents the user has accessed/modified
-    /// - Favorites: User-pinned entities (persisted in Dataverse)
-    /// </para>
-    /// </remarks>
-    Task<RecentDocumentsResponse> GetRecentDocumentsAsync(
-        string userId,
-        int top = 10,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Retrieves documents and packages them for attachment to Outlook compose emails.
-    /// </summary>
-    /// <param name="request">Request containing document IDs and delivery mode.</param>
-    /// <param name="userId">Authenticated user ID for permission verification.</param>
-    /// <param name="correlationId">Correlation ID for request tracing.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Response containing packaged attachments and any errors.</returns>
-    /// <remarks>
-    /// <para>
-    /// Each document is validated for:
-    /// - Existence in Dataverse
-    /// - User share permission via UAC
-    /// - Size limits (25MB per file, 100MB total per spec NFR-03)
-    /// </para>
-    /// <para>
-    /// Partial success is allowed - some documents may succeed while others fail.
-    /// Failed documents are reported in the Errors array.
-    /// </para>
-    /// </remarks>
-    Task<ShareAttachResponse> GetAttachmentsAsync(
-        ShareAttachRequest request,
-        string userId,
-        string correlationId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
