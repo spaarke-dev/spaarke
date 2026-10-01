@@ -92,11 +92,26 @@ public class SpendSnapshotGenerationJobHandler : IJobHandler
             // Updates 9 fields: TotalSpendToDate, InvoiceCount, MonthlySpendCurrent,
             // TotalBudget, RemainingBudget, BudgetUtilizationPercent,
             // MonthOverMonthVelocity, AverageInvoiceAmount, MonthlySpendTimeline
-            await _financeRollupService.RecalculateMatterAsync(matterId, ct);
+            //
+            // A matter deleted since the job was queued is a SKIP, not a failure (task 130). The rollup write is
+            // update-only (If-Match: *) so it no longer recreates the matter; it throws KeyNotFoundException
+            // instead, which IsRetryableException classes as permanent — the job would be poisoned and
+            // dead-lettered for a matter that simply no longer exists. Nothing is left to roll up, so complete.
+            try
+            {
+                await _financeRollupService.RecalculateMatterAsync(matterId, ct);
 
-            _logger.LogInformation(
-                "Finance rollup completed for matter {MatterId}",
-                matterId);
+                _logger.LogInformation(
+                    "Finance rollup completed for matter {MatterId}",
+                    matterId);
+            }
+            catch (KeyNotFoundException)
+            {
+                _logger.LogWarning(
+                    "Finance rollup skipped for job {JobId}: matter {MatterId} no longer exists (deleted after the " +
+                    "job was queued). Nothing was written; completing the job instead of poisoning it.",
+                    job.JobId, matterId);
+            }
 
             stopwatch.Stop();
 

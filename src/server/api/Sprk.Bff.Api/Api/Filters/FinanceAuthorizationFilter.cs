@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -71,8 +72,12 @@ public static class FinanceAuthorizationFilterExtensions
 
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var authService = context.HttpContext.RequestServices.GetRequiredService<AuthorizationService>();
-            var filter = new FinanceAuthorizationFilter(authService, resolveTargets, denial);
+            var services = context.HttpContext.RequestServices;
+            var authService = services.GetRequiredService<AuthorizationService>();
+            // Only the Privilege path uses the probe; GetService so a route that never asks one does not
+            // depend on it. A Privilege check with no probe denies (see EvaluateAsync).
+            var filter = new FinanceAuthorizationFilter(
+                authService, resolveTargets, denial, services.GetService<CallerRecordAccessProbe>());
             return await filter.InvokeAsync(context, next);
         });
     }
@@ -107,6 +112,14 @@ public enum FinanceCheckPath
     /// named entity set, then <see cref="OperationAccessPolicy.HasRequiredRights"/>.
     /// </summary>
     Record,
+
+    /// <summary>
+    /// A TABLE privilege the caller must hold (e.g. Create on <c>sprk_invoice</c>), asked of Dataverse as the
+    /// caller through <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/>. There is no record id:
+    /// it answers "could this user create one", for a record the app is about to create on their behalf
+    /// (task 130, owner decision G5). Build with <see cref="FinanceAuthorizationCheck.CallerPrivilege"/>.
+    /// </summary>
+    Privilege,
 }
 
 /// <summary>One (entity set, id, operation) the caller must be authorized for before the handler runs.</summary>
@@ -117,13 +130,37 @@ public sealed record FinanceAuthorizationCheck
     /// <summary>A constant entity SET name (one of the <see cref="FinanceAuthorizationFilter"/> constants).</summary>
     public required string EntitySetName { get; init; }
 
+    /// <summary>The record asked about. <see cref="Guid.Empty"/> only on the <see cref="FinanceCheckPath.Privilege"/> path.</summary>
     public required Guid RecordId { get; init; }
 
-    /// <summary>The <see cref="OperationAccessPolicy"/> key that names the required rights.</summary>
+    /// <summary>
+    /// The <see cref="OperationAccessPolicy"/> key that names the required rights — or, on the
+    /// <see cref="FinanceCheckPath.Privilege"/> path, the Dataverse privilege name (which never reaches the policy).
+    /// </summary>
     public required string Operation { get; init; }
 
     /// <summary>Where the id came from (e.g. "body.matterId") — logged on deny, never returned.</summary>
     public required string Source { get; init; }
+
+    /// <summary>
+    /// A check that the CALLER holds the Dataverse table privilege <paramref name="privilegeName"/> (any depth),
+    /// e.g. <see cref="FinanceAuthorizationFilter.CreateInvoicePrivilege"/>. <paramref name="entitySetName"/>
+    /// names the table the privilege governs, for the deny log only.
+    /// </summary>
+    public static FinanceAuthorizationCheck CallerPrivilege(string privilegeName, string entitySetName, string source)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(privilegeName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(entitySetName);
+
+        return new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Privilege,
+            EntitySetName = entitySetName,
+            RecordId = Guid.Empty,
+            Operation = privilegeName,
+            Source = source,
+        };
+    }
 }
 
 /// <summary>
@@ -189,11 +226,24 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// <summary>sprk_invoice.sprk_vendororg targets <c>sprk_organization</c>; its set name per live metadata.</summary>
     public const string VendorOrganizationEntitySet = "sprk_organizations";
 
+    /// <summary><c>sprk_invoice</c>'s set name per live metadata (spaarkedev1, 2026-10-01).</summary>
+    public const string InvoiceEntitySet = "sprk_invoices";
+
+    /// <summary>
+    /// The Create privilege on <c>sprk_invoice</c>, by its live name (spaarkedev1 <c>privileges</c>, 2026-10-01 —
+    /// the table's schema name is <c>sprk_Invoice</c>, so the privilege is NOT all lower case). A misspelt name
+    /// answers "not held" for every caller and denies every confirm, which is why it is pinned by a test.
+    /// </summary>
+    public const string CreateInvoicePrivilege = "prvCreatesprk_Invoice";
+
     /// <summary>Record-path deny reason (same code OperationAccessRule uses for the document path).</summary>
     public const string InsufficientRightsReasonCode = "sdap.access.deny.insufficient_rights";
 
     /// <summary>The check itself faulted — denied, never allowed (ADR-003).</summary>
     public const string SystemFailureReasonCode = "sdap.access.error.system_failure";
+
+    /// <summary>The caller lacks a TABLE privilege the operation needs (e.g. Create on sprk_invoice).</summary>
+    public const string InsufficientPrivilegeReasonCode = "sdap.access.deny.insufficient_privilege";
 
     /// <summary>The route declared no resolvable id — denied rather than passed through.</summary>
     public const string NoTargetReasonCode = "sdap.access.deny.no_target";
@@ -208,15 +258,18 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     private readonly AuthorizationService _authorizationService;
     private readonly Func<EndpointFilterInvocationContext, FinanceAuthorizationTargets> _resolveTargets;
     private readonly FinanceDenial _denial;
+    private readonly CallerRecordAccessProbe? _probe;
 
     public FinanceAuthorizationFilter(
         AuthorizationService authorizationService,
         Func<EndpointFilterInvocationContext, FinanceAuthorizationTargets> resolveTargets,
-        FinanceDenial denial)
+        FinanceDenial denial,
+        CallerRecordAccessProbe? probe = null)
     {
         _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
         _resolveTargets = resolveTargets ?? throw new ArgumentNullException(nameof(resolveTargets));
         _denial = denial;
+        _probe = probe;
     }
 
     /// <summary>
@@ -316,6 +369,20 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     private async Task<string?> EvaluateAsync(
         FinanceAuthorizationCheck check, string userId, string? callerToken, string correlationId, CancellationToken ct)
     {
+        if (check.Path == FinanceCheckPath.Privilege)
+        {
+            // Fail closed: no probe registered is a configuration fault, never an allow.
+            var probe = _probe;
+            if (probe is null)
+            {
+                return SystemFailureReasonCode;
+            }
+
+            return await probe.CallerHoldsPrivilegeAsync(callerToken, check.Operation, ct)
+                ? null
+                : InsufficientPrivilegeReasonCode;
+        }
+
         if (check.RecordId == Guid.Empty)
         {
             return NoTargetReasonCode;

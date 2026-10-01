@@ -258,8 +258,9 @@ public class RouteAuthorizationGuardTests
         new GovernedFile("Api/Finance/FinanceEndpoints.cs", Scope.RouteLevelGate,
             "/api/finance/* — summary (Read on sprk_matters(route matterId)), invoice search (query matterId "
             + "REQUIRED, Read on that matter — an unscoped search was tenant-wide), and invoice-review confirm / "
-            + "reject (Write on the BODY DocumentId; confirm also AppendTo on the document, matter and vendor "
-            + "organization it links the new sprk_invoice to). Each route carries its own "
+            + "reject (Write on the BODY DocumentId; confirm also Write+Append on that document, which holds the "
+            + "invoice lookup, AppendTo on the matter and vendor organization, and the caller's Create privilege "
+            + "on sprk_invoice — owner G5). Each route carries its own "
             + "AddFinanceAuthorizationFilter declaring the id it authorizes from the SAME source its handler "
             + "binds; the group-level 'finance.read' filter and its id-fallback chain were deleted by task 130."),
 

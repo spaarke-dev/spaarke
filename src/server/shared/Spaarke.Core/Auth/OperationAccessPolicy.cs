@@ -176,19 +176,29 @@ public static class OperationAccessPolicy
         // "finance.confirm" — Write on the request-BODY DocumentId of POST /api/finance/invoice-review/
         // confirm and /reject, through the document path (AuthorizeAsync). Both MUTATE the document's own
         // state (review status → Confirmed / RejectedNotInvoice), so Write is the requirement. NOT Create
-        // on the document: confirm creates an sprk_invoice, which is a DIFFERENT entity. Whether the
-        // caller's Create privilege on sprk_invoice should be consulted (the invoice is created app-only)
-        // is an open owner question recorded in task 130's notes — it is not decided by this key.
+        // on the document: confirm creates an sprk_invoice, which is a DIFFERENT entity. The caller's
+        // Create privilege on sprk_invoice IS consulted for confirm (owner decision G5, 2026-10-01), but as
+        // a table privilege, not through this key — see FinanceAuthorizationFilter's Privilege path.
         ["finance.confirm"] = AccessRights.Write,
 
-        // "finance.attach_invoice" — AppendTo on each record confirm links the new sprk_invoice to: the
-        // body DocumentId (sprk_documents), MatterId (sprk_matters) and VendorOrgId (sprk_organizations).
-        // Added by task 130 (defect C8). AppendTo, not Write: attaching a child to a parent is the right
-        // Dataverse itself demands of the parent ("other records can be attached to this record"), and
-        // Write does not imply it — the same reasoning as "entity.associate_document" below. A separate
-        // key rather than reusing that one because it names an OFFICE document being associated to an
-        // entity; reusing it here would misdescribe the operation in every deny log.
+        // "finance.attach_invoice" — AppendTo on each PARENT record the new sprk_invoice's own lookups point
+        // at: the body MatterId (sprk_matters, sprk_invoice.sprk_matter) and VendorOrgId
+        // (sprk_organizations, sprk_invoice.sprk_vendororg). Added by task 130 (defect C8). AppendTo, not
+        // Write: attaching a child to a parent is the right Dataverse itself demands of the parent ("other
+        // records can be attached to this record"), and Write does not imply it — the same reasoning as
+        // "entity.associate_document" below. A separate key rather than reusing that one because it names an
+        // OFFICE document being associated to an entity; reusing it here would misdescribe the operation in
+        // every deny log. (Until 2026-10-01 this key was also asked of the DOCUMENT; the live schema puts the
+        // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
+
+        // "finance.link_invoice" — Write AND Append on the body DocumentId of POST /api/finance/invoice-review/
+        // confirm, through the entity-generic record path. Added by task 130 (owner decision G5, 2026-10-01).
+        // The live schema has NO sprk_invoice → sprk_document lookup; the link is sprk_document.sprk_invoice,
+        // so confirm WRITES the document's own lookup column. In Dataverse the record that HOLDS the lookup
+        // needs Append ("this record can be attached to another"), not AppendTo, and Write for the column
+        // update itself — the owner's "Write+Append on the document". Append is not implied by Write.
+        ["finance.link_invoice"] = AccessRights.Write | AccessRights.Append,
 
         // "entity.associate_document" — EntityAccessFilter.cs:64, attached at OfficeEndpoints.cs:173
         // (POST /api/office/save). The authorized resource is the TARGET entity

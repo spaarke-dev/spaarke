@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,6 +22,8 @@ using Spaarke.Core.Auth.Rules;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Finance;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Finance;
 using Xunit;
@@ -52,6 +55,7 @@ public class FinanceEndpointsAuthorizationContractTests
     private const string Projects = "sprk_projects";           // live EntityDefinitions, 2026-09-30
     private const string Documents = "sprk_documents";         // live EntityDefinitions, 2026-09-30
     private const string VendorOrganizations = "sprk_organizations"; // live EntityDefinitions(LogicalName='sprk_organization'), 2026-09-30
+    private const string CreateInvoicePrivilege = "prvCreatesprk_Invoice"; // live privileges(name), 2026-10-01
 
     // =========================================================================================
     // Filter reach — every one of the eight routes denies a caller the seam reports as None
@@ -156,6 +160,28 @@ public class FinanceEndpointsAuthorizationContractTests
         var deletedBody = await deleted.Content.ReadAsStringAsync();
         Normalize(deletedBody).Should().Be(Normalize(await absent.Content.ReadAsStringAsync()));
         deletedBody.Should().NotContain(deletedId.ToString());
+    }
+
+    [Theory]
+    [InlineData("finance-matter-recalculate", Matters)]
+    [InlineData("finance-project-recalculate", Projects)]
+    public async Task Recalculate_FinanceRecordDeletedAfterTheCheck_GetsTheSameUniform404(string route, string expectedSet)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var deletedId = Guid.NewGuid();
+        var absentId = Guid.NewGuid();
+        host.Access.Grant(expectedSet, deletedId, AccessRights.Read);
+        // The update-only rollup write refuses a parent deleted between the check and the write.
+        host.Rollup.DeletedAfterCheck.Add(deletedId);
+
+        var deleted = await host.SendAsync(BuildRequest(route, deletedId));
+        var absent = await host.SendAsync(BuildRequest(route, absentId));
+
+        deleted.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        host.Rollup.Calls.Should().Equal(deletedId); // the check passed and the handler ran; absentId never got there
+        var deletedBody = await deleted.Content.ReadAsStringAsync();
+        Normalize(deletedBody).Should().Be(Normalize(await absent.Content.ReadAsStringAsync()));
+        deletedBody.Should().NotContain(deletedId.ToString()).And.NotContainEquivalentOf(deletedId.ToString("N"));
     }
 
     [Theory]
@@ -355,20 +381,25 @@ public class FinanceEndpointsAuthorizationContractTests
 
     public static TheoryData<string> ConfirmLinkTargets => new() { "document", "matter", "vendor" };
 
+    /// <summary>
+    /// The document HOLDS the invoice lookup (live <c>sprk_document.sprk_invoice</c>), so it needs Append; the
+    /// matter and vendor are pointed AT by the invoice's own lookups, so they need AppendTo (owner G5).
+    /// </summary>
     [Theory]
     [MemberData(nameof(ConfirmLinkTargets))]
-    public async Task Confirm_MissingAppendToOnOneLinkedRecord_Returns403_NamingThatIdAndSet(string missing)
+    public async Task Confirm_MissingTheLinkRightOnOneLinkedRecord_Returns403_NamingThatIdAndSet(string missing)
     {
         await using var host = await FinanceAuthHost.StartAsync();
         var body = ConfirmBody.New();
+        host.Probe.Hold(CreateInvoicePrivilege);
 
-        var docRights = AccessRights.Read | AccessRights.Write | AccessRights.AppendTo;
+        var docRights = AccessRights.Read | AccessRights.Write | AccessRights.Append;
         var matterRights = AccessRights.Read | AccessRights.AppendTo;
         var vendorRights = AccessRights.Read | AccessRights.AppendTo;
         (string Set, Guid Id) expected;
         switch (missing)
         {
-            case "document": docRights &= ~AccessRights.AppendTo; expected = (Documents, body.DocumentId); break;
+            case "document": docRights &= ~AccessRights.Append; expected = (Documents, body.DocumentId); break;
             case "matter": matterRights &= ~AccessRights.AppendTo; expected = (Matters, body.MatterId); break;
             default: vendorRights &= ~AccessRights.AppendTo; expected = (VendorOrganizations, body.VendorOrgId); break;
         }
@@ -385,6 +416,94 @@ public class FinanceEndpointsAuthorizationContractTests
             new AccessCall(AccessPath.Record, expected.Set, expected.Id, HasToken: true),
             "the denying question is the last one asked — the filter stops at the first deny");
         host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact]
+    public async Task Confirm_DocumentWithAppendToButNotAppend_IsDenied_TheOldRightNoLongerSuffices()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        // AppendTo was the right asked of the document before the live schema showed the lookup is ON it.
+        host.Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_rights");
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact]
+    public async Task Confirm_CallerWithoutCreateOnSprkInvoice_Returns403_AndNothingIsCreated()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Probe.Release(CreateInvoicePrivilege); // every record right, but not the table privilege
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.deny.insufficient_privilege");
+        host.Probe.Calls.Should().ContainSingle()
+            .Which.Should().Be(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true),
+                "the privilege is asked AS THE CALLER (their token forwarded), by its exact live name");
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    [Fact]
+    public async Task Confirm_PrivilegeCheckThrows_IsDenied()
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        host.Probe.ThrowOnEveryCall = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable");
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        await ShouldCarryReasonCode(response, "sdap.access.error.system_failure");
+        host.VerifyNoServiceWasInvoked();
+    }
+
+    public static TheoryData<InvoiceReviewFailure, HttpStatusCode, bool> ConfirmFailures => new()
+    {
+        { InvoiceReviewFailure.DocumentNotFound, HttpStatusCode.NotFound, false },
+        { InvoiceReviewFailure.DocumentLinkedToAnotherInvoice, HttpStatusCode.Conflict, true },
+        { InvoiceReviewFailure.OwnerTeamUnresolved, HttpStatusCode.Forbidden, false },
+        { InvoiceReviewFailure.LinkFailed, HttpStatusCode.InternalServerError, false },
+        { InvoiceReviewFailure.LinkFailedInvoiceNotRemoved, HttpStatusCode.InternalServerError, true },
+        { InvoiceReviewFailure.StatusNotUpdated, HttpStatusCode.InternalServerError, true },
+        { InvoiceReviewFailure.ExtractionNotQueued, HttpStatusCode.InternalServerError, true },
+    };
+
+    [Theory]
+    [MemberData(nameof(ConfirmFailures))]
+    public async Task Confirm_ServiceFailure_IsRenderedWithItsMessage_AndNamesTheInvoiceWhenOneExists(
+        InvoiceReviewFailure failure, HttpStatusCode expectedStatus, bool namesInvoice)
+    {
+        await using var host = await FinanceAuthHost.StartAsync();
+        var body = ConfirmBody.New();
+        host.GrantFullConfirm(body);
+        var invoiceId = Guid.NewGuid();
+        host.Review.Setup(r => r.ConfirmInvoiceAsync(It.IsAny<InvoiceReviewConfirmRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvoiceReviewException(failure, $"what happened (invoice {invoiceId})", namesInvoice ? invoiceId : null));
+
+        var response = await host.SendAsync(Confirm(body));
+
+        response.StatusCode.Should().Be(expectedStatus);
+        var json = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        json["detail"]!.GetValue<string>().Should().Contain("what happened");
+        json["reasonCode"]!.GetValue<string>().Should().StartWith("sdap.finance.invoice_review.");
+        if (namesInvoice)
+        {
+            json["invoiceId"]!.GetValue<string>().Should().Be(invoiceId.ToString());
+        }
+        else
+        {
+            json.Should().NotContainKey("invoiceId");
+        }
     }
 
     [Fact]
@@ -405,6 +524,7 @@ public class FinanceEndpointsAuthorizationContractTests
             new AccessCall(AccessPath.Record, Documents, body.DocumentId, HasToken: true),
             new AccessCall(AccessPath.Record, Matters, body.MatterId, HasToken: true),
             new AccessCall(AccessPath.Record, VendorOrganizations, body.VendorOrgId, HasToken: true));
+        host.Probe.Calls.Should().Equal(new PrivilegeCall(CreateInvoicePrivilege, HasToken: true));
     }
 
     [Fact]
@@ -553,6 +673,75 @@ public class FinanceEndpointsAuthorizationContractTests
 
     internal sealed record AccessCall(AccessPath Path, string Set, Guid Id, bool HasToken);
 
+    internal sealed record PrivilegeCall(string Privilege, bool HasToken);
+
+    /// <summary>
+    /// <see cref="CallerRecordAccessProbe"/> at its virtual privilege seam: answers from a held-privilege set and
+    /// records every question. Like the real probe, a missing caller token answers "not held".
+    /// </summary>
+    internal sealed class RecordingPrivilegeProbe : CallerRecordAccessProbe
+    {
+        private readonly HashSet<string> _held = new(StringComparer.Ordinal);
+
+        public RecordingPrivilegeProbe()
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+        {
+        }
+
+        public List<PrivilegeCall> Calls { get; } = new();
+
+        public Exception? ThrowOnEveryCall { get; set; }
+
+        public void Hold(string privilege) => _held.Add(privilege);
+
+        public void Release(string privilege) => _held.Remove(privilege);
+
+        public override Task<bool> CallerHoldsPrivilegeAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            Calls.Add(new PrivilegeCall(privilegeName, !string.IsNullOrEmpty(callerBearerToken)));
+            if (ThrowOnEveryCall is not null)
+            {
+                return Task.FromException<bool>(ThrowOnEveryCall);
+            }
+
+            return Task.FromResult(!string.IsNullOrEmpty(callerBearerToken) && _held.Contains(privilegeName));
+        }
+    }
+
+    /// <summary>
+    /// <see cref="FinanceRollupService"/> at its virtual seam. By default it runs the REAL service (which fails on
+    /// the unwrappable in-process double — see the class remarks); an id in <see cref="DeletedAfterCheck"/> instead
+    /// throws the <see cref="KeyNotFoundException"/> the update-only write raises for a parent deleted after the check.
+    /// </summary>
+    internal sealed class RollupSeam : FinanceRollupService
+    {
+        public RollupSeam(IDataverseService reads, IFieldMappingDataverseService writes)
+            : base(reads, writes, NullLogger<FinanceRollupService>.Instance)
+        {
+        }
+
+        public HashSet<Guid> DeletedAfterCheck { get; } = new();
+
+        public List<Guid> Calls { get; } = new();
+
+        public override Task<RecalculateFinanceResponse> RecalculateMatterAsync(Guid matterId, CancellationToken ct = default)
+        {
+            Calls.Add(matterId);
+            return DeletedAfterCheck.Contains(matterId)
+                ? Task.FromException<RecalculateFinanceResponse>(new KeyNotFoundException("sprk_matter record was not found."))
+                : base.RecalculateMatterAsync(matterId, ct);
+        }
+
+        public override Task<RecalculateFinanceResponse> RecalculateProjectAsync(Guid projectId, CancellationToken ct = default)
+        {
+            Calls.Add(projectId);
+            return DeletedAfterCheck.Contains(projectId)
+                ? Task.FromException<RecalculateFinanceResponse>(new KeyNotFoundException("sprk_project record was not found."))
+                : base.RecalculateProjectAsync(projectId, ct);
+        }
+    }
+
     /// <summary>
     /// Hand-written <see cref="IAccessDataSource"/>: answers from a rights table and records every question.
     /// The document path (<see cref="IAccessDataSource.GetUserAccessAsync"/>) is the one whose Dataverse target
@@ -606,6 +795,7 @@ public class FinanceEndpointsAuthorizationContractTests
         private HttpClient? _client;
 
         public RecordingAccessDataSource Access { get; } = new();
+        public RecordingPrivilegeProbe Probe { get; } = new();
         public Mock<IInvoiceReviewService> Review { get; } = new(MockBehavior.Strict);
         public Mock<IInvoiceSearchService> Search { get; } = new(MockBehavior.Strict);
         public Mock<IFinanceSummaryService> Summary { get; } = new(MockBehavior.Strict);
@@ -613,6 +803,7 @@ public class FinanceEndpointsAuthorizationContractTests
         public Mock<IFieldMappingDataverseService> ScorecardWrites { get; } = new(MockBehavior.Strict);
         public Mock<IDataverseService> RollupReads { get; } = new(MockBehavior.Strict);
         public Mock<IFieldMappingDataverseService> RollupWrites { get; } = new(MockBehavior.Strict);
+        public RollupSeam Rollup { get; private set; } = null!;
 
         public static async Task<FinanceAuthHost> StartAsync()
         {
@@ -642,14 +833,15 @@ public class FinanceEndpointsAuthorizationContractTests
             builder.Services.AddSingleton<IAccessDataSource>(Access);
             builder.Services.AddScoped<IAuthorizationRule, OperationAccessRule>();
             builder.Services.AddScoped<AuthorizationService>();
+            builder.Services.AddSingleton<CallerRecordAccessProbe>(Probe);
 
             builder.Services.AddSingleton(Review.Object);
             builder.Services.AddSingleton(Search.Object);
             builder.Services.AddSingleton(Summary.Object);
             builder.Services.AddSingleton(new ScorecardCalculatorService(
                 Kpi.Object, ScorecardWrites.Object, NullLogger<ScorecardCalculatorService>.Instance));
-            builder.Services.AddSingleton(new FinanceRollupService(
-                RollupReads.Object, RollupWrites.Object, NullLogger<FinanceRollupService>.Instance));
+            Rollup = new RollupSeam(RollupReads.Object, RollupWrites.Object);
+            builder.Services.AddSingleton<FinanceRollupService>(Rollup);
 
             builder.WebHost.UseTestServer();
             _app = builder.Build();
@@ -675,9 +867,10 @@ public class FinanceEndpointsAuthorizationContractTests
 
         public void GrantFullConfirm(ConfirmBody body)
         {
-            Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.AppendTo);
+            Access.Grant(Documents, body.DocumentId, AccessRights.Read | AccessRights.Write | AccessRights.Append);
             Access.Grant(Matters, body.MatterId, AccessRights.Read | AccessRights.AppendTo);
             Access.Grant(VendorOrganizations, body.VendorOrgId, AccessRights.Read | AccessRights.AppendTo);
+            Probe.Hold(CreateInvoicePrivilege);
         }
 
         /// <summary>Every service and Dataverse seam behind the eight handlers was left untouched.</summary>
@@ -690,6 +883,7 @@ public class FinanceEndpointsAuthorizationContractTests
             ScorecardWrites.VerifyNoOtherCalls();
             RollupReads.VerifyNoOtherCalls();
             RollupWrites.VerifyNoOtherCalls();
+            Rollup.Calls.Should().BeEmpty("the finance rollup handler must not have been reached");
         }
 
         public async ValueTask DisposeAsync()

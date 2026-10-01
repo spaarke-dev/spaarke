@@ -105,7 +105,7 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 | `DocumentAuthorizationFilter` | `Api/Filters/` | SPE document Read access |
 | `AnalysisAuthorizationFilter` | `Api/Filters/` | AI analysis document access (delegates to IAiAuthorizationService) |
 | `ExternalCallerAuthorizationFilter` | `Api/Filters/` | Power Pages portal user validation |
-| `FinanceAuthorizationFilter` | `Api/Filters/` | Per-route, per-record caller check on `/api/finance/*` and the finance + scorecard recalculate routes: each route declares the id(s) it authorizes and from which source (route / body / query); Read on the matter/project, Write + AppendTo on invoice-review targets; uniform 404 on recalculate (task 130) |
+| `FinanceAuthorizationFilter` | `Api/Filters/` | Per-route, per-record caller check on `/api/finance/*` and the finance + scorecard recalculate routes: each route declares the id(s) it authorizes and from which source (route / body / query); Read on the matter/project; invoice-review confirm = Write+Append on the document (it holds the invoice lookup), AppendTo on matter + vendor, and the caller's Create privilege on `sprk_invoice` (via `CallerRecordAccessProbe`) before the app creates the team-owned invoice; uniform 404 on recalculate (task 130) |
 | `WorkspaceAuthorizationFilter` | `Api/Filters/` | Workspace access |
 | `WorkspaceLayoutAuthorizationFilter` | `Api/Filters/` | Workspace layout CRUD |
 | `OfficeAuthFilter` | `Api/Filters/` | Office Add-in token validation |

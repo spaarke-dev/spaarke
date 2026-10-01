@@ -1,8 +1,8 @@
 # Task 130 — finance + scorecard recalculate IDOR, summary gate, id substitution (defect C8)
 
-> **Status**: code complete on `task/uac-r2-130`; **one part escalated** (§6 — the confirm route's invoice
-> create does not match the live `sprk_invoice` schema); **live gate pending** (§7, manual, no live writes
-> were made by this run).
+> **Status**: code complete on `task/uac-r2-130`. The §6 escalation is **RESOLVED** (owner decision G5, round 3b,
+> 2026-10-01 — option (a), adjusted: check as the user, create as the app, owned by the team; implemented in §11).
+> **Live gate pending** (§7 + §11.6, manual; no live writes were made by either run).
 > **GitHub**: #1053. **Supersedes** the summary half of finding A-20 that task 003 closed (§8).
 
 ## 1. What was wrong (re-verified against source 2026-09-30)
@@ -115,7 +115,9 @@ upsert: `If-Match: *`"), and the codebase itself depends on it — `InvoiceRevie
 creates the invoice by PATCHing a new GUID. `If-Match: *` on an existing row is a no-op precondition, so the
 guarantee costs nothing if the platform did not upsert. **Live confirmation = gate item (c).**
 
-## 6. 🔔 ESCALATED — confirm's invoice create does not match the live schema (trigger 3 fired)
+## 6. ✅ RESOLVED (was 🔔 ESCALATED) — confirm's invoice create did not match the live schema (trigger 3 fired)
+
+> Resolved 2026-10-01 by owner decision G5 (round 3b); implementation in §11. The text below is the original escalation.
 
 Read-only metadata (spaarkedev1, `EntityDefinitions(LogicalName='sprk_invoice')/Attributes` and
 `/ManyToOneRelationships`, 2026-09-30):
@@ -211,3 +213,134 @@ and denied every caller. Task 130 closes the remaining half; task 003's POML is 
 - C12 / task 132: `CachedAccessDataSource` caches a None record snapshot for 60 s, so a newly granted reader may
   see the recalculate 404 for up to a minute.
 - Publish size: not measured here (batch measurement by the main session). No NuGet change.
+
+## 11. Escalation resolved — owner decision G5 (round 3b, 2026-10-01), implemented
+
+> Owner: "yes if user can create the invoice; but won't this use the same rule that assigned to the bu/team not
+> individual". Recorded binding in `notes/session27-owner-decisions-and-research.md` round 3b: the BFF checks AS THE
+> USER (Create on sprk_invoice, AppendTo on matter and vendor, Write+Append on the document), then the APP creates
+> the invoice OWNED BY THE TEAM (RecordOwnershipResolver, record-first from the matter), never user-owned.
+
+### 11.1 Live schema re-verified (spaarkedev1, read-only GETs, 2026-10-01)
+
+| Fact | Live value |
+|---|---|
+| `sprk_invoice` set / primary name / ownership | `sprk_invoices` / **`sprk_name`** (ApplicationRequired, MaxLength 850) / UserOwned (team-ownable) |
+| invoice → matter lookup | `sprk_matter`, nav **`sprk_Matter`** → `sprk_Matter@odata.bind: /sprk_matters(id)` |
+| invoice → vendor lookup | `sprk_vendororg` → `sprk_organization`, nav **`sprk_vendororg`** → `/sprk_organizations(id)` |
+| document → invoice link | `sprk_document.sprk_invoice`, rel `sprk_document_Invoice_n1`, nav **`sprk_Invoice`** → `sprk_Invoice@odata.bind: /sprk_invoices(id)` |
+| document notes column | **`sprk_invoicereviewnotes`** (Memo, 5000); `sprk_invoicerejectionnotes` absent |
+| absent columns (dropped) | `sprk_invoice.sprk_reviewernotes`, `sprk_invoice.sprk_createdon`, `sprk_invoice.sprk_document` |
+| option sets | doc review status ToReview 100000000 / ConfirmedInvoice 100000001 / RejectedNotInvoice 100000002; invoice status ToReview 100000000; extraction NotRun 100000000 |
+| `sprk_organization` primary name | `sprk_organizationname` |
+| privilege name | **`prvCreatesprk_Invoice`** (schema name `sprk_Invoice` — not all lower case) |
+| `RetrieveUserSetOfPrivilegesByNames` shape | `{"RolePrivileges":[{"Depth":"Deep","PrivilegeName":"prvCreatesprk_Invoice",…}]}` (called read-only for Test User 1) |
+
+### 11.2 What changed
+
+1. **Check as the user** (`FinanceAuthorizationFilter`, `FinanceEndpoints.ResolveConfirmTargets`). Confirm now asks, in
+   order: Write on the document (document path, `finance.confirm`); **Write+Append** on the document (record path,
+   NEW key `finance.link_invoice`) — the document holds the lookup, so Append replaces the earlier AppendTo-on-document;
+   AppendTo on the matter and the vendor (`finance.attach_invoice`, now scoped to those two); and the caller's
+   **Create privilege on sprk_invoice** through a new `FinanceCheckPath.Privilege`. Denials: 403
+   `sdap.access.deny.insufficient_rights` / `sdap.access.deny.insufficient_privilege`; a throwing check →
+   `sdap.access.error.system_failure`. Fails closed when the probe is not registered.
+   - **Privilege mechanism — choice and justification.** `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync` (new
+     virtual member): OBO token → `WhoAmI()` → `systemusers({me})/RetrieveUserSetOfPrivilegesByNames`. Rejected
+     `UserPrivilegeChecker`: Read-only, app-identity impersonation (the caller's id as DATA — the A-2 shape), and a
+     24 h cache that would honour a removed Create privilege a day late (against round 3's "minutes, not hours").
+     The probe already owns the caller-as-credential OBO path; no new class, no new DI registration.
+2. **Create as the app, owned by the team** (`InvoiceReviewService`). `IRecordOwnershipResolver.ResolveOwningTeamAsync`
+   with target `sprk_matter`/MatterId and NO caller ids (record-first; a named-but-unresolvable target refuses, never
+   falls back to the user). For a secure matter the matter's owning BU is the Secure Record BU, so the answer is that
+   BU's owner team. Unresolved → `OwnerTeamUnresolved`, 403, **nothing written**. `ownerid@odata.bind: /teams(id)`.
+3. **Live-schema create**: `sprk_Matter@odata.bind`, `sprk_vendororg@odata.bind`, `sprk_name` = "{vendor} - {invoice
+   number}" else "{vendor} - {date}" else "{vendor} - Invoice" (capped 850); `sprk_createdon` / `sprk_reviewernotes`
+   dropped; reviewer notes go to the document's `sprk_invoicereviewnotes`. All writes moved to the Web API seam
+   (`IFieldMappingDataverseService`): the old status write went through the SDK `UpdateDocumentFieldsAsync` with a
+   bare `int` for a picklist, which the SDK rejects — so confirm and reject were both latent failures.
+4. **No partial write**. The order is create → link → status LAST → enqueue:
+   - create fails → nothing written;
+   - link (update-only PATCH of `sprk_Invoice@odata.bind`) fails → the created invoice is **deleted**
+     (`IGenericEntityService.DeleteAsync`, `CancellationToken.None`), 500 `link_failed` "Nothing was saved"; if the
+     delete also fails → 500 `link_failed_invoice_orphaned` naming the invoice id;
+   - status fails → 500 `status_not_updated` naming the invoice id. **A retry is idempotent**: confirm first reads the
+     document's `_sprk_invoice_value`; a link to an invoice with the SAME matter and vendor is resumed (no second
+     create or link); a link to a different matter's/vendor's invoice → 409 `document_linked_elsewhere`, nothing written;
+   - enqueue fails → 500 `extraction_not_queued` naming the invoice; the job's idempotency key is per invoice;
+   - document gone → 404 `document_not_found`, nothing written.
+5. **Reject** writes `sprk_invoicereviewnotes` (update-only); a deleted document → 404.
+6. **Finance recalculate KeyNotFound-after-check**: `FinanceRollupService` unsealed with `virtual`
+   `RecalculateMatterAsync`/`RecalculateProjectAsync` (ADR-010 concrete-with-virtual-seam, the probe precedent), so
+   the uniform 404 is now tested on the two finance routes (previously scorecard only).
+7. **SpendSnapshotGenerationJobHandler**: a `KeyNotFoundException` from the rollup step (matter deleted after
+   queueing) is a logged skip and the job COMPLETES; other failures keep their retry/poison classification.
+
+### 11.3 §11 three-question justification (new surface in this round)
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `FinanceCheckPath.Privilege` + `FinanceAuthorizationCheck.CallerPrivilege` | the filter's Document/Record paths (record rights only) | It IS the extension of the one finance filter — a third path kind, no new filter | A table privilege has no record to ask RetrievePrincipalAccess about; without it "Create on sprk_invoice, as the user" cannot be checked |
+| `CallerRecordAccessProbe.CallerHoldsPrivilegeAsync` (+ `ResponseGrantsPrivilege`) | `UserPrivilegeChecker` (Read-only, impersonated, 24 h cache); `GetCallerRightsAsync` (record rights) | Extends the existing OBO probe; reuses its exchange + WhoAmI | App-created invoices for users who could never create one (G5's condition unenforced) |
+| `"finance.link_invoice"` key (Write + Append) | `finance.attach_invoice` (AppendTo), `finance.confirm` (Write) | Neither names Append; changing attach_invoice would alter the matter/vendor checks | The document holds the lookup; without Append the link PATCH would 403 live after the filter allowed it |
+| `InvoiceReviewException` + `InvoiceReviewFailure` | generic `catch (Exception)` → one 500 | The handler must know which state was left; a message string is not a contract | A partial confirm would be an anonymous 500 with no invoice id to find or retry |
+| `virtual` on `FinanceRollupService` entry points | sealed concrete over an unwrapped `ServiceClient` | Minimal seam, no interface (ADR-010) | Items 5 and 6 (post-check 404, job skip) untestable in-process |
+
+Placement (CLAUDE.md §10): all in the BFF — existing routes and services, no new endpoint, no new DI registration,
+no NuGet change. `IRecordOwnershipResolver` was already registered unconditionally (`AddDataverseMetadataServices`,
+Program.cs); `InvoiceReviewService` is its first non-Office consumer (one of GitHub #1034's "other BFF writers").
+
+### 11.4 Tests and seeded-violation proofs (this round)
+
+New: `tests/integration/data-mutation/FinanceInvoiceReview/InvoiceReviewWritePathTests.cs` (18 cases — order, exact
+payloads, team ownership, every failure point, retry, reject notes, name),
+`tests/integration/data-mutation/FinanceRollup/SpendSnapshotDeletedMatterTests.cs` (2),
+`tests/integration/auth/UnifiedAccessControl/CallerPrivilegeCheckTests.cs` (8). Extended:
+`FinanceEndpointsAuthorizationContractTests` (finance post-check 404 ×2, AppendTo-not-Append, no Create privilege,
+privilege check throws, 7 failure renderings; probe registered in the host), completeness + characterization tests
+(`finance.link_invoice`), `RouteAuthorizationGuardTests` reason text.
+
+**Suites (2026-10-01)**: BFF unit suite 13155 passed / 56 skipped / 1 failed — the failure is
+`PinnedMemoryEndpointsContractTests.DeletePin_Authenticated_Returns204AndEmitsCounter` (memory endpoints, untouched
+here; a metrics-counter test that flakes under full-suite load — its class re-run in isolation 3× = 15/15 passed).
+ArchTests 340/340. Affected-test filter (finance + policy + new files): 157/157.
+
+Seeded, run, watched fail, restored (2026-10-01):
+
+| # | Seed | Failed |
+|---|---|---|
+| 1 | Create-privilege check removed from confirm | `Confirm_CallerWithoutCreateOnSprkInvoice…`, `Confirm_PrivilegeCheckThrows…`, `Confirm_AuthorizedBodyOnly…` |
+| 2 | document check back to `finance.attach_invoice` | `Confirm_DocumentWithAppendToButNotAppend…` (+ every confirm case granting Append) |
+| 3 | Privilege path fails open | `Confirm_CallerWithoutCreateOnSprkInvoice…` |
+| 4 | compensation delete removed | `Confirm_LinkFails_Deletes…`, `Confirm_LinkFailsAndTheUndoFails…` |
+| 5 | status written before the link | `Confirm_WritesCreateThenLinkThenStatus…`, payload + link-failure tests |
+| 6 | `_sprk_matter_value` key reintroduced | `Confirm_CreatePayload_BindsLookupsByNavigationProperty…` |
+| 7 | resume removed (seeded alone) | `Confirm_StatusUpdateFails_…ARetryResumesWithoutASecondInvoice` |
+| 8 | notes column back to `sprk_invoicerejectionnotes` | `Reject_WithNotes_WritesTheLiveNotesColumn…` |
+| 9 | job skip removed | `MatterDeletedBeforeTheRollup_CompletesTheJob…` |
+| 10 | finance KeyNotFound echoes the id | both `Recalculate_FinanceRecordDeletedAfterTheCheck…` |
+| 12 | parser reads an empty array as held | `AnythingElse_IsNotHeld({"RolePrivileges":[]})` |
+| 13 | `finance.link_invoice` weakened to Write | completeness rights row, `LinkInvoice_RequiresWriteAndAppend…`, document contract case |
+
+### 11.5 Related findings, not fixed here (outside this task's files)
+
+- **`OfficeService.QuickCreateAsync` (Invoice leg) writes `sprk_invoicename`**, which does not exist on live
+  `sprk_invoice` (primary name is `sprk_name`; `sprk_invoicename` exists only as the formatted name of
+  `sprk_document.sprk_invoice`). The Office "New invoice" quick-create therefore fails live. Owner: word-add-in-r1.
+- `sprk_invoice.sprk_regardingrecordtype` is ApplicationRequired (not API-enforced); confirm does not set it.
+- Secure matters: the resolver answers the Secure Record BU's **default** owner team. When C10 Part 1 (named
+  non-default owner team, task 133) lands, the record-first answer for a secure matter must follow it.
+- `sprk_invoice.sprk_issecure` is not copied from a secure matter — child-coverage scope of C10 Part 2 (tasks 145/146).
+
+### 11.6 Live gate additions (manual, pending)
+
+- **(f) unblocked**: read-only `RetrieveUserSetOfPrivilegesByNames` for Test User 1 (2026-10-01) now returns
+  `prvAppendTosprk_Organization` **Deep** (and `prvCreatesprk_Invoice` Deep), so the §7 AppendTo-on-organization gap
+  is gone. The same read returns `prvAppendsprk_Document` Deep, `prvWritesprk_Document` Deep and
+  `prvAppendTosprk_Matter` Deep, so Test User 1 holds every privilege the new confirm rule asks.
+- (h) confirm as Test User 1 → 202; read back: `sprk_invoice.ownerid` = the matter's BU owner team (not the user),
+  `_sprk_matter_value`/`_sprk_vendororg_value` set, `sprk_name` derived; `sprk_document._sprk_invoice_value` = the
+  invoice; review status ConfirmedInvoice. Repeat the confirm → same invoice id, no second row.
+- (i) `RetrieveUserSetOfPrivilegesByNames` under the caller's OBO token answers for that user (incl. a Create held
+  only via a team role, if a test user has one). The function was verified with an admin token only.
+- (j) reject-with-notes → `sprk_invoicereviewnotes` populated.

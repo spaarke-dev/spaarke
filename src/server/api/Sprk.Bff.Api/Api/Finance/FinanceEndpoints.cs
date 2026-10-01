@@ -19,8 +19,10 @@ namespace Sprk.Bff.Api.Api.Finance;
 ///   <item>summary → Read on <c>sprk_matters(route matterId)</c>;</item>
 ///   <item>search → <c>matterId</c> query REQUIRED (400 when absent), Read on <c>sprk_matters(matterId)</c>;</item>
 ///   <item>reject → Write on the BODY DocumentId via the document path;</item>
-///   <item>confirm → Write on the BODY DocumentId, and AppendTo on the document, matter and vendor
-///   organization it links the new <c>sprk_invoice</c> to.</item>
+///   <item>confirm → Write on the BODY DocumentId; Write+Append on that document (it HOLDS the new invoice's
+///   lookup, <c>sprk_document.sprk_invoice</c>); AppendTo on the matter and vendor organization the invoice's own
+///   lookups point at; and the caller's Create privilege on <c>sprk_invoice</c> (owner decision G5, 2026-10-01:
+///   "check as the user, create as the app, owned by the team").</item>
 /// </list>
 /// </remarks>
 public static class FinanceEndpoints
@@ -101,9 +103,17 @@ public static class FinanceEndpoints
     // empty id is a field-level 400 with no rights query made.
 
     /// <summary>
-    /// Confirm: Write on the body DocumentId (its review status is updated) AND AppendTo on every record the
-    /// handler links the new <c>sprk_invoice</c> to — the document, the matter and the vendor organization.
-    /// AppendTo is what Dataverse itself demands to attach a record to a parent; Write does not imply it.
+    /// Confirm — owner decision G5 (2026-10-01): every right is checked AS THE CALLER, then the APP creates the
+    /// invoice, owned by the matter's team. The checks, each on the id the handler consumes:
+    /// <list type="bullet">
+    ///   <item>Write on the body DocumentId through the document path (its review status is updated);</item>
+    ///   <item>Write+Append on that document (<c>finance.link_invoice</c>) — the live schema puts the link on the
+    ///   DOCUMENT (<c>sprk_document.sprk_invoice</c>), and the record that holds a lookup needs Append;</item>
+    ///   <item>AppendTo on the matter and on the vendor organization (<c>finance.attach_invoice</c>) — the new
+    ///   invoice's own <c>sprk_matter</c> / <c>sprk_vendororg</c> lookups point at them;</item>
+    ///   <item>the caller's Create privilege on <c>sprk_invoice</c> — the invoice is created app-only, so without
+    ///   this a user who could never create an invoice would get one by confirming.</item>
+    /// </list>
     /// </summary>
     internal static FinanceAuthorizationTargets ResolveConfirmTargets(EndpointFilterInvocationContext context)
     {
@@ -133,7 +143,7 @@ public static class FinanceEndpoints
                 Path = FinanceCheckPath.Record,
                 EntitySetName = FinanceAuthorizationFilter.DocumentEntitySet,
                 RecordId = request.DocumentId,
-                Operation = "finance.attach_invoice",
+                Operation = "finance.link_invoice",
                 Source = "body.documentId",
             },
             new FinanceAuthorizationCheck
@@ -151,7 +161,11 @@ public static class FinanceEndpoints
                 RecordId = request.VendorOrgId,
                 Operation = "finance.attach_invoice",
                 Source = "body.vendorOrgId",
-            });
+            },
+            FinanceAuthorizationCheck.CallerPrivilege(
+                FinanceAuthorizationFilter.CreateInvoicePrivilege,
+                FinanceAuthorizationFilter.InvoiceEntitySet,
+                source: "privilege.createInvoice"));
     }
 
     /// <summary>Reject: Write on the body DocumentId (its review status is updated) via the document path.</summary>
@@ -250,6 +264,15 @@ public static class FinanceEndpoints
 
             return Results.Accepted(result.StatusUrl, result);
         }
+        catch (InvoiceReviewException ex)
+        {
+            logger.LogError(ex,
+                "Invoice review confirmation refused or incomplete ({Failure}). DocumentId={DocumentId}, " +
+                "InvoiceId={InvoiceId}, CorrelationId={CorrelationId}",
+                ex.Failure, request.DocumentId, ex.InvoiceId, correlationId);
+
+            return ConfirmFailure(ex, correlationId);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -301,6 +324,15 @@ public static class FinanceEndpoints
 
             return Results.Ok(result);
         }
+        catch (KeyNotFoundException)
+        {
+            // The document was deleted after the authorization check; the update-only write created nothing.
+            return Results.Problem(
+                title: "Document Not Found",
+                detail: "The document no longer exists.",
+                statusCode: StatusCodes.Status404NotFound,
+                extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId });
+        }
         catch (Exception ex)
         {
             logger.LogError(ex,
@@ -316,6 +348,34 @@ public static class FinanceEndpoints
                     ["correlationId"] = correlationId
                 });
         }
+    }
+
+    /// <summary>
+    /// Renders an <see cref="InvoiceReviewException"/>. Every message states what was and was not saved, and any
+    /// failure AFTER the invoice row exists names that row's id — the caller (and support) must be able to find it.
+    /// A retry is safe in every case: confirm resumes from the invoice the document is already linked to.
+    /// </summary>
+    internal static IResult ConfirmFailure(InvoiceReviewException ex, string correlationId)
+    {
+        var (status, title) = ex.Failure switch
+        {
+            InvoiceReviewFailure.DocumentNotFound => (StatusCodes.Status404NotFound, "Document Not Found"),
+            InvoiceReviewFailure.DocumentLinkedToAnotherInvoice => (StatusCodes.Status409Conflict, "Document Already Linked"),
+            InvoiceReviewFailure.OwnerTeamUnresolved => (StatusCodes.Status403Forbidden, "Invoice Not Created"),
+            _ => (StatusCodes.Status500InternalServerError, "Invoice Review Incomplete"),
+        };
+
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = ex.ReasonCode,
+            ["correlationId"] = correlationId,
+        };
+        if (ex.InvoiceId is { } invoiceId)
+        {
+            extensions["invoiceId"] = invoiceId;
+        }
+
+        return Results.Problem(title: title, detail: ex.Message, statusCode: status, extensions: extensions);
     }
 
     /// <summary>
