@@ -4,7 +4,7 @@
     <title>Scaffold NEW .NET 10 project Sprk.Provisioning.ControlPlane — Program.cs + Startup + DI + JWT bearer + Operator/Reader auth + OpenAPI at /swagger</title>
     <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Net-new .NET 10 project scaffold + auth tag (JWT bearer + app-role authorization); every downstream handler + REST endpoint depends on this scaffold. task-create Step 3.5.5 FULL (auth tag; l2-controlplane tag; NEW surface; &gt;5 downstream deps).</rigor-reason>
     <model-tier>opus</model-tier>

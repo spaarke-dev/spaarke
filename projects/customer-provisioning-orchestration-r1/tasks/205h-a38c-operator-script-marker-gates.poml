@@ -4,7 +4,7 @@
     <title>Auth-v4 runtime-contract integration — row A38c (operator-script marker pre-check gates (A38c — closes rotation/seed/legacy-orchestrator reversal vectors))</title>
     <phase>Phase Pre-Live-Fire — Auth-v4 runtime-contract integration (task 205, A38c re-scope 2026-08-25)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Per project CLAUDE.md rigor table + root CLAUDE.md §8 TEST-MODIFYING/auth override: A38c is the OPERATOR-SCRIPT half of the A38 re-scope (peer-escalated 2026-08-25 `partial-omit-set-discovered`; owner approved). It gates three operator entry points (`Rotate-Secrets.ps1`, `Seed-ProductionKeyVault.ps1`, `Provision-Customer.ps1`) that — verified live by task 205a's grep-inventory — would otherwise silently reverse the auth-v4 secret-free migration by re-minting `ServiceBus-ConnectionString` + `AiSearch--AdminKey` on every rotation/seed/legacy-orchestrator run while reporting green. Row is tagged `auth` (secret-management surface + FR-39 credential-selection seam), which triggers unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override; ADR-028 A4 rationale (secret-free BFF identity — per `notes/decisions/adr-028-a4-integration-conflict-resolution.md` APPROVED 2026-08-25) + §6.5 owner-narrowed disposition (prong 3 collapses to `spaarkedev1`; Q6 forbids new Model 2 stamps before A36-A42 land) must both be preserved by these gates.</rigor-reason>
     <model-tier>sonnet</model-tier>

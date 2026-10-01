@@ -4,7 +4,7 @@
     <title>Implement per-tenant token-metering layer (D19) — APIM gateway OR app-level custom App Insights metric keyed on tenantId</title>
     <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','ai','auth','azure-deployment'; introduces per-tenant fair-billing + runaway guardrail; blast-radius = every AI call in the platform. FR-13 §M1/M2 differences + SC #13 acceptance scope.</rigor-reason>
     <model-tier>opus</model-tier>

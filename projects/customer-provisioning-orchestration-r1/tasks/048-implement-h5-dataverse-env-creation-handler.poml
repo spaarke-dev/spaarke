@@ -4,7 +4,7 @@
     <title>Implement H5 Dataverse Env Creation Handler (interim pac admin create-environment + gate)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; modifies .cs files; long-running (15–30 min); provisions Dataverse env — high-blast-radius operation.</rigor-reason>
     <model-tier>sonnet</model-tier>

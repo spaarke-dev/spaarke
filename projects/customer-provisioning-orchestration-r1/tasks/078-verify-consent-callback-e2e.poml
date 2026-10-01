@@ -4,7 +4,7 @@
     <title>Verify POST /api/onboarding/consent-callback BFF endpoint E2E with actual Model 2 admin-consent flow</title>
     <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','auth','integration-test','testing'; end-to-end verification of the H0.5 consent-callback endpoint through actual Model 2 admin-consent grant + HMAC verification + Dataverse + Cosmos writes + pipeline kick. FR-02/D18 acceptance scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

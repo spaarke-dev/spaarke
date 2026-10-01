@@ -4,7 +4,7 @@
     <title>H8 handler full rewrite (H8-B semantics): container-CREATION only, container-TYPE creation retired as operator prereq per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §R5 (verified 403 accessDenied 2026-08-30 SESSION 20 Option A probe)</title>
     <phase>Post-Live-Fire remediation — H8 architectural rewrite driven by empirical §R5 verification</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies handler code (H8SpeContainerTypeHandler.cs + GraphContainerTypeProvisioner.cs + collaborators — 700+ LOC in Sprk.Provisioning.ControlPlane.Core), rewrites test surface (tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SpeContainerType/**), touches DagAdvancer.cs, KV manifest, potentially SKILL.md. Multiple hot-path surfaces per root CLAUDE.md §10. bff-api-adjacent per L2 control-plane. Main-session-only per §3 for any .claude/** edits.</rigor-reason>
     <model-tier>sonnet</model-tier>

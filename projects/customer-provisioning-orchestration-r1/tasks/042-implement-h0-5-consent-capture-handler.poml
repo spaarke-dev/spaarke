@@ -4,7 +4,7 @@
     <title>Implement H0.5 Consent-Capture Handler + BFF POST /api/onboarding/consent-callback Endpoint</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','auth' (BFF endpoint); modifies .cs files in Sprk.Bff.Api; auth-sensitive (HMAC verification + Anonymous endpoint); crosses BFF/L2 boundary.</rigor-reason>
     <model-tier>sonnet</model-tier>

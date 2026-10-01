@@ -4,7 +4,7 @@
     <title>Author NEW infrastructure/bicep/platform-controlplane.bicep — L2 orchestrator infrastructure</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment-touching new stack for the L2 control plane; enables Phase D + F. task-create Step 3.5.5 FULL (deploy tag; azure-deployment scope; NEW surface).</rigor-reason>
     <model-tier>opus</model-tier>

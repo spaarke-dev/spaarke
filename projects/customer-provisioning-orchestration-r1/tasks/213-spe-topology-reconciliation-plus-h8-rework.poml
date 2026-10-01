@@ -4,7 +4,7 @@
     <title>SPE topology reconciliation: rework H8 (container-type creation → container creation), add one-time operator prereqs for `Spaarke Trial 1` container-type + `Spaarke SPE Trial 1 Owner` + `Spaarke BFF — Trial 1` app-regs, populate spaarke-constants.yaml, coordinate topology doc merge to master</title>
     <phase>Post-Live-Fire remediation — SPE topology reconciliation orthogonal to task 212 terminology fixes</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>blocked-shipped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies handler code (`H8*Handler.cs` — bff-api-adjacent per L2 control-plane); rewrites operator scripts (`Register-EntraAppRegistrations.ps1`); coordinates cross-worktree doc merge; extends canonical secret manifest; touches skill-directives hot-path (SKILL.md Step 0.5 gains topology-verify sub-step). Multiple hot-path surfaces + code-rework + operator-facing prereq scripts. Main-session-only per §3.</rigor-reason>
     <model-tier>sonnet</model-tier>

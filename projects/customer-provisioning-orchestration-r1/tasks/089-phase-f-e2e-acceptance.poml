@@ -4,7 +4,7 @@
     <title>Phase F E2E acceptance — provision fresh trial-{yyyymmdd} customer stamp using Model 2 (dedicated) profile via new pipeline [SPLIT: subagent scaffolding + owner invocation]</title>
     <phase>F E2E Acceptance</phase>
     <gate>blocked</gate>
-    <status>scaffolding-complete-owner-invocation-pending</status>
+    <status>blocked-shipped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'deploy','integration-test','testing','bff-api'; final project acceptance gate; verifies ALL 6 §4B traps + ALL 5 §4D invariants + naming-conformance + cost envelope. FR-18 + SC #5 + SC #6 scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

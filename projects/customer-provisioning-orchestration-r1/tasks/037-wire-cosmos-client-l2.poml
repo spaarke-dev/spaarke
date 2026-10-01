@@ -4,7 +4,7 @@
     <title>Wire Cosmos client for L2 — partition /customerId, partition-key predicate on every read/write (§4D I3)</title>
     <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-adjacent (UAMI Cosmos data-plane RBAC per task 030) + l2-controlplane tag + enforces §4D I3 tenant-isolation invariant. task-create Step 3.5.5 FULL (l2-controlplane; NEW surface; downstream reconciler + all 19 handlers depend).</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>Author .Worker App Service Bicep module + wire into platform-controlplane.bicep</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Pure Bicep authoring (new module + platform-controlplane.bicep wiring), no existing-file .cs modification beyond app-setting additions; STANDARD per root CLAUDE.md §8 table.</rigor-reason>
     <model-tier>sonnet</model-tier>

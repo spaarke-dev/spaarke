@@ -4,7 +4,7 @@
     <title>Auth-v4 runtime-contract integration — row A43 (Deploy-AllIndexes.ps1 silent-fallback gate — §10.5 trap 2)</title>
     <phase>Phase Pre-Live-Fire — Auth-v4 runtime-contract integration (task 205)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Per project CLAUDE.md rigor table + root CLAUDE.md §8 TEST-MODIFYING/auth override: A43 gates a silent-fallback path that (if left ungated) quietly re-mints an AI Search admin key on secret-free envs — a §10.5 trap-2 silent-Δ2-reversal vector directly attacking the auth-v4 secret-free credential contract (`AiSearch__ManagedIdentity__Enabled=true`). Row is tagged `auth` (secret-management surface), which triggers unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override; ADR-028 A4 rationale (secret-free BFF identity — per `notes/decisions/adr-028-a4-integration-conflict-resolution.md` APPROVED 2026-08-25) must be preserved by this gate.</rigor-reason>
     <model-tier>sonnet</model-tier>

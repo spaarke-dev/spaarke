@@ -4,7 +4,7 @@
     <title>Author NEW infrastructure/bicep/stacks/model1-shared.bicep — first-class trial-tier stack (§3A A1)</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment-touching new stack composition; the Model 1 tier is a first-class business path per §3A A1. task-create Step 3.5.5 FULL (deploy tag; azure-deployment scope).</rigor-reason>
     <model-tier>opus</model-tier>

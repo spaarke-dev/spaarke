@@ -4,7 +4,7 @@
     <title>Pre-dispatch readiness — populate spaarke-constants.yaml per_env_constants, align name_templates with LIVE azure resources, resolve Gap D (Model 1 multi-tenant BFF absent) via §6.5, and verify H8 containerTypeId runtime source (Gap E)</title>
     <phase>Post-Live-Fire remediation — dispatch-blocking readiness gaps orthogonal to tasks 206/207/208/209</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>blocked-shipped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies operator-consumed config files (spaarke-constants.yaml) that gate every subsequent Step 0.5b run + surfaces an architectural decision under §6.5 (Gap D — multi-tenant BFF absence contradicts ADR-028) + investigates a runtime-config unknown (Gap E — H8 containerTypeId source). Skill-directives hot-path per root CLAUDE.md §10. Main-session-only per §3 (constants.yaml lives outside .claude/ but the §6.5 escalation for Gap D warrants FULL rigor).</rigor-reason>
     <model-tier>sonnet</model-tier>

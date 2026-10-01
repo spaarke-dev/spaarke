@@ -4,7 +4,7 @@
     <title>Auth-v4 runtime-contract integration — row A42 (`-FicOnly` consume/reconcile — task 130 C# FIC path vs master `Register-EntraAppRegistrations.ps1` `-FicOnly` estate)</title>
     <phase>Phase Pre-Live-Fire — Auth-v4 runtime-contract integration (task 205)</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Row A42 touches `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/**` — the H3 seam that creates the BFF-identity Federated Identity Credential (auth-tagged). Per project CLAUDE.md §Rigor level defaults: tag `auth` → FULL. Per root CLAUDE.md §8.5 TEST-MODIFYING override (adds parity + tenancy-refusal tests under `tests/**`): code-review + adr-check unconditional at Step 9.5. Per remediation plan §4 "A38 + A42 on Fable/Opus (credential-selection seam + cross-worktree reconciliation — auth-tagged, FULL rigor, code-review + adr-check unconditional)". Per project CLAUDE.md §Human Escalation Triggers: cross-tenant FIC creation (§9.2 reading (b)) is auth-sensitive and MUST escalate.</rigor-reason>
     <model-tier>fable</model-tier>

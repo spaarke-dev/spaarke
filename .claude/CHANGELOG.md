@@ -7,6 +7,21 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-01 — `check-task-status-drift.ps1` reads the layout task-create prescribes
+
+`customer-provisioning-orchestration-r1` (T245a follow-up, owner-directed).
+
+- The checker (gating step for `task-execute` Step 10 and `push-to-github` Step 1.65) only parsed rows with the
+  marker and a three-digit id in the FIRST cell (`| ✅ 001 |`). The layout `task-create` Step 5 prescribes —
+  id first, status in a later cell (`| 001 | Title | … | 🔲 [open] |`) — parsed as nothing: repo-wide ~100 project
+  indexes reported `UNPARSEABLE`, and this project 1 of 186 rows, so the gate was red for a parser reason on every
+  push. Now: id-first rows read their status from the cell holding the `[token]` (else the glyph); ids may carry
+  `.N` / letter suffixes (`081.5`, `245a`); `| **001** | … |` rows (marker `**`, no status) read the later status
+  cell; POML ids with an alphabetic prefix (`ENV-001`) pair with the bare index id; `complete` counts as done.
+  Rows that parsed before parse identically. `-All`: unpaired 886 → 1,162 (2,438 before the prefix pairing),
+  disagreements 74 → 1,540 — real stale statuses that were invisible; 25 projects now read fully clean.
+
+---
 ###### 2026-10-01 — provisioning run-context contract: every handler input has one producer (T245a, G25)
 
 `customer-provisioning-orchestration-r1` T245a.

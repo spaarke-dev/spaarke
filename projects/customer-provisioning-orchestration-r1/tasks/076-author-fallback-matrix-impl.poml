@@ -4,7 +4,7 @@
     <title>Author fallback matrix implementation in /provision-environment skill (MCP disconnect → pac data or raw Web API; az token expiry → auto-refresh; L2 unreachable → escalation)</title>
     <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Skill-documentation-only augmentation of task-075's skill file; no code changes; small doc scope. Per root CLAUDE.md §8 MINIMAL row.</rigor-reason>
     <model-tier>sonnet</model-tier>

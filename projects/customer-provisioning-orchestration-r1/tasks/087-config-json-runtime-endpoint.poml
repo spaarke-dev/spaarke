@@ -4,7 +4,7 @@
     <title>Implement runtime /config.json fetch for external-spa + code-pages (BFF exposes endpoint; consumers fetch at bootstrap)</title>
     <phase>H KV Federation Full Remediation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','auth','deploy'; introduces cross-worktree runtime config endpoint replacing bake-at-build-time pattern; blast-radius = every external-spa + code-page bootstrap. FR-36 scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

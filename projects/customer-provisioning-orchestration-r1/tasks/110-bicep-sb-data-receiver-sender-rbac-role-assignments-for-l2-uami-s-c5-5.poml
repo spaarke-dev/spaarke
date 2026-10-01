@@ -4,7 +4,7 @@
     <title>Bicep: SB Data Receiver (+Sender) RBAC role assignments for L2 UAMI(s) (C5.5)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>blocked</gate>
-    <status>authoring-complete-live-grant-pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>RBAC grant is a hard mechanical prerequisite for any deployed-dispatcher smoke test; missing it produces a loud but blocking failure at first live receive. FULL per l2-controlplane default + azure-deployment.</rigor-reason>
     <model-tier>sonnet</model-tier>
