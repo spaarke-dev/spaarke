@@ -274,4 +274,7 @@ Fixes:
       <expected>(a) and (c) are refused with the server's message; (b) is refused or capped exactly as the POML specifies, with the message shown. No grant row is written for a refusal.</expected>
     </test>
   </ui-tests>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(A1) The grantor-level cap for contact-issued grants is awaiting owner confirmation (the owner questioned rule 1 in round 3) — keep it as an escalation trigger until answered; the View-only-cannot-grant rule is unaffected.</amendment>
+  </amendments>
 </task>

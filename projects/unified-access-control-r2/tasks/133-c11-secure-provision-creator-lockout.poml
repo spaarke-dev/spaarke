@@ -210,4 +210,7 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL). The PR description states the ADR-003 path-C reasoning from the adr-tensions block.</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>
+  </amendments>
 </task>

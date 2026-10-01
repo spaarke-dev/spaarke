@@ -251,4 +251,7 @@ Deactivating an entry lifts the veto (schema Business Rule 2) but does not re-cr
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(R4) No Access enforcement takes effect within MINUTES: saving a No Access entry calls the BFF to enforce immediately; the "Update Access" ribbon command (task 142) also re-applies No Access for that record; the job is a safety net at 5 minutes or less. (S5 invariant) A secure record must ALWAYS keep at least one person who can see it: enforcement never removes the last remaining person's access — if an entry would, refuse the entry with a message naming the record. N2/N5/N6 are re-explained to the owner and remain escalation triggers until answered.</amendment>
+  </amendments>
 </task>

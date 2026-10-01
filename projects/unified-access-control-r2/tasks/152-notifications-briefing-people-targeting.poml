@@ -381,4 +381,7 @@ References: projects/unified-access-control-r2/notes/session27-owner-decisions-a
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. The `.claude/adr/` edit is main-session-only; a sub-agent drafts it and returns the text.</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(A7 REVERSED) Office quick-create defaults the internal Assigned-To field to the maker's contact (editable), so the record is "for" the maker in the briefing; coordinate with 142 and word-add-in-r1. (D1) "Created By" (when human) decides who a record is FOR — never who can open it; the briefing only lists records the user can access in Dataverse.</amendment>
+  </amendments>
 </task>

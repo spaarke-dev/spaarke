@@ -39,6 +39,33 @@ This picks up from [session26-uac-defects-and-synopsis.md](session26-uac-defects
 
 Live fact relevant to Q8, Q4 and Q5: only **1 of 8** active interactive systemusers in dev has `sprk_primarycontact` set. Anything that matches an internal user to a contact (Assigned To in the briefing, No Access for internal users, auto-grants to internal staff named in contact fields) needs a reliable user↔contact link, built in the C7 identity work: `systemuser.azureactivedirectoryobjectid` ↔ `contact.sprk_externalobjectid`.
 
+## Owner answers, round 3 (2026-09-30) — consolidated decision list. BINDING.
+
+**All 52 consolidated decisions** (`raw/session27-owner-questions.json`, plus D2) are ACCEPTED as recommended, EXCEPT the items below.
+
+- **A1.** Rule 5 governs Assigned-To auto-grants: they are ALWAYS Collaborate, with no grantor-level cap.
+  - The owner questioned whether rule 1 ("cap every grant at the grantor's level") was ever their rule.
+  - Record: round 2 Q1 was answered "cap grants and grantor level". That answer was given to the main session's question "can a Collaborate holder grant Full Access? recommend no".
+  - Whether that cap stays for MANUAL Grant Access is **awaiting the owner's confirmation**. Until then, 139/140 treat it as an escalation, not settled.
+- **T2.** The live test identity is `test.user@demo.spaarke.com`. Verified 2026-09-30: an Entra **Member**, enabled, **no licences**, no systemuser, no contact. A correct Type-2 test.
+- **D1, clarified:**
+  - (1) A user with access in the MDA has access in Teams/SPA. This works because Dataverse's own answer decides for systemusers when the FR-20 flag is on. Nobody needs a grant to see what Dataverse already lets them see. Task 036 amendment 2 was rewritten: flag-off is unchanged, so there is no under-grant.
+  - (2) "Created By" decides who a record is FOR (briefing, notifications). It never decides who can OPEN it; access stays Dataverse's answer.
+- **R3 / R4.** Access changes must take effect in MINUTES, never hourly:
+  - immediate on save (the form calls the BFF);
+  - an **"Update Access" ribbon button** on project, matter and work assignment forms that re-syncs that record on demand;
+  - the background job is only a safety net, running at ≤5 min.
+  - This applies to Assigned-To grants (142) and No Access enforcement (143).
+- **S5, REVERSED.** Never create a record nobody can see. The owner's rule: **a secure record MUST always have at least one user who can see it.**
+  - Inbound email whose secure parent can't be determined is HELD: retried, then left unprocessed in the ingestion queue, with an administrator alerted. Nothing is created until it is resolved.
+  - The same invariant binds unshare (the last person cannot be removed), No Access enforcement (it may not remove the last person) and provisioning (task 133).
+- **A2, REVERSED.** Standing grants and organization access STAY, as they work today, on both sign-in types. Assigned-To grants are ADDED alongside them. Nothing is retired.
+- **F11.** Only one account holds "Spaarke Basic User": the owner's guest account `ralph.schroeder_hotmail.com#EXT#`, in the "Spaarke" BU (verified 2026-09-30). That is why it reads secure records. It is the owner's dev/testing account, so the reach is not structural.
+- **G5.** Clarification only: "it" is the **sprk_invoice record** created when a user confirms AI-extracted invoice data. It is created as the user.
+- **A7, REVERSED.** Office quick-create defaults the matter/project "Assigned To (internal)" to the maker's contact, and the field stays editable. The maker already has access through BU-team ownership; this makes the record "for" them in the briefing and issues the Assigned-To share.
+- **N2 / N5 / N6.** The owner did not follow the "wall" wording (= a No Access List entry). These are re-explained and await the owner.
+- **F3.** The owner answered "a systemuser with update rights". The main session flagged that this includes every Collaborate colleague. **Awaiting confirmation.**
+
 ## Live facts verified this session
 
 - `sprk_accesspermission` is **Standard 100000000 / Limited 100000001 / Restricted 100000002** on sprk_project, and identical on sprk_matter and sprk_workassignment.

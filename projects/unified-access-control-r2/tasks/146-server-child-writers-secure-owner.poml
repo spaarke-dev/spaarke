@@ -196,4 +196,7 @@ CONTACT ACCESS IS UNAFFECTED BY OWNERSHIP. Contacts reach children through app-o
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Coordinate with word-add-in-r1 before the first edit to RecordOwnershipResolver.cs.</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 REVERSED) Never create a record nobody can see: inbound email (or any server create) whose secure parent cannot be determined is NOT created owned by the memberless secure team. Retry transient failures; if still undeterminable, leave it unprocessed in the ingestion queue (dead-letter/hold) and alert administrators (appnotification to an admin principal) with enough detail to resolve it; nothing is written to Dataverse until resolved. Escalation trigger S5 is resolved this way.</amendment>
+  </amendments>
 </task>

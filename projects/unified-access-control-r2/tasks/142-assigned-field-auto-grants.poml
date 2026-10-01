@@ -294,4 +294,7 @@ It must be idempotent: an unchanged record means zero Dataverse writes.</step>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(A1) Rule 5 governs: every Assigned-To auto-grant is Collaborate, with NO grantor-level cap (it still goes through 139's grant core with the explicit Collaborate ceiling, and never lowers an existing grant). (A2 REVERSED) Standing grants and organization access are NOT retired — they keep working on both planes; Assigned-To grants are ADDED alongside; escalation (d) is resolved "keep". (R3) Access must change within MINUTES: the form save calls the BFF so the grant/share is written immediately; add an "Update Access" ribbon command on project, matter and work-assignment forms that re-syncs that record on demand (follow the existing ribbon-command pattern; command enabled only for users with Write; shows the outcome); the reconciliation job is a safety net at an interval of 5 minutes or less (not hourly). (A7 REVERSED) Office quick-create defaults the internal Assigned-To field to the maker's contact (editable), coordinated with task 152 and word-add-in-r1.</amendment>
+  </amendments>
 </task>

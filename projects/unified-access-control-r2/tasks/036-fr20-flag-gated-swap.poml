@@ -157,31 +157,27 @@
     batched RPA over the impersonated set and a Read map plus an RPA confirmation at the rights-gated route
     for the single record in hand. Record the round-trip count (NFR-02). Never re-introduce the constant
     for the systemuser Dataverse term.</amendment>
-    <amendment n="2" title="Remove owningbusinessunit as a conferring column">
-    As part of this task, remove "owningbusinessunit" from PlatformOwnershipColumns
-    (src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs:595-596). This is the
-    C9 interim fix, investigation 08 "Option A". The set is consulted only when AccessConferringOnly is set
-    (:255-256), and its sole caller is ComposeForSystemUserAsync (AccessibleRecordSetService.cs:997-1002). So
-    the removal changes the FLAG-OFF membership path too. That is intended, but it does NOT by itself close
-    the BU over-grant with the flag off, and the PR must not claim it does. Two reasons, both verified
-    2026-09-30:
-    (i) owningteam stays conferring, and RecordOwnershipResolver
-    (src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs, now on this branch via the
-    master merge) assigns server-created rows to the target BU's DEFAULT owner team. Every BU user is a
-    member of that team (identity.TeamIds, MembershipResolverService.cs:904-908), so those rows still match
-    the whole BU through owningteam and still receive the constant stamp with the flag off.
-    (ii) With the flag off, dropping owningbusinessunit also UNDER-grants a user whose Dataverse Read depth
-    on the root is Business Unit or deeper (dev "Basic User" holds Deep Read on sprk_project). That is the
-    fail-closed direction (ADR-003), but it departs from the owner's parity rule.
-    Parity in both directions arrives only with the flag ON. So the rollout plan in the PR MUST enable the
-    flag in dev in the same rollout that ships this change, as soon as 034's manual canary, 142 and 143
-    permit; flag-off is a transitional state, not a resting one. Record in notes the number of records the
-    canary test user loses flag-off from the owningbusinessunit removal. Flip the pin
-    tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs:1171-1213
-    (ResolveAsync_AccessConferringOnly_TeamAndBusinessUnitOwnership_Confer). Owner and team terms stay.
-    The original acceptance criterion "Flag OFF ... identical to pre-task state ... zero test edits" is
-    NARROWED by exactly this change. Its only permitted flag-off behaviour change is that a record matched
-    solely by owningbusinessunit no longer appears.</amendment>
+    <amendment n="2" title="SUPERSEDED 2026-09-30 by owner D1 — Dataverse's answer replaces the BU guess; nothing is removed flag-off">
+    OWNER D1 (2026-09-30, binding): "a user with access in dataverse model driven app should have access to
+    teams/SPA app". The earlier version of this amendment removed "owningbusinessunit" from
+    PlatformOwnershipColumns in BOTH flag states. That would UNDER-grant flag-off every user whose Dataverse
+    Read depth reaches the record through their BU/role (dev "Basic User" holds Deep Read on sprk_project),
+    contradicting the owner's rule, so it is withdrawn.
+    The rule now is:
+    (1) FLAG ON (the end state): for the systemuser plane, Dataverse's own answer (impersonated root sets +
+    per-record rights, amendment 1) IS the access. A user who reaches a record in MDA through ANY Dataverse
+    path (ownership, team, BU/role depth, share) sees it in Teams/SPA with exactly the Dataverse rights; a
+    user Dataverse does not admit does not see it. The BFF's membership pattern-matching (including the
+    owningbusinessunit and owningteam terms and the MembershipTermRights constant) is NOT consulted for
+    systemuser ACCESS. Nothing needs a grant to be visible.
+    (2) FLAG OFF (transitional only): unchanged legacy behaviour. Do NOT edit PlatformOwnershipColumns and do
+    NOT flip the MembershipResolverServiceTests BU pin; flag-off must never under-grant.
+    (3) Rollout: the flag is the end state, not an option. Enable it in dev in the same rollout as this task
+    once 034's manual canary, 142 and 143 permit; flag-off is transitional.
+    The ADR-034 amendment (section 6.5 path B) is therefore REWORDED: not "owningbusinessunit stops
+    conferring", but "for systemuser ACCESS on the SPA/Teams plane, Dataverse's answer replaces the
+    membership rules; the membership walk remains for non-access scoping (briefing, AI scope) and for the
+    contact plane".</amendment>
     <amendment n="3" title="New dependencies 142 and 143: no internal feature lost">
     Under flag ON, step 2 omits the membership term on the systemuser plane. Today that term is the only
     carrier of two owner-protected internal features:
@@ -209,8 +205,8 @@
     non-admin test user in the correct BU with no relocation. The NFR-04 constraint above stands unchanged.
     Equal sets are a failure.</amendment>
     <amendment n="5" title="Files added to scope by this block (relevant-files and outputs above predate it)">
-    modify: src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs (PlatformOwnershipColumns and its doc comments);
-    modify: tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs (flip the BU pin);
+    read only (NOT modified, per owner D1 — flag-off must not change): src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs PlatformOwnershipColumns;
+    do NOT flip tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs BU pin (flag-off unchanged);
     modify: .claude/adr/ADR-034-user-record-membership.md (A1.1) and docs/adr/ADR-034-user-record-membership.md. The .claude/ file is
     inside the sub-agent write boundary (root CLAUDE.md section 3): if this task runs as a sub-agent, it drafts the text and the
     MAIN SESSION applies it.
@@ -219,17 +215,17 @@
     Any NEW rights-source type or interface needs the CLAUDE.md section 11 three-question justification (with grep evidence
     that CallerRecordAccessProbe and GetCallerRecordAccessAsync cannot be extended) in the PR before it is written.</amendment>
     <adr-tensions>
-      <tension adr="ADR-034" rule="Amendment A1.1 makes owningbusinessunit an access-conferring platform ownership column (.claude/adr/ADR-034-user-record-membership.md:73)" path="B">Amendment 2 removes it because BU ownership confers structurally without regard to the caller's role depth (C9). The ADR-034 amendment (concise and full versions) must be proposed and merged alongside this change. Path A was rejected because the rule is wrong in general, not only for this project. Path C was rejected because no compliant shape stops a BU match from over-granting.</tension>
+      <tension adr="ADR-034" rule="Amendment A1.1 makes owningbusinessunit an access-conferring platform ownership column (.claude/adr/ADR-034-user-record-membership.md:73)" path="B">Reworded per owner D1 (2026-09-30): for systemuser ACCESS on the SPA/Teams plane, Dataverse's own answer replaces the membership rules (so BU/role-depth access is honoured exactly as in MDA, and BU-ownership matching no longer over-grants); the membership walk stays for non-access scoping and the contact plane. Concise and full ADR-034 versions merge alongside this change. Path A rejected (the BU guess is wrong in general); path C rejected (no compliant shape makes a pattern match equal Dataverse's answer).</tension>
     </adr-tensions>
     <acceptance-criteria-amended>
       <criterion testable="true">Flag ON: a record the caller can Read but not Write in Dataverse composes to exactly Read. Write and Create are absent from its rights, and a rights-gated write route (for example external to-do create or document upload) on that record returns 403. Asserted by test with a substituted rights source.</criterion>
       <criterion testable="true">Flag ON: a record where Dataverse grants the caller Write carries Write in the composed rights. Rights are never broader than the Dataverse answer for any record. Asserted by test.</criterion>
-      <criterion testable="true">Negative, both flag states: a record matched ONLY by owningbusinessunit does not appear. The MembershipResolverServiceTests BU pin is flipped. Owner and team matches still confer.</criterion>
+      <criterion testable="true">Flag ON parity (owner D1): a record the caller reaches in Dataverse ONLY through BU/role depth (no ownership, team or share) APPEARS with exactly the Dataverse rights; a record matched only by owningbusinessunit that Dataverse does NOT admit does NOT appear. Flag OFF: PlatformOwnershipColumns and the MembershipResolverServiceTests BU pin are unchanged (no flag-off under-grant). Asserted by test.</criterion>
       <criterion testable="true">Negative: a failed Dataverse rights lookup (RPA throw or non-2xx) denies the affected record or fails the composition. It never falls back to MembershipTermRights or any constant. Asserted by test.</criterion>
       <criterion testable="true">Flag ON, Restricted root: a systemuser whose Dataverse rights on a Restricted record are Read only composes to exactly Read on it (the Restricted survivor set is the Dataverse term, not MembershipTermRights), and a contact-sourced grant on the same record is still removed. Asserted by test.</criterion>
       <criterion testable="true">Flag ON, BU default owner team: a record owned by the caller's BU default team and absent from the substituted Dataverse answer does NOT appear (the owningteam route of the over-grant is closed flag-on). Asserted by test.</criterion>
       <criterion testable="true">Negative (no constant left): with the flag ON, no code path assigns MembershipTermRights to a systemuser-plane record. A test fails if the constant is reintroduced for the Dataverse term (assert rights equal the substituted per-record answer across at least three records with three different rights sets).</criterion>
-      <criterion testable="true">The ADR-034 amendment for owningbusinessunit (concise .claude/adr/ADR-034-user-record-membership.md A1.1 plus the full docs/adr/ADR-034-user-record-membership.md) is merged with or before this task's PR, and the PR cites it (section 6.5 path B).</criterion>
+      <criterion testable="true">The ADR-034 amendment (reworded per owner D1: Dataverse's answer replaces the membership rules for systemuser ACCESS on the SPA/Teams plane) — concise .claude/adr/ADR-034-user-record-membership.md plus the full docs/adr version — is merged with or before this task's PR, and the PR cites it (section 6.5 path B).</criterion>
       <criterion testable="true">The PR rollout plan names the date the flag is enabled in dev and states that flag-off is transitional (amendment 2); it does not claim the flag-off BU over-grant is closed.</criterion>
       <criterion testable="true">MANUAL LIVE GATE (dev, existing non-admin test user in the correct BU; flag ON; 142 and 143 complete and deployed): (i) the task-034 canary passes strictly fewer; (ii) for one record that user can Read but not Write in MDA, SPA/Teams lists it and refuses a write with 403; (iii) for one record owned in the user's BU (or by the BU default team) but outside their role depth, SPA/Teams does not list it; (iv) for one record where the user's linked contact is named in an "Assigned To *" field, SPA/Teams lists it through the Dataverse share task 142 created; (v) for one secure record with the user on its No Access List, both MDA and SPA/Teams deny it. Every observation, with the record ids, is recorded in notes.</criterion>
     </acceptance-criteria-amended>

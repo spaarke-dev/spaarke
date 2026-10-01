@@ -141,4 +141,7 @@ NEW ENVIRONMENTS. No provisioning code creates the Secure Record BU, the owner t
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Coordinate with word-add-in-r1 before the first live write. Run alone: the live role is shared.</protocol>
   </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(F11) Only one account holds "Spaarke Basic User" in dev — the owner's guest account ralph.schroeder_hotmail.com#EXT# (BU "Spaarke"), verified 2026-09-30 — so the census clause-1 finding is not structural. Record it as an owner-accepted dev exception in the census configuration, named explicitly; any other principal reaching the Secure BU still fails.</amendment>
+  </amendments>
 </task>
