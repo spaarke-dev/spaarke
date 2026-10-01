@@ -11,9 +11,9 @@
 |---|---|
 | **Active task** | **none in progress.** Next: **059** (`tasks/059-*.poml`: extract the search cluster into `OfficeSearchService`). Read its UPDATE block: 058's deletions shrank `OfficeService` to about 3,090 lines, and `GenerateStubResults` stays with `SearchEntitiesAsync`. **083** is blocked until UAC-r2 sends 141's link contract |
 | **Last closed** | **058** ✅ 2026-09-30 `8d56d47eb` (+ close commit): the fabricated-data Office routes were deleted. That closed a LATENT hazard, not a live gap. Suite 13,040/0/54, which reconciles exactly; publish −0.028 MB. Record: `notes/058-delete-unauthorized-stub-surface.md`. Before it: **082** ⚠️ (#1051 merged) |
-| **PR** | ✅ **#1045 MERGED** 2026-09-30 23:40 UTC as `38ad83962` (merge commit; branch kept). #1038 + #1043 closed as fixed on master (⚠️ `spaarke-bff-dev` still runs `2682e8225` until master is deployed). 🔄 **#1051 OPEN**: task 082 (docs + script + config, no BFF). Merge when `Router` passes (it needs only `Router`) |
-| **Branch** | `work/spaarkeai-word-add-in-r1` @ `cf255da8b` (master merged back in after #1045), pushed. Main checkout `C:/code_files/spaarke` fast-forwarded to `38ad83962` |
-| **Next Action** | **1)** When #1051's `Router` passes: `gh pr merge 1051 --merge` (no `--delete-branch`), then merge `origin/master` back into the branch. **2)** `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141). UAC-r2 has been told about #1045, 9fee1e8e2 and #1051 |
+| **PR** | ✅ #1045 merged `38ad83962` · ✅ #1051 (082) merged `b8fc4dc3e` · 🔄 **#1052 OPEN**: task 058 (`8d56d47eb` + `fefeb65cf`), BFF route deletions. A background watch (`bnb0iy8uj`) waits for `Router`; then `gh pr merge 1052 --merge` (no `--delete-branch`) |
+| **Branch** | `work/spaarkeai-word-add-in-r1` @ `fefeb65cf`, pushed, tree clean (= master `b8fc4dc3e` + 058) |
+| **Next Action** | **1)** When #1052's `Router` passes: `gh pr merge 1052 --merge`, then `git -C C:/code_files/spaarke pull --ff-only origin master` and merge `origin/master` back into the branch. Close #1023 and #1024 (both commented). **2)** `task-execute` **059** on a fresh PR (order: 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141) |
 
 ### 🔔 Waiting on the OWNER (from 082)
 
