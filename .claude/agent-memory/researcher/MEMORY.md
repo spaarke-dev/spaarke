@@ -66,7 +66,8 @@
 - [Kiota CVE-2026-44503 + TFM (2026-08-11)](kiota-cve-2026-44503-tfm-2026-08-11.md) — fix Kiota.Abstractions 1.22.0; r1 chose Graph 6.5.0/Kiota 2.0
 - [.NET 10 on App Service Linux (2026-08-10)](dotnet10-appservice-linux-2026-08-10.md) — DOTNETCORE:10.0 vs DOTNETCORE|10.0; port 8080
 - [Functions Flex + .NET 10 (2026-08-13)](functions-flex-consumption-net10-2026-08-13.md) — supported; runtime version '10.0'; Core Tools 4.7.0 regression
-- [Azure Managed Redis (2026-06-26)](azure-managed-redis-2026-06-26.md) — RediSearch needs Enterprise policy; pays off only for semantic dedup
+- [Per-customer Redis decision (2026-09-30)](redis-per-customer-stamp-amr-decision-2026-09-30.md) — ACR retires 2028-09-30; AMR B1 HA ~$47 vs C1 ~$101/mo; UAMI + RESP3
+- [Azure Managed Redis (2026-06-26)](azure-managed-redis-2026-06-26.md) — RediSearch needs Enterprise policy; pays off only for semantic dedup (pricing superseded 09-30)
 - [Assistant push channel (2026-07-15)](assistant-push-channel-2026-07-15.md) — REC Azure SignalR + durable outbox
 - [SignalR vs SSE notification fabric (2026-07-16)](signalr-vs-sse-notification-fabric-2026-07-16.md) — defer SignalR to r2 for MDA-only r1
 - [ACS Chat integration (2026-07-16)](acs-chat-integration-2026-07-16.md) — transport vs system-of-record; BYOI tokens; UI Library React-19 gap
