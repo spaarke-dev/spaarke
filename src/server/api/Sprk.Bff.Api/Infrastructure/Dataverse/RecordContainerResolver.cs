@@ -29,9 +29,12 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///
 /// <para><b>Fail-closed contract.</b> Any failure to DETERMINE securability (metadata unavailable, record
 /// read failed, empty id, indeterminate ownership) throws rather than defaulting to "not secure". An unknown
-/// answer read as not-secure is the same isolation failure with an extra step. Error codes:
+/// answer read as not-secure is the same isolation failure with an extra step. The same holds for the entity
+/// NAME: an alias is mapped to its logical name, and a name that is not a real entity is refused rather than
+/// read as "not securable" (task 151, #1038). Error codes:
 /// <c>secure_record_container_missing</c> (409), <c>container_record_not_found</c> (404),
-/// <c>container_ownership_ambiguous</c> (409), <c>container_ownership_indeterminate</c> (409).</para>
+/// <c>container_entity_unknown</c> (400), <c>container_ownership_ambiguous</c> (409),
+/// <c>container_ownership_indeterminate</c> (409).</para>
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
 /// <see cref="IDocumentStorageResolver"/>). Unconditional registration is deliberate: a feature-gated
@@ -140,7 +143,14 @@ public sealed class RecordContainerResolver
             throw new ArgumentException("Entity logical name is required.", nameof(entityLogicalName));
         }
 
-        var normalizedEntity = entityLogicalName.Trim().ToLowerInvariant();
+        // ALIASES FIRST (task 151, #1038). A caller may name an association type by its friendly alias
+        // ("project") rather than its logical name ("sprk_project"); the securable registry is keyed on logical
+        // names only, so before this mapping "project" read as "not securable" and a SECURE project's content
+        // resolved to a shared container. DocumentAssociationMap is THE alias table — the record-keyed upload
+        // filter's EntitySetByType is held in lockstep with it — so the record the route AUTHORIZED and the
+        // record this resolver READS are the same record. A name that is not an alias passes through
+        // lower-cased, exactly as before.
+        var normalizedEntity = NormalizeEntityName(entityLogicalName);
 
         // An entity that cannot carry sprk_issecure cannot be secure, so there is nothing to read and no
         // decision to make beyond the fallback. Note this also means a non-securable entity costs ZERO extra
@@ -150,6 +160,19 @@ public sealed class RecordContainerResolver
         // ISecurableEntityRegistry's fail-closed contract.
         if (!await _securableEntities.IsSecurableAsync(normalizedEntity, ct).ConfigureAwait(false))
         {
+            // "Not securable" was, until task 151, also the answer for a name that is NOT AN ENTITY AT ALL —
+            // a misspelling, an entity SET name ("sprk_projects"), an unmapped alias. The registry cannot tell
+            // those apart from a real non-securable entity, so a secure record named any of those ways got a
+            // non-secure decision. Ask the second question explicitly, and REFUSE rather than guess: an
+            // unknown answer is never "not secure". The securable set is a subset of the known set (both come
+            // from one metadata query), which is why a securable entity needs no second check.
+            //
+            // Also propagates on metadata failure — never read as "unknown" or "not securable".
+            if (!await _securableEntities.IsKnownEntityAsync(normalizedEntity, ct).ConfigureAwait(false))
+            {
+                throw UnknownEntity(entityLogicalName);
+            }
+
             return SecureContainerDecision.Decide(
                 isSecure: false, ownContainerId: null, fallbackContainerId: nonSecureFallbackContainerId);
         }
@@ -274,6 +297,61 @@ public sealed class RecordContainerResolver
         }
 
         return decision;
+    }
+
+    /// <summary>
+    /// The stable problem code for a name that is neither a <see cref="DocumentAssociationMap"/> alias nor a
+    /// real entity logical name (task 151, #1038). 400, distinct from <c>container_record_not_found</c> (404)
+    /// and <c>secure_record_container_missing</c> (409), which existing clients branch on: a name that is not
+    /// an entity is a malformed request, not a missing record or a missing container.
+    /// </summary>
+    internal const string UnknownEntityCode = "container_entity_unknown";
+
+    /// <summary>
+    /// The logical name for <paramref name="entityName"/>: the <see cref="DocumentAssociationMap"/> alias
+    /// mapping when it is one, otherwise the trimmed, lower-cased input. Deliberately NOT a second alias table
+    /// (CLAUDE.md §11) — anything the shared map does not know passes through and is then checked against the
+    /// org's real entities.
+    /// </summary>
+    private static string NormalizeEntityName(string entityName)
+        => DocumentAssociationMap.ToLogicalName(entityName) ?? entityName.Trim().ToLowerInvariant();
+
+    private SdapProblemException UnknownEntity(string suppliedName)
+    {
+        var safeName = SanitizeForMessage(suppliedName);
+
+        // Warning, not Error: the content was REFUSED, so nothing was mis-stored — but a caller passing a name
+        // that is not an entity is a defect at that call site, and the supplied spelling is what finds it.
+        _logger.LogWarning(
+            "[SECURE-CONTAINER] REFUSED to resolve a storage container: '{SuppliedEntity}' is neither a known "
+            + "association alias nor an entity logical name in this org ({Code}). Not read as 'not "
+            + "securable' — a secure record named this way would otherwise land in a shared container.",
+            safeName, UnknownEntityCode);
+
+        return new SdapProblemException(
+            code: UnknownEntityCode,
+            title: "Unknown entity",
+            detail: $"'{safeName}' is not an entity this service recognises, so it cannot be determined whether "
+                    + "the record is secure. Name the record's entity by its logical name (for example "
+                    + "'sprk_project') or a supported association type (for example 'project').",
+            statusCode: 400);
+    }
+
+    /// <summary>
+    /// The supplied name is caller-controlled (a route segment on the record-keyed upload routes), so it is
+    /// reduced to identifier characters and bounded before it reaches a log line or a response body.
+    /// </summary>
+    private static string SanitizeForMessage(string value)
+    {
+        const int maxLength = 64;
+
+        var trimmed = value.Trim();
+        var chars = trimmed
+            .Take(maxLength)
+            .Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '?')
+            .ToArray();
+
+        return trimmed.Length > maxLength ? new string(chars) + "…" : new string(chars);
     }
 
     /// <summary>

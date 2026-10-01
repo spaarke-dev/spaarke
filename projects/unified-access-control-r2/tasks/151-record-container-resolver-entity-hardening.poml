@@ -4,7 +4,7 @@
     <title>#1038 hardening — RecordContainerResolver must normalize aliases and REFUSE entity names that are not real Dataverse logical names, instead of reading an unrecognised name as "not securable"</title>
     <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 7)</phase>
     <gate>blocked until PR #1045 (word-add-in-r1) is merged to master AND master is merged into this branch — it introduces `DocumentAssociationMap.ToLogicalName` and the OfficeService caller fix this task builds on.</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-path .cs change in the SPE container-isolation seam (tags bff-api, auth, security).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -133,5 +133,19 @@ No caller today legitimately passes a name that is not a real entity.</backgroun
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Do not start until the gate (PR #1045 merged into this branch) is satisfied.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-151">
+      COMPLETED (code + tests). The resolver normalizes through DocumentAssociationMap.ToLogicalName. For a non-securable
+      name it asks the new ISecurableEntityRegistry.IsKnownEntityAsync and throws SdapProblemException
+      container_entity_unknown (400) for a non-entity, never returning a decision. The registry keeps the entity names from
+      its existing single metadata query, cached with the securable set under sdap:dv:dv-securable-entities:v2 (shape-checked;
+      never cached when empty). Gate satisfied (ToLogicalName present on the branch). No escalation trigger fired: no caller
+      passes a non-entity/non-alias name; the alias set is as described; and the shared upload client branches on 409 only,
+      so a 400 does not collide. Every guard was proven to bite (transcript in notes/task-151-resolver-entity-hardening.md).
+      Read-only live gate against spaarkedev1 confirmed the premise: 1,027 entities known, 1,023 returned with empty
+      attribute collections, all required entities present. FINDING: the dev securable subset is 4 entities (incl.
+      sprk_invoice), not 3. It is unchanged by this task, but the "sprk_invoice is non-securable" premise is false in dev.
+      PENDING for the main session: the post-deploy BFF log-line confirmation, the #1038 comment and #1068 close, the
+      TASK-INDEX update, and the batch publish-size measurement. No NuGet change.
+    </outcome>
   </execution>
 </task>

@@ -84,6 +84,13 @@ internal static class ComposeServiceCollaborators
                 ? new HashSet<string>(StringComparer.Ordinal) { "sprk_matter" }
                 : new HashSet<string>(StringComparer.Ordinal));
 
+        // Task 151: the resolver asks "is this a real entity?" before taking the non-securable fallback path,
+        // and refuses a name that is not. Compose resolves the constant logical name sprk_matter, which the
+        // real registry knows; without this the documented `securable: false` → business-unit path would be a
+        // refusal instead.
+        registry.Setup(r => r.IsKnownEntityAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         return new RecordContainerResolver(
             registry.Object, dataverse, NullLogger<RecordContainerResolver>.Instance);
     }

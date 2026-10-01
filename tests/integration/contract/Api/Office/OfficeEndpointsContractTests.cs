@@ -641,6 +641,17 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
     /// </summary>
     public RecordOwnershipResolverDouble Ownership { get; } = new();
 
+    /// <summary>
+    /// Task 151: the registry double's answer to "is this a real entity?" — true for the LOGICAL name of an
+    /// association type, false for its friendly alias or anything else. That is the shape of the real registry's
+    /// answer (built from metadata logical names), restricted to the entities an Office save can name. Reuses the
+    /// production alias table rather than restating it.
+    /// </summary>
+    internal static bool IsAssociationLogicalName(string name)
+        => !string.IsNullOrWhiteSpace(name)
+           && string.Equals(
+               DocumentAssociationMap.ToLogicalName(name), name.Trim().ToLowerInvariant(), StringComparison.Ordinal);
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.ConfigureHostConfiguration(config =>
@@ -811,6 +822,12 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             securableEntitiesMock
                 .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new HashSet<string>(StringComparer.Ordinal));
+            // task 151: the resolver now also asks "is this a real entity?" for a non-securable name and
+            // REFUSES one that is not. Answered as the real registry would for the association types: their
+            // LOGICAL names exist (OfficeService maps the wire's friendly name to one first); an alias does not.
+            securableEntitiesMock
+                .Setup(r => r.IsKnownEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) => IsAssociationLogicalName(name));
             services.RemoveAll<ISecurableEntityRegistry>();
             services.AddSingleton(securableEntitiesMock.Object);
 
@@ -2012,6 +2029,11 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             securable
                 .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => world.SecureRecords.Keys.Select(k => k.Entity).ToHashSet(StringComparer.OrdinalIgnoreCase));
+            // task 151: "is this a real entity?" — logical names only, as the real registry answers.
+            securable
+                .Setup(r => r.IsKnownEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) =>
+                    OfficeTestWebAppFactory.IsAssociationLogicalName(name));
             services.RemoveAll<ISecurableEntityRegistry>();
             services.AddSingleton(securable.Object);
 

@@ -31,4 +31,22 @@ public interface ISecurableEntityRegistry
     /// </summary>
     /// <exception cref="Exception">Propagates metadata-retrieval failures — see the interface remarks.</exception>
     Task<bool> IsSecurableAsync(string entityLogicalName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether <paramref name="entityLogicalName"/> is the LOGICAL name of an entity that exists in this
+    /// org (securable or not). Case-insensitive. An entity SET name (<c>sprk_projects</c>), a friendly alias
+    /// (<c>project</c>) or a misspelling is NOT a logical name and answers <see langword="false"/>.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 151 (#1038). This is what lets a caller tell "a real entity that cannot
+    /// be secure" apart from "not an entity at all" — the two read identically through
+    /// <see cref="IsSecurableAsync"/>, and treating the second as the first is how an Office save to a secure
+    /// project, named by its friendly alias, landed in a shared container.
+    /// </remarks>
+    /// <exception cref="Exception">
+    /// Propagates metadata-retrieval failures, and THROWS when metadata reports no entities at all (an answer
+    /// indistinguishable from a failed query) — never answers <see langword="false"/> for a question it could
+    /// not determine. See the interface remarks.
+    /// </exception>
+    Task<bool> IsKnownEntityAsync(string entityLogicalName, CancellationToken ct = default);
 }

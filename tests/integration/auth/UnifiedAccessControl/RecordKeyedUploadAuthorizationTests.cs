@@ -274,6 +274,82 @@ public class RecordKeyedUploadAuthorizationTests
     }
 
     // ============================================================================================
+    // TASK 151 (#1038) — an ALIAS in the route authorizes and resolves the SAME record
+    // ============================================================================================
+
+    [Theory(DisplayName = "Task 151: an alias route value authorizes AND resolves the same record — no misleading 'no container' 409")]
+    [InlineData("project", "sprk_project", "sprk_projects")]
+    [InlineData("matter", "sprk_matter", "sprk_matters")]
+    public async Task AliasRouteValue_AuthorizesAndResolvesTheSameRecord_NonSecure(
+        string routeValue, string logicalName, string entitySet)
+    {
+        // The route hands ONE string to both halves: the filter (authorization key) and the handler's resolver
+        // call (container key). Before task 151 the filter mapped the alias and the resolver did not — it read
+        // "project" as not-securable, derived no container, and the handler answered "No storage container is
+        // configured" (409) for a record whose business-unit container was derivable.
+        var probe = new StubProbe(RequiredRights);
+        var handlerRan = false;
+
+        var gate = await Invoke(probe, routeValue, RecordId, () => handlerRan = true);
+
+        handlerRan.Should().BeTrue();
+        gate.Should().Be("handler-ran");
+        probe.LastEntitySet.Should().Be(entitySet);
+        probe.LastRecordId.Should().Be(RecordId);
+
+        var entityService = Substitute.For<IGenericEntityService>();
+        StubRecordRead(entityService, isSecure: false, ownContainerId: null, withOwningBusinessUnit: true, entity: logicalName);
+        StubBusinessUnitRead(entityService, BusinessUnitContainer);
+
+        var decision = await BuildResolver(entityService).ResolveForRecordAsync(routeValue, RecordId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback,
+            "Unresolved here is exactly the misleading 409 the handler returns");
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+
+        // The container came from the record the filter authorized: same logical entity, same id.
+        await entityService.Received(1).RetrieveAsync(
+            logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory(DisplayName = "Task 151: an alias route value for a SECURE record resolves to its OWN container")]
+    [InlineData("project", "sprk_project")]
+    [InlineData("matter", "sprk_matter")]
+    public async Task AliasRouteValue_SecureRecord_ResolvesItsOwnContainer(string routeValue, string logicalName)
+    {
+        var entityService = Substitute.For<IGenericEntityService>();
+        StubRecordRead(entityService, isSecure: true, ownContainerId: OwnContainer, withOwningBusinessUnit: true, entity: logicalName);
+        StubBusinessUnitRead(entityService, BusinessUnitContainer);
+
+        var decision = await BuildResolver(entityService).ResolveForRecordAsync(routeValue, RecordId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(OwnContainer);
+    }
+
+    [Fact(DisplayName = "Task 151: an unknown route entity is DENIED by the filter, and the resolver REFUSES it rather than answering 'no container'")]
+    public async Task UnknownRouteEntity_IsDeniedByTheFilter_AndRefusedByTheResolver()
+    {
+        const string unknown = "sprk_projectt";
+
+        var probe = new StubProbe(RequiredRights);
+        var handlerRan = false;
+
+        var gate = await Invoke(probe, unknown, RecordId, () => handlerRan = true);
+
+        handlerRan.Should().BeFalse("an unknown entity is never uploaded");
+        await AssertForbidden(gate, "entity_type_not_authorizable");
+
+        // Defence in depth: should the name ever reach the resolver, it is a typed refusal — NOT the
+        // Unresolved outcome the handler renders as "No storage container is configured".
+        var entityService = Substitute.For<IGenericEntityService>();
+        var act = async () => await BuildResolver(entityService).ResolveForRecordAsync(unknown, RecordId);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.Code.Should().Be("container_entity_unknown");
+        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+    }
+
+    // ============================================================================================
     // MACHINERY
     // ============================================================================================
 
@@ -334,12 +410,22 @@ public class RecordKeyedUploadAuthorizationTests
     private static RecordContainerResolver BuildResolver(IGenericEntityService entityService)
     {
         var registry = Substitute.For<ISecurableEntityRegistry>();
-        var securable = new HashSet<string>(StringComparer.Ordinal) { MappedEntity };
+        var securable = new HashSet<string>(StringComparer.Ordinal) { MappedEntity, "sprk_project" };
+
+        // Task 151: the org's entities by LOGICAL name only, as the real registry knows them — so an alias that
+        // the resolver failed to map would be refused here, not silently answered.
+        var known = new HashSet<string>(StringComparer.Ordinal)
+        {
+            MappedEntity, "sprk_project", "sprk_workassignment", "sprk_invoice", "sprk_event", "sprk_todo",
+            "contact", UnmappedEntity
+        };
 
         registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
         registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .Returns(call => Task.FromResult(securable.Contains(call.Arg<string>().ToLowerInvariant())));
+        registry.IsKnownEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(known.Contains(call.Arg<string>().Trim().ToLowerInvariant())));
 
         return new RecordContainerResolver(
             registry, entityService, NullLogger<RecordContainerResolver>.Instance);
@@ -349,9 +435,10 @@ public class RecordKeyedUploadAuthorizationTests
         IGenericEntityService entityService,
         bool isSecure,
         string? ownContainerId,
-        bool withOwningBusinessUnit)
+        bool withOwningBusinessUnit,
+        string entity = MappedEntity)
     {
-        var row = new Entity(MappedEntity, RecordId) { ["sprk_issecure"] = isSecure };
+        var row = new Entity(entity, RecordId) { ["sprk_issecure"] = isSecure };
 
         if (ownContainerId is not null)
         {
@@ -364,7 +451,7 @@ public class RecordKeyedUploadAuthorizationTests
         }
 
         entityService
-            .RetrieveAsync(MappedEntity, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .RetrieveAsync(entity, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(row));
     }
 

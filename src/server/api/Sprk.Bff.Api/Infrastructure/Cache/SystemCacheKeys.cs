@@ -108,17 +108,20 @@ public static class SystemCacheKeys
     public const string DataverseEntityMetadata = "dv-entity-metadata";
 
     /// <summary>
-    /// The set of Dataverse entities carrying <c>sprk_issecure</c>, derived from live attribute metadata
-    /// (unified-access-control-r2 task 075).
+    /// The org's entity catalog as the securable-entity registry derives it from ONE live metadata query:
+    /// every entity LOGICAL NAME in the org, and the subset carrying <c>sprk_issecure</c>
+    /// (unified-access-control-r2 task 075; the known-entity half added by task 151 / #1038).
     /// Site: <c>Infrastructure/Dataverse/SecurableEntityRegistry.cs</c>. Raw key:
-    /// <c>sdap:dv:securable-entities</c>.
+    /// <c>sdap:dv:dv-securable-entities:v2</c> (<c>SecurableEntityRegistry.CacheKey</c>).
     /// Justification: like <see cref="DataverseEntityMetadata"/> this is org-wide SCHEMA, not per-tenant
-    /// data — which entities can be marked secure is a property of the solution, identical for every caller,
-    /// so tenant-scoping would defeat the cache without changing any answer. The cached value is a list of
-    /// entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
-    /// Fail-closed note: an EMPTY result is deliberately never written to this key — an empty set is
+    /// data — which entities exist and which can be marked secure is a property of the solution, identical
+    /// for every caller, so tenant-scoping would defeat the cache without changing any answer. The cached
+    /// value is entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
+    /// Versioning: <c>:v2</c> because the unversioned key holds the previous build's bare securable-names
+    /// array, which must never be read as the known-entity set; the value is also shape-checked on read.
+    /// Fail-closed note: an EMPTY set is deliberately never written to this key — an empty set is
     /// indistinguishable from a failed metadata query, and caching it would make every record read as
-    /// non-secure for the 6h TTL.
+    /// non-secure (or every entity read as unknown) for the 6h TTL.
     /// </summary>
     public const string DataverseSecurableEntities = "dv-securable-entities";
 
