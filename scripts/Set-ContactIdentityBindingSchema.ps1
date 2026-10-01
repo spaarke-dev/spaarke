@@ -15,9 +15,13 @@
                      oid, enforced by the platform's unique index. NULLs are not enforced (Microsoft Learn,
                      "Define alternate keys": uniqueness is not enforced for null values), so unbound contacts are
                      unaffected. Refuses to create the key while duplicates exist.
+                     ⛔ BLOCKED with (d): Dataverse refuses an alternate key on a field-secured column, and (d)
+                     secures this same column. -Apply stops at the PLATFORM-RULE PREFLIGHT until the owner decides
+                     under CLAUDE.md §6.5 which mechanism moves (task 141 notes §9). Dry run and -Verify report it.
       (c) COLUMNS    Global choices sprk_identityplane (External / Workforce) and sprk_identitycollisionreason; on contact:
                      sprk_identityplane, sprk_identitycollisionon, sprk_identitycollisionoid, sprk_identitycollisionplane,
-                     sprk_identitycollisionreason. BACKFILL: every bound contact with no plane is marked External —
+                     sprk_identitycollisionreason (the FIRST colliding party) and sprk_identitycollisionparties (EVERY
+                     party, JSON). BACKFILL: every bound contact with no plane is marked External —
                      every writer before task 141 was the CIAM path (6 of 6 in spaarkedev1, 2026-09-30).
                      Also a system view "Contacts with Identity Collisions" so an operator can see every open flag.
       (d) FLS        contact.sprk_externalobjectid and systemuser.sprk_primarycontact become field-secured:
@@ -27,6 +31,7 @@
                        * "Spaarke Identity Link Writers"  — Read + Create + Update; the BFF application user(s),
                          associated EXPLICITLY (never relying on System Administrator — D-13 app users may lack it).
                      Members are associated BEFORE the columns are secured, so the BFF never loses Read.
+                     ⛔ contact.sprk_externalobjectid: BLOCKED with (b) — see above.
       (e) SOLUTION   Adds every component to -SolutionUniqueName (default SpaarkeCore, which owns sprk_externalobjectid).
       (f) PUBLISH    contact, systemuser.
 
@@ -113,6 +118,26 @@ $SecuredFields = @(
     @{ Entity = 'contact'; Attribute = 'sprk_externalobjectid' },
     @{ Entity = 'systemuser'; Attribute = 'sprk_primarycontact' }
 )
+$KeyAttributes = @('sprk_externalobjectid')   # step (b): the columns of the contact alternate key
+
+# ── PLATFORM-RULE PREFLIGHT (no network; runs before auth) ─────────────────────────────────────────────────
+# Dataverse refuses an alternate key on a field-secured column: "Attributes must not have field-level security
+# applied" (https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity) and
+# "Columns that have the Enable column security property enabled can't be used as an alternate key"
+# (https://learn.microsoft.com/en-us/power-apps/maker/data-platform/define-alternate-keys-reference-records).
+# Steps (b) and (d) as designed put BOTH on contact.sprk_externalobjectid, so -Apply could deliver at most one of
+# them: the key (and FLS fails — anyone with contact Write can put their own oid on a contact that holds grants)
+# or FLS (and the key fails — every contact creation denies contact_create_unavailable). Which one the platform
+# keeps is an OWNER DECISION under CLAUDE.md §6.5 (task 141 verifier finding 1; notes/task-141-identity-binding.md
+# §9). Until it is made, -Apply STOPS here, before any write, so a partial schema cannot be left behind.
+$PlatformConflicts = @($SecuredFields | Where-Object { $_.Entity -eq 'contact' -and $KeyAttributes -contains $_.Attribute } |
+    ForEach-Object { "contact.$($_.Attribute) is both an alternate-key column (step b) and field-secured (step d); Dataverse allows only one" })
+if ($Apply -and $PlatformConflicts.Count -gt 0) {
+    foreach ($c in $PlatformConflicts) { Write-Host "  BLOCKED  $c" -ForegroundColor Red }
+    throw ('BLOCKED: the identity-binding schema asks Dataverse for an alternate key on a field-secured column, which ' +
+        'the platform refuses. An owner decision is pending under CLAUDE.md §6.5 (unified-access-control-r2 task 141, ' +
+        'notes/task-141-identity-binding.md §9). Nothing was written.')
+}
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
@@ -155,6 +180,10 @@ $org = (Invoke-DvGet 'organizations?$select=name').value[0].name
 Write-Host "Environment : $EnvironmentUrl (org '$org')"
 Write-Host ("Mode        : {0}" -f $(if ($Verify) { 'VERIFY (read-only)' } elseif ($IsDryRun) { 'DRY RUN (no writes)' } else { 'APPLY' }))
 Write-Host "Solution    : $SolutionUniqueName"
+
+Write-Host "`nPlatform rules"
+foreach ($c in $PlatformConflicts) { Report 'FAIL' "BLOCKED — $c (owner decision pending, task 141 notes §9)" }
+if ($PlatformConflicts.Count -eq 0) { Report 'OK' 'no alternate-key column is field-secured' }
 
 # ── (a) NORMALISE ───────────────────────────────────────────────────────────────────────────────────────────
 Write-Host "`n(a) Stored oids"
@@ -231,7 +260,10 @@ $columns = @(
        Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; 'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions(Name='$PlaneOptionSet')" } },
     @{ Logical = 'sprk_identitycollisionreason'; Schema = 'sprk_IdentityCollisionReason'; Display = 'Identity Collision Reason'
        Description = 'Why the binding was refused. See SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, identity collisions.'
-       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; 'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions(Name='$ReasonOptionSet')" } }
+       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; 'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions(Name='$ReasonOptionSet')" } },
+    @{ Logical = 'sprk_identitycollisionparties'; Schema = 'sprk_IdentityCollisionParties'; Display = 'Identity Collision Parties'
+       Description = 'EVERY identity that collided with this contact (JSON: oid, plane, reason, time), the first one being the four Identity Collision columns. Written by the BFF; the reconciliation job drops a party once its collision no longer holds and clears the flag when none does. Do not edit by hand: an unreadable value keeps the flag until an operator clears it.'
+       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'; Format = 'TextArea'; MaxLength = 4000 } }
 )
 foreach ($col in $columns) {
     $existing = Try-DvGet "EntityDefinitions(LogicalName='contact')/Attributes(LogicalName='$($col.Logical)')?`$select=LogicalName,MetadataId"
@@ -266,8 +298,8 @@ if ($view) { Report 'OK' "view '$ViewName'" }
 elseif ($Verify) { Report 'MISSING' "view '$ViewName'" }
 elseif ($IsDryRun -or -not $planeExists) { Report 'WOULD' "create view '$ViewName' (open identity collisions, newest first)" }
 else {
-    $fetch = "<fetch version='1.0' mapping='logical'><entity name='contact'><attribute name='fullname'/><attribute name='emailaddress1'/><attribute name='sprk_externalobjectid'/><attribute name='sprk_identityplane'/><attribute name='sprk_identitycollisionon'/><attribute name='sprk_identitycollisionreason'/><attribute name='sprk_identitycollisionoid'/><attribute name='sprk_identitycollisionplane'/><attribute name='contactid'/><order attribute='sprk_identitycollisionon' descending='true'/><filter type='and'><condition attribute='sprk_identitycollisionon' operator='not-null'/></filter></entity></fetch>"
-    $layout = "<grid name='resultset' object='2' jump='fullname' select='1' icon='1' preview='1'><row name='result' id='contactid'><cell name='fullname' width='200'/><cell name='emailaddress1' width='200'/><cell name='sprk_identitycollisionreason' width='220'/><cell name='sprk_identitycollisionon' width='150'/><cell name='sprk_identitycollisionoid' width='250'/><cell name='sprk_identitycollisionplane' width='120'/><cell name='sprk_externalobjectid' width='250'/><cell name='sprk_identityplane' width='120'/></row></grid>"
+    $fetch = "<fetch version='1.0' mapping='logical'><entity name='contact'><attribute name='fullname'/><attribute name='emailaddress1'/><attribute name='sprk_externalobjectid'/><attribute name='sprk_identityplane'/><attribute name='sprk_identitycollisionon'/><attribute name='sprk_identitycollisionreason'/><attribute name='sprk_identitycollisionoid'/><attribute name='sprk_identitycollisionplane'/><attribute name='sprk_identitycollisionparties'/><attribute name='contactid'/><order attribute='sprk_identitycollisionon' descending='true'/><filter type='and'><condition attribute='sprk_identitycollisionon' operator='not-null'/></filter></entity></fetch>"
+    $layout = "<grid name='resultset' object='2' jump='fullname' select='1' icon='1' preview='1'><row name='result' id='contactid'><cell name='fullname' width='200'/><cell name='emailaddress1' width='200'/><cell name='sprk_identitycollisionreason' width='220'/><cell name='sprk_identitycollisionon' width='150'/><cell name='sprk_identitycollisionoid' width='250'/><cell name='sprk_identitycollisionplane' width='120'/><cell name='sprk_identitycollisionparties' width='300'/><cell name='sprk_externalobjectid' width='250'/><cell name='sprk_identityplane' width='120'/></row></grid>"
     Invoke-DvWrite POST 'savedqueries' @{ name = $ViewName; returnedtypecode = 'contact'; querytype = 0; fetchxml = $fetch; layoutxml = $layout
         description = 'Every contact with an open identity collision (task 141). Resolve per SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md; the reconciliation job clears the flag.' } | Out-Null
     Report 'DONE' "created view '$ViewName'"

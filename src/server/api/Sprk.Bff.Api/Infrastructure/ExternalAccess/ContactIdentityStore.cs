@@ -117,11 +117,17 @@ public interface IContactIdentityStore
     /// <summary>Sets <c>systemuser.sprk_primarycontact</c>, conditional on <paramref name="etag"/>.</summary>
     Task<StoreWriteResult> SetPrimaryContactAsync(Guid systemUserId, string? etag, Guid contactId, CancellationToken ct);
 
-    /// <summary>Writes a collision flag onto a contact.</summary>
-    Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, CancellationToken ct);
+    /// <summary>
+    /// Writes a collision flag (every party) onto a contact, conditional on <paramref name="etag"/> so a party
+    /// another writer appended meanwhile is not overwritten (412 → the caller re-reads and appends again).
+    /// </summary>
+    Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, string? etag, CancellationToken ct);
 
-    /// <summary>Clears a contact's collision flag.</summary>
-    Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, CancellationToken ct);
+    /// <summary>
+    /// Clears a contact's collision flag, conditional on <paramref name="etag"/> — the version the clearing
+    /// decision was made on. Without a version nothing is cleared: a party appended after that read must survive.
+    /// </summary>
+    Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, string? etag, CancellationToken ct);
 
     /// <summary>One page of enabled interactive systemusers with their linked contact.</summary>
     Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct);
@@ -147,11 +153,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public const string FlagPlaneColumn = "sprk_identitycollisionplane";
     public const string FlagReasonColumn = "sprk_identitycollisionreason";
 
+    /// <summary>Every recorded party of the flag, as JSON (multi-line text). The four columns above are the first.</summary>
+    public const string FlagPartiesColumn = "sprk_identitycollisionparties";
+
     /// <summary>The contact columns every binding read selects.</summary>
     public static readonly string ContactSelect = string.Join(",",
         "contactid", "statecode", "emailaddress1",
         ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
-        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn);
+        FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn);
 
     /// <summary>The systemuser columns the link decision selects.</summary>
     public const string SystemUserSelect =
@@ -258,23 +267,80 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         return payload;
     }
 
-    /// <summary>The flag payload (all four columns).</summary>
+    /// <summary>The flag payload: the four summary columns (the first party) and every party as JSON.</summary>
     public static Dictionary<string, object?> FlagPayload(CollisionFlag flag) => new()
     {
         [FlagOnColumn] = flag.FlaggedOn.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
         [FlagOidColumn] = flag.CollidingOid?.ToString("D"),
         [FlagPlaneColumn] = flag.CollidingPlane is { } p ? (int)p : null,
         [FlagReasonColumn] = flag.Reason is { } r ? (int)r : null,
+        [FlagPartiesColumn] = SerializeParties(flag.Parties),
     };
 
-    /// <summary>The clear payload (all four columns null).</summary>
+    /// <summary>The clear payload (all five flag columns null).</summary>
     public static Dictionary<string, object?> ClearFlagPayload() => new()
     {
         [FlagOnColumn] = null,
         [FlagOidColumn] = null,
         [FlagPlaneColumn] = null,
         [FlagReasonColumn] = null,
+        [FlagPartiesColumn] = null,
     };
+
+    /// <summary>
+    /// The parties column's JSON: <c>[{"oid":"…","plane":100000001,"reason":100000000,"on":"…Z"}]</c>. Oids in "D"
+    /// format, option values as integers, times in UTC. Pure.
+    /// </summary>
+    public static string SerializeParties(IReadOnlyList<CollisionParty> parties)
+    {
+        ArgumentNullException.ThrowIfNull(parties);
+        var rows = parties.Select(p => new Dictionary<string, object?>
+        {
+            ["oid"] = p.Oid?.ToString("D"),
+            ["plane"] = p.Plane is { } pl ? (int)pl : null,
+            ["reason"] = p.Reason is { } r ? (int)r : null,
+            ["on"] = p.FlaggedOn.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture),
+        });
+        return JsonSerializer.Serialize(rows);
+    }
+
+    /// <summary>
+    /// Parses the parties column. Null when the text is not the shape <see cref="SerializeParties"/> writes —
+    /// the caller then treats the flag as carrying parties it cannot read (never cleared, never overwritten).
+    /// Pure.
+    /// </summary>
+    public static IReadOnlyList<CollisionParty>? ParseParties(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        using var doc = TryParseJson(json);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Array) return null;
+
+        var parties = new List<CollisionParty>();
+        foreach (var item in doc.RootElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) return null;
+            if (!item.TryGetProperty("on", out var onEl) || onEl.ValueKind != JsonValueKind.String
+                || !DateTimeOffset.TryParse(onEl.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var on))
+            {
+                return null;
+            }
+
+            Guid? oid = null;
+            if (item.TryGetProperty("oid", out var oidEl) && oidEl.ValueKind != JsonValueKind.Null)
+            {
+                if (oidEl.ValueKind != JsonValueKind.String || !Guid.TryParse(oidEl.GetString(), out var g) || g == Guid.Empty)
+                {
+                    return null;
+                }
+
+                oid = g;
+            }
+
+            parties.Add(new CollisionParty(oid, PlaneOf(IntOf(item, "plane")), ReasonOf(IntOf(item, "reason")), on));
+        }
+
+        return parties.Count == 0 ? null : parties;
+    }
 
     /// <summary>Parses one contact row from Web API JSON.</summary>
     public static ContactBindingRow? ParseContactRow(JsonElement row)
@@ -287,13 +353,23 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         if (row.TryGetProperty(FlagOnColumn, out var on) && on.ValueKind == JsonValueKind.String
             && DateTimeOffset.TryParse(on.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var flaggedOn))
         {
-            var reason = IntOf(row, FlagReasonColumn);
-            var plane = IntOf(row, FlagPlaneColumn);
             flag = new CollisionFlag(
                 flaggedOn,
                 GuidOf(row, FlagOidColumn),
-                plane is { } pv && Enum.IsDefined(typeof(IdentityPlaneMarker), pv) ? (IdentityPlaneMarker)pv : null,
-                reason is { } rv && Enum.IsDefined(typeof(IdentityCollisionReason), rv) ? (IdentityCollisionReason)rv : null);
+                PlaneOf(IntOf(row, FlagPlaneColumn)),
+                ReasonOf(IntOf(row, FlagReasonColumn)));
+
+            // The summary columns are the first party; the parties column is every party. A parties column that
+            // does not parse — or does not start with the summary's party — is a flag whose parties we cannot read:
+            // it is kept and never overwritten (ContactBindingDecision.ShouldWriteFlag / ReconcileFlag).
+            var rawParties = StringOf(row, FlagPartiesColumn);
+            if (!string.IsNullOrWhiteSpace(rawParties))
+            {
+                var parties = ParseParties(rawParties);
+                flag = parties is not null && parties[0].IsSameCollision(flag.Primary)
+                    ? flag with { OtherParties = parties.Skip(1).ToList() }
+                    : flag with { HasUnreadableParties = true };
+            }
         }
 
         return new ContactBindingRow(
@@ -496,12 +572,20 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     /// <inheritdoc />
-    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, CancellationToken ct)
-        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", FlagPayload(flag), ("If-Match", "*"), ct);
+    /// <remarks>
+    /// Conditional on the row version so a concurrent append is never overwritten. A row read without a version
+    /// falls back to <c>*</c>: the worst case is a lost party (re-recorded on that identity's next collision),
+    /// never a binding or a link — those stay strictly version-conditional (<see cref="RowVersionPrecondition"/>).
+    /// </remarks>
+    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, string? etag, CancellationToken ct)
+        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", FlagPayload(flag),
+            ("If-Match", RowVersionPrecondition(etag) ?? "*"), ct);
 
     /// <inheritdoc />
-    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, CancellationToken ct)
-        => WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", ClearFlagPayload(), ("If-Match", "*"), ct);
+    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, string? etag, CancellationToken ct)
+        => RowVersionPrecondition(etag) is { } version
+            ? WriteAsync(HttpMethod.Patch, $"contacts({contactId:D})", ClearFlagPayload(), ("If-Match", version), ct)
+            : Task.FromResult(NoRowVersion("flag clear", contactId));
 
     // ── Scans ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -707,6 +791,12 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
 
     private static Guid? GuidOf(JsonElement row, string name)
         => StringOf(row, name) is { } s && Guid.TryParse(s, out var g) && g != Guid.Empty ? g : null;
+
+    private static IdentityPlaneMarker? PlaneOf(int? value)
+        => value is { } v && Enum.IsDefined(typeof(IdentityPlaneMarker), v) ? (IdentityPlaneMarker)v : null;
+
+    private static IdentityCollisionReason? ReasonOf(int? value)
+        => value is { } v && Enum.IsDefined(typeof(IdentityCollisionReason), v) ? (IdentityCollisionReason)v : null;
 
     private static string Trim(string? body) => body is null ? string.Empty : body.Length <= 400 ? body : body[..400];
 

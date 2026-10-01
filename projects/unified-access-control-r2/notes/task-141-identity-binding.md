@@ -2,9 +2,13 @@
 
 > **Status**: implemented on branch `task/uac-r2-141` (2026-10-01). Live steps are **pending manual gates** —
 > this run was read-only against Dataverse/Entra by instruction (§8 lists every gate with its exact command).
+> ⛔ Since the verifier fix round the task is **blocked on an owner decision** (§9): G-1 cannot run as designed.
 > **Owner answers in force**: round 2 item 4, Q3; round 3 I1 = (b), I2 = (1), T2; trigger (a) for licensed
 > collision rows. Source: `session27-owner-decisions-and-research.md`.
 > **Peer contract**: [`141-link-contract.md`](141-link-contract.md) (word-add-in-r1 task 083 waits on it).
+> **Verifier fix round** (`task/uac-r2-141-f1`, 2026-10-01): §9 (⛔ OWNER DECISION — alternate key vs field-level
+> security on `contact.sprk_externalobjectid`; G-1 blocked), §10 (what changed per finding, with the seeded
+> violations), §11 (statements the PR must carry).
 > **Provisioning handoff**: [`handoffs/INCOMING-141-workforce-tenant-list.md`](handoffs/INCOMING-141-workforce-tenant-list.md).
 
 ---
@@ -159,7 +163,8 @@ The plane marker is not secured, so "marker present, oid absent" is detectable a
 | Bind | `PATCH contacts(id)` with `If-Match: <etag read with the row>` | 412 → re-decide once; otherwise Deny `contact_bind_failed` (**not** "resolved anyway") |
 | Create | `PATCH contacts(sprk_externalobjectid='<oid>')` + `If-None-Match: *` — create-only via the alternate key | 412 → re-read by oid and resolve; key not defined → Deny `contact_create_unavailable` |
 | Link | `PATCH systemusers(id)` `sprk_PrimaryContact@odata.bind`, `If-Match: <etag>` | 412 → not re-pointed |
-| Flag | `PATCH contacts(id)` the four flag columns | written only when the row carries no open flag (idempotent) |
+| Flag | `PATCH contacts(id)` the four summary columns + `sprk_identitycollisionparties` (every party), `If-Match: <etag>` | a party is recorded once per contact (idempotent per identity+reason); a DIFFERENT identity is appended (fix round, finding 3); 412 → re-read once and append again |
+| Flag prune / clear (job pass 2) | `PATCH contacts(id)`, `If-Match: <etag the verdict was made on>`; a clear without a version is refused | 412 → kept; the next run re-evaluates |
 | Before any bind/create/link | masking probe: rows with a plane marker; all oid-null ⇒ masked | Deny `binding_column_masked` |
 
 ## 4. Implementation map
@@ -170,16 +175,16 @@ The plane marker is not secured, so "marker present, oid absent" is detectable a
 |---|---|
 | `Infrastructure/ExternalAccess/ContactBindingDecision.cs` | The ONE pure decision (§3), public: `Decide` (unlinked flow D0–E11), `DecideExistingLink` (L1–L12), `DecideInvite`, `ReadBinding`, `CollisionStillHolds`, `ShouldWriteFlag`, the deny/invite codes, and the shared read `ActiveContactsBoundToQuery` (used by `IdentityNormalizationService` and `CallerContactResolver`). No I/O. |
 | `Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` | `WorkforceIdentity:CustomerTenantIds` + `WorkforceIdentityOptionsValidator` (non-GUID / all-zero / CIAM tenant fail startup; empty is valid and DENIES) + `WorkforceCallerClaims` + `WorkforceMembershipTest` (member = `CallerIdentity.FromPrincipal` UserDelegated ∧ `tid` listed ∧ `acct` = 0; six distinct deny codes). |
-| `Infrastructure/ExternalAccess/ContactIdentityStore.cs` | `IContactIdentityStore` (testing seam — HTTP doubles are banned by ADR-038 B1) + `DataverseContactIdentityStore` (Web API, app-only): three-state lookups (Read / Failed / ColumnMissing), ACTIVE rows `$top=2`, `If-Match` bind/link, create-only `PATCH contacts(sprk_externalobjectid='…')` + `If-None-Match: *`, flag write/clear, the FLS masking probe, paged scans. Pure request builders and parsers are unit-tested. |
+| `Infrastructure/ExternalAccess/ContactIdentityStore.cs` | `IContactIdentityStore` (testing seam — HTTP doubles are banned by ADR-038 B1) + `DataverseContactIdentityStore` (Web API, app-only): three-state lookups (Read / Failed / ColumnMissing), ACTIVE rows `$top=2`, `If-Match` bind/link, create-only `PATCH contacts(sprk_externalobjectid='…')` + `If-None-Match: *`, version-conditional flag write/clear with every party as JSON, the FLS masking probe, paged scans. Pure request builders and parsers are unit-tested. |
 | `Infrastructure/ExternalAccess/ContactIdentityBinder.cs` | The ONE binding writer. `ResolveWorkforceCallerAsync`, `ResolveCiamCallerAsync`, `EnsureSystemUserLinkAsync` (row / id), `ResolveInviteContactAsync`, `BindInvitedContactAsync`. Runs the decision, performs the conditional writes, re-decides once on 412, writes idempotent flags, probes masking before any write. `ContactIdentityBinderFactory` builds one over another environment (registration). |
-| `Services/ExternalAccess/IdentityLinkReconciliationJob.cs` | ADR-036 `IScheduledJob` `identity-link-reconciliation`, `*/5 * * * *`. Masking probe → pass 1 (users) → pass 2 (clear resolved flags, only after a complete pass 1). Report-only unless `IdentityLink:Reconciliation:WritesEnabled` parses `true`. |
+| `Services/ExternalAccess/IdentityLinkReconciliationJob.cs` | ADR-036 `IScheduledJob` `identity-link-reconciliation`, `*/5 * * * *`. Masking probe → pass 1 (users) → pass 2 (per party: drop the resolved ones, prune or clear the flag via `ContactBindingDecision.ReconcileFlag`, only after a complete, untruncated pass 1 on a readable probe). Report-only unless `IdentityLink:Reconciliation:WritesEnabled` parses `true` — the same switch gates the inline link (fix round, finding 4). |
 | `scripts/Set-ContactIdentityBindingSchema.ps1` | Dry-run / `-Apply` / `-Verify`: (a) normalise oids, (b) alternate key, (c) plane + flag columns, backfill External, collision view, (d) FLS reader/writer profiles, (e) solution components, (f) publish. |
 
 ### 4.2 Changed
 
 | File | Change |
 |---|---|
-| `WorkforcePrincipalResolver.cs` | Contact-only branch → `ContactIdentityBinder.ResolveWorkforceCallerAsync`; the decision's own deny code reaches the response. Systemuser with no contact → inline `EnsureSystemUserLinkAsync` + `IIdentityNormalizationService.InvalidateAsync` (same-request effect); a failed link is not retried for 10 min (`identity-link-attempt` cache marker). `ExtractVerifiedEmail` → `ExtractTokenEmail` (it verified nothing). |
+| `WorkforcePrincipalResolver.cs` | Contact-only branch → `ContactIdentityBinder.ResolveWorkforceCallerAsync`; the decision's own deny code reaches the response. Systemuser with no contact → inline `EnsureSystemUserLinkAsync` + `IIdentityNormalizationService.InvalidateAsync` (same-request effect), **only when `IdentityLink:Reconciliation:WritesEnabled` is true** (fix round, finding 4); a failed link is not retried for 10 min (`identity-link-attempt` cache marker). `ExtractVerifiedEmail` → `ExtractTokenEmail` (it verified nothing). |
 | `IdentityNormalizationService.cs` / `IIdentityNormalizationService.cs` | Read-only. `TryResolveContactByWorkforceIdentityAsync`, the email path and `GuardInertNoBindingColumn` deleted; the systemuser fallback reads the oid binding via `ActiveContactsBoundToQuery` (ambiguous / unreadable → null). `InvalidateAsync` added. A-18 residual comment removed. |
 | `CallerContactResolver.cs` | Reads the oid binding (`sprk_externalobjectid`), two rows, ambiguity → `ambiguous-binding`. |
 | `ExternalParticipationService.cs` | CIAM contact resolution, `ResolveContactByOidAsync`, `ResolveContactByEmailAsync`, `BindOidToContactAsync` deleted — moved into the binder/decision (§6 D-1). Keeps grant data. |
@@ -325,12 +330,147 @@ fail closed with `binding_column_missing`).
 
 | Gate | Action | Exact command |
 |---|---|---|
-| **G-1** Schema (dev) | Apply, then verify (exit 0). Dry run 2026-10-01: 6 oids OK (lowercase D), key + 2 choices + 5 columns + view + 2 FLS profiles + 2 writer members (`# mi-bff-api-dev`, `SDAP-BFF-SPE-API`) + 6 BU default teams + 2 secured fields + 1 solution component WOULD be written; backfill 6 as External | `.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then the same with `-Verify` |
+| **G-1** Schema (dev) | ⛔ **BLOCKED on the §9 owner decision** — `-Apply` now stops at its platform-rule preflight before any write (as designed it asks for an alternate key on a field-secured column, which Dataverse refuses). Everything below that depends on G-1 (G-4 onward) waits with it. Once decided and the script amended: apply, then verify (exit 0). Dry run 2026-10-01: 6 oids OK (lowercase D), key + 2 choices + 5 columns + view + 2 FLS profiles + 2 writer members (`# mi-bff-api-dev`, `SDAP-BFF-SPE-API`) + 6 BU default teams + 2 secured fields + 1 solution component WOULD be written; backfill 6 as External | `.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then the same with `-Verify` |
 | **G-2** `acct` claim (dev BFF registration) | Add the access-token optional claim | `.\scripts\Register-EntraAppRegistrations.ps1 -TenantId a221a95e-6abc-4434-aecc-e48338a1b2f2 -AcctClaimOnly -AcctClaimAppId 1e40baad-e065-4aea-a8d4-4b7ab273458c`; verify `az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query optionalClaims.accessToken` lists `acct` |
 | **G-3** Tenant setting (dev) | Dev's workforce tenant is the registration's tenant (Model-2 shape) | `az webapp config appsettings set -g <dev-rg> -n <dev-bff-app> --settings WorkforceIdentity__CustomerTenantIds__0=a221a95e-6abc-4434-aecc-e48338a1b2f2` (both slots) |
 | **G-4** Deploy BFF (dev) | After merge to the project branch | `bff-deploy` skill / `scripts/Deploy-BffApi.ps1` |
-| **G-5** Job report-only run | Leave `IdentityLink__Reconciliation__WritesEnabled` unset; trigger a run (admin jobs endpoint, `ManualAdmin`) or wait 5 min; review `[ID-LINK-RECON] before-state` lines + ResultJson against §0 (expect: 1 bind, 7 creates, Ralph's link Verified-or-flagged-kept, 3 collisions flagged, nothing written) | App Insights: `traces | where message startswith "[ID-LINK-RECON]"` |
+| **G-5** Job report-only run | Leave `IdentityLink__Reconciliation__WritesEnabled` unset; trigger a run (admin jobs endpoint, `ManualAdmin`) or wait 5 min; review `[ID-LINK-RECON] before-state` lines + ResultJson against §0 (expect: 1 bind, 7 creates, Ralph's link Verified-or-flagged-kept, 3 collisions flagged, nothing written). These counts no longer drift between G-4 and G-6: the inline link is gated on the same switch (fix round, finding 4). Do not run a demo registration into spaarkedev1 during the review (registration is not gated — §10, finding 4) | App Insights: `traces | where message startswith "[ID-LINK-RECON]"` |
 | **G-6** Enable writes, run again, run a third time | Then confirm the third run changes nothing | `az webapp config appsettings set … --settings IdentityLink__Reconciliation__WritesEnabled=true` |
 | **G-7** FLS authorization | As a non-admin dev user: edit both fields in MDA → refused; Daily Briefing inline to-do still defaults Assigned To; TrackingFieldTrio still shows an internal user as internal | manual |
 | **G-8** Live gate items (POML criterion "MANUAL LIVE GATE") | (1) `test.user@demo.spaarke.com` signs in to Teams/SPA → resolves; one contact created, plane Workforce; second sign-in resolves by oid. (2) a guest / no-`acct` token is not bound. (3) the 3 collision emails refused + visible in "Contacts with Identity Collisions". (4) G-5/G-6 counts recorded. (5) a linked user named in `sprk_assignedattorney1` no longer logs `member_skipped`. (6) = G-7. (7) first link visible on the same request. (8) invite to a workforce-bound contact's email → 409, no CIAM account | manual; record results here |
 | **G-9** Publish size | Skipped by instruction this run. Fresh short-path worktrees, both sides, `Compress-Archive`, equal file counts | CLAUDE.md §10 procedure |
+
+## 9. ⛔ OWNER DECISION REQUIRED — alternate key vs field-level security on `contact.sprk_externalobjectid`
+
+> Raised by the adversarial verifier (finding 1, CRITICAL), 2026-10-01. Confirmed against Microsoft Learn the same
+> day. **No option below was implemented**: the binding rules say an escalation that is not answered in the owner
+> decisions is a first-class stop — stop that part, record it, report it. What WAS done is the stop itself (the
+> schema script refuses `-Apply`) and the paper trail. G-1 should not be run as originally written.
+
+🔔 **Human Input Required — conflicting requirements (CLAUDE.md §6 / §6.5 format)**
+
+- **Rules in question**: two of this task's own constraints, against a platform rule. (No ADR is violated by any
+  option below except where noted; ADR-003 "fail closed" is the bar each option is held to.)
+  - *Constraint "Scope: contact creation"*: "Creation is idempotent by oid: exactly one contact per oid, including
+    when two first sign-ins race." Delivered by step 2(b) as an alternate key `sprk_ExternalObjectIdKey` on
+    `contact(sprk_externalobjectid)` + create-only `PATCH contacts(sprk_externalobjectid='<oid>')` with
+    `If-None-Match: *`.
+  - *Constraint "Scope: contact.sprk_externalobjectid and systemuser.sprk_primarycontact"*: "Lock both with
+    field-level security … only the BFF app user can write." Delivered by step 2(d).
+  - *Platform rule*: "Attributes must not have field-level security applied" ([Work with alternate keys](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity));
+    "Columns that have the **Enable column security** property enabled can't be used as an alternate key"
+    ([Define alternate keys to reference rows](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/define-alternate-keys-reference-records)).
+- **Conflict**: G-1 can deliver at most one of (b) and (d) on that column. (a) If the key wins, the FLS criterion
+  fails for `sprk_externalobjectid`, and any user with contact Write can put their own oid on a contact that holds
+  grants and inherit them (a takeover). (b) If FLS wins, `CreateContactForOidAsync` returns `KeyMissing` and every
+  Type-2 creation and every systemuser create-link is denied `contact_create_unavailable`; criterion 3 then has no
+  enforcing mechanism. The original run's tests were green only because `InMemoryContactIdentityStore` modelled a
+  key-plus-FLS combination the platform does not allow (that double's doc now says so). The 2026-10-01 dry run never
+  exercised the rule: it printed `WOULD` lines only.
+- **What holds under EVERY option** (already in the code, unchanged): two contacts carrying one oid DENY on every
+  plane and every reader (`contact_oid_ambiguous`, flagged); a create that cannot be guaranteed unique DENIES
+  (`contact_create_unavailable`); a masked binding column refuses every write (`binding_column_masked`). So the
+  undecided state is fail-closed, not fail-open.
+
+**Options**
+
+| | Option | Uniqueness | Write lock | Cost | Residual risk |
+|---|---|---|---|---|---|
+| **B2 (recommended)** | **Keep FLS on `sprk_externalobjectid`; move the KEY to a new unsecured mirror column** `sprk_externalobjectidkey` (Text 100, alternate key), written by the BFF with the same oid in the same request as every bind and create. Every READ keeps using the secured column; the mirror exists only so the platform refuses a second contact for one oid. | Platform-enforced, for creates AND binds | Unchanged (FLS on the binding column) | One column + key; the bind/create payloads write both columns; the create addresses the mirror key; the schema copies the 6 existing bindings into the mirror before creating the key | A user with contact Write can only DENY SERVICE through the mirror: squatting an oid makes that person's create get 412 with no secured binding → deny + error log (detectable); clearing a mirror re-allows a duplicate, which the ambiguity deny catches. Never a takeover — the binding itself stays locked |
+| B1 | Keep the key on `sprk_externalobjectid` (unsecured); add an FLS-secured **seal** column the BFF writes with the same oid; a binding is trusted only when both agree | Platform-enforced | Via the seal | One column; every READ path (5 readers) must compare both columns | Same DoS-only profile as B2, but every reader changes, and a reader that forgets the seal is a takeover |
+| D | Keep FLS; move uniqueness to a new BFF-owned **lock table** (`sprk_identitybinding`, alternate key on oid; no user role may create or write it) | Platform-enforced | Unchanged | A new table + privileges + a two-step create with partial-failure repair | None beyond B2; heavier |
+| A | Keep FLS; **drop the key**; create, then re-query by oid, with a deterministic loser-deletes rule (POML step 2b's own alternative) | NOT guaranteed: read-committed ordering can let two racers each see only their own row; the leftover duplicate is caught by the ambiguity deny and flagged, and the person is denied until an operator removes it | Unchanged | Smallest schema; extra create-path code | Likely to bite: a Teams/SPA client's first page load fires several API calls in parallel, so concurrent first sign-ins of ONE person are the common case, not an edge |
+| C | Keep the key; **drop FLS** on `sprk_externalobjectid` | Platform-enforced | None on the binding | Smallest | The takeover the lock exists to prevent (any user with contact Write). Security-sensitive: not recommended |
+
+- **Proposed path**: **B2**. It is the only option that keeps BOTH properties the task requires with a platform
+  guarantee, changes no read path (the masking defence in §3.2 and every consumer in the link contract stay as they
+  are), and limits what a user with contact Write can do to the mirror to a detectable denial of service.
+- **Impact if accepted**: schema step (b) moves to the mirror column (and step (a) copies existing oids into it);
+  `DataverseContactIdentityStore.BindPayload` / `CreatePayload` / `BuildCreateByKeyPath` write and address the
+  mirror; `InMemoryContactIdentityStore` models the key on the mirror; a test pins that a squatted mirror denies
+  rather than binds; the link contract §1.1 and guide §6.5.2 are rewritten. No consumer changes.
+- **Alternatives considered and rejected**: A (not a guarantee, and the concurrent-first-sign-in case is the normal
+  Teams load pattern), C (re-opens the takeover), B1 (moves the burden onto every reader), D (correct but heavier
+  than B2 for the same guarantee).
+- **Until decided**: `scripts/Set-ContactIdentityBindingSchema.ps1 -Apply` stops at a platform-rule preflight before
+  any network write (proved: with the overlap it throws `BLOCKED … Nothing was written`; with the overlap removed in
+  a temporary copy it proceeds to authentication). The dry run and `-Verify` report the overlap as `FAIL`. G-1, and
+  every gate after it, wait for this decision.
+
+Acceptance criteria this blocks: criterion 3 (exactly one contact per oid under concurrent first sign-ins — not
+met as a deployable design) and the FLS authorization criterion (pending G-1/G-7 AND this decision).
+
+## 10. Verifier fix round (`task/uac-r2-141-f1`, 2026-10-01) — what changed per finding
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | CRITICAL — alternate key and FLS on the same column | **Escalated, not decided** (§9). Schema script: platform-rule preflight that blocks `-Apply` (and reports in dry run / `-Verify`); header text. In-memory store doc states it models a combination the platform refuses. Link contract §1.1, guide §6.5.2, provisioning handoff, SPA-r2 023 closure and its note corrected (they stated the key as fact). |
+| 2.1 | Truncated scan guard never shown to bite | Test `ATruncatedScan_SkipsFlagClearing_SoAFlagOfAnUnscannedUserSurvives` (seed F1). |
+| 2.2 | Probe-Failed guard never shown to bite | `InMemoryContactIdentityStore.FailProbe`; test `AFailedMaskingProbe_AbortsTheRun_BeforeAnyDecision` (seed F2). |
+| 2.3 | Cheap Verified path `IsActive` never shown to bite | Test `ALinkedUserWhoseContactIsInactive_IsFlagged_NeverReportedVerified` (seed F3). |
+| 2.4 | Invite-flag re-evaluation never shown to bite | Tests `CollisionStillHolds_AnInviteRefusal_…` (pure) and `AnInviteRefusalFlag_IsKept_WhileTheContactStillBelongsToAnEmployee` (job) (seed F4). |
+| 3 | One flag per contact: a second collision vanishes when the first is resolved | **Fixed for both cases.** A flag now records EVERY colliding party (`CollisionParty`; new memo column `sprk_identitycollisionparties`, JSON; the four summary columns stay the first party). Idempotence is per party (identity + reason), so a retry still writes nothing while a DIFFERENT identity is appended. Pass 2 evaluates each party and goes through the pure `ContactBindingDecision.ReconcileFlag`: clear only when no party holds AND no systemuser collided with the contact this run (the verifier's rule), prune otherwise. Appends, prunes and clears are conditional on the row version (a party appended meanwhile survives; a clear without a version is refused). A flag whose parties column cannot be read, or that holds 20 parties, is never overwritten or cleared by the job (an operator clears it after resolving — guide §6.5.3). Seeds F5–F9, F11, F12. |
+| 4 | Inline link writes ungated before the G-5 review | **Gated.** `WorkforcePrincipalResolver.TryLinkSystemUserAsync` does nothing (no read, no write) unless `IdentityLink:Reconciliation:WritesEnabled` is true — the job's own switch, read through one helper (`ContactIdentityBinder.LinkWritesEnabled`). Not gated, with reasons (binder XML doc, guide §6.5.2): the Type-2 first sign-in (gating it would deny every Type-2 caller) and the registration link (operator-initiated, in a target environment the job never scans — a gate would leave that user unlinked with no safety net; G-5 note: do not register into spaarkedev1 during the review). Test `BeforeTheOwnerEnablesLinkWrites_ASignInLinksNothing_…` (seed F10). |
+| 5 | D-3 mixing must be stated in the PR | Stated in §11 and in the link contract §5. |
+| 6, 7, 9 | Verified OK / tests / paper trail | Nothing to fix. 9's remark that SPA-r2 023 is "completed" while 141 is not live: status kept (POML step 10 asked for it) with a `<status-note>` saying the code is delivered but not live, and the closure text corrected. |
+| 8, 15 | Publish size | Not measured in this run (instructed; the main session measures after merging). |
+| 10, 11 | Criterion 3 and the FLS criterion | Blocked on §9. |
+| 12 | Reconciliation criterion | Met in code: the single-flag gap is fixed (finding 3) and the truncated-scan, probe-Failed and invite-flag guards are now shown to bite. |
+| 13 | `acct` / tenant setting | Re-checked READ-ONLY 2026-10-01: `az ad app show --id 1e40baad-…` → access-token optional claims `email`, `preferred_username`, `upn`; **`acct` still not configured**; `signInAudience = AzureADMultipleOrgs`, v1 tokens. The Teams package's `webApplicationInfo.id` is this registration, so Teams SSO tokens are access tokens FOR it, and Microsoft documents that access-token optional claims "apply to access tokens requested for the application … no matter how the client accesses your API" ([optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference); [Teams tab SSO](https://learn.microsoft.com/en-us/microsoftteams/platform/tabs/how-to/authentication/tab-sso-overview): "Teams requests Microsoft Entra endpoint for the access token"). `acct` is listed for JWT in v1.0 and v2.0 ("member … `0` … guest … `1`"). **Escalation trigger 3 does not fire**; the claim is configuration (G-2), the dev setting is G-3 — both pending manual gates, no change to the app registration was made. |
+| 14 | Live gates | Pending (G-1 now blocked on §9). The G-5 count drift is removed by finding 4's gate. |
+
+### 10.1 Seeded violations (fix round) — each seeded alone, built, the identity-binding set run, source restored
+
+Harness: `f1_seed.py` (scratchpad) — for each seed: patch ONE source line, `dotnet test` the identity-binding set
+(227–228 tests), record the failures, restore, assert the file is byte-identical. All twelve went RED.
+
+| # | Seeded violation (production code) | Failing test(s) |
+|---|---|---|
+| F1 | job: pass 2 runs after a TRUNCATED scan (`\|\| report.UserScanTruncated` dropped) | `ATruncatedScan_SkipsFlagClearing_SoAFlagOfAnUnscannedUserSurvives` |
+| F2 | job: a `Failed` masking probe treated as readable | `AFailedMaskingProbe_AbortsTheRun_BeforeAnyDecision` |
+| F3 | binder: the cheap Verified path ignores `IsActive` | `ALinkedUserWhoseContactIsInactive_IsFlagged_NeverReportedVerified` |
+| F4 | decision: invite-refusal re-evaluation forced false | `AnInviteRefusalFlag_IsKept_WhileTheContactStillBelongsToAnEmployee`, `CollisionStillHolds_AnInviteRefusal_HoldsWhileTheContactIsAnEmployees_AndClearsOnceItIsNot` |
+| F5 | decision: a flag is cleared although a systemuser collided with the contact this run | `AFlagIsKept_WhileAnyDecidedSystemUserCollidesWithTheContact_EvenIfThatPartyIsNotRecorded`, `ReconcileFlag_ClearsOnlyWhenNoPartyHolds_AndNoSystemUserCollidedThisRun` |
+| F6 | decision: single-slot flag (a second identity is not recorded) | `ASecondSystemUsersLiveCollision_SurvivesTheFirstOnesResolution`, `ATokenPlaneCallersLiveCollision_SurvivesASystemUsersResolution`, `ASecondIdentityCollidingWithAFlaggedContact_IsRecorded_WithoutOverwritingAConcurrentParty`, `ShouldWriteFlag_IsIdempotentPerParty_AndRecordsASecondIdentity` |
+| F7 | store: the reader ignores `sprk_identitycollisionparties` | `ParseContactRow_ReadsEveryRecordedParty`, `ParseContactRow_APartiesColumnItCannotTrust_MarksTheFlagUnreadable_NeverDropsIt` |
+| F8 | binder: an append that lost a race (412) is not retried | `ASecondIdentityCollidingWithAFlaggedContact_IsRecorded_WithoutOverwritingAConcurrentParty` |
+| F9 | job: the clear re-reads the row and uses the FRESH version instead of the verdict's | `AFlagClear_IsConditionalOnTheVersionItWasDecidedOn_SoAPartyAppendedMeanwhileSurvives` |
+| F10 | resolver: the inline link ignores the rollout switch | `BeforeTheOwnerEnablesLinkWrites_ASignInLinksNothing_ExactlyLikeTheReportOnlyJob` |
+| F11 | decision: a flag with unreadable parties is reconciled anyway | `ReconcileFlag_KeepsAFlagWithUnrecordedParties`, `ParseContactRow_APartiesColumnItCannotTrust_…` |
+| F12 | job: a prune is written for a row read without a version (falls back to an unconditional write) | `AFlagReadWithoutARowVersion_IsNeverPruned` |
+| G-1 | schema script: the alternate-key/FLS overlap removed (temp copy) | the run passed the preflight and reached authentication; with the overlap it throws `BLOCKED … Nothing was written` before any request |
+
+**Suite results (fix round, final code)**: identity-binding set 228 passed / 0 failed; full BFF suite
+(`tests/unit/Sprk.Bff.Api.Tests`) **13,368 passed / 0 failed / 54 skipped (13,422)**; NetArchTest
+(`tests/Spaarke.ArchTests`) **337 / 0 / 0**. No package or csproj change.
+
+F9 was GREEN on its first run: the test staged the concurrent append INSIDE the clear call, which a fresh re-read
+just before the clear also misses. The test was corrected to stage the append between the flag scan and the clear
+(during pass 2's evidence reads, through a new `InMemoryContactIdentityStore.AfterRead` hook); re-seeded, it went RED.
+
+## 11. Statements the PR must carry
+
+- **D-3 / owner I2 = (1), stated explicitly (verifier finding 5).** `IdentityNormalizationService` still honours a
+  licensed user's existing `sprk_primarycontact` even when that contact is flagged as bound to a different oid, and
+  `AccessibleRecordSetService`'s contact-grant term then loads that contact's external grants into the user's
+  accessible set. In dev that is ralph.schroeder@spaarke.com → contact 8e9918a9, bound to a CIAM oid: his set
+  includes that CIAM identity's grants. This is the mixing the POML's rejection of option (b) warned about. It is
+  pre-existing (the link predates task 141), the owner chose to keep links rather than clear them (I2 = (1)), and it
+  ends when an operator resolves the collision. `CallerContactResolver` ("assign it to me") does NOT follow such a
+  link.
+- **§6.5 / §6 escalation open**: §9 (alternate key vs FLS). G-1 and every later gate wait for it.
+- **Inline link gated** on `IdentityLink:Reconciliation:WritesEnabled` (finding 4); Type-2 binding and the
+  registration link are not, with reasons.
+- **New schema in this round**: `contact.sprk_identitycollisionparties` (memo, 4000) — justification below.
+- **Publish size**: not measured here; the main session measures against fresh master after merging.
+
+**Three-question justification for the new surface of this round (CLAUDE.md §11):**
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `contact.sprk_identitycollisionparties` (memo) + `CollisionParty` / `FlagReconciliation` types | The four `sprk_identitycollision*` columns (one party only) and `CollisionFlag` | **Extended**: `CollisionFlag` keeps its four summary members and gains the other parties; the four columns keep their meaning (the first party). A new column was needed because a text(100) oid column cannot hold a list, and re-purposing it would break the operator view | A second identity colliding with a flagged contact is never recorded; when the first collision is resolved the job clears the flag and a live collision — for a Type-2 or CIAM caller, one nothing else will ever re-raise until they sign in again — vanishes from the operator's view (finding 3) |
+| `ContactIdentityBinder.LinkWritesEnabled` (static helper, no DI) | `IdentityLinkReconciliationJob.WritesEnabled` (the job's private parse of the same key) | **Extended**: the job's parse moved to one shared helper; the job now calls it | The inline link writes R1-class links ahead of the report-only review the switch exists for (finding 4) |
+
+Placement (CLAUDE.md §10): unchanged — all in the BFF (bff-extensions.md §A); no new service, DI registration,
+endpoint, option, job or package. `WorkforcePrincipalResolver` gains an `IConfiguration` constructor dependency
+(already registered).

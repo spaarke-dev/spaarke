@@ -12,7 +12,12 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 ///   <item>both lookups honour <c>$top=2</c>; the email lookup returns ACTIVE rows only, the oid lookup any state;</item>
 ///   <item>every row has a version; <c>If-Match</c> writes fail with 412 when it moved;</item>
 ///   <item>the <c>sprk_externalobjectid</c> alternate key is unique among non-null values (when
-///     <see cref="KeyDefined"/>), so a create or bind that would duplicate an oid fails;</item>
+///     <see cref="KeyDefined"/>), so a create or bind that would duplicate an oid fails. ⚠️ <see cref="KeyDefined"/>
+///     = true together with <see cref="MaskBindingColumn"/>-style field security models a combination Dataverse
+///     does NOT allow: an alternate key cannot include a field-secured column (Microsoft Learn, "Work with
+///     alternate keys"). Which of the two the platform keeps is an owner decision pending under CLAUDE.md §6.5
+///     (notes/task-141-identity-binding.md §9); until it is made, a test that relies on the key proves the
+///     binder's behaviour GIVEN a uniqueness guarantee, not that the deployed schema provides one;</item>
 ///   <item><see cref="MaskBindingColumn"/> reproduces field-level-security masking: the oid comes back null in
 ///     rows AND is treated as null in filters (Dataverse substitutes null — documented).</item>
 /// </list>
@@ -82,6 +87,25 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     /// <summary>Runs inside a bind before its <c>If-Match</c> check — to stage a concurrent writer.</summary>
     public Action<Contact>? BeforeBind { get; set; }
 
+    /// <summary>
+    /// Runs inside EVERY flag write or clear before its <c>If-Match</c> check — to stage a concurrent writer, e.g.
+    /// another identity's party appended between the job's scan and its clear. The hook decides which row and how
+    /// often it fires. Call <see cref="Touch"/> inside it to move the row version, as a real concurrent write would.
+    /// </summary>
+    public Action<Contact>? BeforeFlagWrite { get; set; }
+
+    /// <summary>The masking probe itself cannot be read (<see cref="BindingReadability.Failed"/>).</summary>
+    public bool FailProbe { get; set; }
+
+    /// <summary>The flagged-contact scan returns rows WITHOUT a row version (a read that carried no etag).</summary>
+    public bool ScanFlaggedWithoutETags { get; set; }
+
+    /// <summary>
+    /// Runs after EVERY read is recorded, with the read's name (the <see cref="Reads"/> entry) — to stage a
+    /// concurrent writer at a precise point, e.g. between the job's flag scan and its clear.
+    /// </summary>
+    public Action<string>? AfterRead { get; set; }
+
     /// <summary>Marks a row as changed by someone else (a new version), as a concurrent write would.</summary>
     public void Touch(Contact contact) => contact.Version = NextVersion();
 
@@ -98,10 +122,13 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             MaskBindingColumn = false;
             OidLookupStatus = LookupStatus.Read;
             EmailLookupStatus = LookupStatus.Read;
-            FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = false;
+            FailReferences = FailGetContact = FailBind = FailCreate = FailFlagWrites = FailSystemUserScan = FailProbe = false;
+            ScanFlaggedWithoutETags = false;
             FailOidLookupOnceFor.Clear();
             BeforeCreate = null;
             BeforeBind = null;
+            BeforeFlagWrite = null;
+            AfterRead = null;
         }
     }
 
@@ -147,6 +174,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("oid");
+            AfterRead?.Invoke("oid");
             if (OidLookupStatus != LookupStatus.Read) return Task.FromResult(Failed(OidLookupStatus));
             if (FailOidLookupOnceFor.Remove(oid)) return Task.FromResult(ContactLookup.Failed);
             var rows = Contacts.Values
@@ -161,6 +189,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("email");
+            AfterRead?.Invoke("email");
             if (EmailLookupStatus != LookupStatus.Read) return Task.FromResult(Failed(EmailLookupStatus));
             var rows = Contacts.Values
                 .Where(c => c.StateCode == 0 && string.Equals(c.Email, email, StringComparison.OrdinalIgnoreCase))
@@ -174,6 +203,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("contact");
+            AfterRead?.Invoke("contact");
             if (FailGetContact) return Task.FromResult(ContactLookup.Failed);
             return Task.FromResult(Contacts.TryGetValue(contactId, out var c) ? ContactLookup.Of(Row(c)) : ContactLookup.Of());
         }
@@ -184,6 +214,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("references");
+            AfterRead?.Invoke("references");
             if (FailReferences) return Task.FromResult(ReferenceLookup.Failed);
             var refs = SystemUsers.Values
                 .Where(u => u.PrimaryContactId is { } p && contactIds.Contains(p))
@@ -198,6 +229,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("systemuser");
+            AfterRead?.Invoke("systemuser");
             return Task.FromResult(SystemUsers.TryGetValue(systemUserId, out var u)
                 ? new SystemUserLookup(LookupStatus.Read, UserRow(u))
                 : SystemUserLookup.Failed);
@@ -209,6 +241,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("probe");
+            AfterRead?.Invoke("probe");
+            if (FailProbe) return Task.FromResult(BindingReadability.Failed);
             var marked = Contacts.Values.Where(c => c.Plane is not null).Take(50).Select(Row).ToArray();
             return Task.FromResult(DataverseContactIdentityStore.ClassifyProbe(ContactLookup.Of(marked)));
         }
@@ -294,30 +328,48 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
-    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, CancellationToken ct)
+    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, string? etag, CancellationToken ct)
     {
         lock (_gate)
         {
             if (FailFlagWrites) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected"));
             if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            RunBeforeFlagWrite(c);
+            // Mirrors DataverseContactIdentityStore: conditional on the version when there is one, "*" otherwise.
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is not null && !VersionMatches(etag, c.Version))
+            {
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
+            }
+
             c.Flag = flag;
             c.Version = NextVersion();
-            Writes.Add(("flag", contactId, $"{flag.Reason}|{flag.CollidingOid:D}|{flag.CollidingPlane}"));
+            Writes.Add(("flag", contactId, $"{flag.Reason}|{flag.CollidingOid:D}|{flag.CollidingPlane}|parties={flag.Parties.Count}"));
             return Task.FromResult(StoreWriteResult.Written);
         }
     }
 
-    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, CancellationToken ct)
+    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, string? etag, CancellationToken ct)
     {
         lock (_gate)
         {
+            // Mirrors DataverseContactIdentityStore: no row version, no clear (clearing is the fail-open direction).
+            if (DataverseContactIdentityStore.RowVersionPrecondition(etag) is null)
+            {
+                Writes.Add(("refused-unversioned-clear", contactId, string.Empty));
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "no row version for the clear"));
+            }
+
             if (!Contacts.TryGetValue(contactId, out var c)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.NotFound));
+            RunBeforeFlagWrite(c);
+            if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
             c.Flag = null;
             c.Version = NextVersion();
             Writes.Add(("clear", contactId, string.Empty));
             return Task.FromResult(StoreWriteResult.Written);
         }
     }
+
+    private void RunBeforeFlagWrite(Contact c) => BeforeFlagWrite?.Invoke(c);
 
     // ── Scans ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -326,6 +378,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("scan-users");
+            AfterRead?.Invoke("scan-users");
             if (FailSystemUserScan)
             {
                 return Task.FromResult(new StorePage<SystemUserIdentityRow>(LookupStatus.Failed, Array.Empty<SystemUserIdentityRow>(), null, "injected"));
@@ -343,8 +396,10 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             Reads.Add("scan-flags");
+            AfterRead?.Invoke("scan-flags");
             var all = Contacts.Values.Where(c => c.Flag is not null).OrderBy(c => c.Id).ToList();
-            return Task.FromResult(Page(all, continuation, Row));
+            return Task.FromResult(Page(all, continuation,
+                c => ScanFlaggedWithoutETags ? Row(c) with { ETag = null } : Row(c)));
         }
     }
 

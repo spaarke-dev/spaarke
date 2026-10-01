@@ -125,6 +125,28 @@ public sealed class ContactIdentityBinder
     /// <summary>The store this binder writes through (the job reuses it for its scans).</summary>
     public IContactIdentityStore Store => _store;
 
+    /// <summary>
+    /// The owner's rollout switch for LICENSED-USER link writes in this BFF's own environment — the
+    /// reconciliation job AND the inline link at first resolution. Absent, empty or unparseable = report-only.
+    /// </summary>
+    /// <remarks>
+    /// Linking a systemuser to an existing contact hands that user the contact's grants (the class of write
+    /// ExternalAccessReconciliationJob's R1 is). The switch exists so the dev live gate can review a report-only
+    /// run before any such write lands; an ungated inline link would make those writes as soon as a licensed user
+    /// signed in after the deploy, ahead of the review (verifier finding 4). Not gated, deliberately: the Type-2
+    /// token plane (a member's own first sign-in, behind the member test — gating it would deny every Type-2
+    /// caller) and registration (an operator-initiated link of a systemuser the BFF itself just created, in a
+    /// target environment the job never scans, so a gate would leave that user unlinked with no safety net).
+    /// </remarks>
+    public const string LinkWritesEnabledConfigKey = "IdentityLink:Reconciliation:WritesEnabled";
+
+    /// <summary>True only when <see cref="LinkWritesEnabledConfigKey"/> parses to <c>true</c>.</summary>
+    public static bool LinkWritesEnabled(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        return bool.TryParse(configuration[LinkWritesEnabledConfigKey], out var enabled) && enabled;
+    }
+
     // ── Workforce token plane ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -527,15 +549,18 @@ public sealed class ContactIdentityBinder
             {
                 // Every row to flag must be KNOWN — its current flag decides idempotence. A row the decision
                 // named without reading (the linked contact in L5) is read now; one that cannot be read is
-                // skipped this run rather than written blind.
+                // skipped this run rather than written blind. Idempotence is per PARTY: this user's collision is
+                // recorded once, even on a contact another identity already flagged (verifier finding 3).
                 await EnsureKnownAsync(decision.FlagContactIds ?? none, known, ct).ConfigureAwait(false);
+                var party = Party(request.CallerOid, request.CallerPlane, decision.Reason!.Value);
                 var toFlag = (decision.FlagContactIds ?? none)
-                    .Where(id => known.TryGetValue(id, out var r) && ContactBindingDecision.ShouldWriteFlag(r.Flag))
+                    .Where(id => known.TryGetValue(id, out var r) && ContactBindingDecision.ShouldWriteFlag(r.Flag, party))
                     .ToList();
                 foreach (var id in toFlag)
                 {
-                    changes.Add(new IdentityChange("contact", id, "flag=(none)",
-                        $"flag reason={decision.Reason} oid={request.CallerOid:D} plane={request.CallerPlane}"));
+                    var before = known[id].Flag is { } open ? $"flag parties={open.Parties.Count}" : "flag=(none)";
+                    changes.Add(new IdentityChange("contact", id, before,
+                        $"flag +party reason={decision.Reason} oid={request.CallerOid:D} plane={request.CallerPlane}"));
                 }
 
                 if (toFlag.Count == 0)
@@ -739,6 +764,7 @@ public sealed class ContactIdentityBinder
     {
         await EnsureKnownAsync(contactIds, known, ct).ConfigureAwait(false);
 
+        var party = Party(collidingOid, collidingPlane, reason);
         var wrote = false;
         foreach (var contactId in contactIds)
         {
@@ -751,32 +777,63 @@ public sealed class ContactIdentityBinder
                 continue;
             }
 
-            if (!ContactBindingDecision.ShouldWriteFlag(row.Flag))
-            {
-                continue; // idempotent: an open flag is never written again
-            }
-
-            var flag = new CollisionFlag(_time.GetUtcNow(), collidingOid == Guid.Empty ? null : collidingOid,
-                collidingPlane, reason);
-            var write = await _store.WriteCollisionFlagAsync(contactId, flag, ct).ConfigureAwait(false);
-            if (write.Status == StoreWriteStatus.Written)
-            {
-                wrote = true;
-                _logger.LogWarning(
-                    "[ID-BIND] Collision FLAGGED on contact {ContactId}: reason={Reason} oid={Oid} plane={Plane}",
-                    contactId, reason, collidingOid, collidingPlane);
-            }
-            else
-            {
-                // The deny stands regardless; only the operator-visible marker is missing, and the log carries it.
-                _logger.LogError(
-                    "[ID-BIND] Collision on contact {ContactId} ({Reason}) could NOT be flagged ({Status}): {Error}",
-                    contactId, reason, write.Status, write.Error);
-            }
+            wrote |= await RecordPartyAsync(row, party, ct).ConfigureAwait(false);
         }
 
         return wrote;
     }
+
+    /// <summary>
+    /// Records <paramref name="party"/> on <paramref name="row"/>'s flag: a new flag, or the existing one plus this
+    /// party. Idempotent per party (<see cref="ContactBindingDecision.ShouldWriteFlag"/>). The write is conditional
+    /// on the row version, so a party another writer appended meanwhile is never overwritten: on 412 the row is
+    /// re-read once and the party appended to what is there now.
+    /// </summary>
+    private async Task<bool> RecordPartyAsync(ContactBindingRow row, CollisionParty party, CancellationToken ct)
+    {
+        var current = row;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            if (!ContactBindingDecision.ShouldWriteFlag(current.Flag, party))
+            {
+                return false; // already recorded (or a flag whose parties cannot be read, which is never overwritten)
+            }
+
+            var flag = ContactBindingDecision.FlagWith(current.Flag, party);
+            var write = await _store.WriteCollisionFlagAsync(current.ContactId, flag, current.ETag, ct).ConfigureAwait(false);
+            if (write.Status == StoreWriteStatus.Written)
+            {
+                _logger.LogWarning(
+                    "[ID-BIND] Collision FLAGGED on contact {ContactId}: reason={Reason} oid={Oid} plane={Plane} parties={Parties}",
+                    current.ContactId, party.Reason, party.Oid, party.Plane, flag.Parties.Count);
+                return true;
+            }
+
+            if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
+            {
+                var fresh = await _store.GetContactAsync(current.ContactId, ct).ConfigureAwait(false);
+                var freshRow = fresh.Status == LookupStatus.Read
+                    ? fresh.Rows.FirstOrDefault(r => r.ContactId == current.ContactId)
+                    : null;
+                if (freshRow is not null)
+                {
+                    current = freshRow;
+                    continue;
+                }
+            }
+
+            // The deny stands regardless; only the operator-visible marker is missing, and the log carries it.
+            _logger.LogError(
+                "[ID-BIND] Collision on contact {ContactId} ({Reason}) could NOT be flagged ({Status}): {Error}",
+                current.ContactId, party.Reason, write.Status, write.Error);
+            return false;
+        }
+
+        return false;
+    }
+
+    private CollisionParty Party(Guid? collidingOid, IdentityPlaneMarker plane, IdentityCollisionReason reason)
+        => new(collidingOid == Guid.Empty ? null : collidingOid, plane, reason, _time.GetUtcNow());
 
     private async Task<bool> MaskedAsync(CancellationToken ct)
     {

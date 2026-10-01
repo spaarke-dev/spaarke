@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -116,6 +117,10 @@ public class WorkforceEmailNoHijackTests
     {
         // Both sign-ins pass the "no contact yet" read, then race to create. The alternate key's unique index
         // admits one; the loser's create-only write gets 412 and it re-reads by oid.
+        // ⚠️ This proves the BINDER given a platform uniqueness guarantee. Which column carries that guarantee is
+        // an open owner decision: Dataverse refuses an alternate key on a field-secured column, and the schema
+        // also field-secures sprk_externalobjectid (notes/task-141-identity-binding.md §9). Until it is decided,
+        // the deployed behaviour is the next test's: creation DENIES rather than risk two contacts.
         var gate = new TaskCompletionSource();
         var arrived = 0;
         _store.BeforeCreate = async _ =>
@@ -167,6 +172,35 @@ public class WorkforceEmailNoHijackTests
         await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
         _store.Writes.Should().ContainSingle(w => w.Op == "flag",
             "a caller retrying a denied sign-in must not turn the deny path into a stream of writes");
+    }
+
+    [Fact]
+    public async Task ASecondIdentityCollidingWithAFlaggedContact_IsRecorded_WithoutOverwritingAConcurrentParty()
+    {
+        // Verifier finding 3: the contact already carries another identity's flag. This caller's collision is
+        // ADDED (not swallowed), and a party a concurrent writer appended between our read and our write
+        // survives: the append is conditional on the row version, and a 412 re-reads and appends again.
+        var first = new CollisionParty(Victim, IdentityPlaneMarker.Workforce, IdentityCollisionReason.LinkedToOtherUser, Now.AddDays(-1));
+        _store.AddContact(ContactA, email: Email, oid: Victim.ToString("D"), plane: IdentityPlaneMarker.External,
+            flag: ContactBindingDecision.FlagWith(null, first));
+        var concurrent = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.External, IdentityCollisionReason.EmailAmbiguous, Now);
+        var fired = false;
+        _store.BeforeFlagWrite = contact =>
+        {
+            if (fired) return;
+            fired = true;
+            contact.Flag = ContactBindingDecision.FlagWith(contact.Flag, concurrent);
+            _store.Touch(contact);
+        };
+
+        var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactBoundToDifferentOid);
+        var flag = _store.Contacts[ContactA].Flag!;
+        flag.Parties.Should().HaveCount(3);
+        flag.Records(first).Should().BeTrue();
+        flag.Records(concurrent).Should().BeTrue("a party appended meanwhile is never overwritten");
+        flag.Parties.Should().Contain(p => p.Oid == Caller && p.Reason == IdentityCollisionReason.BoundToDifferentOid);
     }
 
     // ── Acceptance 5: ambiguity — email or oid — denies and flags; no first-row pick, no create ──────
@@ -383,6 +417,29 @@ public class WorkforceEmailNoHijackTests
     }
 
     [Fact]
+    public async Task BeforeTheOwnerEnablesLinkWrites_ASignInLinksNothing_ExactlyLikeTheReportOnlyJob()
+    {
+        // Verifier finding 4: the inline link is the same R1-class write the job's report-only switch stages
+        // (linking a systemuser to an existing contact hands that user its grants). Ungated, every licensed
+        // sign-in after the deploy would write ahead of the report-only review.
+        var suid = Guid.NewGuid();
+        _store.AddSystemUser(suid, Caller, Email);
+        _store.AddContact(ContactA, email: Email); // an unbound contact the link WOULD bind and hand over
+        var identity = new Mock<IIdentityNormalizationService>(MockBehavior.Strict);
+        identity.Setup(x => x.ResolveAsync(suid, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(suid, ContactId: null));
+
+        var result = await Resolver(Binder(_store, _log), identity.Object, systemUserId: suid, linkWrites: false)
+            .ResolveAsync(WorkforceUser(Caller, CustomerTenant, email: Email), CancellationToken.None);
+
+        result.Principal!.Kind.Should().Be(WorkforcePrincipalKind.SystemUser);
+        result.Principal.ContactId.Should().BeNull("no link exists and none may be written yet");
+        _store.Writes.Should().BeEmpty();
+        _store.Reads.Should().BeEmpty("a gated inline link does not even pay for the decision's reads");
+        _store.Contacts[ContactA].Oid.Should().BeNull();
+    }
+
+    [Fact]
     public async Task ASystemUserWhoseLinkCollides_StaysASystemUserPrincipal_AndIsNotReAttemptedEveryRequest()
     {
         var suid = Guid.NewGuid();
@@ -412,7 +469,7 @@ public class WorkforceEmailNoHijackTests
 
     private static WorkforcePrincipalResolver Resolver(
         ContactIdentityBinder binder, IIdentityNormalizationService? identity = null, Guid? systemUserId = null,
-        ITenantCache? cache = null)
+        ITenantCache? cache = null, bool linkWrites = true)
     {
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
         dataverse
@@ -425,11 +482,19 @@ public class WorkforceEmailNoHijackTests
                 return c;
             });
 
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [ContactIdentityBinder.LinkWritesEnabledConfigKey] = linkWrites ? "true" : null,
+            })
+            .Build();
+
         return new WorkforcePrincipalResolver(
             identity ?? new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
             dataverse.Object,
             cache ?? new DictionaryTenantCache(),
             binder,
+            configuration,
             NullLogger<WorkforcePrincipalResolver>.Instance);
     }
 

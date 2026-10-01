@@ -209,6 +209,206 @@ public class IdentityLinkReconciliationTests
         _store.Writes.Should().NotContain(w => w.Op == "clear" && w.RowId == guestContact);
     }
 
+    // ── Flags with more than one party (verifier finding 3) ──────────────────────────────────────────
+
+    private const string SharedEmail = "shared.inbox@customer.example";
+
+    [Fact]
+    public async Task ASecondSystemUsersLiveCollision_SurvivesTheFirstOnesResolution()
+    {
+        // Contact C belongs to a CIAM identity; two licensed users carry its email, so BOTH collide with it.
+        var c = Guid.NewGuid();
+        _store.AddContact(c, SharedEmail, Guid.NewGuid().ToString("D"), IdentityPlaneMarker.External);
+        var userA = Guid.NewGuid();
+        var oidB = Guid.NewGuid();
+        _store.AddSystemUser(userA, Guid.NewGuid(), SharedEmail);
+        _store.AddSystemUser(Guid.NewGuid(), oidB, SharedEmail);
+
+        await RunAsync(writes: true);
+        _store.Contacts[c].Flag!.Parties.Should().HaveCount(2, "each identity's collision is recorded");
+
+        // The operator resolves A's collision only (A's directory email is corrected). B still collides.
+        _store.SystemUsers[userA].Email = "a.person@customer.example";
+        var next = await RunAsync(writes: true);
+
+        var flag = _store.Contacts[c].Flag;
+        flag.Should().NotBeNull("B's collision with the same contact still holds");
+        flag!.Parties.Should().ContainSingle().Which.Oid.Should().Be(oidB);
+        flag.CollidingOid.Should().Be(oidB, "the operator's view now names the party that still collides");
+        next.Success.Should().BeTrue(next.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ATokenPlaneCallersLiveCollision_SurvivesASystemUsersResolution()
+    {
+        // The case the job can never re-decide: B is a Type-2 employee (token plane, no systemuser). Its collision
+        // is known ONLY through the recorded party, so it must not vanish when A's is resolved.
+        var c = Guid.NewGuid();
+        _store.AddContact(c, SharedEmail, Guid.NewGuid().ToString("D"), IdentityPlaneMarker.External);
+        var userA = Guid.NewGuid();
+        _store.AddSystemUser(userA, Guid.NewGuid(), SharedEmail);
+        await RunAsync(writes: true);
+
+        var oidB = Guid.NewGuid();
+        var denied = await Binder(_store).ResolveWorkforceCallerAsync(
+            WorkforceUser(oidB, CustomerTenant, email: SharedEmail), oidB, CancellationToken.None);
+        denied.DenyCode.Should().Be(ContactBindingDecision.DenyContactBoundToDifferentOid);
+        _store.Contacts[c].Flag!.Parties.Should().HaveCount(2, "a second identity on a flagged contact is recorded, not swallowed");
+
+        _store.SystemUsers[userA].Email = "a.person@customer.example";
+        await RunAsync(writes: true);
+
+        var flag = _store.Contacts[c].Flag;
+        flag.Should().NotBeNull("the Type-2 caller's collision still holds and nothing else would ever re-raise it");
+        flag!.Parties.Should().ContainSingle().Which.Oid.Should().Be(oidB);
+    }
+
+    [Fact]
+    public async Task AFlagIsKept_WhileAnyDecidedSystemUserCollidesWithTheContact_EvenIfThatPartyIsNotRecorded()
+    {
+        // Report-only: pass 1 sees B collide with C but records nothing. C's only recorded party (A) is resolved.
+        // The live collision the run just saw keeps the flag — "clear only when no (C, *) collided this run".
+        var c = Guid.NewGuid();
+        var oidA = Guid.NewGuid();
+        _store.AddContact(c, SharedEmail, Guid.NewGuid().ToString("D"), IdentityPlaneMarker.External,
+            flag: Flag(IdentityCollisionReason.BoundToDifferentOid, oidA));
+        _store.AddSystemUser(Guid.NewGuid(), oidA, "a.person@customer.example"); // A no longer matches C
+        _store.AddSystemUser(Guid.NewGuid(), Guid.NewGuid(), SharedEmail);     // B collides with C
+
+        var result = await RunAsync(writes: null);
+
+        FlagCount(result, "cleared").Should().Be(0, "B's collision with C is live");
+        FlagCount(result, "kept").Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task AnInviteRefusalFlag_IsKept_WhileTheContactStillBelongsToAnEmployee()
+    {
+        // Verifier finding 2(4): an invite refusal carries no oid, so pass 2 re-evaluates it from data. It must
+        // survive the job's 5-minute cycle for as long as the contact is an employee's.
+        var employeeOid = Guid.NewGuid();
+        var c = Guid.NewGuid();
+        _store.AddContact(c, "employee@customer.example", employeeOid.ToString("D"), IdentityPlaneMarker.Workforce,
+            flag: new CollisionFlag(Now, null, IdentityPlaneMarker.External, IdentityCollisionReason.InviteMatchesWorkforceContact));
+        _store.AddSystemUser(Guid.NewGuid(), employeeOid, "employee@customer.example", primaryContactId: c);
+
+        await RunAsync(writes: true);
+
+        _store.Contacts[c].Flag.Should().NotBeNull("the invite collision is durable until an operator resolves it");
+        _store.Writes.Should().NotContain(w => w.Op == "clear" && w.RowId == c);
+    }
+
+    [Fact]
+    public async Task AFlagClear_IsConditionalOnTheVersionItWasDecidedOn_SoAPartyAppendedMeanwhileSurvives()
+    {
+        // Pass 2 decides to clear (the recorded party's collision was resolved), but another identity's collision
+        // is appended AFTER the flag scan read the row and BEFORE the clear (here: while pass 2 reads the evidence
+        // for that row). The clear must fail rather than wipe the new party — so it must be conditional on the
+        // version the verdict was made on, not on a fresher read.
+        var c = Guid.NewGuid();
+        _store.AddContact(c, "resolved@customer.example", oid: null, plane: null,
+            flag: Flag(IdentityCollisionReason.BoundToDifferentOid, Guid.NewGuid(), IdentityPlaneMarker.Workforce));
+        var late = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.External, IdentityCollisionReason.EmailAmbiguous, Now);
+        var fired = false;
+        _store.AfterRead = op =>
+        {
+            if (fired || op != "references" || !_store.Reads.Contains("scan-flags")) return;
+            fired = true;
+            var contact = _store.Contacts[c];
+            contact.Flag = ContactBindingDecision.FlagWith(contact.Flag, late);
+            _store.Touch(contact);
+        };
+
+        var result = await RunAsync(writes: true);
+
+        _store.Contacts[c].Flag.Should().NotBeNull("the party appended after the scan read the row survives");
+        _store.Contacts[c].Flag!.Records(late).Should().BeTrue();
+        result.Success.Should().BeFalse("a write that did not complete is reported; the next run re-evaluates");
+    }
+
+    [Fact]
+    public async Task AFlagReadWithoutARowVersion_IsNeverPruned()
+    {
+        // One party resolved (the contact is unbound), one still holds (two active contacts carry the email), so
+        // pass 2 would PRUNE. Without the version the verdict was made on, an unconditional prune could drop a
+        // party appended meanwhile — so it is not written at all.
+        var c = Guid.NewGuid();
+        var resolved = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.Workforce, IdentityCollisionReason.BoundToDifferentOid, Now);
+        var holding = new CollisionParty(Guid.NewGuid(), IdentityPlaneMarker.Workforce, IdentityCollisionReason.EmailAmbiguous, Now);
+        _store.AddContact(c, "dup@customer.example", flag: CollisionFlag.FromParties(new[] { resolved, holding }));
+        _store.AddContact(Guid.NewGuid(), "dup@customer.example");
+        _store.ScanFlaggedWithoutETags = true;
+
+        var result = await RunAsync(writes: true);
+
+        _store.Contacts[c].Flag!.Parties.Should().HaveCount(2, "nothing is rewritten without a row version");
+        _store.Writes.Should().NotContain(w => w.Op == "flag" && w.RowId == c);
+        result.Success.Should().BeFalse("the write that could not be made is reported; the next run re-evaluates");
+    }
+
+    // ── Pass 2 never runs on a partial view (verifier finding 2(1), 2(2)) ────────────────────────────
+
+    [Fact]
+    public async Task ATruncatedScan_SkipsFlagClearing_SoAFlagOfAnUnscannedUserSurvives()
+    {
+        // A guest whose systemuser sorts LAST, so a truncated scan never reaches it. Its flag reason is one pass 2
+        // can only evaluate from that user's own decision; evaluated without it, the flag would be cleared.
+        var guestOid = Guid.NewGuid();
+        var guestContact = Guid.NewGuid();
+        _store.AddContact(guestContact, "guest.partner@other.example",
+            flag: Flag(IdentityCollisionReason.GuestLinkUnverified, guestOid));
+        _store.AddSystemUser(Guid.Parse("ffffffff-ffff-4fff-bfff-ffffffffffff"), guestOid, "guest.partner@other.example",
+            primaryContactId: guestContact, domainName: "guest.partner_other.example#EXT#@spaarke.onmicrosoft.com");
+        const int PageCeiling = 40; // IdentityLinkReconciliationJob.MaxPages
+        for (var i = 0; i < PageCeiling + 5; i++)
+        {
+            _store.AddSystemUser(Guid.NewGuid(), Guid.NewGuid(), email: null);
+        }
+
+        _store.ScanPageSize = 1;
+
+        var result = await RunAsync(writes: true);
+
+        UsersScanned(result).Should().Be(PageCeiling, "the scan stopped at the page ceiling");
+        _store.Contacts[guestContact].Flag.Should().NotBeNull("no flag is cleared on a partial view");
+        _store.Reads.Should().NotContain("scan-flags");
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Pass 2");
+    }
+
+    [Fact]
+    public async Task AFailedMaskingProbe_AbortsTheRun_BeforeAnyDecision()
+    {
+        _store.FailProbe = true;
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeFalse("a probe that could not be read is not evidence the column is readable");
+        _store.Writes.Should().BeEmpty();
+        _store.Reads.Should().NotContain("scan-users");
+        _store.Reads.Should().NotContain("scan-flags");
+    }
+
+    // ── The cheap Verified path (verifier finding 2(3)) ─────────────────────────────────────────────
+
+    [Fact]
+    public async Task ALinkedUserWhoseContactIsInactive_IsFlagged_NeverReportedVerified()
+    {
+        var oid = Guid.NewGuid();
+        var linked = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        _store.AddContact(linked, "inactive.link@spaarke.com", oid.ToString("D"), IdentityPlaneMarker.Workforce, stateCode: 1);
+        _store.AddSystemUser(user, oid, "inactive.link@spaarke.com", primaryContactId: linked);
+
+        var outcome = await Binder(_store).EnsureSystemUserLinkAsync(_store.SystemUsers[user].Id, applyWrites: true,
+            CancellationToken.None);
+
+        outcome.Outcome.Should().Be(SystemUserLinkOutcome.Flagged, "an inactive contact never verifies a link");
+        outcome.Reason.Should().Be(IdentityCollisionReason.LinkedContactInactive);
+        _store.Contacts[linked].Flag!.Reason.Should().Be(IdentityCollisionReason.LinkedContactInactive);
+        _store.SystemUsers[user].PrimaryContactId.Should().Be(linked, "the existing link is never cleared or re-pointed");
+    }
+
     // ── Failure shapes ───────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -305,6 +505,12 @@ public class IdentityLinkReconciliationTests
     {
         using var doc = JsonDocument.Parse(result.ResultJson!);
         return doc.RootElement.GetProperty("systemUsers").GetProperty("scanned").GetInt32();
+    }
+
+    private static int FlagCount(JobRunResult result, string property)
+    {
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.GetProperty("flags").GetProperty(property).GetInt32();
     }
 
     private static string Mode(JobRunResult result)

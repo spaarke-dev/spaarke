@@ -70,8 +70,11 @@ A customer with more than one workforce tenant (e.g. after an acquisition) lists
 - **Dataverse schema** — `scripts/Set-ContactIdentityBindingSchema.ps1 -Apply` then `-Verify` must run BEFORE a BFF
   carrying task 141 is deployed (it selects the new columns; without them CIAM and Type-2 sign-ins fail closed with
   `binding_column_missing`). A natural home is after H6 (solution import) and before H9 (BFF deploy), or folding the
-  components into the SpaarkeCore managed solution once they are exported.
-- **Job switch** `IdentityLink__Reconciliation__WritesEnabled` — absent = report-only. A new stamp should run one
-  report-only cycle, then set `true`.
+  components into the SpaarkeCore managed solution once they are exported. ⛔ **Do not wire it yet**: as designed
+  it asks for an alternate key AND field-level security on the same column, which Dataverse refuses, so `-Apply`
+  currently stops before any write. The owner's decision (UAC-r2 `notes/task-141-identity-binding.md` §9) will
+  change what the script provisions; UAC-r2 will re-send this item when it is made.
+- **Job switch** `IdentityLink__Reconciliation__WritesEnabled` — absent = report-only. It also gates the inline
+  link a licensed user would get at first sign-in. A new stamp should run one report-only cycle, then set `true`.
 
 Authoritative operator text: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 / §6.5.3 / §7.3.

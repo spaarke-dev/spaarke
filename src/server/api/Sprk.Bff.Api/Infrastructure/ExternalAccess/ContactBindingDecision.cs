@@ -130,13 +130,88 @@ public readonly record struct BindingState(BindingKind Kind, Guid? Oid, Identity
 }
 
 /// <summary>
-/// A durable, operator-visible collision flag on a contact (the four <c>sprk_identitycollision*</c> columns).
+/// One identity's collision with a contact: who collided (oid and plane), why, and when. An invite refusal has
+/// no oid (the CIAM account was never created).
 /// </summary>
+public sealed record CollisionParty(
+    Guid? Oid,
+    IdentityPlaneMarker? Plane,
+    IdentityCollisionReason? Reason,
+    DateTimeOffset FlaggedOn)
+{
+    /// <summary>
+    /// The same identity colliding for the same reason. This is the idempotence key: a party already recorded
+    /// is never written again, however often that identity retries a denied sign-in.
+    /// </summary>
+    public bool IsSameCollision(CollisionParty other)
+        => other is not null && Oid == other.Oid && Plane == other.Plane && Reason == other.Reason;
+}
+
+/// <summary>
+/// A durable, operator-visible collision flag on a contact. The four summary columns
+/// (<c>sprk_identitycollisionon / oid / plane / reason</c>) carry the FIRST party, which is what the operator's
+/// "Contacts with Identity Collisions" view lists; <c>sprk_identitycollisionparties</c> carries EVERY party.
+/// </summary>
+/// <remarks>
+/// <b>Why more than one party</b> (task 141 verifier finding 3): with one slot, the second identity to collide
+/// with an already-flagged contact was never recorded. When the first party's collision was resolved the job
+/// cleared the flag, and the second collision — still live — vanished from the operator's view until that
+/// identity happened to sign in again. Every party is now recorded, and the flag is cleared only when none of
+/// them still collides.
+/// </remarks>
 public sealed record CollisionFlag(
     DateTimeOffset FlaggedOn,
     Guid? CollidingOid,
     IdentityPlaneMarker? CollidingPlane,
-    IdentityCollisionReason? Reason);
+    IdentityCollisionReason? Reason)
+{
+    /// <summary>The parties after the first, oldest first.</summary>
+    public IReadOnlyList<CollisionParty> OtherParties { get; init; } = Array.Empty<CollisionParty>();
+
+    /// <summary>
+    /// True when the parties column is present but cannot be read (not the shape the BFF writes, or not
+    /// starting with the summary's party — someone edited it). Such a flag may record parties we cannot see,
+    /// so it is never overwritten and never cleared by the job; an operator resolves it.
+    /// </summary>
+    public bool HasUnreadableParties { get; init; }
+
+    /// <summary>The first party — the four summary columns.</summary>
+    public CollisionParty Primary => new(CollidingOid, CollidingPlane, Reason, FlaggedOn);
+
+    /// <summary>Every recorded party, the first one first.</summary>
+    public IReadOnlyList<CollisionParty> Parties => new[] { Primary }.Concat(OtherParties).ToList();
+
+    /// <summary>True when <paramref name="party"/>'s collision is already recorded.</summary>
+    public bool Records(CollisionParty party) => Parties.Any(p => p.IsSameCollision(party));
+
+    /// <summary>A flag whose parties are <paramref name="parties"/> (the first becomes the summary); null for none.</summary>
+    public static CollisionFlag? FromParties(IReadOnlyList<CollisionParty> parties)
+    {
+        ArgumentNullException.ThrowIfNull(parties);
+        if (parties.Count == 0) return null;
+        var first = parties[0];
+        return new CollisionFlag(first.FlaggedOn, first.Oid, first.Plane, first.Reason)
+        {
+            OtherParties = parties.Skip(1).ToList(),
+        };
+    }
+}
+
+/// <summary>What the reconciliation job does with one open flag.</summary>
+public enum FlagReconciliationAction
+{
+    /// <summary>Every recorded party still collides (or the evidence is incomplete): leave the flag as it is.</summary>
+    Keep,
+
+    /// <summary>Some parties no longer collide: rewrite the flag with the ones that still do.</summary>
+    Prune,
+
+    /// <summary>No party collides any more: clear the flag.</summary>
+    Clear,
+}
+
+/// <summary>The reconciliation job's answer for one open flag.</summary>
+public sealed record FlagReconciliation(FlagReconciliationAction Action, CollisionFlag? Remaining = null);
 
 /// <summary>One contact row as the binding decision needs it. Raw column values, interpreted by the decision.</summary>
 /// <param name="ContactId">The contact.</param>
@@ -747,33 +822,98 @@ public static class ContactBindingDecision
     }
 
     /// <summary>
-    /// Whether a collision flag should be written onto a row. Idempotent by construction: a row that already
-    /// carries an open flag is never written again — not for the same identity (a caller retrying a denied
-    /// sign-in must not turn the deny path into a stream of writes) and not for a different one (the first
-    /// open collision stands until an operator resolves it and the job clears it).
+    /// The most parties one flag records. Past it a new party is NOT recorded, so a flag at capacity is never
+    /// cleared or pruned by the job (an unrecorded party may still collide) — an operator clears it.
     /// </summary>
-    public static bool ShouldWriteFlag(CollisionFlag? existing) => existing is null;
+    public const int MaxCollisionParties = 20;
 
     /// <summary>
-    /// Whether a stored collision still holds, re-evaluated by the reconciliation job for flags whose
-    /// colliding identity is not a systemuser the run re-decided. A flag is cleared only when this is false.
+    /// Whether <paramref name="party"/>'s collision should be written onto a row. Idempotent per collision: a
+    /// party already recorded is never written again (a caller retrying a denied sign-in must not turn the deny
+    /// path into a stream of writes), so each distinct identity costs at most one write per contact. A
+    /// DIFFERENT identity colliding with an already-flagged contact IS recorded — otherwise its collision would
+    /// disappear the moment the first party's was resolved (verifier finding 3).
     /// </summary>
-    /// <param name="flag">The open flag.</param>
+    public static bool ShouldWriteFlag(CollisionFlag? existing, CollisionParty party)
+    {
+        ArgumentNullException.ThrowIfNull(party);
+        return existing is null
+            || (!existing.HasUnreadableParties && !existing.Records(party) && existing.Parties.Count < MaxCollisionParties);
+    }
+
+    /// <summary>The flag to write: a new one for the first party, else <paramref name="existing"/> plus the party.</summary>
+    public static CollisionFlag FlagWith(CollisionFlag? existing, CollisionParty party)
+    {
+        ArgumentNullException.ThrowIfNull(party);
+        return existing is null
+            ? CollisionFlag.FromParties(new[] { party })!
+            : existing with { OtherParties = existing.OtherParties.Append(party).ToList() };
+    }
+
+    /// <summary>
+    /// What the reconciliation job does with one open flag, given the recorded parties whose collision still
+    /// holds (<paramref name="stillHolding"/>) and whether any systemuser decided THIS run collided with the
+    /// contact (<paramref name="collidesThisRun"/>). Pure.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>A flag at <see cref="MaxCollisionParties"/> is KEPT: a party past the cap was never recorded, so
+    ///     no evidence about the recorded ones can show the contact is clear.</item>
+    ///   <item>A flag is CLEARED only when no recorded party still collides AND no systemuser collided with the
+    ///     contact this run. The second condition covers a collision the run saw but has not recorded (report-only
+    ///     mode, or an append that lost a race): it is still a live collision, so the flag stays.</item>
+    ///   <item>Otherwise a flag some of whose parties no longer collide is PRUNED to the ones that do, so the
+    ///     operator's view names a party that still collides.</item>
+    /// </list>
+    /// </remarks>
+    public static FlagReconciliation ReconcileFlag(
+        CollisionFlag flag, IReadOnlyCollection<CollisionParty> stillHolding, bool collidesThisRun)
+    {
+        ArgumentNullException.ThrowIfNull(flag);
+        ArgumentNullException.ThrowIfNull(stillHolding);
+
+        var parties = flag.Parties;
+        if (flag.HasUnreadableParties || parties.Count >= MaxCollisionParties)
+        {
+            return new FlagReconciliation(FlagReconciliationAction.Keep);
+        }
+
+        var remaining = parties.Where(p => stillHolding.Any(h => h.IsSameCollision(p))).ToList();
+        if (remaining.Count == 0)
+        {
+            return collidesThisRun
+                ? new FlagReconciliation(FlagReconciliationAction.Keep)
+                : new FlagReconciliation(FlagReconciliationAction.Clear);
+        }
+
+        return remaining.Count < parties.Count
+            ? new FlagReconciliation(FlagReconciliationAction.Prune, CollisionFlag.FromParties(remaining))
+            : new FlagReconciliation(FlagReconciliationAction.Keep);
+    }
+
+    /// <summary>
+    /// Whether one recorded party's collision still holds, re-evaluated by the reconciliation job for a party
+    /// that is not a systemuser the run re-decided. A party is dropped only when this is false.
+    /// </summary>
+    /// <param name="party">The recorded party.</param>
     /// <param name="flagged">The flagged contact, freshly read.</param>
     /// <param name="emailCarriers">Active contacts carrying the flagged contact's email.</param>
-    /// <param name="oidCarriers">Contacts carrying the colliding oid.</param>
+    /// <param name="oidCarriers">Contacts carrying the party's oid.</param>
     /// <param name="references">Systemusers linking the flagged contact.</param>
     public static bool CollisionStillHolds(
-        CollisionFlag flag,
+        CollisionParty party,
         ContactBindingRow flagged,
         ContactLookup emailCarriers,
         ContactLookup oidCarriers,
         ReferenceLookup references)
     {
-        ArgumentNullException.ThrowIfNull(flag);
+        ArgumentNullException.ThrowIfNull(party);
         ArgumentNullException.ThrowIfNull(flagged);
+        ArgumentNullException.ThrowIfNull(emailCarriers);
+        ArgumentNullException.ThrowIfNull(oidCarriers);
+        ArgumentNullException.ThrowIfNull(references);
 
-        // Anything we could not read keeps the flag: clearing on a failed read is the fail-open direction.
+        // Anything we could not read keeps the party: dropping it on a failed read is the fail-open direction.
         if (emailCarriers.Status != LookupStatus.Read || oidCarriers.Status != LookupStatus.Read
             || references.Status != LookupStatus.Read)
         {
@@ -789,11 +929,11 @@ public static class ContactBindingDecision
         var binding = flagged.Binding;
         var links = references.References.Where(r => r.LinkedContactId == flagged.ContactId).ToList();
 
-        return flag.Reason switch
+        return party.Reason switch
         {
             IdentityCollisionReason.BoundToDifferentOid or IdentityCollisionReason.LinkedContactBoundToDifferentOid
                 => binding.Kind == BindingKind.Unreadable
-                   || (binding.Kind == BindingKind.Bound && binding.Oid != flag.CollidingOid),
+                   || (binding.Kind == BindingKind.Bound && binding.Oid != party.Oid),
             IdentityCollisionReason.EmailAmbiguous
                 => emailCarriers.Rows.Count(r => r.IsActive) > 1,
             IdentityCollisionReason.OidOnMultipleContacts
@@ -801,9 +941,9 @@ public static class ContactBindingDecision
             IdentityCollisionReason.BindingUnreadable
                 => binding.Kind == BindingKind.Unreadable,
             IdentityCollisionReason.LinkedToOtherUser
-                => flag.CollidingPlane == IdentityPlaneMarker.External
+                => party.Plane == IdentityPlaneMarker.External
                     ? links.Count > 0
-                    : links.Any(r => r.Oid != flag.CollidingOid),
+                    : links.Any(r => r.Oid != party.Oid),
             IdentityCollisionReason.InviteMatchesWorkforceContact
                 => (binding.Kind == BindingKind.Bound && binding.Plane == IdentityPlaneMarker.Workforce)
                    || links.Count > 0,

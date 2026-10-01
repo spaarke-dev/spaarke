@@ -10,6 +10,7 @@
 
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -161,8 +162,14 @@ public class WorkforcePrincipalResolverTests
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
+    /// <remarks>Link writes ON, so the inline link runs (it is gated on the rollout switch — verifier finding 4).</remarks>
     private WorkforcePrincipalResolver CreateSut(IDataverseService dataverse, IIdentityNormalizationService identity)
-        => new(identity, dataverse, new FakeTenantCache(), Binder(_store), NullLogger<WorkforcePrincipalResolver>.Instance);
+        => new(identity, dataverse, new FakeTenantCache(), Binder(_store),
+            new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [ContactIdentityBinder.LinkWritesEnabledConfigKey] = "true",
+            }).Build(),
+            NullLogger<WorkforcePrincipalResolver>.Instance);
 
     private static ClaimsPrincipal BuildUser(
         Guid? oid, Guid? tid = null, string? email = null, string? preferredUsername = null, string acct = "0")

@@ -74,16 +74,81 @@ public class DataverseContactIdentityStoreTests
     }
 
     [Fact]
-    public void TheFlagPayloads_SetAndClearAllFourColumns()
+    public void TheFlagPayloads_SetAndClearAllFiveColumns_IncludingEveryParty()
     {
         var flag = new CollisionFlag(new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero), Oid,
             IdentityPlaneMarker.External, IdentityCollisionReason.EmailAmbiguous);
+        flag = ContactBindingDecision.FlagWith(flag, new CollisionParty(null, IdentityPlaneMarker.External,
+            IdentityCollisionReason.InviteMatchesWorkforceContact, new DateTimeOffset(2026, 10, 1, 10, 0, 0, TimeSpan.Zero)));
 
         var set = DataverseContactIdentityStore.FlagPayload(flag);
         set["sprk_identitycollisionon"].Should().Be("2026-10-01T09:00:00Z");
         set["sprk_identitycollisionreason"].Should().Be(100000001);
+        DataverseContactIdentityStore.ParseParties((string?)set["sprk_identitycollisionparties"])!
+            .Should().HaveCount(2, "the parties column carries every party, the first included");
         DataverseContactIdentityStore.ClearFlagPayload().Values.Should().AllSatisfy(v => v.Should().BeNull());
         DataverseContactIdentityStore.ClearFlagPayload().Keys.Should().BeEquivalentTo(set.Keys);
+    }
+
+    [Fact]
+    public void TheParties_RoundTrip_ThroughTheColumnTheBffWrites()
+    {
+        var on = new DateTimeOffset(2026, 10, 1, 9, 0, 0, TimeSpan.Zero);
+        var parties = new[]
+        {
+            new CollisionParty(Oid, IdentityPlaneMarker.Workforce, IdentityCollisionReason.BoundToDifferentOid, on),
+            new CollisionParty(null, IdentityPlaneMarker.External, IdentityCollisionReason.InviteMatchesWorkforceContact, on.AddHours(1)),
+        };
+
+        var back = DataverseContactIdentityStore.ParseParties(DataverseContactIdentityStore.SerializeParties(parties))!;
+
+        back.Should().HaveCount(2);
+        back[0].IsSameCollision(parties[0]).Should().BeTrue();
+        back[1].IsSameCollision(parties[1]).Should().BeTrue();
+        back[1].FlaggedOn.Should().Be(on.AddHours(1));
+    }
+
+    [Fact]
+    public void ParseContactRow_ReadsEveryRecordedParty()
+    {
+        // Verifier finding 3: a second identity's collision lives in the parties column. A reader that ignored
+        // it would see one party, and the job would clear the flag when that one was resolved.
+        using var doc = JsonDocument.Parse("""
+            {"@odata.etag":"W/\"7\"","contactid":"cccccccc-0000-4000-8000-00000000000a","statecode":0,
+             "sprk_externalobjectid":"dddddddd-0000-4000-8000-00000000000d","sprk_identityplane":100000000,
+             "sprk_identitycollisionon":"2026-10-01T09:00:00Z","sprk_identitycollisionoid":"aaaaaaaa-0000-4000-8000-000000000001",
+             "sprk_identitycollisionplane":100000001,"sprk_identitycollisionreason":100000000,
+             "sprk_identitycollisionparties":"[{\"oid\":\"aaaaaaaa-0000-4000-8000-000000000001\",\"plane\":100000001,\"reason\":100000000,\"on\":\"2026-10-01T09:00:00Z\"},{\"oid\":\"bbbbbbbb-0000-4000-8000-000000000002\",\"plane\":100000001,\"reason\":100000000,\"on\":\"2026-10-01T09:05:00Z\"}]"}
+            """);
+
+        var flag = DataverseContactIdentityStore.ParseContactRow(doc.RootElement)!.Flag!;
+
+        flag.Parties.Should().HaveCount(2);
+        flag.Parties[1].Oid.Should().Be(Guid.Parse("bbbbbbbb-0000-4000-8000-000000000002"));
+        flag.HasUnreadableParties.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("[{\"oid\":\"not-a-guid\",\"on\":\"2026-10-01T09:00:00Z\"}]")]
+    [InlineData("[{\"oid\":\"bbbbbbbb-0000-4000-8000-000000000002\",\"plane\":100000001,\"reason\":100000000,\"on\":\"2026-10-01T09:00:00Z\"}]")]
+    public void ParseContactRow_APartiesColumnItCannotTrust_MarksTheFlagUnreadable_NeverDropsIt(string parties)
+    {
+        // The third row is well-formed but does not start with the summary's party — someone edited one and not
+        // the other. Either way the flag may name parties we cannot see: kept, never overwritten or cleared.
+        var row = $$"""
+            {"@odata.etag":"W/\"7\"","contactid":"cccccccc-0000-4000-8000-00000000000a","statecode":0,
+             "sprk_identitycollisionon":"2026-10-01T09:00:00Z","sprk_identitycollisionoid":"aaaaaaaa-0000-4000-8000-000000000001",
+             "sprk_identitycollisionplane":100000001,"sprk_identitycollisionreason":100000000,
+             "sprk_identitycollisionparties":{{JsonSerializer.Serialize(parties)}}}
+            """;
+        using var doc = JsonDocument.Parse(row);
+
+        var flag = DataverseContactIdentityStore.ParseContactRow(doc.RootElement)!.Flag!;
+
+        flag.HasUnreadableParties.Should().BeTrue();
+        ContactBindingDecision.ReconcileFlag(flag, Array.Empty<CollisionParty>(), false).Action
+            .Should().Be(FlagReconciliationAction.Keep);
     }
 
     [Fact]

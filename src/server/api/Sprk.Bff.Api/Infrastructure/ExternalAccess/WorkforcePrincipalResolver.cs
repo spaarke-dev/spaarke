@@ -10,7 +10,8 @@
 //                               systemuser's contact from IIdentityNormalizationService (its sprk_primarycontact
 //                               link, else the contact bound to its oid). A licensed user with NO linked contact
 //                               is linked INLINE here (ContactIdentityBinder, task 141) and the new link takes
-//                               effect on this request — the cached identity is invalidated.
+//                               effect on this request — the cached identity is invalidated. The inline link is
+//                               gated on the job's rollout switch (IdentityLink:Reconciliation:WritesEnabled).
 //   (b) AAD oid → contact     : ContactIdentityBinder.ResolveWorkforceCallerAsync — the contact BOUND to the
 //                               caller's oid (contact.sprk_externalobjectid). A first sign-in by a MEMBER of a
 //                               configured customer workforce tenant (acct = 0) may bind by email (exactly one
@@ -73,6 +74,7 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     private readonly IDataverseService _dataverse;
     private readonly ITenantCache _cache;
     private readonly ContactIdentityBinder _binder;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<WorkforcePrincipalResolver> _logger;
 
     public WorkforcePrincipalResolver(
@@ -80,18 +82,21 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
         IDataverseService dataverse,
         ITenantCache cache,
         ContactIdentityBinder binder,
+        IConfiguration configuration,
         ILogger<WorkforcePrincipalResolver> logger)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(cache);
         ArgumentNullException.ThrowIfNull(binder);
+        ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(logger);
 
         _identity = identity;
         _dataverse = dataverse;
         _cache = cache;
         _binder = binder;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -199,8 +204,23 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
     /// returned directly AND the cached identity is invalidated, so it takes effect on THIS request. A user
     /// whose link cannot be made (a flagged collision) is not re-attempted for 10 minutes.
     /// </summary>
+    /// <remarks>
+    /// Gated on the SAME rollout switch as the reconciliation job
+    /// (<see cref="ContactIdentityBinder.LinkWritesEnabledConfigKey"/>): until the owner turns writes on after
+    /// reviewing the report-only run, a licensed user who signs in is not linked, flagged or given a created
+    /// contact here, exactly as the job writes nothing (verifier finding 4). The user stays a systemuser
+    /// principal with no derived contact, which is the behaviour before task 141; nothing is read.
+    /// </remarks>
     private async Task<Guid?> TryLinkSystemUserAsync(Guid systemUserId, string tenantId, CancellationToken ct)
     {
+        if (!ContactIdentityBinder.LinkWritesEnabled(_configuration))
+        {
+            _logger.LogDebug(
+                "[WF-AUTH] Inline contact link for systemuser {SystemUserId} skipped: {Switch} is not true (report-only rollout)",
+                systemUserId, ContactIdentityBinder.LinkWritesEnabledConfigKey);
+            return null;
+        }
+
         var cacheId = systemUserId.ToString("D");
         try
         {

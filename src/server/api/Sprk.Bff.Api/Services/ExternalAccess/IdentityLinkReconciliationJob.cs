@@ -23,8 +23,11 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// and membership rows). Pass 1 walks enabled interactive systemusers and runs the SAME decision every other
 /// path runs (<see cref="ContactIdentityBinder.EnsureSystemUserLinkAsync(SystemUserIdentityRow, bool, CancellationToken)"/>):
 /// verify, link, bind, create, or flag — never re-pointing or clearing an existing link. Pass 2 walks contacts
-/// with an open flag and clears the ones whose collision no longer holds (an operator resolved it). Pass 2 runs
-/// only after a COMPLETE pass 1: a flag is only cleared on evidence, never on a partial view.</para>
+/// with an open flag and re-evaluates EVERY recorded party: a flag is cleared only when no party still collides
+/// and no systemuser collided with the contact this run, and pruned to the parties that still collide otherwise
+/// (<see cref="ContactBindingDecision.ReconcileFlag"/>). Pass 2 runs only after a COMPLETE pass 1 — not after a
+/// failed or truncated scan, and not when the binding column could not be probed: a flag is only cleared on
+/// evidence, never on a partial view.</para>
 ///
 /// <para><b>The safety convention, copied from <see cref="ExternalAccessReconciliationJob"/>.</b> Linking a
 /// systemuser to an existing contact hands that user the contact's grants — the same class of write as that
@@ -36,9 +39,11 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///
 /// <para><b>Idempotent per row, so no chunk claims.</b> Every write is conditional: a bind and a link carry the
 /// row version read with the row (<c>If-Match</c>), a create is create-only through the alternate key
-/// (<c>If-None-Match: *</c>), and a flag is written only onto a row that has none. A second run — or a second
-/// instance — re-decides from current data and finds nothing to do, which is the at-most-once property
-/// ADR-036 A1 rule 3 asks for, without a claim store.</para>
+/// (<c>If-None-Match: *</c>), a collision party is recorded once per contact, and a flag is pruned or cleared only
+/// on the row version its verdict was made on. A second run — or a second instance — re-decides from current data
+/// and finds nothing to do, which is the at-most-once property ADR-036 A1 rule 3 asks for, without a claim store.
+/// (The create's uniqueness guarantee depends on the alternate key, which is PENDING an owner decision: Dataverse
+/// refuses an alternate key on a field-secured column — notes/task-141-identity-binding.md §9.)</para>
 ///
 /// <para><b>Cheap when nothing changed.</b> The scan expands each user's linked contact, so a verified user costs
 /// no query beyond its page. Every 5 minutes because the owner's rule for access changes is "minutes, never
@@ -56,8 +61,11 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
     /// <summary>Every 5 minutes.</summary>
     internal const string DefaultCronSchedule = "*/5 * * * *";
 
-    /// <summary>The owner switch. Absent, empty or unparseable = REPORT-ONLY.</summary>
-    internal const string WritesEnabledConfigKey = "IdentityLink:Reconciliation:WritesEnabled";
+    /// <summary>
+    /// The owner switch. Absent, empty or unparseable = REPORT-ONLY. The same switch gates the inline link
+    /// (<see cref="ContactIdentityBinder.LinkWritesEnabledConfigKey"/>).
+    /// </summary>
+    internal const string WritesEnabledConfigKey = ContactIdentityBinder.LinkWritesEnabledConfigKey;
 
     /// <summary>The paging ceiling per scan (× 500 rows). Past it the run reports TRUNCATED.</summary>
     internal const int MaxPages = 40;
@@ -117,7 +125,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         + "or clears an existing link. Report-only until IdentityLink:Reconciliation:WritesEnabled is true.";
 
     /// <summary>Report-only unless the switch parses to <c>true</c>.</summary>
-    internal bool WritesEnabled => bool.TryParse(_configuration[WritesEnabledConfigKey], out var enabled) && enabled;
+    internal bool WritesEnabled => ContactIdentityBinder.LinkWritesEnabled(_configuration);
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -208,14 +216,14 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             "[ID-LINK-RECON] heartbeat status={Status} mode={Mode} readability={Readability} usersScanned={Scanned} "
             + "verified={Verified} linked={Linked} boundAndLinked={Bound} createdAndLinked={Created} "
             + "boundLinkedContact={BoundLinked} flagged={Flagged} flagAlreadyPresent={FlagPresent} denied={Denied} "
-            + "failed={Failed} flagsScanned={FlagsScanned} flagsCleared={Cleared} flagsKept={Kept} "
+            + "failed={Failed} flagsScanned={FlagsScanned} flagsCleared={Cleared} flagsPruned={Pruned} flagsKept={Kept} "
             + "truncated={Truncated} durationMs={DurationMs} attempt={Attempt} trigger={Trigger} correlationId={CorrelationId}",
             status, mode, report.Readability, report.UsersScanned,
             report.Count(SystemUserLinkOutcome.Verified), report.Count(SystemUserLinkOutcome.Linked),
             report.Count(SystemUserLinkOutcome.BoundAndLinked), report.Count(SystemUserLinkOutcome.CreatedAndLinked),
             report.Count(SystemUserLinkOutcome.BoundLinkedContact), report.Count(SystemUserLinkOutcome.Flagged),
             report.Count(SystemUserLinkOutcome.FlagAlreadyPresent), report.Count(SystemUserLinkOutcome.Denied),
-            report.Count(SystemUserLinkOutcome.Failed), report.FlagsScanned, report.Cleared, report.Kept,
+            report.Count(SystemUserLinkOutcome.Failed), report.FlagsScanned, report.Cleared, report.Pruned, report.Kept,
             report.UserScanTruncated, (long)duration.TotalMilliseconds, context.Attempt, context.Trigger,
             context.CorrelationId);
 
@@ -315,54 +323,56 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
                 }
 
                 report.FlagsScanned++;
-                bool holds;
-                if (flag.CollidingOid is { } oid && report.DecidedOids.Contains(oid))
-                {
-                    // That systemuser was re-decided in pass 1: the flag holds iff the decision flagged this contact.
-                    holds = report.CollisionsThisRun.Contains((contact.ContactId, oid));
-                }
-                else if (flag.CollidingOid is { } undecided && report.ScannedOids.Contains(undecided))
-                {
-                    // That systemuser WAS scanned, but its decision did not complete this run (a lookup or a write
-                    // failed). No evidence either way, so the flag stays — clearing on a failed read is the
-                    // fail-open direction, and the per-reason re-evaluation below assumes the party is GONE.
-                    holds = true;
-                }
-                else
-                {
-                    var emailCarriers = string.IsNullOrWhiteSpace(contact.Email)
-                        ? ContactLookup.Of()
-                        : await store.FindActiveContactsByEmailAsync(contact.Email, ct).ConfigureAwait(false);
-                    var oidCarriers = flag.CollidingOid is { } o
-                        ? await store.FindContactsByOidAsync(o, ct).ConfigureAwait(false)
-                        : ContactLookup.Of();
-                    var refs = await store.FindSystemUsersLinkingAsync(new[] { contact.ContactId }, ct).ConfigureAwait(false);
-                    holds = ContactBindingDecision.CollisionStillHolds(flag, contact, emailCarriers, oidCarriers, refs);
-                }
+                var stillHolding = await PartiesStillHoldingAsync(store, report, contact, flag, ct).ConfigureAwait(false);
 
-                if (holds)
+                // Any systemuser decided THIS run that collided with this contact keeps the flag, whoever the
+                // recorded parties are (verifier finding 3: one party resolving must not clear another's live
+                // collision on the same contact).
+                var collidesThisRun = report.CollisionsThisRun.Any(c => c.ContactId == contact.ContactId);
+                var verdict = ContactBindingDecision.ReconcileFlag(flag, stillHolding, collidesThisRun);
+                if (verdict.Action == FlagReconciliationAction.Keep)
                 {
                     report.Kept++;
                     continue;
                 }
 
+                var after = verdict.Remaining is { } remaining
+                    ? $"flag parties={remaining.Parties.Count} first=[reason={remaining.Reason} oid={remaining.CollidingOid}]"
+                    : "flag=(none)";
                 _logger.LogInformation(
                     "[ID-LINK-RECON] before-state mode={Mode} entity=contact rowId={RowId} "
-                    + "before=[flag reason={Reason} oid={Oid} plane={Plane} on={On:o}] after=[flag=(none)] correlationId={CorrelationId}",
-                    mode, contact.ContactId, flag.Reason, flag.CollidingOid, flag.CollidingPlane, flag.FlaggedOn,
-                    context.CorrelationId);
-                report.ClearedIds.Add(contact.ContactId);
+                    + "before=[flag parties={Parties} first=[reason={Reason} oid={Oid} plane={Plane} on={On:o}]] after=[{After}] "
+                    + "correlationId={CorrelationId}",
+                    mode, contact.ContactId, flag.Parties.Count, flag.Reason, flag.CollidingOid, flag.CollidingPlane,
+                    flag.FlaggedOn, after, context.CorrelationId);
+
+                var clearing = verdict.Action == FlagReconciliationAction.Clear;
+                if (clearing)
+                {
+                    report.ClearedIds.Add(contact.ContactId);
+                }
 
                 if (!writes)
                 {
-                    report.Cleared++;
+                    if (clearing) report.Cleared++; else report.Pruned++;
                     continue;
                 }
 
-                var write = await store.ClearCollisionFlagAsync(contact.ContactId, ct).ConfigureAwait(false);
+                // Conditional on the version this verdict was made on: a party appended since the scan read the row
+                // makes the write fail (412) and the flag stays for the next run to re-evaluate. A row read without a
+                // version is neither pruned nor cleared — an unconditional write could drop a party appended meanwhile.
+                if (DataverseContactIdentityStore.RowVersionPrecondition(contact.ETag) is null)
+                {
+                    report.ClearFailed++;
+                    continue;
+                }
+
+                var write = clearing
+                    ? await store.ClearCollisionFlagAsync(contact.ContactId, contact.ETag, ct).ConfigureAwait(false)
+                    : await store.WriteCollisionFlagAsync(contact.ContactId, verdict.Remaining!, contact.ETag, ct).ConfigureAwait(false);
                 if (write.Status == StoreWriteStatus.Written)
                 {
-                    report.Cleared++;
+                    if (clearing) report.Cleared++; else report.Pruned++;
                     report.Changed++;
                 }
                 else
@@ -375,6 +385,51 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             pages++;
         }
         while (continuation is not null && pages < MaxPages);
+    }
+
+    /// <summary>
+    /// The recorded parties of <paramref name="flag"/> whose collision still holds. A party that is a systemuser
+    /// re-decided in pass 1 holds iff that decision flagged this contact; one scanned but not decided (a lookup or
+    /// a write failed) holds — no evidence is not evidence of resolution; any other party (a token-plane caller,
+    /// an invite, a systemuser no longer in scope) is re-evaluated from current data.
+    /// </summary>
+    private static async Task<List<CollisionParty>> PartiesStillHoldingAsync(
+        IContactIdentityStore store, RunReport report, ContactBindingRow contact, CollisionFlag flag, CancellationToken ct)
+    {
+        var holding = new List<CollisionParty>();
+        ContactLookup? emailCarriers = null;
+        ReferenceLookup? refs = null;
+
+        foreach (var party in flag.Parties)
+        {
+            bool holds;
+            if (party.Oid is { } oid && report.DecidedOids.Contains(oid))
+            {
+                holds = report.CollisionsThisRun.Contains((contact.ContactId, oid));
+            }
+            else if (party.Oid is { } undecided && report.ScannedOids.Contains(undecided))
+            {
+                holds = true;
+            }
+            else
+            {
+                emailCarriers ??= string.IsNullOrWhiteSpace(contact.Email)
+                    ? ContactLookup.Of()
+                    : await store.FindActiveContactsByEmailAsync(contact.Email, ct).ConfigureAwait(false);
+                refs ??= await store.FindSystemUsersLinkingAsync(new[] { contact.ContactId }, ct).ConfigureAwait(false);
+                var oidCarriers = party.Oid is { } o
+                    ? await store.FindContactsByOidAsync(o, ct).ConfigureAwait(false)
+                    : ContactLookup.Of();
+                holds = ContactBindingDecision.CollisionStillHolds(party, contact, emailCarriers, oidCarriers, refs);
+            }
+
+            if (holds)
+            {
+                holding.Add(party);
+            }
+        }
+
+        return holding;
     }
 
     /// <summary>Per-run counts.</summary>
@@ -391,6 +446,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
         public string? FlagScanError;
         public int FlagsScanned;
         public int Cleared;
+        public int Pruned;
         public int Kept;
         public int ClearFailed;
         public int Changed;
@@ -439,6 +495,7 @@ public sealed class IdentityLinkReconciliationJob : IScheduledJob
             {
                 scanned = FlagsScanned,
                 cleared = Cleared,
+                pruned = Pruned,
                 kept = Kept,
                 clearFailed = ClearFailed,
                 scanFailed = FlagScanFailed,

@@ -10,8 +10,15 @@ of the workforce identity-binding rewrite (defect C7):
 - A workforce caller binds to a contact by **Entra oid** in `contact.sprk_externalobjectid` — the field this
   project's spec assumption (spec.md:224) widened to "CIAM or workforce oid". One field for both planes, plus a
   plane marker `contact.sprk_identityplane` (External / Workforce).
-- **Exactly one contact per oid**: alternate key `sprk_ExternalObjectIdKey`; creation is create-only through it, so
-  two racing first sign-ins leave one contact.
+- **Exactly one contact per oid** — ⛔ the MECHANISM is pending a UAC-r2 owner decision (2026-10-01). The design
+  used an alternate key `sprk_ExternalObjectIdKey` (creation create-only through it, so two racing first sign-ins
+  leave one contact) AND field-level security on the same column, and Dataverse refuses an alternate key on a
+  field-secured column. Until the owner decides which moves (UAC-r2 `notes/task-141-identity-binding.md` §9), the
+  schema is not applied and contact CREATION denies (`contact_create_unavailable`); binding an existing contact
+  and resolving by oid are unaffected, and two contacts on one oid always deny.
+- **Delivery status**: the code is delivered on the UAC-r2 branch; it is LIVE only after UAC-r2 141's manual gates
+  (schema, `acct` claim, tenant setting, deploy) and that decision. Until then a SPA-r2 consumer must treat the
+  requester contact as possibly null (see below).
 - After the first bind, resolution is by oid only; email is never consulted again.
 - The writer is `ContactIdentityBinder` (`src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/`); the
   consumer contract is `projects/unified-access-control-r2/notes/141-link-contract.md`.

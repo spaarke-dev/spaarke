@@ -1081,8 +1081,8 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
     public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAsync(contactId, etag, oid, plane, ct);
     public Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct) => _inner.CreateContactForOidAsync(oid, plane, details, ct);
     public Task<StoreWriteResult> SetPrimaryContactAsync(Guid systemUserId, string? etag, Guid contactId, CancellationToken ct) => _inner.SetPrimaryContactAsync(systemUserId, etag, contactId, ct);
-    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, CancellationToken ct) => _inner.WriteCollisionFlagAsync(contactId, flag, ct);
-    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, CancellationToken ct) => _inner.ClearCollisionFlagAsync(contactId, ct);
+    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, string? etag, CancellationToken ct) => _inner.WriteCollisionFlagAsync(contactId, flag, etag, ct);
+    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, string? etag, CancellationToken ct) => _inner.ClearCollisionFlagAsync(contactId, etag, ct);
     public Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct) => _inner.ScanInteractiveSystemUsersAsync(continuation, ct);
     public Task<StorePage<ContactBindingRow>> ScanFlaggedContactsAsync(string? continuation, CancellationToken ct) => _inner.ScanFlaggedContactsAsync(continuation, ct);
 }

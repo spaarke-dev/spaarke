@@ -576,9 +576,24 @@ user to their contact. It runs **report-only** until `IdentityLink__Reconciliati
 empty or unparseable writes nothing. Review one report-only run (App Insights `[ID-LINK-RECON] before-state`
 lines and the run's ResultJson) before enabling writes on a new stamp.
 
+The same switch gates the **inline link** a licensed user would otherwise get at their first Teams/SPA sign-in,
+so between the BFF deploy and the switch nothing links a licensed user to a contact and the report-only run is a
+true preview. Two writes are **not** gated, by design: a Type-2 (unlicensed) member's own first sign-in (bind or
+create, behind the member test) and the link written when the BFF itself creates a systemuser during demo
+provisioning (in that target environment, which the job does not scan). Do not run demo registrations into the
+BFF's own environment while the report-only run is under review, or its counts will drift.
+
 **Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141.** The BFF selects the new
 columns, so without them every binding read fails closed (`sdap.access.deny.binding_column_missing`) and
-CIAM and Type-2 sign-ins are denied:
+CIAM and Type-2 sign-ins are denied.
+
+> ⛔ **BLOCKED pending an owner decision (2026-10-01).** As designed, the script puts BOTH an alternate key and
+> field-level security on `contact.sprk_externalobjectid`, and Dataverse refuses an alternate key on a
+> field-secured column ([Work with alternate keys](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity)).
+> `-Apply` therefore stops at its platform-rule preflight, before any write; the dry run and `-Verify` report
+> `BLOCKED`. The decision (which mechanism moves) is recorded in
+> `projects/unified-access-control-r2/notes/task-141-identity-binding.md` §9. Do not work around the stop by
+> editing the script.
 
 ```powershell
 .\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
@@ -587,7 +602,7 @@ CIAM and Type-2 sign-ins are denied:
   -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
 ```
 
-It adds the `sprk_externalobjectid` uniqueness key (exactly one contact per oid), the plane and collision
+Once unblocked, it adds the uniqueness guarantee (exactly one contact per oid), the plane and collision
 columns (backfilling existing bindings as External), the "Contacts with Identity Collisions" view, and the
 field-level security that lets ONLY the BFF write `contact.sprk_externalobjectid` and
 `systemuser.sprk_primarycontact` while every user keeps reading them. **A business unit created later needs
@@ -599,8 +614,9 @@ A **collision** is any of: an email match on a contact bound to a different oid;
 contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; or an invite
 whose email matches a workforce-bound contact or a contact a systemuser links to. Every collision is refused
 (403 at sign-in, 409 at invite) **and flagged on the contact** — `sprk_identitycollisionon` (when),
-`sprk_identitycollisionoid` + `sprk_identitycollisionplane` (who collided), `sprk_identitycollisionreason` (why).
-A repeated collision does not write the flag again.
+`sprk_identitycollisionoid` + `sprk_identitycollisionplane` (who collided), `sprk_identitycollisionreason` (why),
+for the FIRST identity; `sprk_identitycollisionparties` lists EVERY identity that collided with the contact.
+A repeated collision by the same identity does not write again; a different identity's collision is added.
 
 **Find them**: Contacts → view **"Contacts with Identity Collisions"**.
 
@@ -623,8 +639,14 @@ A repeated collision does not write the flag again.
    key while duplicates exist.)
    Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
    created.
-3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every flagged
-   contact and clears the flag only once the collision no longer holds.
+   **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
+   summary columns name only the first.
+3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded
+   party, drops the ones that no longer collide (the summary columns then name the next one), and clears the flag
+   only once none does. Two exceptions, cleared by hand AFTER resolving every collision on the contact (clear all
+   five `sprk_identitycollision*` columns): a flag listing **20 parties** (a later identity was not recorded), and
+   one whose `sprk_identitycollisionparties` no longer reads as the BFF wrote it (someone edited it). The job never
+   clears either, so that an unrecorded collision cannot vanish.
 
 ---
 
@@ -1136,6 +1158,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-08-17 | Initial consolidation (task 001 of `customer-provisioning-orchestration-r1`) | spec.md Gap 4 + R6 doc-drift carry-over; design.md §2 (3-generation fragmentation) |
 | 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
 | 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+| 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
 
 ---
 

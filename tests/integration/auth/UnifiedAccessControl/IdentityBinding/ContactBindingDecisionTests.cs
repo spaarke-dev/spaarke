@@ -394,11 +394,78 @@ public class ContactBindingDecisionTests
     // ── Flags ────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void ShouldWriteFlag_OnlyOntoARowWithNoOpenFlag()
+    public void ShouldWriteFlag_IsIdempotentPerParty_AndRecordsASecondIdentity()
     {
-        ContactBindingDecision.ShouldWriteFlag(null).Should().BeTrue();
-        ContactBindingDecision.ShouldWriteFlag(Flag(IdentityCollisionReason.BoundToDifferentOid, Caller))
+        var mine = Party(IdentityCollisionReason.BoundToDifferentOid, Caller);
+        ContactBindingDecision.ShouldWriteFlag(null, mine).Should().BeTrue();
+
+        var flag = ContactBindingDecision.FlagWith(null, mine);
+        ContactBindingDecision.ShouldWriteFlag(flag, mine with { FlaggedOn = Now.AddHours(3) })
             .Should().BeFalse("a repeated collision must not turn a deny path into a stream of writes");
+
+        // Verifier finding 3: a SECOND identity colliding with an already-flagged contact is recorded, so its
+        // collision does not vanish when the first one is resolved.
+        var theirs = Party(IdentityCollisionReason.BoundToDifferentOid, Other, IdentityPlaneMarker.External);
+        ContactBindingDecision.ShouldWriteFlag(flag, theirs).Should().BeTrue();
+        var both = ContactBindingDecision.FlagWith(flag, theirs);
+        both.Parties.Should().HaveCount(2);
+        both.Primary.IsSameCollision(mine).Should().BeTrue("the summary columns keep the first party");
+        ContactBindingDecision.ShouldWriteFlag(both, theirs).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ShouldWriteFlag_NeverOverwritesAFlagWhosePartiesCannotBeRead_OrOneAtCapacity()
+    {
+        var mine = Party(IdentityCollisionReason.BoundToDifferentOid, Caller);
+        var unreadable = Flag(IdentityCollisionReason.EmailAmbiguous, Other) with { HasUnreadableParties = true };
+        ContactBindingDecision.ShouldWriteFlag(unreadable, mine).Should().BeFalse("its unreadable parties would be lost");
+
+        var full = CollisionFlag.FromParties(Enumerable.Range(0, ContactBindingDecision.MaxCollisionParties)
+            .Select(_ => Party(IdentityCollisionReason.BoundToDifferentOid, Guid.NewGuid())).ToList())!;
+        ContactBindingDecision.ShouldWriteFlag(full, mine).Should().BeFalse();
+    }
+
+    // ── ReconcileFlag: keep / prune / clear ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ReconcileFlag_ClearsOnlyWhenNoPartyHolds_AndNoSystemUserCollidedThisRun()
+    {
+        var a = Party(IdentityCollisionReason.BoundToDifferentOid, Caller);
+        var flag = CollisionFlag.FromParties(new[] { a })!;
+
+        ContactBindingDecision.ReconcileFlag(flag, Array.Empty<CollisionParty>(), collidesThisRun: false).Action
+            .Should().Be(FlagReconciliationAction.Clear);
+        ContactBindingDecision.ReconcileFlag(flag, Array.Empty<CollisionParty>(), collidesThisRun: true).Action
+            .Should().Be(FlagReconciliationAction.Keep, "a collision this run saw but has not recorded is still live");
+        ContactBindingDecision.ReconcileFlag(flag, new[] { a }, collidesThisRun: false).Action
+            .Should().Be(FlagReconciliationAction.Keep);
+    }
+
+    [Fact]
+    public void ReconcileFlag_PrunesTheResolvedParty_AndKeepsTheOneThatStillCollides()
+    {
+        var a = Party(IdentityCollisionReason.LinkedContactBoundToDifferentOid, Caller);
+        var b = Party(IdentityCollisionReason.BoundToDifferentOid, Other, IdentityPlaneMarker.External);
+        var flag = CollisionFlag.FromParties(new[] { a, b })!;
+
+        var verdict = ContactBindingDecision.ReconcileFlag(flag, new[] { b }, collidesThisRun: false);
+
+        verdict.Action.Should().Be(FlagReconciliationAction.Prune);
+        verdict.Remaining!.Parties.Should().ContainSingle().Which.IsSameCollision(b).Should().BeTrue();
+        verdict.Remaining.CollidingOid.Should().Be(Other, "the operator's view now names the party that still collides");
+    }
+
+    [Fact]
+    public void ReconcileFlag_KeepsAFlagWithUnrecordedParties()
+    {
+        var unreadable = Flag(IdentityCollisionReason.BoundToDifferentOid, Caller) with { HasUnreadableParties = true };
+        ContactBindingDecision.ReconcileFlag(unreadable, Array.Empty<CollisionParty>(), false).Action
+            .Should().Be(FlagReconciliationAction.Keep);
+
+        var full = CollisionFlag.FromParties(Enumerable.Range(0, ContactBindingDecision.MaxCollisionParties)
+            .Select(_ => Party(IdentityCollisionReason.BoundToDifferentOid, Guid.NewGuid())).ToList())!;
+        ContactBindingDecision.ReconcileFlag(full, Array.Empty<CollisionParty>(), false).Action
+            .Should().Be(FlagReconciliationAction.Keep, "a party past the cap was never recorded");
     }
 
     [Fact]
@@ -425,13 +492,30 @@ public class ContactBindingDecisionTests
 
     [Fact]
     public void CollisionStillHolds_AnUnreadableFact_KeepsTheFlag()
-        => ContactBindingDecision.CollisionStillHolds(Flag(IdentityCollisionReason.BoundToDifferentOid, Caller),
+        => ContactBindingDecision.CollisionStillHolds(Party(IdentityCollisionReason.BoundToDifferentOid, Caller),
                 Unbound(ContactA), ContactLookup.Failed, NoRows, ReferenceLookup.Of())
             .Should().BeTrue("clearing on a failed read is the fail-open direction");
 
     [Fact]
+    public void CollisionStillHolds_AnInviteRefusal_HoldsWhileTheContactIsAnEmployees_AndClearsOnceItIsNot()
+    {
+        // Verifier finding 2(4): an invite refusal records no oid, so the job re-evaluates it from data every
+        // run. Were this branch false, every invite flag would be cleared 5 minutes after it was raised.
+        var invite = new CollisionParty(null, IdentityPlaneMarker.External,
+            IdentityCollisionReason.InviteMatchesWorkforceContact, Now);
+
+        Holds(invite, Bound(ContactA, Other, IdentityPlaneMarker.Workforce))
+            .Should().BeTrue("the contact is still bound to an employee's work identity");
+        Holds(invite, Unbound(ContactA), refs: ReferenceLookup.Of(new SystemUserReference(Guid.NewGuid(), Other, ContactA)))
+            .Should().BeTrue("the contact is still an internal user's");
+        Holds(invite, Bound(ContactA, Other, IdentityPlaneMarker.External))
+            .Should().BeFalse("resolved: the operator gave the contact to the external identity");
+        Holds(invite, Unbound(ContactA)).Should().BeFalse("resolved: neither an employee's binding nor an internal link");
+    }
+
+    [Fact]
     public void CollisionStillHolds_AFlagWithNoReason_IsKept()
-        => Holds(new CollisionFlag(Now, Caller, IdentityPlaneMarker.Workforce, null), Unbound(ContactA))
+        => Holds(new CollisionParty(Caller, IdentityPlaneMarker.Workforce, null, Now), Unbound(ContactA))
             .Should().BeTrue();
 
     [Fact]
@@ -476,5 +560,13 @@ public class ContactBindingDecisionTests
 
     private static bool Holds(CollisionFlag flag, ContactBindingRow flagged, ContactLookup? email = null,
         ContactLookup? oid = null, ReferenceLookup? refs = null)
-        => ContactBindingDecision.CollisionStillHolds(flag, flagged, email ?? NoRows, oid ?? NoRows, refs ?? ReferenceLookup.Of());
+        => Holds(flag.Primary, flagged, email, oid, refs);
+
+    private static bool Holds(CollisionParty party, ContactBindingRow flagged, ContactLookup? email = null,
+        ContactLookup? oid = null, ReferenceLookup? refs = null)
+        => ContactBindingDecision.CollisionStillHolds(party, flagged, email ?? NoRows, oid ?? NoRows, refs ?? ReferenceLookup.Of());
+
+    private static CollisionParty Party(IdentityCollisionReason reason, Guid oid,
+        IdentityPlaneMarker plane = IdentityPlaneMarker.Workforce)
+        => new(oid, plane, reason, Now);
 }
