@@ -472,7 +472,7 @@ configuration is shaped correctly.
 
 | # | Check | Expected |
 |---|---|---|
-| 1 | Role privileges: `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` | **Exits 0**: `Read` at depth `1` on every table in `config/secure-record-owner-role.json` (8 as of 2026-09-30). Its "Outside the file" list should be **empty**; in `spaarkedev1` it is 32 as of 2026-09-30, pending the owner decision in §5.4 |
+| 1 | Role privileges: `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` | **Exits 0**: `Read` at depth `1` on every table in `config/secure-record-owner-role.json` (9 as of 2026-10-01: task 145 added `sprk_invoice`, so `spaarkedev1` exits **1** naming it until the §5.3 `-Apply` + §5.4 strip are run). Its "Outside the file" list should be **empty** — it is in `spaarkedev1` since the 2026-10-01 strip (§5.4); after any `-Apply` it shows the re-injected SharePoint four until the strip runs again |
 | 2 | Team roles of the **named** team: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Record Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
 | 2b | Assignment works for **each** table in the file, not just projects | assign a probe of each: the `root` tables **and** the `child` tables (e.g. a `sprk_todo` created with `ownerid@odata.bind → /teams(<teamId>)`). A role covering only some types fails silently on the others until someone over-grants the team. Delete the probes |
 | 3 | Named team members: `teammemberships?$filter=teamid eq <id>` | **0 — of any kind**, human or application user (task 144). Provisioning refuses otherwise |
@@ -483,9 +483,9 @@ configuration is shaped correctly.
 | 6 | **Assignment works** — create a probe `sprk_project` with `sprk_issecure=true`, `PATCH ownerid@odata.bind → /teams(<teamId>)` | succeeds, **and** `owningbusinessunit` flips to the secure BU. Must be re-run **after** removing System Administrator |
 | 7 | **🔴 Isolation works** — impersonate a known non-admin user (`MSCRMCallerID: <userid>`) and `GET` the probe record. Since task 144: run it on a secure **project, matter AND work assignment** | **DENIED** on each. A successful read means §6 has not been satisfied |
 | 8 | Delete the probe record | no `sprk_issecure=true` rows remain |
-| 9 | **NFR-05 assertion** — `SecureBuRoleDepthAssertionTests` live test with `SPAARKE_NFR05_DATAVERSE_URL` set (and `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` when only `az login` is available) | **passes**: no non-administrator human reaches the BU by depth on project/matter/work assignment, the BU holds no users, the named team resolves with no members, and it alone holds the role |
+| 9 | **NFR-05 assertion** — `SecureBuRoleDepthAssertionTests` live test with `SPAARKE_NFR05_DATAVERSE_URL` set (and `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` when only `az login` is available) | **passes**: no non-administrator human reaches the BU by depth on project/matter/work assignment, the BU holds no users, the named team resolves with no members, it alone holds the role, and the role holds Read at User depth on every table in `config/secure-record-owner-role.json` (clause 5, task 145 — a gap names the table and means that table's secure rows cannot be owned by the team) |
 | 10 | **Cutover complete**: `scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl -Verify` | **exit 0** — every secure row owned by the named team, none by the default team and none outside the BU |
-| 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each finding is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; it writes nothing |
+| 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each exposure is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; a clause-5 coverage gap is an ERROR line naming the table (fail-closed, not an exposure); it writes nothing |
 
 ### ⚠️ Privilege caching will lie to you
 

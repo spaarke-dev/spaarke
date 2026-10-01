@@ -22,8 +22,10 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// composition the manual gate uses (<see cref="SecureBuRoleDepthAssertion"/>,
 /// <see cref="SecureBuRoleDepthCensusBuilder"/>): role-depth reach into the secure BU (clause 1); the named owner team
 /// resolves and has no members of any kind (2); the owner role is held by that team alone (3); the BU holds no
-/// systemusers of any kind (4). Every finding is logged at <see cref="LogLevel.Critical"/>, one line each, naming the
-/// principal.</para>
+/// systemusers of any kind (4); the owner role holds Read at User depth on every table of the codified set,
+/// <c>config/secure-record-owner-role.json</c> (5, task 145). Every exposure finding is logged at
+/// <see cref="LogLevel.Critical"/>, one line each, naming the principal; a clause-5 gap is logged at
+/// <see cref="LogLevel.Error"/>, naming the table — it makes secure-child writes fail closed, it exposes nothing.</para>
 ///
 /// <para><b>What it never does.</b> It writes nothing to Dataverse, moves nobody, strips no role (relocating users is
 /// an owner decision) and touches no CI. The run result carries the findings for <c>/api/admin/jobs/{id}/status</c>.</para>
@@ -90,8 +92,9 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
     /// <inheritdoc />
     public string Description =>
         "Read-only census of the Secure Record business unit (spec NFR-05): no role reaches it by depth, it holds no " +
-        "users, its named owner team resolves and has no members, and only that team holds the owner role. Logs a " +
-        "CRITICAL line per finding. Writes nothing.";
+        "users, its named owner team resolves and has no members, only that team holds the owner role, and the role " +
+        "covers every table in config/secure-record-owner-role.json. Logs a CRITICAL line per exposure and an ERROR " +
+        "line per coverage gap. Writes nothing.";
 
     /// <inheritdoc />
     public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
@@ -128,6 +131,15 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                 {
                     // Inert, not an exposure: there is no secure BU to protect. Loud, but not CRITICAL.
                     _logger.LogWarning("[SECURE-CENSUS] {Verdict}: {Message} correlationId={CorrelationId}",
+                        finding.Verdict, finding.Message, context.CorrelationId);
+                    continue;
+                }
+
+                if (finding.Verdict == SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege)
+                {
+                    // Task 145: a coverage gap makes secure-child writes FAIL CLOSED — an availability defect, not a
+                    // disclosure. Error, not CRITICAL, so the exposure lines stay the ones that page someone.
+                    _logger.LogError("[SECURE-CENSUS] {Verdict}: {Message} correlationId={CorrelationId}",
                         finding.Verdict, finding.Message, context.CorrelationId);
                     continue;
                 }
@@ -189,19 +201,17 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
                 OptionalGuid(row, "parentbusinessunitid")))
             .ToArray();
 
+        // The guarded root-table Reads (clause 1) plus every privilege of the codified owner-role set (clause 5, task
+        // 145) — read from the ONE list compiled into this assembly.
+        var ownerRoleSet = SecureRecordOwnerRoleSet.Embedded;
+        var privilegeNames = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(ownerRoleSet);
+
         var privilegeQuery = Query("privilege", "privilegeid", "name");
-        privilegeQuery.Criteria.AddCondition(
-            "name", ConditionOperator.In, SecureBuRoleDepthAssertion.GuardedPrivileges.Cast<object>().ToArray());
+        privilegeQuery.Criteria.AddCondition("name", ConditionOperator.In, privilegeNames.Cast<object>().ToArray());
         var privileges = (await RetrieveAllAsync(dataverse,privilegeQuery, ct))
             .ToDictionary(row => row.Id, row => row.GetAttributeValue<string>("name") ?? string.Empty);
 
-        if (privileges.Count != SecureBuRoleDepthAssertion.GuardedPrivileges.Count)
-        {
-            throw new InvalidOperationException(
-                $"Expected to resolve {string.Join(" / ", SecureBuRoleDepthAssertion.GuardedPrivileges)} but found "
-                + $"{privileges.Count} privilege row(s) ({string.Join(", ", privileges.Values)}). A missing privilege "
-                + "means an entity is absent or renamed; grading a partial census would under-report reach.");
-        }
+        SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved(privileges.Values.ToArray());
 
         var depthQuery = Query("roleprivileges", "roleid", "privilegeid", "privilegedepthmask");
         depthQuery.Criteria.AddCondition("privilegeid", ConditionOperator.In, privileges.Keys.Cast<object>().ToArray());
@@ -259,7 +269,8 @@ public sealed class SecureRecordIsolationCensusJob : IScheduledJob
             .ToArray();
 
         return SecureBuRoleDepthCensusBuilder.Build(
-            secureBuName, ownerTeamName, businessUnits, depthByRootRole, roles, users, teams);
+            secureBuName, ownerTeamName, businessUnits, depthByRootRole, roles, users, teams, ownerRoleSet,
+            privileges.Values.ToArray());
     }
 
     private static QueryExpression Query(string entity, params string[] columns) =>

@@ -30,6 +30,12 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///   not by any other team, not by any user.</item>
 ///   <item>The secure BU holds <b>zero systemusers</b> — enabled or disabled, human or application. A user there reads
 ///   every secure record by business-unit depth whoever owns them, which a named team alone does not prevent.</item>
+///   <item>(Task 145, #1046.) The <c>Secure Record Owner</c> role — exactly one, in the secure BU — holds Read at User
+///   (<c>Basic</c>) depth on <b>every table in the codified set</b> (<see cref="SecureRecordOwnerRoleSet"/>,
+///   <c>config/secure-record-owner-role.json</c>). A missing one makes Dataverse refuse every assignment of that table
+///   to the owner team, so the secure child fails closed; a wider depth makes the team's ownership reach further than
+///   it owns. Each gap is its own finding, naming the table — the same rule as
+///   <c>Set-SecureRecordOwnerRolePrivileges.ps1 -Verify</c>.</item>
 /// </list></para>
 ///
 /// <para><b>Why this is a standing assertion and not an audit.</b> Every clause above is a
@@ -175,8 +181,76 @@ public static class SecureBuRoleDepthAssertion
         findings.AddRange(EvaluateNoUserBusinessUnitClause(census, secureBu));
         findings.AddRange(EvaluateOwnerTeamClause(census, secureBu));
         findings.AddRange(EvaluateOwnerRoleContainmentClause(census));
+        findings.AddRange(EvaluateOwnerRoleCoverageClause(census));
 
         return new SecureBuAssertionOutcome(findings);
+    }
+
+    /// <summary>
+    /// Clause 5 (task 145) — the owner role covers the codified set. Fails closed on everything it cannot grade: an
+    /// empty set, or anything but exactly one owner role in the secure BU, is a finding rather than a quiet pass.
+    /// </summary>
+    private static IEnumerable<SecureBuFinding> EvaluateOwnerRoleCoverageClause(SecureBuRoleDepthCensus census)
+    {
+        var coverage = census.OwnerRoleCoverage;
+
+        if (coverage.Tables.Count == 0)
+        {
+            yield return new SecureBuFinding(
+                SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege,
+                "The census carries NO tables from the codified set (config/secure-record-owner-role.json), so whether "
+                + $"'{SecureOwnerRoleName}' can own secure children is UNKNOWN, not proven. The set lists the root "
+                + "tables at minimum; an empty one means it was not loaded.");
+            yield break;
+        }
+
+        if (coverage.OwnerRoleCount != 1)
+        {
+            yield return new SecureBuFinding(
+                SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege,
+                $"The secure business unit holds {coverage.OwnerRoleCount} role(s) named '{SecureOwnerRoleName}'; "
+                + "exactly one is required, so its coverage of the codified set cannot be graded. Create it in the "
+                + "secure business unit per docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md §5.2 (one role, never a "
+                + "replica of a role from an ancestor business unit).");
+            yield break;
+        }
+
+        foreach (var table in coverage.Tables)
+        {
+            if (!table.ExistsInEnvironment)
+            {
+                yield return new SecureBuFinding(
+                    SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege,
+                    $"config/secure-record-owner-role.json requires {table.PrivilegeName} (table {table.LogicalName}), "
+                    + "but this environment has no privilege of exactly that name: the table is not installed, was "
+                    + "renamed, or the file mis-cases it (casing follows the schema name; compare "
+                    + $"EntityDefinitions(LogicalName='{table.LogicalName}')/Privileges). The owner team cannot own its "
+                    + "rows here until that is resolved.");
+                continue;
+            }
+
+            if (table.HeldDepth is null)
+            {
+                yield return new SecureBuFinding(
+                    SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege,
+                    $"'{SecureOwnerRoleName}' lacks {table.PrivilegeName} (table {table.LogicalName}), which "
+                    + "config/secure-record-owner-role.json requires. Dataverse refuses to make the secure owner team "
+                    + $"the owner of a {table.LogicalName} row, so every secure {table.LogicalName} write FAILS CLOSED "
+                    + "(not an exposure). Fix: scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Apply, then the guide "
+                    + "§5.4 strip (AddPrivilegesRole re-injects the SharePoint four), then -Verify.");
+                continue;
+            }
+
+            if (table.HeldDepth != PrivilegeDepth.Basic)
+            {
+                yield return new SecureBuFinding(
+                    SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege,
+                    $"'{SecureOwnerRoleName}' holds {table.PrivilegeName} (table {table.LogicalName}) at "
+                    + $"{table.HeldDepth} depth; the codified set requires {SecureRecordOwnerRoleSet.RequiredDepth} "
+                    + "(User) only. A wider depth lets the owner team read beyond what it owns. Narrowing an existing "
+                    + "grant is an owner decision (setup guide §5.1); the script will not do it.");
+            }
+        }
     }
 
     /// <summary>Clause 1 — the load-bearing one. Nothing else here would have caught the §5.2 hole.</summary>
@@ -430,6 +504,11 @@ public static class SecureBuRoleDepthCensusBuilder
     /// <param name="roles">Every role copy.</param>
     /// <param name="users">Every systemuser, with directly-assigned role copy ids.</param>
     /// <param name="teams">Every team, with role copy ids and member ids.</param>
+    /// <param name="ownerRoleSet">The codified set the owner role must cover (task 145) — the readers pass
+    /// <see cref="SecureRecordOwnerRoleSet.Embedded"/>; <paramref name="depthByRootRole"/> must carry its privileges
+    /// (<see cref="CensusPrivilegeNames"/>).</param>
+    /// <param name="resolvedPrivilegeNames">Every privilege name the environment returned, exactly as returned. A
+    /// codified privilege not among them is reported by clause 5 as not present in the environment.</param>
     public static SecureBuRoleDepthCensus Build(
         string secureBusinessUnitName,
         string secureOwnerTeamName,
@@ -437,8 +516,13 @@ public static class SecureBuRoleDepthCensusBuilder
         IReadOnlyDictionary<(Guid RootRoleId, string Privilege), PrivilegeDepth> depthByRootRole,
         IReadOnlyList<CensusRole> roles,
         IReadOnlyList<CensusUser> users,
-        IReadOnlyList<CensusTeam> teams)
+        IReadOnlyList<CensusTeam> teams,
+        SecureRecordOwnerRoleSet ownerRoleSet,
+        IReadOnlyCollection<string> resolvedPrivilegeNames)
     {
+        ArgumentNullException.ThrowIfNull(ownerRoleSet);
+        ArgumentNullException.ThrowIfNull(resolvedPrivilegeNames);
+
         var rolesById = roles.ToDictionary(r => r.Id);
         var usersById = users.ToDictionary(u => u.Id);
         var grants = new List<EffectiveGrant>();
@@ -516,7 +600,83 @@ public static class SecureBuRoleDepthCensusBuilder
             ownerRoleHolders,
             namedTeams.Count,
             ownerTeamMembers,
-            secureBuUsers);
+            secureBuUsers,
+            OwnerRoleCoverage(ownerRoleSet, resolvedPrivilegeNames, depthByRootRole, roles, secureBuIds));
+    }
+
+    /// <summary>
+    /// Every privilege a census reader must resolve: the guarded root-table Reads (clause 1) and every privilege of the
+    /// codified set (clause 5). Distinct, in a stable order.
+    /// </summary>
+    public static IReadOnlyList<string> CensusPrivilegeNames(SecureRecordOwnerRoleSet ownerRoleSet)
+    {
+        ArgumentNullException.ThrowIfNull(ownerRoleSet);
+
+        return SecureBuRoleDepthAssertion.GuardedPrivileges
+            .Concat(ownerRoleSet.Tables.Select(t => t.PrivilegeName))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Refuses a census whose privilege read did not return every GUARDED root-table Read EXACTLY (ordinal). Those
+    /// drive clause 1 — a missing one would under-report reach — so the whole census stops.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only the guarded three throw.</b> A codified-set privilege the environment lacks (a table not installed
+    /// there, a rename, or a mis-cased file entry — Dataverse matches names case-insensitively, the census looks depths
+    /// up exactly) is a clause-5 FINDING, passed to the builder as "not resolved". Throwing on it would blind clauses
+    /// 1-4 — the exposure checks — on every run, in every environment missing one optional table.
+    /// </remarks>
+    public static void RequireGuardedPrivilegesResolved(IReadOnlyCollection<string> returned)
+    {
+        ArgumentNullException.ThrowIfNull(returned);
+
+        var unresolved = SecureBuRoleDepthAssertion.GuardedPrivileges
+            .Where(name => !returned.Contains(name, StringComparer.Ordinal))
+            .ToArray();
+        if (unresolved.Length == 0)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            $"Expected to resolve {string.Join(" / ", SecureBuRoleDepthAssertion.GuardedPrivileges)} exactly, but the "
+            + $"environment returned ({string.Join(", ", returned)}); missing: {string.Join(", ", unresolved)}. A missing "
+            + "privilege means an entity is absent or renamed; grading a partial census would under-report reach, so "
+            + "this fails instead.");
+    }
+
+    /// <summary>
+    /// The owner role's coverage of the codified set: which role(s) named <c>Secure Record Owner</c> live in the secure
+    /// BU, and — when exactly one does — the depth its ROOT copy holds on each table's Read privilege.
+    /// </summary>
+    private static SecureOwnerRoleCoverage OwnerRoleCoverage(
+        SecureRecordOwnerRoleSet ownerRoleSet,
+        IReadOnlyCollection<string> resolvedPrivilegeNames,
+        IReadOnlyDictionary<(Guid RootRoleId, string Privilege), PrivilegeDepth> depthByRootRole,
+        IReadOnlyList<CensusRole> roles,
+        IReadOnlySet<Guid> secureBuIds)
+    {
+        var ownerRootRoleIds = roles
+            .Where(role => secureBuIds.Contains(role.BusinessUnitId)
+                           && string.Equals(role.Name, SecureBuRoleDepthAssertion.SecureOwnerRoleName, StringComparison.OrdinalIgnoreCase))
+            .Select(role => role.RootRoleId)
+            .Distinct()
+            .ToArray();
+
+        var tables = ownerRoleSet.Tables
+            .Select(table => new OwnerRoleTableCoverage(
+                table.LogicalName,
+                table.PrivilegeName,
+                ownerRootRoleIds.Length == 1
+                && depthByRootRole.TryGetValue((ownerRootRoleIds[0], table.PrivilegeName), out var depth)
+                    ? depth
+                    : null,
+                resolvedPrivilegeNames.Contains(table.PrivilegeName, StringComparer.Ordinal)))
+            .ToArray();
+
+        return new SecureOwnerRoleCoverage(ownerRootRoleIds.Length, tables);
     }
 
     private static string Describe(Guid userId, IReadOnlyDictionary<Guid, CensusUser> usersById)
@@ -633,6 +793,7 @@ public sealed record SecureOwnerRoleHolder(string PrincipalName, bool IsSecureOw
 /// <param name="SecureOwnerTeamMembers">Every member of the named team, of any kind (empty unless it resolved).</param>
 /// <param name="SecureBusinessUnitUsers">Every systemuser in the secure BU, of any kind (across every BU bearing the
 /// secure name, when that name is ambiguous).</param>
+/// <param name="OwnerRoleCoverage">The owner role's coverage of the codified set (clause 5, task 145).</param>
 public sealed record SecureBuRoleDepthCensus(
     string SecureBusinessUnitName,
     string SecureOwnerTeamName,
@@ -641,7 +802,23 @@ public sealed record SecureBuRoleDepthCensus(
     IReadOnlyList<SecureOwnerRoleHolder> SecureOwnerRoleHolders,
     int SecureOwnerTeamMatches,
     IReadOnlyList<string> SecureOwnerTeamMembers,
-    IReadOnlyList<string> SecureBusinessUnitUsers);
+    IReadOnlyList<string> SecureBusinessUnitUsers,
+    SecureOwnerRoleCoverage OwnerRoleCoverage);
+
+/// <summary>The <c>Secure Record Owner</c> role's coverage of the codified set (task 145).</summary>
+/// <param name="OwnerRoleCount">How many distinct roles of that name live in the secure BU. Only 1 is gradeable.</param>
+/// <param name="Tables">One entry per codified table, in file order; <c>HeldDepth</c> is null when the role lacks it
+/// (or when <paramref name="OwnerRoleCount"/> is not 1).</param>
+public sealed record SecureOwnerRoleCoverage(int OwnerRoleCount, IReadOnlyList<OwnerRoleTableCoverage> Tables);
+
+/// <summary>One codified table and the depth the owner role holds on its Read privilege.</summary>
+/// <param name="LogicalName">The codified table.</param>
+/// <param name="PrivilegeName">Its Read privilege, as the codified set names it.</param>
+/// <param name="HeldDepth">The depth the owner role holds; null when it lacks it.</param>
+/// <param name="ExistsInEnvironment">False when the environment has no privilege of exactly this name (table not
+/// installed, renamed, or the file mis-cases it).</param>
+public sealed record OwnerRoleTableCoverage(
+    string LogicalName, string PrivilegeName, PrivilegeDepth? HeldDepth, bool ExistsInEnvironment = true);
 
 /// <summary>Why the assertion reached the verdict it did.</summary>
 public enum SecureBuVerdict
@@ -677,7 +854,13 @@ public enum SecureBuVerdict
     /// Two or more business units carry the configured Secure Record name, so none is graded (task 144). Never a pass
     /// and never inert — isolation is unknown.
     /// </summary>
-    SecureBusinessUnitAmbiguous
+    SecureBusinessUnitAmbiguous,
+
+    /// <summary>
+    /// The <c>Secure Record Owner</c> role lacks Read at User depth on a codified table, holds it wider, or cannot be
+    /// graded (task 145). Fail-CLOSED, not an exposure: the secure child of that table cannot be owned by the team.
+    /// </summary>
+    SecureOwnerRoleLacksCodifiedPrivilege
 }
 
 /// <summary>One violation, with the operator-actionable message that belongs in the log.</summary>
@@ -709,9 +892,10 @@ public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Fin
         SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam => 4,
         SecureBuVerdict.SecureOwnerTeamNotResolved => 5,
         SecureBuVerdict.SecureBusinessUnitAmbiguous => 6,
-        SecureBuVerdict.VacuousCensus => 7,
-        SecureBuVerdict.SecureBusinessUnitNotFound => 8,
-        _ => 9
+        SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege => 7, // fail-closed: ranks below every exposure
+        SecureBuVerdict.VacuousCensus => 8,
+        SecureBuVerdict.SecureBusinessUnitNotFound => 9,
+        _ => 10
     };
 
     /// <summary>
@@ -723,7 +907,8 @@ public sealed record SecureBuAssertionOutcome(IReadOnlyList<SecureBuFinding> Fin
     /// <summary>Every finding, newline-separated, for the failure message.</summary>
     public string Message => Findings.Count == 0
         ? "No principal reaches the secure business unit; the business unit holds no users; the named owner team is "
-          + "resolved, memberless and the only holder of its role."
+          + "resolved, memberless and the only holder of its role; the role holds Read at User depth on every table "
+          + "in the codified set."
         : string.Join(
             Environment.NewLine + Environment.NewLine,
             Findings.Select((f, i) => $"[{i + 1}/{Findings.Count}] {f.Verdict}: {f.Message}"));

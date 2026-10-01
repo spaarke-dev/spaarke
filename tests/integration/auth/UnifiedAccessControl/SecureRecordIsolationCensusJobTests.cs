@@ -56,6 +56,7 @@ public class SecureRecordIsolationCensusJobTests
 
     private readonly Directory _directory = new();
     private readonly CapturingLogger _log = new();
+    private readonly Dictionary<string, Guid> _codifiedChildPrivileges = new(StringComparer.Ordinal);
 
     public SecureRecordIsolationCensusJobTests()
     {
@@ -79,7 +80,26 @@ public class SecureRecordIsolationCensusJobTests
         _directory.Depth(BasicUserRootRole, PrivMatter, PrivilegeDepth.Deep);
         _directory.Depth(BasicUserRootRole, PrivWorkAssignment, PrivilegeDepth.Deep);
         _directory.Depth(SysAdminRole, PrivProject, PrivilegeDepth.Global);
-        _directory.Depth(OwnerRole, PrivProject, PrivilegeDepth.Basic);
+
+        // Task 145 (clause 5): the owner role holds Read at Basic on every table of the codified set — iterated FROM
+        // the embedded set, so this fixture never carries a second copy of the list.
+        var rootPrivileges = new Dictionary<string, Guid>(StringComparer.Ordinal)
+        {
+            ["prvReadsprk_Project"] = PrivProject,
+            ["prvReadsprk_Matter"] = PrivMatter,
+            ["prvReadsprk_WorkAssignment"] = PrivWorkAssignment
+        };
+        foreach (var table in SecureRecordOwnerRoleSet.Embedded.Tables)
+        {
+            if (!rootPrivileges.TryGetValue(table.PrivilegeName, out var privilegeId))
+            {
+                privilegeId = Guid.NewGuid();
+                _directory.Privilege(privilegeId, table.PrivilegeName);
+                _codifiedChildPrivileges[table.LogicalName] = privilegeId;
+            }
+
+            _directory.Depth(OwnerRole, privilegeId, PrivilegeDepth.Basic);
+        }
 
         _directory.User(Admin, "Ralph Admin", RootBu, accessMode: 0, isDisabled: false, isApplication: false, SysAdminRole);
         _directory.User(TestUser, "Test User 1", SiblingBu, accessMode: 0, isDisabled: false, isApplication: false, BasicUserSiblingCopy);
@@ -188,6 +208,55 @@ public class SecureRecordIsolationCensusJobTests
         _log.Entries.Should().NotContain(e => e.Message.Contains("heartbeat status=isolated"));
     }
 
+    /// <summary>
+    /// Task 145 (clause 5): the owner role has lost Read on a codified child table (the guide's old strip did exactly
+    /// this to sprk_document). The run fails and names the table — at ERROR, not CRITICAL: the gap makes secure-child
+    /// writes fail closed, it exposes nothing, and the CRITICAL lines stay the ones that mean a disclosure.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenTheOwnerRoleLacksACodifiedTable_FailsAndLogsAnErrorNamingIt_NotCritical()
+    {
+        _directory.RemoveDepth(OwnerRole, _codifiedChildPrivileges["sprk_todo"]);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse("secure To Dos cannot be owned by the team");
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error
+                                           && e.Message.Contains(nameof(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege))
+                                           && e.Message.Contains("prvReadsprk_Todo"));
+        _log.Entries.Should().NotContain(e => e.Level == LogLevel.Critical, "a coverage gap is not an exposure");
+    }
+
+    /// <summary>
+    /// A codified table the environment does not have (not installed there, or renamed) is a clause-5 finding — and
+    /// the exposure clauses are STILL graded in the same run: a user moved into the secure BU is still a CRITICAL line.
+    /// Throwing instead would blind clauses 1-4 on every run in such an environment.
+    /// </summary>
+    [Fact]
+    public async Task Run_WhenACodifiedPrivilegeDoesNotExistInTheEnvironment_ReportsIt_AndStillGradesTheExposureClauses()
+    {
+        _directory.RemovePrivilege(_codifiedChildPrivileges["sprk_memo"]);
+        _directory.User(Guid.NewGuid(), "Moved Attorney", SecureBu, accessMode: 0, isDisabled: false, isApplication: false);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("prvReadsprk_Memo"));
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains("Moved Attorney"));
+    }
+
+    /// <summary>A missing GUARDED privilege still stops the run: clause 1 cannot be graded without it.</summary>
+    [Fact]
+    public async Task Run_WhenAGuardedPrivilegeDoesNotExistInTheEnvironment_ThrowsRatherThanGrading()
+    {
+        _directory.RemovePrivilege(PrivMatter);
+
+        var act = () => RunAsync();
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*isolation is unknown*");
+        _log.Entries.Should().NotContain(e => e.Message.Contains("heartbeat status=isolated"));
+    }
+
     [Fact]
     public async Task Run_WhenTheCensusCannotBeRead_ThrowsAfterItsHeartbeat_SoTheSchedulerRetries()
     {
@@ -253,6 +322,11 @@ public class SecureRecordIsolationCensusJobTests
 
         public void Privilege(Guid id, string name) =>
             Rows("privilege").Add(new Entity("privilege", id) { ["privilegeid"] = id, ["name"] = name });
+
+        public void RemovePrivilege(Guid id) => Rows("privilege").RemoveAll(r => r.Id == id);
+
+        public void RemoveDepth(Guid rootRole, Guid privilege) =>
+            Rows("roleprivileges").RemoveAll(r => (Guid)r["roleid"] == rootRole && (Guid)r["privilegeid"] == privilege);
 
         public void Role(Guid id, string name, Guid businessUnit, Guid rootRole) =>
             Rows("role").Add(new Entity("role", id)
