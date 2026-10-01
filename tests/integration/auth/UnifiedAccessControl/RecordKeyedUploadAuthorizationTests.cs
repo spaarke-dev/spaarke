@@ -1,7 +1,14 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Headers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using NSubstitute;
@@ -11,6 +18,8 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -509,6 +518,233 @@ public class RecordKeyedUploadAuthorizationTests
             }
 
             return Task.FromResult(_rights);
+        }
+    }
+}
+
+/// <summary>
+/// unified-access-control-r2 task 155 (#1080) — the REAL record-keyed upload route, end to end: route →
+/// <see cref="RecordRouteAccessAuthorizationFilter"/> → handler → <see cref="RecordContainerResolver"/> → the drive the
+/// bytes reach. The task 151 verifier's test-shape gap was that the filter and the resolver had only ever been
+/// composed BY HAND in a test; nothing proved the mapped route wires them together. Only module boundaries are
+/// substituted: the caller-rights probe, Dataverse rows, the securable-entity registry, and the SPE facade's upload
+/// (which records the drive it was handed — the load-bearing assertion).
+/// </summary>
+public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedUploadRouteFixture>
+{
+    private readonly RecordKeyedUploadRouteFixture _fixture;
+
+    public RecordKeyedUploadRouteChildRecordTests(RecordKeyedUploadRouteFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.Uploads.Clear();
+    }
+
+    [Fact(DisplayName = "Task 155: PUT /api/obo/records/sprk_todo/{id}/files/… for a to-do under a SECURE project stores the file in the PROJECT's own container")]
+    public async Task Put_TodoUnderASecureProject_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/files/brief.docx",
+            new ByteArrayContent([1, 2, 3]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "a child of a secure record is secure — its bytes belong in the secure project's own container");
+    }
+
+    [Fact(DisplayName = "Task 155: the same route for a to-do under a NON-secure project stores the file in the to-do's OWN business-unit container — no 409")]
+    public async Task Put_TodoUnderANonSecureProject_StoresInItsBusinessUnitContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt",
+            new ByteArrayContent([4, 5, 6]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle().Which.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer);
+    }
+
+    [Fact(DisplayName = "Task 155: a to-do filed under ANOTHER child is refused (409 container_ancestor_unverifiable) and NOTHING reaches SPE")]
+    public async Task Put_TodoFiledUnderACommunication_IsRefused_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderCommunication}/files/notes.txt",
+            new ByteArrayContent([7]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(RecordContainerResolver.AncestorUnverifiableCode);
+        _fixture.Uploads.Should().BeEmpty("a refusal is only a refusal if no bytes moved");
+    }
+
+    [Fact(DisplayName = "Task 155: a to-do under a SECURE project with NO container is refused (409 secure_record_container_missing) and NOTHING reaches SPE")]
+    public async Task Put_TodoUnderASecureProjectWithoutContainer_FailsClosed_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderUnprovisionedSecureProject}/files/x.txt",
+            new ByteArrayContent([8]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("secure_record_container_missing");
+        _fixture.Uploads.Should().BeEmpty();
+    }
+}
+
+/// <summary>Test host for <see cref="RecordKeyedUploadRouteChildRecordTests"/>. See that class.</summary>
+public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
+{
+    public const string SecureProjectContainer = "b!secure-project-own-container-000";
+    public const string BusinessUnitContainer = "b!todo-business-unit-container-000";
+
+    public static readonly Guid TodoUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000001");
+    public static readonly Guid TodoUnderPlainProject = Guid.Parse("15500000-0000-0000-0000-000000000002");
+    public static readonly Guid TodoUnderCommunication = Guid.Parse("15500000-0000-0000-0000-000000000003");
+    public static readonly Guid TodoUnderUnprovisionedSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000004");
+
+    private static readonly Guid SecureProject = Guid.Parse("15500000-0000-0000-0000-00000000000a");
+    private static readonly Guid PlainProject = Guid.Parse("15500000-0000-0000-0000-00000000000b");
+    private static readonly Guid UnprovisionedSecureProject = Guid.Parse("15500000-0000-0000-0000-00000000000c");
+    private static readonly Guid Communication = Guid.Parse("15500000-0000-0000-0000-00000000000d");
+    private static readonly Guid BusinessUnit = Guid.Parse("15500000-0000-0000-0000-00000000000e");
+
+    /// <summary>Every drive id an upload reached, in order. Cleared by the test class constructor.</summary>
+    public ConcurrentQueue<string> Uploads { get; } = new();
+
+    public HttpClient Client()
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+        return client;
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+
+        builder.ConfigureTestServices(services =>
+        {
+            // The caller may append to every record: authorization has its own suite above; placement is
+            // what this host tests.
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new GrantingProbe());
+
+            services.RemoveAll<ISecurableEntityRegistry>();
+            services.AddSingleton(BuildRegistry());
+
+            services.RemoveAll<IGenericEntityService>();
+            services.AddSingleton(BuildRows());
+
+            // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
+            services.RemoveAll<SpeFileStore>();
+            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads));
+        });
+    }
+
+    private static ISecurableEntityRegistry BuildRegistry()
+    {
+        var securable = new HashSet<string>(StringComparer.Ordinal) { "sprk_project", "sprk_matter", "sprk_workassignment" };
+        var known = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_todo", "sprk_event",
+            "sprk_invoice", "sprk_communication", "contact", "businessunit"
+        };
+
+        var registry = Substitute.For<ISecurableEntityRegistry>();
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), securable, known)));
+        registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
+        return registry;
+    }
+
+    private static IGenericEntityService BuildRows()
+    {
+        var bu = new EntityReference("businessunit", BusinessUnit);
+        var rows = new Dictionary<(string, Guid), Entity>
+        {
+            [("sprk_todo", TodoUnderSecureProject)] = new("sprk_todo", TodoUnderSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject)
+            },
+            [("sprk_todo", TodoUnderPlainProject)] = new("sprk_todo", TodoUnderPlainProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject)
+            },
+            [("sprk_todo", TodoUnderCommunication)] = new("sprk_todo", TodoUnderCommunication)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", Communication),
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject)
+            },
+            [("sprk_todo", TodoUnderUnprovisionedSecureProject)] = new("sprk_todo", TodoUnderUnprovisionedSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", UnprovisionedSecureProject)
+            },
+            [("sprk_project", SecureProject)] = new("sprk_project", SecureProject)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = SecureProjectContainer
+            },
+            [("sprk_project", PlainProject)] = new("sprk_project", PlainProject) { ["sprk_issecure"] = false },
+            [("sprk_project", UnprovisionedSecureProject)] = new("sprk_project", UnprovisionedSecureProject)
+            {
+                ["sprk_issecure"] = true
+            },
+            [("businessunit", BusinessUnit)] = new("businessunit", BusinessUnit)
+            {
+                ["sprk_containerid"] = BusinessUnitContainer
+            },
+        };
+
+        var service = Substitute.For<IGenericEntityService>();
+        service.RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(call => rows.TryGetValue((call.ArgAt<string>(0), call.ArgAt<Guid>(1)), out var row)
+                ? Task.FromResult(row)
+                : throw new InvalidOperationException(
+                    $"Unmodelled read: {call.ArgAt<string>(0)} {call.ArgAt<Guid>(1)}"));
+        return service;
+    }
+
+    private sealed class GrantingProbe : CallerRecordAccessProbe
+    {
+        public GrantingProbe()
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+        {
+        }
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+            => Task.FromResult(OperationAccessPolicy.GetRequiredRights(
+                RecordRouteAccessAuthorizationFilter.AssociateContentOperation));
+    }
+
+    private sealed class RecordingSpeFileStore : SpeFileStore
+    {
+        private readonly ConcurrentQueue<string> _uploads;
+
+        public RecordingSpeFileStore(IServiceProvider sp, ConcurrentQueue<string> uploads)
+            : base(sp.GetRequiredService<ContainerOperations>(),
+                   sp.GetRequiredService<DriveItemOperations>(),
+                   sp.GetRequiredService<UploadSessionManager>(),
+                   sp.GetRequiredService<UserOperations>())
+        {
+            _uploads = uploads;
+        }
+
+        public override Task<FileHandleDto?> UploadSmallAsUserAsync(
+            HttpContext ctx,
+            string containerId,
+            string path,
+            Stream content,
+            ConflictBehavior conflictBehavior,
+            CancellationToken ct = default)
+        {
+            _uploads.Enqueue(containerId);
+            var now = DateTimeOffset.UtcNow;
+            return Task.FromResult<FileHandleDto?>(new FileHandleDto(
+                "item-155", path, null, 3, now, now, null, false, null, containerId));
         }
     }
 }

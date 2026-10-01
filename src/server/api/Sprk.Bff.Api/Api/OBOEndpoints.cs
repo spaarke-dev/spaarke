@@ -124,13 +124,22 @@ public static class OBOEndpoints
                 // and resolves sprk_project: the same record (task 151, #1038). Before that mapping an alias
                 // read as "not securable" and this handler answered a misleading "No storage container is
                 // configured" 409 for a record whose container was derivable.
+                //
+                // CHILD records (task 155, owner C10 part 2): a to-do / event / invoice filed under a SECURE
+                // project, matter or work assignment resolves to that root's OWN container, or refuses —
+                // secure_record_container_missing (409, the root has none), container_ancestor_ambiguous (409,
+                // two secure roots), container_ancestor_unresolved (409, or 503 when the root could not be
+                // read), container_ancestor_unverifiable (409, filed under another child, whose root link is a
+                // stamp that can be stale). Otherwise the record's own business-unit container. Before task 155
+                // every to-do / event / contact upload landed in the Unresolved branch below.
                 var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
 
                 if (decision.Outcome == ContainerDecisionOutcome.Unresolved || decision.ContainerId is null)
                 {
-                    // Non-secure record whose owning business unit has no container stamped. Benign
-                    // for the ingest paths that may skip, but an upload cannot skip — there is
-                    // nowhere to put the bytes — so it is reported rather than silently dropped.
+                    // Reached ONLY for a record with no secure root whose owning business unit has no
+                    // container stamped (or which has no owning business unit). Benign for the ingest paths
+                    // that may skip, but an upload cannot skip — there is nowhere to put the bytes — so it is
+                    // reported rather than silently dropped.
                     logger.LogWarning(
                         "OBO record-keyed upload refused - no container could be derived for non-secure "
                         + "{Entity} {RecordId} (its owning business unit has no sprk_containerid).",
@@ -368,7 +377,8 @@ public static class OBOEndpoints
                     entityLogicalName, recordId, path);
 
                 // Identical resolution to the small route, deliberately — one contract, two sizes (including
-                // the alias mapping and the container_entity_unknown refusal, task 151).
+                // the alias mapping and the container_entity_unknown refusal, task 151, and the child-record
+                // secure-root resolution and its refusals, task 155).
                 var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
 
                 if (decision.Outcome == ContainerDecisionOutcome.Unresolved || decision.ContainerId is null)

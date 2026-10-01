@@ -645,12 +645,26 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             dataverseServiceMock
                 .Setup(d => d.CreateProcessingJobAsync(It.IsAny<object>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => Guid.NewGuid());
+            // unified-access-control-r2 task 155 (§F.2 Fixture-Config-FIRST): RecordContainerResolver's two-argument
+            // overload now READS a non-securable target's row for its owningbusinessunit (its documented contract;
+            // before 155 it returned Unresolved without the read). This world's targets carry no owning business
+            // unit, so the read answers an empty row and the save still falls through to
+            // EmailProcessing:DefaultContainerId exactly as before. Scoped to the NON-securable read (owningbusinessunit
+            // without sprk_issecure) so no other read in this
+            // world changes its (null) answer.
+            dataverseServiceMock
+                .Setup(d => d.RetrieveAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(),
+                    It.Is<string[]>(c => c.Contains("owningbusinessunit") && !c.Contains("sprk_issecure")),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) =>
+                    new Microsoft.Xrm.Sdk.Entity(entity, id));
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
 
-            // task 016 (§F.2): RecordContainerResolver.ResolveForRecordAsync consults this BEFORE ever
-            // touching IGenericEntityService — an entity absent from the securable set short-circuits to
-            // "non-secure, no own container", which is what lets the save fall through to the
+            // task 016 (§F.2): RecordContainerResolver.ResolveForRecordAsync consults this FIRST — an entity
+            // absent from the securable set resolves "non-secure, no own container" (since task 155 after reading
+            // only its owningbusinessunit / root links, answered just above), which is what lets the save fall through to the
             // EmailProcessing:DefaultContainerId configured above. An empty set here means every
             // TargetEntity in this test class is treated as non-secure (this file tests the SAVE
             // endpoint's HTTP contract, not record-security semantics — those have their own coverage
@@ -1856,7 +1870,13 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             // has not registered as secure — the loose mock's previous answer, so no other test changes.
             dataverse
                 .Setup(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => world.RetrieveRecord(entity, id)!);
+                .ReturnsAsync((string entity, Guid id, string[] columns, CancellationToken _) =>
+                    world.RetrieveRecord(entity, id)
+                    // Task 155: the resolver's owningbusinessunit read for a non-securable target. An empty row (no
+                    // owning business unit) keeps the save on the configured default, as before.
+                    ?? (columns.Contains("owningbusinessunit") && !columns.Contains("sprk_issecure")
+                        ? new Microsoft.Xrm.Sdk.Entity(entity, id)
+                        : null)!);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverse.Object);
 
