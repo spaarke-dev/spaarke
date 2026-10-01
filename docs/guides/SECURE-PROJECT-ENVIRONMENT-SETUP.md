@@ -279,11 +279,13 @@ Two behaviours to know, both verified:
 - **`RemovePrivilegeRole` does** — one privilege per call, and the parameter is an **entity reference**
   named `Privilege`, *not* a GUID named `PrivilegeId` (that returns an OData parameter error).
 
-> ⚠️ **Before running this in `spaarkedev1`:** as of 2026-09-30 the live role holds **32 privileges outside
-> the file**. They are Create/Write/Delete/Assign/Share/Append/AppendTo on project, matter, work assignment and
-> document, plus the SharePoint four at Global. Their origin is unrecorded; unified-access-control-r2 did not
-> add them. This strip removes all of them. Whether to do that is an **owner decision** (issue #1046), so do
-> not run it there until that decision is made. The script's dry run lists them under "Outside the file".
+> ✅ **`spaarkedev1` was cleaned on 2026-10-01** by the owner's decision (issue #1046). The role had held **32
+> privileges outside the file**: Create/Write/Delete/Assign/Share/Append/AppendTo on project, matter, work assignment
+> and document, plus the SharePoint four at Global. Their origin was unrecorded. This strip removed them, leaving
+> the 8 Read privileges in the file. Afterwards, team-owned creates on all four of those tables still succeeded
+> across 4 polls, against a control refusal that reported `privilegeCount=8`. Record:
+> `projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md` §4.1. If the script's dry run ever lists
+> anything under "Outside the file" again, run this strip.
 
 ```powershell
 # Run this AFTER every AddPrivilegesRole call. $keep comes from the ONE list (§5.1), so it never strips a child

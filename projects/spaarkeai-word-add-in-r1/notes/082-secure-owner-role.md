@@ -107,6 +107,34 @@ depends on them. The role-privilege GUIDs suggest one later batch; its origin is
 the documented design, and nothing depends on the extra privileges. It is not done here; it waits for the owner's
 answer.
 
+### 4.1 ✅ Decided and done, 2026-10-01
+
+**The owner said:** *"yes can remove them if not needed"*. This also answers UAC-r2's question F1, which was asked once,
+jointly with 082. UAC-r2 has been told.
+
+**Done in `spaarkedev1`, by guide §5.4 as written.** `RemovePrivilegeRole` was run for each privilege outside `$keep`,
+with `$keep` read from the JSON. **32 removed; the role went 40 → 8**, all Read at Basic, exactly the file.
+
+**The before-snapshot** (all 40 privileges, with ids and depths) is
+[`082-role-before-strip-2026-10-01.json`](082-role-before-strip-2026-10-01.json). To reverse, re-add those rows
+with `AddPrivilegesRole`.
+
+**"If not needed" was proven, not assumed:**
+
+| Check | Result |
+|---|---|
+| Who holds the role | Only the `Secure Record` team (`daec0b6f…`), with **0 members**. There is one copy of the role, in the Secure BU |
+| Side effects of a probe create on the 4 changed tables | No custom plugin steps (only `Microsoft.Crm.ObjectModel` and `Microsoft.CDS.DataArchival.Plugins`), no callback registrations, no active workflows |
+| **Positive probes**: 4 polls about 25 s apart; in each poll, a Secure-team-owned create on `sprk_project`, `sprk_matter`, `sprk_workassignment` and `sprk_document` | **16 of 16 CREATED.** Every row had `owningteam` = `daec0b6f…` and `owningbusinessunit` = the Secure BU, was deleted, and read back as 404. **0 leftover probe rows** |
+| **Control in the same polls**: a `sprk_invoice` create (the role has no invoice privilege) | **REFUSED in all 4 polls with `privilegeCount=8`**. So the positive probes ran against the new role, not a cached 40-privilege copy (the cache lag recorded in §3) |
+| Script dry run / `-Verify` | "Held now: 8 privileges … Nothing to add" / **`VERIFY PASS`, exit 0** |
+
+The four child tables (todo, communication, event, memo) only ever held Read, so the §3 `sprk_todo` probe still stands
+for them.
+
+**⚠️ For whoever extends the set next** (UAC-r2's 145/146): `AddPrivilegesRole` **re-injects the SharePoint four**
+(guide §5.4). After any `-Apply`, run the §5.4 strip again, or this drift returns.
+
 ## 5. Quality gates (task-execute Step 9.5)
 
 **Code review: 0 critical.**

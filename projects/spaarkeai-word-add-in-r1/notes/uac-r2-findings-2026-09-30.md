@@ -198,3 +198,12 @@ coordinates its edits to both.
   TaskActionCore and the other #1034 writers) set Assigned To themselves.
 - `TaskActionCore` is AI playbook code (`Services/Ai/Nodes/ActionCore`), so it stays with 152.
 - Both projects rejected impersonated creates, because they would widen roles.
+
+## 10. Owner answers, 2026-10-01, relayed to UAC-r2 and acknowledged
+
+| Item | Owner's words | Outcome |
+|---|---|---|
+| The 32 drift privileges on `Secure Record Owner` (082 §4; their F1) | *"yes can remove them if not needed"* | **Done live.** 40 → 8, proven not needed by probes (082 note §4.1). UAC-r2 wrote into their 145: after any `-Apply`, re-run the §5.4 strip, then `-Verify` |
+| The hotmail `#EXT#` guest reaching the Secure BU (their F11) | *"this is in dev and we'll change this"* | The owner changes the account. UAC-r2 grants **no census exception**: clause 1 must pass on its own afterwards |
+| The trusted-tenant list (their I1) | *"yes proceed"* | Their owner had already accepted option (b) directly (a new explicit per-deployment list; empty = deny). 141 proceeds on it. **141 is not in their current batch** (130/131/134/151); they will send its link contract when it is authored as code, so **083 stays blocked** |
+| #1037, disabled with the reason | *"yes write the task"* | Authored as **task 084** |

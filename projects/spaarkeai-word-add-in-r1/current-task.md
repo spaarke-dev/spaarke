@@ -1,19 +1,30 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (by context-handoff, pre-`/compact`; #1045, #1051 and #1052 merged; no open PR; next 059)
+> **Last Updated**: 2026-10-01 (all four owner decisions answered and actioned; task 084 authored; next 059)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
+### ✅ Owner answers, 2026-10-01 (all actioned; the "Waiting on the OWNER" list below is SUPERSEDED for items 1–4)
+
+| # | Owner's words | Done |
+|---|---|---|
+| 1 | Drift on Secure Record Owner: *"yes can remove them if not needed"* | **Removed live**: 40 → 8, proven by probes; `-Verify` PASS. `notes/082-secure-owner-role.md` §4.1; snapshot `notes/082-role-before-strip-2026-10-01.json`; guide §5.4 updated; #1046 commented |
+| 2 | Hotmail guest: *"this is in dev and we'll change this"* | The owner changes the account; no task. UAC-r2: no census exception |
+| 3 | #1037: *"yes write the task"* | **Task 084** authored (validator PASS); TASK-INDEX row; #1037 commented. It folds in the new **#1075 / ISS-014** (the ribbon quick-save sends `sprk_matter` → 400 `OFFICE_002`; latent until 078's package is installed) |
+| 4 | Trusted-tenant list: *"yes proceed"* | UAC-r2's owner had already chosen (b). 141 proceeds, but **is not in their current batch**, so 083 stays blocked |
+
+All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
+
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **059** (`tasks/059-*.poml`: extract the search cluster into `OfficeSearchService`). Read its UPDATE block: 058's deletions shrank `OfficeService` to about 3,090 lines, and `GenerateStubResults` stays with `SearchEntitiesAsync`. **083** is blocked until UAC-r2 sends 141's link contract |
+| **Active task** | **none in progress.** Next: **059** (`tasks/059-*.poml`: extract the search cluster into `OfficeSearchService`). Read its UPDATE block: 058's deletions shrank `OfficeService` to about 3,090 lines, and `GenerateStubResults` stays with `SearchEntitiesAsync`. **084** follows 059 (it edits the extracted search). **083** is blocked until UAC-r2 sends 141's link contract |
 | **Last closed** | **058** ✅ 2026-09-30 `8d56d47eb` (+ close commit): the fabricated-data Office routes were deleted. That closed a LATENT hazard, not a live gap. Suite 13,040/0/54, which reconciles exactly; publish −0.028 MB. Record: `notes/058-delete-unauthorized-stub-surface.md`. Before it: **082** ⚠️ (#1051 merged) |
 | **PR** | ✅ #1045 `38ad83962` · ✅ #1051 (082) `b8fc4dc3e` · ✅ **#1052 (058) `76a9b0fa0`**, all merged 2026-09-30/10-01. #1023 and #1024 closed. **No open PR**; 059 opens the next one |
 | **Branch** | `work/spaarkeai-word-add-in-r1` = master `76a9b0fa0` + a merge-back + checkpoint commits, pushed |
-| **Next Action** | `task-execute` **059** (extract the search cluster into `OfficeSearchService`; read its UPDATE block). Order after it: 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141 (which waits on an owner answer about the trusted-tenant list) |
+| **Next Action** | `task-execute` **059** (extract the search cluster into `OfficeSearchService`; read its UPDATE block). Order after it: **084** → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
 ### This session (2026-09-30 → 10-01), all committed and pushed
 
