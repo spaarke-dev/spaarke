@@ -4,7 +4,7 @@
     <title>C3 — the grant cache drops DirectAccessLevel, so a DIRECT grant on a secure root reads as None on every cache hit: carry the field, bump CacheVersion 4→5, and prove miss/hit parity through the real cache</title>
     <phase>Register-driven (authored 2026-09-30, session 27; verified defect C3 from session 26)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change (the external grant cache feeds AccessibleRecordSetService's Secure suppression); tags bff-api/auth/testing.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -136,5 +136,27 @@ GitHub: none exists (searched 2026-09-30); a new issue is proposed in this task'
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load every file in knowledge/files before starting. FULL rigor — code-review + adr-check at Step 9.5.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-131" status="code-complete; live gate pending">
+      Code complete. Live gate (criterion 11) is a PENDING MANUAL GATE: this run forbade deploys and live writes.
+      Full record: projects/unified-access-control-r2/notes/task-131-grant-cache-direct-level.md.
+      - Fix: CachedParticipation and CachedRootGrant carry int? DirectAccessLevel. It is written for projects,
+        matters and work assignments, and restored null-as-null (never defaulted to AccessLevel).
+        CacheVersion is 5, with the version history extended. QueryGrantSetAsync is internal virtual (test seam).
+        The stale "version 3" is corrected in docs/architecture/uac-access-control.md and in
+        src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md (same fact, not listed in
+        the POML). The InvalidateAsync doc comment said ":v1"; it now says ":v{CacheVersion}".
+      - Tests: tests/integration/seam/ExternalAccess/GrantCacheRoundTripSeamTests.cs, 19 cases covering
+        criteria 1-7, all green. They run the production TenantCache over MemoryDistributedCache and the REAL
+        AccessibleRecordSetService, and GetGrantSetAsync is not overridden. Before each hit, the tests read the
+        v5 entry back and assert the Dataverse read ran exactly once.
+      - Perturbations, all reverted:
+        A. Remove the write: 10 of 19 red (criteria 1, 3, 7).
+        B. Remove the read: the same 10 red.
+        C. Default null to AccessLevel: criterion 2 red on all 3 roots.
+        D. Add a dummy ExternalRootGrant property: criterion 7 red.
+      - Escalation triggers: none fired. 135/136 are still open, and GrantedRightsFor is the only DirectAccessLevel reader.
+      - Not done (per run rules): deploy, live gate, publish-size measurement (no NuGet change), and the
+        TASK-INDEX/current-task updates, which the main session owns.
+    </outcome>
   </execution>
 </task>
