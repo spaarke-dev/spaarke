@@ -9,11 +9,39 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | **none in progress.** Next: **058** (`tasks/058-*.poml`: delete the fabricated-data Office routes. Read its UPDATE block: delete the FOUR Pending waivers in `RouteAuthorizationGuardTests` in the same change, and do NOT delete `GenerateStubResults`). **083** is blocked until UAC-r2 sends task 141's link contract |
+| **Active task** | 🔄 **058 IN PROGRESS** (started 2026-09-30; FULL, opus/xhigh, directional). Delete the fabricated-data Office routes (`/office/share/links`, `/office/share/attach`, `/office/recent`, `/office/search/documents`) and their service/interface members, models, rate-limit categories and tests. Delete the FOUR Pending waivers in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` in the same change. Do NOT delete `GenerateStubResults` (UAC-r2 depends on it). Keep the `AssociationType` enum with `Account` removed and ordinal 3 BURNED. **Commit locally; do not push until #1051 merges.** Conflict-check: silent pass. **083** is blocked until UAC-r2 sends 141's link contract |
 | **Last closed** | **082** ⚠️ 2026-09-30, **committed LOCALLY, not pushed** (see Next Action). The Secure Record Owner role covers the child tables: live dev 36 → 40 (todo/communication/event/memo Read at Basic, 0 removed). The ONE list is `config/secure-record-owner-role.json`, plus `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` and guide edits. Record: `notes/082-secure-owner-role.md`. Before it, **080** ⚠️ `5d870b898` |
 | **PR** | ✅ **#1045 MERGED** 2026-09-30 23:40 UTC as `38ad83962` (merge commit; branch kept). #1038 + #1043 closed as fixed on master (⚠️ `spaarke-bff-dev` still runs `2682e8225` until master is deployed). 🔄 **#1051 OPEN**: task 082 (docs + script + config, no BFF). Merge when `Router` passes (it needs only `Router`) |
 | **Branch** | `work/spaarkeai-word-add-in-r1` @ `cf255da8b` (master merged back in after #1045), pushed. Main checkout `C:/code_files/spaarke` fast-forwarded to `38ad83962` |
 | **Next Action** | **1)** When #1051's `Router` passes: `gh pr merge 1051 --merge` (no `--delete-branch`), then merge `origin/master` back into the branch. **2)** `task-execute` **058** (order: 058 → 059 → 060 → 068 → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 141). UAC-r2 has been told about #1045, 9fee1e8e2 and #1051 |
+
+### Task 058 progress (checkpoint)
+
+- **Reproduce-first DONE (live, spaarke-bff-dev):** `POST /api/office/share/links` returned 200 for a RANDOM GUID and
+  for the real `Invoice-10044725.pdf` (697,393 bytes). Both got the identical fabricated shape: "Document <8 hex>",
+  `.docx`, size 245678. The route reads nothing. The token came from `az account get-access-token --scope
+  api://1e40baad-…/user_impersonation`.
+- **External callers:** none in the repo. App Insights `spe-insights-dev-67e2xz` holds only ~1 h of history (85
+  requests since 22:46 today), so it is INCONCLUSIVE, not proof.
+- **Deleted:**
+  - OfficeService −775 lines (the 14 members); IOfficeService −4 members.
+  - OfficeEndpoints −623 lines (the routes, `MapShareEndpoints`, `MapRecentEndpoints`, 4 handlers).
+  - 7 model files. `AssociationType` was MOVED verbatim to `Models/Office/AssociationType.cs` (ordinal 3 still
+    burned; byte-identical) before `RecentDocumentsResponse.cs` was deleted.
+  - Rate-limit `Share`/`Recent` (enum, switch, options, test); no deployed `RateLimit` app settings.
+  - The 4 Pending waivers in RouteAuthorizationGuardTests (plus the census note).
+  - Contract tests: the doc-search, share-links, share-attach and recent regions. The auth test was repointed to
+    `/search/matter-types`.
+  - e2e: `share-flow.spec.ts`; the 3 route mocks and 3 types from OutlookTaskPanePage (+ index exports); both
+    `mockRecentApi` methods plus 18 call lines.
+  - k6: the 4 test functions, metrics and thresholds; the mixed-load 30% folded into save.
+  - `useShareFlow.ts`.
+- **Verified so far:** BFF, tests and ArchTests build clean; the e2e files parse; k6 passes `node --check`; ZERO
+  route references in tracked src/ + tests/.
+- **Kept, deliberately:** the share-only UI helpers in OutlookTaskPanePage (no route reference). They are dead,
+  flagged for task 075.
+- **Next:** office-addins typecheck and lint, full BFF suite, ArchTests, publish size vs fresh master, CVE, #229,
+  the note, the gates.
 
 ### 🔔 Waiting on the OWNER (from 082)
 

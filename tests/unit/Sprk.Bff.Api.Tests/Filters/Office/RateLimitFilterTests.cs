@@ -46,9 +46,7 @@ public class RateLimitFilterTests
                 SaveRequestsPerMinute = 10,
                 QuickCreateRequestsPerMinute = 5,
                 SearchRequestsPerMinute = 30,
-                JobsRequestsPerMinute = 60,
-                ShareRequestsPerMinute = 20,
-                RecentRequestsPerMinute = 30
+                JobsRequestsPerMinute = 60
             }
         };
     }
@@ -178,8 +176,6 @@ public class RateLimitFilterTests
     [InlineData(OfficeRateLimitCategory.QuickCreate, 5)]
     [InlineData(OfficeRateLimitCategory.Search, 30)]
     [InlineData(OfficeRateLimitCategory.Jobs, 60)]
-    [InlineData(OfficeRateLimitCategory.Share, 20)]
-    [InlineData(OfficeRateLimitCategory.Recent, 30)]
     public async Task RateLimitService_CorrectLimitsForCategory(OfficeRateLimitCategory category, int expectedLimit)
     {
         // Arrange — fresh cache, no prior requests

@@ -210,8 +210,8 @@ public class RouteAuthorizationGuardTests
             + "AddJobOwnershipFilter; POST /todo carries AddTodoSourceAccessFilter; POST /quickcreate carries "
             + "AddQuickCreateSourceAccessFilter; generate-profile carries a document authorization filter. "
             + "/search/entities is gated INSIDE its query (impersonated read) and /search/matter-types is "
-            + "reference data — both Permanent-waived; /search/documents, /recent and /share/* are latent "
-            + "stubs, Pending. None of the named gates was visible to this guard before task 120 widened "
+            + "reference data — both Permanent-waived. The document-search, recent-items and share stub routes "
+            + "were DELETED by task 058. None of the named gates was visible to this guard before task 120 widened "
             + "FilterMarker. CAVEATS Rule A cannot express, stated so 'gated' is not read as 'gated in every "
             + "case': (1) EntityAccessFilter passes through when a /save carries no TargetEntity "
             + "(EntityAccessFilter.cs ExtractTargetEntity), so a new-document save with no related record "
@@ -637,23 +637,10 @@ public class RouteAuthorizationGuardTests
             + "takes no id, so a per-resource filter has no subject. If this route ever takes a record id or "
             + "returns customer rows, this waiver is WRONG and the route needs a gate."),
 
-        new Waiver("GET /api/office/search/documents", WaiverKind.Pending, "#1023",
-            "Authentication filter only. Returns STUB data today (GenerateStubDocumentResults), so the "
-            + "exposure is latent — the gate must land in the same change that makes it return real data."),
-
-        new Waiver("GET /api/office/recent", WaiverKind.Pending, "#1023",
-            "Authentication filter only. Stub data today; the service's own TODO says 'Validate user still "
-            + "has access to each item'. Same latent-until-implemented shape as /search/documents."),
-
-        new Waiver("POST /api/office/share/links", WaiverKind.Pending, "#1024",
-            "Authentication filter only. Mints links for caller-supplied document ids; the per-document "
-            + "check is a hard-coded `return Task.FromResult(true)' (OfficeService.SimulateSharePermissionCheckAsync "
-            + "— cited by name, not line, so the next merge cannot outdate it). Data is fabricated today, so the "
-            + "exposure is latent, not live."),
-
-        new Waiver("POST /api/office/share/attach", WaiverKind.Pending, "#1024",
-            "Authentication filter only, and no IdempotencyFilter either (unlike /share/links). "
-            + "GetAttachmentsAsync is an explicit TODO returning stub attachments."),
+        // The four Pending waivers for the Office STUB routes (document search and recent items, #1023; share
+        // links and share attach, #1024) were DELETED 2026-09-30 WITH THE ROUTES by spaarkeai-word-add-in-r1
+        // task 058. All four served fabricated data behind the authentication filter only, and no client called
+        // them, so the routes were removed rather than gated.
 
         // POST /api/office/quickcreate/{entityType} — waiver DELETED at the 2026-09-30 merge. It read
         // "CREATE. There is no pre-existing resource to authorize", which stopped being true when
