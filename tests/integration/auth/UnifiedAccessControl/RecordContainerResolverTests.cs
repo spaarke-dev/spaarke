@@ -205,18 +205,23 @@ public class RecordContainerResolverTests
         // is not securable", every record would silently resolve to the shared fallback — the identical
         // isolation failure, with an extra step and no log line saying so.
         var registry = Substitute.For<ISecurableEntityRegistry>();
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("Dataverse metadata unavailable"));
 
         var resolver = new RecordContainerResolver(
             registry, Substitute.For<IGenericEntityService>(),
             NullLogger<RecordContainerResolver>.Instance);
 
-        var act = async () => await resolver.ResolveForRecordAsync(
-            SecureProjectEntity, RecordId, SharedBuContainer);
+        // Both a securable and a non-securable name: the single classification call is the only place either
+        // could learn its answer, so a swallowed failure would surface as a decision for one of them.
+        foreach (var name in new[] { SecureProjectEntity, NonSecurableEntity })
+        {
+            var act = async () => await resolver.ResolveForRecordAsync(name, RecordId, SharedBuContainer);
 
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "an undetermined securability answer must never resolve to a shared container");
+            await act.Should().ThrowAsync<InvalidOperationException>(
+                "an undetermined securability answer must never resolve to a shared container, nor be relabelled "
+                + "as a 400 'not an entity' the caller cannot fix");
+        }
     }
 
     [Fact(DisplayName = "Task 075: a record-read failure PROPAGATES rather than defaulting to not-secure")]
@@ -395,23 +400,35 @@ public class RecordContainerResolverTests
         await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
     }
 
-    [Fact(DisplayName = "Task 151: a metadata failure while asking 'is this an entity' PROPAGATES — not unknown, not non-securable")]
-    public async Task KnownEntityMetadataFailure_Propagates()
+    [Fact(DisplayName = "Task 151: the bare name 'invoice' means sprk_invoice — the alias table wins over a same-named OOB entity (stated exception to the byte-for-byte rule)")]
+    public async Task BareInvoice_ResolvesAsSprkInvoice_EvenWhenTheOrgHasTheOobInvoiceEntity()
     {
-        var registry = Substitute.For<ISecurableEntityRegistry>();
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(false));
-        registry.IsKnownEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .ThrowsAsync(new InvalidOperationException("Dataverse metadata unavailable"));
+        // "invoice" is BOTH a DocumentAssociationMap alias (→ sprk_invoice) AND the logical name of the
+        // out-of-the-box Dynamics 365 Sales Invoice entity, present in any org with Sales installed. The
+        // byte-for-byte rule ("a real logical name resolves exactly as before") would send it to the OOB entity;
+        // the resolver deliberately lets the ALIAS win, because every Spaarke caller that says "invoice" means
+        // sprk_invoice and the route filter AUTHORIZES "invoice" against sprk_invoices — resolving it anywhere
+        // else reads a different record from the one authorized. This world therefore KNOWS the OOB "invoice"
+        // and makes sprk_invoice SECURABLE (as live dev has it), so the two readings give different answers:
+        // only the alias reading reaches the secure record's own container.
+        var svc = Substitute.For<IGenericEntityService>();
+        svc.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(Row(isSecure: true, containerId: OwnContainer)));
 
-        var resolver = new RecordContainerResolver(
-            registry, Substitute.For<IGenericEntityService>(), NullLogger<RecordContainerResolver>.Instance);
+        var resolver = Build(
+            securable: [.. SecurableRoots, "sprk_invoice"],
+            entityService: svc,
+            extraKnownEntities: ["invoice"]);
 
-        var act = async () => await resolver.ResolveForRecordAsync("sprk_invoice", RecordId, SharedBuContainer);
+        var decision = await resolver.ResolveForRecordAsync("invoice", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
 
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "an undetermined 'is this an entity' answer must neither become a decision nor be relabelled as a "
-            + "400 the caller cannot fix");
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(OwnContainer,
+            "'invoice' is sprk_invoice here; reading it as the OOB entity would route a secure invoice's content "
+            + "to the shared fallback");
+
+        await svc.Received(1).RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        await svc.DidNotReceive().RetrieveAsync("invoice", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
     }
 
     // ============================================================================================
@@ -944,7 +961,8 @@ public class RecordContainerResolverTests
         (string Entity, Guid Id, bool IsSecure)[]? claimants = null,
         IGenericEntityService? entityService = null,
         string? storedContainerOverride = null,
-        Claimant[]? explicitClaimants = null)
+        Claimant[]? explicitClaimants = null,
+        string[]? extraKnownEntities = null)
     {
         var registry = Substitute.For<ISecurableEntityRegistry>();
         var set = new HashSet<string>(securable.Select(s => s.ToLowerInvariant()), StringComparer.Ordinal);
@@ -956,13 +974,12 @@ public class RecordContainerResolverTests
         // through to a decision. The securable set is a subset, as in production (one query yields both).
         var known = new HashSet<string>(OrgEntityLogicalNames, StringComparer.Ordinal);
         known.UnionWith(set);
+        known.UnionWith(extraKnownEntities ?? []);
 
         registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<string>>(set));
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(set.Contains(call.Arg<string>().ToLowerInvariant())));
-        registry.IsKnownEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(known.Contains(call.Arg<string>().Trim().ToLowerInvariant())));
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), set, known)));
 
         var svc = entityService ?? Substitute.For<IGenericEntityService>();
 

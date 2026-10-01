@@ -817,17 +817,16 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // under RecordContainerResolver's and SecureContainerDecision's own unit tests).
             var securableEntitiesMock = new Mock<ISecurableEntityRegistry>();
             securableEntitiesMock
-                .Setup(r => r.IsSecurableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-            securableEntitiesMock
                 .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new HashSet<string>(StringComparer.Ordinal));
-            // task 151: the resolver now also asks "is this a real entity?" for a non-securable name and
-            // REFUSES one that is not. Answered as the real registry would for the association types: their
-            // LOGICAL names exist (OfficeService maps the wire's friendly name to one first); an alias does not.
+            // task 151: the resolver asks ONE question — "is this an entity, and can it be secure?" — and
+            // REFUSES a name that is not an entity. Answered as the real registry would for the association
+            // types: nothing is securable here, and their LOGICAL names exist (OfficeService maps the wire's
+            // friendly name to one first); an alias does not.
             securableEntitiesMock
-                .Setup(r => r.IsKnownEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string name, CancellationToken _) => IsAssociationLogicalName(name));
+                .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) =>
+                    TestEntityCatalog.Classify(name, isSecurable: _ => false, isKnown: IsAssociationLogicalName));
             services.RemoveAll<ISecurableEntityRegistry>();
             services.AddSingleton(securableEntitiesMock.Object);
 
@@ -2023,17 +2022,16 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
 
             var securable = new Mock<ISecurableEntityRegistry>();
             securable
-                .Setup(r => r.IsSecurableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string name, CancellationToken _) =>
-                    world.SecureRecords.Keys.Any(k => k.Entity == name.Trim().ToLowerInvariant()));
-            securable
                 .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(() => world.SecureRecords.Keys.Select(k => k.Entity).ToHashSet(StringComparer.OrdinalIgnoreCase));
-            // task 151: "is this a real entity?" — logical names only, as the real registry answers.
+            // task 151: ONE question — securable if the world holds a secure record of that entity; otherwise a
+            // real entity only by LOGICAL name, as the real registry answers.
             securable
-                .Setup(r => r.IsKnownEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string name, CancellationToken _) =>
-                    OfficeTestWebAppFactory.IsAssociationLogicalName(name));
+                .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(
+                    name,
+                    isSecurable: n => world.SecureRecords.Keys.Any(k => k.Entity == n),
+                    isKnown: OfficeTestWebAppFactory.IsAssociationLogicalName));
             services.RemoveAll<ISecurableEntityRegistry>();
             services.AddSingleton(securable.Object);
 

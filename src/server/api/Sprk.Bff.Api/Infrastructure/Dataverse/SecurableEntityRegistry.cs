@@ -25,7 +25,9 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// KNOWN-ENTITY set, which is what lets <see cref="RecordContainerResolver"/> refuse a name that is not an
 /// entity at all instead of reading it as "a real entity that cannot be secure". No second query, no second
 /// metadata service, no hard-coded list. The premise "the unfiltered entity query returns every entity" is
-/// proved by the task 151 manual live gate, because no unit test can prove a Dataverse behaviour.</para>
+/// proved by the task 151 manual live gate, because no unit test can prove a Dataverse behaviour. Both answers
+/// are served by ONE call (<see cref="ClassifyEntityAsync"/>) reading ONE catalog value, so a cache miss costs
+/// one metadata round trip per question, not one per set.</para>
 ///
 /// <para><b>Caching (ADR-009).</b> Both sets are cached together for 6h in the shared
 /// <see cref="IDistributedCache"/> under <see cref="CacheKey"/>, mirroring
@@ -101,30 +103,32 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<bool> IsSecurableAsync(string entityLogicalName, CancellationToken ct = default)
+    public async Task<EntitySecurability> ClassifyEntityAsync(string entityLogicalName, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
         {
-            return false;
+            return EntitySecurability.NotAnEntity;
         }
 
-        var catalog = await GetCatalogAsync(ct).ConfigureAwait(false);
-        return catalog.Securable.Contains(entityLogicalName.Trim().ToLowerInvariant());
-    }
+        var name = entityLogicalName.Trim().ToLowerInvariant();
 
-    public async Task<bool> IsKnownEntityAsync(string entityLogicalName, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(entityLogicalName))
+        // The ONE catalog lookup for this question (task 151 review). Both answers below come from this single
+        // value, so a cache miss costs at most ONE metadata round trip per classification. Do not split this
+        // into two lookups — that is exactly the defect this method replaced (an IsSecurableAsync +
+        // IsKnownEntityAsync pair that each fetched, doubling the full-org metadata cost of every ordinary
+        // non-securable upload whenever Redis was unavailable).
+        var catalog = await GetCatalogAsync(ct).ConfigureAwait(false);
+
+        // Securable ⊆ known (both sets come from one query), so a securable hit needs no known-set check.
+        if (catalog.Securable.Contains(name))
         {
-            return false;
+            return EntitySecurability.Securable;
         }
-
-        var catalog = await GetCatalogAsync(ct).ConfigureAwait(false);
 
         if (catalog.Known.Count == 0)
         {
             // Every org has entities (systemuser, businessunit, contact, …), so "none" is not an answer — it is
-            // what a broken metadata query or an under-privileged identity looks like. Answering false here
+            // what a broken metadata query or an under-privileged identity looks like. Answering NotAnEntity here
             // would report a metadata fault to the caller as "you named something that is not an entity" (a
             // 400 the client cannot fix), so this THROWS, matching the interface's fail-closed contract.
             throw new InvalidOperationException(
@@ -132,7 +136,7 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
                 + "the requested entity exists. Refusing rather than answering.");
         }
 
-        return catalog.Known.Contains(entityLogicalName.Trim().ToLowerInvariant());
+        return catalog.Known.Contains(name) ? EntitySecurability.NotSecurable : EntitySecurability.NotAnEntity;
     }
 
     public async Task<IReadOnlySet<string>> GetSecurableEntitiesAsync(CancellationToken ct = default)
@@ -164,7 +168,7 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
             // extend a possible metadata fault into a 6-hour window during which every upload silently
             // resolves to a shared container. So this returns the answer WITHOUT caching it — callers on
             // the isolation path (CommunicationContainerResolver) refuse on an empty securable set, and
-            // IsKnownEntityAsync throws on an empty known set — and it is logged at Error rather than
+            // ClassifyEntityAsync throws on an empty known set — and it is logged at Error rather than
             // Warning. The live end-to-end assertion is task 047.
             _logger.LogError(
                 "[SECURABLE-ENTITIES] Dataverse metadata reports {KnownCount} entity/entities and {SecurableCount} "

@@ -422,10 +422,8 @@ public class RecordKeyedUploadAuthorizationTests
 
         registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(securable.Contains(call.Arg<string>().ToLowerInvariant())));
-        registry.IsKnownEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(known.Contains(call.Arg<string>().Trim().ToLowerInvariant())));
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), securable, known)));
 
         return new RecordContainerResolver(
             registry, entityService, NullLogger<RecordContainerResolver>.Instance);
