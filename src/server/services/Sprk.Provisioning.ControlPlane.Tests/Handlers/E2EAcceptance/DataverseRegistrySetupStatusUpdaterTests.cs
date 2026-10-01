@@ -233,9 +233,8 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         string customerId = "trial20",
         string runId = "run-abc-def",
         string tenantId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-        string environmentId = "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-        string registryDataverseUrl = "https://spaarkedev1.crm.dynamics.com")
-        => new(customerId, runId, tenantId, environmentId, registryDataverseUrl);
+        string environmentId = "87d7b4a7-399b-f111-b8de-7ced8ddc4a05")
+        => new(customerId, runId, tenantId, environmentId);
 
     // Capturing fake — records the last update passed to UpdateSetupStatusAsync
     // so unit tests can assert on the exact shape H13 sees on the wire.

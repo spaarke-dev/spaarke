@@ -54,7 +54,7 @@
 //   │ Failure mode                        │ §4C class                 │
 //   ├─────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId (§4D I1)           │ Resumable                 │
-//   │ Missing indexVer                    │ Resumable                 │
+//   │ Requested index has no schema (245b)│ Resumable                 │
 //   │ Run not found in Cosmos partition   │ Resumable                 │
 //   │ Missing search endpoint             │ Resumable (Model 2 —      │
 //   │ (Model 2 InterStepState blank)      │ H2a must have populated)  │
@@ -87,8 +87,9 @@
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H2b",
 //           IdempotencyKey==aisearch-{customerId}-{indexVer}). Match ⇒ Success
-//           no-op. indexVer is the manifest hash of the schema JSONs in
-//           scripts/ai-search/ (POML constraint) — NOT an attempt counter.
+//           no-op. indexVer is the content version of the embedded schema
+//           bodies H2b applies (IndexSchemaSet — task 245b) — NOT an attempt
+//           counter.
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H2b does NOT enqueue H3 (sibling task 046) directly. The downstream DAG
@@ -117,14 +118,6 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
 
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
-
-    /// <summary>
-    /// Non-secret parameter key carrying the AI Search index-schema version.
-    /// Feeds the idempotency key <c>aisearch-{customerId}-{indexVer}</c> per
-    /// POML constraint (manifest hash of schema JSONs in
-    /// <c>scripts/ai-search/</c>).
-    /// </summary>
-    public const string IndexVersionParameterKey = "indexVer";
 
     /// <summary>
     /// Optional non-secret parameter key carrying a comma-separated subset of
@@ -231,32 +224,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 AiSearchIndexRejectionCodes.MissingTenantId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (3) Index-version guard — feeds the idempotency key. Absence means
-        //     level-3 dedup would collide across upgrades → refuse.
-        if (!TryGetNonEmpty(parameters, IndexVersionParameterKey, out var indexVer))
-        {
-            var diagnostic =
-                "Run parameter 'indexVer' is required by H2b (idempotency key: aisearch-{customerId}-{indexVer}). " +
-                "indexVer MUST be the manifest hash of the schema JSONs in scripts/ai-search/ per POML constraint " +
-                "/ design.md §4.1 preamble.";
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                AiSearchIndexRejectionCodes.MissingIndexVersion, diagnostic, cancellationToken).ConfigureAwait(false);
-        }
-
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, indexVer);
-
-        // (4) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
-        {
-            _logger.LogInformation(
-                "H2b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
-        }
-
-        // (5) Resolve requested index catalog. Empty request ⇒ canonical 7.
+        // (3) Resolve requested index catalog. Empty request ⇒ canonical 7.
         //     The retired-name guard fires BEFORE the provisioner OR verifier
         //     runs regardless of Model 1 / Model 2 branch — structural
         //     design-intent violation must never proceed to a live API call.
@@ -273,6 +241,44 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 AiSearchIndexRejectionCodes.RetiredIndexProvisioningForbidden, diagnostic, cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        // (4) Task 245b: the idempotency version is the content version of the schema bodies H2b
+        //     applies (IndexSchemaSet) — formerly a run parameter nothing wrote. Same schemas ⇒ same
+        //     key; an edited schema ⇒ a new key and a re-apply.
+        string indexVer;
+        string? unknownIndex;
+        try
+        {
+            IndexSchemaSet.TryComputeVersion(requestedIndexes, out indexVer, out unknownIndex);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // An embedded schema resource is missing from the build — a packaging fault, nothing applied.
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                AiSearchIndexRejectionCodes.IndexSchemaUnavailable, ex.Message, cancellationToken).ConfigureAwait(false);
+        }
+        if (unknownIndex is not null)
+        {
+            var diagnostic =
+                $"Requested index '{unknownIndex}' has no embedded schema (Handlers/AiSearchIndex/IndexSchemas/). " +
+                $"Valid names: {string.Join(", ", _catalog.CanonicalIndexNames)}. Fix the run's requestedIndexes " +
+                "intake value; nothing has been applied.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                AiSearchIndexRejectionCodes.IndexSchemaUnavailable, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, indexVer);
+
+        // (5) Level-3 idempotency: durable no-op on duplicate.
+        if (run.CompletedPhases.Any(cp =>
+                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
+                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        {
+            _logger.LogInformation(
+                "H2b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, idempotencyKey);
+            return new HandlerResult.Success(idempotencyKey);
         }
 
         // (6) Branch on tenancy model — Task 223 (D-12) retires the pre-D-12 silent default
@@ -294,9 +300,9 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         var branchResult = tenancyModel switch
         {
             TenancyModel.Model1 => await HandleModel1BranchAsync(
-                run, etag, envelope, tenantId, requestedIndexes, cancellationToken).ConfigureAwait(false),
+                run, etag, envelope, tenantId, requestedIndexes, idempotencyKey, cancellationToken).ConfigureAwait(false),
             TenancyModel.Model2 => await HandleModel2BranchAsync(
-                run, etag, envelope, tenantId, environmentName, requestedIndexes, indexVer, cancellationToken)
+                run, etag, envelope, tenantId, environmentName, requestedIndexes, indexVer, idempotencyKey, cancellationToken)
                 .ConfigureAwait(false),
             _ => throw new InvalidOperationException(
                 $"Unhandled TenancyModel '{tenancyModel}' in H2bAiSearchIndexHandler. " +
@@ -344,6 +350,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         string environmentName,
         ImmutableArray<string> requestedIndexes,
         string indexVer,
+        string idempotencyKey,
         CancellationToken cancellationToken)
     {
         // Model 2 endpoint comes from H2a's InterStepState — if blank, H2a
@@ -394,7 +401,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         // (M2.b) Independent post-deploy verifier — belt-and-suspenders vs
         //         script's Invoke-PostDeployVerifier. See
         //         RestApiAiSearchIndexVerifier file header.
-        return await RunVerifierAsync(run, etag, endpoint, envelope, cancellationToken).ConfigureAwait(false);
+        return await RunVerifierAsync(run, etag, endpoint, envelope, idempotencyKey, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<HandlerResult> HandleModel1BranchAsync(
@@ -403,6 +410,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         HandlerEnvelope envelope,
         string tenantId,
         ImmutableArray<string> requestedIndexes,
+        string idempotencyKey,
         CancellationToken cancellationToken)
     {
         // Model 1 endpoint comes from L2 config (shared platform), NOT from
@@ -477,8 +485,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 templateFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        return new HandlerResult.Success(BuildIdempotencyKey(envelope.CustomerId,
-            run.Parameters.NonSecret[IndexVersionParameterKey]));
+        return new HandlerResult.Success(idempotencyKey);
     }
 
     private async Task<HandlerResult> RunVerifierAsync(
@@ -486,6 +493,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         string etag,
         string endpoint,
         HandlerEnvelope envelope,
+        string idempotencyKey,
         CancellationToken cancellationToken)
     {
         // Always verify against the FULL canonical 7 (even if the run
@@ -516,8 +524,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        return new HandlerResult.Success(BuildIdempotencyKey(envelope.CustomerId,
-            run.Parameters.NonSecret[IndexVersionParameterKey]));
+        return new HandlerResult.Success(idempotencyKey);
     }
 
     private async Task<AiSearchIndexVerifyResult> RunVerifierRawAsync(

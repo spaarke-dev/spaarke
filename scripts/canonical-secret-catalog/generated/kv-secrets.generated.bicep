@@ -149,7 +149,7 @@ resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if
 // (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
 // of this module can therefore NEVER touch the live value.
 
-// BingSearch-ApiKey — Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
+// BingSearch-ApiKey — Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
 resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'BingSearch-ApiKey')) {
   parent: keyVault
   name: 'BingSearch-ApiKey'
@@ -158,7 +158,7 @@ resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = i
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'from-platform-vault'
   }
   tags: {
     canonicalName: 'BingSearch-ApiKey'
@@ -315,26 +315,6 @@ resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' 
 // (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
 // of this module can therefore NEVER touch the live value.
 
-// Dataverse-ServiceUrl — Dataverse environment URL (https://{org}.crm.dynamics.com).
-resource kv_dataverse_ServiceUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Dataverse-ServiceUrl')) {
-  parent: keyVault
-  name: 'Dataverse-ServiceUrl'
-  properties: {
-    value: secretValues['Dataverse-ServiceUrl']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-run-parameter'
-  }
-  tags: {
-    canonicalName: 'Dataverse-ServiceUrl'
-    category: 'dataverse'
-    rotation: 'N/A'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // DocumentIntelligence-ApiKey — Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
 resource kv_documentIntelligence_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'DocumentIntelligence-ApiKey')) {
   parent: keyVault
@@ -415,7 +395,7 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
-// LlamaParse-ApiKey — LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
+// LlamaParse-ApiKey — LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
 resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'LlamaParse-ApiKey')) {
   parent: keyVault
   name: 'LlamaParse-ApiKey'
@@ -424,7 +404,7 @@ resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = i
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'from-platform-vault'
   }
   tags: {
     canonicalName: 'LlamaParse-ApiKey'
@@ -555,7 +535,6 @@ output canonicalSecretNames array = [
   'Compose-Webhook-SigningKey'
   'ContentSafety-ApiKey'
   'Dataverse-ClientSecret'
-  'Dataverse-ServiceUrl'
   'DocumentIntelligence-ApiKey'
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'

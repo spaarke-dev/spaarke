@@ -27,6 +27,14 @@ Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_p
 | `sprk_solutionversion` | Aggregated Solution-set version tag (e.g. `S2026.08`) representing the shipped combination of the 8 solutions per [design.md §11.1a](../../projects/customer-provisioning-orchestration-r1/design.md). Populated at H6 completion. |
 | `sprk_clientcachebusttoken` | Env-var value picked up by SPA clients on next refresh; force-bump on solution upgrades that require immediate cache invalidation. |
 
+> **What provisioning writes today (H13, task 245b, 2026-10-01).** Neither version vocabulary below has a producer
+> yet — the BFF artifact manifest carries a CI `buildId`, not a semver, and the solution artifact manifest carries
+> per-solution versions, not a set tag. H13 therefore writes values derived from what was actually deployed:
+> `sprk_bffversion` = the CI build id H9 deployed (e.g. `2026.09.30-123`); `sprk_solutionversion` = a 32-hex
+> fingerprint of the imported (solution unique name, version) pairs (`ImportedSolutionSet`, identical across
+> environments with the same set); `sprk_clientcachebusttoken` = the run id. Matrix rows must use these values until
+> a release-tag producer exists (T218 owns the solution package; a BFF semver producer is unowned).
+
 **Algorithm**:
 
 ```

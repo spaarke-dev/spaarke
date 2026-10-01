@@ -8,8 +8,9 @@
 // Azure.ResourceManager.Authorization's
 // <see cref="Azure.ResourceManager.Authorization.RoleAssignmentCollection.CreateOrUpdateAsync(Azure.WaitUntil, string, Azure.ResourceManager.Authorization.Models.RoleAssignmentCreateOrUpdateContent, System.Threading.CancellationToken)"/>
 // to PUT a role assignment scoped to the target Key Vault so the L2-caller
-// principal (typically the L2 UAMI, whose object id H2a writes to
-// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.MiObjectId"/>)
+// principal — the L2 control plane's own UAMI, configured as
+// KvSecretsPopulationOptions.ControlPlanePrincipalObjectId (task 245b; it was
+// wrongly the customer stamp's BFF UAMI, InterStepState.MiObjectId, before) —
 // gains data-plane write access BEFORE the first
 // <see cref="Azure.Security.KeyVault.Secrets.SecretClient.SetSecretAsync(Azure.Security.KeyVault.Secrets.KeyVaultSecret, System.Threading.CancellationToken)"/>
 // fires.
@@ -97,16 +98,16 @@ public sealed class ArmOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
         ArgumentNullException.ThrowIfNull(request);
 
         // (1) Guard: PrincipalObjectId must be a well-formed non-empty Guid.
-        //     H4 passes string.Empty when interStepState.MiObjectId is
-        //     absent (upstream H2a bug) — surface as domain Failure with a
-        //     specific diagnostic (Resumable per H4 classification), NEVER a
-        //     silent success + downstream 403 loop.
+        //     H4 passes the validated KvSecretsPopulationOptions value, so an
+        //     empty id here means a caller bypassed that — surface as domain
+        //     Failure with a specific diagnostic (Resumable per H4
+        //     classification), NEVER a silent success + downstream 403 loop.
         if (string.IsNullOrWhiteSpace(request.PrincipalObjectId))
         {
             return new OperatorKvRbacBootstrapOutcome.Failure(
                 $"KV RBAC bootstrap on vault '{request.KeyVaultName}' aborted: PrincipalObjectId is empty. " +
-                "Upstream H2a MUST populate interStepState.MiObjectId (UAMI principal object id) " +
-                "before H4 dispatches. Resume after fixing the upstream population.");
+                "It must be the L2 control plane's own principal (KvSecretsPopulationOptions:" +
+                "ControlPlanePrincipalObjectId). Resume after configuring it.");
         }
         if (!Guid.TryParse(request.PrincipalObjectId, out var principalGuid) || principalGuid == Guid.Empty)
         {

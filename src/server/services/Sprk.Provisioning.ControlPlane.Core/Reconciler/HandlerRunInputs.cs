@@ -9,9 +9,12 @@
 //   Output  — a typed InterStepState property, written by its [ProducedBy]
 //             handler
 //   Gap     — an input whose source is still being fixed by a named task
-//             (T245b: values L2 owns; T245c: operator intake additions). The
-//             set of gaps is pinned by RunContextContractTests, so it can only
-//             change deliberately.
+//             (T245c: operator intake additions). The set of gaps is pinned by
+//             RunContextContractTests, so it can only change deliberately.
+//
+// NOT run inputs (task 245b): L2 configuration (validated options — e.g. the SPE
+// owning-app credentials, the L2 principal H4 grants, the vendor-key vault) and
+// artifact versions L2 computes from the artifacts it applies (ArtifactVersion).
 //
 // WHY: until task 245a about twenty required handler inputs had no producer at
 // all — handlers read them from run parameters nothing wrote, and unit tests
@@ -64,7 +67,6 @@ public sealed record RunInput(RunInputSource Source, string Name, bool Required,
 /// <summary>The declared inputs of every provisioning handler (task 245a run-context contract).</summary>
 public static class HandlerRunInputs
 {
-    private const string T245b = "T245b";
     private const string T245c = "T245c";
 
     // Intake keys used by many handlers.
@@ -91,14 +93,14 @@ public static class HandlerRunInputs
                 RunInput.Intake("currentSolutionVersion", required: false),
                 RunInput.Intake("targetBffVersion", required: false),
                 RunInput.Intake("targetSolutionVersion", required: false),
-                RunInput.Gap("keyVaultName", T245b),   // SPE owner-certificate vault → L2 configuration
+                // Selects the SPE owning-app credential the SpeCertBootstrap probe checks (task 245b).
+                RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
             ],
             [HandlerIds.H05] = [],
             [HandlerIds.H1] = [Tenant, Subscription],
             [HandlerIds.H2a] =
             [
                 Tenant, Subscription,
-                RunInput.Gap("bicepVer", T245b),       // → computed from the template L2 deploys
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake("location", required: false),
                 RunInput.Intake("openAiLocation", required: false),
@@ -109,7 +111,6 @@ public static class HandlerRunInputs
             [HandlerIds.H2b] =
             [
                 Tenant,
-                RunInput.Gap("indexVer", T245b),       // → computed from the index schemas L2 ships
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake("requestedIndexes", required: false),
                 RunInput.Output(nameof(InterStepState.AiSearchEndpoint)),
@@ -124,7 +125,6 @@ public static class HandlerRunInputs
             [HandlerIds.H4] =
             [
                 Tenant, Subscription,
-                RunInput.Gap("secretsVer", T245b),     // → computed from the embedded manifest
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake("provisionedOn", required: false),
                 RunInput.Intake("rotate", required: false),
@@ -133,7 +133,6 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
                 RunInput.Output(nameof(InterStepState.AppServiceName)),
                 RunInput.Output(nameof(InterStepState.MiResourceId)),
-                RunInput.Output(nameof(InterStepState.MiObjectId)),
                 RunInput.Output(nameof(InterStepState.AppServiceStagingSlotName), required: false),
                 // Not inputs: the cleartext-leak guard reflects over every InterStepState string property
                 // (whatever is present), so it depends on no particular producer.
@@ -141,7 +140,6 @@ public static class HandlerRunInputs
             [HandlerIds.H4b] =
             [
                 Tenant, Subscription,
-                RunInput.Gap("secretsVer", T245b),
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
@@ -153,6 +151,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.ServiceBusFullyQualifiedNamespace)),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
                 // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run
                 //  identity, which RunInputSource has no kind for and needs no declaration.)
             ],
@@ -172,24 +171,20 @@ public static class HandlerRunInputs
             [HandlerIds.H7] =
             [
                 Tenant,
-                // The stamp's own BFF URL → H9 output. Absent today, H7 falls back to the platform
-                // BFF (https://api.spaarke.com) — wrong for a dedicated stamp.
-                RunInput.Gap("bffApiBaseUrl", T245b),
                 RunInput.Intake("msalClientId", required: false),
                 RunInput.Intake("shareLinkBaseUrl", required: false),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
                 RunInput.Output(nameof(InterStepState.OpenAiEndpoint), required: false),
                 RunInput.Output(nameof(InterStepState.SpeContainerId)),
+                RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: the stamp's own BFF (H9) — no platform default
             ],
             [HandlerIds.H8] =
             [
                 Tenant,
+                // Also selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners — T245b).
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
-                RunInput.Intake("speCertSecretName", required: false),
                 RunInput.Intake("speContainerDisplayName", required: false),
-                RunInput.Gap("keyVaultName", T245b),   // SPE owner-certificate vault → L2 configuration
-                RunInput.Output(nameof(InterStepState.BffAppRegId)),
             ],
             [HandlerIds.H9] =
             [
@@ -225,16 +220,11 @@ public static class HandlerRunInputs
             [HandlerIds.H13] =
             [
                 Tenant, Subscription,
-                RunInput.Gap("buildId", T245b),        // → H9 output
-                RunInput.Gap("bffApiUrl", T245b),      // → H9 output
-                RunInput.Gap("keyVaultName", T245b),   // T6's SPE owner-certificate vault → L2 configuration
+                // Registry column + T6's owning-app credential selector (T245b).
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId, required: false),
-                RunInput.Intake("registryDataverseUrl", required: false),
-                RunInput.Intake("provisioningScriptsDirectory", required: false),
-                // Registry columns nothing supplies yet; blank columns until the owning task lands.
-                RunInput.Gap("bffVersion", T245b),             // → H9 output (the deployed build)
-                RunInput.Gap("solutionVersion", T245b),        // → H6 output (the imported solutions)
-                RunInput.Gap("clientCacheBustToken", T245b),   // → minted per deploy / upgrade
+                RunInput.Output(nameof(InterStepState.BffBuildId)),   // T245b: idempotency key + sprk_bffversion
+                RunInput.Output(nameof(InterStepState.BffApiUrl)),    // T245b: health / E2E target
+                RunInput.Output(nameof(InterStepState.ImportedSolutions), required: false),   // T245b: sprk_solutionversion
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
                 RunInput.Output(nameof(InterStepState.AppServiceName)),
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
@@ -248,7 +238,7 @@ public static class HandlerRunInputs
             [HandlerIds.H14] =
             [
                 Tenant, Subscription,
-                RunInput.Gap("webhookNotificationBaseUrl", T245b),   // → H9 output (the BFF URL)
+                RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: webhook receiver base (H9)
                 RunInput.Gap("exchangePolicyScopeGroupId", T245c),
                 RunInput.Gap("communicationGraphResource", T245c),
                 RunInput.Gap("emailGraphResource", T245c),

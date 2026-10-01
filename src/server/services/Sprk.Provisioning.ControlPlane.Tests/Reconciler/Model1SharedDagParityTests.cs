@@ -137,8 +137,9 @@ public sealed class Model1SharedDagParityTests
     //     - H12cRuntimeReferencesHandler     (switch Model1Shared / Model2Dedicated, ~line 286)
     //     - ArmCostEnvelopeChecker (H0)      (SelectExpectedEnvelope by tenancyModel)
     //     - AiSearchTenantFilterInvariantProbe (H13 sub-probe; Model1 branch)
-    //     - FileBicepTemplateInspector (H2a) (template-key selection)
-    //     - ArmDeploymentRunner (H2a)        (template-key selection)
+    //     - ArmDeploymentRunner (H2a)        (template-key selection — the only selector since task 245b
+    //                                         deleted FileBicepTemplateInspector; ArmTemplateInspector
+    //                                         inspects the resolved template and does not branch)
     //
     //   DELIBERATELY has NO branch (documented in handler XML doc):
     //     - H10DataverseAppUserGraphParityHandler

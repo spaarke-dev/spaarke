@@ -40,7 +40,7 @@ public interface ISpeContainerVerifier
 /// <param name="ContainerId">SPE container id to verify (H8's just-created container).</param>
 /// <param name="OwningAppId">Container-type owning app-reg id — the confidential-client identity performing the GET.</param>
 /// <param name="TenantId">Customer Entra tenant id (§4D I1/I5 — explicit, no default).</param>
-/// <param name="VaultName">Customer Key Vault name holding the SPE owner cert.</param>
+/// <param name="VaultName">Spaarke platform Key Vault holding the owning app's certificate (<see cref="SpeContainerOptions.ContainerTypeOwners"/>).</param>
 /// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert.</param>
 public sealed record SpeContainerVerificationRequest(
     string ContainerId,

@@ -118,7 +118,7 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
         {
             _logger.LogInformation(
                 "H4b FilePerEnvSettingsManifest: manifest.yaml carries no per_env_settings; H4b run will be a no-op.");
-            return new PerEnvSettingsManifestReadResult.Success(Array.Empty<PerEnvSettingEntry>());
+            return new PerEnvSettingsManifestReadResult.Success(Array.Empty<PerEnvSettingEntry>(), ArtifactVersion.Of(yaml));
         }
 
         var entries = new List<PerEnvSettingEntry>(document.PerEnvSettings.Count);
@@ -178,7 +178,7 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
             "H4b FilePerEnvSettingsManifest: loaded {Count} per_env_settings entries",
             entries.Count);
 
-        return new PerEnvSettingsManifestReadResult.Success(entries);
+        return new PerEnvSettingsManifestReadResult.Success(entries, ArtifactVersion.Of(yaml));
     }
 
     /// <summary>

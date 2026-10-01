@@ -48,10 +48,16 @@
 //
 // RUN CONTEXT (task 245a, G25 run-context contract — see Models/InterStepState.cs):
 //   - Intake values, read from run.Parameters.NonSecret: tenantId, subscriptionId,
-//     secretsVer, provisionedOn, rotate, ficOmitSecretNames, containerTypeId.
+//     provisionedOn, rotate, ficOmitSecretNames, containerTypeId.
+//   - secretsVer (idempotency version) is the content version of the embedded manifest
+//     (task 245b — KvSecretManifestReadResult.Success.ContentVersion), not a run parameter.
 //   - H2a outputs, read from run.InterStepState: KeyVaultName (customer vault),
 //     ResourceGroupName, AppServiceName, AppServiceStagingSlotName (blank ⇒
-//     "staging"), MiResourceId (UAMI resource id — T1 PATCH target), MiObjectId.
+//     "staging"), MiResourceId (UAMI resource id — T1 PATCH target).
+//   - L2 configuration (KvSecretsPopulationOptions, validated at Worker startup — task 245b):
+//     ControlPlanePrincipalObjectId (the principal the KV RBAC bootstrap grants Secrets
+//     Officer — L2's own identity, never the stamp UAMI) and PlatformVaultName (source of
+//     the from-platform-vault vendor keys).
 //   - The vault resource id is always derived (BuildKvResourceId) from
 //     subscriptionId + ResourceGroupName + KeyVaultName.
 //
@@ -60,7 +66,7 @@
 //   │ Failure mode                              │ §4C class                │
 //   ├───────────────────────────────────────────┼──────────────────────────┤
 //   │ Missing run parameter tenantId /          │ Resumable                │
-//   │ subscriptionId / secretsVer               │ (external precondition — │
+//   │ subscriptionId                            │ (external precondition — │
 //   │ (§4D I1 + structural)                     │ operator fixes params +  │
 //   │                                           │ resumes)                 │
 //   │ Missing InterStepState keyVaultName /     │ Resumable                │
@@ -95,9 +101,9 @@
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H4",
 //           IdempotencyKey==kv-{customerId}-{secretsVer}). Match ⇒ Success
-//           no-op. secretsVer is the manifest hash from Phase H (a content
-//           hash — a content change to the manifest yields a new key + a
-//           new invocation).
+//           no-op. secretsVer is the embedded manifest's content version
+//           (task 245b, ArtifactVersion — a content change to the manifest
+//           yields a new key + a new invocation).
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H4 does NOT enqueue a specific successor. Parity with H2a/H2b/H3: the
@@ -163,9 +169,6 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     // stagingSlotName / userAssignedIdentityResourceId parameter-key constants were removed
     // with that move, as was the keyVaultResourceId override (not an accepted intake key —
     // the vault resource id is always derived via BuildKvResourceId).
-
-    /// <summary>Non-secret parameter key carrying the manifest content hash / semantic version — feeds idempotency key kv-{customerId}-{secretsVer}.</summary>
-    public const string SecretsVersionParameterKey = "secretsVer";
 
     /// <summary>Non-secret parameter key toggling rotation mode (H4-rotate variant per spec.md FR-34). Absent OR "false" = rotation-safe (default).</summary>
     public const string RotateExistingParameterKey = "rotate";
@@ -379,14 +382,6 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 "complete before H4 dispatches.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, SecretsVersionParameterKey, out var secretsVer))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                KvSecretsPopulationRejectionCodes.MissingSecretsVersion,
-                "Run parameter 'secretsVer' is required by H4 (idempotency key kv-{customerId}-{secretsVer}). " +
-                "MUST be the manifest content hash / semantic version per Phase H canonical secret-catalog manifest.",
-                cancellationToken).ConfigureAwait(false);
-        }
 
         // Staging slot: H2a's output (ARM output appServiceStagingSlotName); blank falls back to
         // the app-service.bicep default.
@@ -429,22 +424,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 string.Join(", ", FileKvSecretManifest.SecretFreeIdentityOmitTargets), omitCanonicalNames.Count);
         }
 
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, secretsVer);
-
-        // (3) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
-        {
-            _logger.LogInformation(
-                "H4 idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
-        }
-
-        // (4) Read the manifest. Failure here is Resumable (external precondition
-        //     — operator resolves manifest source + resumes; NO writes have
-        //     happened yet so partial-state guarantees hold).
+        // (3) Read the manifest. Failure here is Resumable (external precondition —
+        //     NO writes have happened yet so partial-state guarantees hold). Its content
+        //     version is this handler's secretsVer (task 245b — formerly a run parameter
+        //     nothing wrote, so every real run stopped here).
         KvSecretManifestReadResult manifestResult;
         try
         {
@@ -458,7 +441,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.Resumable,
                 KvSecretsPopulationRejectionCodes.ManifestReadFailed,
                 $"Canonical secret-catalog manifest read failed: {ex.GetType().Name}: {ex.Message}. " +
-                "Verify the Phase H manifest source is reachable + the L2 UAMI has read access.",
+                "Verify the embedded scripts/canonical-secret-catalog/manifest.yaml resource is intact.",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -470,7 +453,21 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var allEntries = ((KvSecretManifestReadResult.Success)manifestResult).Entries;
+        var manifest = (KvSecretManifestReadResult.Success)manifestResult;
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifest.ContentVersion);
+
+        // (4) Level-3 idempotency: durable no-op on duplicate.
+        if (run.CompletedPhases.Any(cp =>
+                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
+                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        {
+            _logger.LogInformation(
+                "H4 idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, idempotencyKey);
+            return new HandlerResult.Success(idempotencyKey);
+        }
+
+        var allEntries = manifest.Entries;
 
         // Task 245a (G25): entries H3 writes itself (value_source: written-by-h3 — BFF-API-ClientId,
         // BFF-API-Audience) are not H4's to write or resolve. H3 runs AFTER H4 (it needs this handler's
@@ -529,10 +526,12 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 ResourceGroupName: resourceGroupName,
                 KeyVaultName: keyVaultName,
                 KeyVaultResourceId: kvResourceId,
-                // Principal: use the UAMI object id (H2a wrote it to interStepState.MiObjectId).
-                // Wave 2 scaffold accepts null when interStepState.MiObjectId is absent — real impl
-                // fails hard in that case.
-                PrincipalObjectId: run.InterStepState.MiObjectId ?? string.Empty,
+                // Task 245b (🔒 owner-approved 2026-10-01): the principal that WRITES the secrets — L2's
+                // own identity (validated configuration). Never the stamp's BFF UAMI
+                // (InterStepState.MiObjectId): it only reads its vault (Secrets User, customer.bicep),
+                // and granting it Secrets Officer gave the customer workload write access to its own
+                // secrets while leaving the real writer without any.
+                PrincipalObjectId: Guid.Parse(_options.ControlPlanePrincipalObjectId.Trim()).ToString("D"),   // validated at startup
                 RoleDefinitionId: KvBuiltInRoleIds.SecretsOfficer);
             var bootstrapOutcome = await _operatorKvRbacBootstrapper
                 .EnsureGrantedAsync(bootstrapRequest, cancellationToken).ConfigureAwait(false);
@@ -574,7 +573,8 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 RotateExisting: rotateExisting,
                 SecretParameters: new Dictionary<string, KeyVaultSecretRef>(run.Parameters.Secrets, StringComparer.Ordinal),
                 OmitCanonicalNames: omitCanonicalNames,
-                IntakeValues: BuildIntakeValues(run.Parameters.NonSecret));
+                IntakeValues: BuildIntakeValues(run.Parameters.NonSecret),
+                PlatformVaultName: _options.PlatformVaultName);
             writeOutcome = await _writer.WriteAsync(writeRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

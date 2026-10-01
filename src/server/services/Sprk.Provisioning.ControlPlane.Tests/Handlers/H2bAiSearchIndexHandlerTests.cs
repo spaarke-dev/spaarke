@@ -21,7 +21,8 @@
 //       key → Success (no seam called, no state mutation).
 //   T4  Missing tenantId (§4D I1): Failure(Resumable, missing-tenant-id) +
 //       no seam call + Cosmos marked Failed.
-//   T5  Missing indexVer: Failure(Resumable, missing-index-version).
+//   T5  Requested index with no embedded schema (task 245b — indexVer is the
+//       schema set's content version): Failure(Resumable, index-schema-unavailable).
 //   T6  Run not found: Failure(Resumable, run-not-found).
 //   T7  Retired index (spaarke-playbook-embeddings) in requested catalog:
 //       Failure(QuarantineRequired, retired-index-provisioning-forbidden)
@@ -65,7 +66,14 @@ public sealed class H2bAiSearchIndexHandlerTests
     private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-h2b-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
-    private const string IndexVer = "manifest-abc123";
+    // Task 245b: H2b's idempotency version is the content version of the embedded schemas it applies.
+    private static readonly string IndexVer = ComputeIndexVer(new FakeCanonicalIndexCatalog().CanonicalIndexNames);
+
+    private static string ComputeIndexVer(IEnumerable<string> names)
+    {
+        IndexSchemaSet.TryComputeVersion(names, out var version, out _).Should().BeTrue();
+        return version;
+    }
     private const string Model2Endpoint = "https://sprk-acme-search.search.windows.net/";
     private const string SharedPlatformEndpoint = "https://spaarke-search-prod.search.windows.net/";
 
@@ -185,15 +193,17 @@ public sealed class H2bAiSearchIndexHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
-    // ---------- T5 missing indexVer ----------
+    // ---------- T5 index-schema version (task 245b) ----------
 
     [Fact]
-    public async Task MissingIndexVersion_FailsResumable()
+    public async Task RequestedIndexWithoutEmbeddedSchema_FailsResumable_NothingApplied()
     {
-        var run = BuildRun(includeIndexVer: false);
+        var run = BuildRun();
+        run.Parameters.NonSecret[H2bAiSearchIndexHandler.RequestedIndexesParameterKey] = "spaarke-files-index,spaarke-nonexistent-index";
         var repo = new FakeRepository(run, etag: "etag-5");
+        var provisioner = FakeAiSearchIndexProvisioner.Success();
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            FakeAiSearchIndexProvisioner.Success(),
+            provisioner,
             FakeAiSearchIndexVerifier.Ok(),
             new FakeAiSearchTenantFilterTemplateProvisioner());
 
@@ -201,7 +211,21 @@ public sealed class H2bAiSearchIndexHandlerTests
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.MissingIndexVersion);
+        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.IndexSchemaUnavailable);
+        failure.Diagnostic.Should().Contain("spaarke-nonexistent-index");
+        provisioner.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public void SchemaSetVersion_SameBodiesSameVersion_ChangedBodyNewVersion_OrderIndependent()
+    {
+        var a = IndexSchemaSet.ComputeVersion([("spaarke-files-index", "{\"name\":\"a\"}"), ("spaarke-records-index", "{\"name\":\"b\"}")]);
+        var reordered = IndexSchemaSet.ComputeVersion([("spaarke-records-index", "{\"name\":\"b\"}"), ("spaarke-files-index", "{\"name\":\"a\"}")]);
+        var changed = IndexSchemaSet.ComputeVersion([("spaarke-files-index", "{\"name\":\"a\",\"x\":1}"), ("spaarke-records-index", "{\"name\":\"b\"}")]);
+
+        reordered.Should().Be(a);
+        changed.Should().NotBe(a);
+        IndexVer.Should().MatchRegex("^[0-9a-f]{64}$", "the version of the real embedded schema set");
     }
 
     // ---------- T6 run not found ----------
@@ -525,7 +549,6 @@ public sealed class H2bAiSearchIndexHandlerTests
 
     private static ProvisioningRun BuildRun(
         bool includeTenantId = true,
-        bool includeIndexVer = true,
         string tenancyModel = "Model2")
     {
         var run = new ProvisioningRun
@@ -540,10 +563,6 @@ public sealed class H2bAiSearchIndexHandlerTests
         if (includeTenantId)
         {
             run.Parameters.NonSecret[H2bAiSearchIndexHandler.TenantIdParameterKey] = TenantId;
-        }
-        if (includeIndexVer)
-        {
-            run.Parameters.NonSecret[H2bAiSearchIndexHandler.IndexVersionParameterKey] = IndexVer;
         }
         // Model 2 requires AiSearchEndpoint populated by H2a; Model 1 does not.
         if (string.Equals(tenancyModel, "Model2", StringComparison.Ordinal))

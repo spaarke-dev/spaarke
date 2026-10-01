@@ -59,9 +59,11 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 
 namespace Sprk.Provisioning.ControlPlane.Modules;
 
@@ -111,6 +113,7 @@ public static class HandlersModule
             sp.GetRequiredService<ILogger<ArmComputeVCpuProbe>>()));
         services.AddScoped<IPreflightQuotaProbe>(sp => new KeyVaultCertBootstrapProbe(
             sp.GetRequiredService<TokenCredential>(),
+            sp.GetRequiredService<IOptions<SpeContainerOptions>>(),
             sp.GetRequiredService<ILogger<KeyVaultCertBootstrapProbe>>()));
 
         // HANDLER-03 (Wave 2 pre-dispatch remediation 2026-08-27) — F1

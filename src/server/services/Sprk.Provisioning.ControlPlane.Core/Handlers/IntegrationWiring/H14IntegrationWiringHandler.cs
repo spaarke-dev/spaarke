@@ -60,10 +60,10 @@
 //   │ Failure mode                               │ §4C class                 │
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId/subscriptionId/            │ Resumable                 │
-//   │ exchangePolicyScopeGroupId/                 │                           │
-//   │ webhookNotificationBaseUrl (run params)     │                           │
+//   │ exchangePolicyScopeGroupId (run params)     │                           │
 //   │ Missing keyVaultName/bffAppRegId/           │ Resumable (upstream       │
-//   │ miClientId/dataverseEnvUrl (InterStepState) │ handler hasn't run yet)   │
+//   │ miClientId/dataverseEnvUrl/bffApiUrl        │ handler hasn't run yet)   │
+//   │ (InterStepState)                            │                           │
 //   │ Run not found in Cosmos partition           │ Resumable                 │
 //   │ T4 drift (H14a)                             │ QuarantineRequired        │
 //   │ Graph subscription create/renew failure     │ RetryableWithCleanup      │
@@ -105,9 +105,6 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
 
     /// <summary>Non-secret parameter key carrying the mail-enabled security group id scoping the Exchange ApplicationAccessPolicy.</summary>
     public const string ExchangePolicyScopeGroupIdParameterKey = "exchangePolicyScopeGroupId";
-
-    /// <summary>Non-secret parameter key carrying the base URL of the customer's BFF webhook receiver (H14b + H14c).</summary>
-    public const string WebhookNotificationBaseUrlParameterKey = "webhookNotificationBaseUrl";
 
     /// <summary>Non-secret parameter key carrying the Graph resource path for the Communication module subscription (optional; at least one of Communication/Email required).</summary>
     public const string CommunicationGraphResourceParameterKey = "communicationGraphResource";
@@ -253,11 +250,14 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 "Run parameter 'exchangePolicyScopeGroupId' is required by H14a.", cancellationToken)
                 .ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, WebhookNotificationBaseUrlParameterKey, out var notificationBaseUrl))
+        // Task 245b: the webhook receivers are the stamp's own BFF — H9's output (H14 ← H9 in the DAG).
+        var notificationBaseUrl = run.InterStepState.BffApiUrl;
+        if (string.IsNullOrWhiteSpace(notificationBaseUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingWebhookNotificationBaseUrl,
-                "Run parameter 'webhookNotificationBaseUrl' is required by H14 (H14b + H14c both derive their " +
-                "receiver URL from it).", cancellationToken).ConfigureAwait(false);
+                "InterStepState.bffApiUrl is not populated — H9 (BFF deploy) writes the stamp's BFF URL and must " +
+                "complete before H14 (H14b + H14c both derive their receiver URL from it).", cancellationToken)
+                .ConfigureAwait(false);
         }
         TryGetNonEmpty(parameters, CommunicationGraphResourceParameterKey, out var communicationResource);
         TryGetNonEmpty(parameters, EmailGraphResourceParameterKey, out var emailResource);

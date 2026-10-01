@@ -18,10 +18,13 @@
 //       7 canonical Dataverse env-var values; client startup fails fast if
 //       any is missing.
 //   - projects/customer-provisioning-orchestration-r1/design.md §10.2 + §10.3:
-//       Value sources — bffApiAppId/msalClientId/tenantId/bffApiBaseUrl/
-//       shareLinkBaseUrl are run parameters (with documented defaults for
-//       bffApiBaseUrl + msalClientId + shareLinkBaseUrl); azureOpenAiEndpoint
-//       is H2a Bicep output; sharePointEmbeddedContainerId is H8 output.
+//       Value sources — msalClientId/tenantId/shareLinkBaseUrl are run
+//       parameters (documented defaults for msalClientId + shareLinkBaseUrl);
+//       bffApiAppId is H3 output; azureOpenAiEndpoint is H2a output;
+//       sharePointEmbeddedContainerId is H8 output; bffApiBaseUrl is H9 output
+//       (task 245b — the STAMP's own BFF. The former default
+//       https://api.spaarke.com is the PLATFORM BFF: a dedicated stamp's
+//       clients would have called another deployment).
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H7 row:
 //       Idempotency key `envvars-{customerId}-{configVer}`.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.2 (v3.2):
@@ -51,7 +54,8 @@
 //   groups {bffAppRegId, dataverseEnvUrl, openAiEndpoint, tenantId,
 //   speContainerId} as REQUIRED-fail-if-missing. design.md §10.2 documents
 //   THREE of the 7 env-vars (bffApiBaseUrl, msalClientId, shareLinkBaseUrl)
-//   as OPTIONAL run parameters with explicit defaults. This handler follows
+//   as OPTIONAL run parameters with explicit defaults. (Task 245b superseded
+//   this for bffApiBaseUrl: it is H9's InterStepState.BffApiUrl, required.) This handler follows
 //   design.md §10.2/§10.3 (the more detailed, authoritative source) over the
 //   POML's terser paraphrase: the 5 AC#2-listed keys are hard-required
 //   (MissingUpstreamState); the other 3 resolve via parameter-with-default
@@ -69,6 +73,7 @@
 //   │ Missing dataverseEnvUrl (H5)        │ Resumable                 │
 //   │ Missing openAiEndpoint (H2a)        │ Resumable                 │
 //   │ Missing speContainerId (H8)         │ Resumable                 │
+//   │ Missing bffApiUrl (H9 — task 245b)  │ Resumable                 │
 //   │ Missing ClientSecret (config)       │ Resumable                 │
 //   │ Run not found in Cosmos partition   │ Resumable                 │
 //   │ Writer AuthFailure                  │ Resumable                 │
@@ -128,17 +133,11 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>Non-secret parameter key carrying the operator-supplied BFF API base URL override.</summary>
-    public const string BffApiBaseUrlParameterKey = "bffApiBaseUrl";
-
     /// <summary>Non-secret parameter key carrying the operator-supplied MSAL public-client id override.</summary>
     public const string MsalClientIdParameterKey = "msalClientId";
 
     /// <summary>Non-secret parameter key carrying the operator-supplied share-link base URL.</summary>
     public const string ShareLinkBaseUrlParameterKey = "shareLinkBaseUrl";
-
-    /// <summary>design.md §10.2 documented default for <c>bffApiBaseUrl</c> when the operator does not supply an override.</summary>
-    public const string DefaultBffApiBaseUrl = "https://api.spaarke.com";
 
     // ---- Canonical Dataverse env-var schema names (design.md §10.3 — exact spelling) ----
     public const string BffApiBaseUrlSchemaName = "sprk_BffApiBaseUrl";
@@ -284,6 +283,13 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 "complete before H7 dispatches — this is the source for sprk_SharePointEmbeddedContainerId.",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (string.IsNullOrWhiteSpace(state.BffApiUrl))
+        {
+            return await FailMissingUpstreamAsync(run, etag, "bffApiUrl",
+                "InterStepState.bffApiUrl not present. H9 (BFF deploy) MUST complete before H7 dispatches — it is the " +
+                "stamp's own BFF URL and the source for sprk_BffApiBaseUrl (task 245b; there is no platform default).",
+                cancellationToken).ConfigureAwait(false);
+        }
         // A44.5 (task 205i): chain-aware secret guard. The secret is REQUIRED
         // only when the FR-39 ordered credential chain's primary is
         // ClientSecret (legacy/unconfigured default — prong-3 unmigrated env,
@@ -307,10 +313,9 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 EnvVarValuesRejectionCodes.MissingClientSecret, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (3) Resolve the 3 optional-with-default values per design.md §10.2.
-        var bffApiBaseUrl = TryGetNonEmpty(parameters, BffApiBaseUrlParameterKey, out var baseUrlOverride)
-            ? baseUrlOverride
-            : DefaultBffApiBaseUrl;
+        // (3) Resolve the optional-with-default values per design.md §10.2. The BFF base URL is the
+        //     stamp's own (H9 output, guarded above) — task 245b removed the platform default.
+        var bffApiBaseUrl = state.BffApiUrl!;
         var msalClientId = TryGetNonEmpty(parameters, MsalClientIdParameterKey, out var msalOverride)
             ? msalOverride
             : state.BffAppRegId!; // design.md §10.2: "Typically same as bffApiAppId".

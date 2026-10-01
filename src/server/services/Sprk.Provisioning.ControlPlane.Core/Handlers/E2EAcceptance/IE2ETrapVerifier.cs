@@ -77,11 +77,11 @@ public interface IE2ETrapVerifier
 /// count-only verification (pre-A41 behavior, logged distinctly as "DEGRADED") rather than failing —
 /// see DataverseAppUserPairT2Probe for the byte-equality contract.
 /// </param>
-/// <param name="SpeOwnerCertKeyVaultName">
-/// The Spaarke PLATFORM vault holding the SPE owner certificate — T6's cert source. Distinct from
-/// <paramref name="KeyVaultName"/> (the CUSTOMER vault, H2a output, used by T1/T5). OPTIONAL TRAILING
-/// FIELD (task 245a, same additive pattern as <paramref name="UamiObjectId"/>); empty → T6 InfraFault.
-/// Interim source: intake <c>keyVaultName</c>; T245b moves it to L2 configuration.
+/// <param name="ContainerTypeId">
+/// The run's SPE container type (intake <c>containerTypeId</c>). T6 uses it to select the owning-app
+/// credential (<c>SpeContainerOptions.ContainerTypeOwners</c> — app id + the certificate's Spaarke
+/// platform vault and secret), the same entry H0 and H8 use (task 245b). OPTIONAL TRAILING FIELD (same
+/// additive pattern as <paramref name="UamiObjectId"/>); empty or unconfigured → T6 InfraFault.
 /// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
@@ -95,7 +95,7 @@ public sealed record TrapVerificationRequest(
     string AppServiceName,
     string ResourceGroupName,
     string UamiObjectId = "",
-    string SpeOwnerCertKeyVaultName = "");
+    string ContainerTypeId = "");
 
 /// <summary>
 /// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).

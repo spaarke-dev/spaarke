@@ -166,13 +166,9 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
 }
 
 # ---- BingSearch-ApiKey (ai) ----
-# Purpose: Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BingSearch-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: BingSearch-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Purpose: Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
+# Value source: from-platform-vault
+Write-Host '  SKIP: BingSearch-ApiKey (value_source=from-platform-vault; copied by H4 from the Spaarke platform vault)' -ForegroundColor Gray
 
 # ---- Communication-DefaultMailbox (communication) ----
 # Purpose: Default mailbox address for Communication module (outbound + Approved-Senders default).
@@ -247,15 +243,6 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
     Set-VaultSecret -Name 'Dataverse-ClientSecret' -Value 'placeholder-value-source-is-existing-kv' -Description 'OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track). [BINDING never-delete: skip in seed]' -Category 'auth'
 }
 
-# ---- Dataverse-ServiceUrl (dataverse) ----
-# Purpose: Dataverse environment URL (https://{org}.crm.dynamics.com).
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Dataverse-ServiceUrl' -Value 'placeholder-from-run-parameter' -Description 'Dataverse environment URL (https://{org}.crm.dynamics.com).' -Category 'dataverse'
-} else {
-    Write-Host '  SKIP: Dataverse-ServiceUrl (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- DocumentIntelligence-ApiKey (ai) ----
 # Purpose: Azure Document Intelligence API key, from the customer's OWN Document Intelligence resource. INTERIM (owner D13, 2026-09-30): the BFF's text extraction only runs when DocIntelKey is set, so the key stays until the BFF managed-identity path lands (plan §7 T243), which removes this entry.
 # Value source: from-bicep-output
@@ -293,13 +280,9 @@ if ($SeedPlaceholders) {
 }
 
 # ---- LlamaParse-ApiKey (ai) ----
-# Purpose: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'LlamaParse-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: LlamaParse-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Purpose: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
+# Value source: from-platform-vault
+Write-Host '  SKIP: LlamaParse-ApiKey (value_source=from-platform-vault; copied by H4 from the Spaarke platform vault)' -ForegroundColor Gray
 
 # ---- Redis-ConnectionString (data-services) ----
 # Purpose: Azure Cache for Redis connection string.

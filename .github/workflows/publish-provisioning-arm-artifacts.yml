@@ -21,12 +21,13 @@
 #   study chose instead.
 #
 # TEMPLATE SCOPE (verified against
-# Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.FileBicepTemplateInspector.
-# ResolveTemplatePath, the authoritative C# source for which template H2a
-# deploys per TenancyModel):
-#   - infrastructure/bicep/customer.bicep            (DEFAULT -- Model2Dedicated
-#     and any TenancyModel value other than 'Model1Shared')
-#   - infrastructure/bicep/stacks/model1-shared.bicep (TenancyModel == 'Model1Shared')
+# Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.ArmDeploymentRunner.
+# ResolveArmTemplateAsync -- since task 245b the ONE place that maps a
+# TenancyModel to a manifest template key; it is an exhaustive switch over the
+# typed enum (task 223), so a new enum member throws rather than defaulting):
+#   - infrastructure/bicep/customer.bicep            (TenancyModel.Model2)
+#   - infrastructure/bicep/stacks/model1-shared.bicep (TenancyModel.Model1 --
+#     until T225b points Model 1 at customer.bicep)
 #   Both templates compose exclusively local relative-path `module` references
 #   (infrastructure/bicep/modules/*.bicep) -- no `Microsoft.Resources/templateSpecs`
 #   / template-spec-by-id references were found in either template's module
@@ -62,6 +63,10 @@ on:
       - 'infrastructure/bicep/customer.bicep'
       - 'infrastructure/bicep/stacks/model1-shared.bicep'
       - 'infrastructure/bicep/modules/**'
+      # customer.bicep composes the generated KV-secret module
+      # (kv-secrets.generated.bicep) -- a catalog change must republish the
+      # template H2a deploys, or H2a keeps deploying the old secret set.
+      - 'scripts/canonical-secret-catalog/generated/**'
       - '.github/workflows/publish-provisioning-arm-artifacts.yml'
   workflow_dispatch: {}
 
@@ -229,14 +234,14 @@ jobs:
             "templates": {
               "customer": {
                 "sourcePath": "infrastructure/bicep/customer.bicep",
-                "resolutionHint": "Default template -- selected by FileBicepTemplateInspector.ResolveTemplatePath for any TenancyModel value other than 'Model1Shared' (currently: 'Model2Dedicated').",
+                "resolutionHint": "Selected by ArmDeploymentRunner.ResolveArmTemplateAsync for TenancyModel.Model2.",
                 "armJsonBlobName": "customer-arm-${{ steps.build-id.outputs.build_id }}.json",
                 "sha256": "${{ steps.hashes.outputs.customer_sha256 }}",
                 "sizeBytes": ${{ steps.hashes.outputs.customer_size }}
               },
               "model1-shared": {
                 "sourcePath": "infrastructure/bicep/stacks/model1-shared.bicep",
-                "resolutionHint": "Selected by FileBicepTemplateInspector.ResolveTemplatePath when TenancyModel == 'Model1Shared' (case-insensitive).",
+                "resolutionHint": "Selected by ArmDeploymentRunner.ResolveArmTemplateAsync for TenancyModel.Model1 (until T225b).",
                 "armJsonBlobName": "model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json",
                 "sha256": "${{ steps.hashes.outputs.shared_sha256 }}",
                 "sizeBytes": ${{ steps.hashes.outputs.shared_size }}

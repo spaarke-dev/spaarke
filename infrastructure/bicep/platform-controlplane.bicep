@@ -180,9 +180,15 @@ param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? '
 @description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Threaded through to modules/controlplane-worker-app-service.bicep as the EXCHANGE_CONNECT_APP_ID sitecontainer environment variable (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21 — the worker module declared this param with default \'\' but the platform stack never plumbed it, so the sidecar always got an empty value and exited 1 at Listener.ps1 startup fail-fast). All-zero GUID default lets the sidecar START without a real EXO app-reg (Verify-Sidecar-Live.ps1 explicitly accommodates this: "all-zero GUIDs reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline before any real Exchange mutation"). Override with the real EXO connect app-reg client ID once H3 Entra app-reg handler output supplies it at customer/platform onboarding.')
 param exchangeConnectAppId string = '00000000-0000-0000-0000-000000000000'
 
+@description('SPE container types this L2 deployment provisions into, with their owning app and certificate secret — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description for the entry shape and the Key Vault grant a non-default certificate vault needs). Task 245b. Empty (default) until the topology runbook has created a container type + owning app.')
+param speContainerTypeOwners array = []
+
 
 @description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled. Default false per ADR-032 null-object kill-switch -- flip true once customerRunGuardTenantId is supplied; the guard authenticates as the bound L2 UAMI (no client secret) since 2026-08-27, and CustomerRunGuardOptions.Validate() then fails fast at Worker boot on any missing field. spec.md §4D I5 / FR-32 requires this true in production.')
 param customerRunGuardEnabled bool = false
+
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H7/H6 then authenticate via the Worker UAMI federated assertion. Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record).')
+param requireSecretFreeIdentity bool = false
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -475,6 +481,10 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // fail-fast (exit 1) → App Service killed whole site startup. See top-level
     // exchangeConnectAppId param description for full rationale.
     exchangeConnectAppId: exchangeConnectAppId
+    // Task 245b (G25): L2's own principal (H4 grants it Secrets Officer on each customer vault —
+    // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
+    controlPlanePrincipalId: uami.outputs.principalId
+    speContainerTypeOwners: speContainerTypeOwners
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
     // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses
@@ -483,6 +493,9 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // per ADR-032 null-object kill-switch (see worker module param docstring).
     customerRunGuardTenantId: effectiveJwtTenantId
     customerRunGuardEnabled: customerRunGuardEnabled
+    // A44.5 (task 205i; restored by task 245b): secret-free identity mode -- omits the
+    // BFF-API-ClientSecret KV-refs + emits the FR-39 chain settings instead.
+    requireSecretFreeIdentity: requireSecretFreeIdentity
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
     // worker module emits it as the three

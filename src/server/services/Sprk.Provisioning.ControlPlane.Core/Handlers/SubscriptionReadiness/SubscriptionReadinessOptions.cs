@@ -18,7 +18,7 @@
 // intent exactly.
 //
 // DEFAULT PROVIDER LIST — derived from the customer.bicep / model1-shared.bicep
-// template composition (task 044 IBicepTemplateInspector's scan surface):
+// template composition (the modules those two templates compose):
 //   - Microsoft.KeyVault       (task 044 kv module, spec §7.9)
 //   - Microsoft.Storage        (task 044 storage module)
 //   - Microsoft.ServiceBus     (task 044 service-bus module, spec §11 R1)

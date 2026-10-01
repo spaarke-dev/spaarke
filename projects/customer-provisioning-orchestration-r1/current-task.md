@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-01 SESSION 29 — **T245a ✅ + T238 ✅** (T238 = H4b writes `Customer__Id` on both slots + H13 trap T7; gates applied). **Next: T245b.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G25).
+> **Last Updated**: 2026-10-01 SESSION 30 — **T245b ✅** (run context part 2: L2-owned values). **Next: T245c.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G28).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,26 +36,35 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 29, 2026-10-01)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 30, 2026-10-01)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **245b — Run context part 2: L2-owned values** · `tasks/245b-run-context-l2-owned-values.poml` · **not started** (deps 245a ✅) |
-| **Step** | 0 — invoke `task-execute` on the POML (root CLAUDE.md §4). |
-| **Next Action** | `task-execute tasks/245b-run-context-l2-owned-values.poml`. Scope includes **step 4c**, owner-APPROVED 2026-10-01: H4's KV RBAC bootstrap grants L2's own configured principal (validated option; blank → Worker startup fails), stop granting the stamp UAMI Secrets Officer. Plus H7 `bffApiBaseUrl`, H13 `bffVersion`/`solutionVersion`/`clientCacheBustToken` gaps (step 4c a/b). Then T245c → plan §7. |
-| **Verified state (end of T238)** | ControlPlane.Tests **2077 pass / 6 fail (T221 baseline) / 1 skip**; ArchTests **337/337**; Api, Worker, LoadTests build 0/0; generator `-Verify` OK; task-status drift check exit 0 (186 POMLs = 186 rows). |
-| **Owner decisions (2026-10-01)** | ✅ KV-bootstrap principal fix approved (T245b 4c). ✅ ADR-020 + ADR-038 path A rows approved (spec.md). ✅ TASK-INDEX/drift checker fixed + statuses reconciled (`233ff9341`). |
-| **Branch** | Pushed through the T238 commit. master is ~58 commits ahead; only `.claude/CHANGELOG.md` overlaps (append-only) — merge master when the owner asks or before a PR. No open PR. |
-| **Previous** | SESSION 29 commits: `11bb87b15` (T245a), `233ff9341` (drift checker + status reconciliation + approvals), then T238. |
+| **Task** | **245c — Run context part 3: operator intake** · `tasks/245c-run-context-operator-intake.poml` · **not started** (FULL / sonnet @ high; main-session-only — edits the `/provision-environment` skill) |
+| **Step** | none yet |
+| **Next Action** | `task-execute tasks/245c-run-context-operator-intake.poml`: `identityPreset`, `usersJson`, `exchangePolicyScopeGroupId`, `communicationGraphResource`, `emailGraphResource` become intake catalog entries; `POST /api/runs` validates them before any registry lookup / Cosmos write / enqueue; `intake.schema.json` + skill collect them; `RunContextContractTests` known-gap list empty. Then plan §7: T225a → T225b → T243 → T242 → T244 → T227 → T228 → T229/T230 → T232 → T233 → T240 → T218 → T235 → 213.7/207/208/209 → T186. |
+| **Verified state (end of T245b)** | ControlPlane.Tests **2119 pass / 6 fail (T221 baseline) / 1 skip**; ArchTests **337/337**; Api, Worker, LoadTests build 0/0; generator `-Verify` OK; drift check exit 0. |
+| **🔔 Open with the owner (from T245b)** | (a) **G28**: no SPE owning-app certificate exists in any readable vault (T245b trigger 1) — H0 rejects every run until the topology runbook creates it + an `speContainerTypeOwners` entry is added. (b) ADR-028 E-1 scope for L2 H0/H8/T6 — spec row PROPOSED (Path B recommended). (c) ADR-020 registry-column semantics — spec row PROPOSED. (d) ContentSafety-ApiKey → T246; vendor keys must be seeded into the platform vault (`Seed-PlatformKeyVault.ps1` does not). (e) H9 (and H10–H14) now wait on H5. (f) H0's 24 h cert-age gate vs the observed near-instant SPE wait. |
+| **Branch** | T245b committed + pushed. master ahead; merge master when the owner asks or before a PR. No open PR. |
 | **Owner decisions in force** | D13 keyless stamps; G23 `spaarke-demo` → later; **"if a fix is required and you can make it, do not defer"**; user (2026-10-01): "commit and /push-to-github; then continue with next tasks". |
 
 ### Critical Context
-T245a made the run context explicit and enforced (`RunContextContractTests`); T238 added `Customer__Id` on both BFF
-slots (H4b, source = the run's customerId) and H13 trap T7 that quarantines a stamp missing it. Remaining run-context
-gaps are pinned with owners (T245b, T245c, T225b, T227) — a real run (T186) needs them. T245b is next and carries the
-owner-approved KV-bootstrap principal fix.
+T245a made the run context explicit and enforced; T245b removed every value L2 owns from the intake (artifact
+versions computed from the artifacts, SPE owner credential per container type, H9 publishes the BFF URL + build,
+H4 grants L2's own principal). What remains pinned in `RunContextContractTests`: T245c (H11/H14 operator intake +
+`Communication-DefaultMailbox`), T246 (ContentSafety), T225b (secret-free default), T227 (SPE container ids).
 
 ## 📁 Files Modified This Session
+
+### SESSION 30 (2026-10-01) — T245b (run context part 2) — committed
+
+See the T245b POML `<notes>` and `notes/run-context-dataflow-gap.md` §6 for the full account. ~100 files: new
+`Handlers/ArtifactVersion.cs`, `AiSearchIndex/IndexSchemaSet.cs`, `BicepInfraDeploy/ArmTemplateInspector.cs`,
+`SolutionImport/ImportedSolutionSet.cs` (+ tests incl. `SpeContainerOptionsTests`, `WorkerL2OwnedOptionsBootTests`);
+H0/H2a/H2b/H4/H4b/H7/H8/H9/H13/H14 + options + DAG + intake catalog; worker + platform Bicep (+ recompiled JSON,
+customer.json); secret catalog manifest + generator + generated; preflight scripts; publish workflow trigger +
+manifest schema; deployment guide, version matrix, inventory, design/spec/plan/gap note; `.claude` provisioning
+constraints, run-context pattern, provision-environment skill, CHANGELOG.
 
 ### SESSION 29 (2026-10-01) — T238 (H4b Customer__Id + trap T7)
 

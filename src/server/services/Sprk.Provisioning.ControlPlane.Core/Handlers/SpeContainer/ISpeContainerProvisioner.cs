@@ -57,13 +57,14 @@ public interface ISpeContainerProvisioner
 /// (populated once by the operator per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
 /// steps 3 + 7). NEVER created per-customer.
 /// </param>
-/// <param name="VaultName">Customer Key Vault name holding the SPE owner cert (§4D I4 tenant-scoped vault).</param>
+/// <param name="VaultName">Spaarke platform Key Vault holding the owning app's certificate (<see cref="SpeContainerOptions.ContainerTypeOwners"/>, task 245b).</param>
 /// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert (T6 cert bootstrap).</param>
 /// <param name="OwningAppId">
 /// The container-type's owning app-reg id. Used ONLY to construct the
 /// ClientCertificateCredential (app-only Graph token) for the CREATE + ACTIVATE
-/// calls — NOT registered anywhere. Sourced from run.InterStepState.BffAppRegId
-/// (H3 output) for backward-compat with H8's existing DAG dependency on H3.
+/// calls — NOT registered anywhere. From <see cref="SpeContainerOptions.ContainerTypeOwners"/> for the run's
+/// container type (task 245b) — never the customer BFF app (InterStepState.BffAppRegId), which is a separate,
+/// secret-free identity (topology §3A).
 /// </param>
 /// <param name="DisplayName">Human-readable container name (e.g. "Acme Corp").</param>
 /// <param name="Description">Human-readable container description.</param>

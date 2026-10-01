@@ -57,6 +57,9 @@ param(
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]
+    [string]$DataverseEnvUrl,
+
+    [Parameter(Mandatory = $true)]
     [string]$KvVaultUri,
 
     [Parameter(Mandatory = $true)]
@@ -108,8 +111,8 @@ $settings = @(
     "CosmosPersistence__Endpoint=$CosmosEndpoint",
     "Customer__Id=$CustomerId",
     "Dataverse__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
-    "Dataverse__EnvironmentUrl=$(Format-KvRef 'Dataverse-ServiceUrl')",
-    "Dataverse__ServiceUrl=$(Format-KvRef 'Dataverse-ServiceUrl')",
+    "Dataverse__EnvironmentUrl=$DataverseEnvUrl",
+    "Dataverse__ServiceUrl=$DataverseEnvUrl",
     "Dataverse__TenantId=$(Format-KvRef 'TenantId')",
     "DEFAULT_CT_ID=$(Format-KvRef 'SPE-ContainerTypeId')",
     "DocumentIntelligence__AiSearchEndpoint=$(Format-KvRef 'AiSearch-Endpoint')",

@@ -52,6 +52,9 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:uami_client_id", HandlerIds.H2a, nameof(InterStepState.MiClientId), r => r.InterStepState.MiClientId),
         Output("from-h2a-output:service_bus_fqns", HandlerIds.H2a, nameof(InterStepState.ServiceBusFullyQualifiedNamespace), r => r.InterStepState.ServiceBusFullyQualifiedNamespace),
         Output("from-h3-output:bff_app_client_id", HandlerIds.H3, nameof(InterStepState.BffAppRegId), r => r.InterStepState.BffAppRegId),
+        // T245b: the Dataverse environment URL — a plain app setting (it was a KV secret H4 could never
+        // write: H5 runs after H4). H4b ← H5 in the DAG.
+        Output("from-h5-output:dataverse_env_url", HandlerIds.H5, nameof(InterStepState.DataverseEnvUrl), r => r.InterStepState.DataverseEnvUrl),
         Intake("from-intake-parameter:tenant_id", IntakeParameterCatalog.TenantId),
         Intake("from-intake-parameter:container_type_id", IntakeParameterCatalog.ContainerTypeId),
         // T238 (D-14): the run's own customerId — the POST /api/runs body field, validated there by

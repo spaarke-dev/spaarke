@@ -27,8 +27,6 @@ public static class BulkAppSettingsRejectionCodes
     /// <summary><c>InterStepState.AppServiceName</c> (H2a output) missing — needed for the generated script's -AppServiceName arg + /healthz probe URL.</summary>
     public const string MissingAppServiceName = "h4b-missing-app-service-name";
 
-    /// <summary>Run parameter <c>secretsVer</c> missing — feeds idempotency key appsettings-{env}-{secretsVer}.</summary>
-    public const string MissingSecretsVersion = "h4b-missing-secrets-version";
 
     // (h4b-missing-environment-name retired by task 245a: the stamp environment resolves through
     //  IntakeParameterCatalog.ResolveEnvironmentName — CreateRun stores it, default 'prod'.)

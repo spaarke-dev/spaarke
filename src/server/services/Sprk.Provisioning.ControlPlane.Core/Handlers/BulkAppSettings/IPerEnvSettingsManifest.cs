@@ -123,8 +123,12 @@ public abstract record PerEnvSettingsManifestReadResult
 {
     private PerEnvSettingsManifestReadResult() { }
 
-    /// <summary>Manifest read OK — entries in canonical (alphabetical-by-Key) order.</summary>
-    public sealed record Success(IReadOnlyList<PerEnvSettingEntry> Entries) : PerEnvSettingsManifestReadResult;
+    /// <summary>
+    /// Manifest read OK — entries in canonical (alphabetical-by-Key) order. <paramref name="ContentVersion"/>
+    /// is the <see cref="ArtifactVersion"/> of the manifest text (task 245b) — the <c>secretsVer</c> of H4b's
+    /// idempotency key <c>appsettings-{env}-{secretsVer}</c>; the same manifest as H4's, so the same value.
+    /// </summary>
+    public sealed record Success(IReadOnlyList<PerEnvSettingEntry> Entries, string ContentVersion) : PerEnvSettingsManifestReadResult;
 
     /// <summary>Manifest read failed — operator-facing diagnostic.</summary>
     public sealed record Failure(string Diagnostic) : PerEnvSettingsManifestReadResult;

@@ -43,14 +43,17 @@
 //   AC-12 Missing containerTypeId (from constants) -> Resumable +
 //         MissingContainerTypeId. Fires when operator hasn't completed the
 //         topology-setup runbook or SKILL Step 4.0 was bypassed.
-//   AC-13 Missing keyVaultName -> Resumable + MissingKeyVaultName.
-//   AC-14 Missing owningAppId (H3 not complete — InterStepState.BffAppRegId
-//         empty) -> Resumable + MissingOwningAppId.
+//   AC-13 No SpeContainerOptions.ContainerTypeOwners entry for the run's
+//         containerTypeId -> Resumable + ContainerTypeOwnerNotConfigured
+//         (task 245b), nothing created.
+//   AC-14 The owning-app credential is the container type's OWNER from L2
+//         configuration, never the customer BFF app (InterStepState.BffAppRegId)
+//         — task 245b.
 //   AC-15 Run not found -> Resumable + RunNotFound.
 //   AC-16 HandlerId mismatch -> throws InvalidOperationException.
 //   AC-17 Provisioner request carries all required inputs (tenant-scoped,
-//         never hardcoded; containerTypeId from run parameters, owningAppId
-//         from InterStepState).
+//         never hardcoded; containerTypeId from run parameters, owning app +
+//         certificate vault/secret from SpeContainerOptions.ContainerTypeOwners).
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -70,8 +73,9 @@ public sealed class H8SpeContainerHandlerTests
     private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-h8-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
-    private const string KeyVaultName = "sprk-acme-prod-kv";
+    private const string KeyVaultName = "sprk-controlplane-dev-kv";   // the Spaarke platform vault holding the owner cert
     private const string OwningAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+    private const string CertSecretName = "SPE-OwnerCert-Pfx";
     private const string ContainerTypeId = "cccccccc-dddd-eeee-ffff-000000000001";
     private const string ContainerId = "b!aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -356,25 +360,11 @@ public sealed class H8SpeContainerHandlerTests
     }
 
     [Fact]
-    public async Task AC13_MissingKeyVaultName_FailsResumable()
+    public async Task AC13_NoOwnerConfiguredForTheContainerType_FailsResumable_NothingCreated()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H8SpeContainerHandler.KeyVaultNameParameterKey);
+        run.Parameters.NonSecret[H8SpeContainerHandler.ContainerTypeIdParameterKey] = "dddddddd-0000-0000-0000-000000000009";
         var repo = new FakeRepository(run, etag: "etag-13");
-        var handler = BuildHandler(repo, FakeProvisioner.Success(ContainerId), FakeVerifier.Verified("active"));
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.MissingKeyVaultName);
-    }
-
-    [Fact]
-    public async Task AC14_MissingOwningAppId_H3NotComplete_FailsResumable_NoProvisionerCall()
-    {
-        var run = BuildRun();
-        run.InterStepState.BffAppRegId = null;
-        var repo = new FakeRepository(run, etag: "etag-14");
         var provisioner = FakeProvisioner.Success(ContainerId);
         var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
 
@@ -382,9 +372,30 @@ public sealed class H8SpeContainerHandlerTests
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.MissingOwningAppId);
-        failure.Diagnostic.Should().Contain("H3");
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerTypeOwnerNotConfigured);
+        failure.Diagnostic.Should().Contain("dddddddd-0000-0000-0000-000000000009");
         provisioner.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC14_AuthenticatesAsTheOwningApp_NotTheCustomerBffApp()
+    {
+        // The owner certificate is registered on the container type's OWNING app; the customer BFF app
+        // (H3 output) is a separate, secret-free identity (topology §3A) — H8 must never present it.
+        var run = BuildRun();
+        run.InterStepState.BffAppRegId = "99999999-0000-0000-0000-00000000bf00";
+        var repo = new FakeRepository(run, etag: "etag-14");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var verifier = FakeVerifier.Verified("active");
+        var handler = BuildHandler(repo, provisioner, verifier);
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        provisioner.LastRequest!.OwningAppId.Should().Be(OwningAppId);
+        provisioner.LastRequest.OwningAppId.Should().NotBe(run.InterStepState.BffAppRegId);
+        verifier.LastRequest!.OwningAppId.Should().Be(OwningAppId);
+        verifier.LastRequest.VaultName.Should().Be(KeyVaultName);
+        verifier.LastRequest.CertSecretName.Should().Be(CertSecretName);
     }
 
     // ---------- AC-15 run not found ----------
@@ -443,8 +454,9 @@ public sealed class H8SpeContainerHandlerTests
         provisioner.LastRequest.ContainerTypeId.Should().Be(ContainerTypeId,
             "sourced from run parameters, not hardcoded");
         provisioner.LastRequest.OwningAppId.Should().Be(OwningAppId,
-            "sourced from InterStepState.BffAppRegId (H3 output)");
+            "the container type's owning app, from SpeContainerOptions.ContainerTypeOwners (task 245b)");
         provisioner.LastRequest.VaultName.Should().Be(KeyVaultName);
+        provisioner.LastRequest.CertSecretName.Should().Be(CertSecretName);
         provisioner.LastRequest.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
@@ -472,9 +484,24 @@ public sealed class H8SpeContainerHandlerTests
     {
         return new H8SpeContainerHandler(
             repo, provisioner, verifier,
-            Options.Create(new SpeContainerOptions()),
+            Options.Create(OwnerOptions()),
             NullLogger<H8SpeContainerHandler>.Instance);
     }
+
+    /// <summary>One configured owner for the test container type (task 245b).</summary>
+    internal static SpeContainerOptions OwnerOptions() => new()
+    {
+        ContainerTypeOwners =
+        [
+            new SpeContainerTypeOwner
+            {
+                ContainerTypeId = ContainerTypeId,
+                OwnerAppId = OwningAppId,
+                OwnerCertKeyVaultName = KeyVaultName,
+                OwnerCertSecretName = CertSecretName,
+            },
+        ],
+    };
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -498,8 +525,7 @@ public sealed class H8SpeContainerHandlerTests
         };
         run.Parameters.NonSecret[H8SpeContainerHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H8SpeContainerHandler.ContainerTypeIdParameterKey] = ContainerTypeId;
-        run.Parameters.NonSecret[H8SpeContainerHandler.KeyVaultNameParameterKey] = KeyVaultName;
-        run.InterStepState.BffAppRegId = OwningAppId;
+        run.InterStepState.BffAppRegId = "99999999-0000-0000-0000-00000000bf00";   // customer BFF app — NOT the SPE owner
         return run;
     }
 

@@ -22,7 +22,10 @@ using Azure.Core.Pipeline;
 using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
+using Sprk.Provisioning.ControlPlane.Models;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -30,6 +33,30 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 public sealed class KeyVaultCertBootstrapProbeTests
 {
     private const string KeyVaultName = "spaarke-platform-kv";
+    private const string CertSecretName = "SPE-OwnerCert-Pfx";
+    private const string ContainerTypeId = "cccccccc-dddd-eeee-ffff-000000000001";
+
+    // Task 245b: the certificate checked is the run's container type's owning-app certificate, from
+    // SpeContainerOptions.ContainerTypeOwners — the same entry H8 and the T6 probe use.
+    private static IOptions<SpeContainerOptions> OwnerOptions() => Options.Create(new SpeContainerOptions
+    {
+        ContainerTypeOwners =
+        [
+            new SpeContainerTypeOwner
+            {
+                ContainerTypeId = ContainerTypeId,
+                OwnerAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+                OwnerCertKeyVaultName = KeyVaultName,
+                OwnerCertSecretName = CertSecretName,
+            },
+        ],
+    });
+
+    private static PreflightProbeInput InputFor(string? containerTypeId) => new(
+        "acme", "tenant-1",
+        containerTypeId is null
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string> { [IntakeParameterCatalog.ContainerTypeId] = containerTypeId });
     private static readonly DateTimeOffset Now = new(2026, 8, 19, 12, 0, 0, TimeSpan.Zero);
 
     // ---------- Evaluate() boundary cases ----------
@@ -38,7 +65,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
     public void Evaluate_SecretNotFound_FailsWithMissingDiagnostic()
     {
         var result = KeyVaultCertBootstrapProbe.Evaluate(
-            KeyVaultName, "spe-owner-cert-pfx", "https://x/secrets/y", minAgeHours: 24, Now,
+            KeyVaultName, CertSecretName, "https://x/secrets/y", minAgeHours: 24, Now,
             new SecretCreatedOnResult.NotFound());
 
         result.Passed.Should().BeFalse();
@@ -49,7 +76,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
     public void Evaluate_MissingCreatedOnMetadata_FailsAsShapeDrift()
     {
         var result = KeyVaultCertBootstrapProbe.Evaluate(
-            KeyVaultName, "spe-owner-cert-pfx", "https://x/secrets/y", minAgeHours: 24, Now,
+            KeyVaultName, CertSecretName, "https://x/secrets/y", minAgeHours: 24, Now,
             new SecretCreatedOnResult.MissingCreatedOn());
 
         result.Passed.Should().BeFalse();
@@ -61,7 +88,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
     {
         // Created 10h ago; needs 24h.
         var result = KeyVaultCertBootstrapProbe.Evaluate(
-            KeyVaultName, "spe-owner-cert-pfx", "https://x/secrets/y", minAgeHours: 24, Now,
+            KeyVaultName, CertSecretName, "https://x/secrets/y", minAgeHours: 24, Now,
             new SecretCreatedOnResult.Found(Now.AddHours(-10)));
 
         result.Passed.Should().BeFalse("10h < 24h replication requirement");
@@ -73,7 +100,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
     public void Evaluate_ExactlyAtMinAge_Passes()
     {
         var result = KeyVaultCertBootstrapProbe.Evaluate(
-            KeyVaultName, "spe-owner-cert-pfx", "https://x/secrets/y", minAgeHours: 24, Now,
+            KeyVaultName, CertSecretName, "https://x/secrets/y", minAgeHours: 24, Now,
             new SecretCreatedOnResult.Found(Now.AddHours(-24)));
 
         result.Passed.Should().BeTrue("24h == 24h requirement is within threshold (>=)");
@@ -83,7 +110,7 @@ public sealed class KeyVaultCertBootstrapProbeTests
     public void Evaluate_OverMinAge_Passes()
     {
         var result = KeyVaultCertBootstrapProbe.Evaluate(
-            KeyVaultName, "spe-owner-cert-pfx", "https://x/secrets/y", minAgeHours: 24, Now,
+            KeyVaultName, CertSecretName, "https://x/secrets/y", minAgeHours: 24, Now,
             new SecretCreatedOnResult.Found(Now.AddHours(-48)));
 
         result.Passed.Should().BeTrue();
@@ -97,13 +124,13 @@ public sealed class KeyVaultCertBootstrapProbeTests
     {
         var handler = new FakeArmHttpMessageHandler(request =>
         {
-            request.RequestUri!.AbsolutePath.Should().Be($"/secrets/{KeyVaultCertBootstrapProbe.CertSecretName}/",
+            request.RequestUri!.AbsolutePath.Should().Be($"/secrets/{CertSecretName}/",
                 "the probe must call the REAL KV secret-show endpoint, not a hard-coded stub");
             var createdUnix = Now.AddHours(-48).ToUnixTimeSeconds();
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    $$"""{ "value": "hidden", "id": "https://{{KeyVaultName}}.vault.azure.net/secrets/{{KeyVaultCertBootstrapProbe.CertSecretName}}/v1", "attributes": { "enabled": true, "created": {{createdUnix}} } }""",
+                    $$"""{ "value": "hidden", "id": "https://{{KeyVaultName}}.vault.azure.net/secrets/{{CertSecretName}}/v1", "attributes": { "enabled": true, "created": {{createdUnix}} } }""",
                     Encoding.UTF8, "application/json"),
             };
         });
@@ -111,10 +138,10 @@ public sealed class KeyVaultCertBootstrapProbeTests
         var probe = new KeyVaultCertBootstrapProbe(
             new FakeCredential(),
             new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) },
+            OwnerOptions(),
             NullLogger<KeyVaultCertBootstrapProbe>.Instance,
             timeProvider);
-        var input = new PreflightProbeInput(
-            "acme", "tenant-1", new Dictionary<string, string> { ["keyVaultName"] = KeyVaultName });
+        var input = InputFor(ContainerTypeId);
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
@@ -133,10 +160,10 @@ public sealed class KeyVaultCertBootstrapProbeTests
         var probe = new KeyVaultCertBootstrapProbe(
             new FakeCredential(),
             new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) },
+            OwnerOptions(),
             NullLogger<KeyVaultCertBootstrapProbe>.Instance,
             new TestTimeProvider(Now));
-        var input = new PreflightProbeInput(
-            "acme", "tenant-1", new Dictionary<string, string> { ["keyVaultName"] = KeyVaultName });
+        var input = InputFor(ContainerTypeId);
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
@@ -145,21 +172,40 @@ public sealed class KeyVaultCertBootstrapProbeTests
     }
 
     [Fact]
-    public async Task CheckAsync_MissingKeyVaultNameParameter_ReturnsConfigErrorWithoutCallingKv()
+    public async Task CheckAsync_MissingContainerTypeIdParameter_ReturnsConfigErrorWithoutCallingKv()
     {
         var handler = new FakeArmHttpMessageHandler(_ => throw new InvalidOperationException("must not call KV"));
         var probe = new KeyVaultCertBootstrapProbe(
             new FakeCredential(),
             new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) },
+            OwnerOptions(),
             NullLogger<KeyVaultCertBootstrapProbe>.Instance,
             new TestTimeProvider(Now));
-        var input = new PreflightProbeInput("acme", "tenant-1", new Dictionary<string, string>());
+        var input = InputFor(null);
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
         result.Passed.Should().BeFalse();
-        result.Diagnostic.Should().Contain("'keyVaultName'");
+        result.Diagnostic.Should().Contain("'containerTypeId'");
         handler.RequestedUris.Should().BeEmpty("config error must short-circuit before any KV call");
+    }
+
+    [Fact]
+    public async Task CheckAsync_NoOwnerConfiguredForTheContainerType_FailsWithoutCallingKv()
+    {
+        var handler = new FakeArmHttpMessageHandler(_ => throw new InvalidOperationException("must not call KV"));
+        var probe = new KeyVaultCertBootstrapProbe(
+            new FakeCredential(),
+            new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) },
+            OwnerOptions(),
+            NullLogger<KeyVaultCertBootstrapProbe>.Instance,
+            new TestTimeProvider(Now));
+
+        var result = await probe.CheckAsync(InputFor("dddddddd-0000-0000-0000-000000000009"), CancellationToken.None);
+
+        result.Passed.Should().BeFalse("H0 must stop a run whose container type has no owning-app credential, before anything is created");
+        result.Diagnostic.Should().Contain("ContainerTypeOwners");
+        handler.RequestedUris.Should().BeEmpty();
     }
 
     /// <summary>Minimal fake <see cref="TokenCredential"/> — this file's own copy (SecretClient needs a credential; no live token acquisition happens against the fake transport).</summary>

@@ -26,6 +26,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -37,10 +38,12 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
     private const string TenantId = "11111111-2222-3333-4444-555555555555";
     private const string SubscriptionId = "sub-cus-acme-prod";
     private const string DataverseUrl = "https://sprk-acme.crm.dynamics.com";
-    private const string BffAppRegId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+    private const string BffAppRegId = "99999999-0000-0000-0000-00000000bf00";   // the customer BFF app — NOT the SPE owner
+    private const string OwnerAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";    // the container type's owning app
+    private const string ContainerTypeId = "cccccccc-dddd-eeee-ffff-000000000001";
     private const string UamiClientId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string KeyVaultName = "sprk-acme-prod-kv";      // the CUSTOMER vault (T1/T5 input)
-    private const string SpeOwnerCertVault = "sprk-dev-kv";       // the Spaarke PLATFORM vault (T6 input)
+    private const string SpeOwnerCertVault = "sprk-dev-kv";       // the Spaarke PLATFORM vault (owner entry, task 245b)
     private const string AppServiceName = "sprk-bff-acme";
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
 
@@ -62,7 +65,8 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
             .Which.Kind.Should().Be(TrapKind.T6SpeConfidentialClient);
         graphProbe.CallCount.Should().Be(1);
         graphProbe.LastTenantId.Should().Be(TenantId);
-        graphProbe.LastClientAppId.Should().Be(BffAppRegId);
+        graphProbe.LastClientAppId.Should().Be(OwnerAppId,
+            "the owner certificate belongs to the container type's owning app, never the customer BFF app (task 245b)");
         graphProbe.LastCertThumbprint.Should().Be(sourceCert.Thumbprint);
     }
 
@@ -223,33 +227,22 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
-    [Fact]
-    public async Task ProbeAsync_MissingBffAppRegId_Throws()
+    [Theory]
+    [InlineData("")]
+    [InlineData("dddddddd-0000-0000-0000-000000000009")]
+    public async Task ProbeAsync_NoOwnerForTheContainerType_ReturnsInfraFault_NoKvRead(string containerTypeId)
     {
-        var probe = BuildProbe(new FakeKvSecretGetHandler(base64PfxOrNull: null),
-            FakeT6GraphAppOnlyProbe.WithResult(T6GraphAppOnlyProbeResults.Succeeded));
-
-        var act = async () => await probe.ProbeAsync(
-            BuildRequest() with { BffAppRegId = string.Empty }, CancellationToken.None);
-
-        await act.Should().ThrowAsync<ArgumentException>();
-    }
-
-    [Fact]
-    public async Task ProbeAsync_MissingSpeOwnerCertVault_ReturnsInfraFault_NoKvRead()
-    {
-        // Task 245a: T6 reads the certificate from the Spaarke PLATFORM vault
-        // (SpeOwnerCertKeyVaultName), not the customer vault (KeyVaultName, used by T1/T5).
-        // An unknown platform vault is an infra fault the operator can fix, not a crash.
+        // Task 245b: T6 tests the owning-app credential of the run's container type
+        // (SpeContainerOptions.ContainerTypeOwners). An unknown or unconfigured container type is an
+        // infra fault the operator can fix, not a crash — and no vault is read.
         var kv = new FakeKvSecretGetHandler(base64PfxOrNull: null);
         var probe = BuildProbe(kv, FakeT6GraphAppOnlyProbe.WithResult(T6GraphAppOnlyProbeResults.Succeeded));
 
         var outcome = await probe.ProbeAsync(
-            BuildRequest() with { SpeOwnerCertKeyVaultName = string.Empty }, CancellationToken.None);
+            BuildRequest() with { ContainerTypeId = containerTypeId }, CancellationToken.None);
 
-        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>()
-            .Which.Diagnostic.Should().Contain("SPE owner certificate");
-        kv.RequestedHosts.Should().BeEmpty("with no platform vault named, no vault is read at all");
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>();
+        kv.RequestedHosts.Should().BeEmpty();
     }
 
     [Fact]
@@ -314,7 +307,7 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
         KeyVaultName: KeyVaultName,
         AppServiceName: AppServiceName,
         ResourceGroupName: ResourceGroupName,
-        SpeOwnerCertKeyVaultName: SpeOwnerCertVault);
+        ContainerTypeId: ContainerTypeId);
 
     private static T6SpeConfidentialClientTrapProbe BuildProbe(
         FakeKvSecretGetHandler kvHandler, IT6GraphAppOnlyProbe graphProbe)
@@ -327,11 +320,25 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
         {
             TrapVerifierTimeout = TimeSpan.FromSeconds(30),
         });
+        var speOptions = Options.Create(new SpeContainerOptions
+        {
+            ContainerTypeOwners =
+            [
+                new SpeContainerTypeOwner
+                {
+                    ContainerTypeId = ContainerTypeId,
+                    OwnerAppId = OwnerAppId,
+                    OwnerCertKeyVaultName = SpeOwnerCertVault,
+                    OwnerCertSecretName = "SPE-OwnerCert-Pfx",
+                },
+            ],
+        });
         return new T6SpeConfidentialClientTrapProbe(
             sharedCredential: new FakeCredential(),
             clientOptions: kvOptions,
             graphProbe: graphProbe,
             options: options,
+            speOptions: speOptions,
             logger: NullLogger<T6SpeConfidentialClientTrapProbe>.Instance);
     }
 

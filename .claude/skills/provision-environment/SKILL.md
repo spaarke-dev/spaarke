@@ -354,6 +354,11 @@ if (-not $containerTypeId) {
   Write-Error "[skill-config] scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.$env.containerTypeId is null. Operator MUST populate before Step 0.5 iteration. See docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 for how to obtain the SPE container-type GUID."
   exit 1
 }
+# Task 245b: the L2 Worker must also carry this container type's OWNING-app credential
+# (SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId / __OwnerCertKeyVaultName /
+# __OwnerCertSecretName — Bicep param speContainerTypeOwners). H0's SpeCertBootstrap check rejects the run
+# otherwise, before anything is created. The skill cannot read Worker settings; if H0 fails with
+# "No SpeContainerOptions:ContainerTypeOwners entry", fix the Worker configuration, not the intake.
 
 $repoRoot = git rev-parse --show-toplevel
 $manifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
@@ -1699,6 +1704,32 @@ Per Wave 0 Decision 2 (Dataverse MCP alt-key probe as the canonical registry loo
 $script:RegistryStale = $false
 $script:RegistryStaleDiagnostic = $null
 
+# Task 245b: every promoted column comes from the run record (GET /api/runs/{id} → $run) — the SAME
+# sources H13 uses (H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady), so the operator fallback
+# can never write a different value than H13 would have.
+$isv                = $run.interStepState
+$completedAtIso     = ([datetimeoffset]$run.completedOn).ToString('o')
+$rgName             = $isv.resourceGroupName           # H2a output
+$appServiceName     = $isv.appServiceName              # H2a output
+$kvName             = $isv.keyVaultName                # H2a output (the CUSTOMER vault)
+$azureSubId         = $run.parameters.nonSecret.subscriptionId
+$deployedBffVersion = $isv.bffBuildId                  # H9 output — the build it deployed
+$cacheBustToken     = $runId                           # new per deploy / upgrade, stable across retries
+# sprk_solutionversion — ImportedSolutionSet: SHA-256 of the ordinal-sorted, distinct "uniqueName=version"
+# lines of H6's importedSolutions joined by "\n", first 32 lowercase hex digits ($null when none).
+$solutionPairs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+foreach ($sol in @($isv.importedSolutions)) {
+  if ($sol -and -not [string]::IsNullOrWhiteSpace($sol.solutionUniqueName)) {
+    [void]$solutionPairs.Add("$($sol.solutionUniqueName.Trim())=$("$($sol.version)".Trim())")
+  }
+}
+$deployedSolutionVer = $null
+if ($solutionPairs.Count -gt 0) {
+  $sortedPairs = [string[]]@($solutionPairs); [Array]::Sort($sortedPairs, [StringComparer]::Ordinal)
+  $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes(($sortedPairs -join "`n")))
+  $deployedSolutionVer = [Convert]::ToHexString($hash).ToLowerInvariant().Substring(0, 32)
+}
+
 # Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
 # (skill session-local $environmentId). Fallback: query by sprk_customerid alt-key
 # in case Step 1f state was lost across a compact/handoff.
@@ -1758,8 +1789,8 @@ if (-not $script:RegistryStale) {
   # landed Ready, do NOT re-write it (RU-cost + audit-noise for no state change).
   $fields = @{
     sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
-    sprk_bffversion               = $deployedBffVersion  # from run.InterStepState.BffVersion
-    sprk_solutionversion          = $deployedSolutionVer # from run.InterStepState.SolutionVersion
+    sprk_bffversion               = $deployedBffVersion  # run.interStepState.bffBuildId (H9)
+    sprk_solutionversion          = $deployedSolutionVer # fingerprint of run.interStepState.importedSolutions (H6)
     sprk_azuresubscriptionid      = $azureSubId
     sprk_resourcegroupname        = $rgName
     sprk_appservicename           = $appServiceName

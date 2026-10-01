@@ -10,12 +10,15 @@
 // omit-when-absent contract for optional columns + the source of each column
 // (task 245a, G25): resource group / App Service / customer Key Vault from
 // InterStepState (H2a outputs); containerTypeId from the intake parameter only.
+// Task 245b: sprk_bffversion ← H9's BffBuildId, sprk_solutionversion ← the
+// fingerprint of H6's ImportedSolutions, sprk_clientcachebusttoken ← the run id.
 // -----------------------------------------------------------------------------
 
 using System;
 using System.Collections.Generic;
 using FluentAssertions;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
+using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Models;
 using Xunit;
 
@@ -50,8 +53,8 @@ public class H13BuildPromotedColumnsTests
     public void BuildPromotedColumnsForReady_Omits_Absent_Optional_Columns()
     {
         // Omit-when-absent rule: never overwrite an existing value with null.
-        // With no NonSecret parameters and no InterStepState, only sprk_provisionedon
-        // is present in the dictionary.
+        // With no NonSecret parameters and no InterStepState, only sprk_provisionedon and the
+        // run-id cache-bust token (task 245b — every run has an id) are present.
         var run = new ProvisioningRun
         {
             RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
@@ -61,7 +64,8 @@ public class H13BuildPromotedColumnsTests
 
         var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
 
-        columns.Should().HaveCount(1);
+        columns.Should().HaveCount(2);
+        columns["sprk_clientcachebusttoken"].Should().Be("run-1");
         columns.Should().NotContainKey("sprk_bffversion");
         columns.Should().NotContainKey("sprk_solutionversion");
         columns.Should().NotContainKey("sprk_containertypeid");
@@ -78,27 +82,27 @@ public class H13BuildPromotedColumnsTests
             {
                 NonSecret =
                 {
-                    ["bffVersion"] = "1.4.2",
-                    ["solutionVersion"] = "2.1.0",
                     ["subscriptionId"] = "11111111-1111-1111-1111-111111111111",
                     ["containerTypeId"] = "e2e-container-type-guid",
-                    ["clientCacheBustToken"] = "abc123",
                 },
             },
-            // H2a outputs (task 245a, G25).
+            // H2a outputs (task 245a, G25); H9 + H6 outputs (task 245b).
             InterStepState = new InterStepState
             {
                 ResourceGroupName = "rg-spaarke-cust1-prod",
                 AppServiceName = "sprk-cust1-prod-api",
                 KeyVaultName = "kv-sprk-cust1",
+                BffBuildId = "2026.09.30-123",
+                ImportedSolutions = Solutions(("SpaarkeCore", "1.4.2.0"), ("LegalWorkspace", "1.0.7.0")),
             },
         };
 
         var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
 
         columns.Should().ContainKey("sprk_provisionedon").WhoseValue.Should().Be(TestStamp);
-        columns.Should().ContainKey("sprk_bffversion").WhoseValue.Should().Be("1.4.2");
-        columns.Should().ContainKey("sprk_solutionversion").WhoseValue.Should().Be("2.1.0");
+        columns.Should().ContainKey("sprk_bffversion").WhoseValue.Should().Be("2026.09.30-123");
+        columns.Should().ContainKey("sprk_solutionversion").WhoseValue.Should()
+            .Be(ImportedSolutionSet.ComputeVersion(run.InterStepState.ImportedSolutions));
         columns.Should().ContainKey("sprk_azuresubscriptionid")
             .WhoseValue.Should().Be("11111111-1111-1111-1111-111111111111");
         columns.Should().ContainKey("sprk_resourcegroupname").WhoseValue.Should().Be("rg-spaarke-cust1-prod");
@@ -106,8 +110,27 @@ public class H13BuildPromotedColumnsTests
         columns.Should().ContainKey("sprk_keyvaultname").WhoseValue.Should().Be("kv-sprk-cust1");
         columns.Should().ContainKey("sprk_containertypeid")
             .WhoseValue.Should().Be("e2e-container-type-guid");
-        columns.Should().ContainKey("sprk_clientcachebusttoken").WhoseValue.Should().Be("abc123");
+        columns.Should().ContainKey("sprk_clientcachebusttoken").WhoseValue.Should().Be("run-1");
     }
+
+    [Fact]
+    public void SolutionSetVersion_IgnoresOrderAndSolutionIds_ChangesWithAnyVersion_FitsTheColumn()
+    {
+        var a = ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeCore", "1.4.2.0"), ("LegalWorkspace", "1.0.7.0")));
+        var reordered = ImportedSolutionSet.ComputeVersion(Solutions(("LegalWorkspace", "1.0.7.0"), ("SpaarkeCore", "1.4.2.0")));
+        var bumped = ImportedSolutionSet.ComputeVersion(Solutions(("SpaarkeCore", "1.4.2.0"), ("LegalWorkspace", "1.0.8.0")));
+
+        reordered.Should().Be(a, "the same solution set in another environment (other solution ids, other order)");
+        bumped.Should().NotBe(a);
+        a!.Length.Should().BeLessThanOrEqualTo(50, "sprk_solutionversion is String(50)");
+        ImportedSolutionSet.ComputeVersion([]).Should().BeNull();
+        // Pinned vector — the /provision-environment Step 6a registry fallback recomputes this in PowerShell
+        // (ordinal sort, newline join, SHA-256, first 32 hex); both must agree on this exact value.
+        a.Should().Be("a7baceac031eba50d19c7e5344061969");
+    }
+
+    private static List<ImportedSolutionRecord> Solutions(params (string Name, string Version)[] solutions)
+        => solutions.Select((s, i) => new ImportedSolutionRecord(s.Name, s.Version, Guid.NewGuid().ToString("D"), i + 1)).ToList();
 
     [Fact]
     public void BuildPromotedColumnsForReady_ContainerTypeId_Reads_Intake_Parameter_Not_InterStepState()
@@ -212,11 +235,8 @@ public class H13BuildPromotedColumnsTests
             {
                 NonSecret =
                 {
-                    ["bffVersion"] = "1.0",
-                    ["solutionVersion"] = "1.0",
                     ["subscriptionId"] = "sub",
                     ["containerTypeId"] = "ctype",
-                    ["clientCacheBustToken"] = "cbt",
                 },
             },
             InterStepState = new InterStepState
@@ -224,10 +244,13 @@ public class H13BuildPromotedColumnsTests
                 ResourceGroupName = "rg",
                 AppServiceName = "app",
                 KeyVaultName = "kv",
+                BffBuildId = "2026.09.30-1",
+                ImportedSolutions = Solutions(("SpaarkeCore", "1.0.0.0")),
             },
         };
 
-        var expectedColumnCount = 9; // provisionedon + 5 intake + 3 H2a outputs
+        // provisionedon + 2 intake + 3 H2a outputs + bffversion (H9) + solutionversion (H6) + cache-bust (run id)
+        var expectedColumnCount = 9;
 
         var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
 

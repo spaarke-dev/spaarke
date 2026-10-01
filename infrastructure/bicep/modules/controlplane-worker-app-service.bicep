@@ -154,8 +154,62 @@ param customerRunGuardTenantId string = ''
 @description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once customerRunGuardTenantId is supplied and the bound UAMI is a Dataverse Application User on the admin env (it authenticates as the UAMI since 2026-08-27; no client secret is involved). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
 param customerRunGuardEnabled bool = false
 
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master\'s pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves the legacy shape byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)')
+param requireSecretFreeIdentity bool = false
+
+// ============================================================================
+// A44.5 -- BFF-app-reg credential app settings (exactly ONE of these two sets
+// is appended to the base appSettings below via concat + ternary):
+//   - legacy (requireSecretFreeIdentity=false): the two KV-refs exactly as
+//     tasks 142 / 204a wired them.
+//   - secret-free (requireSecretFreeIdentity=true): FR-39 ordered-credential
+//     chain settings consumed by WorkerCredentialSelectionOptions
+//     (Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/**, task
+//     205i) -- MI-FIC via the SAME UAMI this module binds.
+// ============================================================================
+var legacyClientSecretAppSettings = [
+  {
+    name: 'EnvVarValues__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+  {
+    name: 'SolutionImportOptions__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+]
+
+var secretFreeCredentialAppSettings = [
+  { name: 'EnvVarValues__Credentials__Order__0', value: 'ManagedIdentityFederated' }
+  { name: 'EnvVarValues__Credentials__RequireSecretFreeIdentity', value: 'true' }
+  { name: 'SolutionImportOptions__Credentials__Order__0', value: 'ManagedIdentityFederated' }
+  { name: 'SolutionImportOptions__Credentials__RequireSecretFreeIdentity', value: 'true' }
+]
+
+@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as KvSecretsPopulationOptions__ControlPlanePrincipalObjectId -- the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead). REQUIRED: KvSecretsPopulationOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
+param controlPlanePrincipalId string
+
+@description('Spaarke platform Key Vault holding the Spaarke-shared vendor keys (owner D5: BingSearch-ApiKey, LlamaParse-ApiKey) under their canonical names. Emitted as KvSecretsPopulationOptions__PlatformVaultName -- H4 copies each manifest value_source=from-platform-vault entry from here into the customer vault (task 245b). Defaults to this module\'s platform vault (keyVaultName), on which platform-controlplane.bicep grants the Worker UAMI Key Vault Secrets User. Any OTHER vault named here must grant the Worker UAMI Key Vault Secrets User itself -- nothing in this template does, and H4 then fails Resumable before writing anything.')
+param vendorKeysKeyVaultName string = keyVaultName
+
+// Task 245b. Deliberately `array`, not a user-defined type: a `type` makes
+// Bicep emit languageVersion 2.0 (symbolic-name resources) for this module AND
+// for platform-controlplane.bicep, which imports it -- a template-wide change to
+// a live-what-if-verified deployment for a shape check that
+// SpeContainerOptions.Validate() already does more strictly at Worker startup.
+@description('SPE container types this L2 deployment provisions into, each with its OWNING app and that app\'s certificate (base64 PFX): [{ containerTypeId, ownerAppId, ownerCertKeyVaultName?, ownerCertSecretName? }]. containerTypeId = the SPE container type GUID, matched against the run\'s intake containerTypeId; ownerAppId = the owning app registration\'s client id -- never the customer BFF app (topology section 3A); ownerCertKeyVaultName defaults to keyVaultName, on which platform-controlplane.bicep grants the Worker UAMI Key Vault Secrets User -- any OTHER vault must grant the Worker UAMI Key Vault Secrets User itself, or H0\'s SpeCertBootstrap probe rejects every run for that container type; ownerCertSecretName defaults to SPE-OwnerCert-Pfx. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__* -- read by H0\'s SpeCertBootstrap probe, H8 (container creation) and H13\'s T6 probe. Empty (default) boots the Worker; H0 then rejects every run until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type, an owning app listed twice, or two owning apps sharing one certificate secret.')
+param speContainerTypeOwners array = []
+
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 245b: flatten speContainerTypeOwners into indexed app settings (the .NET
+// configuration binder's list syntax: SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId ...).
+var speContainerTypeOwnerSettings = flatten(map(range(0, length(speContainerTypeOwners)), i => [
+  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__ContainerTypeId', value: speContainerTypeOwners[i].containerTypeId }
+  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerAppId', value: speContainerTypeOwners[i].ownerAppId }
+  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerCertKeyVaultName', value: speContainerTypeOwners[i].?ownerCertKeyVaultName ?? keyVaultName }
+  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerCertSecretName', value: speContainerTypeOwners[i].?ownerCertSecretName ?? 'SPE-OwnerCert-Pfx' }
+]))
 
 // ============================================================================
 // APP SERVICE (WORKER -- slotless per DS-3 Section 3; UAMI-only per ADR-028)
@@ -183,7 +237,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: [
+      appSettings: concat([
         // ---------------------------------------------------------------
         // NOTE: no AzureAd__* settings here -- the Worker has NO auth
         // surface (task 100 Program.cs: only anonymous /healthz + /ping).
@@ -233,17 +287,17 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // writer collaborator authenticates to each customer's Dataverse
         // env using the SAME shared multitenant BFF app-reg credential H6
         // uses for solution import (the MI-Dataverse App User from H10 does
-        // not exist yet at H7's point in the DAG). REQUIRED --
-        // EnvVarValuesOptions.Validate() fails fast at boot (NFR-05) if
-        // this is missing; sourced from the platform KV's canonical
-        // never-delete BFF-API-ClientSecret secret (task 126 real-value
-        // population; same secret the .Api site resolves as
-        // AzureAd__ClientSecret / Graph__ClientSecret).
+        // not exist yet at H7's point in the DAG). Sourced from the platform
+        // KV's canonical BFF-API-ClientSecret secret (task 126 real-value
+        // population).
+        //
+        // A44.5 (task 205i; restored by task 245b): the EnvVarValues__ClientSecret
+        // KV-ref is NOT emitted here unconditionally -- it lives in
+        // legacyClientSecretAppSettings (appended via the concat + ternary at
+        // the bottom of this array) and is OMITTED when
+        // requireSecretFreeIdentity=true, where the FR-39 chain settings take
+        // its place and EnvVarValuesOptions.Validate() accepts the empty slot.
         // ---------------------------------------------------------------
-        {
-          name: 'EnvVarValues__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Task 204a (Wave G-8 Class-B follow-on to task 142): SolutionImport
@@ -264,14 +318,14 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // .Validate() only asserts ProvisioningArtifactsContainerUri +
         // SolutionArtifactManifestBlobName -- H6's ClientSecret is a runtime
         // Resumable failure per §4C rollback classification (H6SolutionImportHandler
-        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret). We
-        // still wire it here so H6 succeeds on the happy path without
-        // per-customer operator intervention (parity with H7 lifecycle).
+        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret).
+        //
+        // A44.5 (task 205i; restored by task 245b): the
+        // SolutionImportOptions__ClientSecret KV-ref lives in
+        // legacyClientSecretAppSettings -- OMITTED when
+        // requireSecretFreeIdentity=true (H6 then selects MI-FIC via the
+        // FR-39 chain).
         // ---------------------------------------------------------------
-        {
-          name: 'SolutionImportOptions__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Task 153 (Wave G-5): RuntimeReferences -- H12c's shared-platform
@@ -378,7 +432,17 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
         { name: 'ApplicationInsightsAgent_EXTENSION_VERSION', value: '~3' }
-      ]
+
+        // ---------------------------------------------------------------
+        // Task 245b (G25): L2-owned run inputs, validated at Worker startup.
+        // H4's KV RBAC bootstrap grants THIS principal (L2's own identity)
+        // Secrets Officer on each customer vault; H4 copies the Spaarke
+        // vendor keys from the platform vault. SPE owning-app credentials
+        // are appended below (speContainerTypeOwnerSettings).
+        // ---------------------------------------------------------------
+        { name: 'KvSecretsPopulationOptions__ControlPlanePrincipalObjectId', value: controlPlanePrincipalId }
+        { name: 'KvSecretsPopulationOptions__PlatformVaultName', value: vendorKeysKeyVaultName }
+      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
     }
   }
 }

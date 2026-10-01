@@ -125,6 +125,16 @@ public enum KvSecretValueSource
     /// supply, after H4: a deadlock on every real run.
     /// </summary>
     WrittenByEntraAppReg = 8,
+
+    /// <summary>
+    /// Task 245b — a Spaarke-shared vendor key (owner D5: <c>BingSearch-ApiKey</c>, <c>LlamaParse-ApiKey</c>)
+    /// copied from the Spaarke platform Key Vault (<see cref="KvSecretsPopulationOptions.PlatformVaultName"/>),
+    /// where it is stored under the same canonical name (manifest <c>value_source: from-platform-vault</c>).
+    /// Before T245b these were <see cref="FromRunParameters"/> — a reference in <c>run.Parameters.Secrets</c>
+    /// that nothing wrote. Not for Azure service credentials: a stamp reaches its own services with the
+    /// stamp UAMI (D13), and never reads a shared service's credential (T226).
+    /// </summary>
+    FromPlatformVault = 9,
 }
 
 /// <summary>
@@ -136,8 +146,12 @@ public abstract record KvSecretManifestReadResult
 {
     private KvSecretManifestReadResult() { }
 
-    /// <summary>Manifest read OK — entries in canonical order.</summary>
-    public sealed record Success(IReadOnlyList<KvSecretEntry> Entries) : KvSecretManifestReadResult;
+    /// <summary>
+    /// Manifest read OK — entries in canonical order. <paramref name="ContentVersion"/> is the
+    /// <see cref="ArtifactVersion"/> of the manifest text (task 245b) — the <c>secretsVer</c> of H4's
+    /// idempotency key <c>kv-{customerId}-{secretsVer}</c>.
+    /// </summary>
+    public sealed record Success(IReadOnlyList<KvSecretEntry> Entries, string ContentVersion) : KvSecretManifestReadResult;
 
     /// <summary>Manifest read failed — operator-facing diagnostic.</summary>
     public sealed record Failure(string Diagnostic) : KvSecretManifestReadResult;

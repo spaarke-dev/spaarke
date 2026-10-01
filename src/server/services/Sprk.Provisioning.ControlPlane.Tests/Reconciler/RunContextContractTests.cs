@@ -33,7 +33,7 @@
 //   - New handler input → declare it in HandlerRunInputs with its real source.
 //     A failure here means the data flow is wrong; fix the flow, not the table.
 //   - New handler folder → add it to FolderToHandler below.
-//   - The KnownGaps list shrinks as T245b / T245c land; it may not grow
+//   - The KnownGaps list shrinks as T245c lands (T245b emptied its entries); it may not grow
 //     without an owner-visible reason in the task notes.
 //
 // Fitness-function rules per tests/CLAUDE.md: each rule (a)–(e) and (g) runs
@@ -96,20 +96,6 @@ public sealed class RunContextContractTests
     /// </summary>
     private static readonly string[] PinnedKnownGaps =
     [
-        "H0:keyVaultName→T245b",                 // Spaarke platform vault (SPE owner cert) → L2 configuration
-        "H2a:bicepVer→T245b",                    // idempotency version → computed from the template
-        "H2b:indexVer→T245b",                    // idempotency version → computed from the index schemas
-        "H4:secretsVer→T245b",                   // idempotency version → computed from the manifest
-        "H4b:secretsVer→T245b",
-        "H7:bffApiBaseUrl→T245b",                // the stamp's BFF URL → H9 output (default is the platform BFF)
-        "H8:keyVaultName→T245b",                 // platform vault, as H0
-        "H13:buildId→T245b",                     // deployed build → H9 output
-        "H13:bffApiUrl→T245b",                   // deployed BFF URL → H9 output
-        "H13:keyVaultName→T245b",                // platform vault for the T6 trap probe → L2 configuration
-        "H13:bffVersion→T245b",                  // registry column → H9 output
-        "H13:solutionVersion→T245b",             // registry column → H6 output
-        "H13:clientCacheBustToken→T245b",        // registry column → minted per deploy / upgrade
-        "H14:webhookNotificationBaseUrl→T245b",  // BFF URL → H9 output
         "H11:identityPreset→T245c",              // operator choice → required intake field
         "H11:usersJson→T245c",
         "H14:exchangePolicyScopeGroupId→T245c",
@@ -216,7 +202,7 @@ public sealed class RunContextContractTests
             [HandlerIds.H0] =
             [
                 RunInput.Intake(IntakeParameterCatalog.TenantId),
-                RunInput.Gap("keyVaultName", "T245b"),
+                RunInput.Gap("identityPreset", "T245c"),
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),   // an Output is not an intake key
             ],
         };
@@ -416,7 +402,7 @@ public sealed class RunContextContractTests
         // Shapes a regex scan missed: literal keys beside the NonSecret map, `?.` / `!.` access.
         const string seeded = """
             var nonSecret = run.Parameters?.NonSecret ?? new Dictionary<string, string>();
-            AddIfPresent(columns, nonSecret, "bffVersion", "sprk_bffversion");
+            AddIfPresent(columns, nonSecret, "msalClientId", "sprk_bffversion");
             run.Parameters.NonSecret.TryGetValue("buildId", out var build);
             var region = run.Parameters.NonSecret["region"];
             var a = run.InterStepState?.CosmosEndpoint;
@@ -425,7 +411,7 @@ public sealed class RunContextContractTests
 
         var scan = Scan(seeded);
 
-        scan.IntakeKeys.Should().BeEquivalentTo(["bffVersion", "buildId", "region"],
+        scan.IntakeKeys.Should().BeEquivalentTo(["msalClientId", "buildId", "region"],
             "only literals that ARE intake keys count — the column name 'sprk_bffversion' does not");
         scan.InterStepStateReferences.Should().BeEquivalentTo(
             [nameof(InterStepState.CosmosEndpoint), nameof(InterStepState.MiClientId)]);
@@ -456,7 +442,7 @@ public sealed class RunContextContractTests
         [
             RunInput.Output(nameof(InterStepState.CosmosEndpoint)),
             RunInput.Intake(IntakeParameterCatalog.TenantId),
-            RunInput.Gap("bffApiUrl", "T245b"),
+            RunInput.Gap("usersJson", "T245c"),
         ];
 
         var problems = FindUnreadDeclarations("BffDeploy", HandlerIds.H9, Scan("var x = 1;"), declared);
@@ -464,7 +450,7 @@ public sealed class RunContextContractTests
         problems.Should().HaveCount(3);
         problems.Should().Contain(p => p.Contains("InterStepState.CosmosEndpoint"));
         problems.Should().Contain(p => p.Contains("'tenantId'"));
-        problems.Should().Contain(p => p.Contains("'bffApiUrl'"));
+        problems.Should().Contain(p => p.Contains("'usersJson'"));
     }
 
     [Fact]
@@ -518,10 +504,11 @@ public sealed class RunContextContractTests
     /// </summary>
     private static readonly string[] PinnedManifestGaps =
     [
-        "Dataverse-ServiceUrl→T245b",          // H5's DataverseEnvUrl; H5 is not a DAG ancestor of H4
-        "BingSearch-ApiKey→T245b",             // Spaarke-shared vendor key (owner D5) → L2 configuration
-        "ContentSafety-ApiKey→T245b",
-        "LlamaParse-ApiKey→T245b",
+        // T245b: Dataverse-ServiceUrl moved to H4b per_env_settings (from-h5-output); BingSearch-ApiKey and
+        // LlamaParse-ApiKey are from-platform-vault (L2 configuration). ContentSafety-ApiKey is NOT a Spaarke
+        // vendor key — stamps have no Content Safety resource and D13 keeps Key Vault for keys with no MI
+        // alternative (plan G26).
+        "ContentSafety-ApiKey→T246",
         "Communication-DefaultMailbox→T245c",  // per-customer mailbox → operator intake
         "SPE-DefaultContainerId→T227",                 // from-bicep-output, but containers are created at runtime (H8,
         "SPE-CommunicationArchiveContainerId→T227",    // after H4) — customer.bicep has no value to write (plan G18)
@@ -595,7 +582,8 @@ public sealed class RunContextContractTests
             new("Generated-One", KvSecretOperation.Upsert, KvSecretValueSource.Generated),
             new("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter),
             new(GraphAppRegistrationProvisioner.ClientIdSecretName, KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg),
-            new("Dataverse-ServiceUrl", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters),   // a pinned, owned gap
+            new("BingSearch-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromPlatformVault),       // L2 configuration (T245b)
+            new("ContentSafety-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters),   // a pinned, owned gap
         ];
         var intakeMap = new Dictionary<string, string>(StringComparer.Ordinal) { ["TenantId"] = IntakeParameterCatalog.TenantId };
         var bicepWrites = new HashSet<string>(StringComparer.Ordinal) { "From-Bicep" };
@@ -603,7 +591,7 @@ public sealed class RunContextContractTests
         var (problems, gaps) = ClassifyManifestEntries(sanctioned, intakeMap, H3WrittenSecretNames, bicepWrites, PinnedManifestGapOwners());
 
         problems.Should().BeEmpty();
-        gaps.Should().BeEquivalentTo(["Dataverse-ServiceUrl→T245b"]);
+        gaps.Should().BeEquivalentTo(["ContentSafety-ApiKey→T246"]);
     }
 
     /// <summary>The KV secrets H3's provisioner commits itself; H4 skips their <c>written-by-h3</c> entries.</summary>
@@ -645,6 +633,7 @@ public sealed class RunContextContractTests
             {
                 case KvSecretValueSource.FromBicepOutput when bicepWrittenNames.Contains(entry.CanonicalName):
                 case KvSecretValueSource.Generated:
+                case KvSecretValueSource.FromPlatformVault:   // T245b: L2 configuration, validated at Worker startup
                     break;
                 case KvSecretValueSource.FromTopologyConstants:
                 case KvSecretValueSource.FromIntakeParameter:
@@ -713,7 +702,7 @@ public sealed class RunContextContractTests
     {
         // Hands the whole map to the KV writer, which consults it only for manifest entries that still
         // need a ref (FromRunParameters / FromExistingKvSecret) — each pinned with an owner in
-        // PinnedManifestGaps (rule g). Retires with those gaps (T245b / T245c / T225b).
+        // PinnedManifestGaps (rule g). Retires with those gaps (T245c / T246 / T225b).
         [HandlerIds.H4] = "manifest secrets pinned in PinnedManifestGaps",
     };
 

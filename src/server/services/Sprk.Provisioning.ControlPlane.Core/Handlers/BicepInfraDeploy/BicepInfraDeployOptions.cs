@@ -10,9 +10,9 @@
 // TASK 123 (Wave G-2, Option D hybrid): ProvisioningArtifactsContainerUri +
 // ArmManifestBlobName added for <see cref="ArmDeploymentRunner"/> — the SDK
 // port no longer shells out to Provision-Customer.ps1 / az CLI (those two
-// legacy fields + PwshExecutable/AzCliExecutable stay ONLY for
-// <see cref="FileBicepTemplateInspector"/>'s on-disk template reads and any
-// residual scaffold consumers; ArmDeploymentRunner, ArmKeyVaultRefProbe, and
+// legacy fields + PwshExecutable/AzCliExecutable stay ONLY for residual
+// scaffold consumers (task 245b removed BicepDirectory with the on-disk
+// template inspector); ArmDeploymentRunner, ArmKeyVaultRefProbe, and
 // ArmWhatIfDriftDetector consume none of them). See task 117's
 // .github/workflows/publish-provisioning-arm-artifacts.yml for the artifact
 // shape this options class points at.
@@ -100,14 +100,6 @@ public sealed class BicepInfraDeployOptions
                 "BicepInfraDeployOptions:ArmManifestBlobName is required.");
         }
     }
-
-    /// <summary>
-    /// Absolute path to the <c>infrastructure/bicep/</c> tree — used by
-    /// <see cref="FileBicepTemplateInspector"/> to walk template + module
-    /// files. Defaults relative to <see cref="AppContext.BaseDirectory"/>.
-    /// </summary>
-    public string BicepDirectory { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "infrastructure", "bicep");
 
     /// <summary>
     /// Absolute path to the runNotes directory used for upgrade-mode drift

@@ -26,8 +26,6 @@
 //      violations that survive a hand-edit.
 // -----------------------------------------------------------------------------
 
-using System.Globalization;
-using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
@@ -82,12 +80,7 @@ public sealed class FileSeedManifestReader : ISeedManifestReader
     /// byte sequence. Deterministic; identical bytes always produce identical
     /// hash. Same shape as the H2a <c>BuildIdempotencyKey</c> helper.
     /// </summary>
-    public static string ComputeSha256Hex(ReadOnlySpan<byte> bytes)
-    {
-        Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData(bytes, hash);
-        return Convert.ToHexString(hash).ToLower(CultureInfo.InvariantCulture);
-    }
+    public static string ComputeSha256Hex(ReadOnlySpan<byte> bytes) => ArtifactVersion.Of(bytes);
 
     /// <summary>
     /// Exposed for unit tests — line-oriented scan for a retired-artifact

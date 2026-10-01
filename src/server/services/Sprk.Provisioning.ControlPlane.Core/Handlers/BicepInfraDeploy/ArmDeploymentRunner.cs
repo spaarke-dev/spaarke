@@ -36,8 +36,7 @@
 //
 // HISTORICAL — PRE-WAVE-G-2.5 STATE (2026-08-19 and earlier; resolved, kept
 // for context only): at task 123 authoring time, infrastructure/bicep/
-// customer.bicep (the template FileBicepTemplateInspector.ResolveTemplatePath
-// selects for the Model2Dedicated branch) deployed ONLY Key Vault + Storage +
+// customer.bicep (the template the manifest's `customer` key names) deployed ONLY Key Vault + Storage +
 // Service Bus + Cosmos + membership-topic + optional ACS + optional SignalR.
 // It did NOT deploy a UAMI, App Service, or Azure OpenAI resource —
 // `userAssignedIdentityResourceId` was a pass-through parameter with no
@@ -54,9 +53,8 @@
 // bffApi` / `bffApiSlot` (modules/app-service.bicep), and `module openAi`
 // (modules/openai.bicep) — see customer.bicep lines ~203, ~340, ~532 — and
 // exposes `userAssignedIdentityResourceId`, `openAiEndpoint`, and the App
-// Service outputs this runner consumes. Azure AI Search is deployed via the
-// separate H2b handler path, not customer.bicep, so no AiSearchEndpoint gap
-// remains here. If AreOutputsComplete() reports BicepDeployOutputsIncomplete
+// Service outputs this runner consumes (customer.bicep also deploys the AI
+// Search service; H2b creates its indexes). If AreOutputsComplete() reports BicepDeployOutputsIncomplete
 // today, treat it as a real signal (template drift or a genuinely partial
 // deploy) — not as this historical gap resurfacing.
 // -----------------------------------------------------------------------------
@@ -114,32 +112,24 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     }
 
     /// <inheritdoc/>
+    public Task<ResolvedArmTemplate> ResolveTemplateAsync(
+        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel,
+        CancellationToken cancellationToken)
+        => ResolveArmTemplateAsync(_artifactsContainer, _options, tenancyModel, cancellationToken);
+
+    /// <inheritdoc/>
     public async Task<BicepDeployOutcome> DeployAsync(
         BicepDeployRequest request,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Template);
 
-        // Task 223 (D-12): parse tenancy at handler entry so all downstream selection is typed
-        // + exhaustive. Reject unknown values here rather than tolerating them into
-        // artifact-manifest resolution.
-        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var tenancyModel))
-        {
-            throw new ArgumentException(
-                $"ArmDeploymentRunner requires a recognized TenancyModel. Got '{request.TenancyModel ?? "(null)"}'. " +
-                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}.",
-                nameof(request));
-        }
-
-        // (1) Resolve the versioned ARM JSON artifact via the manifest task
-        //     117's workflow publishes. A missing/misconfigured artifact is
-        //     an infra-configuration fault (not a per-customer domain
-        //     failure) — this MAY throw per IBicepDeployRunner's contract;
-        //     the handler's existing try/catch around DeployAsync classifies
-        //     it QuarantineRequired.
-        var templateJson = await ResolveArmTemplateJsonAsync(
-                _artifactsContainer, _options, tenancyModel, cancellationToken)
-            .ConfigureAwait(false);
+        // (1) The template was resolved ONCE by the handler (ResolveTemplateAsync, task 245b) and
+        //     its version is already part of the idempotency key — deploy exactly those bytes. A
+        //     second resolution here could pick up a newer "latest" manifest than the one the key
+        //     names.
+        var templateJson = request.Template.Json;
 
         // (2) RG-ensure. Idempotent — Azure treats an existing RG with
         //     matching location as a no-op update. Naming matches
@@ -334,16 +324,16 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         && ex.ErrorCode.Contains("RequestConflict", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Downloads <c>ArmManifestBlobName</c> (the mutable "latest" pointer),
-    /// resolves the tenancy-model-appropriate ARM JSON blob name, then
-    /// downloads + returns that blob's content. <c>internal static</c> (not
-    /// an instance member) so <see cref="ArmWhatIfDriftDetector"/> (task 123,
-    /// same collaborator family) reuses the identical artifact-resolution
-    /// logic without depending on an <see cref="ArmDeploymentRunner"/>
-    /// instance (CLAUDE.md §11 — extend/share, don't duplicate the manifest
-    /// + blob-download plumbing across both collaborators).
+    /// Downloads <c>ArmManifestBlobName</c> (the mutable "latest" pointer), resolves the
+    /// tenancy-model-appropriate ARM JSON blob, downloads it, and returns it with its content
+    /// version (task 245b — <see cref="ArtifactVersion"/> of the downloaded bytes). When the manifest
+    /// entry carries <c>sha256</c> (the CI workflow always writes it), a different hash means a
+    /// truncated or corrupted download, or a blob overwritten after publish — that THROWS
+    /// <see cref="InvalidDataException"/> rather than deploying bytes the manifest does not vouch for.
+    /// <c>internal static</c> (not an instance member) so the shared resolution logic stays in one
+    /// place (CLAUDE.md §11).
     /// </summary>
-    internal static async Task<string> ResolveArmTemplateJsonAsync(
+    internal static async Task<ResolvedArmTemplate> ResolveArmTemplateAsync(
         BlobContainerClient artifactsContainer,
         BicepInfraDeployOptions options,
         Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel,
@@ -354,18 +344,17 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         var manifestJson = manifestResponse.Value.Content.ToString();
 
         using var manifestDoc = JsonDocument.Parse(manifestJson);
-        // Task 223 (D-12): exhaustive switch over the typed enum. Callers TryParse at their
-        // entry (see DeployAsync / ArmWhatIfDriftDetector.DetectDriftAsync) — this helper
-        // trusts an already-validated value. The `_` arm throws so a future enum member
-        // (Item 3 / Task 224) surfaces as a loud InvalidOperationException rather than
-        // silently falling into a `customer` template branch.
+        // Task 223 (D-12): exhaustive switch over the typed enum. Callers TryParse at their entry —
+        // this helper trusts an already-validated value. The `_` arm throws so a future enum member
+        // surfaces as a loud InvalidOperationException rather than silently falling into a
+        // `customer` template branch.
         var templateKey = tenancyModel switch
         {
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => "model1-shared",
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => "customer",
             _ => throw new InvalidOperationException(
-                $"Unhandled TenancyModel '{tenancyModel}' in ArmDeploymentRunner.ResolveArmTemplateJsonAsync. " +
-                "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
+                $"Unhandled TenancyModel '{tenancyModel}' in ArmDeploymentRunner.ResolveArmTemplateAsync. " +
+                "Add a switch arm here when the enum grows.")
         };
 
         if (!manifestDoc.RootElement.TryGetProperty("templates", out var templates)
@@ -381,7 +370,21 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         var armJsonBlobName = blobNameElement.GetString()!;
         var templateBlob = artifactsContainer.GetBlobClient(armJsonBlobName);
         var templateResponse = await templateBlob.DownloadContentAsync(cancellationToken).ConfigureAwait(false);
-        return templateResponse.Value.Content.ToString();
+        var content = templateResponse.Value.Content;
+        var version = ArtifactVersion.Of(content.ToMemory().Span);
+
+        if (templateEntry.TryGetProperty("sha256", out var shaElement)
+            && shaElement.ValueKind == JsonValueKind.String
+            && !string.Equals(shaElement.GetString(), version, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"ARM template blob '{armJsonBlobName}' has SHA-256 {version}, but manifest '{options.ArmManifestBlobName}' " +
+                $"records {shaElement.GetString()} for templates.{templateKey} — a truncated or corrupted download, or a blob " +
+                "overwritten after publish. Not deploying bytes the manifest does not vouch for; re-run H2a, and if it " +
+                "persists re-publish the artifacts (publish-provisioning-arm-artifacts.yml).");
+        }
+
+        return new ResolvedArmTemplate(templateKey, armJsonBlobName, content.ToString(), version);
     }
 
     /// <summary>

@@ -12,9 +12,12 @@
 // surfacing as "missing input" deep in the DAG). RunContextContractTests checks
 // that every intake key a handler declares is listed here.
 //
-// Entries marked "(T245b)" / "(T245c)" are interim: the value is still read from
-// intake today, and the owning task moves it to L2 configuration / a typed
-// handler output / a required intake field (notes/run-context-dataflow-gap.md).
+// Entries marked "(T245c)" are interim: the value is still read from intake
+// today, and the owning task makes it a required intake field
+// (notes/run-context-dataflow-gap.md). Task 245b removed the keys whose real
+// source is L2 itself — artifact versions (computed from the artifacts), the
+// SPE owner credential (Worker configuration), and the BFF URL / build (H9
+// outputs) — so POST /api/runs now rejects them.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Models;
@@ -62,7 +65,7 @@ public static class IntakeParameterCatalog
         new("estimatedMonthlyUsd", "H0 cost-envelope input."),
         new("costEnvelopePolicy", "H0 cost-envelope policy (abortOnOverrun | warnAndProceed)."),
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a)."),
-        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). H4 (SPE-ContainerTypeId secret), H8, H13."),
+        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). H4 (SPE-ContainerTypeId secret), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new("confirmationAcknowledgment", "Operator confirmation phrase (audit; part of the H0 idempotency hash)."),
         new("intakeFileSha256", "Batch intake file hash (audit; part of the H0 idempotency hash)."),
         new("operatorUpn", "Operator identity (audit; part of the H0 idempotency hash)."),
@@ -75,9 +78,8 @@ public static class IntakeParameterCatalog
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
         new("dataverseDisplayName", "Dataverse environment display name (H5)."),
         new("speContainerDisplayName", "SPE root container display name (H8)."),
-        new("speCertSecretName", "Override of the SPE owner-certificate secret name (H8). (T245b → L2 configuration)"),
         new("healthCheckPath", "BFF health probe path (H9; default /healthz)."),
-        new("buildId", "BFF build to deploy (H9 optional — defaults to latest.json); required by H13. (T245b → H9 output)"),
+        new("buildId", "BFF build to deploy (H9 optional — defaults to latest.json). H13 reads the deployed build from H9's output."),
 
         // --- Upgrade mode (an existing stamp) ---------------------------------------
         new("provisionedOn", "Set on an upgrade run: when the stamp was first provisioned (H0, H2a, H4)."),
@@ -95,24 +97,10 @@ public static class IntakeParameterCatalog
         new("openaiPinFreshnessMinDays", "H0 OpenAI model-pin freshness threshold."),
 
         // --- Dataverse environment-variable values (H7) -------------------------------
-        new("bffApiBaseUrl", "H7 env-var value: BFF base URL. Absent → the platform BFF, wrong for a dedicated stamp. (T245b → H9 output)"),
         new("msalClientId", "H7 env-var value: MSAL client id for code pages."),
         new("shareLinkBaseUrl", "H7 env-var value: share-link base URL."),
 
-        // --- H13 registry columns + checks ----------------------------------------------
-        new("bffVersion", "H13 registry column sprk_bffversion. (T245b → H9 output)"),
-        new("solutionVersion", "H13 registry column sprk_solutionversion. (T245b → H6 output)"),
-        new("clientCacheBustToken", "H13 registry column sprk_clientcachebusttoken. (T245b → minted per deploy / upgrade)"),
-        new("registryDataverseUrl", "H13: registry Dataverse URL (SetupStatus PATCH). (T245b → L2 configuration)"),
-        new("provisioningScriptsDirectory", "H13 I1 probe scripts directory. (T245b → L2 configuration)"),
-
-        // --- Interim: still read from intake; the owning task moves them ----------------
-        new("keyVaultName", "Spaarke platform vault holding the SPE owner certificate (H0 probe, H8). NOT the customer vault — that is InterStepState.KeyVaultName (H2a). (T245b → L2 configuration)"),
-        new("bicepVer", "H2a idempotency version. (T245b → computed from the template)"),
-        new("indexVer", "H2b idempotency version. (T245b → computed from the index schemas)"),
-        new("secretsVer", "H4 / H4b idempotency version. (T245b → computed from the manifest)"),
-        new("bffApiUrl", "H13: deployed BFF URL. (T245b → H9 output)"),
-        new("webhookNotificationBaseUrl", "H14: BFF webhook base URL. (T245b → H9 output)"),
+        // --- Interim: still read from intake; T245c makes them required intake -----------
         new("identityPreset", "H11: B2BGuest | NativeAccount. (T245c → required intake)"),
         new("usersJson", "H11: users to provision (JSON array). (T245c → required intake)"),
         new("exchangePolicyScopeGroupId", "H14: Exchange application-access-policy scope group. (T245c → required intake)"),

@@ -67,7 +67,7 @@ function Get-SpeConfidentialClientToken {
         -TenantId $env:TENANT_ID `
         -ClientId $env:API_APP_ID `
         -KeyVaultName $env:SPE_KV_NAME `
-        -CertSecretName 'spe-owner-cert-pfx'
+        -CertSecretName 'SPE-OwnerCert-Pfx'
 
     .EXAMPLE
     $spToken = Get-SpeConfidentialClientToken `

@@ -28,8 +28,10 @@
 //   - Container-type registration + owning-app permission grant (also §R5)
 //   - KV write of SPE-ContainerTypeId per customer (containerTypeId now comes
 //     from constants, not per-customer KV; H4 no longer pre-creates that slot)
-//   - Owning-app-id + sharePointDomain + keyVaultName + subscriptionId + upgradeMode
-//     parameter guards (none of them are needed by container CREATION)
+//   - sharePointDomain + subscriptionId + upgradeMode parameter guards (not
+//     needed by container CREATION). The owning-app credential (app id + the
+//     certificate's vault + secret) is SpeContainerOptions.ContainerTypeOwners —
+//     L2 configuration keyed by containerTypeId (task 245b).
 //   - T6 trap detection (task 214.4 Option A — H13 owns T6 acceptance gate)
 //
 // SPEC / DESIGN references:
@@ -53,8 +55,8 @@
 //   │ on a just-created container)               │ — RunStatus.WaitingOnGate│
 //   │                                             │ (session-free run-level  │
 //   │                                             │ pause; DS-4 §2)          │
-//   │ Missing tenantId / containerTypeId /       │ Resumable                │
-//   │ owningAppId (H3 not complete)              │ (external precondition — │
+//   │ Missing tenantId / containerTypeId, or no  │ Resumable                │
+//   │ owner configured for the container type    │ (external precondition — │
 //   │                                             │ operator fixes + resumes)│
 //   │ Run not found in Cosmos partition          │ Resumable                │
 //   │ Provisioner CreateFailure                  │ Resumable                │
@@ -107,12 +109,6 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
     /// Populated by SKILL Step 4.0 payload construction.
     /// </summary>
     public const string ContainerTypeIdParameterKey = "containerTypeId";
-
-    /// <summary>Non-secret parameter key carrying the target Key Vault name holding the SPE owner cert (§4D I4 tenant-scoped vault).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Non-secret parameter key carrying the KV secret name holding the base64 PFX SPE owner cert. Optional — defaults to <see cref="SpeContainerOptions.DefaultCertSecretName"/>.</summary>
-    public const string CertSecretNameParameterKey = "speCertSecretName";
 
     /// <summary>Non-secret parameter key carrying the container display name. Optional — defaults to <see cref="SpeContainerOptions.DefaultDisplayNamePrefix"/> + " - {customerId}".</summary>
     public const string DisplayNameParameterKey = "speContainerDisplayName";
@@ -216,33 +212,22 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         }
         // T226: H4 writes the trimmed value to the vault (BuildIntakeValues); Graph gets the same id.
         containerTypeId = containerTypeId.Trim();
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // (3) Owning-app credential (task 245b) — L2 configuration keyed by the container type: the
+        //     owning app the container type is bound to (topology R1) and the vault + secret holding
+        //     its certificate. Not the customer BFF app: the certificate is registered on the owning
+        //     app, and the BFF app is a separate, secret-free identity (topology §3A).
+        if (!_options.TryGetOwner(containerTypeId, out var owner))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerRejectionCodes.MissingKeyVaultName,
-                "Run parameter 'keyVaultName' is required by H8 (holds the SPE owner cert used to build the " +
-                "ClientCertificateCredential for CREATE + ACTIVATE + verify). Upstream MUST populate this " +
-                "before H8 dispatches.",
+                SpeContainerRejectionCodes.ContainerTypeOwnerNotConfigured,
+                $"No SpeContainerOptions:ContainerTypeOwners entry for container type '{containerTypeId}'. H8 creates " +
+                "containers as the container type's owning app, whose client id and certificate (vault + secret) are " +
+                "Worker configuration — add the entry (controlplane-worker-app-service.bicep speContainerTypeOwners) " +
+                "after the topology runbook (SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created the container type and " +
+                "its owning app, then resume.",
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (3) H3 prerequisite guard — the owning app id (used to construct the
-        //     T6 ClientCertificateCredential) comes from H3's InterStepState.
-        //     H8's DAG dependency on H3 is preserved (DagAdvancer.cs line 166).
-        var owningAppId = run.InterStepState.BffAppRegId;
-        if (string.IsNullOrWhiteSpace(owningAppId))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerRejectionCodes.MissingOwningAppId,
-                "InterStepState.BffAppRegId is empty — H3 (Entra app-reg) MUST complete before H8 " +
-                "dispatches (design.md §4.1 DAG: H4 -> H3 -> { H8, H9 }). BffAppRegId is used to " +
-                "construct the T6 ClientCertificateCredential (app-only Graph token for CREATE + ACTIVATE).",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        var certSecretName = TryGetNonEmpty(parameters, CertSecretNameParameterKey, out var certSecretRaw)
-            ? certSecretRaw
-            : _options.DefaultCertSecretName;
         var displayName = TryGetNonEmpty(parameters, DisplayNameParameterKey, out var displayNameRaw)
             ? displayNameRaw
             : $"{_options.DefaultDisplayNamePrefix} - {envelope.CustomerId}";
@@ -274,9 +259,9 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 CustomerId: envelope.CustomerId,
                 TenantId: tenantId,
                 ContainerTypeId: containerTypeId,
-                VaultName: keyVaultName,
-                CertSecretName: certSecretName,
-                OwningAppId: owningAppId,
+                VaultName: owner.OwnerCertKeyVaultName,
+                CertSecretName: owner.OwnerCertSecretName,
+                OwningAppId: owner.OwnerAppId,
                 DisplayName: displayName,
                 Description: description);
             provisionOutcome = await _provisioner.ProvisionAsync(provisionRequest, cancellationToken)
@@ -329,10 +314,10 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         {
             var verifyRequest = new SpeContainerVerificationRequest(
                 ContainerId: outputs.ContainerId,
-                OwningAppId: owningAppId,
+                OwningAppId: owner.OwnerAppId,
                 TenantId: tenantId,
-                VaultName: keyVaultName,
-                CertSecretName: certSecretName);
+                VaultName: owner.OwnerCertKeyVaultName,
+                CertSecretName: owner.OwnerCertSecretName);
             verifyResult = await _verifier.VerifyAsync(verifyRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

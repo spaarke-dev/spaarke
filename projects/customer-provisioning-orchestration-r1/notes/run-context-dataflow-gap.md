@@ -134,17 +134,17 @@ configuration + DAG; **T245b** intake additions (schema, API validation, skill).
   the run's `subscriptionId` (the separate `azureSubscriptionId` intake key is gone); the `/provision-environment`
   skill's `Model2Dedicated` comparisons (dead since T223/T224 — the Model 2 hard stops never fired) now test `Model2`.
 
-**Still open — pinned in `RunContextContractTests`, each with its owner**
+**Still open — pinned in `RunContextContractTests`, each with its owner** *(snapshot after T245a; §6 is current)*
 | Gap | Owner |
 |---|---|
-| H0 / H8 / H13-T6 SPE owner-certificate vault (`keyVaultName` intake, interim) | T245b |
-| `bicepVer`, `indexVer`, `secretsVer` (H2a, H2b, H4, H4b) | T245b |
-| H13 `buildId`, `bffApiUrl`; H14 `webhookNotificationBaseUrl` (H9 outputs) | T245b |
-| H7 `bffApiBaseUrl` — the stamp's own BFF URL (H9 output); today it falls back to the **platform** BFF `https://api.spaarke.com` | T245b |
-| H13 registry columns `bffVersion` (H9), `solutionVersion` (H6), `clientCacheBustToken` (minted per deploy) | T245b |
-| 🔒 H4's KV RBAC bootstrap grants Secrets Officer to the stamp UAMI (`MiObjectId`), not L2's own principal — not a pinned input but the same class: the right value (L2's principal id) has no source yet | T245b (owner review, security) |
-| Manifest: `Dataverse-ServiceUrl` (H5 output, H5 not an ancestor of H4) | T245b |
-| Manifest: `BingSearch-ApiKey`, `ContentSafety-ApiKey`, `LlamaParse-ApiKey` (Spaarke vendor keys → L2 config) | T245b |
+| H0 / H8 / H13-T6 SPE owner-certificate vault (`keyVaultName` intake, interim) | T245b ✅ |
+| `bicepVer`, `indexVer`, `secretsVer` (H2a, H2b, H4, H4b) | T245b ✅ |
+| H13 `buildId`, `bffApiUrl`; H14 `webhookNotificationBaseUrl` (H9 outputs) | T245b ✅ |
+| H7 `bffApiBaseUrl` — the stamp's own BFF URL (H9 output); today it falls back to the **platform** BFF `https://api.spaarke.com` | T245b ✅ |
+| H13 registry columns `bffVersion` (H9), `solutionVersion` (H6), `clientCacheBustToken` (minted per deploy) | T245b ✅ |
+| 🔒 H4's KV RBAC bootstrap grants Secrets Officer to the stamp UAMI (`MiObjectId`), not L2's own principal — not a pinned input but the same class: the right value (L2's principal id) has no source yet | T245b ✅ (owner-approved 2026-10-01) |
+| Manifest: `Dataverse-ServiceUrl` (H5 output, H5 not an ancestor of H4) | T245b ✅ (moved to per-env settings) |
+| Manifest: `BingSearch-ApiKey`, `ContentSafety-ApiKey`, `LlamaParse-ApiKey` (Spaarke vendor keys → L2 config) | T245b ✅ Bing + LlamaParse; ContentSafety → **T246** (no Content Safety resource in a stamp) |
 | H11 `identityPreset`, `usersJson`; H14 `exchangePolicyScopeGroupId`, Graph resources | T245c |
 | Manifest: `Communication-DefaultMailbox` (operator intake) | T245c |
 | Manifest: `Dataverse-ClientSecret`, `BFF-API-ClientSecret` (`from-existing-kv` through the writer-less Secrets channel; secret-free default is G21) | T225b |
@@ -152,6 +152,57 @@ configuration + DAG; **T245b** intake additions (schema, API validation, skill).
 
 A real run still cannot complete until those land; it now fails on a named, owned gap instead of on a value
 nothing writes.
+
+## 6. Status after T245b (2026-10-01)
+
+**Fixed — values L2 owns are no longer run parameters**
+- **Artifact versions computed from the artifact applied** (`Handlers/ArtifactVersion.cs`, SHA-256): H2a resolves the
+  CI-published ARM template once and uses its bytes for the version, the structural checks, the upgrade what-if and the
+  deploy (a manifest `sha256` that disagrees with the download is refused); H2b hashes the schema bodies it PUTs
+  (`IndexSchemaSet`, order-independent); H4 and H4b use the embedded manifest's content version (the same value). Same
+  artifact ⇒ same key; a changed artifact is re-applied.
+- **SPE owning-app credential** = `SpeContainerOptions.ContainerTypeOwners` (container type id → owning app id + the
+  certificate's platform vault + secret, canonical `SPE-OwnerCert-Pfx`), validated at Worker startup and selected by the
+  intake `containerTypeId`. H0's SpeCertBootstrap probe, H8 and the T6 probe read the same entry. Found on the way and
+  fixed: H8 and T6 authenticated as the **customer BFF app** (`BffAppRegId`) with the owner certificate — the certificate
+  belongs to the owning app and the BFF app is a separate, secret-free identity (topology §3A), so token acquisition
+  could not succeed. H0 now stops a run whose container type has no configured owner.
+- **H9 outputs** `InterStepState.BffApiUrl` (the production URL it health-probed) and `BffBuildId` (the build it
+  deployed). H7 writes `sprk_BffApiBaseUrl` from it with **no** `https://api.spaarke.com` fallback; H13 probes it and keys
+  on the build; H14's webhook receivers derive from it. DAG: H7 ← H9, H14 ← H9 (H13 ← H14).
+- **H13 registry columns**: `sprk_bffversion` ← `BffBuildId`; `sprk_solutionversion` ← a fingerprint of H6's
+  `ImportedSolutions` (no set-level release tag has a producer yet — `version-compatibility-matrix.md` §3.2);
+  `sprk_clientcachebusttoken` ← the run id (new per deploy / upgrade, stable across H13 retries).
+- **H13 options**: the I1 scripts directory is `E2EAcceptance:ProvisioningScriptsDirectory` (validated). The
+  `registryDataverseUrl` parameter was **deleted**, not moved — the registry updater never read it (the registry client
+  already targets `DataverseEnvironmentRegistry:AdminEnvironmentUrl`).
+- 🔒 **H4 KV RBAC bootstrap** (owner-approved 2026-10-01): grants Key Vault Secrets Officer to L2's own principal
+  (`KvSecretsPopulationOptions.ControlPlanePrincipalObjectId`, validated; Bicep passes the Worker UAMI's principal id) —
+  never the stamp UAMI, which keeps only Secrets User.
+- **Secrets channel**: `BingSearch-ApiKey`, `LlamaParse-ApiKey` → `value_source: from-platform-vault` (copied from
+  `KvSecretsPopulationOptions.PlatformVaultName`, same secret name). `Dataverse-ServiceUrl` left the secret catalog: it is
+  now H4b `per_env_settings` `Dataverse__ServiceUrl` / `Dataverse__EnvironmentUrl` from `from-h5-output:dataverse_env_url`
+  with H4b ← H5 (a URL is not a secret — D13; only H4b/H9 wait for H5, not the KV/app-reg chain). Escalation trigger 3
+  did not fire: the per-env route was better on all three counts.
+- **H2a structural inspector** rebuilt on the resolved ARM JSON (`ArmTemplateInspector`) — the old file inspector read
+  `infrastructure/bicep/` from the publish output, which never contained it (every real run failed there), and its
+  "no per-customer Redis" rule contradicted D-12 (it would have quarantined every correct deploy). Rule retired.
+- `IntakeParameterCatalog` no longer accepts `keyVaultName`, `speCertSecretName`, `bicepVer`, `indexVer`, `secretsVer`,
+  `bffApiUrl`, `bffApiBaseUrl`, `webhookNotificationBaseUrl`, `bffVersion`, `solutionVersion`, `clientCacheBustToken`,
+  `registryDataverseUrl`, `provisioningScriptsDirectory`.
+
+**Still open — pinned in `RunContextContractTests`**
+| Gap | Owner |
+|---|---|
+| H11 `identityPreset`, `usersJson`; H14 `exchangePolicyScopeGroupId`, Graph resources | T245c |
+| Manifest: `Communication-DefaultMailbox` (operator intake) | T245c |
+| Manifest: `ContentSafety-ApiKey` — stamps have no Content Safety resource (plan G26) | T246 |
+| Manifest: `Dataverse-ClientSecret`, `BFF-API-ClientSecret` (secret-free default, G21) | T225b |
+| Manifest: `SPE-DefaultContainerId`, `SPE-CommunicationArchiveContainerId` (G18) | T227 |
+
+**Live prerequisite (plan G28)**: no SPE owning-app certificate exists in any Spaarke vault the operator identity can
+read (checked by name only, 2026-10-01). The topology runbook must create it, import it as `SPE-OwnerCert-Pfx`, and add the
+`speContainerTypeOwners` entry before H0 will pass.
 
 ## 4. Effect on the plan
 

@@ -140,13 +140,15 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH4AndH3_UnlocksH4b()
+    public void ComputeReadyHandlers_AfterH4H3AndH5_UnlocksH4b()
     {
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
+        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
+        var withH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
 
-        var ready = _sut.ComputeReadyHandlers(run);
-
-        ready.Should().Contain("H4b", "H4b's producers (H4 for the populated KV, H3 for BffAppRegId) have both run.");
+        _sut.ComputeReadyHandlers(withoutH5).Should().NotContain("H4b",
+            "T245b: Dataverse__ServiceUrl / __EnvironmentUrl are H5's DataverseEnvUrl");
+        _sut.ComputeReadyHandlers(withH5).Should().Contain("H4b",
+            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL) have all run.");
     }
 
     [Fact]
@@ -224,11 +226,27 @@ public sealed class DagAdvancerTests
     public void ComputeReadyHandlers_AfterH6WithoutH8_H7Waits_ThenUnlocksWithH8()
     {
         // T245a: H7 writes the SPE container-id env var from InterStepState.SpeContainerId (H8 output).
-        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H6");
-        var withH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H6", "H8");
+        // T245b: + H9 — sprk_BffApiBaseUrl is the stamp's own BFF URL (InterStepState.BffApiUrl).
+        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H9", "H6");
+        var withoutH9 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H6", "H8");
+        var withBoth = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H4b", "H6", "H8", "H9");
 
         _sut.ComputeReadyHandlers(withoutH8).Should().NotContain("H7", "H8 has not produced SpeContainerId yet");
-        _sut.ComputeReadyHandlers(withH8).Should().Contain("H7");
+        _sut.ComputeReadyHandlers(withoutH9).Should().NotContain("H7", "H9 has not produced the stamp's BFF URL yet");
+        _sut.ComputeReadyHandlers(withBoth).Should().Contain("H7");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_H14WaitsForH9_EvenAfterH12c()
+    {
+        // T245b: H14's webhook receivers are the stamp's BFF (InterStepState.BffApiUrl, H9 output).
+        var withoutH9 = MakeRun(RunStatus.Running,
+            "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H4b", "H6", "H8", "H10", "H11", "H12a", "H12b", "H12c");
+
+        _sut.ComputeReadyHandlers(withoutH9).Should().NotContain("H14");
+        _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running,
+            "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H4b", "H6", "H8", "H9", "H7", "H10", "H11", "H12a", "H12b", "H12c"))
+            .Should().Contain("H14");
     }
 
     [Fact]

@@ -13,12 +13,13 @@
 //
 // FLOW:
 //   (1) Load ProvisioningRun.
-//   (2) Guards: intake tenantId / subscriptionId / secretsVer; H2a outputs
+//   (2) Guards: intake tenantId / subscriptionId; H2a outputs
 //       InterStepState.KeyVaultName / ResourceGroupName / AppServiceName
 //       (task 245a — these were read from run parameters nobody wrote).
 //       environmentName = IntakeParameterCatalog.ResolveEnvironmentName.
-//   (3) Idempotency Level-3: appsettings-{environmentName}-{secretsVer}.
-//   (4) Read per_env_settings manifest.
+//   (3) Read the per_env_settings manifest; its content version is secretsVer
+//       (task 245b — formerly a run parameter nothing wrote).
+//   (4) Idempotency Level-3: appsettings-{environmentName}-{secretsVer}.
 //   (5) Resolve each non-literal entry through PerEnvSourceCatalog (typed
 //       InterStepState output or intake value); required-and-missing =
 //       Resumable Failure BEFORE any script call.
@@ -59,9 +60,6 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
     /// <summary>Non-secret parameter key carrying the target subscription id.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
-
-    /// <summary>Non-secret parameter key carrying the manifest content hash / semantic version — feeds idempotency key.</summary>
-    public const string SecretsVersionParameterKey = "secretsVer";
 
     /// <summary>
     /// Parses the first fail-fast IOptions module name from a container docker
@@ -204,28 +202,8 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         // One stamp environment for every handler (CreateRun stores it; a pre-245a run resolves
         // to the same default H2a/H2b use).
         var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
-        if (!TryGetNonEmpty(parameters, SecretsVersionParameterKey, out var secretsVer))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                BulkAppSettingsRejectionCodes.MissingSecretsVersion,
-                "Run parameter 'secretsVer' is required by H4b (manifest content hash — feeds idempotency key).",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        var idempotencyKey = BuildIdempotencyKey(environmentName, secretsVer);
-
-        // (3) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
-        {
-            _logger.LogInformation(
-                "H4b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
-        }
-
-        // (4) Read manifest.
+        // (3) Read the manifest. Its content version is this handler's secretsVer (task 245b) — the
+        //     same manifest H4 reads, so the same value.
         PerEnvSettingsManifestReadResult manifestResult;
         try
         {
@@ -248,7 +226,22 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 $"Manifest reader reported failure: {manifestFailure.Diagnostic}",
                 cancellationToken).ConfigureAwait(false);
         }
-        var entries = ((PerEnvSettingsManifestReadResult.Success)manifestResult).Entries;
+        var manifest = (PerEnvSettingsManifestReadResult.Success)manifestResult;
+
+        var idempotencyKey = BuildIdempotencyKey(environmentName, manifest.ContentVersion);
+
+        // (4) Level-3 idempotency: durable no-op on duplicate.
+        if (run.CompletedPhases.Any(cp =>
+                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
+                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        {
+            _logger.LogInformation(
+                "H4b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, idempotencyKey);
+            return new HandlerResult.Success(idempotencyKey);
+        }
+
+        var entries = manifest.Entries;
 
         // (5) Resolve per-env values through PerEnvSourceCatalog (task 245a): each
         //     source names the typed InterStepState output or intake value it

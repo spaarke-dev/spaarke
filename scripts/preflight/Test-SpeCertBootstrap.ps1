@@ -24,7 +24,7 @@ KV that holds the SPE cert secret (PFX-encoded base64, per
 scripts/common/Get-SpeConfidentialClientToken.ps1 convention).
 
 .PARAMETER CertSecretName
-Name of the secret in KV. Default 'spe-owner-cert-pfx' matches the T6 helper
+Name of the secret in KV. Default 'SPE-OwnerCert-Pfx' matches the T6 helper
 convention.
 
 .PARAMETER MinAgeHours
@@ -61,7 +61,7 @@ STOP and escalate per root CLAUDE.md §6.
 param(
     [Parameter(Mandatory=$true)][string]$KeyVaultName,
 
-    [Parameter()][string]$CertSecretName = 'spe-owner-cert-pfx',
+    [Parameter()][string]$CertSecretName = 'SPE-OwnerCert-Pfx',
 
     [Parameter()][int]$MinAgeHours = 24,
 

@@ -116,8 +116,8 @@ the choice is recorded per environment. ⚠️ This amends
 Everything in this section is created by **H2a** deploying [`infrastructure/bicep/customer.bicep`](../../infrastructure/bicep/customer.bicep)
 into the customer's own subscription (`targetScope = 'subscription'`), unless another handler is named.
 
-🔲 **T225a + T225b — today Model 1 runs do not use `customer.bicep`.** `ArmDeploymentRunner` /
-`FileBicepTemplateInspector` map `Model1` to the `model1-shared` template (task 224 renamed the enum only), and
+🔲 **T225a + T225b — today Model 1 runs do not use `customer.bicep`.** `ArmDeploymentRunner.ResolveArmTemplateAsync`
+maps `Model1` to the `model1-shared` template (task 224 renamed the enum only), and
 `model1-shared.bicep` has not compiled since 2026-08-17. T225a retires the `model1-*` Bicep surfaces; T225b points
 Model 1 at `customer.bicep`. Every ✅ below means "`customer.bicep` already does this", which becomes true for
 Model 1 once T225b lands.

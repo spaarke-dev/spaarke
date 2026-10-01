@@ -212,7 +212,7 @@ public sealed class H0PreflightHandlerTests
                 ? FakeProbe.Fail(PreflightCheckNames.SubscriptionVCpuQuota, "vCPU: 0/8 required standardDv5Family in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             failingCheck == PreflightCheckNames.SpeCertBootstrap
-                ? FakeProbe.Fail(PreflightCheckNames.SpeCertBootstrap, "SPE cert: secret 'spe-owner-cert-pfx' not found in vault spaarke-platform-kv")
+                ? FakeProbe.Fail(PreflightCheckNames.SpeCertBootstrap, "SPE cert: secret 'SPE-OwnerCert-Pfx' not found in vault spaarke-platform-kv")
                 : FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
         };
         var handler = CreateHandler(repo, enqueuer, probes);

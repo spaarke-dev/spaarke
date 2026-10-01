@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "3919834462005111323"
+      "templateHash": "10736487036248916844"
     }
   },
   "parameters": {
@@ -3653,7 +3653,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "4071608621154353551"
+              "templateHash": "10028135150353172885"
             }
           },
           "parameters": {
@@ -3782,7 +3782,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-platform-vault"
               },
               "tags": {
                 "canonicalName": "BingSearch-ApiKey",
@@ -3933,26 +3933,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'Dataverse-ServiceUrl')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Dataverse-ServiceUrl')]",
-              "properties": {
-                "value": "[parameters('secretValues')['Dataverse-ServiceUrl']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "Dataverse-ServiceUrl",
-                "category": "dataverse",
-                "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-ApiKey')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4042,7 +4022,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-platform-vault"
               },
               "tags": {
                 "canonicalName": "LlamaParse-ApiKey",
@@ -4172,7 +4152,6 @@
                 "Compose-Webhook-SigningKey",
                 "ContentSafety-ApiKey",
                 "Dataverse-ClientSecret",
-                "Dataverse-ServiceUrl",
                 "DocumentIntelligence-ApiKey",
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",

@@ -35,6 +35,9 @@
 //     AppServiceName, AppServiceStagingSlotName (optional — blank falls back
 //     to BffDeployOptions.DefaultStagingSlotName). These were previously
 //     read from NonSecret, where nothing ever wrote them.
+//   - Outputs (task 245b), written on success: InterStepState.BffApiUrl (the
+//     production slot URL it health-probed) and InterStepState.BffBuildId (the
+//     build it deployed) — read by H7, H13 and H14.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-12 (H9
@@ -787,6 +790,12 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
             "healthProbeAttempts={Attempts} nfr01Summary={Nfr01Summary}",
             envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds,
             probeSuccess.AttemptsUsed, sizeReport.Summary);
+
+        // Task 245b: publish what H7 (sprk_BffApiBaseUrl), H13 (health/E2E target + registry
+        // sprk_bffversion + its idempotency key) and H14 (webhook receiver base) need — the URL just
+        // probed and the build just deployed.
+        run.InterStepState.BffApiUrl = productionUrl;
+        run.InterStepState.BffBuildId = manifest.BuildId;
 
         return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, sizeReport, cancellationToken)
             .ConfigureAwait(false);

@@ -248,7 +248,8 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 var diagnostic =
                     $"manifest.yaml entry '{secret.CanonicalName}' has unrecognized value_source " +
                     $"'{secret.ValueSource}' (expected one of: from-existing-kv, from-bicep-output, " +
-                    "from-run-parameter, generated, from-topology-constants, from-intake-parameter, written-by-h3).";
+                    "from-run-parameter, generated, from-topology-constants, from-intake-parameter, written-by-h3, " +
+                    "from-platform-vault).";
                 _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
                 return new KvSecretManifestReadResult.Failure(diagnostic);
             }
@@ -292,7 +293,7 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
         _logger.LogInformation(
             "H4 FileKvSecretManifest: loaded {Count} canonical entries from manifest.yaml (task 084 Phase H manifest)",
             entries.Count);
-        return new KvSecretManifestReadResult.Success(entries);
+        return new KvSecretManifestReadResult.Success(entries, ArtifactVersion.Of(yaml));
     }
 
     private static bool TryMapValueSource(string? raw, out KvSecretValueSource valueSource)
@@ -321,6 +322,9 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 return true;
             case "written-by-h3":
                 valueSource = KvSecretValueSource.WrittenByEntraAppReg;  // task 245a
+                return true;
+            case "from-platform-vault":
+                valueSource = KvSecretValueSource.FromPlatformVault;     // task 245b
                 return true;
             default:
                 valueSource = default;

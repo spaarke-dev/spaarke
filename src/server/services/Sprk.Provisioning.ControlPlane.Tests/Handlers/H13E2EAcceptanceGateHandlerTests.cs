@@ -18,8 +18,8 @@
 //          registry Ready transition + all 6 H13 gates Verified.
 //   AC-2a  Missing tenantId (§4D I1) → Resumable + MissingTenantId.
 //   AC-2b  Missing subscriptionId → Resumable + MissingSubscriptionId.
-//   AC-2c  Missing buildId → Resumable + MissingBuildId.
-//   AC-2d  Missing bffApiUrl → Resumable + MissingBffApiUrl.
+//   AC-2c  Missing InterStepState.BffBuildId (H9 output, task 245b) → Resumable + MissingBuildId.
+//   AC-2d  Missing InterStepState.BffApiUrl (H9 output, task 245b) → Resumable + MissingBffApiUrl.
 //   AC-2e  Missing InterStepState.dataverseEnvUrl → Resumable + MissingDataverseEnvUrl.
 //   AC-2f/g/h Missing InterStepState.resourceGroupName / appServiceName /
 //          keyVaultName (H2a outputs, task 245a) → Resumable + MissingResourceGroupName /
@@ -81,7 +81,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
     private const string AppServiceName = "sprk-bff-acme";
     private const string KeyVaultName = "sprk-acme-prod-kv";
-    private const string RegistryDataverseUrl = "https://spaarke-registry.crm.dynamics.com";
     private const string EnvironmentId = "b0000000-0000-0000-0000-000000000001";
 
     // ---------- AC-1 happy path ----------
@@ -155,8 +154,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [Fact]
     public async Task AC2c_MissingBuildId_FailsResumable()
     {
+        // Task 245b: the deployed build is H9's output, not a run parameter.
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H13E2EAcceptanceGateHandler.BuildIdParameterKey);
+        run.InterStepState.BffBuildId = null;
         var repo = new FakeRepository(run, etag: "etag-2c");
         var handler = BuildHandler(repo, out _);
 
@@ -169,8 +169,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [Fact]
     public async Task AC2d_MissingBffApiUrl_FailsResumable()
     {
+        // Task 245b: the deployed BFF URL is H9's output, not a run parameter.
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H13E2EAcceptanceGateHandler.BffApiUrlParameterKey);
+        run.InterStepState.BffApiUrl = null;
         var repo = new FakeRepository(run, etag: "etag-2d");
         var handler = BuildHandler(repo, out _);
 
@@ -227,13 +228,13 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     }
 
     [Fact]
-    public async Task AC2h_CustomerVaultMissing_PlatformVaultIntakeKeyDoesNotStandIn_FailsResumable()
+    public async Task AC2h_CustomerVaultMissing_ARunParameterDoesNotStandIn_FailsResumable()
     {
-        // Intake "keyVaultName" is the Spaarke PLATFORM vault (a real, accepted key); it must never
-        // stand in for the customer vault H2a writes to InterStepState.KeyVaultName.
+        // The customer vault is H2a's InterStepState.KeyVaultName; a stray run parameter of the same
+        // name (no longer an accepted intake key since task 245b) must never stand in for it.
         var run = BuildRun();
         ClearInterStepStateValue(run, nameof(InterStepState.KeyVaultName));
-        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
+        run.Parameters.NonSecret["keyVaultName"] = "vault-from-a-run-parameter";
         var repo = new FakeRepository(run, etag: "etag-2h-platform-vault");
         var handler = BuildHandler(repo, out var seams);
 
@@ -249,9 +250,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     public async Task AC2i_StampNames_FlowFromInterStepState_ToProbesCostAndRegistryColumns()
     {
         var run = BuildRun();
-        // Intake carries the PLATFORM vault under "keyVaultName" and the container type id;
-        // InterStepState carries the CUSTOMER stamp names from H2a.
-        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
+        // Intake carries the container type id; InterStepState carries the CUSTOMER stamp names from H2a.
         run.Parameters.NonSecret["containerTypeId"] = "ct-from-intake";
         var repo = new FakeRepository(run, etag: "etag-2i");
         var handler = BuildHandler(repo, out var seams);
@@ -263,6 +262,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         trapRequest.ResourceGroupName.Should().Be(ResourceGroupName);
         trapRequest.AppServiceName.Should().Be(AppServiceName);
         trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
+        trapRequest.ContainerTypeId.Should().Be("ct-from-intake", "T6 selects the SPE owning-app credential by container type (task 245b)");
         seams.Cost.LastRequest!.ResourceGroupName.Should().Be(ResourceGroupName);
 
         var columns = seams.RegistryClient.LastColumns!;
@@ -823,9 +823,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         };
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.BuildIdParameterKey] = BuildId;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.BffApiUrlParameterKey] = BffApiUrl;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.RegistryDataverseUrlParameterKey] = RegistryDataverseUrl;
+        // H9 outputs (task 245b) — the deployed build and the BFF URL it health-probed.
+        run.InterStepState.BffBuildId = BuildId;
+        run.InterStepState.BffApiUrl = BffApiUrl;
         run.InterStepState.DataverseEnvUrl = DataverseUrl;
         run.InterStepState.BffAppRegId = "bff-appreg-id";
         run.InterStepState.MiClientId = "uami-client-id";

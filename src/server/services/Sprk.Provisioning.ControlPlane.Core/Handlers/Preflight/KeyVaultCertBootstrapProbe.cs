@@ -28,38 +28,41 @@
 // Mock&lt;HttpMessageHandler&gt;, never a wrapper mock of SecretClient itself.
 //
 // AUTH: reuses the shared <see cref="TokenCredential"/> singleton (UAMI-
-// pinned per ADR-028) — targets the SPAARKE PLATFORM Key Vault (Model 2's
-// per-customer stamp still lives under the platform UAMI's KV data-plane
-// RBAC per H4's own posture).
+// pinned per ADR-028) — targets the SPAARKE PLATFORM Key Vault holding the
+// owning app's certificate.
+//
+// WHICH CERTIFICATE (task 245b): the owning-app credential of the run's
+// container type — SpeContainerOptions.ContainerTypeOwners, looked up by the
+// intake containerTypeId — the SAME entry H8 and H13's T6 probe use. Before
+// T245b this probe read the vault from a run parameter nothing wrote and checked
+// `spe-owner-cert-pfx`, a different secret from H8's `SPE-OwnerCert-Pfx`. A run
+// whose container type has no configured owner fails HERE, before anything is
+// created.
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;
 using Azure;
 using Azure.Core;
 using Azure.Security.KeyVault.Secrets;
+using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
+using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 
 /// <summary>
-/// SDK-backed <see cref="IPreflightQuotaProbe"/> for SPE cert-bootstrap
-/// readiness. Reads the intake key <c>keyVaultName</c> from
-/// <see cref="PreflightProbeInput.NonSecretParameters"/> — the Spaarke PLATFORM vault holding the
-/// SPE owner certificate (also H8's and H13/T6's source). It is NOT the customer vault, which is
-/// H2a's <c>InterStepState.KeyVaultName</c> (task 245a). T245b moves this value to L2 configuration.
+/// SDK-backed <see cref="IPreflightQuotaProbe"/> for SPE cert-bootstrap readiness: the owning-app
+/// certificate of the run's container type (<see cref="SpeContainerOptions.ContainerTypeOwners"/>, by
+/// intake <c>containerTypeId</c>) exists in its Spaarke platform vault and is old enough.
 /// </summary>
 public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
 {
-    /// <summary>Intake key for the Spaarke platform vault holding the SPE owner certificate (see class remarks).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Secret name — matches the T6 helper convention (Test-SpeCertBootstrap.ps1 default).</summary>
-    public const string CertSecretName = "spe-owner-cert-pfx";
-
     /// <summary>Minimum secret age for SPE replication to have completed (FR-11 T6).</summary>
     public const int MinAgeHours = 24;
 
     private readonly TokenCredential _credential;
     private readonly SecretClientOptions? _clientOptions;
+    private readonly SpeContainerOptions _speOptions;
     private readonly ILogger<KeyVaultCertBootstrapProbe> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -67,20 +70,27 @@ public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
     public string CheckName => PreflightCheckNames.SpeCertBootstrap;
 
     /// <summary>Constructs the production probe bound to the shared platform <see cref="TokenCredential"/>.</summary>
-    public KeyVaultCertBootstrapProbe(TokenCredential credential, ILogger<KeyVaultCertBootstrapProbe> logger)
-        : this(credential, clientOptions: null, logger, TimeProvider.System)
+    public KeyVaultCertBootstrapProbe(
+        TokenCredential credential, IOptions<SpeContainerOptions> speOptions, ILogger<KeyVaultCertBootstrapProbe> logger)
+        : this(credential, clientOptions: null, speOptions, logger, TimeProvider.System)
     {
     }
 
     /// <summary>Test seam constructor — injects a fake-transport <see cref="SecretClientOptions"/> + <see cref="TimeProvider"/>.</summary>
     internal KeyVaultCertBootstrapProbe(
-        TokenCredential credential, SecretClientOptions? clientOptions, ILogger<KeyVaultCertBootstrapProbe> logger, TimeProvider timeProvider)
+        TokenCredential credential,
+        SecretClientOptions? clientOptions,
+        IOptions<SpeContainerOptions> speOptions,
+        ILogger<KeyVaultCertBootstrapProbe> logger,
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(credential);
+        ArgumentNullException.ThrowIfNull(speOptions);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(timeProvider);
         _credential = credential;
         _clientOptions = clientOptions;
+        _speOptions = speOptions.Value;
         _logger = logger;
         _timeProvider = timeProvider;
     }
@@ -90,15 +100,28 @@ public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
     {
         ArgumentNullException.ThrowIfNull(input);
 
-        if (!input.NonSecretParameters.TryGetValue(KeyVaultNameParameterKey, out var keyVaultName) || string.IsNullOrWhiteSpace(keyVaultName))
+        input.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var containerTypeId);
+        if (string.IsNullOrWhiteSpace(containerTypeId))
         {
-            return ConfigError($"Run parameter '{KeyVaultNameParameterKey}' is required by {CheckName}.");
+            return ConfigError(
+                $"Run parameter '{IntakeParameterCatalog.ContainerTypeId}' is required by {CheckName} — it selects the " +
+                "container type whose owning-app certificate H8 will use (spaarke-constants.yaml per_env_constants).");
+        }
+        if (!_speOptions.TryGetOwner(containerTypeId, out var owner))
+        {
+            return ConfigError(
+                $"No SpeContainerOptions:ContainerTypeOwners entry for container type '{containerTypeId.Trim()}' — this L2 " +
+                "deployment has no owning-app credential for it, so H8 could not create the customer's containers. Add the " +
+                "entry (controlplane-worker-app-service.bicep speContainerTypeOwners) after the topology runbook " +
+                "(SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created the container type and its owning app.");
         }
 
-        var certUri = $"https://{keyVaultName}.vault.azure.net/secrets/{CertSecretName}";
+        var keyVaultName = owner.OwnerCertKeyVaultName;
+        var certSecretName = owner.OwnerCertSecretName;
+        var certUri = $"https://{keyVaultName}.vault.azure.net/secrets/{certSecretName}";
         _logger.LogInformation(
-            "{CheckName} querying Azure.Security.KeyVault.Secrets: vault={KeyVault} secret={Secret}",
-            CheckName, keyVaultName, CertSecretName);
+            "{CheckName} querying Azure.Security.KeyVault.Secrets: containerType={ContainerType} vault={KeyVault} secret={Secret}",
+            CheckName, containerTypeId.Trim(), keyVaultName, certSecretName);
 
         var vaultUri = new Uri($"https://{keyVaultName}.vault.azure.net/");
         var client = _clientOptions is null
@@ -108,7 +131,7 @@ public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
         SecretCreatedOnResult metadata;
         try
         {
-            var response = await client.GetSecretAsync(CertSecretName, version: null, cancellationToken).ConfigureAwait(false);
+            var response = await client.GetSecretAsync(certSecretName, version: null, cancellationToken).ConfigureAwait(false);
             metadata = response.Value.Properties.CreatedOn is { } createdOn
                 ? new SecretCreatedOnResult.Found(createdOn)
                 : new SecretCreatedOnResult.MissingCreatedOn();
@@ -118,7 +141,7 @@ public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
             metadata = new SecretCreatedOnResult.NotFound();
         }
 
-        return Evaluate(keyVaultName, CertSecretName, certUri, MinAgeHours, _timeProvider.GetUtcNow(), metadata);
+        return Evaluate(keyVaultName, certSecretName, certUri, MinAgeHours, _timeProvider.GetUtcNow(), metadata);
     }
 
     /// <summary>
@@ -150,7 +173,8 @@ public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
                 Headroom: headroom,
                 Diagnostic:
                     $"SPE cert-bootstrap MISSING: no secret '{certSecretName}' in vault '{keyVaultName}' (URI: {certUri}). " +
-                    "Run scripts/common cert-bootstrap helper OR verify H4 KV-seed handler ran cleanly. " +
+                    "Import the owning app's certificate (base64 PFX) under this name as part of the topology runbook " +
+                    "(SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) — L2 never creates it. " +
                     $"Note: even after bootstrap, wait {minAgeHours}h for SPE replication before proceeding to H8.");
         }
 

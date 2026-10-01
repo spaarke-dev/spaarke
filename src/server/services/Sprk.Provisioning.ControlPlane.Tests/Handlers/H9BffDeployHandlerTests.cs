@@ -167,6 +167,10 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H9");
         repo.LastWrittenRun.GateStates.Should().ContainKey("h9-nfr01-publish-size");
         repo.LastWrittenRun.GateStates["h9-nfr01-publish-size"].Status.Should().Be(GateState.Verified);
+        // Task 245b: H9 publishes what H7 / H13 / H14 read — the production URL it probed, the build it deployed —
+        // in the same write as its completion.
+        repo.LastWrittenRun.InterStepState.BffApiUrl.Should().Be($"https://{AppServiceName}.azurewebsites.net");
+        repo.LastWrittenRun.InterStepState.BffBuildId.Should().Be(BuildId);
 
         verifier.CallCount.Should().Be(1);
         downloader.CallCount.Should().Be(1);

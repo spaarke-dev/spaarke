@@ -3,9 +3,8 @@
 //
 // Bound options for the H4 handler's collaborators (KV secrets writer +
 // App Service identity patcher + slot-identity role granter). Loaded from
-// the "KvSecretsPopulation" configuration section by Program.cs — runtime-
-// configurable so the linux-x64 App Service publish layout can be honored
-// without recompiling.
+// the "KvSecretsPopulationOptions" configuration section by Program.cs and
+// validated at Worker startup (task 245b — ValidateOnStart).
 //
 // PATTERN PARITY:
 //   Mirrors Handlers/EntraAppReg/EntraAppRegOptions.cs and
@@ -17,7 +16,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 
 /// <summary>
 /// Bound options for <see cref="H4KvSecretsPopulationHandler"/> collaborators.
-/// Configuration key: <c>KvSecretsPopulation</c>.
+/// Configuration key: <c>KvSecretsPopulationOptions</c>.
 /// </summary>
 public sealed class KvSecretsPopulationOptions
 {
@@ -91,4 +90,45 @@ public sealed class KvSecretsPopulationOptions
     /// Default <c>false</c>.
     /// </summary>
     public bool SecretFreeIdentityRollback { get; set; }
+
+    /// <summary>
+    /// Task 245b (🔒 owner-approved 2026-10-01): object id of the L2 control plane's own identity — the
+    /// Worker UAMI that writes the customer vault's secrets (H4, then H3). H4's KV RBAC bootstrap grants
+    /// THIS principal Key Vault Secrets Officer on the customer vault. Before T245b it granted
+    /// <c>InterStepState.MiObjectId</c> — the customer stamp's BFF UAMI — write access to its own vault,
+    /// while the identity that actually writes had none. The stamp UAMI keeps only Secrets User
+    /// (customer.bicep). Required GUID; validated at Worker startup. Same value
+    /// <c>platform-controlplane.bicep</c> passes as <c>controlPlanePrincipalId</c> to its Cosmos RBAC.
+    /// </summary>
+    public string ControlPlanePrincipalObjectId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Task 245b: the Spaarke platform Key Vault holding the Spaarke-shared vendor keys (owner D5:
+    /// <c>BingSearch-ApiKey</c>, <c>LlamaParse-ApiKey</c>) under their canonical names. H4 copies each
+    /// <c>value_source: from-platform-vault</c> manifest entry from here into the customer vault.
+    /// Required; validated at Worker startup.
+    /// </summary>
+    public string PlatformVaultName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Startup validation (Worker/Program.cs ValidateOnStart). Throws
+    /// <see cref="InvalidOperationException"/> naming the invalid setting.
+    /// </summary>
+    public void Validate()
+    {
+        if (!Guid.TryParse(ControlPlanePrincipalObjectId?.Trim(), out var principal) || principal == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "KvSecretsPopulationOptions:ControlPlanePrincipalObjectId must be the object id (GUID) of the L2 " +
+                "control plane's own identity — the principal H4 grants Key Vault Secrets Officer on each customer " +
+                $"vault (got '{ControlPlanePrincipalObjectId}'). Set by controlplane-worker-app-service.bicep " +
+                "(controlPlanePrincipalId).");
+        }
+        if (string.IsNullOrWhiteSpace(PlatformVaultName))
+        {
+            throw new InvalidOperationException(
+                "KvSecretsPopulationOptions:PlatformVaultName is required — the Spaarke platform Key Vault H4 copies " +
+                "the Spaarke-shared vendor keys (BingSearch-ApiKey, LlamaParse-ApiKey) from.");
+        }
+    }
 }

@@ -51,15 +51,12 @@ public static class SpeContainerRejectionCodes
     /// </summary>
     public const string MissingContainerTypeId = "spe-missing-container-type-id";
 
-    /// <summary>Run parameter <c>keyVaultName</c> missing — the vault holding the SPE owner cert used to build the ClientCertificateCredential.</summary>
-    public const string MissingKeyVaultName = "spe-missing-kv-name";
-
     /// <summary>
-    /// <c>InterStepState.BffAppRegId</c> (H3 output) is missing — H8 uses this
-    /// as the container-type owning app's clientId when constructing the T6
-    /// ClientCertificateCredential. H3 MUST complete before H8 dispatches.
+    /// Task 245b: this L2 deployment has no <see cref="SpeContainerOptions.ContainerTypeOwners"/> entry
+    /// for the run's <c>containerTypeId</c>, so H8 has no owning-app credential to create the container
+    /// with. Nothing has been created — Resumable once the entry is configured on the Worker.
     /// </summary>
-    public const string MissingOwningAppId = "spe-missing-owning-app-id";
+    public const string ContainerTypeOwnerNotConfigured = "spe-container-type-owner-not-configured";
 
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "spe-run-not-found";

@@ -101,7 +101,7 @@ $r = & ./Test-SubscriptionVCpuQuota.ps1 `
 ```powershell
 $r = & ./Test-SpeCertBootstrap.ps1 `
     -KeyVaultName $env:SPE_KV_NAME `
-    -CertSecretName 'spe-owner-cert-pfx' `
+    -CertSecretName 'SPE-OwnerCert-Pfx' `
     -MinAgeHours 24
 ```
 

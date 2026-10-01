@@ -65,7 +65,7 @@ public interface IAiSearchIndexProvisioner
 /// <param name="EnvironmentName">Target environment (<c>dev</c> / <c>staging</c> / <c>prod</c> / <c>demo</c>) — the script's <c>-Environment</c> parameter.</param>
 /// <param name="SearchEndpoint">Customer's dedicated AI Search endpoint URI from H2a's <see cref="Models.InterStepState.AiSearchEndpoint"/>. Empty for Model 1 (not used).</param>
 /// <param name="RequestedIndexNames">Subset of canonical 7 to provision — empty means "all". Never contains retired names (H2b guard rejects earlier).</param>
-/// <param name="IndexVersion">Manifest hash of the schema JSONs in <c>scripts/ai-search/</c> — feeds the idempotency key <c>aisearch-{customerId}-{indexVer}</c> per POML constraint.</param>
+/// <param name="IndexVersion">Content version of the schema set being applied (<see cref="IndexSchemaSet"/>, task 245b) — the <c>indexVer</c> of the idempotency key <c>aisearch-{customerId}-{indexVer}</c>.</param>
 public sealed record AiSearchIndexProvisionRequest(
     string CustomerId,
     string TenantId,

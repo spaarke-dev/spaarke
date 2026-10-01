@@ -71,9 +71,6 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// </summary>
 public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
 {
-    /// <summary>Canonical KV secret name for the SPE owner cert -- mirrors <see cref="SpeContainerOptions.DefaultCertSecretName"/>. Flagged for Phase H reconciliation (task 084).</summary>
-    internal const string SpeOwnerCertSecretName = "SPE-OwnerCert-Pfx";
-
     /// <summary>Fixed trap identity for this probe -- ALWAYS T6.</summary>
     public TrapKind Kind => TrapKind.T6SpeConfidentialClient;
 
@@ -81,6 +78,7 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
     private readonly SecretClientOptions? _clientOptions;
     private readonly IT6GraphAppOnlyProbe _graphProbe;
     private readonly H13AcceptanceOptions _options;
+    private readonly SpeContainerOptions _speOptions;
     private readonly ILogger<T6SpeConfidentialClientTrapProbe> _logger;
 
     /// <summary>Production constructor.</summary>
@@ -88,8 +86,9 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
         TokenCredential sharedCredential,
         IT6GraphAppOnlyProbe graphProbe,
         IOptions<H13AcceptanceOptions> options,
+        IOptions<SpeContainerOptions> speOptions,
         ILogger<T6SpeConfidentialClientTrapProbe> logger)
-        : this(sharedCredential, clientOptions: null, graphProbe, options, logger)
+        : this(sharedCredential, clientOptions: null, graphProbe, options, speOptions, logger)
     {
     }
 
@@ -99,16 +98,19 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
         SecretClientOptions? clientOptions,
         IT6GraphAppOnlyProbe graphProbe,
         IOptions<H13AcceptanceOptions> options,
+        IOptions<SpeContainerOptions> speOptions,
         ILogger<T6SpeConfidentialClientTrapProbe> logger)
     {
         ArgumentNullException.ThrowIfNull(sharedCredential);
         ArgumentNullException.ThrowIfNull(graphProbe);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(speOptions);
         ArgumentNullException.ThrowIfNull(logger);
         _sharedCredential = sharedCredential;
         _clientOptions = clientOptions;
         _graphProbe = graphProbe;
         _options = options.Value;
+        _speOptions = speOptions.Value;
         _logger = logger;
     }
 
@@ -123,25 +125,27 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.BffAppRegId);
 
-        // The SPE owner certificate lives in the Spaarke PLATFORM vault, not the customer vault
-        // (request.KeyVaultName, used by T1/T5). Task 245a split the two; T245b moves this vault to
-        // validated L2 configuration. Until then a blank value is an infra fault, not a crash.
-        var vaultName = request.SpeOwnerCertKeyVaultName;
-        if (string.IsNullOrWhiteSpace(vaultName))
+        // Task 245b: the owning-app credential of the run's container type — the SAME
+        // SpeContainerOptions.ContainerTypeOwners entry H0 and H8 use. NOT the customer BFF app: the
+        // certificate is registered on the owning app, and the BFF app is a separate, secret-free
+        // identity (topology §3A). NOT the customer vault (request.KeyVaultName, used by T1/T5).
+        if (!_speOptions.TryGetOwner(request.ContainerTypeId, out var owner))
         {
             return new TrapVerificationOutcome.InfraFault(Kind,
-                "T6 probe: the vault holding the SPE owner certificate is not known for this run " +
-                "(intake 'keyVaultName' — the Spaarke platform vault — is absent). T245b moves this to L2 " +
-                "configuration; until then supply it at intake.");
+                string.IsNullOrWhiteSpace(request.ContainerTypeId)
+                    ? "T6 probe: the run carries no containerTypeId, so the SPE owning-app credential to test is unknown."
+                    : $"T6 probe: no SpeContainerOptions:ContainerTypeOwners entry for container type " +
+                      $"'{request.ContainerTypeId.Trim()}' — configure it on the Worker, then re-run H13.");
         }
+        var vaultName = owner.OwnerCertKeyVaultName;
+        var secretName = owner.OwnerCertSecretName;
 
         _logger.LogInformation(
             "T6 probe starting: customerId={CustomerId} runId={RunId} tenantId={TenantId} " +
             "vaultName={VaultName} owningAppId={OwningAppId}",
             request.CustomerId, request.RunId, request.TenantId,
-            vaultName, request.BffAppRegId);
+            vaultName, owner.OwnerAppId);
 
         // (1) KV cert-load half.
         X509Certificate2 cert;
@@ -149,7 +153,7 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
         {
             cert = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
                 _sharedCredential, _clientOptions, vaultName,
-                SpeOwnerCertSecretName, _options.TrapVerifierTimeout, cancellationToken)
+                secretName, _options.TrapVerifierTimeout, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (RequestFailedException ex)
@@ -157,10 +161,10 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             _logger.LogWarning(ex,
                 "T6 probe InfraFault -- KV cert secret unreadable: customerId={CustomerId} " +
                 "vaultName={VaultName} secretName={SecretName} status={Status}",
-                request.CustomerId, vaultName, SpeOwnerCertSecretName, ex.Status);
+                request.CustomerId, vaultName, secretName, ex.Status);
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
-                $"T6 verdict deferred: KV secret '{SpeOwnerCertSecretName}' on vault " +
+                $"T6 verdict deferred: KV secret '{secretName}' on vault " +
                 $"'{vaultName}' was unreadable (RequestFailedException status {ex.Status}: " +
                 $"{ex.ErrorCode ?? "(no code)"}). Verify the SPE owner certificate exists in this Spaarke " +
                 $"platform vault and that the platform UAMI has Key Vault Secrets User RBAC on it. Re-run H13 after fixing.");
@@ -170,13 +174,13 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             _logger.LogWarning(ex,
                 "T6 probe InfraFault -- KV cert secret malformed: customerId={CustomerId} " +
                 "vaultName={VaultName} secretName={SecretName}",
-                request.CustomerId, vaultName, SpeOwnerCertSecretName);
+                request.CustomerId, vaultName, secretName);
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
-                $"T6 verdict deferred: KV secret '{SpeOwnerCertSecretName}' on vault " +
+                $"T6 verdict deferred: KV secret '{secretName}' on vault " +
                 $"'{vaultName}' is present but not a usable base64-encoded PFX " +
-                $"({ex.Message}). Re-upload the cert via H4 / scripts/common/Get-SpeConfidentialClientToken.ps1 " +
-                $"conventions and re-run H13.");
+                $"({ex.Message}). Re-import the owning app's certificate (base64 PFX) per the topology runbook — L2 never creates it — " +
+                $"and re-run H13.");
         }
         catch (TimeoutException ex)
         {
@@ -198,7 +202,7 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
                 $"T6 verdict deferred: unexpected {ex.GetType().Name} loading KV secret " +
-                $"'{SpeOwnerCertSecretName}' from vault '{vaultName}': {ex.Message}.");
+                $"'{secretName}' from vault '{vaultName}': {ex.Message}.");
         }
 
         // (2) Graph confidential-client GET half.
@@ -208,7 +212,7 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             try
             {
                 graphResult = await _graphProbe.ProbeAsync(
-                    request.TenantId, request.BffAppRegId, cert, cancellationToken)
+                    request.TenantId, owner.OwnerAppId, cert, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)

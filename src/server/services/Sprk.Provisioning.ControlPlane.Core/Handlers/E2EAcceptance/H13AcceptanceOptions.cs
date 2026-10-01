@@ -139,6 +139,31 @@ public sealed class H13AcceptanceOptions
     public string TargetSlotName { get; set; } = "production";
 
     /// <summary>
+    /// Task 245b: directory holding the packaged <c>scripts/</c> the I1 invariant probe scans for
+    /// hard-coded tenant literals. L2 configuration (formerly the run parameter
+    /// <c>provisioningScriptsDirectory</c>, which nothing wrote); defaults to the publish layout.
+    /// </summary>
+    public string ProvisioningScriptsDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "scripts");
+
+    /// <summary>
+    /// Startup validation (E2EAcceptanceModule — ValidateOnStart). Throws
+    /// <see cref="InvalidOperationException"/> naming the invalid setting.
+    /// </summary>
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ProvisioningScriptsDirectory))
+        {
+            throw new InvalidOperationException(
+                "E2EAcceptance:ProvisioningScriptsDirectory must not be blank — the I1 invariant probe scans it " +
+                "(default: <app>/scripts).");
+        }
+        if (string.IsNullOrWhiteSpace(TargetSlotName))
+        {
+            throw new InvalidOperationException("E2EAcceptance:TargetSlotName must not be blank (default: production).");
+        }
+    }
+
+    /// <summary>
     /// When true, H13 short-circuits + returns Success WITHOUT invoking any
     /// collaborator seam if the run's registry Setup Status is already
     /// <c>Ready</c> AND the level-3 idempotency key matches. Defaults to

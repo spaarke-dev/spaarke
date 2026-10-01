@@ -59,9 +59,6 @@ public static class KvSecretsPopulationRejectionCodes
     /// <summary>Run parameter <c>keyVaultName</c> missing — the target vault for all writes.</summary>
     public const string MissingKeyVaultName = "kvsecrets-missing-kv-name";
 
-    /// <summary>Run parameter <c>secretsVer</c> missing — feeds idempotency key kv-{customerId}-{secretsVer}.</summary>
-    public const string MissingSecretsVersion = "kvsecrets-missing-secrets-version";
-
     /// <summary>
     /// Run parameter <c>resourceGroupName</c> missing — H4 needs it to PATCH
     /// App Service keyVaultReferenceIdentity (T1) + query slot System-Assigned

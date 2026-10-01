@@ -325,6 +325,24 @@ Handlers run in BFF's existing IJobHandler infrastructure (ADR-004)
 - Cross-customer runs parallel
 - On L2 startup, Cosmos scan resumes `Running` / `WaitingOnGate` runs older than 2× median-handler-duration
 
+**L2-owned run inputs — Worker configuration, validated at startup** (task 245b). These are not run
+parameters: `POST /api/runs` rejects them. A missing or malformed value stops the Worker at boot.
+
+| Setting (`Worker` app setting) | What it is | Read by |
+|---|---|---|
+| `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId` | Object id of L2's own UAMI — the principal H4 grants **Key Vault Secrets Officer** on each customer vault before writing it. Never the stamp's BFF UAMI (that one only reads its vault). | H4 |
+| `KvSecretsPopulationOptions__PlatformVaultName` | Spaarke platform vault holding the Spaarke-shared vendor keys (`BingSearch-ApiKey`, `LlamaParse-ApiKey`) under their canonical names; H4 copies them into each customer vault. | H4 |
+| `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId`, `OwnerAppId` (the container type's **owning** app), `OwnerCertKeyVaultName` + `OwnerCertSecretName` (its certificate, base64 PFX — canonical `SPE-OwnerCert-Pfx`). The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run until the topology runbook has created a container type + owning app and its entry is added. | H0 (SpeCertBootstrap), H8, H13 (T6) |
+| `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
+
+Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`),
+`vendorKeysKeyVaultName` (default: the Worker's platform vault) and `speContainerTypeOwners` (array; threaded from
+`platform-controlplane.bicep`).
+
+Artifact versions in idempotency keys (`bicepVer`, `indexVer`, `secretsVer`) are computed by L2 from the artifact each
+handler applies — the ARM template H2a deploys, the index schemas H2b PUTs, the secret-catalog manifest H4 / H4b read —
+so the same artifact gives the same key and a changed artifact is re-applied.
+
 **API surface** (per FR-21):
 
 | Endpoint | Purpose |
@@ -373,48 +391,42 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 
 | # | Handler | Purpose | Gate | Idempotency key |
 |---|---|---|---|---|
-| **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE cert-bootstrap | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
+| **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE cert-bootstrap (the owning-app certificate of the run's container type, from `SpeContainerOptions:ContainerTypeOwners`) | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
 | **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
-| **H2a** | Per-customer Bicep infra | Deploy: RG, KV, Storage, Service Bus, Cosmos, OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR. Redis explicitly **NOT** per-customer | — | `infra-{customerId}-{bicepVer}` |
-| **H2b** | AI Search indexes | Provision 7 canonical indexes via `scripts/ai-search/Deploy-AllIndexes.ps1` (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) | — | `aisearch-{customerId}-{indexVer}` |
+| **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12), OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR. Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
+| **H2b** | AI Search indexes | Provision 7 canonical indexes via `scripts/ai-search/Deploy-AllIndexes.ps1` (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
 | **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ⚠️ **The code does not do this yet**: `H3EntraAppRegHandler` still has a `Model1Shared` branch that creates **zero** app registrations and reuses `SharedBffAppRegistrationId`. Deleting it is open work. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
-| **H4** | Key Vault secrets | Populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` |
+| **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
-| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s) | Container GET succeeds; container ID persisted to Dataverse + KV | `spe-{customerId}` |
+| **H8** | SPE root container | Creates the customer's container in the pre-existing container type, as that type's **owning app** (confidential-client cert from `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app; **T6** trap — delegated 403s) | Container GET succeeds; container ID persisted | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
-| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` |
+| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
 | **H14** | Post-deploy integrations | (a) 2 Exchange `ApplicationAccessPolicy` (BFF app-reg + UAMI — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | `Get-ApplicationAccessPolicy` returns 2 with both principals | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
 
-```
-H0 --> H1 --> H2a --> { H2b (indexes), H4 (KV), H5 (dv-env) }   # 3-way parallel post-Bicep
-                            |
-                            v
-                       H4 --> H3 (needs KV for secrets) --> { H8 (SPE), H9 (BFF deploy) }
+Authoritative source: `DagAdvancer.HandlerDependencies` (a handler is ready when every handler listed for it has
+completed). As of task 245b:
 
-H5 --> H6 (solutions) --> H7 --> H10 (needs H6) --> H11
-                                    |
-                                    v
-                              { H12a (AI seed), H12b (config seed) }   # parallel
-                                    |
-                                    v
-                              H12c (needs H12a + H12b + H2a OpenAI)
-                                    |
-                                    v
-                              H14 { (a) Exchange x2, (b) Graph webhooks, (c) service-endpoint webhooks }  # parallel
-                                    |
-                                    v
-                              H13 (final gate)
 ```
+H1   <- H0                 H2a  <- H1                 H2b  <- H2a
+H4   <- H2a                H5   <- H2a                H3   <- H4
+H4b  <- H4, H3, H5         H6   <- H5, H3             H8   <- H3
+H9   <- H3, H4b            H7   <- H6, H8, H9         H10  <- H7
+H11  <- H10                H12a <- H11                H12b <- H11
+H12c <- H12a, H12b, H2a    H14  <- H12c, H9           H13  <- H14
+```
+
+Every edge carries data: a handler that reads another's `InterStepState` output has it as an ancestor, and
+`RunContextContractTests` fails the build if a required input has no producer running first.
 
 **Model 2 self-service branch**: `H0.5 (consent-capture) → H0 → …` — pipeline starts on consent callback rather than operator-initiated.
 

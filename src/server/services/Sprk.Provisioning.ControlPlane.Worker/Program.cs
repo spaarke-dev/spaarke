@@ -180,10 +180,10 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 // the CI-precompiled ARM JSON artifact task 117 publishes),
 // ArmKeyVaultRefProbe (WebSiteResource/WebSiteSlotResource.Data.KeyVaultReferenceIdentity),
 // and ArmWhatIfDriftDetector (ArmDeploymentResource.WhatIfAsync() — typed
-// WhatIfChange[] results, not stdout-parsed JSON). IBicepTemplateInspector
-// (on-disk infrastructure/bicep/ structural pre-flight) is UNCHANGED —
-// out of task 123's scope (it does not shell out; it reads local files
-// shipped in the publish output). All registrations UNCONDITIONAL per
+// WhatIfChange[] results, not stdout-parsed JSON). ArmTemplateInspector
+// (task 245b, concrete — pure, no seam): it checks the resolved ARM template
+// JSON H2a deploys — the earlier on-disk .bicep inspector read a directory the
+// publish output never contained. All registrations UNCONDITIONAL per
 // ADR-032 — SignalR is the feature-gated resource, not the handler; the
 // handler passes through the SignalREnabled parameter to the runner
 // unconditionally (Null-Object kill-switch applies to the RESOURCE, not the
@@ -241,13 +241,12 @@ builder.Services.AddSingleton<IUpgradeDriftDetector>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var armClient = new Azure.ResourceManager.ArmClient(credential);
-    var options = sp.GetRequiredService<IOptions<BicepInfraDeployOptions>>();
-    var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
-        new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
     var logger = sp.GetRequiredService<ILogger<ArmWhatIfDriftDetector>>();
-    return new ArmWhatIfDriftDetector(armClient, artifactsContainer, options, logger);
+    return new ArmWhatIfDriftDetector(armClient, logger);
 });
-builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
+// Task 245b: inspects the resolved ARM template JSON (the bytes H2a deploys), not .bicep source
+// on disk — the L2 publish never shipped infrastructure/bicep, so the file inspector failed every run.
+builder.Services.AddSingleton<ArmTemplateInspector>();
 // HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27): resource-name
 // availability probe wired into H2a's precondition chain (after inspector,
 // before runner). Reuses the shared platform ArmClient singleton — no
@@ -481,8 +480,17 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // manifest.yaml). H4 handler + tests are UNCHANGED by this swap (parity with
 // H1's Null-probe -> real-ARM-probe transition) — only the DI registration
 // target changed.
-builder.Services.Configure<KvSecretsPopulationOptions>(
-    builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
+// Task 245b: validated at startup — ControlPlanePrincipalObjectId (the principal H4 grants Key Vault
+// Secrets Officer on each customer vault: L2's own UAMI) and PlatformVaultName (source of the
+// Spaarke-shared vendor keys) are required.
+builder.Services.AddOptions<KvSecretsPopulationOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "KvSecretsPopulationOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IKvSecretManifest, FileKvSecretManifest>();
 builder.Services.AddSingleton<IKvSecretValueResolver>(sp =>
 {
@@ -777,8 +785,17 @@ builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 // detection (per task 214.4 Option A). H13's T6SpeConfidentialClientTrapProbe
 // owns the T6 acceptance gate. SpeConfidentialClientGraphFactory.
 // IsDelegatedTokenTrapError is retained ONLY for H13's use.
-builder.Services.Configure<SpeContainerOptions>(
-    builder.Configuration.GetSection(nameof(SpeContainerOptions)));
+// Task 245b: SpeContainerOptions.ContainerTypeOwners — the owning-app credential per SPE container type
+// (app id + the certificate's platform vault + secret), read by H0's SpeCertBootstrap probe, H8 and
+// H13's T6 probe — is validated at startup.
+builder.Services.AddOptions<SpeContainerOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(SpeContainerOptions)))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "SpeContainerOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
 builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisioner>();
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
 builder.Services.AddScoped<H8SpeContainerHandler>();

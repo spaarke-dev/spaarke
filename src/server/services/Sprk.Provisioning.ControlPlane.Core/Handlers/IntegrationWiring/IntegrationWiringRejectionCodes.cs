@@ -50,7 +50,7 @@ public static class H14Rejections
     /// <summary>InterStepState.dataverseEnvUrl missing — H5/H6 has not completed yet (upstream dependency for H14c).</summary>
     public const string MissingDataverseEnvUrl = "h14-missing-dataverse-env-url";
 
-    /// <summary>Run parameter <c>webhookNotificationBaseUrl</c> missing — H14b/H14c both need it to construct the receiver URL.</summary>
+    /// <summary>InterStepState.BffApiUrl (H9 output) missing — H14b/H14c both need it to construct the receiver URL (task 245b).</summary>
     public const string MissingWebhookNotificationBaseUrl = "h14-missing-webhook-notification-base-url";
 
     /// <summary>

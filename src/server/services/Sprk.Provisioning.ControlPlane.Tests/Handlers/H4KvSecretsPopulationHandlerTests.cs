@@ -79,7 +79,10 @@ public sealed class H4KvSecretsPopulationHandlerTests
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
     private const string AppServiceName = "sprk-acme-prod-api";
     private const string StagingSlotName = "staging";
+    // Task 245b: secretsVer is the manifest's content version (KvSecretManifestReadResult.Success.ContentVersion).
     private const string SecretsVer = "manifest-hash-abc123";
+    private const string L2PrincipalObjectId = "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f";
+    private const string PlatformVault = "sprk-controlplane-dev-kv";
     private const string UamiResourceId = "/subscriptions/sub-cus-acme-prod/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
     // ---------- AC-1 fresh populate happy path (all seams green) ----------
@@ -427,7 +430,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
 
         ((HandlerResult.Success)result).IdempotencyKey.Should().Be(expectedKey);
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
-        manifest.CallCount.Should().Be(0);
+        manifest.CallCount.Should().Be(1, "task 245b: the manifest's content version IS the key's secretsVer — read, nothing written");
         writer.CallCount.Should().Be(0);
         patcher.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
@@ -462,8 +465,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
                 KvSecretsPopulationRejectionCodes.MissingTenantId)]
     [InlineData(H4KvSecretsPopulationHandler.SubscriptionIdParameterKey,
                 KvSecretsPopulationRejectionCodes.MissingSubscriptionId)]
-    [InlineData(H4KvSecretsPopulationHandler.SecretsVersionParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingSecretsVersion)]
     public async Task AC17to23_MissingRequiredParameter_FailsResumable_NoWriterCall(
         string parameterKey, string expectedRejectionCode)
     {
@@ -881,7 +882,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var writer = FakeWriter.AllWrote();
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
             FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
-            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+            options: ValidOptions(requireSecretFreeIdentity: true));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -920,7 +921,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var writer = FakeWriter.AllWrote();
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
             FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
-            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+            options: ValidOptions(requireSecretFreeIdentity: true));
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -941,11 +942,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
             FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
             markerApplier: marker,
-            options: new KvSecretsPopulationOptions
-            {
-                RequireSecretFreeIdentity = true,
-                SecretFreeIdentityRollback = true,
-            });
+            options: ValidOptions(requireSecretFreeIdentity: true, secretFreeIdentityRollback: true));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -965,7 +962,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
             FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
             FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
-            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+            options: ValidOptions(requireSecretFreeIdentity: true));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -1002,7 +999,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
             FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
             FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
-            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+            options: ValidOptions(requireSecretFreeIdentity: true));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -1035,7 +1032,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
             FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
             FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
-            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+            options: ValidOptions(requireSecretFreeIdentity: true));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -1054,7 +1051,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
             FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
             FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
-            options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+            options: ValidOptions(requireSecretFreeIdentity: true));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -1082,7 +1079,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
             var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
                 FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
                 FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
-                options: new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true });
+                options: ValidOptions(requireSecretFreeIdentity: true));
 
             var envelope = new HandlerEnvelope
             {
@@ -1167,6 +1164,81 @@ public sealed class H4KvSecretsPopulationHandlerTests
 
     // ---------- HANDLER-09 operator KV RBAC bootstrap (Wave 2 pre-dispatch remediation 2026-08-27) ----------
 
+    // ---------- Task 245b: computed secretsVer + L2-owned configuration ----------
+
+    [Fact]
+    public async Task ChangedManifestVersion_IsNotAnIdempotentNoOp()
+    {
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = H4KvSecretsPopulationHandler.HandlerIdentifier,
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-9),
+            IdempotencyKey = H4KvSecretsPopulationHandler.BuildIdempotencyKey(CustomerId, SecretsVer),
+            JobId = RunId,
+        });
+        var repo = new FakeRepository(run, etag: "etag-245b-a");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries(), contentVersion: "edited-manifest"),
+            writer, FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey
+            .Should().Be(H4KvSecretsPopulationHandler.BuildIdempotencyKey(CustomerId, "edited-manifest"));
+        writer.CallCount.Should().Be(1, "an edited manifest is re-applied, not skipped");
+    }
+
+    [Fact]
+    public async Task KvRbacBootstrap_GrantsTheConfiguredL2Principal_NeverTheStampUami()
+    {
+        var run = BuildRun();
+        run.InterStepState.MiObjectId = "0f0e0d0c-0b0a-0908-0706-050403020100";   // the stamp's BFF UAMI
+        var repo = new FakeRepository(run, etag: "etag-245b-b");
+        var writer = FakeWriter.AllWrote();
+        var bootstrapper = new StubOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: true));
+        var handler = new H4KvSecretsPopulationHandler(
+            repo, FakeManifest.Success(BuildCanonicalEntries()), writer, FakeIdentityPatcher.Success(),
+            FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(), FakeMarkerApplier.Success(), bootstrapper,
+            Options.Create(new KvSecretsPopulationOptions
+            {
+                ControlPlanePrincipalObjectId = L2PrincipalObjectId,
+                PlatformVaultName = PlatformVault,
+            }),
+            NullLogger<H4KvSecretsPopulationHandler>.Instance);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        bootstrapper.LastRequest!.PrincipalObjectId.Should().Be(L2PrincipalObjectId);
+        bootstrapper.LastRequest.PrincipalObjectId.Should().NotBe(run.InterStepState.MiObjectId);
+        bootstrapper.LastRequest.RoleDefinitionId.Should().Be(KvBuiltInRoleIds.SecretsOfficer);
+        writer.LastRequest!.PlatformVaultName.Should().Be(PlatformVault, "vendor keys are copied from the configured platform vault");
+    }
+
+    [Theory]
+    [InlineData("", PlatformVault, "ControlPlanePrincipalObjectId")]
+    [InlineData("not-a-guid", PlatformVault, "ControlPlanePrincipalObjectId")]
+    [InlineData("00000000-0000-0000-0000-000000000000", PlatformVault, "ControlPlanePrincipalObjectId")]
+    [InlineData(L2PrincipalObjectId, " ", "PlatformVaultName")]
+    public void Options_Validate_RejectsMissingL2Principal_OrPlatformVault(string principal, string vault, string expectedSetting)
+    {
+        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = principal, PlatformVaultName = vault };
+
+        var act = () => options.Validate();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage($"*{expectedSetting}*");
+    }
+
+    [Fact]
+    public void Options_Validate_AcceptsAPrincipalGuidAndAVault()
+    {
+        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = L2PrincipalObjectId, PlatformVaultName = PlatformVault };
+
+        options.Invoking(o => o.Validate()).Should().NotThrow();
+    }
+
     private sealed class StubOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
     {
         private readonly OperatorKvRbacBootstrapOutcome _outcome;
@@ -1199,7 +1271,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
             repo, manifest, writer, patcher, probe, granter,
             FakeMarkerApplier.Success(),
             failingBootstrapper,
-            Options.Create(new KvSecretsPopulationOptions()),
+            Options.Create(ValidOptions()),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -1245,9 +1317,22 @@ public sealed class H4KvSecretsPopulationHandlerTests
             repo, manifest, writer, patcher, probe, granter,
             markerApplier ?? FakeMarkerApplier.Success(),
             new StubOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: false)),
-            Options.Create(options ?? new KvSecretsPopulationOptions()),
+            Options.Create(options ?? ValidOptions()),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
     }
+
+    /// <summary>
+    /// Options in the shape Worker startup guarantees (KvSecretsPopulationOptions.Validate() runs under
+    /// ValidateOnStart, task 245b) — the handler relies on it and does not re-validate.
+    /// </summary>
+    private static KvSecretsPopulationOptions ValidOptions(
+        bool requireSecretFreeIdentity = false, bool secretFreeIdentityRollback = false) => new()
+    {
+        ControlPlanePrincipalObjectId = L2PrincipalObjectId,
+        PlatformVaultName = PlatformVault,
+        RequireSecretFreeIdentity = requireSecretFreeIdentity,
+        SecretFreeIdentityRollback = secretFreeIdentityRollback,
+    };
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -1274,7 +1359,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
         // Intake values (run parameters).
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.SecretsVersionParameterKey] = SecretsVer;
         // H2a outputs (task 245a, G25) — InterStepState, never run parameters.
         run.InterStepState.KeyVaultName = KeyVaultName;
         run.InterStepState.ResourceGroupName = ResourceGroupName;
@@ -1335,8 +1419,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
         private readonly KvSecretManifestReadResult _result;
         public int CallCount { get; private set; }
         private FakeManifest(KvSecretManifestReadResult result) => _result = result;
-        public static FakeManifest Success(IReadOnlyList<KvSecretEntry> entries)
-            => new(new KvSecretManifestReadResult.Success(entries));
+        public static FakeManifest Success(IReadOnlyList<KvSecretEntry> entries, string contentVersion = SecretsVer)
+            => new(new KvSecretManifestReadResult.Success(entries, contentVersion));
         public static FakeManifest Failure(string diagnostic)
             => new(new KvSecretManifestReadResult.Failure(diagnostic));
         public Task<KvSecretManifestReadResult> ReadAsync(CancellationToken ct)

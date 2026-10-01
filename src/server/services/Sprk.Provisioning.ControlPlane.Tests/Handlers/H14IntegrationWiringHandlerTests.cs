@@ -114,6 +114,26 @@ public sealed class H14IntegrationWiringHandlerTests
     // ---------- AC-3 missing InterStepState.bffAppRegId ----------
 
     [Fact]
+    public async Task AC3a_MissingBffApiUrl_H9NotComplete_FailsResumable_NoSeamInvoked()
+    {
+        // Task 245b: the webhook receivers live on the stamp's BFF — H9's InterStepState.BffApiUrl.
+        var run = BuildRun();
+        run.InterStepState.BffApiUrl = null;
+        var repo = new FakeRepository(run, etag: "etag-3a-bffurl");
+        var applier = FakeApplier.Applied(2);
+        var graphCreator = FakeGraphCreator.Success();
+        var handler = BuildHandler(repo, applier, FakeReader.Success(SigningKey), graphCreator, FakeDvRegistrar.Created());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H14Rejections.MissingWebhookNotificationBaseUrl);
+        applier.CallCount.Should().Be(0);
+        graphCreator.CallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task AC3_MissingBffAppRegId_FailsResumable()
     {
         var run = BuildRun();
@@ -364,13 +384,13 @@ public sealed class H14IntegrationWiringHandlerTests
         }
         run.Parameters.NonSecret[H14IntegrationWiringHandler.SubscriptionIdParameterKey] = SubscriptionId;
         run.Parameters.NonSecret[H14IntegrationWiringHandler.ExchangePolicyScopeGroupIdParameterKey] = PolicyScopeGroupId;
-        run.Parameters.NonSecret[H14IntegrationWiringHandler.WebhookNotificationBaseUrlParameterKey] = NotificationBaseUrl;
         if (includeGraphResources)
         {
             run.Parameters.NonSecret[H14IntegrationWiringHandler.CommunicationGraphResourceParameterKey] = CommunicationResource;
             run.Parameters.NonSecret[H14IntegrationWiringHandler.EmailGraphResourceParameterKey] = EmailResource;
         }
         run.InterStepState.BffAppRegId = BffAppRegId;
+        run.InterStepState.BffApiUrl = NotificationBaseUrl;   // H9 output (task 245b) — the webhook receiver base
         run.InterStepState.MiClientId = UamiClientId;
         run.InterStepState.DataverseEnvUrl = DataverseEnvUrl;
         // The CUSTOMER vault is an H2a output (task 245a, G25) — not a run parameter.

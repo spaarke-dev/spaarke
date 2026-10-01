@@ -30,7 +30,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["customer", "model1-shared"],
-      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.FileBicepTemplateInspector.ResolveTemplatePath (the authoritative C# source: TenancyModel == 'Model1Shared' (case-insensitive) selects 'model1-shared'; every other value, including 'Model2Dedicated', falls through to the 'customer' default).",
+      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.ArmDeploymentRunner.ResolveArmTemplateAsync (the authoritative C# source: an exhaustive switch over TenancyModel -- Model1 selects 'model1-shared', Model2 selects 'customer', any other value throws).",
       "properties": {
         "customer": {
           "$ref": "#/definitions/templateEntry",
@@ -55,7 +55,7 @@
         },
         "resolutionHint": {
           "type": "string",
-          "description": "Human-readable statement of the TenancyModel selection rule for this template, kept in sync with FileBicepTemplateInspector.ResolveTemplatePath. Advisory / documentation only -- H2a's handler encodes the actual branch in code, this field lets an operator or a future audit confirm the manifest and the code still agree."
+          "description": "Human-readable statement of the TenancyModel selection rule for this template, kept in sync with ArmDeploymentRunner.ResolveArmTemplateAsync. Advisory / documentation only -- H2a's handler encodes the actual branch in code, this field lets an operator or a future audit confirm the manifest and the code still agree."
         },
         "armJsonBlobName": {
           "type": "string",

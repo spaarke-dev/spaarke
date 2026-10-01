@@ -56,7 +56,14 @@ public static class E2EAcceptanceModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<H13AcceptanceOptions>(configuration.GetSection(ConfigSection));
+        services.AddOptions<H13AcceptanceOptions>()
+            .Bind(configuration.GetSection(ConfigSection))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "E2EAcceptance options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
         // Production seam registrations. All 7 trap + 5 invariant probes are
         // real as of task 185 (Wave G-7 Batch G-7D) -- PlaceholderTrapVerifier

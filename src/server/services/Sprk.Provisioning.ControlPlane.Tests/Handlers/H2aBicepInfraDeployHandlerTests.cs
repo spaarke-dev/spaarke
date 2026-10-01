@@ -6,7 +6,7 @@
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live Bicep / az CLI / ARM / pwsh /
 //   Azure API. Fakes replace the repository + all four collaborator seams
-//   (runner, ARM probe, drift detector, template inspector) so the handler
+//   (runner, ARM probe, drift detector) so the handler
 //   orchestration logic is exercised in isolation. Live-Azure coverage
 //   belongs in env-guarded smoke tests (H2a is not exercised end-to-end at
 //   CI time by design — a real Bicep deploy is 10–20 min).
@@ -21,9 +21,10 @@
 //   T4  Missing tenantId (§4D I1): Failure(Resumable, missing-tenant-id) +
 //       no runner call + Cosmos marked Failed.
 //   T5  Missing subscriptionId: Failure(Resumable, missing-subscription-id).
-//   T6  Missing bicepVer: Failure(Resumable, missing-bicep-version).
-//   T7  Redis presence in template: Failure(QuarantineRequired,
-//       redis-provisioning-forbidden) + Cosmos marked Quarantined.
+//   T6  ARM template unresolvable (task 245b): Failure(Resumable,
+//       arm-template-unavailable), no deploy. The idempotency version is the
+//       resolved template's content version; a changed template is not a no-op.
+//   (T7 "Redis presence" retired with task 245b — D-12 made Redis per-customer.)
 //   T8  Unpinned model deployment: Failure(QuarantineRequired,
 //       model-version-not-pinned).
 //   T9  Upgrade-mode drift detected: Failure(QuarantineRequired,
@@ -40,7 +41,7 @@
 //   T14 SignalR flag OFF: runner request carries SignalREnabled=false.
 //   T15 SignalR flag ON: runner request carries SignalREnabled=true.
 //   T16 HandlerId mismatch: throws InvalidOperationException.
-//   T17 Idempotency key format determinism: same customerId + bicepVer
+//   T17 Idempotency key format determinism: same customerId + template version
 //       produce same key.
 //   T18 Run not found: Failure(Resumable, run-not-found).
 // -----------------------------------------------------------------------------
@@ -63,7 +64,10 @@ public sealed class H2aBicepInfraDeployHandlerTests
     private const string RunId = "01j7q3zp-h2a-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string SubscriptionId = "sub-cus-acme-prod";
+    // Task 245b: H2a's idempotency version is the resolved template's content version.
     private const string BicepVer = "abc123def456";
+    private static readonly ResolvedArmTemplate TestTemplate =
+        new("customer", "customer-arm-2026.10.01-1.json", """{"resources":[]}""", BicepVer);
     private const string ExpectedUamiRid = "/subscriptions/x/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
     // ---------- T1 happy path — Model 2 dedicated ----------
@@ -76,8 +80,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var runner = FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: false));
         var probe = FakeArmKeyVaultRefProbe.Match();
         var driftDetector = new FakeUpgradeDriftDetector();
-        var inspector = FakeBicepTemplateInspector.Clean();
-        var handler = BuildHandler(repo, runner, probe, driftDetector, inspector);
+        var handler = BuildHandler(repo, runner, probe, driftDetector, RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -108,9 +111,11 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.CallCount.Should().Be(1);
         probe.CallCount.Should().Be(1);
         driftDetector.CallCount.Should().Be(0, "upgrade mode did not fire — no provisionedOn param");
-        inspector.CallCount.Should().Be(1);
         runner.LastRequest.Should().NotBeNull();
         runner.LastRequest!.TenancyModel.Should().Be("Model2");
+        // Task 245b: the template resolved for the key is the template deployed — one resolution.
+        runner.ResolvedFor.Should().Be(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2);
+        runner.LastRequest.Template.Should().BeSameAs(runner.Template);
     }
 
     // ---------- T2 happy path — Model 1 shared ----------
@@ -123,8 +128,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var runner = FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: false));
         var probe = FakeArmKeyVaultRefProbe.Match();
         var driftDetector = new FakeUpgradeDriftDetector();
-        var inspector = FakeBicepTemplateInspector.Clean();
-        var handler = BuildHandler(repo, runner, probe, driftDetector, inspector);
+        var handler = BuildHandler(repo, runner, probe, driftDetector, RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -151,8 +155,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var probe = FakeArmKeyVaultRefProbe.Match();
         var driftDetector = new FakeUpgradeDriftDetector();
-        var inspector = FakeBicepTemplateInspector.Clean();
-        var handler = BuildHandler(repo, runner, probe, driftDetector, inspector);
+        var handler = BuildHandler(repo, runner, probe, driftDetector, RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -160,7 +163,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
         runner.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
-        inspector.CallCount.Should().Be(0);
     }
 
     // ---------- T4 missing tenantId (§4D I1) ----------
@@ -172,7 +174,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-4");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -194,7 +196,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-5");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -204,23 +206,76 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.CallCount.Should().Be(0);
     }
 
-    // ---------- T6 missing bicepVer ----------
+    // ---------- T6 template resolution (task 245b) ----------
 
     [Fact]
-    public async Task MissingBicepVersion_FailsResumable()
+    public async Task TemplateUnresolvable_FailsResumable_NothingDeployed()
     {
-        var run = BuildRun(includeBicepVer: false);
+        var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-6");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        runner.ResolveFailure = new InvalidDataException("blob sha256 does not match the manifest");
+        var inspector = RealInspector();
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), inspector);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.MissingBicepVersion);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.ArmTemplateUnavailable);
+        failure.Diagnostic.Should().Contain("sha256 does not match");
         runner.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(false)]   // the artifact store is reachable and "latest" names a NEWER template
+    [InlineData(true)]    // the artifact store is down
+    public async Task AlreadyCompletedInThisRun_IsADuplicateNoOp_WithoutResolvingTheTemplate(bool artifactStoreDown)
+    {
+        // ADR-004 at-least-once: a redelivered H2a message must neither fail a run that already moved on nor
+        // redeploy a newer template mid-run (outputs already consumed downstream; no upgrade what-if).
+        var run = BuildRun();
+        var priorKey = H2aBicepInfraDeployHandler.BuildIdempotencyKey(CustomerId, "earlier-template-version");
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = H2aBicepInfraDeployHandler.HandlerIdentifier,
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            IdempotencyKey = priorKey,
+            JobId = RunId,
+        });
+        var repo = new FakeRepository(run, etag: "etag-6c");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        if (artifactStoreDown)
+        {
+            runner.ResolveFailure = new Azure.RequestFailedException(503, "blob service unavailable");
+        }
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey.Should().Be(priorKey);
+        runner.ResolvedFor.Should().BeNull("a completed H2a is not re-resolved");
+        runner.CallCount.Should().Be(0);
+        repo.LastWrittenRun.Should().BeNull("a duplicate delivery does not touch the run");
+    }
+
+    [Fact]
+    public async Task IdempotencyKey_NamesTheContentVersionOfTheTemplateDeployed()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-6d");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        runner.Template = TestTemplate with { Version = "0123abcd" };
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey
+            .Should().Be(H2aBicepInfraDeployHandler.BuildIdempotencyKey(CustomerId, "0123abcd"));
     }
 
     // ---------- EXEC-04 blank TenancyModel (Wave 2 pre-dispatch remediation 2026-08-27) ----------
@@ -234,7 +289,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var run = BuildRun(tenancyModel: tenancyModel!);
         var repo = new FakeRepository(run, etag: "etag-exec04");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var inspector = FakeBicepTemplateInspector.Clean();
+        var inspector = RealInspector();
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
             new FakeUpgradeDriftDetector(), inspector);
 
@@ -244,9 +299,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.MissingTenancyModel);
         failure.Diagnostic.Should().Contain("silently default");
-        failure.Diagnostic.Should().Contain("Model 1 shared trial");
+        failure.Diagnostic.Should().Contain("TenancyModel");
         runner.CallCount.Should().Be(0, "H2a MUST NOT invoke deploy runner on blank TenancyModel");
-        inspector.CallCount.Should().Be(0, "structural inspector fires AFTER TenancyModel guard");
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
@@ -265,7 +319,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             "AlreadyExists: The specified service namespace is already taken.");
         var handler = BuildHandler(
             repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            new FakeUpgradeDriftDetector(), RealInspector(),
             nameProbe: nameProbe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -291,7 +345,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var nameProbe = FakeResourceNameAvailabilityProbe.AllAvailable();
         var handler = BuildHandler(
             repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            new FakeUpgradeDriftDetector(), RealInspector(),
             nameProbe: nameProbe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -314,7 +368,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             ResourceNameKind.StorageAccount, "sprkacmeprodsa", "would-collide-if-checked");
         var handler = BuildHandler(
             repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            new FakeUpgradeDriftDetector(), RealInspector(),
             nameProbe: nameProbe);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -351,29 +405,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
         storage.RequestedName.Should().StartWith("sprk");
     }
 
-    // ---------- T7 Redis presence ----------
-
-    [Fact]
-    public async Task RedisInTemplate_FailsQuarantineRequired()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-7");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var inspector = FakeBicepTemplateInspector.WithRedis("customer.bicep:100");
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), inspector);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.QuarantineRequired);
-        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.RedisProvisioningForbidden);
-        failure.Diagnostic.Should().Contain("Q-E FR-12");
-        runner.CallCount.Should().Be(0, "template inspector fires BEFORE runner");
-        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
-        repo.LastWrittenRun.Quarantine.Should().NotBeNull();
-    }
-
     // ---------- T8 unpinned model deployment ----------
 
     [Fact]
@@ -382,9 +413,13 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-8");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var inspector = FakeBicepTemplateInspector.WithUnpinnedModel("gpt-4o", "latest");
+        // The real inspector over a template whose model descriptor is unpinned.
+        runner.Template = TestTemplate with
+        {
+            Json = """{"resources":[{"properties":{"template":{"parameters":{"deployments":{"defaultValue":[{"name":"gpt-4o","model":"gpt-4o","version":"latest","capacity":10}]}}}}}]}""",
+        };
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), inspector);
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -408,7 +443,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             var runner = FakeBicepDeployRunner.Success(BuildOutputs());
             var driftDetector = FakeUpgradeDriftDetector.WithDrift("{'changes':[{'changeType':'Modify'}]}");
             var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(), driftDetector,
-                FakeBicepTemplateInspector.Clean(), runNotesDir: tempDir);
+                RealInspector(), runNotesDir: tempDir);
 
             var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -442,7 +477,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var driftDetector = new FakeUpgradeDriftDetector();
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            driftDetector, FakeBicepTemplateInspector.Clean());
+            driftDetector, RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -463,7 +498,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             observedProd: "SystemAssigned",
             observedStaging: null);
         var handler = BuildHandler(repo, runner, probe, new FakeUpgradeDriftDetector(),
-            FakeBicepTemplateInspector.Clean());
+            RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -485,7 +520,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-12");
         var runner = FakeBicepDeployRunner.Failure("az deployment sub create exit 1: quota");
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -524,7 +559,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
                 Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences.PinnedModelCatalog.Models,
                 Array.Empty<string>(), string.Empty));
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            new FakeUpgradeDriftDetector(), RealInspector(),
             optionsOverride: new BicepInfraDeployOptions
             {
                 OpenAiDeploymentSetPolicy = OpenAiDeploymentSetPolicy.Strict,
@@ -551,7 +586,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
                 new[] { "gpt-4o", "text-embedding-3-large" },
                 "Dropped 2 zero-TPM models on fresh sub."));
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            new FakeUpgradeDriftDetector(), RealInspector(),
             optionsOverride: new BicepInfraDeployOptions
             {
                 OpenAiDeploymentSetPolicy = OpenAiDeploymentSetPolicy.AutoRecompose,
@@ -582,10 +617,12 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-h10");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var inspector = FakeBicepTemplateInspector.WithInvalidKvRefIdentity(
-            "modules/app-service.bicep:120: keyVaultReferenceIdentity: 'SystemAssigned'");
+        runner.Template = TestTemplate with
+        {
+            Json = """{"resources":[{"type":"Microsoft.Web/sites","properties":{"keyVaultReferenceIdentity":"SystemAssigned"}}]}""",
+        };
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), inspector);
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -612,7 +649,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             ArmDeploymentRunner.CogSvcSoftLockDiagnosticPrefix +
             " ARM deployment 'customer-acme-20260827121200' for customerId 'acme' returned HTTP 409 RequestConflict on the Cognitive Services scope after 4 attempts across the [30s, 90s, 180s] backoff schedule.");
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -634,7 +671,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-h06-generic");
         var runner = FakeBicepDeployRunner.Failure("Generic ARM failure — quota exhausted for gpt-4o in eastus");
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -669,7 +706,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -708,7 +745,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -730,7 +767,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-14");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs(signalRDeployed: expected));
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -749,7 +786,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-a38b");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -763,7 +800,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-a38b-absent");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -781,7 +818,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-ish08-absent");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -798,7 +835,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-ish08-populated");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -814,7 +851,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var repo = new FakeRepository(run, etag: "etag-ish08-whitespace");
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+            new FakeUpgradeDriftDetector(), RealInspector());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -832,7 +869,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             TenantId: "00000000-1111-2222-3333-444444444444",
             SubscriptionId: "22222222-3333-4444-5555-666666666666",
             TenancyModel: "Model2",
-            BicepVersion: "abc",
+            Template: TestTemplate,
             EnvironmentName: "prod",
             Location: "westus2",
             SignalREnabled: false,
@@ -852,7 +889,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             TenantId: "00000000-1111-2222-3333-444444444444",
             SubscriptionId: "22222222-3333-4444-5555-666666666666",
             TenancyModel: "Model2",
-            BicepVersion: "abc",
+            Template: TestTemplate,
             EnvironmentName: "prod",
             Location: "westus2",
             SignalREnabled: false,
@@ -876,7 +913,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             FakeBicepDeployRunner.Success(BuildOutputs()),
             FakeArmKeyVaultRefProbe.Match(),
             new FakeUpgradeDriftDetector(),
-            FakeBicepTemplateInspector.Clean());
+            RealInspector());
 
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -913,7 +950,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             FakeBicepDeployRunner.Success(BuildOutputs()),
             FakeArmKeyVaultRefProbe.Match(),
             new FakeUpgradeDriftDetector(),
-            FakeBicepTemplateInspector.Clean());
+            RealInspector());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -929,7 +966,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         FakeBicepDeployRunner runner,
         FakeArmKeyVaultRefProbe probe,
         FakeUpgradeDriftDetector driftDetector,
-        FakeBicepTemplateInspector inspector,
+        ArmTemplateInspector inspector,
         string? runNotesDir = null,
         FakeResourceNameAvailabilityProbe? nameProbe = null,
         BicepInfraDeployOptions? optionsOverride = null,
@@ -978,7 +1015,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
     private static ProvisioningRun BuildRun(
         bool includeTenantId = true,
         bool includeSubscriptionId = true,
-        bool includeBicepVer = true,
         bool includeProvisionedOn = false,
         string tenancyModel = "Model2")
     {
@@ -998,10 +1034,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
         if (includeSubscriptionId)
         {
             run.Parameters.NonSecret[H2aBicepInfraDeployHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        }
-        if (includeBicepVer)
-        {
-            run.Parameters.NonSecret[H2aBicepInfraDeployHandler.BicepVersionParameterKey] = BicepVer;
         }
         if (includeProvisionedOn)
         {
@@ -1063,6 +1095,21 @@ public sealed class H2aBicepInfraDeployHandlerTests
         private readonly BicepDeployOutcome _outcome;
         public int CallCount { get; private set; }
         public BicepDeployRequest? LastRequest { get; private set; }
+
+        /// <summary>What ResolveTemplateAsync returns (task 245b).</summary>
+        public ResolvedArmTemplate Template { get; set; } = TestTemplate;
+
+        /// <summary>When set, ResolveTemplateAsync throws it.</summary>
+        public Exception? ResolveFailure { get; set; }
+
+        public Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel? ResolvedFor { get; private set; }
+
+        public Task<ResolvedArmTemplate> ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel, CancellationToken ct)
+        {
+            ResolvedFor = tenancyModel;
+            return ResolveFailure is null ? Task.FromResult(Template) : Task.FromException<ResolvedArmTemplate>(ResolveFailure);
+        }
 
         private FakeBicepDeployRunner(BicepDeployOutcome outcome) => _outcome = outcome;
 
@@ -1153,36 +1200,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
         }
     }
 
-    /// <summary>Template-inspector fake.</summary>
-    private sealed class FakeBicepTemplateInspector : IBicepTemplateInspector
-    {
-        private readonly BicepTemplateInspectionResult _result;
-        public int CallCount { get; private set; }
-
-        private FakeBicepTemplateInspector(BicepTemplateInspectionResult result) => _result = result;
-
-        public static FakeBicepTemplateInspector Clean()
-            => new(new BicepTemplateInspectionResult(false, string.Empty, false, string.Empty));
-
-        public static FakeBicepTemplateInspector WithRedis(string reference)
-            => new(new BicepTemplateInspectionResult(true, reference, false, string.Empty));
-
-        public static FakeBicepTemplateInspector WithUnpinnedModel(string deployment, string version)
-            => new(new BicepTemplateInspectionResult(false, string.Empty, true,
-                $"modules/openai.bicep: deployment '{deployment}' version '{version}'"));
-
-        // HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
-        public static FakeBicepTemplateInspector WithInvalidKvRefIdentity(string reference)
-            => new(new BicepTemplateInspectionResult(
-                false, string.Empty, false, string.Empty,
-                HasInvalidKvRefIdentity: true,
-                KvRefIdentityReference: reference));
-
-        public Task<BicepTemplateInspectionResult> InspectAsync(
-            BicepDeployRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            return Task.FromResult(_result);
-        }
-    }
+    /// <summary>The real (pure) template inspector — task 245b removed its stub seam (ADR-038 B5).</summary>
+    private static ArmTemplateInspector RealInspector() => new(NullLogger<ArmTemplateInspector>.Instance);
 }

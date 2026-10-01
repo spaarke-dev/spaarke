@@ -81,7 +81,7 @@ public sealed class SearchIndexClientProvisionerTests
     [InlineData("spaarke-invoices-index.json")]
     public void LoadAndStripSchema_AllSevenCanonicalFiles_ProduceValidJsonWithNoCommentKeys(string resourceFileName)
     {
-        var json = SearchIndexClientProvisioner.LoadAndStripSchema(resourceFileName);
+        var json = IndexSchemaSet.LoadAndStripSchema(resourceFileName);
 
         json.Should().NotContain("\"//", "comment keys must be stripped before PUT (Azure AI Search rejects unknown properties)");
         json.Should().NotContain("\"_comment_\"", "the insights-index underscore-comment convention must also be stripped");
@@ -100,7 +100,7 @@ public sealed class SearchIndexClientProvisionerTests
     [Fact]
     public void LoadAndStripSchema_UnknownResource_Throws()
     {
-        var act = () => SearchIndexClientProvisioner.LoadAndStripSchema("does-not-exist.json");
+        var act = () => IndexSchemaSet.LoadAndStripSchema("does-not-exist.json");
         act.Should().Throw<InvalidOperationException>().WithMessage("*not found*");
     }
 

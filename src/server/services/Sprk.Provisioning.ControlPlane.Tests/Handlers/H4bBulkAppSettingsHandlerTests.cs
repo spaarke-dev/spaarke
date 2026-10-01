@@ -140,6 +140,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["tenant_id"] = ("-TenantId", TenantId),
             ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
             ["customer_id"] = ("-CustomerId", CustomerId),   // T238: the run's own customerId, verbatim
+            ["dataverse_env_url"] = ("-DataverseEnvUrl", "https://acme.crm.dynamics.com/"),   // T245b: H5's DataverseEnvUrl
         };
         expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
@@ -340,8 +341,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
         success.IdempotencyKey.Should().Be(expectedKey);
-        // Idempotent no-op does NOT invoke manifest / process / probe.
-        manifest.CallCount.Should().Be(0);
+        // Idempotent no-op does NOT invoke process / probe. The manifest is read once — its content
+        // version is the key's secretsVer (task 245b).
+        manifest.CallCount.Should().Be(1);
         runner.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
         repo.LastWrittenRun.Should().BeNull();
@@ -435,8 +437,6 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 BulkAppSettingsRejectionCodes.MissingTenantId)]
     [InlineData(H4bBulkAppSettingsHandler.SubscriptionIdParameterKey,
                 BulkAppSettingsRejectionCodes.MissingSubscriptionId)]
-    [InlineData(H4bBulkAppSettingsHandler.SecretsVersionParameterKey,
-                BulkAppSettingsRejectionCodes.MissingSecretsVersion)]
     public async Task AC9_MissingRequiredParameter_FailsResumable_NoExternalCalls(
         string parameterKey, string expectedRejectionCode)
     {
@@ -773,7 +773,6 @@ public sealed class H4bBulkAppSettingsHandlerTests
         p[H4bBulkAppSettingsHandler.TenantIdParameterKey] = TenantId;
         p[H4bBulkAppSettingsHandler.SubscriptionIdParameterKey] = SubscriptionId;
         p[IntakeParameterCatalog.EnvironmentName] = EnvironmentName;
-        p[H4bBulkAppSettingsHandler.SecretsVersionParameterKey] = SecretsVer;
         p[IntakeParameterCatalog.ContainerTypeId] = "00000000-dead-beef-0000-000000000001";
         // Upstream handler outputs (task 245a) — H2a's and H3's typed InterStepState.
         var s = run.InterStepState;
@@ -785,6 +784,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.MiClientId = "00000000-1111-2222-3333-555555555555";
         s.ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net";
         s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
+        s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
         return run;
     }
 
@@ -885,8 +885,8 @@ public sealed class H4bBulkAppSettingsHandlerTests
         private readonly PerEnvSettingsManifestReadResult _result;
         public int CallCount { get; private set; }
         private FakePerEnvManifest(PerEnvSettingsManifestReadResult result) => _result = result;
-        public static FakePerEnvManifest Success(IReadOnlyList<PerEnvSettingEntry> entries)
-            => new(new PerEnvSettingsManifestReadResult.Success(entries));
+        public static FakePerEnvManifest Success(IReadOnlyList<PerEnvSettingEntry> entries, string contentVersion = SecretsVer)
+            => new(new PerEnvSettingsManifestReadResult.Success(entries, contentVersion));
         public static FakePerEnvManifest Failure(string diag)
             => new(new PerEnvSettingsManifestReadResult.Failure(diag));
         public Task<PerEnvSettingsManifestReadResult> ReadAsync(CancellationToken ct)

@@ -38,7 +38,6 @@
 using System.Net;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Xunit;
 
@@ -48,18 +47,12 @@ public sealed class ArmWhatIfDriftDetectorTests
 {
     private const string SubscriptionId = "22222222-3333-4444-5555-666666666666";
 
-    private static BicepInfraDeployOptions NewOptions() => new()
-    {
-        ProvisioningArtifactsContainerUri = "https://fakeaccount.blob.core.windows.net/provisioning-artifacts",
-        ArmManifestBlobName = "provisioning-arm-latest.json",
-    };
-
     private static BicepDeployRequest NewRequest() => new(
         CustomerId: "acme",
         TenantId: "00000000-1111-2222-3333-444444444444",
         SubscriptionId: SubscriptionId,
         TenancyModel: "Model2",
-        BicepVersion: "abc123",
+        Template: new ResolvedArmTemplate("customer", "customer-arm-2026.08.19-1.json", """{"resources":[]}""", "abc123"),
         EnvironmentName: "prod",
         Location: "westus2",
         SignalREnabled: false);
@@ -69,8 +62,6 @@ public sealed class ArmWhatIfDriftDetectorTests
         var handler = ArmSdkTestFakes.NewHandler(templateAndWhatIfResponder);
         return new ArmWhatIfDriftDetector(
             ArmSdkTestFakes.NewArmClient(handler),
-            ArmSdkTestFakes.NewBlobContainerClient(handler),
-            Options.Create(NewOptions()),
             NullLogger<ArmWhatIfDriftDetector>.Instance);
     }
 
@@ -185,8 +176,6 @@ public sealed class ArmWhatIfDriftDetectorTests
         });
         var detector = new ArmWhatIfDriftDetector(
             ArmSdkTestFakes.NewArmClient(handler),
-            ArmSdkTestFakes.NewBlobContainerClient(handler),
-            Options.Create(NewOptions()),
             NullLogger<ArmWhatIfDriftDetector>.Instance);
 
         await detector.DetectDriftAsync(NewRequest(), CancellationToken.None);

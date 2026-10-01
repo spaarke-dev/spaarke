@@ -117,6 +117,7 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 
 - `run.Parameters.NonSecret` holds **intake values only** — the closed set in `Models/IntakeParameterCatalog.cs`; `POST /api/runs` rejects any other key. **NEVER read a value another handler produces from `NonSecret`** — nothing writes it there.
 - A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
+- A value L2 owns (its own principal, a platform vault, the SPE owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
 - Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
 - H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`.
 - **`run.Parameters.Secrets` has no writer.** No handler may write it; only H4 may read it, and only for the manifest entries pinned as gaps.

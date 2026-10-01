@@ -44,8 +44,13 @@ public static class BicepDeployRejectionCodes
     /// <summary>Run parameter <c>subscriptionId</c> missing — H2a MUST know the target subscription (ADR-027 D4).</summary>
     public const string MissingSubscriptionId = "missing-subscription-id";
 
-    /// <summary>Run parameter <c>bicepVer</c> missing — idempotency key requires the bicep-repo git SHA.</summary>
-    public const string MissingBicepVersion = "missing-bicep-version";
+    /// <summary>
+    /// Task 245b: the ARM template could not be resolved (manifest or template blob unreadable, the
+    /// manifest names no template for the tenancy model, or the downloaded bytes do not match the
+    /// manifest's <c>sha256</c>). Its content version is the idempotency key's <c>bicepVer</c>, so H2a
+    /// cannot proceed without it. Nothing has been deployed — Resumable.
+    /// </summary>
+    public const string ArmTemplateUnavailable = "arm-template-unavailable";
 
     /// <summary>
     /// EXEC-04 (pre-dispatch audit 2026-08-27): the run's
@@ -59,13 +64,6 @@ public static class BicepDeployRejectionCodes
 
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "run-not-found";
-
-    /// <summary>
-    /// The active Bicep template contains a Redis resource (violates spec MUST
-    /// rule + Q-E FR-12 v3.2 — Redis is per-environment via
-    /// <c>scripts/Deploy-RedisCache.ps1</c>, NOT per-customer).
-    /// </summary>
-    public const string RedisProvisioningForbidden = "redis-provisioning-forbidden";
 
     /// <summary>
     /// The active Bicep template contains an Azure OpenAI model deployment

@@ -25,41 +25,32 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.Resources;
 using Azure.ResourceManager.Resources.Models;
-using Azure.Storage.Blobs;
-using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 
 /// <summary>
 /// Runs an ARM what-if preview at subscription scope via
 /// <see cref="ArmDeploymentResource.WhatIfAsync(WaitUntil, ArmDeploymentWhatIfContent, CancellationToken)"/>
-/// and classifies the typed <see cref="WhatIfChange"/> results. Constructed
-/// with an <see cref="ArmClient"/> + <see cref="BlobContainerClient"/> so
-/// tests can inject both against a fake HTTP transport (parity with
-/// <see cref="ArmDeploymentRunner"/>).
+/// and classifies the typed <see cref="WhatIfChange"/> results. Previews the
+/// template on <see cref="BicepDeployRequest.Template"/> — the same bytes H2a
+/// versions and would deploy (task 245b). Constructed with an
+/// <see cref="ArmClient"/> so tests can inject it against a fake HTTP
+/// transport (parity with <see cref="ArmDeploymentRunner"/>).
 /// </summary>
 public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
 {
     private readonly ArmClient _armClient;
-    private readonly BlobContainerClient _artifactsContainer;
-    private readonly BicepInfraDeployOptions _options;
     private readonly ILogger<ArmWhatIfDriftDetector> _logger;
 
-    /// <summary>Constructs the detector. Production DI reuses the shared UAMI-pinned ArmClient + artifacts-container factory pattern.</summary>
+    /// <summary>Constructs the detector. Production DI reuses the shared UAMI-pinned ArmClient.</summary>
     public ArmWhatIfDriftDetector(
         ArmClient armClient,
-        BlobContainerClient artifactsContainer,
-        IOptions<BicepInfraDeployOptions> options,
         ILogger<ArmWhatIfDriftDetector> logger)
     {
         ArgumentNullException.ThrowIfNull(armClient);
-        ArgumentNullException.ThrowIfNull(artifactsContainer);
-        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _armClient = armClient;
-        _artifactsContainer = artifactsContainer;
-        _options = options.Value;
         _logger = logger;
     }
 
@@ -69,22 +60,11 @@ public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Template);
 
-        // Task 223 (D-12): parse tenancy at this collaborator's entry — this method is a
-        // first-class entry point invoked by the H2a handler independently of DeployAsync
-        // (they share the manifest download path, not the request-parse). Reject unknown
-        // values here rather than falling into a default template branch.
-        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var tenancyModel))
-        {
-            throw new ArgumentException(
-                $"ArmWhatIfDriftDetector requires a recognized TenancyModel. Got '{request.TenancyModel ?? "(null)"}'. " +
-                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}.",
-                nameof(request));
-        }
-
-        var templateJson = await ArmDeploymentRunner.ResolveArmTemplateJsonAsync(
-                _artifactsContainer, _options, tenancyModel, cancellationToken)
-            .ConfigureAwait(false);
+        // Task 245b: preview exactly the template H2a resolved (and versioned) for this run — the
+        // tenancy model already selected it, so there is no second resolution here.
+        var templateJson = request.Template.Json;
         var parameters = ArmDeploymentRunner.BuildParametersPayload(request);
 
         var whatIfProperties = new ArmDeploymentWhatIfProperties(ArmDeploymentMode.Incremental)

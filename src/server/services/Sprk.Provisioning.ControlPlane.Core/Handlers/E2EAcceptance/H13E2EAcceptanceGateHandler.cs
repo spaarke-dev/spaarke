@@ -113,6 +113,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -131,38 +132,13 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the customer subscription id (ADR-027 D4) — required for cost query + ARM trap probes.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the BFF CI build number — feeds the idempotency key <c>validate-{customerId}-{buildId}</c>.</summary>
-    public const string BuildIdParameterKey = "buildId";
-
-    /// <summary>Non-secret parameter key carrying the target BFF API URL (production slot post-H9 swap).</summary>
-    public const string BffApiUrlParameterKey = "bffApiUrl";
-
-    // The customer resource group, BFF App Service and customer Key Vault names
-    // are NOT run parameters (task 245a, G25): H2a writes them to
-    // InterStepState.ResourceGroupName / .AppServiceName / .KeyVaultName and H13
-    // reads them from there. The intake key "keyVaultName" is the Spaarke
-    // PLATFORM vault (IntakeParameterCatalog), not the customer vault.
-
-    /// <summary>
-    /// Intake key carrying the Spaarke PLATFORM vault that holds the SPE owner certificate — passed
-    /// to the T6 trap probe only (task 245a). Interim: T245b moves it to L2 configuration.
-    /// </summary>
-    public const string SpeOwnerCertKeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Intake key for registry column <c>sprk_bffversion</c>. Interim: T245b makes it an H9 output.</summary>
-    public const string BffVersionParameterKey = "bffVersion";
-
-    /// <summary>Intake key for registry column <c>sprk_solutionversion</c>. Interim: T245b makes it an H6 output.</summary>
-    public const string SolutionVersionParameterKey = "solutionVersion";
-
-    /// <summary>Intake key for registry column <c>sprk_clientcachebusttoken</c>. Interim: T245b mints it per deploy / upgrade.</summary>
-    public const string ClientCacheBustTokenParameterKey = "clientCacheBustToken";
-
-    /// <summary>Non-secret parameter key carrying the Spaarke-internal registry Dataverse env URL (target of the SetupStatus PATCH — NOT the customer's own Dataverse env URL).</summary>
-    public const string RegistryDataverseUrlParameterKey = "registryDataverseUrl";
-
-    /// <summary>Non-secret parameter key carrying the absolute path to scripts/ on disk for I1 grep probe. Optional — defaults to the App Service publish scripts directory.</summary>
-    public const string ProvisioningScriptsDirectoryParameterKey = "provisioningScriptsDirectory";
+    // Not run parameters (tasks 245a / 245b, G25):
+    //   - the customer resource group, BFF App Service and customer Key Vault → H2a outputs
+    //     (InterStepState.ResourceGroupName / .AppServiceName / .KeyVaultName);
+    //   - the deployed BFF URL and build → H9 outputs (InterStepState.BffApiUrl / .BffBuildId);
+    //   - the SPE owner credential for T6 → SpeContainerOptions.ContainerTypeOwners, by the intake
+    //     containerTypeId;
+    //   - the I1 scripts directory → H13AcceptanceOptions.ProvisioningScriptsDirectory.
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IE2EValidationRunner _validationRunner;
@@ -266,16 +242,21 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H13 (ADR-027 D4 — cost query + ARM trap probes).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, BuildIdParameterKey, out var buildId))
+        // Task 245b: the deployed build and URL are H9's outputs (H13 ← H14 ← H9 in the DAG).
+        var buildId = run.InterStepState.BffBuildId;
+        if (string.IsNullOrWhiteSpace(buildId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBuildId,
-                "Run parameter 'buildId' is required by H13 (idempotency key: validate-{customerId}-{buildId}).",
+                "InterStepState.bffBuildId is not populated — H9 (BFF deploy) writes the build it deployed and must " +
+                "complete before H13 (idempotency key: validate-{customerId}-{buildId}; registry sprk_bffversion).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, BffApiUrlParameterKey, out var bffApiUrl))
+        var bffApiUrl = run.InterStepState.BffApiUrl;
+        if (string.IsNullOrWhiteSpace(bffApiUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBffApiUrl,
-                "Run parameter 'bffApiUrl' is required by H13 (BFF sample /healthz + E2E round-trip target).",
+                "InterStepState.bffApiUrl is not populated — H9 (BFF deploy) writes the production URL it health-probed " +
+                "and must complete before H13 (BFF sample /healthz + E2E round-trip target).",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -317,11 +298,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        TryGetNonEmpty(parameters, RegistryDataverseUrlParameterKey, out var registryDataverseUrl);
-        TryGetNonEmpty(parameters, ProvisioningScriptsDirectoryParameterKey, out var scriptsDirParam);
-        var scriptsDirectory = string.IsNullOrWhiteSpace(scriptsDirParam)
-            ? Path.Combine(AppContext.BaseDirectory, "scripts")
-            : scriptsDirParam;
+        var scriptsDirectory = _options.ProvisioningScriptsDirectory;
 
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, buildId);
 
@@ -408,10 +385,9 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     AppServiceName: appServiceName,
                     ResourceGroupName: resourceGroupName,
                     UamiObjectId: uamiObjectId,
-                    // T6 reads the SPE owner certificate from the Spaarke platform vault — the
-                    // interim intake key "keyVaultName" (T245b moves it to L2 configuration).
-                    SpeOwnerCertKeyVaultName: run.Parameters.NonSecret.TryGetValue(SpeOwnerCertKeyVaultNameParameterKey, out var speCertVault)
-                        ? speCertVault ?? string.Empty
+                    // T6 selects the SPE owning-app credential by the run's container type (task 245b).
+                    ContainerTypeId: parameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var containerTypeId)
+                        ? containerTypeId?.Trim() ?? string.Empty
                         : string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
@@ -695,8 +671,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             CustomerId: envelope.CustomerId,
             RunId: envelope.RunId,
             TenantId: tenantId,
-            EnvironmentId: run.EnvironmentId,
-            RegistryDataverseUrl: registryDataverseUrl);
+            EnvironmentId: run.EnvironmentId);
         RegistrySetupStatusUpdateOutcome updateOutcome;
         try
         {
@@ -849,8 +824,9 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     ///
     /// Column-to-source mapping (source keys shown in comments):
     ///   sprk_provisionedon       ← <paramref name="readyStamp"/> (always)
-    ///   sprk_bffversion          ← run.Parameters.NonSecret["bffVersion"] (interim intake; T245b → H9 output)
-    ///   sprk_solutionversion     ← run.Parameters.NonSecret["solutionVersion"] (interim intake; T245b → H6 output)
+    ///   sprk_bffversion          ← run.InterStepState.BffBuildId (H9 output — the deployed build)
+    ///   sprk_solutionversion     ← ImportedSolutionSet.ComputeVersion(run.InterStepState.ImportedSolutions)
+    ///                              (H6 output — fingerprint of the imported solution set)
     ///   sprk_azuresubscriptionid ← run.Parameters.NonSecret["subscriptionId"] (intake — the run's subscription)
     ///   sprk_resourcegroupname   ← run.InterStepState.ResourceGroupName (H2a output)
     ///   sprk_appservicename      ← run.InterStepState.AppServiceName (H2a output)
@@ -858,7 +834,9 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     ///   sprk_containertypeid     ← run.Parameters.NonSecret["containerTypeId"] (intake — the
     ///                              container type pre-exists per environment; no handler
     ///                              produces it, so InterStepState.ContainerTypeId is NOT read)
-    ///   sprk_clientcachebusttoken ← run.Parameters.NonSecret["clientCacheBustToken"] (interim intake; T245b)
+    ///   sprk_clientcachebusttoken ← run.RunId (task 245b: every run is a deploy or an upgrade, so the run
+    ///                              id is new for each one — clients holding an older token refresh — and
+    ///                              stable across H13 retries of the same run)
     ///
     /// Column NAMES are lowercase Dataverse logical names (REG-06 rule).
     /// Internal for pure-function test coverage.
@@ -878,11 +856,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         //
         // Intake values (run.Parameters.NonSecret — written only at POST /api/runs).
         var nonSecret = run.Parameters?.NonSecret ?? new Dictionary<string, string>();
-        AddParameterIfPresent(columns, nonSecret, BffVersionParameterKey, "sprk_bffversion");
-        AddParameterIfPresent(columns, nonSecret, SolutionVersionParameterKey, "sprk_solutionversion");
         // The stamp's subscription is the run's subscriptionId; there is no separate intake value for it.
         AddParameterIfPresent(columns, nonSecret, SubscriptionIdParameterKey, "sprk_azuresubscriptionid");
-        AddParameterIfPresent(columns, nonSecret, ClientCacheBustTokenParameterKey, "sprk_clientcachebusttoken");
         // The SPE container type pre-exists per environment and is supplied at
         // intake; InterStepState.ContainerTypeId has no producer (task 245a, G25).
         AddParameterIfPresent(columns, nonSecret, IntakeParameterCatalog.ContainerTypeId, "sprk_containertypeid");
@@ -890,6 +865,10 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         // H2a outputs (run.InterStepState). HandleAsync guards all three before
         // reaching here; omit-when-absent keeps this pure helper total.
         var interStep = run.InterStepState;
+        // Task 245b: handler outputs, not intake.
+        AddValueIfPresent(columns, interStep?.BffBuildId, "sprk_bffversion");
+        AddValueIfPresent(columns, ImportedSolutionSet.ComputeVersion(interStep?.ImportedSolutions), "sprk_solutionversion");
+        AddValueIfPresent(columns, run.RunId, "sprk_clientcachebusttoken");
         AddValueIfPresent(columns, interStep?.ResourceGroupName, "sprk_resourcegroupname");
         AddValueIfPresent(columns, interStep?.AppServiceName, "sprk_appservicename");
         AddValueIfPresent(columns, interStep?.KeyVaultName, "sprk_keyvaultname");

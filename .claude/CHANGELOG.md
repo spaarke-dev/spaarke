@@ -7,6 +7,26 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-01 — provisioning: values L2 owns are configuration or computed, never run parameters (T245b, G25)
+
+`customer-provisioning-orchestration-r1` T245b.
+
+- **`.claude/constraints/provisioning.md`**: new rule — a value L2 owns (its own principal, a platform vault, the SPE
+  owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run
+  parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`),
+  never supplied.
+- **`.claude/patterns/provisioning/run-context-contract.md`**: pointer — such values are not `HandlerRunInputs` entries.
+- **`/provision-environment` SKILL.md**: Step 6a's operator registry fallback now derives every promoted column from
+  the run record (`interStepState.resourceGroupName` / `appServiceName` / `keyVaultName` / `bffBuildId`, the
+  `importedSolutions` fingerprint, the run id as cache-bust token) — the same sources H13 uses. Before, `$rgName`,
+  `$kvName`, `$deployedBffVersion`, `$cacheBustToken` … were used but never assigned, and two comments named
+  InterStepState properties that never existed. Step 0.5b notes the Worker's SPE owner-entry prerequisite.
+- The mechanism: `bicepVer` / `indexVer` / `secretsVer` are SHA-256 of the deployed ARM template / the applied index
+  schemas / the embedded manifest; `SpeContainerOptions.ContainerTypeOwners`, `KvSecretsPopulationOptions`
+  (`ControlPlanePrincipalObjectId`, `PlatformVaultName`) and `E2EAcceptance:ProvisioningScriptsDirectory` fail Worker
+  startup when invalid; H9 publishes `InterStepState.BffApiUrl` / `BffBuildId`. 13 keys left `IntakeParameterCatalog`.
+
+---
 ###### 2026-10-01 — silent-fail trap T7: `Customer__Id` on both BFF slots (T238, D-14)
 
 `customer-provisioning-orchestration-r1` T238 (INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1–§1.2).

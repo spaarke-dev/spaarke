@@ -114,6 +114,9 @@ public sealed class FileKvSecretManifestTests
     // T226 / owner D13: interim key from the customer's own Document Intelligence (T243 removes it).
     [InlineData("DocumentIntelligence-ApiKey", KvSecretValueSource.FromBicepOutput)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]
+    // T245b: Spaarke-shared vendor keys (owner D5) are copied from the Spaarke platform vault.
+    [InlineData("BingSearch-ApiKey", KvSecretValueSource.FromPlatformVault)]
+    [InlineData("LlamaParse-ApiKey", KvSecretValueSource.FromPlatformVault)]
     public async Task ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly(string canonicalName, KvSecretValueSource expected)
     {
         var manifest = NewManifest();
@@ -374,5 +377,33 @@ public sealed class FileKvSecretManifestTests
             new[] { "Dataverse-ClientSecret", "Some-Other-Secret" },
             "BFF-API-ClientSecret is filtered from SERVED entries; Dataverse-ClientSecret + " +
             "unrelated entries stay");
+    }
+
+    // ---- Task 245b: the manifest's content version is H4's (and H4b's) secretsVer ----
+
+    [Fact]
+    public void ContentVersion_SameYamlSameVersion_ChangedYamlNewVersion()
+    {
+        var a = (KvSecretManifestReadResult.Success)NewManifest().ParseYamlForTest(SyntheticYamlWithBothNeverDeleteRows);
+        var again = (KvSecretManifestReadResult.Success)NewManifest().ParseYamlForTest(SyntheticYamlWithBothNeverDeleteRows);
+        var edited = (KvSecretManifestReadResult.Success)NewManifest().ParseYamlForTest(
+            SyntheticYamlWithBothNeverDeleteRows.Replace("Some-Other-Secret", "Some-Renamed-Secret"));
+
+        a.ContentVersion.Should().MatchRegex("^[0-9a-f]{64}$");
+        again.ContentVersion.Should().Be(a.ContentVersion);
+        edited.ContentVersion.Should().NotBe(a.ContentVersion);
+    }
+
+    [Fact]
+    public async Task ContentVersion_H4AndH4bReadTheSameManifest_SoTheyAgreeOnSecretsVer()
+    {
+        var h4 = (KvSecretManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None);
+        var h4b = (Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.PerEnvSettingsManifestReadResult.Success)
+            await new Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.FilePerEnvSettingsManifest(
+                NullLogger<Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.FilePerEnvSettingsManifest>.Instance)
+                .ReadAsync(CancellationToken.None);
+
+        h4b.ContentVersion.Should().Be(h4.ContentVersion,
+            "both readers hash the one embedded scripts/canonical-secret-catalog/manifest.yaml (ArtifactVersion)");
     }
 }

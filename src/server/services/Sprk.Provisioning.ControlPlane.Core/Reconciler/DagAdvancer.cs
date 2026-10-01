@@ -148,17 +148,17 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH4] = new[] { HandlerH2a },
             [HandlerH5] = new[] { HandlerH2a },
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
-            [HandlerH4b] = new[] { HandlerH4, HandlerH3 },                  // Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired.) T245a: + H3 — AzureAd__ClientId is H3's InterStepState.BffAppRegId.
+            [HandlerH4b] = new[] { HandlerH4, HandlerH3, HandlerH5 },       // Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired.) T245a: + H3 — AzureAd__ClientId is H3's InterStepState.BffAppRegId. T245b: + H5 — Dataverse__ServiceUrl/EnvironmentUrl are H5's InterStepState.DataverseEnvUrl.
             [HandlerH6] = new[] { HandlerH5, HandlerH3 },                   // T245a: + H3 — H6 reads InterStepState.BffAppRegId (H3 output).
-            [HandlerH7] = new[] { HandlerH6, HandlerH8 },                   // T245a: + H8 — H7 writes the SPE container id env var from InterStepState.SpeContainerId (H8 output).
-            [HandlerH8] = new[] { HandlerH3 },                              // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 dep preserved: H8 uses InterStepState.BffAppRegId to construct the T6 ClientCertificateCredential.
+            [HandlerH7] = new[] { HandlerH6, HandlerH8, HandlerH9 },        // T245a: + H8 — H7 writes the SPE container id env var from InterStepState.SpeContainerId (H8 output). T245b: + H9 — sprk_BffApiBaseUrl is InterStepState.BffApiUrl (H9 output).
+            [HandlerH8] = new[] { HandlerH3 },                              // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 dep kept for ordering, not data (T245b): H8 authenticates as the container type's OWNING app (SpeContainerOptions.ContainerTypeOwners), no longer as H3's BffAppRegId; T227's per-customer container-type grant for the BFF app (G9) will make it a data edge again.
             [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4).
             [HandlerH10] = new[] { HandlerH7 },
             [HandlerH11] = new[] { HandlerH10 },
             [HandlerH12a] = new[] { HandlerH11 },
             [HandlerH12b] = new[] { HandlerH11 },                             // Parallel with H12a.
             [HandlerH12c] = new[] { HandlerH12a, HandlerH12b, HandlerH2a },   // Join per task 072 + H14 handler code.
-            [HandlerH14] = new[] { HandlerH12c },
+            [HandlerH14] = new[] { HandlerH12c, HandlerH9 },                  // T245b: + H9 — webhook receivers are InterStepState.BffApiUrl (H9 output); H13 ← H14 so H13 also follows H9.
             [HandlerH13] = new[] { HandlerH14 },
         };
 

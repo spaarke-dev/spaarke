@@ -49,10 +49,11 @@ public static class AiSearchIndexRejectionCodes
     public const string MissingTenantId = "missing-tenant-id";
 
     /// <summary>
-    /// Run parameter <c>indexVer</c> missing — idempotency key requires the
-    /// manifest hash of the schema JSONs in <c>scripts/ai-search/</c>.
+    /// Task 245b: a requested index has no embedded schema, so H2b cannot compute the schema-set
+    /// version (its idempotency key's <c>indexVer</c>) or apply it. Nothing has been applied — Resumable
+    /// once the run's <c>requestedIndexes</c> intake value is corrected.
     /// </summary>
-    public const string MissingIndexVersion = "missing-index-version";
+    public const string IndexSchemaUnavailable = "index-schema-unavailable";
 
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "run-not-found";

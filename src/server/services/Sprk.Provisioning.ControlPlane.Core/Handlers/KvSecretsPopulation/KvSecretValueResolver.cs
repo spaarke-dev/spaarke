@@ -58,6 +58,10 @@
 //                               mental model doesn't map 1:1 onto the real
 //                               4-member enum; this is the evidence-grounded
 //                               resolution, not an invented shortcut).
+//     - FromPlatformVault     -> COPY from the Spaarke platform vault
+//                               (KvSecretWriteRequest.PlatformVaultName),
+//                               secret = the canonical name (task 245b —
+//                               Spaarke-shared vendor keys, owner D5).
 //     - FromBicepOutput       -> NO REACHABLE SOURCE from H4's writer today.
 //                               task 084's own kv-secrets.generated.bicep
 //                               module (not yet wired into customer.bicep —
@@ -192,6 +196,7 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                     "without a slot for this entry). See notes/task-126-deviations.md 'FromBicepOutput gap'.")),
             KvSecretValueSource.FromTopologyConstants => Task.FromResult(ResolveTopologyConstant(entry, request)),
             KvSecretValueSource.FromIntakeParameter => Task.FromResult(ResolveIntakeParameter(entry, request)),
+            KvSecretValueSource.FromPlatformVault => ResolveFromPlatformVaultAsync(entry, request, cancellationToken),
             KvSecretValueSource.WrittenByEntraAppReg => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
                     $"'{entry.CanonicalName}' is written by H3 (EntraAppReg), which runs after H4 — H4 must skip " +
@@ -244,6 +249,26 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
     }
 
     /// <summary>
+    /// PLATFORM-VAULT branch (task 245b): a Spaarke-shared vendor key copied from the Spaarke platform
+    /// vault, where it is stored under its canonical name. The vault is L2 configuration
+    /// (<see cref="KvSecretsPopulationOptions.PlatformVaultName"/>, validated at Worker startup) that H4
+    /// passes on <see cref="KvSecretWriteRequest.PlatformVaultName"/>.
+    /// </summary>
+    private Task<KvSecretValueResolution> ResolveFromPlatformVaultAsync(
+        KvSecretEntry entry,
+        KvSecretWriteRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.PlatformVaultName))
+        {
+            return Task.FromResult<KvSecretValueResolution>(new KvSecretValueResolution.Failed(
+                $"value_source=from-platform-vault on '{entry.CanonicalName}' but no platform vault was supplied " +
+                "(KvSecretsPopulationOptions:PlatformVaultName). H4 will NOT fabricate a vendor key."));
+        }
+        return CopyFromVaultAsync(entry, new Models.KeyVaultSecretRef(request.PlatformVaultName, entry.CanonicalName), cancellationToken);
+    }
+
+    /// <summary>
     /// GENERATE branch: cryptographically secure random value. Root CLAUDE.md
     /// §9 — MUST use System.Security.Cryptography, never System.Random.
     /// </summary>
@@ -274,6 +299,15 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                 "resolve a functional value for this entry — H4 will NOT fabricate a placeholder.");
         }
 
+        return await CopyFromVaultAsync(entry, reference, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the REAL cleartext of <paramref name="reference"/> for the writer to copy.</summary>
+    private async Task<KvSecretValueResolution> CopyFromVaultAsync(
+        KvSecretEntry entry,
+        Models.KeyVaultSecretRef reference,
+        CancellationToken cancellationToken)
+    {
         SecretClient sourceClient;
         try
         {

@@ -319,6 +319,27 @@ public sealed class SecretClientKvWriterTests
         handler.PutMethods.Should().BeEmpty("a resolution failure must never fall through to a fabricated write");
     }
 
+    // ---------- Task 245b: platform-vault sources are a precondition, resolved before any write ----------
+
+    [Fact]
+    public async Task WriteAsync_PlatformVaultSourceUnreadable_FailsBeforeAnyWrite()
+    {
+        var handler = new FakeSecretsHandler(SubscriptionId, TenantId);
+        var resolver = new FakeValueResolver { FailForName = "LlamaParse-ApiKey" };
+        var writer = NewWriter(handler, resolver);
+        var entries = new List<KvSecretEntry>
+        {
+            new("AiSearch-Endpoint", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),
+            new("LlamaParse-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromPlatformVault),
+        };
+
+        var outcome = await writer.WriteAsync(NewRequest(entries) with { PlatformVaultName = "sprk-controlplane-dev-kv" }, CancellationToken.None);
+
+        outcome.Should().BeOfType<KvSecretsWriteOutcome.Failure>().Which.Diagnostic
+            .Should().Contain("LlamaParse-ApiKey").And.Contain("sprk-controlplane-dev-kv");
+        handler.PutMethods.Should().BeEmpty("a missing vendor key must stop the writer before its first write (Resumable, not a partial write)");
+    }
+
     /// <summary>
     /// Canned-outcome <see cref="IKvSecretValueResolver"/> test double. Real
     /// SDK-calling resolution behavior (GetSecretAsync copy-sourcing,

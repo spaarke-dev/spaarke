@@ -14,7 +14,7 @@
 
 1. `src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs` — the closed set of intake keys; the ONLY contents of `run.Parameters.NonSecret` (written once, by `POST /api/runs`, which rejects any other key).
 2. `.../Core/Models/InterStepState.cs` — typed handler outputs; each property is `[ProducedBy(HandlerIds.X)]` or `[NoProducer(reason)]`.
-3. `.../Core/Reconciler/HandlerRunInputs.cs` — every handler's declared inputs (Intake / Output / Gap).
+3. `.../Core/Reconciler/HandlerRunInputs.cs` — every handler's declared inputs (Intake / Output / Gap). Values L2 owns are NOT run inputs (T245b): validated Worker options (e.g. `SpeContainerOptions.ContainerTypeOwners`) and artifact versions computed from the artifact applied (`Handlers/ArtifactVersion.cs`).
 4. `.../Core/Reconciler/DagAdvancer.cs` — `HandlerDependencies`; a required Output's producer must be an ancestor of the reader.
 5. `.../Core/Handlers/BulkAppSettings/PerEnvSourceCatalog.cs` — H4b's closed `per_env_settings` source set.
 6. `.../Tests/Reconciler/RunContextContractTests.cs` — the forcing function: DAG reachability, the intake catalog, a Roslyn source scan of each handler folder (reads = declarations, both directions), producer truthfulness, and the H4 manifest check against `customer.bicep`'s `kvSecretValues`.

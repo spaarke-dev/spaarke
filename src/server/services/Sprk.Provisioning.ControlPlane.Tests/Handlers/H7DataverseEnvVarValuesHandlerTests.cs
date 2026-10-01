@@ -21,7 +21,8 @@
 //   T7  Missing speContainerId → Failure(Resumable, MissingUpstreamState) naming speContainerId.
 //   T8  Missing ClientSecret → Failure(Resumable, MissingClientSecret).
 //   T9  All 7 canonical schema names present with exact spelling (enumeration).
-//   T10 bffApiBaseUrl defaults to https://api.spaarke.com when parameter absent.
+//   T10 bffApiBaseUrl is the stamp's own BFF (InterStepState.BffApiUrl, H9 output); absent →
+//       MissingUpstreamState naming bffApiUrl — never the platform BFF (task 245b).
 //   T11 msalClientId defaults to bffAppRegId when parameter absent.
 //   T12 shareLinkBaseUrl resolves to empty string when parameter absent (no failure).
 //   T13 Writer Failure DefinitionNotFound → Resumable EnvVarDefinitionNotFound.
@@ -61,6 +62,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     private const string EnvUrl = "https://acme.crm.dynamics.com/";
     private const string OpenAiEndpoint = "https://acme-openai.openai.azure.com/";
     private const string SpeContainerId = "b!acmeContainerIdBase64";
+    private const string StampBffUrl = "https://sprk-acme-prod-api.azurewebsites.net";   // H9 output (task 245b)
     private const string ClientSecret = "test-client-secret-placeholder";
 
     // ---------- T1 happy path ----------
@@ -344,7 +346,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     // ---------- T10-T12 default resolution ----------
 
     [Fact]
-    public async Task BffApiBaseUrl_DefaultsToCanonicalUrl_WhenParameterAbsent()
+    public async Task BffApiBaseUrl_IsTheStampsOwnBff_FromH9()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-10");
@@ -354,7 +356,25 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         writer.LastRequest!.Values.Single(kv => kv.Key == "sprk_BffApiBaseUrl").Value
-            .Should().Be("https://api.spaarke.com");
+            .Should().Be(StampBffUrl);
+    }
+
+    [Fact]
+    public async Task MissingBffApiUrl_FailsResumable_NamesBffApiUrl_NeverFallsBackToThePlatformBff()
+    {
+        var run = BuildRun();
+        run.InterStepState.BffApiUrl = null;
+        var repo = new FakeRepository(run, etag: "etag-10b");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingUpstreamState);
+        failure.Diagnostic.Should().Contain("bffApiUrl");
+        writer.CallCount.Should().Be(0, "no write with a guessed (platform) BFF URL");
     }
 
     [Fact]
@@ -803,12 +823,13 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         run.InterStepState.DataverseEnvUrl = EnvUrl;
         run.InterStepState.OpenAiEndpoint = OpenAiEndpoint;
         run.InterStepState.SpeContainerId = SpeContainerId;
+        run.InterStepState.BffApiUrl = StampBffUrl;
         return run;
     }
 
     private static List<KeyValuePair<string, string>> ExpectedValues(ProvisioningRun run) => new()
     {
-        new("sprk_BffApiBaseUrl", "https://api.spaarke.com"),
+        new("sprk_BffApiBaseUrl", run.InterStepState.BffApiUrl!),
         new("sprk_BffApiAppId", run.InterStepState.BffAppRegId!),
         new("sprk_MsalClientId", run.InterStepState.BffAppRegId!),
         new("sprk_TenantId", TenantId),

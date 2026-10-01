@@ -27,7 +27,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `BFF-API-Audience` | identity | N/A | - | written-by-h3 |
 | `BFF-API-ClientId` | identity | N/A | - | written-by-h3 |
 | `BFF-API-ClientSecret` | auth | 90-days | YES | from-existing-kv |
-| `BingSearch-ApiKey` | ai | 90-days | - | from-run-parameter |
+| `BingSearch-ApiKey` | ai | 90-days | - | from-platform-vault |
 | `Communication-DefaultMailbox` | communication | N/A | - | from-run-parameter |
 | `Communication-Webhook-SigningKey` | communication | 90-days-or-on-incident | - | generated |
 | `Communication-WebhookClientState` | communication | 90-days | - | generated |
@@ -36,12 +36,11 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `Compose-Webhook-SigningKey` | compose | 90-days-or-on-incident | - | generated |
 | `ContentSafety-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Dataverse-ClientSecret` | auth | manual-on-incident | YES | from-existing-kv |
-| `Dataverse-ServiceUrl` | dataverse | N/A | - | from-run-parameter |
 | `DocumentIntelligence-ApiKey` | ai | 90-days | - | from-bicep-output |
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
-| `LlamaParse-ApiKey` | ai | 90-days | - | from-run-parameter |
+| `LlamaParse-ApiKey` | ai | 90-days | - | from-platform-vault |
 | `Redis-ConnectionString` | data-services | 90-days | - | from-bicep-output |
 | `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
 | `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
@@ -146,10 +145,10 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 ### `BingSearch-ApiKey`
 
 - **Category**: ai
-- **Purpose**: Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
+- **Purpose**: Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-platform-vault
 - **Tags**: ai, key
 - **Consumers**:
   - BFF: BingSearch:ApiKey
@@ -270,23 +269,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - BFF: Dataverse:ClientSecret
   - L2 control-plane: dataverseClientSecretName (controlplane-app-service.bicep)
 
-### `Dataverse-ServiceUrl`
-
-- **Category**: dataverse
-- **Purpose**: Dataverse environment URL (https://{org}.crm.dynamics.com).
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: dataverse, endpoint
-- **Exception note**: Grandfathered PascalCase per §7.9 R2.
-- **Consumers**:
-  - BFF: Dataverse:ServiceUrl / Dataverse:EnvironmentUrl
-- **App-setting keys**:
-  - `Dataverse__EnvironmentUrl`
-  - `Dataverse__ServiceUrl`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `SPRK-DEV-DATAVERSE-URL`
-
 ### `DocumentIntelligence-ApiKey`
 
 - **Category**: ai
@@ -349,10 +331,10 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 ### `LlamaParse-ApiKey`
 
 - **Category**: ai
-- **Purpose**: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault.
+- **Purpose**: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
 - **Rotation cadence**: 90-days
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-platform-vault
 - **Tags**: ai, key
 - **Consumers**:
   - BFF: LlamaParse:ApiKeySecretName -> LlamaParseApiKey (grandfathered spelling — see aliases)
@@ -454,4 +436,3 @@ The following drift spellings are documented as aliases on canonical entries. Ta
 | `docintel-key` | `DocumentIntelligence-ApiKey` | ai |
 | `LlamaParseApiKey` | `LlamaParse-ApiKey` | ai |
 | `redis-connection-string` | `Redis-ConnectionString` | data-services |
-| `SPRK-DEV-DATAVERSE-URL` | `Dataverse-ServiceUrl` | dataverse |

@@ -288,4 +288,25 @@ public sealed class InterStepState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [ProducedBy(HandlerIds.H11)]
     public IList<ProvisionedUserRecord>? ProvisionedUsers { get; set; }
+
+    /// <summary>
+    /// The stamp's own BFF base URL — the production slot H9 deployed to and health-probed
+    /// (<c>https://{appServiceName}.azurewebsites.net</c>, no <c>/api</c> suffix). Task 245b: H7 writes it
+    /// as <c>sprk_BffApiBaseUrl</c>, H13 probes it, H14 derives its webhook receiver URLs from it.
+    /// Before T245b those read run parameters nothing wrote, and H7 fell back to the PLATFORM BFF.
+    /// </summary>
+    [JsonPropertyName("bffApiUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H9)]
+    public string? BffApiUrl { get; set; }
+
+    /// <summary>
+    /// The BFF build H9 deployed (the CI artifact manifest's <c>buildId</c>, e.g. <c>2026.09.30-123</c>).
+    /// Task 245b: H13's idempotency key (<c>validate-{customerId}-{buildId}</c>) and the registry column
+    /// <c>sprk_bffversion</c>.
+    /// </summary>
+    [JsonPropertyName("bffBuildId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H9)]
+    public string? BffBuildId { get; set; }
 }

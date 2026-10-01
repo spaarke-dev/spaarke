@@ -564,8 +564,7 @@ public sealed class DataverseRegistrySetupStatusUpdaterSmokeTests
             CustomerId: "canary",
             RunId: $"smoke-run-{Guid.NewGuid():N}",
             TenantId: tenantId,
-            EnvironmentId: rowId,
-            RegistryDataverseUrl: adminEnvUrl);
+            EnvironmentId: rowId);
 
         var outcome = await updater.TransitionToReadyAsync(request, CancellationToken.None);
         outcome.Should().BeOfType<RegistrySetupStatusUpdateOutcome.Success>(
