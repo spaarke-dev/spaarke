@@ -534,6 +534,98 @@ defaults to `rg-spaarke-dev` (which is not a per-customer shape at all) and docu
 environment, so neither is exempt from the startup failure. What customerId those pre-D-12 stamps should
 carry is an **owner decision** — do not invent one.
 
+#### 6.5.2 Customer workforce tenants (`WorkforceIdentity__CustomerTenantIds__N`) — required per stamp
+
+> Added 2026-10-01 by `unified-access-control-r2` task 141 (owner decision I1 = (b)). Contract:
+> [`141-link-contract.md`](../../projects/unified-access-control-r2/notes/141-link-contract.md).
+
+A customer employee **without a Power Apps licence** ("Type 2") signs in to Teams / the SPA with company SSO.
+On their FIRST sign-in the BFF binds them to a contact by their Entra object id (`oid`): onto the one active,
+unbound contact carrying their email, or — when none does — a new contact keyed by the oid. **Only a MEMBER of
+one of this deployment's customer workforce tenants gets that first-sign-in bind or creation.** The setting
+names those tenants.
+
+| | |
+|---|---|
+| **Setting** | `WorkforceIdentity__CustomerTenantIds__0`, `__1`, … (configuration key `WorkforceIdentity:CustomerTenantIds`, a string array) |
+| **Value** | the customer's Entra **tenant id(s)** (GUIDs) whose employees use this stamp |
+| **Empty / absent** | **DENY** — nobody is ever email-bound or gets a contact created; a Type-2 first sign-in gets `sdap.access.deny.workforce_tenant_list_empty`. Existing oid bindings still resolve. |
+| **Never** | a fallback to `AzureAd:TenantId`, or `TenantRouting:Tenants[]` |
+| **Startup check** | a non-GUID, the all-zero GUID, or the CIAM tenant id **fails startup** (`ValidateOnStart`) |
+| **Written by** | provisioning (`customer-provisioning-orchestration-r1`) — handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+
+🔴 **Model 1 is the case that makes this a separate setting.** In Model 1 the per-customer BFF app registration
+lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant while the customer's employees
+sign in with the **customer's** `tid`. Keying the member test on `AzureAd:TenantId` would refuse every Model-1
+Type-2 employee **and** auto-bind Spaarke's own staff into the customer's environment. Set the CUSTOMER's tenant
+here. In Model 2 the registration lives in the customer's tenant and the two values coincide — list it anyway;
+nothing is inferred.
+
+```bash
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings WorkforceIdentity__CustomerTenantIds__0=<customer-tenant-guid>
+```
+
+**The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A token with no `acct` claim fails
+closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
+a `#EXT#` UPN.
+
+**The identity-link reconciliation job** (`identity-link-reconciliation`, every 5 minutes) links every licensed
+user to their contact. It runs **report-only** until `IdentityLink__Reconciliation__WritesEnabled=true` — absent,
+empty or unparseable writes nothing. Review one report-only run (App Insights `[ID-LINK-RECON] before-state`
+lines and the run's ResultJson) before enabling writes on a new stamp.
+
+**Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141.** The BFF selects the new
+columns, so without them every binding read fails closed (`sdap.access.deny.binding_column_missing`) and
+CIAM and Type-2 sign-ins are denied:
+
+```powershell
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
+```
+
+It adds the `sprk_externalobjectid` uniqueness key (exactly one contact per oid), the plane and collision
+columns (backfilling existing bindings as External), the "Contacts with Identity Collisions" view, and the
+field-level security that lets ONLY the BFF write `contact.sprk_externalobjectid` and
+`systemuser.sprk_primarycontact` while every user keeps reading them. **A business unit created later needs
+`-Apply` re-run**, so its default team joins the reader profile.
+
+#### 6.5.3 Identity collisions — the operator procedure
+
+A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
+contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; or an invite
+whose email matches a workforce-bound contact or a contact a systemuser links to. Every collision is refused
+(403 at sign-in, 409 at invite) **and flagged on the contact** — `sprk_identitycollisionon` (when),
+`sprk_identitycollisionoid` + `sprk_identitycollisionplane` (who collided), `sprk_identitycollisionreason` (why).
+A repeated collision does not write the flag again.
+
+**Find them**: Contacts → view **"Contacts with Identity Collisions"**.
+
+**Resolve** (System Administrator — the fields are field-secured):
+
+1. Decide which identity owns the contact. One contact carries one sign-in; it is never shared or merged.
+2. **The colliding identity should own it** — clear BOTH `sprk_externalobjectid` and `sprk_identityplane` on the
+   contact (clearing only one leaves it UNREADABLE, which also denies). The other identity's next sign-in or the
+   next reconciliation run binds it correctly.
+   **The existing binding is right** — leave the binding. For an invite, invite a different email; for a
+   licensed user whose `sprk_primarycontact` points at someone else's contact, point it at the user's own contact
+   (or clear it and let the job create one). ⚠️ Changing a licensed user's link changes their Assigned-To access —
+   it is deliberately never done automatically.
+   **Duplicate email** (reason "Email carried by more than one contact") — deactivate or correct the duplicate
+   contact(s); only ACTIVE contacts take part in an email match.
+   **Duplicate oid** (reason "Oid carried by more than one contact") — clear BOTH `sprk_externalobjectid` and
+   `sprk_identityplane` on every contact that is not that person's. Deactivating is NOT enough here: the oid
+   lookup reads contacts of every state, so an oid left on an inactive duplicate keeps the oid ambiguous. (Once
+   the `sprk_ExternalObjectIdKey` alternate key exists this cannot recur; the schema script refuses to create the
+   key while duplicates exist.)
+   Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
+   created.
+3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every flagged
+   contact and clears the flag only once the collision no longer holds.
+
 ---
 
 ## 7. Pipeline Execution Phases (walkthrough)
@@ -579,6 +671,21 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 - `https://<addin-host>/auth-callback.html` — the standard MSAL popup redirect used by **Office on the web** (which does not support NAA, so `OfficeNaaStrategy` falls back to a standard `PublicClientApplication`).
 
 `<addin-host>` is the origin serving the add-in bundle (the Static Web App / CDN host in the manifest `SourceLocation`), so these are **per-host** — every environment (dev / each customer) that serves the add-in from a distinct host needs its own pair. Missing them produces `AADSTS7000471` ("no matching redirect URI") at add-in sign-in. Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts) derives the broker redirect as `brk-multihub://${window.location.hostname}` and the web fallback as `https://<host>/auth-callback.html`.
+
+**The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
+The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
+"member" is read from the `acct` claim (`0` member, `1` guest). Step 1 of the script adds it to a NEW
+registration; an EXISTING one needs it added once:
+
+```powershell
+.\scripts\Register-EntraAppRegistrations.ps1 -TenantId <tenant-of-the-registration> `
+  -AcctClaimOnly -AcctClaimAppId <bff-app-registration-appid>
+```
+
+It is idempotent and keeps every other optional claim. Optional claims on the resource registration apply to
+every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
+Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
+Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
 
 **Escalation gate** (per FR-13 / H10): 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` must be completed via `az` enumeration BEFORE first production customer provisioning.
 
@@ -1028,6 +1135,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 |---|---|---|
 | 2026-08-17 | Initial consolidation (task 001 of `customer-provisioning-orchestration-r1`) | spec.md Gap 4 + R6 doc-drift carry-over; design.md §2 (3-generation fragmentation) |
 | 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
+| 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
 
 ---
 

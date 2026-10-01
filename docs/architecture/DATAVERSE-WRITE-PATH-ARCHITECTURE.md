@@ -129,6 +129,7 @@ Every write-path invariant has one row. A new invariant is not complete until it
 | I-7 | User-record membership junction | BFF events + `MembershipReconciliationJob` | Done (ADR-034) | ≤24h staleness for non-BFF changes (accepted; L4) | — |
 | I-8 | External grant expiry | Read-time fail-closed (UAC-r2 task 107) + `ExternalAccessReconciliationJob` | Read side done; job registered disabled | Job not enabled | unified-access-control-r2 |
 | I-9 | Single default (`sprk_isdefault`) | Read-side deterministic tie-break | Unenforced | Duplicate defaults possible | Backlog (read-side tie-break suffices) |
+| I-10 | Identity binding: one contact per Entra oid (`contact.sprk_externalobjectid` + `sprk_identityplane`), the systemuser↔contact link (`systemuser.sprk_primarycontact`), collisions refused AND flagged; a link is never re-pointed or cleared automatically | `ContactIdentityBinder` (inline at first resolution, at systemuser registration, and the `identity-link-reconciliation` job — WP-5 for systemusers created outside the product) | Code on branch `task/uac-r2-141` (2026-10-01); schema (alternate key, plane + flag columns, FLS write lock), dev setting and job writes are pending manual gates | Before the schema lands every binding read fails closed (`binding_column_missing`); job report-only until `IdentityLink:Reconciliation:WritesEnabled=true`; FLS makes client writes of either field fail (WP-3). Contract: `projects/unified-access-control-r2/notes/141-link-contract.md` | unified-access-control-r2 (task 141) |
 
 ---
 

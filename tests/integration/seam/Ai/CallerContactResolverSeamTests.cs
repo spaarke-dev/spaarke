@@ -30,11 +30,18 @@ public sealed class CallerContactResolverSeamTests
     private static ClaimsPrincipal PrincipalWithOid(Guid oid) =>
         new(new ClaimsIdentity(new[] { new Claim("oid", oid.ToString()) }, "TestAuth"));
 
-    private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, Guid? contactId)
+    /// <summary>
+    /// The contact BOUND to the caller's oid (unified-access-control-r2 task 141): the ACTIVE contact whose
+    /// <c>sprk_externalobjectid</c> is the oid in "D" format. The resolver used to query
+    /// <c>contact.azureactivedirectoryobjectid</c>, which does not exist in dev — every "assign it to me" there
+    /// came back lookup-failed. The strict double answers ONLY the binding query, so a regression to the old
+    /// column throws instead of passing.
+    /// </summary>
+    private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, params Guid[] contactIds)
     {
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
         var collection = new EntityCollection();
-        if (contactId is { } cid)
+        foreach (var cid in contactIds)
         {
             collection.Entities.Add(new Entity("contact") { Id = cid });
         }
@@ -44,13 +51,17 @@ public sealed class CallerContactResolverSeamTests
                 It.Is<QueryExpression>(q =>
                     q.EntityName == "contact" &&
                     q.Criteria.Conditions.Any(c =>
-                        c.AttributeName == "azureactivedirectoryobjectid" &&
+                        c.AttributeName == "sprk_externalobjectid" &&
                         c.Values.Count == 1 &&
-                        Equals(c.Values[0], oidQueried))),
+                        Equals(c.Values[0], oidQueried.ToString("D"))) &&
+                    q.Criteria.Conditions.Any(c => c.AttributeName == "statecode" && Equals(c.Values[0], 0))),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(collection);
         return dataverse;
     }
+
+    private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, Guid? contactId)
+        => DataverseReturning(oidQueried, contactId is { } c ? new[] { c } : Array.Empty<Guid>());
 
     private static ContextBinder NewBinder(ICallerContactResolver resolver) =>
         new(new ChatSessionManager(new InMemoryTenantCache(),
@@ -85,6 +96,34 @@ public sealed class CallerContactResolverSeamTests
         result.IsResolved.Should().BeFalse();
         result.ContactId.Should().BeNull();
         result.UnresolvedReason.Should().Be("no-matching-contact");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_TwoContactsBoundToTheOid_ReturnsUnresolvedNeverPicksOne()
+    {
+        // NEGATIVE (task 141): an ambiguous binding is an identity collision, not a choice.
+        var dataverse = DataverseReturning(CallerOid, ResolvedContactId, Guid.NewGuid());
+        var sut = new CallerContactResolver(dataverse.Object, Mock.Of<ILogger<CallerContactResolver>>());
+
+        var result = await sut.ResolveAsync(PrincipalWithOid(CallerOid), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.UnresolvedReason.Should().Be("ambiguous-binding");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_LookupFails_ReturnsAnHonestUnresolved()
+    {
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+        var sut = new CallerContactResolver(dataverse.Object, Mock.Of<ILogger<CallerContactResolver>>());
+
+        var result = await sut.ResolveAsync(PrincipalWithOid(CallerOid), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.UnresolvedReason.Should().Be("lookup-failed");
     }
 
     [Fact]

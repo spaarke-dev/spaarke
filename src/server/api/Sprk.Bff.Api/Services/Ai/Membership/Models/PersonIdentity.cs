@@ -4,7 +4,8 @@
 // design.md Part 1 § Identity normalization contract table:
 //
 //   Lookup → systemuser    → SystemUserId (always populated)
-//   Lookup → contact       → ContactId (cross-ref via azureactivedirectoryobjectid per ADR-028)
+//   Lookup → contact       → ContactId (systemuser.sprk_primarycontact, else the contact bound to the
+//                            user's Entra oid via contact.sprk_externalobjectid — task 141)
 //   Lookup → team          → TeamIds[] (expanded from teammembership)
 //   Lookup → businessunit  → BusinessUnitId (from systemuser row)
 //   Lookup → account       → AccountId (from primary contact's parentcustomerid)
@@ -36,11 +37,10 @@ namespace Sprk.Bff.Api.Services.Ai.Membership.Models;
 /// </summary>
 /// <param name="SystemUserId">Always populated — the input <c>systemuserid</c>.</param>
 /// <param name="ContactId">
-/// The matching <c>contactid</c> if a contact exists whose
-/// <c>azureactivedirectoryobjectid</c> equals the systemuser's
-/// <c>azureactivedirectoryobjectid</c> (per ADR-028). <c>null</c> if the user
-/// has no corresponding contact (perfectly valid — many BFF callers are users
-/// without an external-contact record).
+/// The user's contact: the systemuser's <c>sprk_primarycontact</c> link, else the
+/// ACTIVE contact whose <c>sprk_externalobjectid</c> is the systemuser's Entra oid
+/// (task 141). <c>null</c> if the user has neither (valid — the identity-link
+/// reconciliation job links such users, or flags a collision).
 /// </param>
 /// <param name="PrimaryEmail">
 /// The systemuser's <c>internalemailaddress</c> (preferred — Dataverse-owned)

@@ -4,7 +4,8 @@
     <title>C7: workforce identity binding by Entra oid for unlicensed employees (Type 2), plus a reliable systemuser↔contact link for licensed users</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C7 plus owner round-2 decision 4)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>code-complete-pending-live-gates</status>
+    <status-note>2026-10-01, branch task/uac-r2-141: code, tests, scripts, docs, notes and handoffs done; Step 9.5 code-review + adr-check run and their findings fixed. NOT "completed": this run was instructed READ-ONLY for live Dataverse/Entra/Azure and to skip the publish-size measurement, so the schema apply, the acct claim, the dev setting, the BFF deploy, the job runs and the manual live gate are pending manual gates (notes/task-141-identity-binding.md §8, G-1..G-9). The main session owns the TASK-INDEX marker.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Rewrites identity binding on the authorization path (who a caller IS decides whose grants they inherit), adds Dataverse schema and field security, and adds a background job. Tags bff-api/auth. Security-sensitive per root CLAUDE.md §6.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -363,5 +364,33 @@ Three things are genuinely new:
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all knowledge files before starting. Follow the task-execute pre-execution checklist. FULL rigor: code-review plus adr-check at Step 9.5, with any ADR tension surfaced as CLAUDE.md §6.5 path A/B/C.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-141">
+CODE-COMPLETE; LIVE GATES PENDING. Full record: notes/task-141-identity-binding.md (§0 baseline, §1 acct verdict, §2 setting, §3 decision table, §4 implementation map, §5 placement + justification, §6 deviations, §7 tests + perturbations + review fixes, §8 pending manual gates). Peer contract: notes/141-link-contract.md. Provisioning handoff: notes/handoffs/INCOMING-141-workforce-tenant-list.md.
+
+OWNER ANSWERS APPLIED: I1 = (b) new setting WorkforceIdentity:CustomerTenantIds, empty = deny, never AzureAd:TenantId, not TenantRouting:Tenants[]; I2 = (1) a licensed user's colliding sprk_primarycontact is kept, flagged, never cleared or re-pointed; T2 live identity test.user@demo.spaarke.com.
+
+ESCALATION TRIGGERS: 1 and 2 answered by the owner. 3 (acct) does not fire: acct is a documented optional claim on access tokens issued for this registration, Teams SSO included (sources in notes §1); not yet configured, so it is gate G-2; until then Type-2 first sign-ins fail closed (workforce_acct_claim_missing). 4 (FLS breaks a client writer) does not fire: client code only reads both fields. 5 does not fire: contact had no alternate key. 6 does not fire: test.user@demo.spaarke.com exists.
+
+PLACEMENT (CLAUDE.md §10, bff-extensions.md §A): all in the BFF — the binding runs inside the authorization path of each Teams/SPA/CIAM request (latency-coupled), over BFF-owned identity data, under the BFF's app-only identity; the job is in-process on Spaarke.Scheduling per ADR-052 (BFF domain code, BFF-owned tables, low volume). No new NuGet package; no AI-internal type; no OBO, no Graph with the caller token, no new .WithClientSecret (ADR-028 A2/A4).
+
+THREE-QUESTION JUSTIFICATIONS (CLAUDE.md §11), one per new surface — full table in notes §5:
+- ContactBindingDecision — existing: DecideWorkforceEmailMatch/ReadOidBinding (013) and the CIAM copies in ExternalParticipationService; extension: YES, it is those generalised to every plane, copies deleted; cost: each plane keeps its own rule and the CIAM path keeps $top=1 and the failed-read fall-through.
+- WorkforceIdentityOptions + validator + member test — existing: TenantRouting:Tenants[] (routing, unconfigured), AzureAd:TenantId; extension: no, owner I1 = (b), both are wrong in Model 1; cost: Model-1 employees refused or Spaarke staff bound into a customer stamp.
+- IContactIdentityStore / DataverseContactIdentityStore — existing: IDataverseService (SDK, no If-Match / If-None-Match / alternate-key create-only), ExternalParticipationService's private Web API calls; extension: no, the conditional writes ARE the race guarantees; interface = ADR-010 test seam (HTTP doubles banned); cost: two racing first sign-ins create two contacts, a bind overwrites a concurrent bind.
+- ContactIdentityBinder + factory — existing: IdentityNormalizationService (read-only, cached), ExternalParticipationService (grant data); extension: no, writes would add a second reason to change (§11.5); one writer for five callers; cost: five call sites writing bindings/links/flags their own way.
+- IdentityLinkReconciliationJob — existing: ExternalAccessReconciliationJob, MembershipReconciliationJob; extension: no, different scan and reason to change; copies the safety convention; cost: users who never sign in to Teams/SPA never get a link (C9/Q4/Q8 skip them).
+- Schema (plane + flag columns, alternate key, FLS, view) — existing: sprk_externalobjectid (text, no plane), no collision column, no key, 0 fieldpermission rows; extension: the existing column is extended; cost: no durable flag, "AlreadyProvisioned" for an employee, anyone with contact Write could bind their oid onto a granted contact.
+- Config: WorkforceIdentity:CustomerTenantIds and IdentityLink:Reconciliation:WritesEnabled (appsettings.template.json, deployment guide §6.5.2).
+
+ADR TENSIONS (CLAUDE.md §6.5): ADR-038 B8 (InternalsVisibleTo, left pending by 013) — PATH C: the decision is public and asserted directly. No other tension open. Deviations: D-1 CIAM resolution moved from ExternalParticipationService into the binder (one cohesive rule + writes; the POML allowed it); D-3 IdentityNormalizationService honours a flagged kept link while CallerContactResolver ("assign it to me") follows only the oid binding (owner I2; stated in the link contract); D-4 contact created at first MEMBER sign-in supersedes SPA-r2 FR-11 wording (owner round 2); D-5 job filter accessmode 0/1/2; D-6 live steps and publish-size not executed (instruction).
+
+STEP 9.5: code-review and adr-check run over every changed file. Findings fixed (notes §7.1): R-1 no bind/link is ever sent as If-Match: * (invite bind of a just-created contact and registration link of a just-created systemuser now re-read and never overwrite / re-point); R-2 the invite bind runs the masking probe; R-3 a non-JSON response is a could-not-read, not an exception; R-4 the job keeps a flag whose systemuser was scanned but not decided; R-5 guide procedure for duplicate oids corrected; R-6 write-path invariant registry row I-10 added (WP-1). Accepted with reasons (notes §7.1): per-decision email in job logs, ~3 reads per repeated denied sign-in, a narrow ≤10-min stale-identity race (less access, never more), a reused flag reason for "linked to internal user", the job shipping-state test, the per-consumer named HttpClient, +7 registrations inside the feature module (ADR-010's documented accepted elevation). Every new guard and fix was shown to bite: G + P1..P29 seeded, each RED, sources restored.
+
+TESTS: full BFF suite 13,347 passed / 0 failed / 54 skipped (13,401); NetArchTest 337 / 0 / 0; dotnet list package --vulnerable --include-transitive: no vulnerable packages, no package changes. Publish size NOT measured (instructed to skip) — gate G-9.
+
+PAPER TRAIL: SPA-r2 task 023 + TASK-INDEX row marked delivered by this task, notes/task-023-delivered-by-uac-r2-141.md records the FR-11 supersession and the P3 requester wiring staying with SPA-r2; task 013 carries an a18-closure block pointing here (its status stays pending until this task's live gate passes); the A-18 residual comment was removed from IIdentityNormalizationService.
+
+PENDING MANUAL GATES (exact commands in notes §8): G-1 Set-ContactIdentityBindingSchema.ps1 -Apply then -Verify on spaarkedev1 (dry run 2026-10-01 clean: 6 oids lowercase D; everything else WOULD create); G-2 acct claim on 1e40baad (-AcctClaimOnly); G-3 WorkforceIdentity__CustomerTenantIds__0=a221a95e-6abc-4434-aecc-e48338a1b2f2 on the dev BFF; G-4 deploy; G-5 report-only job run reviewed against §0; G-6 writes on, run twice; G-7 FLS authorization as a non-admin; G-8 the eight live-gate items with test.user@demo.spaarke.com; G-9 publish size.
+    </outcome>
   </execution>
 </task>

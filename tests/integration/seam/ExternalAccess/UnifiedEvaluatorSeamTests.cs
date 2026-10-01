@@ -879,7 +879,6 @@ public sealed class UnifiedEvaluatorSeamTests
         public bool ThrowOnActiveOrgIds { get; set; }
         public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
         public HashSet<Guid> UnreadableOrgReferences { get; } = new();
-        public Guid? ResolveContactId { get; set; }
 
         public ParticipationWorld()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
@@ -892,9 +891,8 @@ public sealed class UnifiedEvaluatorSeamTests
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_grantSet);
 
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult(ResolveContactId);
+        // (Task 141 removed the participation service's contact resolution — there is no email fallback left
+        // in the evaluator for this world to stub.)
 
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

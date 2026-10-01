@@ -314,21 +314,30 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
 }
 
 /// <summary>
-/// CIAM contact strategy — the EXISTING external-SPA resolution, unchanged (ADR-028 A1). Resolves the
-/// Dataverse contact by stable <c>oid</c> (email as first-login fallback) and loads its
-/// sprk_externalrecordaccess participations. Reproduces <c>ExternalCallerAuthorizationFilter</c>'s
-/// deny semantics byte-for-byte (R1 FR-15 / R2 guardrail #3).
+/// CIAM contact strategy (ADR-028 A1). Resolves the Dataverse contact by the stable <c>oid</c> bound to
+/// <c>contact.sprk_externalobjectid</c> and loads its sprk_externalrecordaccess participations. The email bind
+/// survives only as the repair path for an invite whose oid write failed; the CIAM plane never creates a
+/// contact (task 141).
 /// </summary>
+/// <remarks>
+/// Task 141: resolution moved from <c>ExternalParticipationService</c> (the grant-data reader) to
+/// <see cref="ContactIdentityBinder"/>, which runs the one binding decision both planes share. Each deny now
+/// carries the decision's OWN code — ambiguity, collision, unreadable binding, inactive contact — instead of
+/// one <c>contact_not_found</c> for all of them, so the audit trail can tell an outage from a hijack attempt.
+/// </remarks>
 public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
 {
     private readonly ExternalParticipationService _participations;
+    private readonly ContactIdentityBinder _binder;
     private readonly ILogger<CiamContactPrincipalStrategy> _logger;
 
     public CiamContactPrincipalStrategy(
         ExternalParticipationService participations,
+        ContactIdentityBinder binder,
         ILogger<CiamContactPrincipalStrategy> logger)
     {
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
+        _binder = binder ?? throw new ArgumentNullException(nameof(binder));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -359,29 +368,31 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1"));
         }
 
-        var contactId = await _participations
-            .ResolveExternalContactAsync(oid, email, httpContext.RequestAborted)
+        var binding = await _binder
+            .ResolveCiamCallerAsync(oid, email, httpContext.RequestAborted)
             .ConfigureAwait(false);
 
-        if (!contactId.HasValue)
+        if (!binding.IsResolved)
         {
+            var code = binding.DenyCode ?? ContactBindingDecision.DenyContactNotFound;
             _logger.LogWarning(
-                "[EXT-AUTH] Cannot resolve Dataverse Contact (oid present: {HasOid}, email present: {HasEmail})",
-                !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
-            return CallerPrincipalResolution.Denied(
-                ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found"));
+                "[EXT-AUTH] Cannot resolve Dataverse Contact ({DenyCode}; oid present: {HasOid}, email present: {HasEmail})",
+                code, !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
+            return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(code, CiamDenyDetail(code)));
         }
+
+        var contactId = binding.ContactId!.Value;
 
         // Outside-counsel access is GRANT-ONLY and explicit (task 028 / design §2): the caller sees
         // exactly the roots granted via sprk_externalrecordaccess — projects (with level), matters, and
         // work assignments. No membership/assignment/rollup-derived access for a CIAM partner.
         var grantSet = await _participations
-            .GetGrantSetAsync(contactId.Value, httpContext.RequestAborted)
+            .GetGrantSetAsync(contactId, httpContext.RequestAborted)
             .ConfigureAwait(false);
 
         _logger.LogInformation(
             "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — grants: {Projects} project / {Matters} matter / {Was} work-assignment",
-            contactId.Value, !string.IsNullOrEmpty(oid), grantSet.Projects.Count, grantSet.Matters.Count, grantSet.WorkAssignments.Count);
+            contactId, !string.IsNullOrEmpty(oid), grantSet.Projects.Count, grantSet.Matters.Count, grantSet.WorkAssignments.Count);
 
         var projectAccess = grantSet.Projects
             .Select(p => CallerProjectAccess.FromLevel(p.ProjectId, p.AccessLevel))
@@ -390,7 +401,7 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
             Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = contactId.Value,
+            ContactId = contactId,
             SystemUserId = null,
             Email = email ?? string.Empty,
             Oid = oid,
@@ -403,6 +414,28 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             WorkAssignmentAccess = RightsFromGrants(grantSet.WorkAssignmentGrants),
         });
     }
+
+    /// <summary>
+    /// The ProblemDetails detail for a CIAM deny. States only what the decision established (FR-B03) — and
+    /// says so plainly where the fix is an administrator's, so a refused external user is not left guessing.
+    /// </summary>
+    internal static string CiamDenyDetail(string code) => code switch
+    {
+        ContactBindingDecision.DenyContactNotFound =>
+            "No contact is registered for this sign-in. External users are added by invitation.",
+        ContactBindingDecision.DenyContactInactive =>
+            "The contact for this sign-in has been deactivated.",
+        ContactBindingDecision.DenyContactOidAmbiguous or ContactBindingDecision.DenyContactEmailAmbiguous =>
+            "More than one contact matches this sign-in, so access cannot be resolved. An administrator has been "
+            + "alerted through an identity-collision flag.",
+        ContactBindingDecision.DenyContactBoundToDifferentOid or ContactBindingDecision.DenyContactLinkedToOtherUser =>
+            "The contact for this email belongs to another sign-in. An administrator has been alerted through an "
+            + "identity-collision flag.",
+        ContactBindingDecision.DenyContactBindingUnreadable =>
+            "The contact for this sign-in carries an identity binding that cannot be read. An administrator has "
+            + "been alerted through an identity-collision flag.",
+        _ => "Access could not be resolved for this sign-in. Please try again.",
+    };
 
     /// <summary>
     /// Projects root grants to <c>(recordId → rights)</c>, unioning duplicates HIGHEST-WINS.
@@ -539,7 +572,7 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             Plane = CallerPrincipalPlane.Workforce,
             ContactId = principal.ContactId ?? Guid.Empty,
             SystemUserId = principal.SystemUserId,
-            Email = WorkforcePrincipalResolver.ExtractVerifiedEmail(httpContext.User) ?? string.Empty,
+            Email = WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User) ?? string.Empty,
             Oid = principal.Oid,
             ProjectAccess = projectAccess,
             MatterAccess = accessibleMatters.Rights,

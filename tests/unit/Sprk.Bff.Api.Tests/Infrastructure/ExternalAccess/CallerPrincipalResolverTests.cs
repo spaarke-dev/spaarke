@@ -3,11 +3,13 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 
 using static Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory;
@@ -21,8 +23,9 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 ///   • <see cref="WorkforcePrincipalStrategy"/> — the workforce caller's record scope is EXACTLY the
 ///     accessible-record-set (R2 NFR-08: not all projects), sourced from IAccessibleRecordSetService
 ///     for entity <c>sprk_project</c>; a resolver deny short-circuits with ProblemDetails.
-///   • <see cref="CiamContactPrincipalStrategy"/> — reproduces the legacy CIAM deny + participation
-///     resolution (R2 guardrail #3 / FR-15).
+///   • <see cref="CiamContactPrincipalStrategy"/> — resolves the contact through the oid binding
+///     (<see cref="ContactIdentityBinder"/>, task 141) and loads its participations; each deny carries the
+///     binding decision's own reason code.
 /// </summary>
 public class CallerPrincipalResolverTests
 {
@@ -226,19 +229,19 @@ public class CallerPrincipalResolverTests
             It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    // ── CIAM strategy: legacy resolution + deny semantics preserved (FR-15) ──────────────────────
+    // ── CIAM strategy: resolution by the oid binding (task 141) + participations ──────────────────
 
     [Fact]
-    public async Task CiamStrategy_ResolvesContactAndParticipations_PreservesAccessLevels()
+    public async Task CiamStrategy_ResolvesContactByOid_AndPreservesAccessLevels()
     {
         var contactId = Guid.NewGuid();
+        var oid = Guid.NewGuid();
         var p1 = Guid.NewGuid();
         var p2 = Guid.NewGuid();
+        var store = new InMemoryContactIdentityStore();
+        store.AddContact(contactId, email: "external@test.com", oid: oid.ToString("D"), plane: IdentityPlaneMarker.External);
 
         var participations = CreateParticipationServiceMock();
-        participations.Setup(s => s.ResolveExternalContactAsync(
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(contactId);
         participations.Setup(s => s.GetGrantSetAsync(contactId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalGrantSet
             {
@@ -252,17 +255,17 @@ public class CallerPrincipalResolverTests
             });
 
         var strategy = new CiamContactPrincipalStrategy(
-            participations.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            participations.Object, IdentityBindingTestKit.Binder(store), Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
 
         var ctx = new DefaultHttpContext
         {
-            User = Principal(("oid", Guid.NewGuid().ToString()), ("email", "external@test.com"))
+            User = Principal(("oid", oid.ToString().ToUpperInvariant()), ("email", "external@test.com"))
         };
         var result = await strategy.ResolveAsync(ctx, CancellationToken.None);
 
         result.IsResolved.Should().BeTrue();
         result.Principal!.Plane.Should().Be(CallerPrincipalPlane.CiamContact);
-        result.Principal.ContactId.Should().Be(contactId);
+        result.Principal.ContactId.Should().Be(contactId, "oids compare as parsed Guids, whatever their case");
         result.Principal.GetAccessLevel(p1).Should().Be(ExternalAccessLevel.ViewOnly);
         result.Principal.GetAccessLevel(p2).Should().Be(ExternalAccessLevel.FullAccess);
     }
@@ -271,7 +274,8 @@ public class CallerPrincipalResolverTests
     public async Task CiamStrategy_MissingOidAndEmail_Returns401()
     {
         var strategy = new CiamContactPrincipalStrategy(
-            CreateParticipationServiceMock().Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            CreateParticipationServiceMock().Object, IdentityBindingTestKit.Binder(new InMemoryContactIdentityStore()),
+            Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
 
         var result = await strategy.ResolveAsync(
             new DefaultHttpContext { User = Principal() }, CancellationToken.None);
@@ -281,22 +285,57 @@ public class CallerPrincipalResolverTests
         result.Failure!.GetType().Name.Should().Be("ProblemHttpResult");
     }
 
-    [Fact]
-    public async Task CiamStrategy_ContactNotFound_Returns403()
+    /// <summary>
+    /// Task 141 acceptance: <see cref="CiamContactPrincipalStrategy"/> returns the decision's DISTINCT deny code
+    /// — not one <c>contact_not_found</c> for everything — so ambiguity, collision, an unreadable binding and an
+    /// inactive contact are distinguishable in the audit trail.
+    /// </summary>
+    [Theory]
+    [InlineData("not-found", "sdap.access.deny.contact_not_found")]
+    [InlineData("email-ambiguous", "sdap.access.deny.contact_email_ambiguous")]
+    [InlineData("collision", "sdap.access.deny.contact_bound_to_different_oid")]
+    [InlineData("unreadable", "sdap.access.deny.contact_lookup_failed")]
+    [InlineData("inactive", "sdap.access.deny.contact_inactive")]
+    public async Task CiamStrategy_EachDeny_CarriesItsOwnReasonCode(string scenario, string expectedCode)
     {
-        var participations = CreateParticipationServiceMock();
-        participations.Setup(s => s.ResolveExternalContactAsync(
-                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
+        var oid = Guid.NewGuid();
+        var store = new InMemoryContactIdentityStore();
+        switch (scenario)
+        {
+            case "email-ambiguous":
+                store.AddContact(Guid.NewGuid(), email: "x@firm.example");
+                store.AddContact(Guid.NewGuid(), email: "x@firm.example");
+                break;
+            case "collision":
+                store.AddContact(Guid.NewGuid(), email: "x@firm.example", oid: Guid.NewGuid().ToString("D"));
+                break;
+            case "unreadable":
+                store.OidLookupStatus = LookupStatus.Failed;
+                break;
+            case "inactive":
+                store.AddContact(Guid.NewGuid(), oid: oid.ToString("D"), plane: IdentityPlaneMarker.External, stateCode: 1);
+                break;
+        }
 
         var strategy = new CiamContactPrincipalStrategy(
-            participations.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            CreateParticipationServiceMock().Object, IdentityBindingTestKit.Binder(store),
+            Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+        var http = new DefaultHttpContext
+        {
+            User = Principal(("oid", oid.ToString()), ("preferred_username", "x@firm.example")),
+            RequestServices = new ServiceCollection()
+                .AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
 
-        var ctx = new DefaultHttpContext { User = Principal(("oid", Guid.NewGuid().ToString())) };
-        var result = await strategy.ResolveAsync(ctx, CancellationToken.None);
+        var result = await strategy.ResolveAsync(http, CancellationToken.None);
 
         result.IsResolved.Should().BeFalse();
-        result.Failure.Should().NotBeNull();
+        await result.Failure!.ExecuteAsync(http);
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        http.Response.Body.Position = 0;
+        var body = await new StreamReader(http.Response.Body).ReadToEndAsync();
+        body.Should().Contain(expectedCode);
     }
 
     private static Mock<ExternalParticipationService> CreateParticipationServiceMock() =>

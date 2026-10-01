@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
@@ -42,6 +43,7 @@ public class RegistrationDataverseService : IDisposable
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
+    private readonly ContactIdentityBinderFactory _binderFactory;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -60,9 +62,11 @@ public class RegistrationDataverseService : IDisposable
         TrackingIdGenerator trackingIdGenerator,
         TokenCredential credential,
         IHttpClientFactory httpClientFactory,
-        ILogger<RegistrationDataverseService> logger)
+        ILogger<RegistrationDataverseService> logger,
+        ContactIdentityBinderFactory binderFactory)
     {
         _logger = logger;
+        _binderFactory = binderFactory ?? throw new ArgumentNullException(nameof(binderFactory));
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
         _httpClientFactory = httpClientFactory;
@@ -404,7 +408,72 @@ public class RegistrationDataverseService : IDisposable
 
         var userId = Guid.Parse(entityIdHeader.Split('(', ')')[1]);
         _logger.LogInformation("Created systemuser {UserId} in Dataverse", userId);
+
+        // Task 141: link the new user to its contact at creation — in the SAME environment the systemuser was
+        // created in (the target, never the default one), so Assigned-To / No Access / briefing matching work
+        // from the user's first day rather than from the next reconciliation tick.
+        await LinkContactForNewSystemUserAsync(
+            userId, azureAdObjectId, firstName, lastName, email, ContactLinkEnvironment(targetDataverseUrl), ct);
+
         return userId;
+    }
+
+    /// <summary>
+    /// The environment a new systemuser's contact link is written to: the environment the systemuser was
+    /// CREATED in — <paramref name="targetDataverseUrl"/> when one was given, else this service's own
+    /// (<see cref="DataverseBaseUrl"/>, the DATAVERSE_URL environment). Never the BFF's default
+    /// <c>Dataverse:ServiceUrl</c>, which is a different environment for every demo/customer target.
+    /// </summary>
+    public string ContactLinkEnvironment(string? targetDataverseUrl)
+        => (string.IsNullOrWhiteSpace(targetDataverseUrl) ? DataverseBaseUrl : targetDataverseUrl).TrimEnd('/');
+
+    /// <summary>
+    /// Runs the identity-binding decision for a just-created systemuser against <paramref name="dataverseBaseUrl"/>
+    /// (task 141): bind or create the contact keyed by the user's Entra oid and set <c>sprk_primarycontact</c>,
+    /// or flag a collision. NON-FATAL by design: the systemuser exists either way, and the identity-link
+    /// reconciliation job retries whatever this could not do.
+    /// </summary>
+    /// <returns>The link result, or null when nothing could be attempted (unusable oid, or a fault).</returns>
+    public async Task<SystemUserLinkResult?> LinkContactForNewSystemUserAsync(
+        Guid systemUserId, string azureAdObjectId, string firstName, string lastName, string email,
+        string dataverseBaseUrl, CancellationToken ct)
+    {
+        if (!Guid.TryParse(azureAdObjectId, out var oid) || oid == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] Systemuser {SystemUserId} was created with an unusable AAD object id; no contact link",
+                systemUserId);
+            return null;
+        }
+
+        try
+        {
+            var baseUrl = dataverseBaseUrl.TrimEnd('/');
+            var binder = _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
+
+            // email is the UPN this service created the user with (directory data, not a client value), so it
+            // is both the directory-synced email and the domainname the guest test reads.
+            var row = new SystemUserIdentityRow(
+                systemUserId, oid, email, email, PrimaryContactId: null, ETag: null,
+                FirstName: firstName, LastName: lastName);
+            var result = await binder.EnsureSystemUserLinkAsync(row, applyWrites: true, ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link {Outcome} (contact {ContactId}, code {Code})",
+                systemUserId, baseUrl, result.Outcome, result.ContactId, result.DenyCode);
+            return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[ID-BIND] Contact link for new systemuser {SystemUserId} failed; the reconciliation job retries it",
+                systemUserId);
+            return null;
+        }
     }
 
     #endregion

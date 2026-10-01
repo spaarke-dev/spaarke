@@ -339,8 +339,8 @@ public enum WorkforcePrincipalKind
     /// Accessible set = ADR-034 membership (automatic).</summary>
     SystemUser,
 
-    /// <summary>Caller has no systemuser but resolves to a <c>contact</c> (by AAD oid or
-    /// verified email). Accessible set = contact-anchored membership / grants (task 021).</summary>
+    /// <summary>Caller has no systemuser but resolves to a <c>contact</c> BOUND to their Entra oid
+    /// (<c>sprk_externalobjectid</c>, task 141). Accessible set = contact-anchored membership / grants (task 021).</summary>
     ContactOnly
 }
 
@@ -364,8 +364,8 @@ public sealed class WorkforcePrincipal
     /// <summary>The Dataverse <c>contactid</c>. For a <see cref="WorkforcePrincipalKind.ContactOnly"/>
     /// principal this is the required anchor (always non-null). For a
     /// <see cref="WorkforcePrincipalKind.SystemUser"/> principal this is the <b>derived</b> contact
-    /// (via <c>sprk_primarycontact</c> / AAD cross-ref) and MAY be null when the systemuser has no
-    /// linked contact.</summary>
+    /// (its <c>sprk_primarycontact</c> link, else the contact bound to its oid — task 141) and MAY be null
+    /// when the systemuser has neither.</summary>
     public Guid? ContactId { get; init; }
 
     /// <summary>The workforce AAD object id (<c>oid</c> claim) the caller was resolved by.</summary>
@@ -374,9 +374,10 @@ public sealed class WorkforcePrincipal
     /// <summary>The workforce tenant id (<c>tid</c> claim).</summary>
     public required string TenantId { get; init; }
 
-    /// <summary>The caller's tenant-verified email/UPN (from token claims). Used as the fallback key to
-    /// find the caller's contact-grants when a <see cref="WorkforcePrincipalKind.SystemUser"/> has no
-    /// derived <see cref="ContactId"/> (no <c>sprk_primarycontact</c> link). May be empty.</summary>
+    /// <summary>The caller's email/UPN from token claims — UNVERIFIED (Microsoft documents these claims as
+    /// mutable). Display and audit only: since task 141 it is NEVER used to resolve a contact or its grants
+    /// (the email fallback in <c>AccessibleRecordSetService</c> was removed — a licensed user's contact comes
+    /// only from the systemuser↔contact link). May be empty.</summary>
     public string Email { get; init; } = string.Empty;
 
     /// <summary>True when this is a systemuser principal (ADR-034 membership plane).</summary>
@@ -425,9 +426,8 @@ public sealed class WorkforcePrincipalResolution
     public static WorkforcePrincipalResolution Resolved(WorkforcePrincipal principal)
         => new() { Principal = principal ?? throw new ArgumentNullException(nameof(principal)) };
 
-    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + verified email).
-    /// <paramref name="email"/> is the fallback key for the caller's contact-grants when the systemuser
-    /// has no derived contact (see <see cref="WorkforcePrincipal.Email"/>).</summary>
+    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + token email).
+    /// <paramref name="email"/> is display/audit only (see <see cref="WorkforcePrincipal.Email"/>).</summary>
     public static WorkforcePrincipalResolution ForSystemUser(
         Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null)
         => Resolved(new WorkforcePrincipal

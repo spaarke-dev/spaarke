@@ -38,6 +38,7 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return group;
@@ -48,6 +49,7 @@ public static class InviteAndGrantExternalUserEndpoint
         DataverseWebApiClient dataverseClient,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
+        ContactIdentityBinder binder,
         ITenantCache cache,
         IConfiguration configuration,
         HttpContext httpContext,
@@ -94,8 +96,17 @@ public static class InviteAndGrantExternalUserEndpoint
         string onboardStatus;
         try
         {
-            (contactId, onboardStatus) = await InviteExternalUserEndpoint.ProvisionAsync(
-                request, dataverseClient, ciamProvisioner, emailService, portalUrl, logger, ct);
+            var outcome = await InviteExternalUserEndpoint.ProvisionAsync(
+                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger, ct);
+
+            // Task 141: a refused onboarding writes NO grant. Granting a contact an employee's work identity
+            // owns would hand the employee's contact a CIAM grant it can never use — or worse, one it can.
+            if (outcome.Refusal is { } refusal)
+            {
+                return InviteExternalUserEndpoint.RefusalResult(refusal, httpContext);
+            }
+
+            (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);
         }
         catch (Exception ex)
         {
