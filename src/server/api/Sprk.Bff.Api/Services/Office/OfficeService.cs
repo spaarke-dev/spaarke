@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
@@ -27,7 +26,9 @@ namespace Sprk.Bff.Api.Services.Office;
 /// - Save: enriches content, uploads to SPE, persists to Dataverse, queues finalization
 /// - Job status: queries Dataverse/in-memory store for job progress
 /// - SSE streaming: real-time job status updates via Redis pub/sub
-/// - Search, share, quick-create: entity and document operations
+/// - Quick-create and To Do: record creation
+/// - Search and matter types: delegated to <see cref="OfficeSearchService"/>, which owns every Dataverse
+///   read this add-in makes (task 059)
 /// </para>
 /// <para>
 /// Per ADR-001, heavy processing (SPE upload, AI processing) is delegated to background workers.
@@ -57,44 +58,36 @@ public class OfficeService : IOfficeService
     private readonly IMembershipEventPublisher _membershipEventPublisher;
     // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
     // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
-    // sprk_document archive. Optional/null-tolerant so hosts without the Communication module (and the existing
-    // bare test constructions) keep working; null → the capture step is a guarded no-op (best-effort, NFR-04).
-    private readonly EmailUploadCaptureService? _emailUploadCapture;
-    // Real Dataverse entity search for the add-in "File to" picker (task 026 / #229 — replaces the
-    // GenerateStubResults hardcoded fixtures). Retained for the matter-type reference list, which is a
-    // small non-customer lookup table and stays app-only; the ENTITY search no longer uses it (task 062).
-    // Optional/null-tolerant so bare test constructions keep compiling; null → stub fallback.
-    private readonly DataverseWebApiClient? _dataverseClient;
-    // F1 / task 062: the caller-scoped read seam for /office/search/entities. Runs the search query
-    // AS the calling user (MSCRMCallerID impersonation), so Dataverse applies row-level security
-    // natively and the picker returns only records the caller may read. Reused rather than
-    // reinvented (CLAUDE.md §11): this is the same unconditionally-registered singleton seam the
-    // Communication read path uses — its QueryAsync takes an entity set + an OData query string and
-    // is entity-agnostic despite the Communication-specific interface name. Optional/null-tolerant so
-    // bare test constructions keep compiling; null is refused at the call site, never degraded to an
-    // app-only read (see SearchEntitiesAsync's forcing function).
-    private readonly IImpersonatedCommunicationQuery? _impersonatedQuery;
-    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Matter/Project).
-    // Registered singleton (→ IDataverseService, GraphModule.cs); optional/null-tolerant so bare test
-    // ctors keep compiling; null → quick-create returns null (endpoint 403s).
-    private readonly IGenericEntityService? _genericEntityService;
+    // sprk_document archive. Required (task 059): CommunicationModule registers it unconditionally. CaptureAsync
+    // is itself best-effort (NFR-04) and never throws out of the save.
+    private readonly EmailUploadCaptureService _emailUploadCapture;
+    // Task 059: the Office add-in's Dataverse READS — the "File to" entity search (impersonated, task 062), the
+    // matter-type list, and the sprk_recordtype_ref lookup the To Do writer below stamps. Extracted so this
+    // class issues no Dataverse read of its own; the IOfficeService search members delegate to it.
+    private readonly OfficeSearchService _search;
+    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Invoice) and the To Do writer.
+    // Required (task 059): registered unconditionally as a singleton (→ IDataverseService, GraphModule.cs).
+    private readonly IGenericEntityService _genericEntityService;
     // FR-13 (spaarkeai-word-add-in-r1 task 030): the Matter quick-create path. Required (ADR-032): its registration
     // is unconditional, so an absent one is a startup fault, never a per-request 403.
     private readonly RecordCreationService _recordCreation;
     // Task 067 (finding F5): resolves the calling user's Dataverse systemuserid so the job row can record
     // WHO asked for it (sprk_initiatedby). Reused, not reinvented (CLAUDE.md §11) — this is the same
     // ICallerSystemUserResolver the Communication read path and task 062's picker already depend on,
-    // TryAdd-registered inline by CommunicationModule, which Program.cs composes unconditionally.
-    // Optional/null-tolerant to match the six optional deps above (bare test ctors keep compiling). If it
-    // is absent the creator is simply not recorded — and an unrecorded creator is REFUSED by the ownership
-    // checks, so the degradation direction is closed, never open.
-    private readonly ICallerSystemUserResolver? _callerSystemUserResolver;
+    // TryAdd-registered inline by CommunicationModule, which Program.cs composes unconditionally. Required
+    // (task 059). A caller it cannot resolve still records no creator, and an unrecorded creator is REFUSED by
+    // the ownership checks, so the degradation direction is closed, never open.
+    private readonly ICallerSystemUserResolver _callerSystemUserResolver;
     private readonly ILogger<OfficeService> _logger;
 
     // FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" fire-and-forget dispatch, extracted —
     // mirrors the ComposeProfileDispatcher pattern (detached DI scope + OBO facade) without touching
-    // Services/Compose/. Built in this constructor from fields already resolved via DI (ADR-010 — no new
-    // registration); optional ctor params below so existing bare test constructions keep compiling.
+    // Services/Compose/. Built in this constructor from three optional ctor params.
+    // ⚠️ CORRECTED 2026-10-01 (task 059): this comment used to justify that construction as "ADR-010 — no new
+    // registration". ADR-010 says no such thing: it asks for concrete registrations inside feature modules
+    // (.claude/adr/ADR-010-di-minimalism.md, Constraints), which is exactly what a registered dispatcher would be.
+    // The three params remain only until task 068 deletes this dispatcher (its Task.Run loses the work on a
+    // restart) and moves the profile onto the job queue.
     private readonly OfficeProfileDispatcher _profileDispatcher;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -113,15 +106,14 @@ public class OfficeService : IOfficeService
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         RecordCreationService recordCreation,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        OfficeSearchService search,
+        EmailUploadCaptureService emailUploadCapture,
+        IGenericEntityService genericEntityService,
+        ICallerSystemUserResolver callerSystemUserResolver,
         ILogger<OfficeService> logger,
-        EmailUploadCaptureService? emailUploadCapture = null,
-        DataverseWebApiClient? dataverseClient = null,
-        IGenericEntityService? genericEntityService = null,
         IServiceScopeFactory? scopeFactory = null,
         IDocumentProfileAi? documentProfileAi = null,
-        IHostApplicationLifetime? appLifetime = null,
-        IImpersonatedCommunicationQuery? impersonatedQuery = null,
-        ICallerSystemUserResolver? callerSystemUserResolver = null)
+        IHostApplicationLifetime? appLifetime = null)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -142,8 +134,7 @@ public class OfficeService : IOfficeService
         _emailProcessingOptions = emailProcessingOptions.Value;
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
-        _dataverseClient = dataverseClient;
-        _impersonatedQuery = impersonatedQuery;
+        _search = search;
         _genericEntityService = genericEntityService;
         _callerSystemUserResolver = callerSystemUserResolver;
         _logger = logger;
@@ -457,7 +448,7 @@ public class OfficeService : IOfficeService
             // OfficeDocumentPersistence's cross-path link (FR-C4) resolves the canonical this produces. Message-
             // level dedup is structural (FR-C1 alternate key) inside CaptureAsync — no second dedup mechanism.
             // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
-            if (_emailUploadCapture is not null && request.ContentType == SaveContentType.Email)
+            if (request.ContentType == SaveContentType.Email)
             {
                 await _emailUploadCapture.CaptureAsync(request, userId, cancellationToken);
             }
@@ -562,25 +553,22 @@ public class OfficeService : IOfficeService
             // An unresolved caller yields null, the property is skipped by the create mapper, and the row
             // simply records no creator — which the ownership checks then REFUSE. Fail-closed by default.
             Guid? initiatedBySystemUserId = null;
-            if (_callerSystemUserResolver is not null)
-            {
-                var callerResolution = await _callerSystemUserResolver
-                    .ResolveAsync(httpContext.User, cancellationToken);
+            var callerResolution = await _callerSystemUserResolver
+                .ResolveAsync(httpContext.User, cancellationToken);
 
-                if (callerResolution.IsResolved
-                    && Guid.TryParse(callerResolution.SystemUserId, out var resolvedSystemUserId)
-                    && resolvedSystemUserId != Guid.Empty)
-                {
-                    initiatedBySystemUserId = resolvedSystemUserId;
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Could not resolve a Dataverse systemuser for the caller ({Reason}); this job will " +
-                        "record no creator and its status will therefore be refused after the in-memory " +
-                        "entry expires (task 067 fail-closed rule).",
-                        callerResolution.UnresolvedReason ?? "unknown");
-                }
+            if (callerResolution.IsResolved
+                && Guid.TryParse(callerResolution.SystemUserId, out var resolvedSystemUserId)
+                && resolvedSystemUserId != Guid.Empty)
+            {
+                initiatedBySystemUserId = resolvedSystemUserId;
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Could not resolve a Dataverse systemuser for the caller ({Reason}); this job will " +
+                    "record no creator and its status will therefore be refused after the in-memory " +
+                    "entry expires (task 067 fail-closed rule).",
+                    callerResolution.UnresolvedReason ?? "unknown");
             }
 
             try
@@ -1847,402 +1835,18 @@ public class OfficeService : IOfficeService
     }
 
     /// <inheritdoc />
-    public async Task<EntitySearchResponse> SearchEntitiesAsync(
+    /// <remarks>Delegates to <see cref="OfficeSearchService"/> (task 059). The search code moved there verbatim.</remarks>
+    public Task<EntitySearchResponse> SearchEntitiesAsync(
         EntitySearchRequest request,
         string userId,
         Guid callerSystemUserId,
         CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation(
-            "Entity search requested: Query='{Query}', Types={EntityTypes}, Skip={Skip}, Top={Top}, User={UserId}",
-            request.Query,
-            request.EntityTypes != null ? string.Join(",", request.EntityTypes) : "all",
-            request.Skip,
-            request.Top,
-            userId);
-
-        // Determine which entity types to search
-        var typesToSearch = GetEntityTypesToSearch(request.EntityTypes);
-
-        // Real Dataverse search (task 026 / #229). When no client is injected (bare test
-        // constructions), fall back to the legacy stub so those tests keep their shape.
-        // The stub returns hardcoded fixtures, never tenant data, so it discloses nothing; task 059
-        // owns its removal.
-        if (_dataverseClient is null)
-        {
-            var stub = GenerateStubResults(request.Query, typesToSearch, request.Top);
-            var stubTotal = stub.Count + (request.Skip > 0 ? request.Skip : 0);
-            return new EntitySearchResponse
-            {
-                Results = stub.Skip(request.Skip).Take(request.Top).ToList(),
-                TotalCount = stubTotal,
-                HasMore = stubTotal > request.Skip + request.Top
-            };
-        }
-
-        // FORCING FUNCTION (task 062 / finding F1). Every row this method can return comes from an
-        // IMPERSONATED query keyed by these two values. Absent either one, there is no identity for
-        // Dataverse to filter by and the only query we could issue is the tenant-wide app-only
-        // enumeration this task exists to close — so refuse loudly rather than serve it. The endpoint
-        // resolves and validates both before calling; reaching here without them means the pipeline
-        // changed underneath us.
-        if (_impersonatedQuery is null || callerSystemUserId == Guid.Empty)
-        {
-            _logger.LogError(
-                "Entity search reached OfficeService without an impersonation seam ({SeamPresent}) or a "
-                + "caller systemuserid ({CallerSystemUserId}) — refusing rather than falling back to the "
-                + "app-only enumeration (fail closed).",
-                _impersonatedQuery is not null, callerSystemUserId);
-
-            throw new InvalidOperationException(
-                "Entity search requires an impersonated Dataverse read as the calling user; "
-                + "refusing to issue an app-only, security-untrimmed query.");
-        }
-
-        // Query each requested entity type with a name/number 'contains' filter, IMPERSONATED as the
-        // caller (MSCRMCallerID = their systemuserid) so Dataverse itself applies row-level security —
-        // ownership, role depth, business unit, teams, sharing, hierarchy — inside the query. The rows
-        // that come back ARE what this caller may read, for every entity type, on every page, at the
-        // cost of the same one round trip per type the app-only query took. See the remarks on
-        // QuerySearchEntityAsync for why this mechanism was chosen over post-trimming each row.
-        //
-        // Each type stays best-effort — one entity's failure (missing table, transient 4xx) is logged
-        // and skipped, never fails the whole picker — EXCEPT that a run in which every attempted type
-        // threw is reported as a failure rather than as "no results": an impersonation privilege that
-        // is not configured must not look like an empty tenant.
-        var combined = new List<EntitySearchResult>();
-        var perTypeTop = Math.Clamp(request.Top, 5, 50);
-        var typeFailures = 0;
-        var typesAttempted = 0;
-        foreach (var type in typesToSearch)
-        {
-            typesAttempted++;
-            try
-            {
-                combined.AddRange(await QuerySearchEntityAsync(
-                    type, request.Query, perTypeTop, callerSystemUserId, cancellationToken));
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                typeFailures++;
-                _logger.LogWarning(ex, "Entity search failed for type {EntityType}; skipping", type);
-            }
-        }
-
-        if (typesAttempted > 0 && typeFailures == typesAttempted)
-        {
-            // The single most likely cause is the go-live prerequisite: the BFF application user does
-            // not hold prvActOnBehalfOfAnotherUser, so every impersonated read is rejected. Surfacing
-            // that as an empty picker would be a lie that reads as "you have access to nothing".
-            throw new InvalidOperationException(
-                $"Entity search failed for all {typesAttempted} requested entity type(s). The impersonated "
-                + "read may be rejected because the BFF application user lacks the Dataverse Delegate "
-                + "privilege prvActOnBehalfOfAnotherUser.");
-        }
-
-        // Rank: prefix matches first, then most-recently-modified.
-        var ordered = combined
-            .OrderByDescending(r => r.Name.StartsWith(request.Query, StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(r => r.ModifiedOn)
-            .ToList();
-
-        return new EntitySearchResponse
-        {
-            Results = ordered.Skip(request.Skip).Take(request.Top).ToList(),
-            TotalCount = ordered.Count + request.Skip,
-            HasMore = ordered.Count > request.Skip + request.Top
-        };
-    }
-
-    /// <summary>Per-entity-type Dataverse Web API search metadata (mirrors RecordSyncJob's catalogue).</summary>
-    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField);
-
-    private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
-        new Dictionary<AssociationEntityType, EntitySearchMeta>
-        {
-            [AssociationEntityType.Matter] = new("sprk_matters", "sprk_matterid", "sprk_mattername", "sprk_matternumber", "sprk_matterdescription"),
-            [AssociationEntityType.Project] = new("sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription"),
-            [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_description"),
-            [AssociationEntityType.Account] = new("accounts", "accountid", "name", "accountnumber", "description"),
-            [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle"),
-        };
-
-    /// <summary>
-    /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API
-    /// IMPERSONATED as <paramref name="callerSystemUserId"/>, and maps the rows to
-    /// <see cref="EntitySearchResult"/>. The rows returned are exactly those the caller may read.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Why trim INSIDE the query rather than post-trim each row</b> (task 062, finding F1 — the
-    /// mechanism choice the acceptance criteria ask to be stated). The alternative, and the one the
-    /// sibling record/visualization search surfaces use, is to run the app-only query and then call
-    /// <c>AuthorizationService.GetCallerRecordAccessAsync</c> per returned row. Both are correct; they
-    /// differ on cost and on coverage:
-    /// </para>
-    /// <list type="bullet">
-    ///   <item><description><b>Cost.</b> This is a keystroke-driven typeahead with a 500 ms contract,
-    ///   and the picker asks for up to 50 rows per type across five types. Post-trimming buys one
-    ///   Dataverse round trip PER DISTINCT ROW — up to 250 sequential calls for one keystroke.
-    ///   Impersonation adds none: Dataverse filters inside the same single query per type. The only
-    ///   added round trip on the whole request is the one oid→systemuserid lookup the endpoint already
-    ///   performs for quick-create.</description></item>
-    ///   <item><description><b>Coverage.</b> Post-trimming can only trim rows it has already fetched,
-    ///   so a caller entitled to few records receives a short page indistinguishable from "nothing
-    ///   matched" once ranking pushes their matches past the fetched window — the limitation
-    ///   <c>RecordSearchEndpoints.AuthorizeRowsAsync</c> documents as follow-up F-4. Filtering inside
-    ///   the query has no such window: page N is drawn from the caller's own rows.</description></item>
-    ///   <item><description><b>Uniformity.</b> Post-trimming needs an entity-set allow-list, and the
-    ///   shared one (<c>SemanticSearchAuthorizationFilter.AuthorizableEntitySets</c>) covers matter,
-    ///   project, invoice and work assignment — but NOT account or contact, two of this route's five
-    ///   types. Impersonation is entity-agnostic, so all five are covered by the same
-    ///   mechanism.</description></item>
-    /// </list>
-    /// <para>
-    /// This is the seam <c>.claude/constraints/auth.md</c> names as genuinely caller-scoped, and the
-    /// one the Communication read path already ships on. <b>Operational prerequisite</b>: the BFF
-    /// application user must hold the Dataverse Delegate privilege
-    /// <c>prvActOnBehalfOfAnotherUser</c>. Without it Dataverse rejects the call — which fails closed,
-    /// and which <see cref="SearchEntitiesAsync"/> reports as an error rather than as an empty picker.
-    /// </para>
-    /// </remarks>
-    private async Task<List<EntitySearchResult>> QuerySearchEntityAsync(
-        AssociationEntityType type,
-        string query,
-        int top,
-        Guid callerSystemUserId,
-        CancellationToken cancellationToken)
-    {
-        var meta = _searchMeta[type];
-
-        // OData string literal: double single-quotes, then URL-encode the value (the surrounding
-        // contains(...) syntax stays literal).
-        var value = Uri.EscapeDataString(query.Replace("'", "''"));
-        var nameClause = $"contains({meta.NameField},'{value}')";
-        var filter = meta.RefField is null
-            ? nameClause
-            : $"({nameClause} or contains({meta.RefField},'{value}'))";
-
-        var selectFields = new List<string> { meta.IdField, meta.NameField, "modifiedon" };
-        if (meta.RefField is not null) selectFields.Add(meta.RefField);
-        if (meta.DescField is not null) selectFields.Add(meta.DescField);
-
-        var odataQuery =
-            $"$filter={filter}&$select={string.Join(",", selectFields)}&$top={top}";
-
-        var rows = await _impersonatedQuery!.QueryAsync(
-            meta.EntitySet,
-            odataQuery,
-            callerSystemUserId,
-            cancellationToken);
-
-        var results = new List<EntitySearchResult>(rows.Count);
-        foreach (var row in rows)
-        {
-            var mapped = MapSearchRow(type, meta, row);
-            if (mapped is not null)
-                results.Add(mapped);
-        }
-
-        return results;
-    }
-
-    /// <summary>
-    /// Maps one Dataverse Web API JSON row to an <see cref="EntitySearchResult"/>, or null when the
-    /// row has no name (never surface an unnamed record in the picker). Pure — unit-tested.
-    /// </summary>
-    internal static EntitySearchResult? MapSearchRow(
-        AssociationEntityType type,
-        EntitySearchMeta meta,
-        Dictionary<string, JsonElement> row)
-    {
-        var name = GetJsonString(row, meta.NameField);
-        if (string.IsNullOrWhiteSpace(name))
-            return null;
-
-        var id = Guid.TryParse(GetJsonString(row, meta.IdField), out var g) ? g : Guid.Empty;
-        var refVal = meta.RefField is not null ? GetJsonString(row, meta.RefField) : null;
-        var desc = meta.DescField is not null ? GetJsonString(row, meta.DescField) : null;
-        var modified = DateTimeOffset.TryParse(GetJsonString(row, "modifiedon"), out var mo)
-            ? mo
-            : DateTimeOffset.UtcNow;
-
-        return new EntitySearchResult
-        {
-            Id = id,
-            EntityType = type,
-            LogicalName = GetLogicalName(type),
-            Name = name!,
-            DisplayInfo = !string.IsNullOrWhiteSpace(refVal) ? refVal! : (desc ?? GetLogicalName(type)),
-            PrimaryField = !string.IsNullOrWhiteSpace(refVal) ? refVal! : name!,
-            IconUrl = $"/icons/{type.ToString().ToLowerInvariant()}.svg",
-            ModifiedOn = modified
-        };
-    }
-
-    private static string? GetJsonString(Dictionary<string, JsonElement> row, string key)
-        => row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
-
-    /// <summary>
-    /// Determines which entity types to search based on the request.
-    /// </summary>
-    private static HashSet<AssociationEntityType> GetEntityTypesToSearch(string[]? requestedTypes)
-    {
-        // If no types specified, search all
-        if (requestedTypes == null || requestedTypes.Length == 0)
-        {
-            return new HashSet<AssociationEntityType>(Enum.GetValues<AssociationEntityType>());
-        }
-
-        var typesToSearch = new HashSet<AssociationEntityType>();
-        foreach (var typeStr in requestedTypes)
-        {
-            if (Enum.TryParse<AssociationEntityType>(typeStr, ignoreCase: true, out var entityType))
-            {
-                typesToSearch.Add(entityType);
-            }
-        }
-
-        // If no valid types were specified, search all
-        return typesToSearch.Count > 0
-            ? typesToSearch
-            : new HashSet<AssociationEntityType>(Enum.GetValues<AssociationEntityType>());
-    }
-
-    /// <summary>
-    /// Generates stub results for testing. Will be replaced with actual Dataverse queries.
-    /// </summary>
-    private static List<EntitySearchResult> GenerateStubResults(
-        string query,
-        HashSet<AssociationEntityType> entityTypes,
-        int maxResults)
-    {
-        var results = new List<EntitySearchResult>();
-        var queryLower = query.ToLowerInvariant();
-
-        // Generate test data that matches the query
-        var testData = new[]
-        {
-            new { Type = AssociationEntityType.Matter, Name = "Smith vs Jones Matter", Info = "Client: Acme Corp | Status: Active", Primary = "SMJ-2024-001" },
-            new { Type = AssociationEntityType.Matter, Name = "Acme Contract Dispute", Info = "Client: Acme Corp | Status: Open", Primary = "ACD-2024-002" },
-            new { Type = AssociationEntityType.Project, Name = "Acme Implementation Project", Info = "Phase: Development | Due: 2026-06-01", Primary = "PROJ-001" },
-            new { Type = AssociationEntityType.Project, Name = "Smith Foundation Audit", Info = "Phase: Planning | Due: 2026-03-15", Primary = "PROJ-002" },
-            new { Type = AssociationEntityType.Invoice, Name = "INV-2024-0001", Info = "Amount: $15,000 | Status: Pending", Primary = "Acme Corp" },
-            new { Type = AssociationEntityType.Invoice, Name = "INV-2024-0002", Info = "Amount: $8,500 | Status: Paid", Primary = "Smith Foundation" },
-            new { Type = AssociationEntityType.Account, Name = "Acme Corporation", Info = "Industry: Manufacturing | City: Chicago", Primary = "acme@acmecorp.com" },
-            new { Type = AssociationEntityType.Account, Name = "Smith Foundation", Info = "Industry: Non-Profit | City: Boston", Primary = "info@smithfoundation.org" },
-            new { Type = AssociationEntityType.Contact, Name = "John Smith", Info = "Company: Acme Corp | Title: CEO", Primary = "john.smith@acmecorp.com" },
-            new { Type = AssociationEntityType.Contact, Name = "Jane Acme", Info = "Company: Acme Corp | Title: CFO", Primary = "jane.acme@acmecorp.com" }
-        };
-
-        foreach (var item in testData)
-        {
-            // Only include if type is requested
-            if (!entityTypes.Contains(item.Type))
-                continue;
-
-            // Only include if query matches name, info, or primary field
-            var matchesQuery = item.Name.ToLowerInvariant().Contains(queryLower) ||
-                               item.Info.ToLowerInvariant().Contains(queryLower) ||
-                               item.Primary.ToLowerInvariant().Contains(queryLower);
-
-            if (!matchesQuery)
-                continue;
-
-            results.Add(new EntitySearchResult
-            {
-                Id = Guid.NewGuid(),
-                EntityType = item.Type,
-                LogicalName = GetLogicalName(item.Type),
-                Name = item.Name,
-                DisplayInfo = item.Info,
-                PrimaryField = item.Primary,
-                IconUrl = $"/icons/{item.Type.ToString().ToLowerInvariant()}.svg",
-                ModifiedOn = DateTimeOffset.UtcNow.AddDays(-Random.Shared.Next(1, 30))
-            });
-
-            if (results.Count >= maxResults)
-                break;
-        }
-
-        // Sort by relevance (exact match first) then by recency
-        return results
-            .OrderByDescending(r => r.Name.ToLowerInvariant().StartsWith(queryLower))
-            .ThenByDescending(r => r.ModifiedOn)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Gets the Dataverse logical name for an entity type.
-    /// </summary>
-    private static string GetLogicalName(AssociationEntityType entityType) => entityType switch
-    {
-        AssociationEntityType.Matter => "sprk_matter",
-        AssociationEntityType.Project => "sprk_project",
-        AssociationEntityType.Invoice => "sprk_invoice",
-        AssociationEntityType.Account => "account",
-        AssociationEntityType.Contact => "contact",
-        _ => throw new ArgumentOutOfRangeException(nameof(entityType))
-    };
+        => _search.SearchEntitiesAsync(request, userId, callerSystemUserId, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<MatterTypeListResponse> GetMatterTypesAsync(
-        CancellationToken cancellationToken = default)
-    {
-        // No Dataverse client injected (bare test constructions) — mirror SearchEntitiesAsync's stub
-        // fallback with an empty list rather than throwing.
-        if (_dataverseClient is null)
-        {
-            return new MatterTypeListResponse { Results = Array.Empty<MatterTypeOption>() };
-        }
-
-        var rows = await _dataverseClient.QueryAsync<Dictionary<string, JsonElement>>(
-            "sprk_mattertype_refs",
-            filter: "statecode eq 0",
-            select: "sprk_mattertype_refid,sprk_mattertypename,sprk_mattertypecode",
-            top: 50,
-            cancellationToken: cancellationToken);
-
-        var options = new List<MatterTypeOption>(rows.Count);
-        foreach (var row in rows)
-        {
-            var mapped = MapMatterTypeRow(row);
-            if (mapped is not null)
-                options.Add(mapped);
-        }
-
-        return new MatterTypeListResponse
-        {
-            Results = options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList()
-        };
-    }
-
-    /// <summary>
-    /// Maps one Dataverse Web API JSON row from <c>sprk_mattertype_refs</c> to a <see cref="MatterTypeOption"/>,
-    /// or null when the row has no name or no parseable id (never surface an unusable reference row). Pure —
-    /// unit-tested (mirrors <see cref="MapSearchRow"/>'s shape).
-    /// </summary>
-    internal static MatterTypeOption? MapMatterTypeRow(Dictionary<string, JsonElement> row)
-    {
-        var name = GetJsonString(row, "sprk_mattertypename");
-        if (string.IsNullOrWhiteSpace(name))
-            return null;
-
-        var id = Guid.TryParse(GetJsonString(row, "sprk_mattertype_refid"), out var g) ? g : Guid.Empty;
-        if (id == Guid.Empty)
-            return null;
-
-        return new MatterTypeOption
-        {
-            Id = id,
-            Name = name!,
-            Code = GetJsonString(row, "sprk_mattertypecode")
-        };
-    }
+    /// <remarks>Delegates to <see cref="OfficeSearchService"/> (task 059).</remarks>
+    public Task<MatterTypeListResponse> GetMatterTypesAsync(CancellationToken cancellationToken = default)
+        => _search.GetMatterTypesAsync(cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>
@@ -2285,12 +1889,6 @@ public class OfficeService : IOfficeService
             _logger.LogInformation(
                 "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
                 entityType);
-            return null;
-        }
-
-        if (_genericEntityService is null)
-        {
-            _logger.LogWarning("Quick create unavailable — IGenericEntityService not injected.");
             return null;
         }
 
@@ -2464,12 +2062,6 @@ public class OfficeService : IOfficeService
     {
         _logger.LogInformation("Create To Do requested by user {UserId}", userId);
 
-        if (_genericEntityService is null)
-        {
-            _logger.LogWarning("Create To Do unavailable — IGenericEntityService not injected.");
-            return null;
-        }
-
         var name = request.Name?.Trim();
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -2519,7 +2111,7 @@ public class OfficeService : IOfficeService
 
             // Best-effort record-type ref (denormalized ADR-024 resolver lookup). Non-fatal — the typed lookup
             // above is the load-bearing relationship; a missing record-type ref only affects cross-entity display.
-            var recordTypeId = await ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
+            var recordTypeId = await _search.ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
                 .ConfigureAwait(false);
             if (recordTypeId is { } rtId && rtId != Guid.Empty)
             {
@@ -2636,38 +2228,6 @@ public class OfficeService : IOfficeService
                 : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
                   + "administrator to check your user record's business unit.",
             OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
-    }
-
-    /// <summary>
-    /// Resolves the <c>sprk_recordtype_ref</c> id for a target entity logical name (mirrors the client
-    /// <c>PolymorphicResolverService.resolveRecordType</c>). Best-effort — returns null on any failure or when the
-    /// reference table / row is absent, so the To Do create proceeds with the typed lookup alone.
-    /// </summary>
-    private async Task<Guid?> ResolveRegardingRecordTypeIdAsync(string logicalName, CancellationToken cancellationToken)
-    {
-        if (_dataverseClient is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var value = Uri.EscapeDataString(logicalName.Replace("'", "''"));
-            var rows = await _dataverseClient.QueryAsync<Dictionary<string, JsonElement>>(
-                "sprk_recordtype_refs",
-                filter: $"sprk_recordlogicalname eq '{value}' and statecode eq 0",
-                select: "sprk_recordtype_refid",
-                top: 1,
-                cancellationToken: cancellationToken).ConfigureAwait(false);
-
-            var idString = rows.Count > 0 ? GetJsonString(rows[0], "sprk_recordtype_refid") : null;
-            return Guid.TryParse(idString, out var id) ? id : null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Record-type ref lookup failed for {LogicalName}; To Do regarding will omit it.", logicalName);
-            return null;
-        }
     }
 
     /// <inheritdoc />

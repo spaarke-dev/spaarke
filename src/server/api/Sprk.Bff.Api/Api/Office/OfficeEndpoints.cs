@@ -1011,12 +1011,12 @@ public static class OfficeEndpoints
         // GET /office/search/entities - Search for association targets
         // Authorization: OfficeAuthFilter validates user authentication; per-RECORD authorization is
         // enforced INSIDE the query by Dataverse row-level security, because the handler resolves the
-        // caller's systemuserid and OfficeService issues the search IMPERSONATED as that user
+        // caller's systemuserid and OfficeSearchService issues the search IMPERSONATED as that user
         // (task 062, finding F1). Per ADR-008 a per-resource check belongs in a filter — but a filter
         // runs before the handler and there are no rows yet to authorize, and the subject here is a
         // whole result set rather than one route-addressed resource. The trim therefore lives in the
         // query itself, which is the case ADR-008's own constraint carves out ("where trimming must
-        // happen inside the query, document why in the code"). See OfficeService.QuerySearchEntityAsync.
+        // happen inside the query, document why in the code"). See OfficeSearchService.QuerySearchEntityAsync.
         // Rate Limit: 30 requests/minute/user (per spec.md)
         search.MapGet("/entities", SearchEntitiesAsync)
             .WithName("SearchOfficeEntities")
