@@ -70,7 +70,10 @@ public enum SystemUserLinkOutcome
     /// <summary>Refused without a flag (lookup failure, masking, missing linked contact, no oid).</summary>
     Denied,
 
-    /// <summary>A write failed; the next run retries.</summary>
+    /// <summary>
+    /// A write failed. In this BFF's own environment the reconciliation job re-decides the user on its next run;
+    /// a registration link in another environment has no retry in this BFF (see RegistrationDataverseService).
+    /// </summary>
     Failed,
 }
 
@@ -135,8 +138,10 @@ public sealed class ContactIdentityBinder
     /// run before any such write lands; an ungated inline link would make those writes as soon as a licensed user
     /// signed in after the deploy, ahead of the review (verifier finding 4). Not gated, deliberately: the Type-2
     /// token plane (a member's own first sign-in, behind the member test — gating it would deny every Type-2
-    /// caller) and registration (an operator-initiated link of a systemuser the BFF itself just created, in a
-    /// target environment the job never scans, so a gate would leave that user unlinked with no safety net).
+    /// caller) and registration (an operator-initiated link of a systemuser the BFF itself just created, normally
+    /// in a demo/customer target environment this BFF's job does not scan — it scans only Dataverse:ServiceUrl —
+    /// so a gate would leave that user unlinked with no safety net; a registration link that does not land there
+    /// is not retried by this BFF either, and RegistrationDataverseService logs it as such).
     /// </remarks>
     public const string LinkWritesEnabledConfigKey = "IdentityLink:Reconciliation:WritesEnabled";
 
@@ -742,8 +747,9 @@ public sealed class ContactIdentityBinder
         if (write.Status != StoreWriteStatus.Written)
         {
             _logger.LogWarning(
-                "[ID-BIND] Link of systemuser {SystemUserId} to contact {ContactId} not written ({Status}); the next "
-                + "reconciliation run retries. An existing link is never overwritten.",
+                "[ID-BIND] Link of systemuser {SystemUserId} to contact {ContactId} not written ({Status}). An existing "
+                + "link is never overwritten. Only this BFF's own environment is re-decided by its reconciliation job; "
+                + "a registration link in another environment is logged by the caller as not retried.",
                 user.SystemUserId, contactId, write.Status);
             return Result(user.SystemUserId, SystemUserLinkOutcome.Failed, contactId,
                 ContactBindingDecision.DenyContactBindFailed, null, Array.Empty<Guid>(), changes, true);

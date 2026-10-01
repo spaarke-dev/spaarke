@@ -546,16 +546,69 @@ public class ContactBindingDecisionTests
         => ContactBindingDecision.IsGuestDomainName(domainName).Should().Be(guest);
 
     [Fact]
-    public void TheSharedReadOnlyQuery_ReadsTwoActiveRowsByTheBindingColumn()
+    public void TheSharedReadOnlyQuery_ReadsTwoRowsInAnyState_ByTheBindingColumn()
     {
-        var q = ContactBindingDecision.ActiveContactsBoundToQuery(Caller);
+        // The SAME question the binder's oid lookup asks (any statecode, two rows): an inactive second contact on
+        // the caller's oid must be visible to the read-only consumers too (verifier finding 6).
+        var q = ContactBindingDecision.ContactsBoundToQuery(Caller);
 
         q.EntityName.Should().Be("contact");
         q.TopCount.Should().Be(2, "an ambiguous binding must be visible");
         q.Criteria.Conditions.Should().Contain(c => c.AttributeName == "sprk_externalobjectid"
             && (string)c.Values[0] == Caller.ToString("D"));
-        q.Criteria.Conditions.Should().Contain(c => c.AttributeName == "statecode" && (int)c.Values[0] == 0);
+        q.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "statecode",
+            "filtering to active rows hides an inactive contact that makes the oid ambiguous");
+        q.ColumnSet.Columns.Should().Contain("statecode", "the decision needs each row's state");
         q.Criteria.Conditions.Should().NotContain(c => c.AttributeName == "azureactivedirectoryobjectid");
+    }
+
+    // ── The read-only consumers' answer is the binder's answer (verifier finding 6) ───────────────────
+
+    [Fact]
+    public void DecideBoundContact_AnActiveAndAnInactiveContactOnOneOid_IsAmbiguous_ExactlyAsTheBinderSays()
+    {
+        var oid = ContactLookup.Of(Bound(ContactA, Caller), Bound(ContactB, Caller, state: 1));
+
+        var reader = ContactBindingDecision.DecideBoundContact(oid);
+        var binder = ContactBindingDecision.Decide(Workforce(), oid);
+
+        reader!.Action.Should().Be(BindingAction.Collision);
+        reader.DenyCode.Should().Be(ContactBindingDecision.DenyContactOidAmbiguous);
+        reader.ContactId.Should().BeNull("never the active one of two");
+        (binder.Action, binder.DenyCode).Should().Be((reader.Action, reader.DenyCode),
+            "a reader and the binder must give the same answer to the same rows");
+    }
+
+    [Fact]
+    public void DecideBoundContact_ResolvesOnlyTheOneActiveContact_AndDeniesAnInactiveOne()
+    {
+        ContactBindingDecision.DecideBoundContact(ContactLookup.Of(Bound(ContactA, Caller)))
+            .Should().Be(new BindingDecision(BindingAction.ResolveByOid, ContactA));
+        ContactBindingDecision.DecideBoundContact(ContactLookup.Of(Bound(ContactA, Caller, state: 1)))!
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
+        ContactBindingDecision.DecideBoundContact(NoRows).Should().BeNull("no contact carries the oid");
+        ContactBindingDecision.DecideBoundContact(ContactLookup.Failed)!
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactLookupFailed);
+    }
+
+    [Fact]
+    public void BoundContactLookup_ReadsTheStateFromTheRow_AndAMissingStateIsNotActive()
+    {
+        var active = new Microsoft.Xrm.Sdk.Entity("contact", ContactA)
+        {
+            ["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0),
+            ["sprk_externalobjectid"] = Caller.ToString("D"),
+        };
+        var noState = new Microsoft.Xrm.Sdk.Entity("contact", ContactB) { ["sprk_externalobjectid"] = Caller.ToString("D") };
+
+        var lookup = ContactBindingDecision.BoundContactLookup(new[] { active, noState });
+
+        lookup.Status.Should().Be(LookupStatus.Read);
+        lookup.Rows.Should().HaveCount(2);
+        lookup.Rows[0].IsActive.Should().BeTrue();
+        lookup.Rows[1].IsActive.Should().BeFalse("ADR-003: only statecode = 0 resolves");
+        ContactBindingDecision.DecideBoundContact(ContactBindingDecision.BoundContactLookup(new[] { noState }))!
+            .DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
     }
 
     private static bool Holds(CollisionFlag flag, ContactBindingRow flagged, ContactLookup? email = null,

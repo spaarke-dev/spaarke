@@ -60,7 +60,7 @@ public class ContactAadObjectIdColumnGuardTests
 
         violations.Should().BeEmpty(
             "contact.azureactivedirectoryobjectid does not exist in dev and is not the binding key — query "
-            + "contact.sprk_externalobjectid (ContactBindingDecision.ActiveContactsBoundToQuery / the identity store). Found:\n"
+            + "contact.sprk_externalobjectid (ContactBindingDecision.ContactsBoundToQuery / the identity store). Found:\n"
             + string.Join("\n", violations));
     }
 

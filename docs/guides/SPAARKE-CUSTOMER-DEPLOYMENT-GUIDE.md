@@ -583,6 +583,19 @@ create, behind the member test) and the link written when the BFF itself creates
 provisioning (in that target environment, which the job does not scan). Do not run demo registrations into the
 BFF's own environment while the report-only run is under review, or its counts will drift.
 
+**A registration link that does not land in a target environment is NOT retried by this BFF.** The job scans
+only the BFF's own `Dataverse:ServiceUrl`. When a demo/customer provisioning target is a different environment
+and the link there faults, is refused or loses a race (or raises a collision flag), nothing in this BFF re-decides
+that user or re-evaluates that flag. App Insights shows it as a warning:
+`[ID-BIND] New systemuser … contact link NOT made … and NOT retried by this BFF`. The user is linked only by a
+BFF deployed against that environment (its own job, with `IdentityLink__Reconciliation__WritesEnabled=true`); if
+none runs there, the user stays unlinked (Assigned-To / No Access List / briefing matching skip them) until one
+does. A link that does not land in the BFF's own environment logs `… re-decides the user on its next run` instead.
+
+**Cost of leaving a stamp report-only.** Each run reads every enabled interactive systemuser; a user with no
+verified link costs roughly 2–4 further Dataverse reads per run (every 5 minutes) for as long as writes stay off.
+Fine at dev scale; on a large stamp, enable writes after the review rather than leaving the job report-only.
+
 **Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141.** The BFF selects the new
 columns, so without them every binding read fails closed (`sdap.access.deny.binding_column_missing`) and
 CIAM and Type-2 sign-ins are denied.
@@ -1159,6 +1172,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
 | 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
 | 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
+| 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
 
 ---
 

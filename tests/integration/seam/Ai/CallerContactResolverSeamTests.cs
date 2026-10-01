@@ -31,19 +31,25 @@ public sealed class CallerContactResolverSeamTests
         new(new ClaimsIdentity(new[] { new Claim("oid", oid.ToString()) }, "TestAuth"));
 
     /// <summary>
-    /// The contact BOUND to the caller's oid (unified-access-control-r2 task 141): the ACTIVE contact whose
-    /// <c>sprk_externalobjectid</c> is the oid in "D" format. The resolver used to query
-    /// <c>contact.azureactivedirectoryobjectid</c>, which does not exist in dev — every "assign it to me" there
-    /// came back lookup-failed. The strict double answers ONLY the binding query, so a regression to the old
-    /// column throws instead of passing.
+    /// The contacts BOUND to the caller's oid (unified-access-control-r2 task 141): every contact whose
+    /// <c>sprk_externalobjectid</c> is the oid in "D" format, in ANY state (the binder's own question — verifier
+    /// finding 6). The resolver used to query <c>contact.azureactivedirectoryobjectid</c>, which does not exist in
+    /// dev — every "assign it to me" there came back lookup-failed. The strict double answers ONLY the binding
+    /// query without a statecode filter, so a regression to the old column, or back to an active-only read that
+    /// hides an inactive second contact, throws instead of passing.
     /// </summary>
-    private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, params Guid[] contactIds)
+    private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, params (Guid Id, int State)[] contacts)
     {
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
         var collection = new EntityCollection();
-        foreach (var cid in contactIds)
+        foreach (var (cid, state) in contacts)
         {
-            collection.Entities.Add(new Entity("contact") { Id = cid });
+            collection.Entities.Add(new Entity("contact")
+            {
+                Id = cid,
+                ["statecode"] = new OptionSetValue(state),
+                ["sprk_externalobjectid"] = oidQueried.ToString("D"),
+            });
         }
 
         dataverse
@@ -54,11 +60,14 @@ public sealed class CallerContactResolverSeamTests
                         c.AttributeName == "sprk_externalobjectid" &&
                         c.Values.Count == 1 &&
                         Equals(c.Values[0], oidQueried.ToString("D"))) &&
-                    q.Criteria.Conditions.Any(c => c.AttributeName == "statecode" && Equals(c.Values[0], 0))),
+                    q.Criteria.Conditions.All(c => c.AttributeName != "statecode")),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(collection);
         return dataverse;
     }
+
+    private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, params Guid[] activeContactIds)
+        => DataverseReturning(oidQueried, activeContactIds.Select(id => (id, 0)).ToArray());
 
     private static Mock<IDataverseService> DataverseReturning(Guid oidQueried, Guid? contactId)
         => DataverseReturning(oidQueried, contactId is { } c ? new[] { c } : Array.Empty<Guid>());
@@ -109,6 +118,34 @@ public sealed class CallerContactResolverSeamTests
 
         result.IsResolved.Should().BeFalse();
         result.UnresolvedReason.Should().Be("ambiguous-binding");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AnActiveAndAnInactiveContactOnTheOid_IsAmbiguous_NeverTheActiveOne()
+    {
+        // NEGATIVE (verifier finding 6): the binder reads the oid over every state and denies + flags this data
+        // as OidOnMultipleContacts. "Assign it to me" must give the same answer, not quietly pick the active row.
+        var dataverse = DataverseReturning(CallerOid, (ResolvedContactId, 0), (Guid.NewGuid(), 1));
+        var sut = new CallerContactResolver(dataverse.Object, Mock.Of<ILogger<CallerContactResolver>>());
+
+        var result = await sut.ResolveAsync(PrincipalWithOid(CallerOid), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.ContactId.Should().BeNull();
+        result.UnresolvedReason.Should().Be("ambiguous-binding");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_TheOnlyContactOnTheOidIsInactive_ReturnsItsOwnUnresolvedReason()
+    {
+        // Deactivating a contact is how an operator removes a person (ADR-003); it is never "me".
+        var dataverse = DataverseReturning(CallerOid, (ResolvedContactId, 1));
+        var sut = new CallerContactResolver(dataverse.Object, Mock.Of<ILogger<CallerContactResolver>>());
+
+        var result = await sut.ResolveAsync(PrincipalWithOid(CallerOid), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.UnresolvedReason.Should().Be("inactive-contact");
     }
 
     [Fact]

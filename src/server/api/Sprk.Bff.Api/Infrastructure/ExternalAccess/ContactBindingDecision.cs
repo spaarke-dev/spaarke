@@ -20,6 +20,7 @@
 // The decision table this implements, with every negative case, is in
 // projects/unified-access-control-r2/notes/task-141-identity-binding.md §3.
 
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -975,21 +976,59 @@ public static class ContactBindingDecision
     };
 
     /// <summary>
-    /// The read-only SDK query for the contact bound to <paramref name="oid"/>: ACTIVE rows, two of them, so an
-    /// ambiguous binding is visible. Shared by the read-only consumers (identity normalization, "assign it to
-    /// me") so the binding column is named in exactly one SDK query.
+    /// The read-only SDK query for the contacts bound to <paramref name="oid"/>: EVERY statecode, two rows, with
+    /// the statecode selected — the same question the binder's oid lookup asks
+    /// (<c>IContactIdentityStore.FindContactsByOidAsync</c>), so an ambiguous binding is visible even when one of
+    /// the two contacts is inactive. Shared by the read-only consumers (identity normalization, "assign it to
+    /// me") so the binding column is named in exactly one SDK query. Answer it with
+    /// <see cref="DecideBoundContact"/>.
     /// </summary>
-    public static QueryExpression ActiveContactsBoundToQuery(Guid oid)
+    public static QueryExpression ContactsBoundToQuery(Guid oid)
     {
         var query = new QueryExpression("contact")
         {
-            ColumnSet = new ColumnSet("contactid", ExternalObjectIdColumn, IdentityPlaneColumn),
+            ColumnSet = new ColumnSet("contactid", "statecode", ExternalObjectIdColumn, IdentityPlaneColumn),
             TopCount = 2,
             NoLock = true,
         };
         query.Criteria.AddCondition(ExternalObjectIdColumn, ConditionOperator.Equal, oid.ToString("D"));
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
         return query;
+    }
+
+    /// <summary>
+    /// The rows of a <see cref="ContactsBoundToQuery"/> result as the lookup <see cref="DecideBoundContact"/>
+    /// reads. A row whose <c>statecode</c> is absent maps to an unknown state, which is not active (ADR-003: only
+    /// <c>statecode = 0</c> resolves).
+    /// </summary>
+    public static ContactLookup BoundContactLookup(IEnumerable<Entity> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return new ContactLookup(LookupStatus.Read, rows
+            .Select(e => new ContactBindingRow(
+                e.Id,
+                e.GetAttributeValue<OptionSetValue>("statecode")?.Value,
+                e.GetAttributeValue<string>(ExternalObjectIdColumn),
+                e.GetAttributeValue<OptionSetValue>(IdentityPlaneColumn)?.Value))
+            .ToList());
+    }
+
+    /// <summary>
+    /// The oid step (D1–D4) on its own, for READ-ONLY consumers: the SAME answer the binder gives to "which
+    /// contact is bound to this oid?", so a reader never resolves a contact the binder would deny.
+    /// <list type="bullet">
+    /// <item><c>null</c> — no contact carries the oid.</item>
+    /// <item><see cref="BindingAction.ResolveByOid"/> — exactly one contact carries it, and it is active.</item>
+    /// <item><see cref="BindingAction.Collision"/> (<see cref="DenyContactOidAmbiguous"/>) — two or more contacts
+    /// carry it, in ANY state: one active plus one inactive is ambiguous here exactly as it is in the binder.</item>
+    /// <item><see cref="BindingAction.Deny"/> — the only contact is inactive (<see cref="DenyContactInactive"/>),
+    /// or the lookup could not be read.</item>
+    /// </list>
+    /// A reader writes nothing: flagging the collision is the binder's job (sign-in or the reconciliation job).
+    /// </summary>
+    public static BindingDecision? DecideBoundContact(ContactLookup oidLookup)
+    {
+        ArgumentNullException.ThrowIfNull(oidLookup);
+        return DecideOnOid(oidLookup);
     }
 
     /// <summary><c>contact.sprk_externalobjectid</c> — the binding key, both planes.</summary>

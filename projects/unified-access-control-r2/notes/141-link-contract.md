@@ -5,8 +5,8 @@
 > tasks 152 (briefing "assigned to" matching) and 013 (A-18 closure), and the C9 Assigned-To auto-grant work.
 > Changes to this contract are made HERE and announced to those consumers — do not fork a second rule.
 >
-> **State of the world when this was written**: the code is on branch `task/uac-r2-141` (not merged; fix round
-> `task/uac-r2-141-f1`, 2026-10-01). The Dataverse schema, the `acct` claim, the tenant setting and the job's
+> **State of the world when this was written**: the code is on branch `task/uac-r2-141` (not merged; fix rounds
+> `task/uac-r2-141-f1` and `task/uac-r2-141-f2`, 2026-10-01). The Dataverse schema, the `acct` claim, the tenant setting and the job's
 > writes are **pending manual gates** (see `task-141-identity-binding.md` §8). Until those land, dev behaves as
 > today: 1 of 11 interactive systemusers has `sprk_primarycontact`.
 >
@@ -80,7 +80,7 @@ plugin, no client, no `Xrm.WebApi` (DATAVERSE-WRITE-PATH-ARCHITECTURE WP-1/WP-3;
 | Writer | When | Writes |
 |---|---|---|
 | **Inline, workforce sign-in** — `WorkforcePrincipalResolver` | A licensed user resolves (Teams/SPA) with no contact: `EnsureSystemUserLinkAsync(systemUserId, applyWrites: true)` — **only when `IdentityLink:Reconciliation:WritesEnabled = true`** (the job's rollout switch; verifier finding 4). A Type-2 (unlicensed) member's first sign-in: `ResolveWorkforceCallerAsync` (not gated). | Bind / create / link, or a flag. The new link takes effect **on the same request** (`IIdentityNormalizationService.InvalidateAsync`). A user whose link cannot be made is not re-attempted for 10 minutes. With the switch off a licensed user is simply not linked inline (no read, no write) — the report-only job shows what would happen. |
-| **Registration** — `RegistrationDataverseService.CreateSystemUserAsync` → `LinkContactForNewSystemUserAsync` | When the BFF creates a systemuser (demo provisioning) | Bind / create / link, in the **same** `targetDataverseUrl` environment as the systemuser. |
+| **Registration** — `RegistrationDataverseService.CreateSystemUserAsync` → `LinkContactForNewSystemUserAsync` | When the BFF creates a systemuser (demo provisioning) | Bind / create / link, in the **same** `targetDataverseUrl` environment as the systemuser. ⚠️ A link that does not land in a target environment other than the BFF's own `Dataverse:ServiceUrl` is **not retried by this BFF** (its job scans only its own environment); the warning says so. Such a user is linked only by a BFF deployed against that environment (second fix round, verifier finding 4). |
 | **Reconciliation job** — `identity-link-reconciliation` (ADR-036 `IScheduledJob`, every 5 min) | Every enabled interactive systemuser (`isdisabled = false`, `applicationid` null, `accessmode` 0/1/2) | Pass 1: verify / link / bind / create, or flag. Pass 2 (only after a complete, untruncated pass 1 with a readable masking probe): re-evaluate every recorded party; drop the ones whose collision no longer holds, and clear the flag only when none holds AND no systemuser collided with the contact this run. **Report-only until `IdentityLink:Reconciliation:WritesEnabled = true`.** |
 | **Invite** — `/invite`, `/invite-and-grant` | An external user is invited | Binds the new CIAM oid (plane External) onto the contact. Refuses (409) and flags an email that matches a workforce-bound contact or a contact a systemuser links to. |
 | **CIAM first login** — `CiamContactPrincipalStrategy` | The invite's oid write had failed | Repair bind only (never creates a contact). |
@@ -112,7 +112,11 @@ Order of a systemuser link decision (the full table is `task-141-identity-bindin
   `…contact_email_ambiguous`, `…contact_oid_ambiguous`, `…contact_inactive`, `…contact_binding_unreadable`,
   `…binding_column_missing`, `…binding_column_masked`, `…workforce_acct_claim_missing`, …). Invites return HTTP 409
   with `reasonCode` `sdap.access.invite.workforce_bound_contact` / `…contact_linked_to_internal_user` /
-  `…email_ambiguous`.
+  `…email_ambiguous` / `…contact_binding_unreadable`. An invite whose contact lookup (email, or the systemuser
+  reference check) could not be read is NOT a refusal: HTTP **503** with `reasonCode`
+  `sdap.access.invite.contact_lookup_failed` and the message "…could not be looked up. Nothing was created; try
+  again." — nothing is created, bound, flagged or granted, on both `/invite` and `/invite-and-grant` (second fix
+  round, verifier finding 5; it used to be folded into the generic 500).
 
 ## 5. How a consumer reads the link
 
@@ -121,8 +125,8 @@ every consumer must handle.
 
 | You have | Use | You get |
 |---|---|---|
-| A **systemuser id** (server) | `IIdentityNormalizationService.ResolveAsync(systemUserId, ct)` → `PersonIdentity.ContactId` | `sprk_primarycontact` (honoured as-is, including a flagged kept link); when absent, the ONE active contact bound to the user's oid; otherwise `null`. Cached 10 min; writers invalidate. **This is the value membership (`MembershipResolverService`) and the Assigned-To / briefing matching see.** ⚠️ Stated explicitly (verifier finding 5, owner decision I2 = (1)): a flagged kept link is honoured EVERYWHERE this value is used — including `AccessibleRecordSetService`, whose contact-grant term then loads that contact's external grants into the licensed user's accessible set. In dev that is ralph.schroeder@spaarke.com → 8e9918a9, a contact bound to a CIAM oid: his set includes that CIAM identity's grants. This is the mixing the POML's rejection of option (b) warned about; it is pre-existing behaviour (the link predates task 141) that the owner chose to keep rather than clear the link, and it ends when an operator resolves the collision. |
-| The **caller's claims**, and you need proof the contact IS this identity ("assign it to me") | `ICallerContactResolver.ResolveAsync(principal, ct)` | Only the active contact whose `sprk_externalobjectid` = the caller's oid. Unresolved (`no-matching-contact`, `ambiguous-binding`, `lookup-failed`) otherwise — it does **not** follow a flagged kept link. |
+| A **systemuser id** (server) | `IIdentityNormalizationService.ResolveAsync(systemUserId, ct)` → `PersonIdentity.ContactId` | `sprk_primarycontact` (honoured as-is, including a flagged kept link); when absent, the ONE contact bound to the user's oid if it is active — read over EVERY statecode, so two contacts on the oid (even one active plus one inactive) give `null`, exactly as the binder denies them (second fix round, verifier finding 6); otherwise `null`. Cached 10 min; writers invalidate. **This is the value membership (`MembershipResolverService`) and the Assigned-To / briefing matching see.** ⚠️ Stated explicitly (verifier finding 5, owner decision I2 = (1)): a flagged kept link is honoured EVERYWHERE this value is used — including `AccessibleRecordSetService`, whose contact-grant term then loads that contact's external grants into the licensed user's accessible set. In dev that is ralph.schroeder@spaarke.com → 8e9918a9, a contact bound to a CIAM oid: his set includes that CIAM identity's grants. This is the mixing the POML's rejection of option (b) warned about; it is pre-existing behaviour (the link predates task 141) that the owner chose to keep rather than clear the link, and it ends when an operator resolves the collision. |
+| The **caller's claims**, and you need proof the contact IS this identity ("assign it to me") | `ICallerContactResolver.ResolveAsync(principal, ct)` | Only the ONE contact whose `sprk_externalobjectid` = the caller's oid, when it is active (read over every statecode — the binder's own question). Unresolved (`no-matching-contact`, `ambiguous-binding` — two contacts in any state —, `inactive-contact`, `lookup-failed`) otherwise — it does **not** follow a flagged kept link. |
 | A **workforce request principal** (Teams/SPA) | `WorkforcePrincipalResolution.ContactId` | The contact the resolver derived/bound for this request. |
 | **Client code** running as the signed-in user | `systemuser._sprk_primarycontact_value` (Web API) | Read only. Writing it fails (FLS). |
 
@@ -135,7 +139,8 @@ secured field from a client; treat two contacts on one oid as a choice.
   `IIdentityNormalizationService.ResolveAsync(systemUserId, ct).ContactId`. That is the same value task 152's
   briefing matcher and the membership resolver use, so the To Do you stamp is the To Do the briefing finds —
   including for a user whose existing link is flagged (Ralph in dev).
-- **Ambiguity rule**: two contacts carrying one oid → `null` (never one of them). Inactive contact → `null`.
+- **Ambiguity rule**: two contacts carrying one oid → `null` (never one of them), whatever their state — one
+  active plus one inactive is ambiguous too. Inactive contact → `null`.
 - **Null** → leave `sprk_assignedto` empty and log the warning, exactly as your constraint already says.
 - **Do not** call `ContactIdentityBinder` from the Office path: linking is the job's and the sign-in resolver's
   responsibility, and a To Do create must not become an identity write.

@@ -509,17 +509,55 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         (await ReasonCode(response)).Should().Be("sdap.access.invite.email_ambiguous");
     }
 
-    [Fact]
-    public async Task Invite_WhenTheContactLookupCannotBeRead_ReturnsProblemDetails_NotABare500()
+    // Verifier finding 5: an unreadable lookup used to be thrown into the generic catch — a 500 "Failed to onboard
+    // the external user" — so the decision's reason code and its message never reached the client. It is now its
+    // own answer on BOTH routes: 503, reasonCode sdap.access.invite.contact_lookup_failed, the decision's message,
+    // and nothing created, bound, flagged or granted. (Had the CIAM provisioner been reached it would attempt live
+    // MSAL/Key Vault and 500, so a 503 also proves no CIAM account was created.)
+    [Theory]
+    [InlineData("/api/v1/external-access/invite")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task Invite_WhenTheContactLookupCannotBeRead_Returns503_WithItsOwnReasonCodeAndMessage(string route)
     {
         _fixture.IdentityStore.EmailLookupStatus = LookupStatus.Failed;
         using var client = _fixture.CreateAdminClient();
 
-        var response = await client.PostAsJsonAsync("/api/v1/external-access/invite", InviteBody("anyone@firm.example"));
+        var response = await client.PostAsJsonAsync(route, InviteBody("anyone@firm.example"));
 
-        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        await ShouldBeTheLookupFailure(response);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/external-access/invite")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task Invite_WhenTheSystemUserReferenceLookupCannotBeRead_Returns503_AndWritesNothing(string route)
+    {
+        // The second read of the invite decision: is the one matching contact some internal user's contact?
+        // Not knowing is not "no" — it fails the invite exactly like an unreadable email lookup.
+        _fixture.IdentityStore.AddContact(Guid.NewGuid(), email: "unbound@firm.example");
+        _fixture.IdentityStore.FailReferences = true;
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(route, InviteBody("unbound@firm.example"));
+
+        await ShouldBeTheLookupFailure(response);
+    }
+
+    private async Task ShouldBeTheLookupFailure(HttpResponseMessage response)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
-        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("nothing is created on an unreadable lookup");
+        (await ReasonCode(response)).Should().Be("sdap.access.invite.contact_lookup_failed");
+        using (var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            doc.RootElement.GetProperty("detail").GetString().Should().Be(
+                "The contact for this email could not be looked up. Nothing was created; try again.",
+                "the decision's own message reaches the client");
+            doc.RootElement.TryGetProperty("onboardStatus", out _).Should().BeFalse();
+        }
+
+        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("no Contact and no sprk_externalrecordaccess grant");
+        _fixture.IdentityStore.Writes.Should().BeEmpty("nothing is bound and nothing is flagged on an unreadable lookup");
     }
 
     [Fact]

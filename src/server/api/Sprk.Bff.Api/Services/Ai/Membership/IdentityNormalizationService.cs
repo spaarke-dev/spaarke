@@ -275,9 +275,12 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     // contact.azureactivedirectoryobjectid cross-reference, a column that does not exist in dev (task 141 /
     // defect C7: every query of it threw and was swallowed as "no contact").
     //
-    // Read-only and fail-closed: an unreadable lookup, an ambiguous binding (two contacts carrying one oid) or
-    // an inactive contact all yield NO contact — less access, never a guessed one. The binding is WRITTEN only
-    // by ContactIdentityBinder.
+    // Read-only and fail-closed: an unreadable lookup, an ambiguous binding (two contacts carrying one oid, in ANY
+    // state) or an inactive contact all yield NO contact — less access, never a guessed one. The rows are read
+    // over every statecode and answered by ContactBindingDecision.DecideBoundContact, the binder's own oid step,
+    // so this reader and the binder give the same answer to the same data (verifier finding 6: an active plus an
+    // inactive contact on one oid used to resolve to the active one here while the binder denied and flagged).
+    // The binding is WRITTEN only by ContactIdentityBinder.
     private async Task<Guid?> TryResolveContactIdByBindingAsync(
         Guid aadObjectId,
         CancellationToken ct)
@@ -285,20 +288,25 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         try
         {
             var results = await _dataverse
-                .RetrieveMultipleAsync(ContactBindingDecision.ActiveContactsBoundToQuery(aadObjectId), ct)
+                .RetrieveMultipleAsync(ContactBindingDecision.ContactsBoundToQuery(aadObjectId), ct)
                 .ConfigureAwait(false);
 
-            var ids = results.Entities.Select(e => e.Id).Where(id => id != Guid.Empty).Distinct().ToList();
-            if (ids.Count > 1)
+            var decision = ContactBindingDecision.DecideBoundContact(
+                ContactBindingDecision.BoundContactLookup(results.Entities));
+            if (decision is null)
             {
-                _logger.LogWarning(
-                    "IdentityNormalizationService: {DenyCode} — {Count} active contacts carry oid {AadObjectId}; "
-                    + "no contact derived (fail closed)",
-                    ContactBindingDecision.DenyContactOidAmbiguous, ids.Count, aadObjectId);
                 return null;
             }
 
-            return ids.Count == 1 ? ids[0] : null;
+            if (decision.Action == BindingAction.ResolveByOid && decision.ContactId is { } contactId)
+            {
+                return contactId;
+            }
+
+            _logger.LogWarning(
+                "IdentityNormalizationService: {DenyCode} for oid {AadObjectId}; no contact derived (fail closed)",
+                decision.DenyCode, aadObjectId);
+            return null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

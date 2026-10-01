@@ -53,7 +53,8 @@ public static class InviteExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -90,6 +91,11 @@ public static class InviteExternalUserEndpoint
         {
             var outcome = await ProvisionAsync(
                 request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger, ct);
+            if (outcome.Failure is { } failure)
+            {
+                return LookupFailureResult(failure, httpContext);
+            }
+
             if (outcome.Refusal is { } refusal)
             {
                 return RefusalResult(refusal, httpContext);
@@ -115,8 +121,17 @@ public static class InviteExternalUserEndpoint
     /// <summary>A refused invite: HTTP 409 with a stable reason code and a human message.</summary>
     internal sealed record InviteRefusal(string ReasonCode, string Message);
 
-    /// <summary>The provisioning outcome: a contact and a status, or a refusal.</summary>
-    internal sealed record ProvisionOutcome(Guid ContactId, string Status, InviteRefusal? Refusal = null);
+    /// <summary>
+    /// An invite whose contact lookup could not be read (the decision's <c>Fail</c>): not a refusal and not a
+    /// collision — nothing was decided, nothing was created or flagged. HTTP 503 with the decision's own reason
+    /// code and message, so the client can tell "try again" from a refusal and from an unknown fault (task 141,
+    /// verifier finding 5: this used to be thrown into the generic 500 and the code was dropped).
+    /// </summary>
+    internal sealed record InviteLookupFailure(string ReasonCode, string Message);
+
+    /// <summary>The provisioning outcome: a contact and a status, or a refusal, or a lookup failure.</summary>
+    internal sealed record ProvisionOutcome(
+        Guid ContactId, string Status, InviteRefusal? Refusal = null, InviteLookupFailure? Failure = null);
 
     /// <summary>
     /// Resolves-or-creates the Dataverse Contact by email and — if not already provisioned — creates a
@@ -124,8 +139,9 @@ public static class InviteExternalUserEndpoint
     /// and sends the onboarding email. <b>Idempotent</b>: a Contact already bound on the CIAM plane creates NO
     /// second account ("AlreadyProvisioned"). <b>Refuses</b> (task 141) a contact bound on the WORKFORCE plane,
     /// one an internal user links to, an ambiguous email, or an unreadable binding — BEFORE any CIAM account is
-    /// created. Throws on a hard failure (lookup, Contact create, CIAM create). Shared by <c>/invite</c> and
-    /// <c>/invite-and-grant</c> (task 029).
+    /// created. Returns a <see cref="InviteLookupFailure"/> (HTTP 503, its own reason code) when the contact
+    /// lookup could not be read. Throws on any other hard failure (Contact create, CIAM create, oid bind). Shared
+    /// by <c>/invite</c> and <c>/invite-and-grant</c> (task 029).
     /// </summary>
     internal static async Task<ProvisionOutcome> ProvisionAsync(
         InviteExternalUserRequest request,
@@ -167,10 +183,24 @@ public static class InviteExternalUserEndpoint
                 contactId = await CreateContactAsync(dataverseClient, request, logger, ct);
                 break;
 
+            case InviteContactAction.Fail:
+                // The email or reference lookup could not be read. Nothing was decided, created or flagged. The
+                // decision's own reason code and message reach the client (503) — never folded into the generic
+                // "Failed to onboard" 500.
+                var code = resolution.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed;
+                logger.LogWarning(
+                    "[EXT-INVITE] Contact lookup for {Email} could not be read ({ReasonCode}) — nothing created",
+                    request.Email, code);
+                return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "LookupFailed",
+                    Failure: new InviteLookupFailure(code,
+                        resolution.Message ?? ContactIdentityBinder.InviteMessage(code)
+                        ?? "The contact for this email could not be looked up. Nothing was created; try again."));
+
             default:
-                // Fail: the lookup could not be read. Nothing was created; ProblemDetails, never a bare 500.
+                // NeedReferenceLookup (or an action this code does not know) cannot reach here: the binder
+                // completes the reference lookup itself. Fail closed — nothing is created.
                 throw new InvalidOperationException(
-                    $"The contact lookup for '{request.Email}' could not be read ({resolution.ReasonCode}).");
+                    $"The invite decision for '{request.Email}' ended in an unexpected state ({resolution.Action}).");
         }
 
         // Create the CIAM local account (broker-only; no B2B guest).
@@ -217,6 +247,22 @@ public static class InviteExternalUserEndpoint
             extensions: new Dictionary<string, object?>
             {
                 ["reasonCode"] = refusal.ReasonCode,
+                ["traceId"] = httpContext.TraceIdentifier,
+            });
+
+    /// <summary>
+    /// The 503 ProblemDetails for an invite whose contact lookup could not be read (both <c>/invite</c> and
+    /// <c>/invite-and-grant</c>): the decision's reason code and its message. Retrying is safe — nothing was
+    /// created, bound, flagged or granted.
+    /// </summary>
+    internal static IResult LookupFailureResult(InviteLookupFailure failure, HttpContext httpContext)
+        => Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Contact lookup unavailable",
+            detail: failure.Message,
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = failure.ReasonCode,
                 ["traceId"] = httpContext.TraceIdentifier,
             });
 

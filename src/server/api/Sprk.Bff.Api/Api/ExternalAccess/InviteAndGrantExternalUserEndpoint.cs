@@ -39,7 +39,8 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -104,6 +105,13 @@ public static class InviteAndGrantExternalUserEndpoint
             if (outcome.Refusal is { } refusal)
             {
                 return InviteExternalUserEndpoint.RefusalResult(refusal, httpContext);
+            }
+
+            // Task 141 (verifier finding 5): an unreadable contact lookup is its own answer (503 + reason code),
+            // and — like a refusal — writes no grant.
+            if (outcome.Failure is { } failure)
+            {
+                return InviteExternalUserEndpoint.LookupFailureResult(failure, httpContext);
             }
 
             (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);

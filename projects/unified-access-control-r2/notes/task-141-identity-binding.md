@@ -9,6 +9,9 @@
 > **Verifier fix round** (`task/uac-r2-141-f1`, 2026-10-01): §9 (⛔ OWNER DECISION — alternate key vs field-level
 > security on `contact.sprk_externalobjectid`; G-1 blocked), §10 (what changed per finding, with the seeded
 > violations), §11 (statements the PR must carry).
+> **Second verifier fix round** (`task/uac-r2-141-f2`, 2026-10-01): §12 (findings 4–6 fixed — registration-link
+> retry wording and the recorded gap, the invite lookup-failure reason code, one answer for "which contact is bound
+> to this oid?"; findings 1–3 and 11–15 still blocked or pending, unchanged).
 > **Provisioning handoff**: [`handoffs/INCOMING-141-workforce-tenant-list.md`](handoffs/INCOMING-141-workforce-tenant-list.md).
 
 ---
@@ -173,7 +176,7 @@ The plane marker is not secured, so "marker present, oid absent" is detectable a
 
 | File | What it is |
 |---|---|
-| `Infrastructure/ExternalAccess/ContactBindingDecision.cs` | The ONE pure decision (§3), public: `Decide` (unlinked flow D0–E11), `DecideExistingLink` (L1–L12), `DecideInvite`, `ReadBinding`, `CollisionStillHolds`, `ShouldWriteFlag`, the deny/invite codes, and the shared read `ActiveContactsBoundToQuery` (used by `IdentityNormalizationService` and `CallerContactResolver`). No I/O. |
+| `Infrastructure/ExternalAccess/ContactBindingDecision.cs` | The ONE pure decision (§3), public: `Decide` (unlinked flow D0–E11), `DecideExistingLink` (L1–L12), `DecideInvite`, `ReadBinding`, `CollisionStillHolds`, `ShouldWriteFlag`, the deny/invite codes, and the shared read `ContactsBoundToQuery` + `BoundContactLookup` + `DecideBoundContact` (every statecode, two rows, the binder's own oid step — used by `IdentityNormalizationService` and `CallerContactResolver`; renamed from `ActiveContactsBoundToQuery` in the second fix round, §12). No I/O. |
 | `Infrastructure/ExternalAccess/WorkforceIdentityOptions.cs` | `WorkforceIdentity:CustomerTenantIds` + `WorkforceIdentityOptionsValidator` (non-GUID / all-zero / CIAM tenant fail startup; empty is valid and DENIES) + `WorkforceCallerClaims` + `WorkforceMembershipTest` (member = `CallerIdentity.FromPrincipal` UserDelegated ∧ `tid` listed ∧ `acct` = 0; six distinct deny codes). |
 | `Infrastructure/ExternalAccess/ContactIdentityStore.cs` | `IContactIdentityStore` (testing seam — HTTP doubles are banned by ADR-038 B1) + `DataverseContactIdentityStore` (Web API, app-only): three-state lookups (Read / Failed / ColumnMissing), ACTIVE rows `$top=2`, `If-Match` bind/link, create-only `PATCH contacts(sprk_externalobjectid='…')` + `If-None-Match: *`, version-conditional flag write/clear with every party as JSON, the FLS masking probe, paged scans. Pure request builders and parsers are unit-tested. |
 | `Infrastructure/ExternalAccess/ContactIdentityBinder.cs` | The ONE binding writer. `ResolveWorkforceCallerAsync`, `ResolveCiamCallerAsync`, `EnsureSystemUserLinkAsync` (row / id), `ResolveInviteContactAsync`, `BindInvitedContactAsync`. Runs the decision, performs the conditional writes, re-decides once on 412, writes idempotent flags, probes masking before any write. `ContactIdentityBinderFactory` builds one over another environment (registration). |
@@ -185,12 +188,12 @@ The plane marker is not secured, so "marker present, oid absent" is detectable a
 | File | Change |
 |---|---|
 | `WorkforcePrincipalResolver.cs` | Contact-only branch → `ContactIdentityBinder.ResolveWorkforceCallerAsync`; the decision's own deny code reaches the response. Systemuser with no contact → inline `EnsureSystemUserLinkAsync` + `IIdentityNormalizationService.InvalidateAsync` (same-request effect), **only when `IdentityLink:Reconciliation:WritesEnabled` is true** (fix round, finding 4); a failed link is not retried for 10 min (`identity-link-attempt` cache marker). `ExtractVerifiedEmail` → `ExtractTokenEmail` (it verified nothing). |
-| `IdentityNormalizationService.cs` / `IIdentityNormalizationService.cs` | Read-only. `TryResolveContactByWorkforceIdentityAsync`, the email path and `GuardInertNoBindingColumn` deleted; the systemuser fallback reads the oid binding via `ActiveContactsBoundToQuery` (ambiguous / unreadable → null). `InvalidateAsync` added. A-18 residual comment removed. |
-| `CallerContactResolver.cs` | Reads the oid binding (`sprk_externalobjectid`), two rows, ambiguity → `ambiguous-binding`. |
+| `IdentityNormalizationService.cs` / `IIdentityNormalizationService.cs` | Read-only. `TryResolveContactByWorkforceIdentityAsync`, the email path and `GuardInertNoBindingColumn` deleted; the systemuser fallback reads the oid binding via `ContactsBoundToQuery` + `DecideBoundContact` (ambiguous in any state / inactive / unreadable → null; §12). `InvalidateAsync` added. A-18 residual comment removed. |
+| `CallerContactResolver.cs` | Reads the oid binding (`sprk_externalobjectid`), two rows in any state, through `DecideBoundContact`: ambiguity → `ambiguous-binding`, an inactive bound contact → `inactive-contact` (§12). |
 | `ExternalParticipationService.cs` | CIAM contact resolution, `ResolveContactByOidAsync`, `ResolveContactByEmailAsync`, `BindOidToContactAsync` deleted — moved into the binder/decision (§6 D-1). Keeps grant data. |
 | `CallerPrincipalResolver.cs` | `CiamContactPrincipalStrategy` → `ResolveCiamCallerAsync`; returns the decision's distinct deny code + message. |
 | `AccessibleRecordSetService.cs` | Licensed-user email fallback removed; the contact comes only from `principal.ContactId` (the link). |
-| `InviteExternalUserEndpoint.cs` / `InviteAndGrantExternalUserEndpoint.cs` | `ProvisionAsync` resolves through `DecideInvite`: workforce-bound / systemuser-linked / ambiguous → HTTP 409 ProblemDetails with `reasonCode` + flag; no CIAM account, no grant. CIAM-bound stays idempotent. Lookup failure → 500 ProblemDetails (not bare). New CIAM oid bound through the binder (plane External). |
+| `InviteExternalUserEndpoint.cs` / `InviteAndGrantExternalUserEndpoint.cs` | `ProvisionAsync` resolves through `DecideInvite`: workforce-bound / systemuser-linked / ambiguous → HTTP 409 ProblemDetails with `reasonCode` + flag; no CIAM account, no grant. CIAM-bound stays idempotent. Lookup failure → 503 ProblemDetails with `reasonCode` `sdap.access.invite.contact_lookup_failed` and the decision's message (§12; a generic 500 before). New CIAM oid bound through the binder (plane External). |
 | `RegistrationDataverseService.cs` | `CreateSystemUserAsync` → `LinkContactForNewSystemUserAsync` on `ContactLinkEnvironment(targetDataverseUrl)`. `DemoProvisioningService.cs` unchanged — it already passes `targetDataverseUrl`. |
 | `ExternalAccessModule.cs` | Options + validator, named HttpClient, store, binder, factory, `AddScheduledJob<IdentityLinkReconciliationJob>`. |
 | `appsettings.template.json` | `WorkforceIdentity:CustomerTenantIds: []`, `IdentityLink:Reconciliation:WritesEnabled: false`, with comments. |
@@ -474,3 +477,102 @@ just before the clear also misses. The test was corrected to stage the append be
 Placement (CLAUDE.md §10): unchanged — all in the BFF (bff-extensions.md §A); no new service, DI registration,
 endpoint, option, job or package. `WorkforcePrincipalResolver` gains an `IConfiguration` constructor dependency
 (already registered).
+
+## 12. Second verifier fix round (`task/uac-r2-141-f2`, 2026-10-01) — what changed per finding
+
+> Branch `task/uac-r2-141-f2` from `task/uac-r2-141-f1`. Owner answers in force unchanged (I1 = (b), I2 = (1), T2).
+> READ-ONLY for live systems: the only live call was `az ad app show` (below). Nothing was written to Dataverse,
+> Entra or Azure. Publish size not measured (the main session measures after merging).
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | BLOCKER — no deployable mechanism for criterion 3 (alternate key vs FLS on `contact.sprk_externalobjectid`) | **Still blocked on the owner decision in §9** (recommendation B2). Nothing implemented; an unanswered escalation is a first-class stop. Fail-closed meanwhile: `KeyMissing` → `contact_create_unavailable`; `Set-ContactIdentityBindingSchema.ps1 -Apply` throws `BLOCKED` before any write. |
+| 2 | BLOCKER — FLS criterion + manual live gate wait on G-1/G-7/G-8 | Unchanged: pending gates (§8), G-1 behind §9. |
+| 3 | Not met — publish size (G-9); `acct` (G-2) and the dev tenant setting (G-3) pending | Unchanged: pending gates. `acct` re-checked READ-ONLY today: `az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c` → access-token optional claims `email`, `preferred_username`, `upn`; **`acct` still not configured**; `AzureADMultipleOrgs`; `requestedAccessTokenVersion` null (v1). Escalation trigger 3 still does **not** fire (the claim is issuable for this registration's access tokens, Teams SSO included — sources in §1); applying it is G-2. The app registration was not changed. |
+| 4 | LOW — the registration link promised a retry that does not exist outside the BFF's own environment | **Fixed (wording + log) and the gap recorded.** `RegistrationDataverseService.IsReconciledByThisBff(url)` compares the link environment with this BFF's `Dataverse:ServiceUrl` (the only environment `IdentityLinkReconciliationJob` scans, through the DI store). A link that does not land (fault, deny, lost race, or a collision flag) now logs one of two warnings: in the BFF's own environment "…re-decides the user on its next run once `IdentityLink:Reconciliation:WritesEnabled` is true"; anywhere else "…NOT retried by this BFF: its identity-link reconciliation job scans only its own Dataverse:ServiceUrl (…)". The XML doc says the same. The binder's `SystemUserLinkOutcome.Failed` doc, its link-not-written log line and its switch remarks no longer claim a retry either. **Recorded gap (not a retry):** see §12.1. |
+| 5 | LOW — the invite lookup failure's reason code was dropped (thrown into the generic 500) | **Fixed.** `InviteContactAction.Fail` (email lookup OR the systemuser-reference lookup unreadable) returns `InviteLookupFailure` → HTTP **503** ProblemDetails, `reasonCode` `sdap.access.invite.contact_lookup_failed`, `detail` = `ContactIdentityBinder.InviteMessage(code)` (no longer dead), on BOTH `/invite` and `/invite-and-grant`; nothing is created, bound, flagged or granted. 503 rather than 500: nothing was decided and a retry is safe; the client (`AccessGrantModal`) reads `reasonCode`/`detail` whatever the status. Both endpoints declare `ProducesProblem(503)`. Any other unexpected decision state still fails closed (throw → generic 500, nothing created). |
+| 6 | LOW — two answers to "which contact is bound to this oid?" | **Fixed.** The shared read is now `ContactBindingDecision.ContactsBoundToQuery` (renamed from `ActiveContactsBoundToQuery`): EVERY statecode, two rows, `statecode` selected — the same question as the binder's `FindContactsByOidAsync`. `IdentityNormalizationService`'s fallback and `CallerContactResolver` answer it with `DecideBoundContact` (the binder's own D1–D4 step, made public) over `BoundContactLookup(entities)`. One active + one inactive contact on an oid → no contact (`contact_oid_ambiguous`) in both readers, as in the binder; a sole inactive contact → none (`CallerContactResolver` reports `inactive-contact`, a new identifier-only reason; `ContextBinder` only logs it). Readers still write nothing; the flag is the binder's. |
+| 7 | INFO — Ralph's flagged, kept link is still honoured (D-3) | Unchanged by design (owner I2 = (1)); stated for the PR in §11 and link contract §5. Repeated in §12.2. |
+| 8 | INFO — job cost on a report-only stamp; a business unit created later needs a re-run | Recorded: guide §6.5.2 now states the cost (≈2–4 reads per unlinked user per 5-minute run while writes stay off; enable writes after the review on a large stamp). The later-BU re-run was already documented (script header, guide §6.5.2). No code change. |
+| 9, 10 | VERIFIED | Nothing to do. Finding 9's note on the redundant `>1` branch is moot: that code was replaced by `DecideBoundContact` (finding 6). |
+| 11 | Criterion 3 not met | = finding 1 (§9). |
+| 12 | FLS criterion not met | = finding 2 (G-1/G-7, behind §9). |
+| 13 | Manual live gate not met | = finding 2 (G-8, behind G-1). |
+| 14 | `acct` / customer-tenant criterion not met | = finding 3 (G-2, G-3). Script, template and guide parts are in place. |
+| 15 | Suites / publish size / CVE / placement | Suites re-run (§12.5). Publish size: G-9, not measured by instruction. No package change, so no new CVE surface. Placement unchanged (all in the BFF; §12.4). |
+
+### 12.1 Recorded gap — a registration link outside the BFF's own environment has no retry in this BFF
+
+- **What**: `RegistrationDataverseService.CreateSystemUserAsync` links a just-created systemuser in the TARGET
+  environment (`targetDataverseUrl`; for demo provisioning, `DemoEnvironmentConfig.DataverseUrl`). If that link
+  does not land, nothing in this BFF re-decides it, and a collision flag written there is never re-evaluated or
+  cleared by this BFF's job, because the job scans only `Dataverse:ServiceUrl`.
+- **Who covers it**: a BFF deployed against that environment — its own `identity-link-reconciliation` job (with
+  `IdentityLink__Reconciliation__WritesEnabled=true`), or the inline link at the user's first sign-in through it.
+  In the D-13 per-customer stamp model every customer environment has its own BFF, so the gap is confined to an
+  environment that no BFF serves (e.g. a demo environment provisioned from another stamp while its own BFF is
+  stopped — `config/environments.json` notes the prod/demo BFF as stopped).
+- **Why not a retry here**: an in-process retry only covers a transient blip, and making this BFF's job scan
+  every provisioning target is a new multi-environment design (per-environment tokens, which environments, which
+  stamp owns them) that the owner has not asked for. Recorded rather than built; the operator signal is the
+  `NOT retried by this BFF` warning (guide §6.5.2). If the owner wants a safety net, the cheapest option is a
+  bounded retry of the registration link on a fault/lookup-failure; the complete one is a job that scans the
+  `sprk_dataverseenvironment` registry — an owner choice, not taken here.
+
+### 12.2 Statements the PR must carry (in addition to §11)
+
+- §11 D-3 (verifier finding 7): Ralph's flagged, kept `sprk_primarycontact` (contact 8e9918a9, bound to CIAM oid
+  6a9fa229) is honoured by `IdentityNormalizationService`, so `AccessibleRecordSetService` loads that CIAM
+  identity's grants into his internal access set until an operator resolves the collision. Owner I2 = (1).
+- §12.1: the registration-link gap outside the BFF's own environment.
+- The invite lookup failure is now HTTP 503 (was a generic 500) — a wire change on `/invite` and `/invite-and-grant`.
+- `ActiveContactsBoundToQuery` → `ContactsBoundToQuery` (public rename; no caller outside the two readers).
+- Report-only cost on a stamp left with writes off (§12, finding 8).
+
+### 12.3 Seeded violations (second fix round) — each alone, built, the affected classes run, source restored
+
+Harness `f2_seed.py` (scratchpad): patch ONE source site, `dotnet build`, `dotnet test` over
+RegistrationContactLink / CallerContactResolverSeam / IdentityNormalizationService / ContactBindingDecisionTests /
+ExternalAccessContractTests (143 tests), record failures, restore byte-identical. All eight went RED.
+
+| # | Seeded violation | Failing test(s) |
+|---|---|---|
+| S1 | registration: every environment treated as reconciled by this BFF | `ALinkThatDoesNotLand_InATargetEnvironment_IsReportedAsNotRetried`, `ALinkThatFaults_InATargetEnvironment_IsReportedAsNotRetried` |
+| S2 | registration: the fault path logs the old "the reconciliation job retries it" | `ALinkThatFaults_InATargetEnvironment_IsReportedAsNotRetried` |
+| S3 | invite: `Fail` thrown into the generic 500 again | `Invite_WhenTheContactLookupCannotBeRead_Returns503_…` ×2 routes, `Invite_WhenTheSystemUserReferenceLookupCannotBeRead_Returns503_…` ×2 routes |
+| S4 | `/invite-and-grant` ignores the lookup failure | the same two theories, `/invite-and-grant` rows |
+| S5 | the shared read filters `statecode = 0` again | `TheSharedReadOnlyQuery_ReadsTwoRowsInAnyState_ByTheBindingColumn` + 9 seam/normalization tests (10) |
+| S6 | normalization counts only active rows | `ResolveAsync_AnActiveAndAnInactiveContactOnTheUsersOid_DerivesNoContact` |
+| S7 | "assign it to me" counts only active rows | `ResolveAsync_AnActiveAndAnInactiveContactOnTheOid_IsAmbiguous_NeverTheActiveOne`, `ResolveAsync_TheOnlyContactOnTheOidIsInactive_ReturnsItsOwnUnresolvedReason` |
+| S8 | an inactive bound contact reported as `no-matching-contact` | `ResolveAsync_TheOnlyContactOnTheOidIsInactive_ReturnsItsOwnUnresolvedReason` |
+
+New tests (KEEP paths; no `Mock<HttpMessageHandler>`, no DI-registration test, no ctor null-check test, no
+`InternalsVisibleTo`): `RegistrationContactLinkTests` (+4, a `CapturingLogger` at the real logging boundary and a
+`ContactIdentityBinderFactory` subclass that throws — no HTTP double), `ExternalAccessContractTests` (the old
+500 test replaced by two theories, 4 cases), `ContactBindingDecisionTests` (query test rewritten, +3 pure),
+`CallerContactResolverSeamTests` (+2; the strict double now rejects a `statecode` filter),
+`IdentityNormalizationServiceTests` (+2; same).
+
+### 12.4 Placement and justification (CLAUDE.md §10 / §11)
+
+No new service, DI registration, endpoint, option, job or package. All changes are in the BFF (bff-extensions.md
+§A), inside existing components. New public surface, each a modification of an existing component:
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `RegistrationDataverseService.IsReconciledByThisBff` | the job's environment = `DataverseContactIdentityStore.ForDefaultEnvironment` (`Dataverse:ServiceUrl`) | Extends the existing service; reads an already-configured key | Operators are told a failed link is retried when it never is (finding 4) |
+| `InviteExternalUserEndpoint.InviteLookupFailure` + `LookupFailureResult` | `InviteRefusal` + `RefusalResult` | Sibling of the existing refusal pair (a failure is not a refusal: different status, no flag) | The distinct reason code never reaches the client; `InviteMessage`'s lookup text stays dead (finding 5) |
+| `ContactBindingDecision.ContactsBoundToQuery` / `BoundContactLookup` / `DecideBoundContact` | `ActiveContactsBoundToQuery` (renamed), the private `DecideOnOid` | Extends: the private D1–D4 step is exposed, not copied | Readers and the binder answer the same data differently (finding 6) |
+| `CallerContactResolution` reason `inactive-contact` | the identifier set `no-matching-contact` / `ambiguous-binding` / `lookup-failed` | Extends the identifier set | An inactive bound contact is indistinguishable from "no contact" in the trail |
+
+### 12.5 Suite results (second fix round, final code)
+
+- Identity/access subset (IdentityBinding, WorkforceEmailNoHijack, DataverseContactIdentityStore,
+  ExternalAccessContractTests, RegistrationContactLink, WorkforcePrincipalResolver, CallerContactResolverSeam,
+  IdentityNormalizationService, ContactAadObjectIdColumnGuard, CallerPrincipalResolver, AccessibleRecordSet):
+  **354 passed / 0 failed** (the verifier's 340 + 14 new).
+- Full BFF suite (`dotnet test tests/unit/Sprk.Bff.Api.Tests`, which also compiles the `tests/integration/**`
+  KEEP paths): **13,382 passed / 0 failed / 54 skipped (13,436)** — the f1 round's 13,368 / 13,422 plus 14 new.
+- NetArchTest (`dotnet test tests/Spaarke.ArchTests`): **337 / 0 / 0**.
+- No package or csproj change (no new CVE surface). Publish size not measured (G-9; the main session measures
+  after merging).
