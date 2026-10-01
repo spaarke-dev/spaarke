@@ -706,8 +706,10 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.SetGrants(SingleGrant(ProjectEntity, grantedRecord, ExternalAccessLevel.FullAccess));
 
         var dataverse = BuildDataverse(contactHeld: false);
-        // Strict: with the junction read failed, activeOrgs.OrganizationIds is empty, so the org-expansion
-        // loop must never attempt a membership walk.
+        // Strict: with the junction read failed, activeOrgs.ConferringOrganizationIds is empty, so the
+        // org-expansion loop must never attempt a membership walk. (This double throws — the token/API-url
+        // fault. The QUERY-level fault, which the real read now reports as an outcome, is driven through a
+        // real transport in OrganizationMembershipReadTests, task 109.)
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
         var sut = BuildSut(dataverse, membership.Object, participations);
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
@@ -905,10 +907,12 @@ public sealed class UnifiedEvaluatorSeamTests
             return Task.FromResult(result);
         }
 
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+        // ActiveOrgIds are current memberships of active organizations — in BOTH named sets (task 109).
+        // ThrowOnActiveOrgIds models the entry's token/API-url fault, the one that arrives as an exception.
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
             => ThrowOnActiveOrgIds
-                ? Task.FromException<IReadOnlyList<Guid>>(new InvalidOperationException("simulated sprk_contactorganization query failure"))
-                : Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
+                ? Task.FromException<ActiveOrgMemberships>(new InvalidOperationException("simulated token/API-url acquisition failure"))
+                : Task.FromResult(new ActiveOrgMemberships(ActiveOrgIds.ToList(), ActiveOrgIds.ToList(), Unreadable: false));
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

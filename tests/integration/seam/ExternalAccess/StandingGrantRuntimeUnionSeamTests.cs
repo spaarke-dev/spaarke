@@ -283,8 +283,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         // Task 039: same reasoning as the RootRecordFlags override above — without these, the base
         // implementations throw on `credential: null!`, and AccessibleRecordSetService's deny-veto
         // resolution would fail closed (deny everything), which this seam is not testing.
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(ActiveOrgMemberships.None);
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

@@ -52,9 +52,14 @@ public class ExternalAccessQueryIntegrityGuardTests
         var source = ReadSource(ParticipationServiceRelativePath);
 
         // Scoped to the GRANT TABLE specifically. An earlier draft keyed on `_sprk_contact_value`, which
-        // also appears in the sprk_contactorganizations junction query (`:1068`) — a correct query that
-        // rightly has no expiry predicate, because a membership row has no expiry. Expiry is a property
-        // of a GRANT. Keying the rule on the entity set is what makes it mean what it says.
+        // also appears in the sprk_contactorganizations junction query (QueryOrganizationMembershipsAsync).
+        // That query rightly carries no grant-expiry predicate — but NOT because a membership has no end:
+        // it does (`sprk_enddate`, and `sprk_startdate`), and since task 109 (owner D-2 / D-10) a
+        // membership outside those dates confers nothing. The bound is applied IN MEMORY to the
+        // conferring set (ExternalParticipationService.MembershipConfersOn), never in the junction
+        // $filter, because the same read also defines the FR-23 wall-subject set, which must NOT be
+        // date-bounded. That shape is pinned by its own guard below. Keying THIS rule on the grant entity
+        // set is what makes it mean what it says.
         var lines = source.Split('\n');
 
         var grantQueryStarts = lines
@@ -87,6 +92,54 @@ public class ExternalAccessQueryIntegrityGuardTests
             + "access again."
             + $"{Environment.NewLine}  offending line(s): "
             + string.Join("; ", inlined.Select(l => $"{l.Line}: {l.Text.Trim()}")));
+    }
+
+    /// <summary>
+    /// Task 109 — every membership-junction query builds its <c>$filter</c> through
+    /// <c>BuildOrganizationMembershipFilter</c>, never inline.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the call site needs its own guard.</b> One junction read serves the additive
+    /// CONFERRING set and the FR-23 deny-veto WALL set. The wall must stay bounded on <c>statecode</c>
+    /// ONLY (owner D-2 part 2, D-10); the date bounds belong to the conferring set and are applied in
+    /// memory. <c>OrganizationMembershipReadTests</c> asserts that the builder carries no date term — but,
+    /// exactly as seam 3 found for grants, asserting a builder proves nothing about a call site that
+    /// stops using it. An inlined <c>… and (sprk_enddate eq null or sprk_enddate ge …)</c> would quietly
+    /// date-bound the WALL server-side — a fail-OPEN change to a veto — while every in-memory projection
+    /// test stayed green, because those tests never see the server filter.</para>
+    /// </remarks>
+    [Fact(DisplayName = "Task 109: membership-junction queries build their $filter, never inline it")]
+    public void MembershipJunctionQueriesUseTheWallSafeFilterBuilder()
+    {
+        var source = ReadSource(ParticipationServiceRelativePath);
+        var lines = source.Split('\n');
+
+        var junctionQueryStarts = lines
+            .Select((text, index) => (Text: text, Index: index))
+            .Where(l => l.Text.Contains("/sprk_contactorganizations", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.True(
+            junctionQueryStarts.Count > 0,
+            $"No query against sprk_contactorganizations found in {ParticipationServiceRelativePath}. Either "
+            + "the file moved or the query was restructured — a guard that finds nothing passes vacuously, "
+            + "so fix the guard rather than deleting it.");
+
+        var inlined = junctionQueryStarts
+            .Select(start => (start.Index, Window: string.Join('\n', lines.Skip(start.Index).Take(4))))
+            .Where(w => w.Window.Contains("$filter=", StringComparison.Ordinal))
+            .Where(w => !w.Window.Contains("BuildOrganizationMembershipFilter", StringComparison.Ordinal))
+            .Select(w => (Line: w.Index + 1, Text: lines[w.Index].Trim()))
+            .ToList();
+
+        Assert.True(
+            inlined.Count == 0,
+            "A sprk_contactorganizations query builds its $filter inline instead of calling "
+            + "BuildOrganizationMembershipFilter. That filter defines the FR-23 WALL-subject set and must stay "
+            + "statecode-only; a date bound added there narrows the ethical wall (owner D-2 part 2 / D-10). "
+            + "Date bounds belong to the conferring set, in memory (MembershipConfersOn)."
+            + $"{Environment.NewLine}  offending line(s): "
+            + string.Join("; ", inlined.Select(l => $"{l.Line}: {l.Text}")));
     }
 
     /// <summary>

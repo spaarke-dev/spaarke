@@ -1475,10 +1475,11 @@ public class AccessibleRecordSetServiceTests
         // not even attempted (NFR-02 — a term that cannot contribute costs nothing).
         //
         // NOTE on the OTHER half of the acceptance criterion — "an INACTIVE junction row confers
-        // nothing". That is enforced by the `statecode eq 0` predicate inside
-        // ExternalParticipationService.QueryActiveOrgIdsAsync, which THIS DOUBLE REPLACES. Asserting it
-        // here would assert the fake, not the product, so it is pinned where it lives (the junction
-        // query) and deliberately not restated here.
+        // nothing". That is decided by the junction read's filter + projection
+        // (ExternalParticipationService.BuildOrganizationMembershipFilter / ProjectOrganizationMemberships,
+        // task 109), which THIS DOUBLE REPLACES. Asserting it here would assert the fake, not the product,
+        // so it is pinned where it lives — OrganizationMembershipReadTests — and deliberately not
+        // restated here.
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
 
         var standing = new Mock<ISubjectStandingGrantReader>();
@@ -1722,8 +1723,12 @@ public class AccessibleRecordSetServiceTests
     }
 
     [Fact]
-    public async Task ComposeAsync_WhenTheJunctionReadFaults_DeniesEveryCandidateAndDoesNotThrow()
+    public async Task ComposeAsync_WhenTheJunctionEntryThrows_DeniesEveryCandidateAndDoesNotThrow()
     {
+        // The TOKEN/API-URL acquisition fault — the one junction failure that reaches the composer as an
+        // exception. Task 109 must not weaken it while making the QUERY-level fault report itself; the
+        // query-level half is driven through a real transport in OrganizationMembershipReadTests.
+        //
         // NFR-01 / NFR-02. The junction read feeds TWO consumers whose safe failure directions are
         // opposite, so one fault has two consequences and the test states both:
         //   • the additive org-expansion term contributes NOTHING (over-inclusion there is an
@@ -1904,31 +1909,36 @@ public class AccessibleRecordSetServiceTests
         //
         // ⚠️ Both overrides are REQUIRED, not convenience — exactly like the Flags override above. The
         // base ExternalParticipationService implementations need `credential`/`configuration`, which are
-        // `null!` here; without an override, QueryActiveOrgIdsAsync's token acquisition throws
-        // uncaught into AccessibleRecordSetService.ResolveDenyVetoAsync's own fail-closed catch, which
-        // then denies EVERY candidate in the composition — silently failing every pre-039 test that
-        // reaches the deny-veto call (i.e. almost all of them, since a resolved contact id is enough to
-        // reach it). "References/belongs to nothing" is the deny-veto's honest, inert default for a
-        // test that predates it.
+        // `null!` here; without an override, ReadOrganizationMembershipsAsync's token acquisition throws
+        // into AccessibleRecordSetService's fail-closed handling, which then denies EVERY candidate in the
+        // composition — silently failing every pre-039 test that reaches the deny-veto call (i.e. almost
+        // all of them, since a resolved contact id is enough to reach it). "References/belongs to
+        // nothing" is the deny-veto's honest, inert default for a test that predates it.
+        //
+        // ActiveOrgIds are CURRENT memberships of ACTIVE organizations, so each one is in BOTH named sets
+        // (task 109). Which rows fall into which set is the junction read's projection, pinned on the real
+        // code in OrganizationMembershipReadTests — never restated by this double.
         public HashSet<Guid> ActiveOrgIds { get; } = new();
         public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
         public HashSet<Guid> UnreadableOrgReferences { get; } = new();
 
         /// <summary>
-        /// Makes the junction read FAULT (task 043). The real query is wrapped in a try/catch that
-        /// returns an empty list, so a fault surfaces to the composer as
-        /// <c>ActiveOrgMemberships.Failed</c> rather than as an exception — and that outcome drives TWO
-        /// decisions in opposite directions: the additive org-expansion term contributes nothing, while
-        /// the FR-23 deny veto denies every queried candidate. A double that could only return an empty
-        /// list could not tell those apart, which is the whole point of the distinction.
+        /// Makes the junction ENTRY throw — the token/API-url acquisition fault, the only failure that
+        /// reaches the composer as an exception. The composer must map it to
+        /// <c>ActiveOrgMemberships.Failed</c>, and that outcome drives TWO decisions in opposite
+        /// directions: the additive org-expansion term contributes nothing, while the FR-23 deny veto
+        /// denies every queried candidate. (A junction QUERY fault — HTTP 500/403/timeout — is reported by
+        /// the real query as an outcome instead, task 109; that path is driven through a real transport in
+        /// OrganizationMembershipReadTests, because a double here would assert the fake — the exact error
+        /// that let ISS-019 ship green.)
         /// </summary>
         public bool ThrowOnActiveOrgIds { get; set; }
 
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
             => ThrowOnActiveOrgIds
-                ? Task.FromException<IReadOnlyList<Guid>>(
-                    new InvalidOperationException("sprk_contactorganization query failed"))
-                : Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
+                ? Task.FromException<ActiveOrgMemberships>(
+                    new InvalidOperationException("Dataverse:ServiceUrl is required"))
+                : Task.FromResult(new ActiveOrgMemberships(ActiveOrgIds.ToList(), ActiveOrgIds.ToList(), Unreadable: false));
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
@@ -1985,8 +1995,8 @@ public class AccessibleRecordSetServiceTests
         // would see its systemuser membership force-denied by ResolveDenyVetoAsync's own catch-all,
         // for a reason unrelated to what this double is testing. Benign, non-throwing defaults keep the
         // fault surface exactly where this class's name says it is.
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(ActiveOrgMemberships.None);
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

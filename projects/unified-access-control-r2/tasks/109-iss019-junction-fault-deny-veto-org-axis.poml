@@ -4,7 +4,7 @@
     <title>ONE junction read, two named sets, and a fault that cannot be mistaken for absence — ISS-019 (#998) + ISS-020 (#999) + ISS-026's read guard, as ONE change</title>
     <phase>Register-driven (authored 2026-09-19 after owner decision D-2)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Evaluator membership path (.cs); tags bff-api/auth. It changes who has access today and it changes a VETO's fail direction.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -144,5 +144,14 @@ Register: `notes/defer-issues.md` § ISS-019, § ISS-020, § ISS-026. Related: t
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load every file in knowledge/files before starting. FULL rigor — code-review + adr-check run at Step 9.5 unconditionally. Read `ActiveOrgMemberships`' remarks before writing any code; they are the specification.</protocol>
+    <outcome date="2026-09-30" session="27" branch="task/uac-r2-109" result="completed">
+      <summary>One junction read (`ExternalParticipationService.QueryOrganizationMembershipsAsync`) now projects sprk_startdate, sprk_enddate, its own statecode and — by $expand, same read — the parent organization's statecode, and returns the EXTENDED `ActiveOrgMemberships(ConferringOrganizationIds, WallSubjectOrganizationIds, Unreadable)`. The $filter is the WALL's (statecode only, null = active); the conferring set is narrowed in memory (`MembershipConfersOn`: inclusive both ends, null = unbounded; `OrganizationIsActive`). A query fault (non-success / timeout / exception) returns Failed instead of an empty list (ISS-019). Org expansion + org-grant term read the conferring set; the FR-23 veto reads the wall set. ISS-026 read guard also applied to GRANT rows (`GrantOrganizationConfers`) incl. contact-keyed grants carrying an inactive firm — the population task 117 R2 deactivates. Full record: notes/task-109-junction-read-two-named-sets.md.</summary>
+      <step0>Live (read-only) 2026-09-30: sprk_enddate + sprk_startdate are Format=DateOnly AND DateTimeBehavior=DateOnly; nav property sprk_Organization; all three exact production query shapes return 200. Escalation triggers 1 and 4 did NOT fire.</step0>
+      <step1>Live (read-only) 2026-09-30, re-confirming 2026-09-21: date-ended-but-active 0; future-start-but-active 0; active grants under an inactive organization 0 (of 5 org-carrying grants, all under the active Morrison Foerster LLP); active memberships under an inactive organization 0 (of 2). Escalation trigger 3 did NOT fire. Must be re-taken in any non-dev environment before deploy there (commands in notes §E).</step1>
+      <tests>New tests/integration/auth/UnifiedAccessControl/OrganizationMembershipReadTests.cs (21 tests: pure contract + REAL services over an in-memory UseTestServer Dataverse stand-in for every fault/over-match claim). ArchTest guard MembershipJunctionQueriesUseTheWallSafeFilterBuilder added; seam-3 justification corrected. Five test doubles moved to ReadOrganizationMembershipsAsync. Perturbations P1-P9 all bite, all restored.</tests>
+      <placement>BFF, existing Infrastructure/ExternalAccess evaluator path. No new service, DI registration, endpoint, option, job or package. §11: ActiveOrgMemberships EXTENDED (existing = task 043 outcome; extension = yes; cost-of-doing-nothing = a junction query fault silently removes the No Access wall's organization axis, ISS-019 — and date-ended / not-started / inactive-org memberships keep conferring, ISS-020 / D-10 / ISS-026). New internal static members are pure and extracted to be assertable (ADR-038 A2).</placement>
+      <quality-gates>code-review: 0 Critical; W3 (caller cancellation from the junction query would have emptied + cached the whole grant set) and W8 (per-composition Information log) FIXED; remaining warnings handed off (fault-derived grant set still cached for one TTL — task 132; cache-miss second junction read by the cached org-grant term — pre-existing, task 132's path). adr-check: 0 violations; warnings documented (C12 caching → 132; test server encodes Dataverse wire shape — B1's sanctioned replacement; no CacheVersion bump, ≤60 s post-deploy staleness).</quality-gates>
+      <not-done>TASK-INDEX rows for 109 and 110, current-task.md, closing #998/#999/#1006-read-half and the defer-issues disposition rows — main session / task 110 own them. Publish size — skipped by instruction (main session measures after merge).</not-done>
+    </outcome>
   </execution>
 </task>

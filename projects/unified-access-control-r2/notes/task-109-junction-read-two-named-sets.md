@@ -1,9 +1,9 @@
 # Task 109 — ONE junction read, two named sets
 
-> **Status**: **NOT IMPLEMENTED.** This file currently holds only the **Step 0 metadata verification**
-> and the **Step 1 before-state**, both measured live on **2026-09-21** (session 22). The executor of
-> task 109 should read this instead of re-running them — but should re-run them anyway if more than a
-> few days have passed, because they are measurements of live data, not facts about code.
+> **Status**: ✅ **IMPLEMENTED 2026-09-30** on branch `task/uac-r2-109` (session 27). Steps 0 and 1
+> were measured live on **2026-09-21** (session 22, kept below unchanged) and **re-measured live on
+> 2026-09-30** before any behaviour change — see "Step 0/1 re-measured". The implementation record
+> starts at "§A. What shipped".
 >
 > ⚠️ **Environment: DEV.** The owner recorded (2026-09-17) that dev's records are TEST records.
 > Everything below is true of dev and says **nothing** about a production tenant.
@@ -81,7 +81,7 @@ deploying there.** A dev result does not discharge a production gate; the query 
 
 ---
 
-## What is NOT done
+## What was NOT done in session 22 (now done — see §A onward)
 
 Everything else in task 109: the junction query change, the `ActiveOrgMemberships` extension carrying
 two named sets, the ISS-019 fault-reporting fix, the ISS-026 read guard, the three retired-rule
@@ -95,3 +95,231 @@ Counts came from the Dataverse MCP `read_query` tool. Two cautions for whoever r
 - Category 1 and 2 were first measured with `COUNT(column)` (which counts non-nulls) and then
   **re-confirmed with an explicit `IS NULL` predicate**, because relying on `COUNT(col)` null
   semantics to discharge a deploy gate is the kind of shortcut that produces a confident wrong number.
+
+---
+
+## Step 0/1 re-measured live — 2026-09-30 (session 27), before any behaviour change
+
+Read-only, spaarkedev1, via `EntityDefinitions` / collection GETs with the operator's own `az` token.
+
+**Step 0 — stronger than session 22's check.** `describe` reports the FORMAT; the escalation trigger is
+about BEHAVIOUR. Both are now verified at the attribute-metadata level:
+
+| Attribute | `Format` | `DateTimeBehavior` |
+|---|---|---|
+| `sprk_contactorganization.sprk_enddate` | DateOnly | **DateOnly** |
+| `sprk_contactorganization.sprk_startdate` | DateOnly | **DateOnly** |
+
+Also verified: navigation property `sprk_Organization` (relationship
+`sprk_contactorganization_Organization_sprk_organization`); `sprk_organization.statecode` Active(0) /
+Inactive(1). **All three exact production query shapes return 200 live** (junction; contact grants;
+org grants — each with `$expand=sprk_Organization($select=statecode)`), so escalation trigger 4 (the
+ISS-026 guard needs a second read) does **not** fire. Captured live payload shapes, mirrored by the test
+server: Date Only as `"2026-08-12"`; an unset lookup's expand as `"sprk_Organization": null`; a set one as
+`{"statecode":0,"sprk_organizationid":"…"}`.
+
+**Step 1 — unchanged from 2026-09-21.** Still **0 / 0 / 0**, plus a fourth category this task's
+contact-grant guard adds (§A.3): active grants **of any kind** carrying an inactive organization — **0**.
+Denominators: 2 junction rows (both Active, both organizations Active); 3 organizations (all Active, none
+with `sprk_standinggrant`); 5 active org-carrying grants, all under the Active Morrison Foerster LLP — 4
+org grants (`6f54531a-…`, `ec54e576-…`, `1967189b-…`, `9aed8ab9-…`) + **1 contact-keyed grant carrying
+its firm** (`0452ab4b-…`). **Escalation trigger 3 does not fire. Removal on deploy in dev: zero rows.**
+
+---
+
+## §A. What shipped
+
+| Change | Where |
+|---|---|
+| The junction read projects `sprk_startdate`, `sprk_enddate`, its own `statecode`, and the parent organization's `statecode` (by `$expand`) — **one** query | `ExternalParticipationService.QueryOrganizationMembershipsAsync` (`:1354`) |
+| Junction `$filter` = the WALL's: statecode only, null counted active | `BuildOrganizationMembershipFilter` (`:187`) |
+| The two NAMED sets, in memory, from those rows | `ProjectOrganizationMemberships` (`:273`) |
+| Date bound — inclusive both ends, null = unbounded | `MembershipConfersOn` (`:217`) |
+| A query fault is reported (`Unreadable`), never swallowed | non-success / timeout / exception → `ActiveOrgMemberships.Failed` |
+| `ActiveOrgMemberships` **extended** (not replaced): `ConferringOrganizationIds` + `WallSubjectOrganizationIds` + `Unreadable` | `AccessibleRecordSetService.cs:228` — moved from private-nested to namespace `internal` because the reader now returns it |
+| Org expansion → conferring set; deny veto → wall set | `AccessibleRecordSetService.cs:1222` / `:647` |
+| Org-grant term → conferring set | `QueryOrganizationGrantRowsAsync` (`:1212`) |
+| ISS-026 read guard on GRANT rows: an inactive (or unreturned) organization confers nothing | `GrantOrganizationConfers` (`:252`) + `WithoutInactiveOrganizations` (`:1280`), both grant reads |
+| Evaluator entry renamed `QueryActiveOrgIdsAsync` → `ReadOrganizationMembershipsAsync` (`internal virtual`, returns the outcome) | `:1317`; five test doubles updated |
+
+### §A.1 One READ, not one FILTER
+
+The `$filter` defines the wall; the conferring set is narrowed in memory from the same rows. A date term in
+the `$filter` would date-bound the WALL — a fail-OPEN change to a veto. Pinned twice: the builder test
+(`BuildOrganizationMembershipFilter_IsStatecodeOnly_WithNoDateTerm`) and a new ArchTest
+(`MembershipJunctionQueriesUseTheWallSafeFilterBuilder`) pinning that the CALL SITE uses the builder — the
+projection tests cannot see the server filter.
+
+### §A.2 Null semantics
+
+| Value | Meaning | Why |
+|---|---|---|
+| `sprk_startdate` / `sprk_enddate` null | **Unbounded** — confers | D-2 / D-10; task 107's grant-expiry inversion deliberately NOT mirrored (live row `0f2cace5-…` above is exactly this case) |
+| junction `statecode` null | active | `ExternalGrantRow.IsActive` + task 117's scan; filter is `(statecode eq 0 or statecode eq null)` |
+| organization `statecode` null (expand present) | active | same rule |
+| organization expand ABSENT while the lookup is set | **confers nothing**; still a wall subject | unknown ≠ active on a conferring path (ADR-003). Task 117's WRITER acts only on a CONFIRMED inactive — the opposite, correct for a writer |
+
+### §A.3 ISS-026 on grant rows — contact-keyed grants included
+
+The criterion scopes "unaffected" to *"a contact-keyed grant with no organization lookup"*, so a
+contact-keyed grant WITH a lookup to an inactive organization IS affected. That lookup is the `/grant`
+writer's firm association (`GrantExternalAccessEndpoint.cs:699-705`), and task 117's R2 deactivates exactly
+that population (every active grant whose `sprk_organization` is inactive, contact or not). The read guard
+therefore covers precisely what the writer later makes permanent. Live count: 0.
+
+### §A.4 Faults — both directions, from one outcome
+
+| Fault | Before | Now |
+|---|---|---|
+| Junction query non-success / timeout / exception | empty list → veto read "belongs to no organization" → wall's org axis silently gone (ISS-019) | `Failed` → veto denies every candidate; additive terms get an empty conferring set |
+| Token / API-url acquisition (entry throws) | `Failed` (deny-all) | unchanged |
+| Caller cancellation | junction swallowed; evaluator rethrew | query reports `Failed`; the evaluator's entry rethrows (§A.5) |
+
+The `:1060-1069` constraint ("do not unify the two fail directions") holds: what is now shared is the FACT
+of a fault; each consumer still applies its own direction.
+
+### §A.5 Code-review fix W3 — a regression this change would otherwise have introduced
+
+The first draft rethrew caller cancellation from inside the junction query. That query also runs inside
+`QueryGrantSetAsync`, whose catch-all turns any escaping exception into an EMPTY grant set (direct grants
+included) and caches it — a client abort mid-read would cache "no access at all" for 60 s where previously
+only the org-grant term was lost. Fixed: the query reports cancellation as `Failed`; only
+`ReadOrganizationMembershipsAsync` rethrows. Pinned by
+`GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants` (perturbation P9).
+
+### §A.6 No `CacheVersion` bump
+
+The cached grant-set shape is unchanged (filtering happens before caching). An entry written under the old
+rule survives at most one TTL (≤ 60 s) after deploy — the documented staleness bound for any revocation.
+
+## §B. Read accounting (NFR-02 / task 043)
+
+| Read | Count | Note |
+|---|---|---|
+| Evaluator junction read | **1 per composition** | unchanged from 043; now projects both sets. Asserted on the wire by `ComposeAsync_OneJunctionReadPerResolution_ServesTheConferringAndTheWallSets` |
+| Grant set (cached 60 s) | 1 on a miss | its org-grant term has its OWN junction read — pre-existing since task 073, counted under "grant set" in task 043 §6 — now using the same query + projection (conferring set) |
+
+🔶 **Residual, recorded rather than hidden**: on a grant-set cache MISS a composition sees two junction
+requests (the org-grant term's, cached with the grant set, and the evaluator's). Same query, filter and
+projection — they can differ only by time, and the grant set's view is bounded by the 60 s TTL anyway.
+Unifying them means threading the evaluator's outcome into the grant-set miss path, which changes
+`GetGrantSetAsync`'s signature (six overriding test doubles) and the CIAM `/me` surface. Task 132 is
+restructuring exactly that path's fault handling and is the natural owner. Also handed to 132: the
+`Unreadable` signal inside the org-grant term is logged but not carried on the grant set, so a grant set
+built over a faulted junction read is still cached for one TTL (`auth.md` C12 rule — 132 owns it).
+
+## §C. The three retired-rule artifacts — corrected
+
+1. "a former member is a deactivated row and is excluded" (HEAD `:1107-1108`; POML cited `:1081-1082`) —
+   **removed**; the replacement says the opposite, correctly (a former member can be statecode-active).
+2. The stale "confirm against the created junction schema" caveat (HEAD `:1109-1111`) — **removed**; cites
+   the 2026-08-26 live verification and this task's 2026-09-30 one.
+3. `ExternalAccessQueryIntegrityGuardTests.cs:54-57` — no longer says "a membership row has no expiry"; the
+   stale `:1068` reference is replaced by the method name so it cannot drift again.
+
+Also corrected because they named the renamed method or restated the retired rule:
+`RevokeExternalAccessEndpoint.cs` remarks (comments only; the revoke sweep stays statecode-only — now a
+strict SUPERSET of the read side's conferring set, the safe direction for a revoke),
+`IMembershipResolverService.cs:172`, `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:61`.
+
+## §D. Tests
+
+New: `tests/integration/auth/UnifiedAccessControl/OrganizationMembershipReadTests.cs` (KEEP `auth/`), 21 tests.
+
+| Test | Pins |
+|---|---|
+| `MembershipConfersOn_NullStartOrNullEnd_IsUnboundedAndConfers` | null start / end unbounded — the explicit null-start pin |
+| `MembershipConfersOn_StartTodayOrEndToday_Confers` | inclusive boundaries |
+| `MembershipConfersOn_EndDatePassed_ConfersNothing` | D-2 part 1 |
+| `MembershipConfersOn_StartDateInTheFuture_ConfersNothing` | D-10 |
+| `ProjectOrganizationMemberships_EndedByDateButActive_IsAWallSubjectButConfersNothing` | D-2 parts 1 + 2 |
+| `ProjectOrganizationMemberships_StartDateInTheFuture_IsAWallSubjectButConfersNothing` | D-10 both halves; start TODAY confers |
+| `ProjectOrganizationMemberships_InactiveOrganization_IsAWallSubjectButConfersNothing` | ISS-026 for memberships; active organization unaffected |
+| `ProjectOrganizationMemberships_NullStatecodes_AreActive` | null statecode = active (junction + organization) |
+| `ProjectOrganizationMemberships_OrganizationStateDidNotComeBack_…` | unknown organization state confers nothing |
+| `ProjectOrganizationMemberships_InactiveJunctionRow_IsInNeitherSet` | statecode re-decided in code |
+| `BuildOrganizationMembershipFilter_IsStatecodeOnly_WithNoDateTerm` | the wall is not date-bounded server-side |
+| `GrantOrganizationConfers_…` | ISS-026 on grant rows; no-org contact grant unaffected |
+| `GetGrantSetAsync_OrgGrantTerm_ConfersOnlyThroughCurrentMembershipsOfActiveOrganizations` | **real transport**: org-grant term (no standing gate) bounded by D-2 / D-10 / ISS-026; contact grant with inactive firm drops; plain contact grant unaffected |
+| `ComposeAsync_OrgKeyedDenyRow_StillMatchesAMemberWhoseMembershipNoLongerConfers` ×3 | **real transport**: veto over-match — ended / not-yet-started / inactive-organization |
+| `ComposeAsync_JunctionQueryFaults_DeniesEveryCandidateAndTheAdditiveTermsContributeNothing` ×3 | **real transport**: ISS-019 — 500 / 403 / timeout, both directions from one fault, with a healthy control |
+| `GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants` | review fix W3 |
+| `ComposeAsync_OneJunctionReadPerResolution_ServesTheConferringAndTheWallSets` | one read on the wire serves both sets |
+
+**Instrument.** The fault and over-match claims run the REAL `ExternalParticipationService` and
+`AccessibleRecordSetService` over an in-memory ASP.NET Core server (`UseTestServer`) standing in for the
+Dataverse Web API — deliberately: ISS-019 shipped because task 043's double THREW where the real query
+returned an empty list; a double here would assert the fake again. A test server is ADR-038 §7's named
+replacement for ban B1 — not a `Mock<HttpMessageHandler>`. Membership resolution, standing grants and the
+No Access reader are substituted at their module-boundary interfaces.
+
+**Beyond the closed set, justified**: the caller-cancellation test guards a regression this task's own
+change would otherwise have introduced (§A.5); the `inactive-organization` over-match case pins that the
+ISS-026 guard did not leak into the wall; the new ArchTest makes the "no date in the wall's filter" rule
+bind the call site, not only the builder.
+
+**Updated**: five test doubles now override `ReadOrganizationMembershipsAsync`. The pre-existing
+entry-throws test is renamed `ComposeAsync_WhenTheJunctionEntryThrows_DeniesEveryCandidateAndDoesNotThrow`
+and now names the token/API-url path it covers.
+
+### Perturbations — each seeded, observed, restored
+
+| # | Seeded violation | Result |
+|---|---|---|
+| P1 | fault reporting reverted (non-success + exception → `None`) | **3 red** — all three fault cases |
+| P2 | end-date bound removed | **4 red** |
+| P3a | veto fed the CONFERRING set (date-bounded wall) | **4 red** — three over-match + one-read |
+| P3b | date term added to the junction `$filter` builder | **1 red** — the filter test (E2E cannot see OData, by design) |
+| P3c | date-bounded `$filter` inlined at the call site | **1 red** — the new ArchTest guard |
+| P4 | start-date bound removed | **4 red** |
+| P5 | null-start branch inverted (task 107's inversion) | **13 red**, incl. the explicit null-start pin |
+| P6a+b | ISS-026 guard removed (projection + grant rows) | **4 red** |
+| P6b alone | grant-row guard removed | **1 red** — the inactive-firm grant reappears |
+| P7 | a second junction read for the veto (ISS-019's rejected suggestion) | **1 red** — the one-read test |
+| P8 | token-path catch weakened to `None` | **2 red** — entry-throws unit + seam tests |
+| P9 | caller cancellation rethrown from the query (pre-W3) | **1 red** — the cancellation test |
+
+All restored; `grep PERTURBATION src/` is empty.
+
+## §E. Pending manual gates (no live writes were made)
+
+- **Re-take the before-state in any non-dev environment before deploying there** (read-only):
+  ```
+  GET {org}/api/data/v9.2/sprk_contactorganizations?$select=sprk_contactorganizationid,_sprk_contact_value,_sprk_organization_value,sprk_startdate,sprk_enddate,statecode&$expand=sprk_Organization($select=statecode)
+  GET {org}/api/data/v9.2/sprk_externalrecordaccesses?$filter=(statecode eq 0 or statecode eq null) and _sprk_organization_value ne null&$select=sprk_externalrecordaccessid,_sprk_contact_value,_sprk_organization_value,_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,statecode&$expand=sprk_Organization($select=statecode)
+  ```
+  Count junction rows active with `sprk_enddate` < today, active with `sprk_startdate` > today, and grant /
+  junction rows whose expanded `sprk_Organization.statecode` = 1. More than a handful → owner sign-off.
+- **Publish size** — skipped by instruction (the main session measures after merge). No package changes.
+
+## §F. ISS-020 / task 110 verification map
+
+| Task 110 criterion | Evidence |
+|---|---|
+| null or ≥-today end date still confers | `MembershipConfersOn_NullStartOrNullEnd_…`, `…_StartTodayOrEndToday_Confers`, grant-set E2E (OrgCurrent) |
+| passed end date confers nothing while active | `MembershipConfersOn_EndDatePassed_…`, `ProjectOrganizationMemberships_EndedByDate…`, grant-set E2E |
+| D-10: future start nothing; today / null confers; veto not start-bounded | `…_StartDateInTheFuture_…` (both), `…_NullStartOrNullEnd_…`, over-match theory `not-yet-started` |
+| org-keyed deny still matches an ended membership | over-match theory `ended` |
+| conferring + wall from ONE read, read-count test | `ComposeAsync_OneJunctionReadPerResolution_…` (+ P7) |
+| before-state recorded (count + list) | Step 1 (2026-09-21) + re-measure (2026-09-30), above |
+| no second junction query / outcome record / date-bounding path | grep: `/sprk_contactorganizations` occurs ONCE in `src/server` (`ExternalParticipationService.cs:1359`); the other junction readers are pre-existing and deliberately separate (task 020's inverse revoke reader, task 117's writer scan); `ActiveOrgMemberships` is the only outcome record |
+
+Closing **#999** and the defer-issues disposition rows are task 110's / the main session's — not done here.
+
+## §G. Premise checks (the code won again)
+
+| POML claim | Reality at HEAD `a099fe394` |
+|---|---|
+| `ExpiryPredicate (:99-100)` is `(sprk_expiresdate eq null or … ge …)` | **Stale** — task 107 already dropped the `eq null` branch: it is `sprk_expiresdate ge {today}` (`:114-115`). The mechanics to mirror (`ge`, Date Only) are unchanged; the null branch is the inversion NOT to mirror |
+| asymmetry `:1060-1069`; false comment `:1081-1082`; caveat `:1083-1085`; junction query `:1092-1094` | drifted to `:1086-1095`, `:1107-1108`, `:1109-1111`, `:1118-1120` (task 131 added lines) |
+| task 110 background: org expansion "`ExternalParticipationService.cs:1209-1221`" | wrong file — it is `AccessibleRecordSetService.cs:1209-1221` |
+
+## §H. CLAUDE.md §10 / §11
+
+**Placement**: BFF, inside the existing `Infrastructure/ExternalAccess` evaluator path — a read-path
+correctness change to two existing classes. No new service, DI registration, endpoint, option, job or
+package. **§11**: no new component — `ActiveOrgMemberships` extended (existing: task 043's outcome;
+extension: yes; cost-of-doing-nothing: without a carried fault and two named sets a junction fault
+silently removes the wall's organization axis, ISS-019). New `internal static` members are pure and
+extracted to be assertable (ADR-038 A2); `ContactOrgRow` / `OrganizationStateRow` widened from private for
+the same reason. **CVE**: `dotnet list package --vulnerable --include-transitive` → none.

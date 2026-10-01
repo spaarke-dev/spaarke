@@ -57,9 +57,27 @@ public class ExternalParticipationService
     // internal + InternalsVisibleTo("Sprk.Bff.Api.Tests"), the convention already used across this
     // assembly. No reflection into privates (ban B8).
 
-    /// <summary>Columns every grant read needs to partition a row into its root bucket.</summary>
+    /// <summary>
+    /// Columns every grant read needs to partition a row into its root bucket — plus the row's
+    /// organization lookup, which <see cref="GrantOrganizationConfers"/> needs to tell "no organization"
+    /// (unaffected) from "an organization whose state did not come back" (confers nothing). Task 109.
+    /// </summary>
     internal const string GrantRowSelect =
-        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel";
+        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel,_sprk_organization_value";
+
+    /// <summary>
+    /// The <c>$expand</c> that brings the parent <c>sprk_organization</c>'s OWN <c>statecode</c> back with a
+    /// row, in the SAME read (task 109 · ISS-026 / #1006 read half). Used by the junction read and by both
+    /// grant reads.
+    /// </summary>
+    /// <remarks>
+    /// The navigation property is <c>sprk_Organization</c> (PascalCase) on BOTH tables — live-verified
+    /// 2026-09-30 (<c>ManyToOneRelationships.ReferencingEntityNavigationPropertyName</c> on
+    /// <c>sprk_contactorganization</c>; the grant writer already binds <c>sprk_Organization@odata.bind</c>).
+    /// An expand, not a second query: the parent's state is a column of the row's own read, so the
+    /// single-read budget (task 043 / NFR-02) is untouched.
+    /// </remarks>
+    internal const string OrganizationStateExpand = "sprk_Organization($select=statecode)";
 
     /// <summary>
     /// The <c>$filter</c> selecting a Contact's own ACTIVE, UNEXPIRED grants.
@@ -138,6 +156,148 @@ public class ExternalParticipationService
     /// </remarks>
     internal static bool ConfersAccessOn(DateOnly? expiresDate, DateOnly today)
         => expiresDate is not null && expiresDate.Value >= today;
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The ONE organization-membership read (task 109 — ISS-019 #998, ISS-020 #999, ISS-026 #1006 read
+    // half, owner decisions D-2 and D-10)
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // One junction read feeds consumers whose safe failure directions are OPPOSITE — the additive
+    // org terms (over-inclusion = over-GRANT) and the FR-23 deny-veto subject (over-inclusion = a
+    // stricter wall). That was only ever a dilemma because the read projected bare ids. It is one
+    // READ, not one FILTER: the $filter below is the WALL's (statecode only), and the conferring set is
+    // narrowed from the same rows IN MEMORY. A second query for either consumer would re-introduce the
+    // two-snapshot hazard task 043 removed.
+
+    /// <summary>
+    /// The junction <c>$filter</c>: the contact's memberships whose own <c>statecode</c> is ACTIVE — and
+    /// NOTHING else.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>🔴 No date term, deliberately, and none may be added here.</b> This filter defines the
+    /// FR-23 wall-subject set as well as the superset the conferring set is narrowed from. A date bound in
+    /// the <c>$filter</c> would narrow the WALL too — a fail-OPEN change to a veto, which owner decision
+    /// D-2 part 2 (end date) and D-10 (start date) both forbid: an org-keyed ethical wall keeps binding a
+    /// former member, and a not-yet-started one. The date bounds live in
+    /// <see cref="MembershipConfersOn"/>, applied to the conferring set only.</para>
+    /// <para><b>Null <c>statecode</c> is ACTIVE</b> — <c>ExternalGrantRow.IsActive</c>'s semantics, and
+    /// task 117's reconciliation scan's. A bare <c>statecode eq 0</c> excludes nulls in OData, so the
+    /// disjunction is explicit.</para>
+    /// </remarks>
+    internal static string BuildOrganizationMembershipFilter(Guid contactId)
+        => $"_sprk_contact_value eq {contactId} and (statecode eq 0 or statecode eq null)";
+
+    /// <summary>
+    /// Columns of the junction read: the organization, BOTH date bounds (task 109 / D-2 + D-10), and the
+    /// row's own state (re-decided in code — see <see cref="ProjectOrganizationMemberships"/>).
+    /// </summary>
+    internal const string OrganizationMembershipSelect =
+        "_sprk_organization_value,sprk_startdate,sprk_enddate,statecode";
+
+    /// <summary>
+    /// The IN-MEMORY conferring bound on a membership's dates: does a membership dated
+    /// <paramref name="startDate"/>..<paramref name="endDate"/> confer access on <paramref name="today"/>?
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Mirrors <see cref="ExpiryPredicate"/>'s MECHANICS, not task 107's null inversion.</b> Both
+    /// columns are <b>Date Only</b> with <c>DateOnly</c> behaviour (live-verified 2026-09-30:
+    /// <c>DateTimeAttributeMetadata.Format = DateOnly</c>, <c>DateTimeBehavior = DateOnly</c>), so both
+    /// boundaries are INCLUSIVE — access holds ON the start date (owner D-10: "confers as of the access
+    /// date") and THROUGH the end date (D-2 part 1; the same <c>ge</c> boundary <c>ExpiryPredicate</c>
+    /// uses, and the complement of task 117's strict <c>lt</c> deactivation rule, so the reader and the
+    /// writer agree on which day a membership ends).</para>
+    /// <para>🔴 <b>A NULL bound means UNBOUNDED, and both null branches are load-bearing.</b> Task 107
+    /// inverted the null branch for a GRANT's <c>sprk_expiresdate</c>, so an undated grant confers nothing
+    /// — correct for a grant, which is a privilege that must be bounded. A membership is not a grant: no
+    /// start date and no end date is simply an ordinary current membership. "Being consistent" across the
+    /// date columns here would silently revoke every open-ended membership in the system.</para>
+    /// <para>Applied to the CONFERRING set only — never to the wall (see
+    /// <see cref="BuildOrganizationMembershipFilter"/>).</para>
+    /// </remarks>
+    internal static bool MembershipConfersOn(DateOnly? startDate, DateOnly? endDate, DateOnly today)
+        => (startDate is null || startDate.Value <= today)
+           && (endDate is null || endDate.Value >= today);
+
+    /// <summary>Active means <c>statecode</c> 0 OR null — <c>ExternalGrantRow.IsActive</c>'s semantics.</summary>
+    internal static bool IsActiveState(int? stateCode) => stateCode is null or 0;
+
+    /// <summary>
+    /// Is the parent <c>sprk_organization</c>, as expanded onto a row, ACTIVE (task 109 · ISS-026)?
+    /// </summary>
+    /// <remarks>
+    /// <para>An expanded organization whose <c>statecode</c> is null is ACTIVE
+    /// (<see cref="IsActiveState"/>). An organization that did not come back at all — the lookup is set but
+    /// the expand is absent — is NOT: its state is unknown, and on a CONFERRING path unknown confers
+    /// nothing (ADR-003 fail-closed; the same rule <see cref="RootRecordFlags.Unreadable"/> applies to an
+    /// id the flag read did not return).</para>
+    /// <para>Deliberately the opposite of task 117's WRITER, which deactivates only on a CONFIRMED
+    /// <c>statecode = 1</c>. A writer removing access on an unknown would be the fail-open direction for a
+    /// write; a reader granting on one would be the fail-open direction for a read.</para>
+    /// </remarks>
+    internal static bool OrganizationIsActive(OrganizationStateRow? organization)
+        => organization is not null && IsActiveState(organization.StateCode);
+
+    /// <summary>
+    /// The ISS-026 read guard for a GRANT row: does the row's organization association let it confer?
+    /// </summary>
+    /// <remarks>
+    /// A row with NO organization lookup is unaffected — that is every plain contact-keyed grant. A row
+    /// WITH one confers only while that organization is active: an organization grant (contact empty)
+    /// obviously, and also a contact-keyed grant carrying its grantee's firm (the <c>/grant</c> writer's
+    /// "firm/org association", <c>GrantExternalAccessEndpoint</c>). The second is the set task 117's R2
+    /// deactivates (it selects every active grant whose <c>sprk_organization</c> is inactive, contact or
+    /// not), so the read guard covers exactly what the writer will later make permanent — the guard is
+    /// belt-and-braces for the writer, never a different rule.
+    /// </remarks>
+    internal static bool GrantOrganizationConfers(Guid? organizationId, OrganizationStateRow? organization)
+        => organizationId is null || organizationId.Value == Guid.Empty || OrganizationIsActive(organization);
+
+    /// <summary>
+    /// Projects the junction rows of ONE read into the two NAMED sets (task 109).
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item><b>Wall subject</b> — every organization with an ACTIVE junction row. <c>statecode</c> ONLY:
+    /// no date bound at either end and no organization-state bound. FR-23 over-matches by design, and every
+    /// one of those bounds would make the wall match FEWER subjects (owner D-2 part 2, D-10).</item>
+    /// <item><b>Conferring</b> — the wall set, narrowed to memberships that are current on
+    /// <paramref name="today"/> (<see cref="MembershipConfersOn"/>) under an ACTIVE organization
+    /// (<see cref="OrganizationIsActive"/>). Every additive org term reads this set and nothing else.</item>
+    /// </list>
+    /// <para>The junction <c>statecode</c> is re-decided here even though the <c>$filter</c> already
+    /// bounded it — task 117's discipline: the filter bounds what comes back, the code decides what it
+    /// means, so an over-broad filter is a cost rather than an access change.</para>
+    /// <para>One organization reached by two rows (one ended, one current) confers: any current
+    /// membership is a membership.</para>
+    /// </remarks>
+    internal static ActiveOrgMemberships ProjectOrganizationMemberships(
+        IEnumerable<ContactOrgRow> rows, DateOnly today)
+    {
+        var wall = new HashSet<Guid>();
+        var conferring = new HashSet<Guid>();
+
+        foreach (var row in rows)
+        {
+            if (row.OrganizationId is not { } organizationId || organizationId == Guid.Empty)
+            {
+                continue;
+            }
+
+            if (!IsActiveState(row.StateCode))
+            {
+                continue;
+            }
+
+            wall.Add(organizationId);
+
+            if (MembershipConfersOn(row.StartDate, row.EndDate, today) && OrganizationIsActive(row.Organization))
+            {
+                conferring.Add(organizationId);
+            }
+        }
+
+        return new ActiveOrgMemberships(conferring.ToList(), wall.ToList(), Unreadable: false);
+    }
 
     /// <summary>Today in UTC — the reference date every expiry comparison uses.</summary>
     private static DateOnly TodayUtc => DateOnly.FromDateTime(DateTime.UtcNow);
@@ -860,9 +1020,12 @@ public class ExternalParticipationService
             // verified against live Dataverse.) sprk_invoice grants are intentionally NOT read (design §6
             // — child access derives from an accessible root, not a direct child grant).
             // Expiry is enforced HERE, in the $filter (task 007 / FR-06) — see ExpiryPredicate.
+            // The organization's own state comes back in the SAME read (task 109 · ISS-026) — see
+            // GrantOrganizationConfers, applied immediately below before any row is partitioned.
             var query = $"{apiUrl}/sprk_externalrecordaccesses" +
                         $"?$filter={BuildContactGrantFilter(contactId, TodayUtc)}" +
-                        $"&$select={GrantRowSelect}";
+                        $"&$select={GrantRowSelect}" +
+                        $"&$expand={OrganizationStateExpand}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -879,7 +1042,7 @@ public class ExternalParticipationService
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
-            var rows = result?.Value ?? new List<ExternalAccessRow>();
+            var rows = WithoutInactiveOrganizations(result?.Value ?? new List<ExternalAccessRow>(), contactId);
 
             // Partition each grant into its root bucket by which typed lookup is populated. A project
             // grant keeps its access level; matter/WA grants contribute an id only.
@@ -924,10 +1087,11 @@ public class ExternalParticipationService
                 .ToList();
 
             // Term 3 (task 073 #7): union ORGANIZATION grants — records granted to any organization the
-            // contact is an ACTIVE member of (sprk_contactorganization junction). This mirrors the
-            // standing-grant runtime union: no per-contact rows exist, membership is resolved live, and
-            // staleness is bounded by the 60s cache TTL. Fail-closed by construction — a junction or
-            // org-grant read fault returns an empty list and contributes nothing, never 500s the authz path.
+            // contact CURRENTLY and ACTIVELY belongs to (the junction's CONFERRING set — task 109: date-
+            // bounded at both ends, under an active organization). This mirrors the standing-grant runtime
+            // union: no per-contact rows exist, membership is resolved live, and staleness is bounded by
+            // the 60s cache TTL. Fail-closed by construction — a junction or org-grant read fault
+            // contributes nothing, never 500s the authz path.
             var orgRows = await QueryOrganizationGrantRowsAsync(contactId, token, apiUrl, ct);
             if (orgRows.Count > 0)
             {
@@ -1029,17 +1193,38 @@ public class ExternalParticipationService
 
     /// <summary>
     /// Term 3 (task 073 #7) — the ORGANIZATION-grant rows a contact inherits: active org grants (contact
-    /// empty) for every organization the contact is an ACTIVE member of (<c>sprk_contactorganization</c>).
-    /// Two reads (memberships → org grants); fail-closed at every step (an empty list on any fault so an
-    /// org-side read problem NEVER widens NOR 500s the authz decision). Returns the org-grant rows in the
-    /// same shape as per-contact grants so the caller unions them identically.
+    /// empty) for every organization in the contact's CONFERRING membership set
+    /// (<c>sprk_contactorganization</c>, task 109). Two reads (memberships → org grants); fail-closed at
+    /// every step (nothing on any fault, so an org-side read problem NEVER widens NOR 500s the authz
+    /// decision). Returns the org-grant rows in the same shape as per-contact grants so the caller unions
+    /// them identically.
     /// </summary>
+    /// <remarks>
+    /// An ADDITIVE caller, so it reads <see cref="ActiveOrgMemberships.ConferringOrganizationIds"/> and
+    /// nothing else: a date-ended or not-yet-started membership, or one under an inactive organization,
+    /// contributes no org grant (owner D-2 part 1, D-10, ISS-026). On an unreadable junction that set is
+    /// empty, so the fault grants nothing — the additive half of the outcome's two fail directions.
+    /// <para>⚠️ The <see cref="ActiveOrgMemberships.Unreadable"/> signal is logged here but not yet carried
+    /// on the returned grant set, so a grant set built over a faulted junction read is cached for one TTL
+    /// like any other. Classifying that set as faulted (and not caching it) is task 132's, which consumes
+    /// this outcome by design rather than re-reading the junction.</para>
+    /// </remarks>
     private async Task<List<ExternalAccessRow>> QueryOrganizationGrantRowsAsync(
         Guid contactId, string token, string apiUrl, CancellationToken ct)
     {
-        var orgIds = await QueryActiveOrgIdsAsync(contactId, token, apiUrl, ct);
+        var memberships = await QueryOrganizationMembershipsAsync(contactId, token, apiUrl, ct);
+        var orgIds = memberships.ConferringOrganizationIds;
         if (orgIds.Count == 0)
+        {
+            if (memberships.Unreadable)
+            {
+                _logger.LogWarning(
+                    "[EXT-ACCESS] Org-grant term for Contact {ContactId} contributes NOTHING: the membership " +
+                    "junction was unreadable. A fault must not grant (ADR-003).", contactId);
+            }
+
             return new List<ExternalAccessRow>();
+        }
 
         try
         {
@@ -1049,7 +1234,8 @@ public class ExternalParticipationService
             // their firm, which is the same finding wearing a different lookup.
             var query = $"{apiUrl}/sprk_externalrecordaccesses" +
                         $"?$filter={BuildOrganizationGrantFilter(orgIds, TodayUtc)}" +
-                        $"&$select={GrantRowSelect}";
+                        $"&$select={GrantRowSelect}" +
+                        $"&$expand={OrganizationStateExpand}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -1067,7 +1253,11 @@ public class ExternalParticipationService
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
-            return result?.Value ?? new List<ExternalAccessRow>();
+
+            // Belt-and-braces for ISS-026: the conferring set already excluded inactive organizations,
+            // so a row here under an inactive one means its organization changed state between the two
+            // reads. The guard is the same one the contact-grant read applies.
+            return WithoutInactiveOrganizations(result?.Value ?? new List<ExternalAccessRow>(), contactId);
         }
         catch (Exception ex)
         {
@@ -1077,47 +1267,99 @@ public class ExternalParticipationService
     }
 
     /// <summary>
-    /// Public entry point onto the private <see cref="QueryActiveOrgIdsAsync(Guid, string, string, CancellationToken)"/>
-    /// overload below, for the task 039 deny-list veto: the principal's own active organization
-    /// memberships are one of the two SUBJECT identities <see cref="INoAccessListReader"/> checks
-    /// (contact + organization). REUSED, not duplicated — resolves its own token/API-url so the caller
-    /// does not need this service's internal Dataverse plumbing.
+    /// Drops every grant row whose organization association is not active
+    /// (<see cref="GrantOrganizationConfers"/>) — the ISS-026 read guard, applied before any row is
+    /// partitioned, cached or returned.
     /// </summary>
     /// <remarks>
-    /// Delegates to the SAME private query <see cref="QueryOrganizationGrantRowsAsync"/> already uses,
-    /// whose own internal try/catch fails toward an EMPTY org list on a query-level fault (correct for
-    /// that ADDITIVE caller — a fault there must not GRANT more access). Token/API-url acquisition here
-    /// is deliberately NOT separately guarded: if it throws, the exception propagates to
-    /// <c>AccessibleRecordSetService.ResolveDenyVetoAsync</c>, whose own catch-all denies every queried
-    /// candidate on ANY fault in the deny-veto resolution — the correct fail direction for a VETO
-    /// subject (unlike the additive org-grant caller above). A token-acquisition fault and a
-    /// query-level fault therefore resolve toward OPPOSITE defaults; both are deliberate for their
-    /// respective callers, not an inconsistency to "fix" by unifying them.
-    /// <para>Virtual for the same test seam the rest of this class uses (subclass + override).</para>
+    /// In memory rather than in the <c>$filter</c>: the organization's state arrives by
+    /// <see cref="OrganizationStateExpand"/>, and an OR across a parent column and a navigation column is
+    /// not a predicate whose null semantics Dataverse documents. The rows never leave this private method
+    /// unfiltered, so no later code path can see one.
     /// </remarks>
-    public virtual async Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+    private List<ExternalAccessRow> WithoutInactiveOrganizations(List<ExternalAccessRow> rows, Guid contactId)
     {
-        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
-        var apiUrl = GetDataverseApiUrl();
-        return await QueryActiveOrgIdsAsync(contactId, token, apiUrl, ct).ConfigureAwait(false);
+        var kept = rows.Where(r => GrantOrganizationConfers(r._sprk_organization_value, r.Organization)).ToList();
+        if (kept.Count != rows.Count)
+        {
+            _logger.LogInformation(
+                "[EXT-ACCESS] {Dropped} grant row(s) for Contact {ContactId} confer NOTHING: their organization " +
+                "is inactive or its state did not come back (ISS-026 read guard).",
+                rows.Count - kept.Count, contactId);
+        }
+
+        return kept;
     }
 
     /// <summary>
-    /// The <c>sprk_organization</c> ids the contact is an ACTIVE member of, from the
-    /// <c>sprk_contactorganization</c> junction (<c>statecode eq 0</c> = active membership; a former
-    /// member is a deactivated row and is excluded, so leaving a firm drops inherited access). Fail-closed
-    /// to an empty list. NOTE: assumes the junction's lookup logical names are <c>sprk_contact</c> /
-    /// <c>sprk_organization</c> (→ <c>_sprk_contact_value</c> / <c>_sprk_organization_value</c>), matching
-    /// the grant table's convention — confirm against the created junction schema.
+    /// The evaluator's entry onto the ONE organization-membership read (task 109): the subject's
+    /// CONFERRING set (additive org terms) and WALL-SUBJECT set (the FR-23 deny veto, task 039), plus
+    /// whether the read could be completed at all — from a single junction query.
     /// </summary>
-    private async Task<List<Guid>> QueryActiveOrgIdsAsync(
+    /// <remarks>
+    /// <para><b>Every fault now reaches the caller as a fault.</b> A query-level failure (non-success status,
+    /// timeout, transport or parse error) comes back as <see cref="ActiveOrgMemberships.Failed"/> from
+    /// <see cref="QueryOrganizationMembershipsAsync"/>. Token/API-url acquisition is still deliberately NOT
+    /// guarded here: it propagates to <c>AccessibleRecordSetService.ReadActiveOrgMembershipsAsync</c>,
+    /// which maps it to the SAME <see cref="ActiveOrgMemberships.Failed"/>. Before task 109 those two faults
+    /// resolved differently — the token fault denied, the query fault was swallowed into an empty list that
+    /// the veto read as "belongs to no organization" (ISS-019, #998), so the wall's organization axis
+    /// silently stopped matching.</para>
+    /// <para><b>The two fail directions are NOT unified — they are now both reachable.</b> The outcome is
+    /// one value; each consumer applies its own direction to it. The additive terms read
+    /// <see cref="ActiveOrgMemberships.ConferringOrganizationIds"/>, which is empty on a fault, so a fault
+    /// grants nothing; the veto reads <see cref="ActiveOrgMemberships.Unreadable"/> first and denies every
+    /// queried candidate. What was removed is only the case where a fault was indistinguishable from
+    /// absence.</para>
+    /// <para><c>internal virtual</c> for the test seam the rest of this class uses (subclass + override);
+    /// internal because <see cref="ActiveOrgMemberships"/> is.</para>
+    /// </remarks>
+    internal virtual async Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
+        Guid contactId, CancellationToken ct = default)
+    {
+        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
+        var apiUrl = GetDataverseApiUrl();
+        var memberships = await QueryOrganizationMembershipsAsync(contactId, token, apiUrl, ct).ConfigureAwait(false);
+
+        // The query reports the caller's own cancellation as Failed (see its catch); here, on the evaluator's
+        // path, a cancelled request propagates instead of composing a deny-all answer nobody is waiting for.
+        ct.ThrowIfCancellationRequested();
+        return memberships;
+    }
+
+    /// <summary>
+    /// The <c>sprk_contactorganization</c> junction query — the ONE read behind both named membership sets
+    /// (<see cref="ProjectOrganizationMemberships"/>), shared by the evaluator entry above and the org-grant
+    /// term (<see cref="QueryOrganizationGrantRowsAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Reports a fault instead of swallowing it</b> (task 109 · ISS-019): a non-success status, a
+    /// timeout or any other exception returns <see cref="ActiveOrgMemberships.Failed"/> — never an empty
+    /// "successful" read. An HTTP timeout surfaces as an <see cref="OperationCanceledException"/> whose token
+    /// is not the caller's, and that is a fault. The caller's OWN cancellation is reported as Failed here too
+    /// and rethrown by <see cref="ReadOrganizationMembershipsAsync"/> — see the catch for why it must not
+    /// propagate from this method.</para>
+    /// <para><b>Schema</b>, live-verified 2026-08-26 (task 020, recorded at
+    /// <c>RevokeExternalAccessEndpoint.cs</c>'s <c>ExternalOrganizationMembership</c>) and again 2026-09-30
+    /// (task 109): collection <c>sprk_contactorganizations</c>; lookups <c>_sprk_contact_value</c> /
+    /// <c>_sprk_organization_value</c>; <c>statecode</c> Active(0)/Inactive(1); <c>sprk_startdate</c> and
+    /// <c>sprk_enddate</c> Date Only with <c>DateOnly</c> behaviour; navigation property
+    /// <c>sprk_Organization</c>.</para>
+    /// <para><b>A former member is NOT necessarily a deactivated row.</b> Nothing in the repo deactivated
+    /// these maker-authored rows until task 117's reconciliation job (registered disabled), so a membership
+    /// ended by DATE can still be <c>statecode</c>-active. That is why the conferring set is date-bounded in
+    /// memory and does not rely on <c>statecode</c> alone — and why the wall, which deliberately does, keeps
+    /// binding a former member (owner D-2).</para>
+    /// </remarks>
+    private async Task<ActiveOrgMemberships> QueryOrganizationMembershipsAsync(
         Guid contactId, string token, string apiUrl, CancellationToken ct)
     {
         try
         {
             var query = $"{apiUrl}/sprk_contactorganizations" +
-                        $"?$filter=_sprk_contact_value eq {contactId} and statecode eq 0" +
-                        $"&$select=_sprk_organization_value";
+                        $"?$filter={BuildOrganizationMembershipFilter(contactId)}" +
+                        $"&$select={OrganizationMembershipSelect}" +
+                        $"&$expand={OrganizationStateExpand}";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -1128,23 +1370,45 @@ public class ExternalParticipationService
             var response = await _httpClient.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning(
-                    "[EXT-ACCESS] Contact-organization membership query failed for Contact {ContactId}: {Status}",
+                _logger.LogError(
+                    "[EXT-ACCESS] Contact-organization membership query FAILED for Contact {ContactId}: {Status}. " +
+                    "Reporting the read as UNREADABLE — the org terms contribute nothing and the deny veto " +
+                    "denies every queried candidate (ISS-019).",
                     contactId, response.StatusCode);
-                return new List<Guid>();
+                return ActiveOrgMemberships.Failed;
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ContactOrgRow>>(ct);
-            return (result?.Value ?? new List<ContactOrgRow>())
-                .Where(r => r._sprk_organization_value.HasValue)
-                .Select(r => r._sprk_organization_value!.Value)
-                .Distinct()
-                .ToList();
+            var memberships = ProjectOrganizationMemberships(result?.Value ?? new List<ContactOrgRow>(), TodayUtc);
+
+            if (memberships.ConferringOrganizationIds.Count != memberships.WallSubjectOrganizationIds.Count)
+            {
+                // Debug, not Information: this runs on every composition (every authorization check) and
+                // describes a steady state, not an event.
+                _logger.LogDebug(
+                    "[EXT-ACCESS] Contact {ContactId}: {Wall} active organization membership(s), of which " +
+                    "{Conferring} confer access — the rest are ended by date, not yet started, or under an " +
+                    "inactive organization. They still bind the No Access wall (owner D-2 / D-10).",
+                    contactId, memberships.WallSubjectOrganizationIds.Count, memberships.ConferringOrganizationIds.Count);
+            }
+
+            return memberships;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The CALLER cancelled. Reported as Failed, not rethrown, on purpose: this query also runs inside
+            // QueryGrantSetAsync, whose catch-all would turn a propagated cancellation into an EMPTY grant set
+            // (direct grants included) and cache it — a wider loss than the org-grant term alone. The
+            // evaluator's entry (ReadOrganizationMembershipsAsync) rethrows the cancellation itself.
+            // Not caching fault-derived grant sets at all is task 132's.
+            return ActiveOrgMemberships.Failed;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[EXT-ACCESS] Error querying contact-organization memberships for Contact {ContactId}", contactId);
-            return new List<Guid>();
+            _logger.LogError(ex,
+                "[EXT-ACCESS] Error querying contact-organization memberships for Contact {ContactId}. " +
+                "Reporting the read as UNREADABLE (ISS-019).", contactId);
+            return ActiveOrgMemberships.Failed;
         }
     }
 
@@ -1246,13 +1510,50 @@ public class ExternalParticipationService
 
         [JsonPropertyName("sprk_accesslevel")]
         public int? sprk_accesslevel { get; set; }
-    }
 
-    /// <summary>A `sprk_contactorganization` junction row — projects the org lookup value (task 073 #7).</summary>
-    private sealed class ContactOrgRow
-    {
+        /// <summary>The row's organization association — an org grant's grantee, or a contact grant's firm (task 109).</summary>
         [JsonPropertyName("_sprk_organization_value")]
         public Guid? _sprk_organization_value { get; set; }
+
+        /// <summary>The organization's own state, expanded in the same read (<see cref="OrganizationStateExpand"/>).</summary>
+        [JsonPropertyName("sprk_Organization")]
+        public OrganizationStateRow? Organization { get; set; }
+    }
+
+    /// <summary>
+    /// A <c>sprk_contactorganization</c> junction row (task 073 #7; widened by task 109 to carry both date
+    /// bounds, its own state and its organization's state, so ONE read serves both named sets).
+    /// </summary>
+    /// <remarks><c>internal</c> so <see cref="ProjectOrganizationMemberships"/> — a pure member carrying the
+    /// conferring/wall contract — is assertable without a transport (ADR-038 A2).</remarks>
+    internal sealed class ContactOrgRow
+    {
+        [JsonPropertyName("_sprk_organization_value")]
+        public Guid? OrganizationId { get; set; }
+
+        /// <summary>Date Only. Null = no start bound (an ordinary current membership).</summary>
+        [JsonPropertyName("sprk_startdate")]
+        public DateOnly? StartDate { get; set; }
+
+        /// <summary>Date Only. Null = no end bound (an ordinary current membership).</summary>
+        [JsonPropertyName("sprk_enddate")]
+        public DateOnly? EndDate { get; set; }
+
+        /// <summary>The junction row's own state. Null is ACTIVE (<see cref="IsActiveState"/>).</summary>
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
+
+        /// <summary>The parent organization's state; null when the expand did not come back.</summary>
+        [JsonPropertyName("sprk_Organization")]
+        public OrganizationStateRow? Organization { get; set; }
+    }
+
+    /// <summary>The expanded parent <c>sprk_organization</c> — its state only (task 109 · ISS-026).</summary>
+    internal sealed class OrganizationStateRow
+    {
+        /// <summary>Active(0) / Inactive(1), live-verified 2026-09-30. Null is ACTIVE (<see cref="IsActiveState"/>).</summary>
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
     }
 
     private sealed class ContactRow

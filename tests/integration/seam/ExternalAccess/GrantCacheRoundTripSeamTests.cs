@@ -557,8 +557,8 @@ public sealed class GrantCacheRoundTripSeamTests
             return Task.FromResult(flags);
         }
 
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(ActiveOrgMemberships.None);
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

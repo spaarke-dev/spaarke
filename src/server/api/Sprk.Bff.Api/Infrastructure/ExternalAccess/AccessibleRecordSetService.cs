@@ -182,6 +182,61 @@ public readonly record struct AccessibleRecordSetSources(
     bool StandingGrantMembership,
     bool OrgExpansionMembership = false);
 
+/// <summary>
+/// The outcome of the ONE read of a subject's organization memberships (<c>sprk_contactorganization</c>):
+/// two NAMED sets, plus whether the read could be completed at all.
+/// </summary>
+/// <param name="ConferringOrganizationIds">
+/// Organizations whose membership CONFERS access today — an active junction row, current on both date
+/// bounds (<c>sprk_startdate</c> ≤ today ≤ <c>sprk_enddate</c>, a null bound being unbounded), under an
+/// ACTIVE <c>sprk_organization</c>. Owner decisions D-2 part 1, D-10, and ISS-026's read guard. Read by
+/// every ADDITIVE org term: org expansion (here) and org grants
+/// (<c>ExternalParticipationService.QueryOrganizationGrantRowsAsync</c>). Empty on a fault.
+/// </param>
+/// <param name="WallSubjectOrganizationIds">
+/// Organizations the subject is checked against by the FR-23 deny veto — every ACTIVE junction row, bounded
+/// on <c>statecode</c> ONLY. Deliberately a SUPERSET of the conferring set: an org-keyed ethical wall keeps
+/// binding a former member, a not-yet-started one, and a member of an inactive organization (owner D-2
+/// part 2, D-10). Date-bounding it would be a fail-OPEN change to a veto. Empty on a fault — so a consumer
+/// MUST read <paramref name="Unreadable"/> first.
+/// </param>
+/// <param name="Unreadable">The read could not be completed. Additive terms contribute nothing; the veto
+/// denies every queried candidate.</param>
+/// <remarks>
+/// <para>🔴 <b>Why this is an outcome and not a list.</b> One junction read feeds two consumers whose safe
+/// failure directions are OPPOSITE:</para>
+/// <list type="bullet">
+/// <item>the ADDITIVE org terms, where over-inclusion is an over-GRANT — so a failed read must contribute
+/// NOTHING;</item>
+/// <item>the FR-23 deny-veto SUBJECT, where over-inclusion is merely a stricter wall — so a failed read must
+/// deny EVERY candidate (the behaviour <c>ResolveDenyVetoAsync</c> has always had).</item>
+/// </list>
+/// <para>Collapsing both onto a bare empty list converts the veto's fail-CLOSED into a fail-OPEN: an empty
+/// subject-org list looks exactly like "belongs to no organization", so the wall simply stops matching.
+/// <see cref="Unreadable"/> keeps the two decisions distinct while still costing one read (NFR-02).</para>
+/// <para>✅ <b>The guarantee now covers every fault — task 109 (ISS-019, #998).</b> Task 043's code-review
+/// gate recorded that <see cref="Unreadable"/> was set only for faults reaching the evaluator as an
+/// EXCEPTION (token/API-url acquisition): a junction QUERY failure (HTTP 500/403, timeout) was swallowed
+/// inside <c>ExternalParticipationService</c>'s private query into an empty list, arrived as
+/// <c>Unreadable: false</c>, and silently removed the wall's organization axis for that subject. The query
+/// now returns <see cref="Failed"/> itself, which is the fix "one layer down" that review asked for — not a
+/// second query for the veto path, which would have re-introduced the two-snapshot hazard task 043
+/// removed.</para>
+/// <para>Two NAMED sets rather than one set plus a predicate, so a consumer cannot pick up "the
+/// organizations" without saying which question it is asking.</para>
+/// </remarks>
+internal readonly record struct ActiveOrgMemberships(
+    IReadOnlyList<Guid> ConferringOrganizationIds,
+    IReadOnlyList<Guid> WallSubjectOrganizationIds,
+    bool Unreadable)
+{
+    /// <summary>No contact subject, or a subject that genuinely belongs to no organization.</summary>
+    internal static ActiveOrgMemberships None { get; } = new(Array.Empty<Guid>(), Array.Empty<Guid>(), false);
+
+    /// <summary>The read faulted — contribute nothing, and deny every queried candidate.</summary>
+    internal static ActiveOrgMemberships Failed { get; } = new(Array.Empty<Guid>(), Array.Empty<Guid>(), true);
+}
+
 /// <inheritdoc />
 public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 {
@@ -423,49 +478,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static readonly string[] OrganizationIdentityTypeOnly = { "Organization" };
 
     /// <summary>
-    /// The outcome of reading a subject's ACTIVE organization memberships
-    /// (<c>sprk_contactorganization</c>) — the ids, plus whether the read could be completed at all.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b>Why this is an outcome and not just a list.</b> One junction read feeds two consumers whose
-    /// safe failure directions are OPPOSITE:
-    /// <list type="bullet">
-    /// <item>the ADDITIVE org-expansion term, where over-inclusion is an over-GRANT — so a failed read
-    /// must contribute NOTHING;</item>
-    /// <item>the FR-23 deny-veto SUBJECT, where over-inclusion is merely a stricter wall — so a failed
-    /// read must deny EVERY candidate (the behaviour <c>ResolveDenyVetoAsync</c> has always had).</item>
-    /// </list>
-    /// Collapsing both onto a bare empty list would have converted the veto's fail-CLOSED into a
-    /// fail-OPEN for the faults this type CAN see: an empty subject-org list looks exactly like
-    /// "belongs to no organization", so the wall would simply stop matching. Carrying
-    /// <see cref="Unreadable"/> keeps the two decisions distinct while still costing one read (NFR-02).
-    /// <para>
-    /// ⚠️ <b>Scope of the guarantee — corrected by task 043's code-review gate, which found the original
-    /// wording here claimed more than the code delivers.</b> <see cref="Unreadable"/> is set only for
-    /// faults that reach
-    /// <see cref="ReadActiveOrgMembershipsAsync"/> as an <b>exception</b>, which in practice means
-    /// token/API-url acquisition. A junction <i>query</i> failure (HTTP 500/403, timeout, any
-    /// non-success status) is swallowed inside <c>ExternalParticipationService</c>'s private query,
-    /// which returns an empty list — so it arrives here as <c>Unreadable: false</c> and the deny veto's
-    /// ORGANIZATION axis silently stops matching for that subject. Contact-keyed deny rows still apply,
-    /// so the wall narrows rather than vanishes. That hole PRE-DATES task 043; what task 043 briefly did
-    /// was document and test it as closed, which is worse than silence because it stops the next reader
-    /// looking. See <see cref="ResolveDenyVetoAsync"/>'s remarks for why fixing it properly has to
-    /// happen one layer down, in the junction query itself.
-    /// </para>
-    /// </remarks>
-    private readonly record struct ActiveOrgMemberships(IReadOnlyList<Guid> OrganizationIds, bool Unreadable)
-    {
-        /// <summary>No contact subject, or a subject that genuinely belongs to no organization.</summary>
-        internal static ActiveOrgMemberships None { get; } = new(Array.Empty<Guid>(), false);
-
-        /// <summary>The read faulted — contribute nothing, and deny every queried candidate.</summary>
-        internal static ActiveOrgMemberships Failed { get; } = new(Array.Empty<Guid>(), true);
-    }
-
-    /// <summary>
-    /// Reads the subject's ACTIVE organization memberships ONCE per composition, for both the
-    /// org-expansion term and the deny-veto subject (task 043).
+    /// Reads the subject's organization memberships ONCE per composition, for both the org-expansion term
+    /// and the deny-veto subject (task 043; the one read now yields two named sets — task 109).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -475,12 +489,18 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// anyway, since they are an input to it.
     /// </para>
     /// <para>
-    /// ⚠️ <b>The query bounds on <c>statecode</c> only; it does NOT bound on <c>sprk_enddate</c></b>, and
-    /// task 043 decided that deliberately rather than inheriting it. See
-    /// <c>notes/task-043-org-expansion-term.md</c> — the short version is that
-    /// <c>QueryActiveOrgIdsAsync</c> is shared by this ADDITIVE caller and the VETO subject, whose fail
-    /// directions are inverted, so a blanket date bound would tighten the grant path and simultaneously
-    /// make the ethical wall match FEWER subjects. One query shape cannot be correct for both.
+    /// <b>Date bounds — decided by the owner (D-2, D-10), implemented by task 109.</b> Task 043 left the
+    /// read bounded on <c>statecode</c> alone because one bare-id projection could not be right for both
+    /// consumers. It is one READ, not one FILTER: the read now projects both date columns and the
+    /// organization's state, and returns the CONFERRING set (date-bounded at both ends, active
+    /// organization) beside the WALL-SUBJECT set (<c>statecode</c> only). This method returns the outcome
+    /// unchanged; the consumers below each pick their own set.
+    /// </para>
+    /// <para>
+    /// Every fault becomes <see cref="ActiveOrgMemberships.Failed"/>: a query-level fault inside the read
+    /// itself (task 109 · ISS-019), and a token/API-url fault here. Only the caller's own cancellation
+    /// propagates (rethrown by the participation service's entry) — a timeout is a fault, not a
+    /// cancellation.
     /// </para>
     /// </remarks>
     private async Task<ActiveOrgMemberships> ReadActiveOrgMembershipsAsync(
@@ -496,11 +516,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
-            var orgIds = await _participations
-                .QueryActiveOrgIdsAsync(contactId, ct).ConfigureAwait(false);
-            return new ActiveOrgMemberships(orgIds, Unreadable: false);
+            return await _participations
+                .ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -538,12 +557,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// EITHER axis. The deny-list reader is never even queried in that case.
     /// </param>
     /// <param name="subjectOrgs">
-    /// The subject's active organization memberships, already resolved by
+    /// The subject's organization memberships, already resolved by
     /// <see cref="ReadActiveOrgMembershipsAsync"/> (task 043 hoisted the read out of this method so the
-    /// additive org-expansion term and this veto cannot be computed from two different snapshots).
-    /// <see cref="ActiveOrgMemberships.Unreadable"/> denies every queried candidate — but read that
-    /// type's remarks for exactly which fault modes set it, because the junction query's own error
-    /// handling does NOT surface every failure as one.
+    /// additive org-expansion term and this veto cannot be computed from two different snapshots). This
+    /// veto reads <see cref="ActiveOrgMemberships.WallSubjectOrganizationIds"/> — the <c>statecode</c>-only
+    /// set — and NEVER the conferring set (owner D-2 part 2, D-10). <see cref="ActiveOrgMemberships.Unreadable"/>
+    /// denies every queried candidate, and since task 109 it is set for every fault of the junction read,
+    /// query-level ones included.
     /// </param>
     /// <remarks>
     /// <para>
@@ -567,26 +587,23 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// deny entry keyed on an organization it actually references but which the read could not
     /// confirm — exactly the "skipped record is an unevaluated wall" case task 039's escalation
     /// trigger names.</item>
-    /// <item>A subject whose active organizations could not be read
+    /// <item>A subject whose organizations could not be read
     /// (<see cref="ActiveOrgMemberships.Unreadable"/>) denies every queried candidate, mirroring
     /// <see cref="NoAccessListReader"/>'s own over-large-subject-set precedent: a subject that cannot be
-    /// safely evaluated is treated the same as a subject the reader could not evaluate.</item>
+    /// safely evaluated is treated the same as a subject the reader could not evaluate. Since task 109 this
+    /// covers a junction QUERY failure (HTTP 500/403, timeout, any non-success status) as well as a
+    /// token/API-url fault — the query reports <see cref="ActiveOrgMemberships.Failed"/> instead of an
+    /// empty list (ISS-019, #998). Before that, a failed query arrived here as "belongs to no
+    /// organization" and silently removed the wall's organization axis for that subject.</item>
     /// <item>Any other unexpected fault in this method is caught below and denies every queried
     /// candidate.</item>
     /// </list>
     /// <para>
-    /// 🔴 <b>The one fault this veto does NOT catch</b> (recorded by task 043's code-review gate; the
-    /// hole PRE-DATES that task and is not introduced by it). A junction <i>query</i> failure — HTTP
-    /// 500/403, a timeout, any non-success status — is swallowed inside
-    /// <c>ExternalParticipationService</c>'s private query, which returns an EMPTY list rather than
-    /// throwing. The public overload only propagates a token/API-url acquisition fault. So a failed
-    /// junction query reaches this method as <c>Unreadable: false</c> with no organizations, which is
-    /// indistinguishable from "this subject belongs to no organization" — and the subject's
-    /// ORGANIZATION axis of the wall stops matching. Contact-keyed deny rows (contact×record,
-    /// contact×org) are unaffected, so the wall is narrowed rather than removed. Closing it properly
-    /// means surfacing an outcome from the junction query itself, which also governs the org-GRANT
-    /// path, whose additive caller deliberately wants empty-on-fault — i.e. the same inverted-fail-
-    /// direction problem one layer down. Filed, not fixed here.
+    /// <b>The subject's organizations OVER-match too, on purpose</b> (owner D-2 part 2, D-10): the wall
+    /// set is every organization with an ACTIVE junction row — a membership ended by date, one not yet
+    /// started, and one under an inactive organization all still bind. The conferring set the additive
+    /// terms use is narrower; using it here would make the wall match fewer subjects, a fail-OPEN change
+    /// to a veto.
     /// </para>
     /// <para>
     /// In every case the veto is never SKIPPED — an observable fault denies; it never causes the
@@ -626,7 +643,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
-            var subjectOrgIds = subjectOrgs.OrganizationIds;
+            // The WALL set — statecode only, never the conferring set (owner D-2 part 2, D-10).
+            var subjectOrgIds = subjectOrgs.WallSubjectOrganizationIds;
 
             var referencedOrgs = await _participations
                 .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
@@ -1133,7 +1151,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         // ── ONE junction read, shared by the additive org term AND the deny-veto subject (NFR-02) ──
         // Hoisted above the membership walk because the contact's active organizations are an INPUT to
-        // it: an org-typed descriptor can only emit a condition if the identity carries org ids.
+        // it: an org-typed descriptor can only emit a condition if the identity carries org ids. The one
+        // read yields both NAMED sets (task 109): the org term below reads ConferringOrganizationIds, the
+        // veto reads WallSubjectOrganizationIds.
         var activeOrgs = await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false);
 
         // Standing-grant runtime membership, GATED on the subject-level policy flag. The negative case is
@@ -1192,12 +1212,17 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         //
         // Independent of the contact's OWN standing grant: this term is the ORGANIZATION's standing
         // arrangement, so it applies whether or not the contact personally holds one.
+        //
+        // An ADDITIVE term, so it reads the CONFERRING set only (task 109): a membership ended by date,
+        // not yet started, or under an inactive organization derives nothing (owner D-2 part 1, D-10,
+        // ISS-026) — while the veto below still treats it as a wall subject. On an unreadable junction
+        // the conferring set is empty, so the fault contributes nothing.
         var orgTerms = new List<(AccessRights Rights, HashSet<Guid> RecordIds)>();
         var orgExpansionApplied = false;
-        if (activeOrgs.OrganizationIds.Count > 0)
+        if (activeOrgs.ConferringOrganizationIds.Count > 0)
         {
             var orgsByRights = new Dictionary<AccessRights, List<Guid>>();
-            foreach (var orgId in activeOrgs.OrganizationIds.Distinct())
+            foreach (var orgId in activeOrgs.ConferringOrganizationIds.Distinct())
             {
                 // The reader refuses Guid.Empty (it is a caller bug there, not a subject). Skipping it
                 // here keeps a malformed junction row from turning the whole term into an exception.
