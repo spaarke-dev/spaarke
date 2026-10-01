@@ -1,6 +1,16 @@
 # Current Task State — `unified-access-control-r2`
 
-> ## 🚨 SESSION 26 FINAL CHECKPOINT (2026-09-30; updated after merge + deploy) — READ FIRST
+> ## 🚨 SESSION 27 CHECKPOINT (2026-09-30 late) — READ FIRST
+> | | |
+> |---|---|
+> | **Decisions** | `notes/session27-owner-decisions-and-research.md`: owner rounds 1–2 are BINDING, plus the peer agreements (082/#1046, #1044 to-do matching, PR #1045 merged). |
+> | **Tasks** | **130–152 authored and reviewed** (commit `622fbc1dc`). Re-opened 003/013/037/039; amended 034/036/056/064/066/067/070. TASK-INDEX has a "Session 27" section with the hot-file serial order. Issues **#1053–#1074** filed; #967/#1034/#1046/#1006/#999 linked. |
+> | **Owner questions** | **51** consolidated from 147 escalation triggers → `notes/raw/session27-owner-questions.json`. Presented to the owner in session 27 (28 need an explicit answer). The ADR-003 path-B amendment for 138 (Limited suppresses pre-max) is added by hand as D2. |
+> | **Executing** | Workflow `wf_aa385556-714` runs tasks **130, 131, 134, 151** in isolated worktrees on branches `task/uac-r2-{id}`, then adversarial verify. **Next:** merge the ready branches into `work/unified-access-control-r2` → full suite + ArchTests → publish size from fresh short-path worktrees → update TASK-INDEX → push → PR. |
+> | **Master** | Merged into the branch at `79d9dec59` (includes #1045). Dev BFF still runs `2682e8225`; redeploy after this batch to pick up the #1038/#1043 fixes. |
+> | **Peer** | word-add-in-r1: 082 is live (PR #1051), 083 waits on 141's link contract, PR #1052 edits RouteAuthorizationGuardTests (130 rebases on it). |
+>
+> ## SESSION 26 FINAL CHECKPOINT (2026-09-30; updated after merge + deploy)
 > **Next action**: merge PR #1033 when `Router` passes. Then **wait on the owner**: 4 decisions (C4, C7, C9-interim, C10) + approval to file issues/author tasks for the 12 defects. Do NOT file or author until answered.
 > | | |
 > |---|---|
