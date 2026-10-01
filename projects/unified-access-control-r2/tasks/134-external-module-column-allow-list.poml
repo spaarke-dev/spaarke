@@ -4,7 +4,7 @@
     <title>C6 — a per-module COLUMN allow-list on the external module read seam: /fetch and /record stop returning SPE pointers and internal/FLS columns inside granted scope</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C6)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization/disclosure change on a live, unconditionally mapped external read route (.cs); tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -145,10 +145,41 @@ NEW MODULES. Task 056 (pending) registers sprk_todo / sprk_event / sprk_communic
 
   <notes>Defect C6 (notes/session26-uac-defects-and-synopsis.md § C6; UC3 caveat "OVER-EXPOSURE"). Impact is identifier and internal-field disclosure within already-granted scope — no cross-scope rows — which is why it ranks medium, but it breaks the broker-only invariant that every other external route keeps. Investigation gap G-10 was filed under the generic "field-level visibility out of scope" deferral (spec.md:27; design-register.md D-3), whose premise ("the SPA won't ask") fails when the caller authors the FetchXML. This task closes G-10; record that in the design register's D-3 entry at completion (a notes edit, not a spec change).
 
-Independent of tasks 135-137 in logic, but parallel-unsafe under the hot-file rule; run it before or after them, not beside. Task 136 relies on the module scope dimensions reading `CallerPrincipal` views and deliberately does not edit this task's files. Task 056 (child modules) must declare allow-lists for its three descriptors if it lands after this task — the main session should add that line to 056 (not edited here).</notes>
+Independent of tasks 135-137 in logic, but parallel-unsafe under the hot-file rule; run it before or after them, not beside. Task 136 relies on the module scope dimensions reading `CallerPrincipal` views and deliberately does not edit this task's files. Task 056 (child modules) must declare allow-lists for its three descriptors if it lands after this task — the main session should add that line to 056 (not edited here). After the criterion-8 follow-up, 056's descriptors must ALSO declare PrimaryNameAttribute (read from live EntityDefinitions) and add their entities to the LivePrimaryNames pin table.
+
+🔔 OWNER QUESTION (executor follow-up D1, open — no client code changed for it): the external grids mount the shared DataGrid with the default showViewSelector=true (src/client/external-spa/src/widgets/GridWidgetBody.tsx), so CIAM users can pick the entity's INTERNAL MDA main views from /savedqueries/{entity}. That is why each allow-list includes columns from sibling main views that render rows today (e.g. ownerid, sprk_assignedto, sprk_visibilitystate). Should external grids hide the ViewSelector (showViewSelector=false)? If yes, every allow-list can shrink to grid config + scope attributes + /record default projection, removing those internal columns from external reach; if no, the allow-lists stay as derived and any change to an internal main view's columns must also be mirrored in ReadableColumns. Owner decision required before either change.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-134">
+      Code complete; the MANUAL live gate (criterion 12) is PENDING — no deploy or live write was permitted in this run.
+      Allow-lists derived from LIVE dev data (read-only): the six sprk_gridconfiguration records, every active main
+      view of the seven module entities, EntityDefinitions primary id/name, and IsSecured (none). No escalation trigger
+      fired: no pointer, alias or aggregate in any live grid or view; nothing unreadable; only the external grid client
+      reaches the seam. Premise corrections: grid FetchXML lives in sprk_configjson (no sprk_fetchxml/sprk_layoutxml
+      columns); the external config read is DataGrid.tsx:657, not ConfigurationService/ViewService (Xrm paths); the
+      external grids expose a ViewSelector of internal main views (owner follow-up D1 in the notes). Deviation D2: the
+      primary-NAME default column is pinned by a live-metadata test, not by Register (metadata is not derivable from the
+      one permitted property); Register enforces the primary id. Perturbations P1–P4 each turned tests red, all reverted.
+      Design-register D-3 annotated (G-10 closed for this seam). Full record:
+      notes/task-134-external-module-column-allow-list.md.
+    </outcome>
+    <outcome date="2026-09-30" branch="task/uac-r2-134" kind="verifier-follow-up">
+      Criterion 8 follow-up (verifier: PARTIALLY met — Register enforced the primary id but not the primary NAME the
+      no-$select /record projection needs). Deviation D2 is SUPERSEDED: ExternalModuleDescriptor gains a second
+      required property, PrimaryNameAttribute, and Register now refuses at startup a descriptor that does not declare
+      it (null/blank) or whose ReadableColumns lacks it, alongside the existing primary-id refusal. All seven
+      production descriptors declare it; each was re-verified READ-ONLY against live EntityDefinitions
+      (spaarkedev1, 2026-09-30): sprk_project=sprk_projectnumber, sprk_document=sprk_documentname,
+      sprk_invoice/sprk_workassignment/sprk_servicerequest/sprk_gridconfiguration=sprk_name,
+      sprk_matter=sprk_matternumber — unchanged from the original derivation. The live-metadata pin test is kept and
+      now also asserts each DECLARATION equals the live value; a new test fails if a registered module is missing
+      from the pin table. New tests: seeded descriptor missing the name column throws at Register (theory row +
+      exact-message fact), undeclared name (null/""/"  ") throws, case-insensitive match accepted. Perturbations
+      P5-P8 each turned tests red and were reverted (see notes §8). No allow-list content changed; no client change.
+      Runs: affected 117/117; full BFF unit 13120 passed / 0 failed / 56 skipped (13176); ArchTests 337/337.
+      MANUAL live gate (criterion 12) remains PENDING.
+    </outcome>
   </execution>
 </task>
