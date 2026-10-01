@@ -632,6 +632,28 @@ because 084 also changes which predicted record the ribbon may auto-file to.
 
 ---
 
+## ISS-015 — `sprk_invoice` has no `sprk_invoicename` column: the Office invoice quick-create always fails
+
+| Field | Value |
+|---|---|
+| **Status** | Open; our half (`OfficeService.QuickCreateAsync`) to be tasked after 084. The other sites belong to other owners and are named in the issue |
+| **Urgency** | now (LIVE: every invoice quick-create from the pane fails) |
+| **Filed** | 2026-10-01 |
+| **Source** | unified-access-control-r2 task-130 verifier; confirmed live here |
+| **GitHub Issue** | [#1079](https://github.com/spaarke-dev/spaarke/issues/1079) |
+
+- `OfficeService.cs:1916` writes `entity["sprk_invoicename"] = name`. The column does not exist; `sprk_invoice`'s
+  primary name is `sprk_name` (live metadata, 2026-10-01).
+- It was introduced by #934 (`f5fee2141`). No test asserts the invoice name attribute.
+- Fix: write `sprk_name`, with a regression test that asserts the attribute name.
+- Same wrong column, NOT ours:
+  - `Services/RecordMatching/DataverseIndexSyncService.cs:52-55` (invoices likely missing from the records index);
+  - `scripts/ai-search/Sync-RecordsToIndex.ps1`;
+  - `scripts/backfill-multi-container-multi-index/...ParentRecords.ps1`.
+- `sprk_billingevent.sprk_invoicename` does exist, so references on that entity are correct.
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.

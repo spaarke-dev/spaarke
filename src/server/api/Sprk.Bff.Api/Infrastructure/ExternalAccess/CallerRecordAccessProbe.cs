@@ -61,9 +61,11 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// the same obligation for task 005's document-path use of it.</para>
 ///
 /// <para><b>ADR-010.</b> Concrete class, registered as a concrete (no interface). The substitution
-/// seam for tests is <c>virtual</c> on <see cref="GetCallerRightsAsync"/>, following the
-/// <see cref="DataverseWebApiClient"/> precedent that ADR-038 §4 designates as the module
-/// boundary.</para>
+/// seam for tests is <c>virtual</c> on <see cref="GetCallerRightsAsync"/> and
+/// <see cref="GetCallerRightsForRecordsAsync"/>, following the <see cref="DataverseWebApiClient"/>
+/// precedent that ADR-038 §4 designates as the module boundary. The three steps underneath (the OBO
+/// exchange, <c>WhoAmI</c>, <c>RetrievePrincipalAccess</c>) are <c>protected virtual</c> (task 084) so a
+/// test can count them and prove the multi-record path asks for the caller's identity once.</para>
 /// </remarks>
 public class CallerRecordAccessProbe
 {
@@ -242,6 +244,82 @@ public class CallerRecordAccessProbe
     }
 
     /// <summary>
+    /// Most <see cref="RetrievePrincipalAccessAsync"/> calls <see cref="GetCallerRightsForRecordsAsync"/> runs at once.
+    /// </summary>
+    internal const int MaxConcurrentRecordLookups = 4;
+
+    /// <summary>
+    /// The caller's rights on SEVERAL records, as Dataverse itself reports them: one entry per target, in
+    /// target order.
+    /// </summary>
+    /// <param name="callerBearerToken">The caller's bearer token from the inbound request.</param>
+    /// <param name="targets">Each record as (entity SET name, id).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>
+    /// <see cref="AccessRights.None"/> for any record whose question could not be answered, exactly as
+    /// <see cref="GetCallerRightsAsync"/> does for one record.
+    /// </returns>
+    /// <remarks>
+    /// <para>Added by spaarkeai-word-add-in-r1 task 084, so the Office picker can mark each row it offers
+    /// with whether the save would accept it ("pickable equals savable", #1037). The per-record answer comes
+    /// from the SAME private steps as <see cref="GetCallerRightsAsync"/>: the OBO exchange, <c>WhoAmI</c>,
+    /// then <c>RetrievePrincipalAccess</c>. The one difference is that the exchange and <c>WhoAmI</c> run once
+    /// for the whole set rather than once per record, because they depend only on the caller.</para>
+    ///
+    /// <para><b>Fail closed, per record and for the set.</b> If the caller cannot be established, every entry
+    /// is <see cref="AccessRights.None"/>. A record whose lookup fails gets <see cref="AccessRights.None"/>
+    /// without affecting the others. At most <see cref="MaxConcurrentRecordLookups"/> lookups run at once, so
+    /// a page of results cannot fan out unboundedly against Dataverse.</para>
+    /// </remarks>
+    public virtual async Task<IReadOnlyList<AccessRights>> GetCallerRightsForRecordsAsync(
+        string? callerBearerToken,
+        IReadOnlyList<(string EntitySet, Guid RecordId)> targets,
+        CancellationToken ct = default)
+    {
+        var results = new AccessRights[targets.Count];
+        if (targets.Count == 0)
+            return results;
+
+        if (string.IsNullOrWhiteSpace(callerBearerToken) || !OboAvailable || string.IsNullOrEmpty(_environmentUrl))
+        {
+            _logger.LogWarning(
+                "[{Marker}] Rights check cannot run for {Count} record(s): hasToken={HasToken}, " +
+                "canDoObo={CanDoObo}, hasEnvironmentUrl={HasEnvironmentUrl}. Denying all (fail closed).",
+                FallbackMarker, targets.Count,
+                !string.IsNullOrWhiteSpace(callerBearerToken), OboAvailable, !string.IsNullOrEmpty(_environmentUrl));
+
+            return results;
+        }
+
+        var dataverseToken = await ExchangeForDataverseTokenAsync(
+            callerBearerToken, $"{targets.Count} record(s)", ct).ConfigureAwait(false);
+        if (dataverseToken is null)
+            return results;
+
+        var callerSystemUserId = await ResolveCallerSystemUserIdAsync(dataverseToken, ct).ConfigureAwait(false);
+        if (callerSystemUserId is null)
+            return results;
+
+        using var gate = new SemaphoreSlim(MaxConcurrentRecordLookups);
+        var lookups = targets.Select(async (target, index) =>
+        {
+            await gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                results[index] = await RetrievePrincipalAccessAsync(
+                    dataverseToken, callerSystemUserId.Value, target.EntitySet, target.RecordId, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                gate.Release();
+            }
+        });
+
+        await Task.WhenAll(lookups).ConfigureAwait(false);
+        return results;
+    }
+
+    /// <summary>
     /// The calling user's Dataverse <c>systemuserid</c>, or <c>null</c> when it cannot be established.
     /// </summary>
     /// <remarks>
@@ -291,7 +369,7 @@ public class CallerRecordAccessProbe
     /// <param name="callerBearerToken">The caller's bearer token.</param>
     /// <param name="context">What the exchange is for — log context only, never a decision input.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task<string?> ExchangeForDataverseTokenAsync(
+    protected virtual async Task<string?> ExchangeForDataverseTokenAsync(
         string callerBearerToken,
         string context,
         CancellationToken ct)
@@ -354,7 +432,7 @@ public class CallerRecordAccessProbe
     /// that could silently miss (<see cref="DataverseAccessDataSource"/> returns
     /// <see cref="AccessRights.None"/> exactly there, which reads as "denied" rather than "unmapped").
     /// </remarks>
-    private async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
+    protected virtual async Task<Guid?> ResolveCallerSystemUserIdAsync(string dataverseToken, CancellationToken ct)
     {
         try
         {
@@ -407,7 +485,7 @@ public class CallerRecordAccessProbe
     /// (<c>"ReadAccess,WriteAccess,..."</c>) parsed by <see cref="DataverseAccessRightsMapper"/>, the
     /// single place in the codebase that reads that wire format.
     /// </remarks>
-    private async Task<AccessRights> RetrievePrincipalAccessAsync(
+    protected virtual async Task<AccessRights> RetrievePrincipalAccessAsync(
         string dataverseToken,
         Guid principalSystemUserId,
         string entitySet,
