@@ -10,6 +10,11 @@
 > write-path invariant I-6 (task 080) assigns a secure record's children to the owner team. The privilege list
 > moved to ONE file, [`config/secure-record-owner-role.json`](../../config/secure-record-owner-role.json), which
 > §5, §7 and the NFR-05 census read.
+> **Updated 2026-10-01** by `unified-access-control-r2` task 144 (C10 part 1, GitHub #967). Secure records are owned by
+> a **NAMED, non-default owner team** (`Secure Record Owners`), no longer by the business unit's **default** team — whose
+> membership Dataverse maintains from each user's business unit and which cannot be curated. The business unit must
+> also hold **no users**. Provisioning refuses unless both hold; a scheduled census job reports any drift. §4 is the
+> cutover; §7 the checks.
 
 ---
 
@@ -27,12 +32,22 @@ readable by ordinary users. See [§6 Blocking prerequisite](#6-blocking-prerequi
 
 ## 1. What this configuration is, in one paragraph
 
-A secure project is isolated by **ownership**, not by a per-record rule (Dataverse has no per-record
-deny). One business unit holds secure records; that BU's **default owner team** owns them; the team has
-**no human members**, so nobody gains access by owning or by business unit. All human access is by
-explicit share. The team needs a security role only because **Dataverse refuses to assign a record to a
-principal that lacks Read on that entity** — the role exists to make the team a legal assignment target,
-nothing more. It is the target for secure records and, since task 080, for the children filed to them.
+A secure record (project, matter or work assignment) is isolated by **ownership**, not by a per-record rule
+(Dataverse has no per-record deny). One business unit holds secure records and **holds no users**; a **named,
+non-default owner team** in it (`Secure Record Owners`) owns them; the team has **no members of any kind**, so nobody
+gains access by owning or by business unit. All human access is by explicit share. The team needs a security role
+only because **Dataverse refuses to assign a record to a principal that lacks Read on that entity** — the role exists
+to make the team a legal assignment target, nothing more. It is the target for secure records and, since task 080,
+for the children filed to them.
+
+**Why a named team and not the business unit's default team (task 144).** Every business unit has a default team, and
+Dataverse keeps its membership equal to the users whose business unit it is — it cannot be curated. When the default
+team owned secure records, moving any user into the business unit (a Change-BU, or registration given that BU's
+name) silently made them a reader of every secure record, and nothing checked. A named team changes membership only
+when someone adds a member on purpose. **Why the business unit must hold no users:** a record owned by ANY team in the
+business unit sits in that business unit, so a user placed there whose roles carry Business Unit or Deep depth reads
+every secure record by depth whoever owns it. Provisioning checks both before it moves anything; the read-only
+`secure-record-isolation-census` job re-checks them every 15 minutes and logs CRITICAL on drift.
 
 ---
 
@@ -42,7 +57,7 @@ nothing more. It is the target for secure records and, since task 080, for the c
 |---|---|
 | Rights | A System Administrator in the target environment |
 | Auth | `az login` to the tenant, then a token for the environment (below). `pac` is **not** used — its *active profile* may point at a different environment, which is an easy way to configure the wrong org |
-| Config | `SecureRecord:BusinessUnitName` in BFF app settings, **or** accept the compiled default |
+| Config | `SecureRecord:BusinessUnitName` and `SecureRecord:OwnerTeamName` in BFF app settings, **or** accept the compiled defaults (`Secure Record` / `Secure Record Owners`). Both are fail-closed lookup keys |
 
 ```powershell
 # Pin the environment explicitly. Never rely on an ambient/active profile.
@@ -140,21 +155,86 @@ exists.
 
 ---
 
-## 4. Step 2 — the owner team (already exists; do not create one)
+## 4. Step 2 — the NAMED owner team (create it; never use the default team)
 
-Every business unit is created with a **default owner team** named after the BU. It requires no
-provisioning. Verify rather than create:
+> **Changed 2026-10-01 (task 144, #967).** This step used to say "the owner team already exists; do not create one"
+> and pointed at the business unit's **default** team. That was the defect: the default team's membership is every
+> user in the business unit, maintained by Dataverse and impossible to curate. Secure records are now owned by a
+> **named, non-default Owner team**, and the default team is retired as an owner.
+
+**The name** is `Secure Record Owners` (owner decision F9), the compiled default of `SecureRecord:OwnerTeamName`. It
+is deliberately different from the business unit's own name, which its default team carries — so the two cannot be
+confused in MDA or in a census. 🔴 It is a **fail-closed lookup key**: the live team, the config value, the compiled
+default (`SecureRecordOwnerTeam.DefaultOwnerTeamName`, pinned by
+`DefaultSecureOwnerTeamName_IsTheOwnersChoice_AndNotTheBusinessUnitsOwnName`) and this guide move together, or
+provisioning stops with `sdap.provision.secure_owner_team_not_found`.
+
+### 4.1 Read the current state first (read-only)
 
 ```powershell
-$team = (Invoke-RestMethod "$Api/teams?`$select=teamid,name,teamtype,isdefault&`$filter=_businessunitid_value eq $buId and isdefault eq true and teamtype eq 0" -Headers $H).value
-$teamId = $team[0].teamid
-"owner team = $($team[0].name) / $teamId (teamtype=$($team[0].teamtype), isdefault=$($team[0].isdefault))"
+# Must be FALSE. If true, every reassignment shares the record back to its previous owner — the default team.
+(Invoke-RestMethod "$Api/organizations?`$select=sharetopreviousowneronassign" -Headers $H).value[0].sharetopreviousowneronassign
 
-# MUST be zero, now and forever.
-(Invoke-RestMethod "$Api/teams($teamId)/teammembership_association?`$select=systemuserid" -Headers $H).value.Count
+# The business unit must hold NO systemusers — enabled or disabled, human or application. Do not "fix" a non-zero
+# answer by moving people: relocating users is an owner decision.
+(Invoke-RestMethod "$Api/systemusers?`$select=fullname&`$filter=_businessunitid_value eq $buId" -Headers $H).value.Count   # MUST be 0
+
+# The default team, for reference (its membership mirrors the business unit's users, so it must also be 0).
+$default = (Invoke-RestMethod "$Api/teams?`$select=teamid,name&`$filter=_businessunitid_value eq $buId and isdefault eq true and teamtype eq 0" -Headers $H).value
+$defaultTeamId = $default[0].teamid
 ```
 
-`teamtype` must be `0` (Owner). An Access team (`1`) cannot own records.
+### 4.2 Create the named team
+
+```powershell
+$teamName = 'Secure Record Owners'
+$exists = (Invoke-RestMethod "$Api/teams?`$select=teamid&`$filter=_businessunitid_value eq $buId and name eq '$teamName' and teamtype eq 0 and isdefault eq false" -Headers $H).value
+if ($exists.Count -eq 0) {
+  $body = @{ name = $teamName; teamtype = 0
+             'businessunitid@odata.bind' = "/businessunits($buId)"
+             description = 'Owns every secure project, matter and work assignment (and the children filed to them). MUST have no members. Not the business unit''s default team.' } | ConvertTo-Json
+  Invoke-RestMethod -Method Post "$Api/teams" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes($body))
+}
+$teamId = (Invoke-RestMethod "$Api/teams?`$select=teamid&`$filter=_businessunitid_value eq $buId and name eq '$teamName' and teamtype eq 0 and isdefault eq false" -Headers $H).value[0].teamid
+
+# MUST be zero, now and forever — of ANY kind, human or application user.
+(Invoke-RestMethod "$Api/teammemberships?`$select=systemuserid&`$filter=teamid eq $teamId" -Headers $H).value.Count
+```
+
+`teamtype` must be `0` (Owner). An Access team (`1`) cannot own records. Do not add any member — a member reads every
+secure record by ownership, and provisioning refuses (`secure_owner_team_has_members`) while one exists.
+
+### 4.3 The cutover, in this order
+
+1. **Assign the `Secure Record Owner` role to the named team** (§5.5 a, with `$teamId` = the named team). Prove an
+   assignment works (§7 item 6) before going further.
+2. **Deploy the BFF build carrying task 144.** From here provisioning assigns new secure records to the named team, and
+   refuses a record still owned by the default team (`sdap.provision.owned_by_other_secure_team`) instead of giving
+   it a second container.
+3. **Migrate the existing secure rows** with the one-time script. Dry run first — it prints every check and the plan,
+   and writes nothing:
+
+   ```powershell
+   .\scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl                    # dry run (default)
+   .\scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl -Apply `
+       -AcceptedAssignCascade team,sharepointdocumentlocation,sharepointdocument                 # only after the owner accepts the cascade list
+   .\scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl                    # second run: the plan must be EMPTY
+   ```
+
+   It moves only rows already inside the Secure Record business unit, reads every owner back, and compares each row's
+   share count before and after. It refuses `-Apply` if `sharetopreviousowneronassign` is true, if the named team or the
+   default team has members, if any user sits in the business unit, if the named team lacks the role, or if a root
+   relationship cascades Assign to a child table the owner has not accepted. Secure rows owned OUTSIDE the business unit
+   are reported as **not isolated** and never touched — provision them, unsecure them or delete them (an owner decision).
+4. **Remove the role from the default team** — once nothing is owned by it, it must not remain a legal owner:
+
+   ```powershell
+   $roleId = (Invoke-RestMethod "$Api/roles?`$select=roleid&`$filter=name eq 'Secure Record Owner' and _businessunitid_value eq $buId" -Headers $H).value[0].roleid
+   Invoke-RestMethod -Method Delete "$Api/teams($defaultTeamId)/teamroles_association($roleId)/`$ref" -Headers $H
+   ```
+5. **Verify**: `.\scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl -Verify` (exit 0), the NFR-05
+   assertion (§7 item 9), and the impersonated isolation probe (§7 item 7) on a secure project, a secure matter and a
+   secure work assignment.
 
 ---
 
@@ -300,10 +380,11 @@ foreach ($p in (Invoke-RestMethod "$Api/roles($roleId)/roleprivileges_associatio
 
 ### 5.5 Assign to the team, then remove System Administrator — in that order
 
-Keep the working configuration until the new one is proven.
+Keep the working configuration until the new one is proven. `$teamId` is the **named** owner team from §4.2 — never
+the business unit's default team (task 144).
 
 ```powershell
-# a) assign the new role
+# a) assign the new role (to the NAMED team)
 $ref = @{ '@odata.id' = "$Api/roles($roleId)" } | ConvertTo-Json
 Invoke-RestMethod -Method Post "$Api/teams($teamId)/teamroles_association/`$ref" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes($ref))
 
@@ -392,14 +473,19 @@ configuration is shaped correctly.
 | # | Check | Expected |
 |---|---|---|
 | 1 | Role privileges: `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` | **Exits 0**: `Read` at depth `1` on every table in `config/secure-record-owner-role.json` (8 as of 2026-09-30). Its "Outside the file" list should be **empty**; in `spaarkedev1` it is 32 as of 2026-09-30, pending the owner decision in §5.4 |
-| 2 | Team roles: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Record Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
+| 2 | Team roles of the **named** team: `teams(<id>)/teamroles_association` | **exactly 1** — `Secure Record Owner`. **No `System Administrator`, and no broad role** (`Spaarke Basic User` etc.) |
 | 2b | Assignment works for **each** table in the file, not just projects | assign a probe of each: the `root` tables **and** the `child` tables (e.g. a `sprk_todo` created with `ownerid@odata.bind → /teams(<teamId>)`). A role covering only some types fails silently on the others until someone over-grants the team. Delete the probes |
-| 3 | Team members: `teams(<id>)/teammembership_association` | **0** |
+| 3 | Named team members: `teammemberships?$filter=teamid eq <id>` | **0 — of any kind**, human or application user (task 144). Provisioning refuses otherwise |
+| 3b | **Users in the Secure Record BU**: `systemusers?$filter=_businessunitid_value eq <buId>` | **0** — enabled or disabled, human or application (task 144). A user there reads every secure record by depth; provisioning refuses otherwise. Moving anyone out is an owner decision |
 | 4 | Role holders: `roles(<id>)/systemuserroles_association` | **0 users** |
-| 5 | Role holders: `roles(<id>)/teamroles_association` | **exactly 1 team** — the secure BU's default owner team |
+| 5 | Role holders: `roles(<id>)/teamroles_association` | **exactly 1 team — the NAMED owner team**. The business unit's **default** team must NOT hold it (task 144; §4.3 step 4) |
+| 5b | `organization.sharetopreviousowneronassign` | **false** — otherwise every assignment into the team shares the record back to its previous owner |
 | 6 | **Assignment works** — create a probe `sprk_project` with `sprk_issecure=true`, `PATCH ownerid@odata.bind → /teams(<teamId>)` | succeeds, **and** `owningbusinessunit` flips to the secure BU. Must be re-run **after** removing System Administrator |
-| 7 | **🔴 Isolation works** — impersonate a known non-admin user (`MSCRMCallerID: <userid>`) and `GET` the probe record | **DENIED.** A successful read means §6 has not been satisfied |
+| 7 | **🔴 Isolation works** — impersonate a known non-admin user (`MSCRMCallerID: <userid>`) and `GET` the probe record. Since task 144: run it on a secure **project, matter AND work assignment** | **DENIED** on each. A successful read means §6 has not been satisfied |
 | 8 | Delete the probe record | no `sprk_issecure=true` rows remain |
+| 9 | **NFR-05 assertion** — `SecureBuRoleDepthAssertionTests` live test with `SPAARKE_NFR05_DATAVERSE_URL` set (and `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` when only `az login` is available) | **passes**: no non-administrator human reaches the BU by depth on project/matter/work assignment, the BU holds no users, the named team resolves with no members, and it alone holds the role |
+| 10 | **Cutover complete**: `scripts\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl $DvUrl -Verify` | **exit 0** — every secure row owned by the named team, none by the default team and none outside the BU |
+| 11 | The BFF's `secure-record-isolation-census` job (`/api/admin/jobs/secure-record-isolation-census/status`) | last run `isolated`. Each finding is a CRITICAL log line `[SECURE-CENSUS]` naming the principal; it writes nothing |
 
 ### ⚠️ Privilege caching will lie to you
 
@@ -424,12 +510,14 @@ session is void.
 
 | ❌ | Why |
 |---|---|
-| Add a human to the secure owner team | The team owns every secure project; a member reads all of them by membership. The whole safety argument is that it is memberless |
+| Add anyone — human or application user — to the secure owner team | The team owns every secure record; a member reads all of them by membership. The whole safety argument is that it is memberless. Provisioning refuses while it has a member |
+| Place any user in the Secure Record business unit (Change-BU, or a registration environment configured with that BU or a team in it) | A user there reads every secure record by business-unit depth, whoever owns them. Registration refuses it by ID (task 144); a maker-portal Change-BU cannot be blocked and is caught by provisioning and the census job |
+| Use the business unit's **default** team as the owner, or leave the owner role on it | Its membership is every user placed in the business unit, maintained by Dataverse and impossible to curate (#967). §4.3 retires it |
 | Grant `Secure Record Owner` to a user or any other team | Same reason. Items 4–5 of §7 assert this |
 | Add privileges "for completeness" | Every privilege must be forced by a recorded failure. Nothing beyond `Read` was |
 | Widen the depth beyond `User` | Adds reach without adding capability, and re-opens §6 |
 | Remove `sprk_project` Read from ordinary user roles | Silently disables all sharing (§6) |
-| Create a service account to own secure records | Not needed — the default owner team costs no licence, no credential, no identity to audit |
+| Create a service account to own secure records | Not needed — an owner team costs no licence, no credential, no identity to audit |
 | Create one BU per project | Retired mechanism. No `SP-*` BUs should exist |
 | Set `sprk_containerid` on the secure BU | That is the *shared* cascade container. A secure project uses its own |
 | Use `pac` without checking the active profile | `pac auth list` may be pointed at production. Mint a token against an explicit URL instead |
@@ -446,4 +534,6 @@ session is void.
 | The role's privilege list (the ONE list) + the script that applies and verifies it | [`config/secure-record-owner-role.json`](../../config/secure-record-owner-role.json), [`scripts/Set-SecureRecordOwnerRolePrivileges.ps1`](../../scripts/Set-SecureRecordOwnerRolePrivileges.ps1); why children are in it: `projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md` |
 | Container isolation (separate, unresolved) | design §5.1c → project `spaarke-secure-project-r1` |
 | NFR-05 assertion wording | `projects/unified-access-control-r2/spec.md` |
-| Provisioning code | `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs` |
+| Provisioning code | `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs` (projects, matters, work assignments; `recordType` + `recordId`) |
+| Named owner team + the two invariants | `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerTeam.cs`; census job `Services/ExternalAccess/SecureRecordIsolationCensusJob.cs`; evaluator `Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs` |
+| One-time migration off the default team | [`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1`](../../scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1); record `projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md` |

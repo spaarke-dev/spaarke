@@ -3,7 +3,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <summary>
 /// Response from POST /api/v1/external-access/unsecure-project.
 /// </summary>
-/// <param name="ProjectId">The project whose secure designation was removed.</param>
+/// <param name="ProjectId">
+/// The project whose secure designation was removed — <see cref="Guid.Empty"/> when the record is a matter or work
+/// assignment (task 144), so a client reading the legacy field is never told a matter id is a project id. Read
+/// <paramref name="RecordType"/> / <paramref name="RecordId"/> instead.
+/// </param>
 /// <param name="NewOwnerSystemUserId">
 /// The <c>systemuser</c> that now owns the record. Ownership moving off the Secure Record business
 /// unit's owner team is what actually ends the isolation — the <c>sprk_issecure</c> flag is a label,
@@ -29,6 +33,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </list>
 /// A caller must treat anything other than <c>true</c> as "not vouched for".
 /// </param>
+/// <param name="RecordType">The record's type token: <c>project</c> | <c>matter</c> | <c>workassignment</c> (task 144).</param>
+/// <param name="RecordId">The record whose secure designation was removed (task 144).</param>
 /// <remarks>
 /// <para><b>Why this exists</b> (ISS-018 / #995, task 108): <c>SharesRevoked = 0</c> was ambiguous in
 /// the worst direction — EITHER "no shares" OR "the shares could not be read", because the soft POA
@@ -50,4 +56,6 @@ public record UnsecureProjectResponse(
     Guid NewOwnerSystemUserId,
     int SharesRevoked,
     bool AlreadyUnsecure,
-    bool? SweepComplete);
+    bool? SweepComplete,
+    string RecordType,
+    Guid RecordId);

@@ -449,6 +449,16 @@ public static class ExternalAccessModule
         services.AddScheduledJob<ExternalAccessReconciliationJob>(
             ExternalAccessReconciliationJob.DefaultCronSchedule, enabled: false);
 
+        // unified-access-control-r2 task 144 (C10 part 1, #967; owner decision F2 = a) — the read-only Secure Record
+        // isolation census: no role reaches the Secure Record BU by depth, the BU holds no users, its named owner team
+        // resolves with no members and alone holds the owner role. Logs CRITICAL per finding; writes nothing. Provisioning
+        // checks the same invariants only when something is provisioned; a Change-BU between provisioning calls cannot
+        // be blocked from the BFF (no plugins, ADR-002), so this bounds how long it goes unseen. ADR-052 places it in
+        // the BFF on the in-process scheduler (ADR-036 A1 rule 6). ENABLED: it has no side effect to gate.
+        // UNCONDITIONAL registration (ADR-032): IServiceScopeFactory, IConfiguration and TimeProvider are all
+        // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
+        services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
+
         return services;
     }
 
