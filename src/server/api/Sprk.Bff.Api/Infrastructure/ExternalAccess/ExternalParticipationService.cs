@@ -36,7 +36,13 @@ public class ExternalParticipationService
     // entry deserializes into the v4 shape with no level, so every matter/WA would resolve to
     // AccessRights.None for one TTL after deploy: rights correct on a cache MISS, absent on a HIT, with
     // the unit suite green throughout because unit tests bypass the cache.
-    public const int CacheVersion = 4;
+    // CacheVersion 5 (unified-access-control-r2 task 131 / defect C3): every cached grant now carries
+    // DirectAccessLevel as well — the field task 037 (FR-22) added to the grant types WITHOUT a cache
+    // change or a bump. Secure suppression reads that field, so a v4 entry (no direct level) turned a
+    // legitimate DIRECT grant on a secure root into AccessRights.None on every cache HIT. The same
+    // miss/hit split as v4, a third time; GrantCacheRoundTripSeamTests now drives the real cache so the
+    // fourth one fails CI instead of production.
+    public const int CacheVersion = 5;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Grant-query construction (extracted by task 007 / FR-06, finding A-5)
@@ -228,7 +234,7 @@ public class ExternalParticipationService
 
     /// <summary>
     /// Invalidates the cached per-Contact participation DATA entry
-    /// (<c>tenant:{tid}:external-access-grant:{contactId}:v1</c>, the tenant-scoped realization of the
+    /// (<c>tenant:{tid}:external-access-grant:{contactId}:v{CacheVersion}</c>, the tenant-scoped realization of the
     /// documented <c>sdap:external:access:{contactId}</c> key) so a subsequent accessible-set
     /// evaluation re-reads current state instead of serving up to 60 seconds of stale TTL.
     /// </summary>
@@ -829,7 +835,18 @@ public class ExternalParticipationService
         }
     }
 
-    private async Task<ExternalGrantSet> QueryGrantSetAsync(Guid contactId, CancellationToken ct)
+    /// <summary>
+    /// The Dataverse read behind a grant-set cache MISS: the contact's own grant rows plus the
+    /// organization-inherited ones, partitioned and deduped.
+    /// </summary>
+    /// <remarks>
+    /// <c>internal virtual</c> as a test seam (task 131), the convention <c>NoAccessListReader.QueryChunkAsync</c>
+    /// already uses: a test double overrides THIS read so <see cref="GetGrantSetAsync"/> — the method
+    /// that owns the cache read, the miss fallback and the cache write — runs unmodified. Every earlier
+    /// double overrode <see cref="GetGrantSetAsync"/> itself, which is why no test ever exercised the
+    /// cache and defect C3 shipped green. Behaviour is unchanged by the modifier.
+    /// </remarks>
+    internal virtual async Task<ExternalGrantSet> QueryGrantSetAsync(Guid contactId, CancellationToken ct)
     {
         try
         {
@@ -1140,16 +1157,24 @@ public class ExternalParticipationService
         {
             var cached = new CachedGrantSet
             {
+                // Task 131 (C3): BOTH levels are written, for every root type. DirectAccessLevel is what
+                // Secure suppression reads; dropping it here made a direct grant on a secure root None on
+                // every cache hit. A null direct level (org-inherited only) is written AS null.
                 Projects = grantSet.Projects
-                    .Select(p => new CachedParticipation { ProjectId = p.ProjectId, AccessLevel = (int)p.AccessLevel })
+                    .Select(p => new CachedParticipation
+                    {
+                        ProjectId = p.ProjectId,
+                        AccessLevel = (int)p.AccessLevel,
+                        DirectAccessLevel = (int?)p.DirectAccessLevel
+                    })
                     .ToList(),
                 // Task 032: persist matter/WA LEVELS, not just ids. Writing ids here (the prior shape)
                 // is what would have made rights correct on a miss and None on a hit.
                 MatterGrants = grantSet.MatterGrants
-                    .Select(g => new CachedRootGrant { RecordId = g.RecordId, AccessLevel = (int?)g.AccessLevel })
+                    .Select(CachedRootGrant.From)
                     .ToList(),
                 WorkAssignmentGrants = grantSet.WorkAssignmentGrants
-                    .Select(g => new CachedRootGrant { RecordId = g.RecordId, AccessLevel = (int?)g.AccessLevel })
+                    .Select(CachedRootGrant.From)
                     .ToList(),
             };
 
@@ -1239,31 +1264,52 @@ public class ExternalParticipationService
         public string? sprk_externalobjectid { get; set; }
     }
 
+    /// <summary>
+    /// A cached project grant: id + effective level + DIRECT level (task 131 / C3).
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <c>DirectAccessLevel</c> restores null AS null — never defaulted to <c>AccessLevel</c>, never
+    /// inferred. Null means "every contributing row was org-inherited", and on a secure root that must
+    /// compose to <see cref="AccessRights.None"/> on a hit exactly as it does on a miss. Defaulting it
+    /// upward would be an over-grant on every secure record reached only through an organization.
+    /// </remarks>
     private sealed class CachedParticipation
     {
         public Guid ProjectId { get; set; }
         public int AccessLevel { get; set; }
+        public int? DirectAccessLevel { get; set; }
 
         public ExternalParticipation ToParticipation() => new()
         {
             ProjectId = ProjectId,
-            AccessLevel = (ExternalAccessLevel)AccessLevel
+            AccessLevel = (ExternalAccessLevel)AccessLevel,
+            DirectAccessLevel = (ExternalAccessLevel?)DirectAccessLevel
         };
     }
 
     /// <summary>
-    /// A cached non-project (matter / work-assignment) grant: id + level (task 032).
-    /// <c>AccessLevel</c> is nullable for the same reason <see cref="ExternalRootGrant"/>'s is.
+    /// A cached non-project (matter / work-assignment) grant: id + effective level (task 032) + DIRECT
+    /// level (task 131 / C3). Both levels are nullable for the same reasons <see cref="ExternalRootGrant"/>'s
+    /// are, and a null direct level restores as null — see <see cref="CachedParticipation"/>.
     /// </summary>
     private sealed class CachedRootGrant
     {
         public Guid RecordId { get; set; }
         public int? AccessLevel { get; set; }
+        public int? DirectAccessLevel { get; set; }
+
+        public static CachedRootGrant From(ExternalRootGrant grant) => new()
+        {
+            RecordId = grant.RecordId,
+            AccessLevel = (int?)grant.AccessLevel,
+            DirectAccessLevel = (int?)grant.DirectAccessLevel
+        };
 
         public ExternalRootGrant ToGrant() => new()
         {
             RecordId = RecordId,
-            AccessLevel = (ExternalAccessLevel?)AccessLevel
+            AccessLevel = (ExternalAccessLevel?)AccessLevel,
+            DirectAccessLevel = (ExternalAccessLevel?)DirectAccessLevel
         };
     }
 
@@ -1281,6 +1327,18 @@ public class ExternalParticipationService
     /// <b><see cref="CacheVersion"/> MUST be bumped whenever this shape changes</b> (3 → 4 here).
     /// Without the bump, entries written under the old shape deserialize into the new one with levels
     /// absent, reproducing exactly the bug above for one TTL after every deploy.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>It happened again (4 → 5, task 131 / defect C3).</b> Task 037 added
+    /// <c>DirectAccessLevel</c> to <see cref="ExternalParticipation"/> and <see cref="ExternalRootGrant"/>
+    /// — the field Secure suppression reads — but not to this shape and without a bump. A DIRECT grant
+    /// on a secure root therefore composed correctly on a miss and to <c>AccessRights.None</c> on every
+    /// hit; the suite stayed green because every test double overrode <c>GetGrantSetAsync</c>. The rule
+    /// above was not enough on its own: it binds whoever edits THIS type, and task 037 edited the grant
+    /// TYPES. So the obligation is now enforced from the other side — <c>GrantCacheRoundTripSeamTests</c>
+    /// enumerates every public settable property of the three grant types and fails when one does not
+    /// survive a round trip through the production <c>TenantCache</c>. Adding a property there means
+    /// carrying it here and bumping <see cref="CacheVersion"/>.
     /// </para>
     /// <para>
     /// ⚠️ It holds NO expiry dates — expiry is applied by the read <c>$filter</c> when an entry is built. The

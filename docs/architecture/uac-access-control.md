@@ -64,7 +64,7 @@ Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs:17-19, 65, 153
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 
-The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 3 (`Infrastructure/ExternalAccess/ExternalParticipationService.cs:28-34`), 60s TTL — invalidated by the grant/revoke endpoints.
+The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
 
 ---
 

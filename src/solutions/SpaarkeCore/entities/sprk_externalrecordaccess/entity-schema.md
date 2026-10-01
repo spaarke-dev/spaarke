@@ -253,7 +253,7 @@ This table is queried by:
 | `ProjectClosureEndpoint` | Deactivate all records for project | Cascade revocation on project close |
 | `ExternalUserContextEndpoint` | Resolved principal's grant set | Return user's project membership to SPA |
 
-**Redis Cache Key** *(corrected 2026-08-20)*: tenant-scoped `ITenantCache` entry — resource `external-access-grant`, contact-id component, version 3, 60s TTL (`ExternalParticipationService.cs:28-34`; per ADR-009). The old flat `sdap:external:access:{contactId}` key is no longer accurate.
+**Redis Cache Key** *(corrected 2026-08-20; version updated 2026-09-30)*: tenant-scoped `ITenantCache` entry — resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion`), 60s TTL (per ADR-009). Each cached grant holds the record id, the effective `sprk_accesslevel` and the direct-only level. The old flat `sdap:external:access:{contactId}` key is no longer accurate.
 
 ---
 
