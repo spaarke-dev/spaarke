@@ -4,7 +4,7 @@
     <title>Run context, part 1 (G25) — every handler input declared with one producer: H2a persists its ARM outputs, consumers read typed state, closed intake catalog at POST /api/runs, H4b closed per-env source catalog, DAG gaps closed, forcing-function test</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T245 (G25, notes/run-context-dataflow-gap.md)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production .cs in Api + Core (H2a, H3, H4, H4b, H9, H12b, H13, H14, DagAdvancer, RunsEndpoints, InterStepState), adds a forcing-function test, updates many handler test fixtures; root §8 test-modifying override applies.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -223,10 +223,65 @@
   </acceptance-criteria>
 
   <notes>
-    Source scan in rule (e) is regex over handler source files located from the repo root (walk up from the test
-    assembly to the directory holding `.git`); reads through an aliased local (`var s = run.InterStepState; s.X`) are
-    not seen — note the limitation in the test header and do not introduce such aliases in handler code.
-    H0 probes live under Handlers/Preflight and belong to H0 in the folder map.
+    Source scan in rule (e) reads handler source files located from the repo root (walk up from the test
+    assembly to the directory holding `.git`). H0 probes live under Handlers/Preflight and belong to H0 in the folder map.
+
+    COMPLETION (2026-10-01, SESSION 28/29). All acceptance criteria verified: ControlPlane.Tests 2063 pass / 6 fail
+    (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; RunContextContractTests 30/30; ArchTests
+    337/337; Api, Worker, LoadTests build 0/0; Invoke-CatalogGenerator.ps1 -Verify OK; customer.json rebuilt.
+    Rule (e) verified by hand: a seeded `_ = run.InterStepState?.CosmosEndpoint;` in H9 failed it naming
+    "Handlers/BffDeploy (H9) reads InterStepState.CosmosEndpoint", then was removed.
+
+    DEVIATIONS (each deliberate; reviewer-visible):
+    (a) Step 3 — environmentName: one shared IntakeParameterCatalog.ResolveEnvironmentName (default `prod`, owner D6)
+        for H2a/H2b/H4b instead of making H2a/H2b fail; CreateRun also stores the default. The
+        `h4b-missing-environment-name` rejection code is retired (it can no longer occur) despite "keep existing
+        rejection codes". A stored invalid value is not re-validated by handlers: customer.bicep's @allowed list fails
+        it at H2a, which precedes H2b/H4b.
+    (b) Step 6b — found 10 Secrets-channel consumers, not 3. Fixed: TenantId (`from-intake-parameter`),
+        BFF-API-ClientId/Audience (`written-by-h3`; H3 no longer writes run.Parameters.Secrets). The rest are pinned in
+        PinnedManifestGaps with owners (T245b, T245c, T225b; the two SPE container ids → T227/G18, found by the gates).
+        The scan covers Parameters.Secrets as step 6b asked, as a rule rather than HandlerRunInputs entries: nobody may
+        write it; only H4 may read it (RunSecretsReaders, with its reason).
+    (c) Added: T6 trap probe reads TrapVerificationRequest.SpeOwnerCertKeyVaultName (platform vault, interim from intake
+        `keyVaultName`); H13 passes the CUSTOMER vault as KeyVaultName (correct for T1/T5).
+    (d) Rename TopologyConstantValues → IntakeValues across H4 / writer / resolver.
+    (e) IntakeParameter.Key → Name (the FR-27 ArchTest treats a string property named Key as secret-shaped).
+    (f) The scanner is a Roslyn syntax walk, not the regex the POML named (Microsoft.CodeAnalysis.CSharp 5.9.0 added
+        to the L2 TEST project only). The regex scan had one comment bug found by its own producer-truthfulness check
+        and three more found by code review (string literals, `?.`/`!.`, raw/verbatim strings), and was blind to the
+        aliased reads six handlers use. Added beyond the POML: declared ⇒ read (stale declarations fail), literal intake
+        keys beside the NonSecret map, rule (g) checked against customer.bicep's kvSecretValues, rule (h) generator ⇔
+        PerEnvSourceCatalog parity, and negative + positive controls for every rule (tests/CLAUDE.md).
+    (g) LoadTests request bodies fixed (pre-broken: T224-retired tenancy values, no tenantId).
+    (h) H13: three new required-input codes `h13-missing-{resource-group,app-service,key-vault}-name`.
+    (i) infrastructure/bicep/customer.json changed despite "no change to infrastructure/bicep/**": a regeneration
+        (contentType tags from the regenerated kv-secrets module) plus one comment edit in customer.bicep (JSON unchanged).
+    (j) Test deleted: H3EntraAppRegHandlerTests.AcParse_KvUriReference_RoundTrips — the production ParseKvUriReference
+        it tested was removed as dead code; the H3 happy path now asserts Parameters.Secrets is empty.
+    (k) Quality-gate fixes beyond the POML (owner: fix at discovery):
+        - ADR-019: every control-plane ProblemDetails now carries a stable `errorCode` (Api/ControlPlaneProblems.cs,
+          one helper for RunsEndpoints + RunLogsEndpoints); the unknown-key 400 returns `acceptedKeys`.
+        - H4 cleartext-leak guard flagged real Azure host names (would have quarantined every real run at H4); it now
+          exempts DNS hosts, scans URI path/query/user-info, and reflects over every InterStepState string property.
+        - H13 sprk_azuresubscriptionid ← `subscriptionId` (the `azureSubscriptionId` intake key is removed); H13's literal
+          intake keys became *ParameterKey constants.
+        - New pinned T245b gaps: H7 `bffApiBaseUrl` (falls back to the PLATFORM BFF), H13 `bffVersion` /
+          `solutionVersion` / `clientCacheBustToken`. T245b POML step 4c also carries the H4 KV-bootstrap principal
+          defect (grants the stamp UAMI Secrets Officer instead of L2's principal) for owner review.
+        - /provision-environment skill: `Model2Dedicated` comparisons (dead since T223/T224) now test `Model2`; the
+          "L2 ignores unknown keys" comment replaced; Step 1c literals corrected; Step 5 gate note for the new edges.
+        - Generator mirrors the closed per_env_source set (-Verify fails on a mislabelled source).
+        - PerEnvSourceCatalog trims intake values like H4/H8; ArmDeploymentRunner.MapOutputs and H2a.MissingOutputs
+          back to private (no test needed them); unused EnvironmentNameParameterKey constants removed (H2a, H2b).
+    (l) ADR tensions recorded in spec.md: ADR-020 (strict intake reader, no deprecation window — path A) and
+        ADR-038 (L2 fitness functions off the KEEP paths — path A, deletion-protected by that row).
+    (m) DAG edges H4b←H3, H6←H3, H7←H8 apply to Model 2 as well; they only add true data dependencies (Model 2 is out
+        of scope; H0.5 untouched).
+    Test-scope justification: AC1b (H4b, every catalog source end-to-end) and AC28b–e (leak guard) cover the two
+    production defects the gates found; the scanner controls are required by tests/CLAUDE.md. Four new tests that fed
+    keys CreateRun now rejects were removed or narrowed to the reachable case (H9 AC2c2, H12b DataverseUrlOnlyInNonSecret,
+    H13 AC2fgh rows, H4 keyVaultResourceId override).
   </notes>
 
   <execution>

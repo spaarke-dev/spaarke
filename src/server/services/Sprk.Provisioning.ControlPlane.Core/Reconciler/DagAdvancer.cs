@@ -148,9 +148,9 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH4] = new[] { HandlerH2a },
             [HandlerH5] = new[] { HandlerH2a },
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
-            [HandlerH4b] = new[] { HandlerH4 },                             // Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired — every secret comes from the customer's own resources.)
-            [HandlerH6] = new[] { HandlerH5 },
-            [HandlerH7] = new[] { HandlerH6 },
+            [HandlerH4b] = new[] { HandlerH4, HandlerH3 },                  // Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired.) T245a: + H3 — AzureAd__ClientId is H3's InterStepState.BffAppRegId.
+            [HandlerH6] = new[] { HandlerH5, HandlerH3 },                   // T245a: + H3 — H6 reads InterStepState.BffAppRegId (H3 output).
+            [HandlerH7] = new[] { HandlerH6, HandlerH8 },                   // T245a: + H8 — H7 writes the SPE container id env var from InterStepState.SpeContainerId (H8 output).
             [HandlerH8] = new[] { HandlerH3 },                              // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 dep preserved: H8 uses InterStepState.BffAppRegId to construct the T6 ClientCertificateCredential.
             [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4).
             [HandlerH10] = new[] { HandlerH7 },

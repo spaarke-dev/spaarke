@@ -134,7 +134,10 @@ $script:RequiredSecretFields = @(
 )
 # 'from-shared-service' (task 200 H4-shared) retired T226 (2026-09-30); 'from-topology-constants'
 # (task 214, SPE-ContainerTypeId) accepted from T226 — H4 writes it from the run's non-secret parameter.
-$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-topology-constants', 'generated')
+# Task 245a (G25): 'from-intake-parameter' (H4 writes a non-secret intake value, e.g. TenantId) and
+# 'written-by-h3' (H3 commits it to the vault itself, after H4 — H4 skips it). The C# reader
+# (FileKvSecretManifest.TryMapValueSource) accepts exactly this set.
+$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-topology-constants', 'from-intake-parameter', 'written-by-h3', 'generated')
 
 # Task 201 — per_env_settings schema (H4b BulkAppSettings handler).
 # Optional top-level list; when present, each entry MUST carry these fields.
@@ -144,6 +147,19 @@ $script:RequiredPerEnvSettingFields = @('key', 'per_env_source', 'iOptionsModule
 # Handler segment: lowercase-alphanumeric (H0.5 handler-id "h0.5" allowed by
 # escaping the dot). Key segment: identifier-shaped (letters/digits/underscore).
 $script:PerEnvSourcePattern = '^(literal|from-[a-z0-9\.]+-(output|parameter):[a-zA-Z_][a-zA-Z0-9_]*)$'
+# Task 245a (G25): the CLOSED set of non-literal per_env_source values — each names where H4b finds the
+# value on the run (an InterStepState output of a named handler, or an intake parameter). MUST equal
+# PerEnvSourceCatalog.cs (Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings); the C# reader
+# rejects anything else at H4b, and RunContextContractTests checks the two lists match.
+$script:AllowedPerEnvSources = @(
+    'from-h2a-output:kv_vault_uri',
+    'from-h2a-output:cosmos_endpoint',
+    'from-h2a-output:uami_client_id',
+    'from-h2a-output:service_bus_fqns',
+    'from-h3-output:bff_app_client_id',
+    'from-intake-parameter:tenant_id',
+    'from-intake-parameter:container_type_id'
+)
 
 # ---------------------------------------------------------------------------
 # Path defaults
@@ -325,6 +341,9 @@ function Test-PerEnvSettingsShape {
         $srcRaw = [string]$entry.per_env_source
         if ($srcRaw -notmatch $script:PerEnvSourcePattern) {
             throw "per_env_settings entry '$key' has malformed per_env_source '$srcRaw'. Expected: 'literal' OR 'from-{handler}-{output|parameter}:{key}' where handler is lowercase-alphanumeric and key is identifier-shaped."
+        }
+        if ($srcRaw -ne 'literal' -and $script:AllowedPerEnvSources -cnotcontains $srcRaw) {
+            throw "per_env_settings entry '$key' has per_env_source '$srcRaw', which is not in the closed set H4b can resolve: $($script:AllowedPerEnvSources -join ', '). A new source needs a PerEnvSourceCatalog.cs entry (and its producer) first — task 245a."
         }
 
         # Conditional field: literal_value REQUIRED when per_env_source == literal.
@@ -720,6 +739,14 @@ Write-Host ''
             # written by H4 at run time from the run's non-secret parameter. No placeholder — a placeholder
             # would be served to the BFF as a real container-type id.
             [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray`n")
+        } elseif ($source -eq 'from-intake-parameter') {
+            # Task 245a: a non-secret intake value (e.g. TenantId) written by H4 at run time. No
+            # placeholder — it would be served to the BFF as a real value.
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-intake-parameter; written by H4 from the intake value)' -ForegroundColor Gray`n")
+        } elseif ($source -eq 'written-by-h3') {
+            # Task 245a: committed to the vault by H3 (EntraAppReg) when it creates the BFF app
+            # registration. No placeholder — a placeholder app id would break token validation.
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=written-by-h3; written by H3 with the app registration)' -ForegroundColor Gray`n")
         } else {
             [void]$sb.Append("if (`$SeedPlaceholders) {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-$($source)' -Description '$($purpose -replace "'","''")' -Category '$category'`n")

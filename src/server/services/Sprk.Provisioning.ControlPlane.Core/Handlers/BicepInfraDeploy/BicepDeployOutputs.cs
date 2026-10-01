@@ -55,6 +55,19 @@ public sealed class BicepDeployOutputs
     /// <summary>Cosmos DB account endpoint URI — written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.CosmosEndpoint"/>. Prerequisite for BFF boot (R11).</summary>
     public required string CosmosEndpoint { get; init; }
 
+    /// <summary>Customer Key Vault name (ARM output <c>keyVaultName</c>) — written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.KeyVaultName"/> (task 245a).</summary>
+    public required string KeyVaultName { get; init; }
+
+    /// <summary>Customer Key Vault URI (ARM output <c>keyVaultUri</c>) — written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.KeyVaultUri"/> (task 245a).</summary>
+    public required string KeyVaultUri { get; init; }
+
+    /// <summary>
+    /// Customer Service Bus fully-qualified namespace (<c>{ns}.servicebus.windows.net</c>) — the HOST of ARM
+    /// output <c>serviceBusEndpoint</c>; written to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.ServiceBusFullyQualifiedNamespace"/> (task 245a).
+    /// </summary>
+    public required string ServiceBusFullyQualifiedNamespace { get; init; }
+
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }
 }

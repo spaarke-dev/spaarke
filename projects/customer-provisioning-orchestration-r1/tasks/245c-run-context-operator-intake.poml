@@ -81,6 +81,7 @@
     <step order="1">Decide, from code and prereqs.yaml, whether the Exchange scope group is created by an operator before the run (then it is intake + a prereqs.yaml entry) or should be created by H14a (then STOP — escalation trigger 1).</step>
     <step order="2">Add the five keys to IntakeParameterCatalog with H11/H14's rules; POST /api/runs validates them (400 per rule); schema properties + required/conditional rules; parity test extended.</step>
     <step order="3">Skill: Step 1 interactive prompts (preset, users, Exchange group, Graph resources) with the T237 loop style; Step 1.0 batch hard stops; Step 4.0 payload; intake template.</step>
+    <step order="3b">`Communication-DefaultMailbox` (manifest `from-run-parameter`, pinned in `RunContextContractTests.PinnedManifestGaps` by T245a): it is a per-customer, non-secret mailbox address — make it an intake value (catalog key + schema + skill) and the manifest entry `from-intake-parameter` (map it in `H4KvSecretsPopulationHandler.IntakeValueParameterKeys`), then remove it from `PinnedManifestGaps`.</step>
     <step order="4">Empty the known-gap list; declare the inputs as Intake in HandlerRunInputs; RunContextContractTests strict.</step>
     <step order="5">Tests, build, CHANGELOG, gap note §5 (G25 closed), plan G25 ✅, TASK-INDEX `✅ [done]`, POML status.</step>
   </steps>

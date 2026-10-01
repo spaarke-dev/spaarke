@@ -95,6 +95,14 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.CosmosEndpoint.Should().Be("https://sprk-acme-cosmos.documents.azure.com:443/");
         repo.LastWrittenRun.InterStepState.MiObjectId.Should().Be("uami-oid");
         repo.LastWrittenRun.InterStepState.MiClientId.Should().Be("uami-cid");
+        // Task 245a — the customer-stamp values downstream handlers read from typed state.
+        repo.LastWrittenRun.InterStepState.ResourceGroupName.Should().Be("rg-spaarke-acme-prod");
+        repo.LastWrittenRun.InterStepState.AppServiceName.Should().Be("sprk-acme-prod-api");
+        repo.LastWrittenRun.InterStepState.AppServiceStagingSlotName.Should().Be("staging");
+        repo.LastWrittenRun.InterStepState.KeyVaultName.Should().Be("sprk-acme-prod-kv");
+        repo.LastWrittenRun.InterStepState.KeyVaultUri.Should().Be("https://sprk-acme-prod-kv.vault.azure.net/");
+        repo.LastWrittenRun.InterStepState.MiResourceId.Should().Be(ExpectedUamiRid);
+        repo.LastWrittenRun.InterStepState.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -253,7 +261,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var runner = FakeBicepDeployRunner.Success(BuildOutputs());
         var nameProbe = FakeResourceNameAvailabilityProbe.Conflict(
             ResourceNameKind.ServiceBusNamespace,
-            "sprk-acme-prod-sb",
+            "spaarke-acme-prod-sbus",
             "AlreadyExists: The specified service namespace is already taken.");
         var handler = BuildHandler(
             repo, runner, FakeArmKeyVaultRefProbe.Match(),
@@ -265,7 +273,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.ResourceNameTaken);
-        failure.Diagnostic.Should().Contain("sprk-acme-prod-sb");
+        failure.Diagnostic.Should().Contain("spaarke-acme-prod-sbus");
         failure.Diagnostic.Should().Contain("AlreadyExists");
         failure.Diagnostic.Should().Contain("ServiceBusNamespace");
         runner.CallCount.Should().Be(0, "runner MUST NOT fire on a name-availability conflict");
@@ -318,15 +326,16 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [Fact]
     public void Handler05_BuildGloballyNamespacedNameChecks_MirrorsCustomerBicepNamingConvention()
     {
-        // customer.bicep line 141: take(toLower(replace('sprk{customer}{env}sa', '-', '')), 24)
-        // F10 verbatim: Service Bus namespace uses `-sb` suffix (customer.bicep pattern)
+        // customer.bicep: storageAccountName = take(toLower(replace('${baseName}sa', '-', '')), 24)
+        //                  serviceBusName     = 'spaarke-${customerId}-${environmentName}-sbus'
+        // (the check used to probe 'sprk-{id}-{env}-sb', a name the template never creates — task 245a)
         var checks = H2aBicepInfraDeployHandler.BuildGloballyNamespacedNameChecks("acme", "prod");
 
         checks.Should().HaveCount(2);
         checks[0].Kind.Should().Be(ResourceNameKind.StorageAccount);
         checks[0].RequestedName.Should().Be("sprkacmeprodsa");
         checks[1].Kind.Should().Be(ResourceNameKind.ServiceBusNamespace);
-        checks[1].RequestedName.Should().Be("sprk-acme-prod-sb");
+        checks[1].RequestedName.Should().Be("spaarke-acme-prod-sbus");
     }
 
     [Fact]
@@ -653,6 +662,9 @@ public sealed class H2aBicepInfraDeployHandlerTests
             OpenAiEndpoint = "   ",
             AiSearchEndpoint = "https://x/",
             CosmosEndpoint = "https://x/",
+            KeyVaultName = "kv",
+            KeyVaultUri = "https://kv.vault.azure.net/",
+            ServiceBusFullyQualifiedNamespace = "ns.servicebus.windows.net",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -664,6 +676,46 @@ public sealed class H2aBicepInfraDeployHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.QuarantineRequired);
         failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.BicepDeployOutputsIncomplete);
+        failure.Diagnostic.Should().Contain(nameof(BicepDeployOutputs.OpenAiEndpoint));
+    }
+
+    [Theory]
+    [InlineData(nameof(BicepDeployOutputs.KeyVaultName))]
+    [InlineData(nameof(BicepDeployOutputs.KeyVaultUri))]
+    [InlineData(nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace))]
+    public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
+    {
+        // Task 245a: the three outputs H2a now persists for downstream handlers are
+        // required like the rest — a blank one must stop the run here, not at the reader.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-245a-" + blankField);
+        var complete = BuildOutputs();
+        var outputs = new BicepDeployOutputs
+        {
+            ResourceGroupName = complete.ResourceGroupName,
+            UserAssignedIdentityResourceId = complete.UserAssignedIdentityResourceId,
+            UserAssignedIdentityObjectId = complete.UserAssignedIdentityObjectId,
+            UserAssignedIdentityClientId = complete.UserAssignedIdentityClientId,
+            AppServiceName = complete.AppServiceName,
+            AppServiceStagingSlotName = complete.AppServiceStagingSlotName,
+            OpenAiEndpoint = complete.OpenAiEndpoint,
+            AiSearchEndpoint = complete.AiSearchEndpoint,
+            CosmosEndpoint = complete.CosmosEndpoint,
+            KeyVaultName = blankField == nameof(BicepDeployOutputs.KeyVaultName) ? "" : complete.KeyVaultName,
+            KeyVaultUri = blankField == nameof(BicepDeployOutputs.KeyVaultUri) ? "" : complete.KeyVaultUri,
+            ServiceBusFullyQualifiedNamespace = blankField == nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace)
+                ? "" : complete.ServiceBusFullyQualifiedNamespace,
+            SignalRDeployed = false,
+        };
+        var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.BicepDeployOutputsIncomplete);
+        failure.Diagnostic.Should().Contain(blankField);
     }
 
     // ---------- T14/T15 SignalR feature flag ----------
@@ -964,11 +1016,14 @@ public sealed class H2aBicepInfraDeployHandlerTests
         UserAssignedIdentityResourceId = ExpectedUamiRid,
         UserAssignedIdentityObjectId = "uami-oid",
         UserAssignedIdentityClientId = "uami-cid",
-        AppServiceName = "sprk-acme-prod-app",
+        AppServiceName = "sprk-acme-prod-api",
         AppServiceStagingSlotName = "staging",
         OpenAiEndpoint = "https://sprk-acme-openai.openai.azure.com/",
         AiSearchEndpoint = "https://sprk-acme-search.search.windows.net/",
         CosmosEndpoint = "https://sprk-acme-cosmos.documents.azure.com:443/",
+        KeyVaultName = "sprk-acme-prod-kv",
+        KeyVaultUri = "https://sprk-acme-prod-kv.vault.azure.net/",
+        ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net",
         SignalRDeployed = signalRDeployed,
     };
 

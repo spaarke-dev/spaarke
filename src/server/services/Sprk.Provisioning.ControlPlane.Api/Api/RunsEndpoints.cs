@@ -378,11 +378,11 @@ public static class RunsEndpoints
 
         if (request is null)
         {
-            return BadRequest(httpContext, "Request body is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.RequestBodyRequired, "Request body is required.");
         }
         if (string.IsNullOrWhiteSpace(request.CustomerId))
         {
-            return BadRequest(httpContext, "customerId is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdRequired, "customerId is required.");
         }
         // T237 (owner D10 / INCOMING-CUSTOMERID-STANDARD §3.1): the customerId standard is enforced
         // HERE — ARM has no @pattern and the Dataverse column has no regex, so nothing later can catch
@@ -391,28 +391,28 @@ public static class RunsEndpoints
         // lookup, the run guard, any Cosmos write and any enqueue.
         if (!CustomerIdStandard.IsValid(request.CustomerId))
         {
-            return BadRequest(httpContext,
+            return BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdNonStandard,
                 $"customerId '{request.CustomerId}' does not match the customerId standard {CustomerIdStandard.Pattern}: " +
                 $"{CustomerIdStandard.Description}. Abbreviate longer customer names at intake (northwind -> nwind) " +
                 "and record the full name as the registry row's display name.");
         }
         if (CustomerIdStandard.IsReserved(request.CustomerId))
         {
-            return BadRequest(httpContext,
+            return BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdReserved,
                 $"customerId '{request.CustomerId}' is reserved: it names a non-customer resource group " +
                 $"(rg-spaarke-{request.CustomerId}-{{env}}). Reserved ids: {string.Join(", ", CustomerIdStandard.ReservedIds)}.");
         }
         if (string.IsNullOrWhiteSpace(request.EnvironmentId))
         {
-            return BadRequest(httpContext, "environmentId is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.EnvironmentIdRequired, "environmentId is required.");
         }
         if (string.IsNullOrWhiteSpace(request.TenancyModel))
         {
-            return BadRequest(httpContext, "tenancyModel is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.TenancyModelRequired, "tenancyModel is required.");
         }
         if (string.IsNullOrWhiteSpace(request.Profile))
         {
-            return BadRequest(httpContext, "profile is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.ProfileRequired, "profile is required.");
         }
 
         // ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
@@ -432,7 +432,45 @@ public static class RunsEndpoints
         //   Any other tenancyModel value → 400 (enum check).
         if (!TryValidateTenancyProfilePair(request.TenancyModel, request.Profile, out var pairError))
         {
-            return BadRequest(httpContext, pairError);
+            return BadRequest(httpContext, ControlPlaneErrorCodes.TenancyProfileInvalid, pairError);
+        }
+
+        // Task 245a (G25 — run-context contract): nonSecretParameters is the ONLY writer of
+        // run.Parameters.NonSecret, so it may carry intake values only — the closed set in
+        // IntakeParameterCatalog. An unknown key is a typo (`tenant_id`) or a value some handler
+        // produces (which belongs in InterStepState); either way no handler would ever read it as
+        // intended, so refuse it here instead of letting the run fail deep in the DAG.
+        if (request.NonSecretParameters is not null)
+        {
+            var unknownKeys = IntakeParameterCatalog.UnknownKeys(request.NonSecretParameters.Keys);
+            if (unknownKeys.Count > 0)
+            {
+                // Echo at most a few rejected keys (the body is attacker-controlled); the full accepted set
+                // goes back in `acceptedKeys` so the caller can correct the payload without reading code.
+                const int maxEchoed = 5;
+                var echoed = string.Join(", ", unknownKeys.Take(maxEchoed).Select(k => $"'{k}'"))
+                    + (unknownKeys.Count > maxEchoed ? $" (+{unknownKeys.Count - maxEchoed} more)" : string.Empty);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status400BadRequest,
+                    ControlPlaneErrorCodes.IntakeUnknownKey,
+                    $"nonSecretParameters contains keys that are not accepted intake values: {echoed}. Keys are " +
+                    "case-sensitive; the accepted set is listed in `acceptedKeys`. A value one handler produces for " +
+                    "another is never a run parameter.",
+                    new Dictionary<string, object?>
+                    {
+                        ["acceptedKeys"] = IntakeParameterCatalog.All.Keys.Order(StringComparer.Ordinal).ToArray(),
+                    });
+            }
+
+            if (request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.EnvironmentName, out var environmentNameValue)
+                && !IntakeParameterCatalog.AllowedEnvironmentNames.Contains(environmentNameValue ?? string.Empty))
+            {
+                return BadRequest(httpContext, ControlPlaneErrorCodes.IntakeInvalidEnvironmentName,
+                    $"nonSecretParameters['{IntakeParameterCatalog.EnvironmentName}'] is '{environmentNameValue}'; " +
+                    $"allowed values are {string.Join(" | ", IntakeParameterCatalog.AllowedEnvironmentNames.Order(StringComparer.Ordinal))} " +
+                    $"(customer.bicep environmentName). Omit it for '{IntakeParameterCatalog.DefaultEnvironmentName}'.");
+            }
         }
 
         // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
@@ -445,25 +483,24 @@ public static class RunsEndpoints
         // Fail-fast at intake with a clear 400 instead of surfacing the same
         // error deep inside the DAG.
         if (request.NonSecretParameters is null
-            || !request.NonSecretParameters.TryGetValue("tenantId", out var tenantIdValue)
+            || !request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.TenantId, out var tenantIdValue)
             || string.IsNullOrWhiteSpace(tenantIdValue))
         {
-            return BadRequest(httpContext,
+            return BadRequest(httpContext, ControlPlaneErrorCodes.TenantIdRequired,
                 "nonSecretParameters['tenantId'] is required (§4D I1 tenant-isolation invariant). " +
                 "Every downstream handler reads run.Parameters.NonSecret['tenantId']; a missing value " +
                 "would fail the H0 preflight envelope with missing-tenant-id — surface at intake instead.");
         }
 
         // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
-        // 2026-08-27): for Model2Dedicated runs, subscriptionId MUST be present
+        // 2026-08-27): for Model2 runs, subscriptionId MUST be present
         // in nonSecretParameters (per ADR-027 D4 subscription-per-customer +
-        // intake.schema.json Model2Dedicated allOf). Nine downstream handlers
-        // (H1, H2a, H2b, H4, H4b, H8, H9, H13, H14) read
-        // NonSecret["subscriptionId"] and hard-stop on absence — H1 typically
-        // fails within ~20s with MissingSubscriptionId, and the operator has
-        // no post-CreateRun add-nonSecret endpoint to recover.
+        // intake.schema.json Model2 allOf). The handlers that read it are
+        // declared in Reconciler/HandlerRunInputs.cs; they hard-stop on absence —
+        // H1 typically fails within ~20s with MissingSubscriptionId, and the
+        // operator has no post-CreateRun add-nonSecret endpoint to recover.
         //
-        // Model1Shared is EXEMPT — the skill's Step 2 auto-injects the Spaarke
+        // Model1 is EXEMPT — the skill's Step 4.0 auto-injects the Spaarke
         // shared subscription id for Model 1 flows (documented in
         // intake.schema.json subscriptionId description) so intake need not
         // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
@@ -475,15 +512,14 @@ public static class RunsEndpoints
         // literal contract in force at the HTTP edge.
         if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var m2Check)
             && m2Check == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2
-            && (!request.NonSecretParameters.TryGetValue("subscriptionId", out var subscriptionIdValue)
+            && (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SubscriptionId, out var subscriptionIdValue)
                 || string.IsNullOrWhiteSpace(subscriptionIdValue)))
         {
-            return BadRequest(httpContext,
+            return BadRequest(httpContext, ControlPlaneErrorCodes.SubscriptionIdRequired,
                 "nonSecretParameters['subscriptionId'] is required for tenancyModel='Model2' " +
-                "(ADR-027 D4 subscription-per-customer). Nine downstream handlers (H1/H2a/H2b/H4/H4b/" +
-                "H8/H9/H13/H14) read run.Parameters.NonSecret['subscriptionId']; a missing value " +
-                "would fail H1 subscription-readiness with MissingSubscriptionId within ~20s and leave " +
-                "the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
+                "(ADR-027 D4 subscription-per-customer). H1 onward target the customer's own subscription; " +
+                "a missing value would fail H1 subscription-readiness with MissingSubscriptionId within ~20s " +
+                "and leave the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
                 "Model1 runs are exempt — the skill auto-injects the Spaarke shared sub-id.");
         }
 
@@ -504,18 +540,17 @@ public static class RunsEndpoints
                     "CustomerId={CustomerId} AttemptedRunId={RunId} " +
                     "WinningRunId={WinningRunId} ReasonCode={ReasonCode}",
                     request.CustomerId, runId, conflict.WinningRunId, conflict.ReasonCode);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status409Conflict,
-                    title: "Conflict",
-                    detail:
-                        $"A provisioning run for customer '{request.CustomerId}' is already " +
-                        $"in flight (winning runId '{conflict.WinningRunId}', reason '{conflict.ReasonCode}'). " +
-                        "Cross-customer runs are unaffected — this is per-customer serialization only (spec.md §4D I5 / FR-23).",
-                    extensions: new Dictionary<string, object?>
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status409Conflict,
+                    ControlPlaneErrorCodes.CustomerRunInFlight,
+                    $"A provisioning run for customer '{request.CustomerId}' is already " +
+                    $"in flight (winning runId '{conflict.WinningRunId}', reason '{conflict.ReasonCode}'). " +
+                    "Cross-customer runs are unaffected — this is per-customer serialization only (spec.md §4D I5 / FR-23).",
+                    new Dictionary<string, object?>
                     {
                         ["winningRunId"] = conflict.WinningRunId,
                         ["reasonCode"] = conflict.ReasonCode,
-                        ["correlationId"] = httpContext.TraceIdentifier,
                     });
 
             case AcquireResult.TransientFailure txf:
@@ -523,16 +558,12 @@ public static class RunsEndpoints
                     "CreateRun: 502 — CustomerRunGuard transient failure. " +
                     "CustomerId={CustomerId} AttemptedRunId={RunId} Diagnostic={Diagnostic}",
                     request.CustomerId, runId, txf.Diagnostic);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status502BadGateway,
-                    title: "Bad Gateway",
-                    detail:
-                        $"Concurrency guard could not be evaluated for customer '{request.CustomerId}': " +
-                        $"{txf.Diagnostic}",
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["correlationId"] = httpContext.TraceIdentifier,
-                    });
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status502BadGateway,
+                    ControlPlaneErrorCodes.RunGuardUnavailable,
+                    $"Concurrency guard could not be evaluated for customer '{request.CustomerId}': " +
+                    $"{txf.Diagnostic}");
         }
 
         // REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
@@ -572,7 +603,7 @@ public static class RunsEndpoints
                         "CreateRun: 400 — REG-07 customerId mismatch. RequestedCustomerId={RequestedCustomerId} " +
                         "RegistryCustomerId={RegistryCustomerId} EnvironmentId={EnvironmentId}",
                         request.CustomerId, snapshot.CustomerId, request.EnvironmentId);
-                    return BadRequest(httpContext,
+                    return BadRequest(httpContext, ControlPlaneErrorCodes.RegistryCustomerMismatch,
                         $"REG-07: environmentId '{request.EnvironmentId}' belongs to customer " +
                         $"'{snapshot.CustomerId}', not requested customer '{request.CustomerId}' " +
                         "(§4D I1 cross-customer bleed guard).");
@@ -584,7 +615,7 @@ public static class RunsEndpoints
                         "CreateRun: 400 — REG-07 setupStatus mismatch. RequestedCustomerId={CustomerId} " +
                         "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus}",
                         request.CustomerId, request.EnvironmentId, snapshot.SetupStatus);
-                    return BadRequest(httpContext,
+                    return BadRequest(httpContext, ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress,
                         $"REG-07: environmentId '{request.EnvironmentId}' has setupStatus='{snapshot.SetupStatus}' " +
                         "(expected 'InProgress'). Row is already finalized or in a rollback state; " +
                         "a new run cannot overwrite it. Use clear-quarantine or an operator-side " +
@@ -635,15 +666,23 @@ public static class RunsEndpoints
 
         // Copy non-secret parameters into the run. Cleartext secrets are
         // structurally impossible on this endpoint — CreateRunRequest exposes
-        // NonSecret (Dictionary<string,string>) only; the KeyVaultSecretRef
-        // channel is populated by handlers (H3/H4) later in the DAG, never
-        // by the intake body.
+        // NonSecret (Dictionary<string,string>) only. The KeyVaultSecretRef
+        // channel (run.Parameters.Secrets) has NO writer since task 245a: the
+        // manifest entries that still expect one are pinned gaps in
+        // RunContextContractTests, each owned by a follow-up task.
         if (request.NonSecretParameters is not null)
         {
             foreach (var kvp in request.NonSecretParameters)
             {
                 run.Parameters.NonSecret[kvp.Key] = kvp.Value;
             }
+        }
+
+        // Task 245a: one stamp environment for every handler. Before, H2a/H2b defaulted a missing
+        // value to "prod" on their own while H4b required it — the same run could see two answers.
+        if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.EnvironmentName))
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = IntakeParameterCatalog.DefaultEnvironmentName;
         }
 
         try
@@ -663,11 +702,7 @@ public static class RunsEndpoints
                 "CreateRun: id collision (customerId={CustomerId}, runId={RunId})",
                 run.CustomerId, run.RunId);
             _ = await runGuard.ReleaseAsync(run.CustomerId, run.RunId, cancellationToken).ConfigureAwait(false);
-            return Results.Problem(
-                statusCode: StatusCodes.Status409Conflict,
-                title: "Conflict",
-                detail: $"A run with id '{runId}' already exists.",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            return Conflict(httpContext, ControlPlaneErrorCodes.RunIdCollision, $"A run with id '{runId}' already exists.");
         }
 
         // Enqueue H0 preflight. Deterministic MessageId (FR-22 level-1) dedup's
@@ -781,7 +816,7 @@ public static class RunsEndpoints
         }
         if (string.IsNullOrWhiteSpace(gateId))
         {
-            return BadRequest(httpContext, "gateId is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.GateIdRequired, "gateId is required.");
         }
 
         var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
@@ -949,7 +984,7 @@ public static class RunsEndpoints
         // NOT emit on the 400 path (only on the enqueue-successful path).
         if (string.IsNullOrWhiteSpace(reason))
         {
-            return BadRequest(httpContext, "reason is required (spec FR-24).");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.ReasonRequired, "reason is required (spec FR-24).");
         }
 
         // Task 061: single source of truth for the Quarantined -> Failed
@@ -973,12 +1008,14 @@ public static class RunsEndpoints
             case QuarantineClearResult.Conflict wrongState:
                 return Conflict(
                     httpContext,
+                    ControlPlaneErrorCodes.RunNotQuarantined,
                     $"Run '{id}' is not in Quarantined state (current status: {wrongState.CurrentStatus}). " +
                     "clear-quarantine requires the run to be in Quarantined state (spec FR-24).");
 
             case QuarantineClearResult.ConcurrencyConflict concurrent:
                 return Conflict(
                     httpContext,
+                    ControlPlaneErrorCodes.RunConcurrentlyModified,
                     $"Run '{id}' was modified by a concurrent writer (current status: {concurrent.Current.Status}). " +
                     "Retry the clear-quarantine after re-reading the run state.");
 
@@ -1151,12 +1188,12 @@ public static class RunsEndpoints
     {
         if (string.IsNullOrWhiteSpace(id))
         {
-            failure = BadRequest(httpContext, "runId is required.");
+            failure = BadRequest(httpContext, ControlPlaneErrorCodes.RunIdRequired, "runId is required.");
             return false;
         }
         if (string.IsNullOrWhiteSpace(customerId))
         {
-            failure = BadRequest(httpContext,
+            failure = BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdQueryRequired,
                 "customerId query parameter is required (§4D I3 forbids cross-partition reads).");
             return false;
         }
@@ -1164,29 +1201,15 @@ public static class RunsEndpoints
         return true;
     }
 
-    private static IResult BadRequest(HttpContext httpContext, string detail) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status400BadRequest,
-            title: "Bad Request",
-            detail: detail,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+    private static IResult BadRequest(HttpContext httpContext, string errorCode, string detail) =>
+        ControlPlaneProblems.BadRequest(httpContext, errorCode, detail);
 
     private static IResult NotFound(HttpContext httpContext, string runId, string customerId) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status404NotFound,
-            title: "Not Found",
-            detail: $"ProvisioningRun '{runId}' not found in customer partition '{customerId}'.",
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+        ControlPlaneProblems.NotFound(httpContext, ControlPlaneErrorCodes.RunNotFound,
+            $"ProvisioningRun '{runId}' not found in customer partition '{customerId}'.");
 
-    private static IResult Conflict(HttpContext httpContext, string detail) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status409Conflict,
-            title: "Conflict",
-            detail: detail,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.8",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+    private static IResult Conflict(HttpContext httpContext, string errorCode, string detail) =>
+        ControlPlaneProblems.Conflict(httpContext, errorCode, detail);
 
     private static string SerializeEnqueueParameters(EnqueuePayload payload) =>
         JsonSerializer.Serialize(payload, ParametersJsonOptions);
@@ -1204,8 +1227,8 @@ public static class RunsEndpoints
 
     /// <summary>
     /// DTO for the POST /api/runs request body. Non-secret parameters only —
-    /// the KeyVaultSecretRef channel is populated by handlers (H3/H4) later
-    /// in the DAG, never by intake body.
+    /// cleartext secrets have no field here, and the run's KeyVaultSecretRef
+    /// channel (run.Parameters.Secrets) is never written from the intake body.
     /// </summary>
     public sealed record CreateRunRequest
     {
@@ -1223,7 +1246,11 @@ public static class RunsEndpoints
         [JsonPropertyName("profile")]
         public string Profile { get; init; } = string.Empty;
 
-        /// <summary>Optional non-secret parameter map (target-env, feature flags, etc.).</summary>
+        /// <summary>
+        /// Intake values for the run — keys must be in <see cref="IntakeParameterCatalog"/> (closed set,
+        /// case-sensitive; anything else is a 400 <c>intake-unknown-key</c>). <c>tenantId</c> is required;
+        /// <c>subscriptionId</c> is required for Model 2.
+        /// </summary>
         [JsonPropertyName("nonSecretParameters")]
         public IDictionary<string, string>? NonSecretParameters { get; init; }
     }

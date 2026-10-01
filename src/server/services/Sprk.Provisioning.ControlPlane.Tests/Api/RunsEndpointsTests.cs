@@ -210,7 +210,9 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
-                    ["display-name"] = "Acme Corp",
+                    // An accepted intake key (IntakeParameterCatalog, task 245a) — proves intake
+                    // values reach the stored run.
+                    ["region"] = "westus2",
                     // ISH-01 (Wave 2 pre-dispatch remediation): tenantId is the
                     // canonical propagation path (Wave 0 Decision 1).
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
@@ -236,7 +238,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         repo.CreatedRuns.Should().ContainSingle(r => r.RunId == responseBody.RunId);
         var stored = repo.CreatedRuns.Single();
         stored.CustomerId.Should().Be(TestCustomerId);
-        stored.Parameters.NonSecret.Should().ContainKey("display-name").WhoseValue.Should().Be("Acme Corp");
+        stored.Parameters.NonSecret.Should().ContainKey("region").WhoseValue.Should().Be("westus2");
 
         // Service Bus enqueue observed — H0 preflight.
         var enq = factory.Enqueuer;
@@ -785,6 +787,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("customerId standard", "the diagnostic must name the rule the value broke");
         ReadProblemDetail(body).Should().Contain($"'{customerId}'", "the diagnostic must echo the rejected value");
+        ReadProblemErrorCode(body).Should().Be("customer-id-nonstandard");
         registry.LookupCount.Should().Be(0, "the standard is checked before the REG-07 registry lookup");
         factory.Repository.CreatedRuns.Should().BeEmpty();
         factory.Enqueuer.Enqueued.Should().BeEmpty();
@@ -804,7 +807,9 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var response = await client.SendAsync(BuildValidCreateRunRequest(customerId));
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        ReadProblemDetail(await response.Content.ReadAsStringAsync()).Should().Contain($"customerId '{customerId}' is reserved");
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemDetail(body).Should().Contain($"customerId '{customerId}' is reserved");
+        ReadProblemErrorCode(body).Should().Be("customer-id-reserved");
         registry.LookupCount.Should().Be(0);
         factory.Repository.CreatedRuns.Should().BeEmpty();
         factory.Enqueuer.Enqueued.Should().BeEmpty();
@@ -824,11 +829,124 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         factory.Repository.CreatedRuns.Should().ContainSingle(r => r.CustomerId == customerId);
     }
 
+    // -------------------------------------------------------------------------
+    // Task 245a (G25 — run-context contract): nonSecretParameters is the only
+    // writer of run.Parameters.NonSecret, so it accepts only the closed
+    // IntakeParameterCatalog set, and the stamp environment is resolved once.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("tenant_id")]       // snake_case typo of an accepted key — no handler reads it
+    [InlineData("display-name")]    // read by nothing
+    [InlineData("keyVaultUri")]     // an H2a output smuggled in as a parameter — belongs in InterStepState
+    public async Task PostRuns_UnknownNonSecretKey_Returns400_BeforeRegistryCosmosOrEnqueue(string unknownKey)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var registry = new StubRegistryClient();
+        factory.ReplaceRegistryClient(registry);
+        var guard = new SpyCustomerRunGuard();
+        factory.ReplaceCustomerRunGuard(guard);
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            [unknownKey] = "x",
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemDetail(body).Should().Contain(unknownKey);
+        ReadProblemErrorCode(body).Should().Be("intake-unknown-key");
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("acceptedKeys").EnumerateArray()
+            .Select(k => k.GetString()).Should().BeEquivalentTo(IntakeParameterCatalog.All.Keys,
+                "the caller learns the accepted set from the response, not from reading code");
+        guard.AcquireCalls.Should().BeEmpty("the intake catalog is checked before the I5 run guard is acquired");
+        registry.LookupCount.Should().Be(0, "the intake catalog is checked before the REG-07 registry lookup");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_EnvironmentNameAbsent_StoresProdOnTheRun()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildValidCreateRunRequest("testcust"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret
+            .Should().Contain(IntakeParameterCatalog.EnvironmentName, "prod",
+                "every handler reads one stored stamp environment (owner D6: customer stamps are prod-only)");
+    }
+
+    [Theory]
+    [InlineData("demo")]   // an L2 control-plane tier, not a customer.bicep environmentName
+    [InlineData("Prod")]   // case-sensitive: resource names are built from it, so one spelling per stamp
+    public async Task PostRuns_EnvironmentNameNotAllowed_Returns400_BeforeCosmosOrEnqueue(string environmentName)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            [IntakeParameterCatalog.EnvironmentName] = environmentName,
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemDetail(body).Should().Contain($"'{environmentName}'");
+        ReadProblemErrorCode(body).Should().Be("intake-invalid-environment-name");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_ProvisionEnvironmentSkillStep40Payload_Returns202()
+    {
+        // The exact key set /provision-environment Step 4.0 sends (SKILL.md) must stay accepted.
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+            ["subscriptionId"] = "22222222-2222-2222-2222-222222222222",
+            ["openAiLocation"] = "westus3",
+            ["confirmationAcknowledgment"] = "proceed with provisioning",
+            ["intakeFileSha256"] = "ABCDEF",
+            ["region"] = "westus2",
+            ["tier"] = "standard",
+            ["estimatedMonthlyUsd"] = "900",
+            ["costEnvelopePolicy"] = "abortOnOverrun",
+            ["operatorUpn"] = "operator@spaarke.com",
+            ["containerTypeId"] = "33333333-3333-3333-3333-333333333333",
+        };
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Should().ContainSingle();
+    }
+
     // ProblemDetails JSON escapes ' as ', so assert on the parsed detail, not the raw body.
     private static string ReadProblemDetail(string body)
         => System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("detail").GetString() ?? string.Empty;
 
+    // ADR-019: callers branch on the stable errorCode extension, never on detail text.
+    private static string ReadProblemErrorCode(string body)
+        => System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString() ?? string.Empty;
+
     private static HttpRequestMessage BuildValidCreateRunRequest(string customerId)
+        => BuildCreateRunRequest(customerId, new Dictionary<string, string>
+        {
+            ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+        });
+
+    private static HttpRequestMessage BuildCreateRunRequest(string customerId, Dictionary<string, string> nonSecretParameters)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
         {
@@ -838,10 +956,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
-                {
-                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                nonSecretParameters,
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1150,6 +1265,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("REG-07");
         ReadProblemDetail(body).Should().Contain("belongs to customer 'other'");
+        ReadProblemErrorCode(body).Should().Be("registry-customer-mismatch");
         factory.Repository.CreatedRuns.Should().BeEmpty(
             because: "REG-07 must reject BEFORE the Cosmos write.");
     }

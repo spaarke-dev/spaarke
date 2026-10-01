@@ -753,12 +753,12 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //        from-bicep-output and nothing writes them, so H4 quarantines on a fresh
 //        customer until the H8 write path is wired.
 //   BFF-API-ClientId, BFF-API-Audience
-//     -> H3 (task 130) creates the per-customer BFF app-registration at RUNTIME
-//        and writes ClientId/Audience to RunParameters.Secrets. manifest.yaml
-//        reclassified these from FromBicepOutput to FromRunParameters (task 129
-//        step 6, owner E3 2026-08-19) -- no Bicep resource produces these
-//        values; this Bicep composition correctly has nothing to contribute
-//        here. Recommended owner: H3 handler author (Wave G-3, task 130).
+//     -> H3 creates the per-customer BFF app-registration at RUNTIME and writes
+//        ClientId/Audience to this vault itself (manifest value_source
+//        `written-by-h3`, task 245a; H4 skips them). No Bicep resource produces
+//        these values; this composition correctly has nothing to contribute.
+//   RunContextContractTests rule (g) checks this map against the manifest's
+//   from-bicep-output entries in both directions.
 // ============================================================================
 
 var kvSecretValues = {

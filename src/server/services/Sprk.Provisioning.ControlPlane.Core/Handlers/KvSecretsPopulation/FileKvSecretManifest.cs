@@ -248,7 +248,7 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 var diagnostic =
                     $"manifest.yaml entry '{secret.CanonicalName}' has unrecognized value_source " +
                     $"'{secret.ValueSource}' (expected one of: from-existing-kv, from-bicep-output, " +
-                    "from-run-parameter, generated, from-topology-constants).";
+                    "from-run-parameter, generated, from-topology-constants, from-intake-parameter, written-by-h3).";
                 _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
                 return new KvSecretManifestReadResult.Failure(diagnostic);
             }
@@ -315,6 +315,12 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 // Task 214 added this value_source to manifest.yaml (SPE-ContainerTypeId) without
                 // teaching this reader — every H4 run failed ManifestReadFailed. Fixed T226.
                 valueSource = KvSecretValueSource.FromTopologyConstants;
+                return true;
+            case "from-intake-parameter":
+                valueSource = KvSecretValueSource.FromIntakeParameter;   // task 245a
+                return true;
+            case "written-by-h3":
+                valueSource = KvSecretValueSource.WrittenByEntraAppReg;  // task 245a
                 return true;
             default:
                 valueSource = default;

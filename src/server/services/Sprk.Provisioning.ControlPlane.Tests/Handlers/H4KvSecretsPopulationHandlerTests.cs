@@ -39,10 +39,14 @@
 // Plus defensive negative branches (parameter guards + control-flow):
 //   AC-17 Missing tenantId (§4D I1) → Resumable + kvsecrets-missing-tenant-id.
 //   AC-18 Missing subscriptionId → Resumable + kvsecrets-missing-subscription-id.
-//   AC-19 Missing keyVaultName → Resumable + kvsecrets-missing-kv-name.
-//   AC-20 Missing resourceGroupName → Resumable + kvsecrets-missing-resource-group.
-//   AC-21 Missing appServiceName → Resumable + kvsecrets-missing-app-service-name.
-//   AC-22 Missing userAssignedIdentityResourceId → Resumable + kvsecrets-missing-uami-resource-id.
+//   AC-19 Missing InterStepState.KeyVaultName → Resumable + kvsecrets-missing-kv-name.
+//   AC-20 Missing InterStepState.ResourceGroupName → Resumable + kvsecrets-missing-resource-group.
+//   AC-21 Missing InterStepState.AppServiceName → Resumable + kvsecrets-missing-app-service-name.
+//   AC-22 Missing InterStepState.MiResourceId → Resumable + kvsecrets-missing-uami-resource-id.
+//         (AC-19..22: task 245a / G25 — these are H2a outputs, read from InterStepState,
+//         never from run parameters; a same-named run parameter is ignored. The H2a
+//         staging slot flows to T1/T5 with a "staging" fallback when blank; the KV
+//         resource id is always derived — the keyVaultResourceId override is gone.)
 //   AC-23 Missing secretsVer → Resumable + kvsecrets-missing-secrets-version.
 //   AC-24 HandlerId mismatch → throws InvalidOperationException.
 //   AC-25 Idempotency-key format determinism.
@@ -458,14 +462,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
                 KvSecretsPopulationRejectionCodes.MissingTenantId)]
     [InlineData(H4KvSecretsPopulationHandler.SubscriptionIdParameterKey,
                 KvSecretsPopulationRejectionCodes.MissingSubscriptionId)]
-    [InlineData(H4KvSecretsPopulationHandler.KeyVaultNameParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingKeyVaultName)]
-    [InlineData(H4KvSecretsPopulationHandler.ResourceGroupNameParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingResourceGroupName)]
-    [InlineData(H4KvSecretsPopulationHandler.AppServiceNameParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingAppServiceName)]
-    [InlineData(H4KvSecretsPopulationHandler.UamiResourceIdParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingUamiResourceId)]
     [InlineData(H4KvSecretsPopulationHandler.SecretsVersionParameterKey,
                 KvSecretsPopulationRejectionCodes.MissingSecretsVersion)]
     public async Task AC17to23_MissingRequiredParameter_FailsResumable_NoWriterCall(
@@ -485,6 +481,135 @@ public sealed class H4KvSecretsPopulationHandlerTests
         failure.RejectionCode.Should().Be(expectedRejectionCode);
         writer.CallCount.Should().Be(0);
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    // AC-19..AC-22 (task 245a, G25): the customer vault name, resource group, App Service
+    // name and UAMI resource id are H2a's outputs on InterStepState. A missing value keeps
+    // the SAME rejection code it had when it was (wrongly) read from run parameters.
+    [Theory]
+    [InlineData(nameof(InterStepState.KeyVaultName),
+                KvSecretsPopulationRejectionCodes.MissingKeyVaultName)]
+    [InlineData(nameof(InterStepState.ResourceGroupName),
+                KvSecretsPopulationRejectionCodes.MissingResourceGroupName)]
+    [InlineData(nameof(InterStepState.AppServiceName),
+                KvSecretsPopulationRejectionCodes.MissingAppServiceName)]
+    [InlineData(nameof(InterStepState.MiResourceId),
+                KvSecretsPopulationRejectionCodes.MissingUamiResourceId)]
+    public async Task AC19to22_MissingH2aInterStepStateValue_FailsResumable_NoWriterCall(
+        string interStepStateProperty, string expectedRejectionCode)
+    {
+        var run = BuildRun();
+        ClearInterStepStateValue(run.InterStepState, interStepStateProperty);
+        var repo = new FakeRepository(run, etag: "etag-guard-iss");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(expectedRejectionCode);
+        failure.Diagnostic.Should().Contain("H2a");
+        writer.CallCount.Should().Be(0);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task AC19to22_LegacyRunParametersAreIgnored_InterStepStateIsTheOnlySource()
+    {
+        // A run parameter can never stand in for an H2a output: with the InterStepState
+        // value absent, the same-named NonSecret key does not satisfy the guard.
+        var run = BuildRun();
+        run.InterStepState.KeyVaultName = null;
+        run.Parameters.NonSecret["keyVaultName"] = KeyVaultName;
+        var repo = new FakeRepository(run, etag: "etag-legacy-param");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.MissingKeyVaultName);
+        writer.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task H2aOutputs_FlowToTheT1PatchT1ProbeAndT5Grant()
+    {
+        const string customSlot = "blue";
+        var run = BuildRun();
+        run.InterStepState.AppServiceStagingSlotName = customSlot;
+        var repo = new FakeRepository(run, etag: "etag-h2a-outputs");
+        var patcher = FakeIdentityPatcher.Success();
+        var probe = FakeArmProbe.Match();
+        var granter = FakeSlotGranter.NoSystemAssigned();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), patcher, probe, granter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        patcher.LastInput!.ResourceGroupName.Should().Be(ResourceGroupName);
+        patcher.LastInput.AppServiceName.Should().Be(AppServiceName);
+        patcher.LastInput.StagingSlotName.Should().Be(customSlot);
+        patcher.LastInput.UserAssignedIdentityResourceId.Should().Be(UamiResourceId);
+        probe.LastInput!.StagingSlotName.Should().Be(customSlot);
+        probe.LastInput.ExpectedUserAssignedIdentityResourceId.Should().Be(UamiResourceId);
+        granter.LastInput!.StagingSlotName.Should().Be(customSlot);
+        granter.LastInput.AppServiceName.Should().Be(AppServiceName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task H2aStagingSlotBlank_FallsBackToDefaultStagingSlot(string? slot)
+    {
+        var run = BuildRun();
+        run.InterStepState.AppServiceStagingSlotName = slot;
+        var repo = new FakeRepository(run, etag: "etag-slot-default");
+        var patcher = FakeIdentityPatcher.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), patcher, FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        patcher.LastInput!.StagingSlotName.Should().Be("staging",
+            "the app-service.bicep default slot name applies when H2a reports none");
+    }
+
+    [Fact]
+    public async Task T5GrantScope_IsDerivedFromSubscriptionAndH2aOutputs()
+    {
+        // Task 245a: the former keyVaultResourceId run-parameter override is gone — the T5 grant
+        // scope is always BuildKvResourceId(subscriptionId, InterStepState.ResourceGroupName,
+        // InterStepState.KeyVaultName).
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-kv-rid");
+        var granter = FakeSlotGranter.NoSystemAssigned();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(), granter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        granter.LastInput!.VaultResourceId.Should().Be(
+            H4KvSecretsPopulationHandler.BuildKvResourceId(SubscriptionId, ResourceGroupName, KeyVaultName));
+    }
+
+    private static void ClearInterStepStateValue(InterStepState state, string property)
+    {
+        switch (property)
+        {
+            case nameof(InterStepState.KeyVaultName): state.KeyVaultName = null; break;
+            case nameof(InterStepState.ResourceGroupName): state.ResourceGroupName = null; break;
+            case nameof(InterStepState.AppServiceName): state.AppServiceName = null; break;
+            case nameof(InterStepState.MiResourceId): state.MiResourceId = null; break;
+            default: throw new ArgumentOutOfRangeException(nameof(property), property, "Not an H4-read H2a output.");
+        }
     }
 
     // ---------- AC-24 handler-id mismatch ----------
@@ -577,6 +702,66 @@ public sealed class H4KvSecretsPopulationHandlerTests
         H4KvSecretsPopulationHandler.IsCleartextSecretPattern("guid-like").Should().BeFalse();
     }
 
+    // ---------- AC-28b leak guard vs real H2a outputs (task 245a) ----------
+    // customer.bicep names for an 8-character customerId in the longest environment ('staging'):
+    // the host names alone are 40+ characters of the token alphabet, which tripped the guard before.
+
+    [Theory]
+    [InlineData("https://spaarke-abcdefgh-staging-cosmos.documents.azure.com:443/")]
+    [InlineData("https://sprk-abcdefgh-staging-openai.openai.azure.com/")]
+    [InlineData("https://sprk-abcdefgh-staging-search.search.windows.net")]
+    [InlineData("https://sprk-abcdefgh-staging-kv.vault.azure.net/")]
+    [InlineData("spaarke-abcdefgh-staging-sbus.servicebus.windows.net")]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-spaarke-abcdefgh-staging/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-spaarke-abcdefgh-staging")]
+    public void AC28b_IsCleartextSecretPattern_RealH2aOutputs_DoNotTrip(string value)
+        => H4KvSecretsPopulationHandler.IsCleartextSecretPattern(value).Should().BeFalse();
+
+    [Theory]
+    [InlineData("https://sprk-acme-prod-search.search.windows.net/?api-key=Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
+    [InlineData("https://sprk-acme-prod-kv.vault.azure.net/Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
+    [InlineData("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0")]
+    public void AC28c_IsCleartextSecretPattern_SecretInsideAUriOrDotted_StillTrips(string value)
+        => H4KvSecretsPopulationHandler.IsCleartextSecretPattern(value).Should().BeTrue(
+            "only a lowercase DNS host is exempt — a URI's path / query and dotted tokens are still scanned");
+
+    [Fact]
+    public async Task AC28d_RealShapedH2aOutputs_OnARun_DoNotQuarantine()
+    {
+        var run = BuildRun();
+        run.InterStepState.CosmosEndpoint = "https://spaarke-abcdefgh-staging-cosmos.documents.azure.com:443/";
+        run.InterStepState.OpenAiEndpoint = "https://sprk-abcdefgh-staging-openai.openai.azure.com/";
+        run.InterStepState.AiSearchEndpoint = "https://sprk-abcdefgh-staging-search.search.windows.net";
+        run.InterStepState.KeyVaultUri = "https://sprk-abcdefgh-staging-kv.vault.azure.net/";
+        run.InterStepState.ServiceBusFullyQualifiedNamespace = "spaarke-abcdefgh-staging-sbus.servicebus.windows.net";
+        var repo = new FakeRepository(run, etag: "etag-28d");
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+    }
+
+    [Fact]
+    public async Task AC28e_LeakInAnInterStepStatePropertyAddedLater_IsStillCaught()
+    {
+        // The guard enumerates every string property; it used to check a hand-kept list of eleven
+        // that predated the seven H2a outputs task 245a added.
+        var run = BuildRun();
+        run.InterStepState.KeyVaultUri = "https://sprk-acme-prod-kv.vault.azure.net/?sig=Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";
+        var repo = new FakeRepository(run, etag: "etag-28e");
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.CleartextSecretLeak);
+        failure.Diagnostic.Should().Contain(nameof(InterStepState.KeyVaultUri));
+    }
+
     // ---------- AC-29 KvResourceId builder ----------
 
     [Fact]
@@ -600,7 +785,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
     [InlineData("  ct-guid\n")]
     public void BuildTopologyConstantValues_MapsContainerTypeIdRunParameterToCanonicalName(string raw)
     {
-        var values = H4KvSecretsPopulationHandler.BuildTopologyConstantValues(
+        var values = H4KvSecretsPopulationHandler.BuildIntakeValues(
             new Dictionary<string, string>(StringComparer.Ordinal) { ["containerTypeId"] = raw });
 
         values.Should().ContainSingle()
@@ -619,7 +804,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
             parameters["containerTypeId"] = raw;
         }
 
-        H4KvSecretsPopulationHandler.BuildTopologyConstantValues(parameters).Should().BeEmpty(
+        H4KvSecretsPopulationHandler.BuildIntakeValues(parameters).Should().BeEmpty(
             "an absent value must surface as a resolver failure against the canonical name, never a blank secret");
     }
 
@@ -635,7 +820,45 @@ public sealed class H4KvSecretsPopulationHandlerTests
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        writer.LastRequest!.TopologyConstantValues.Should().Contain("SPE-ContainerTypeId", "ct-guid");
+        writer.LastRequest!.IntakeValues.Should().Contain("SPE-ContainerTypeId", "ct-guid");
+    }
+
+    [Fact]
+    public async Task HandleAsync_PassesTheIntakeTenantIdToTheWriter_ForTheTenantIdSecret()
+    {
+        // Task 245a: TenantId is value_source from-intake-parameter — the run's own tenantId,
+        // with no RunParameters.Secrets reference (nothing ever supplied one).
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-245a-tenant");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.IntakeValues.Should().Contain("TenantId", TenantId);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SkipsEntriesWrittenByH3_TheyNeverReachTheWriter()
+    {
+        // Task 245a: H3 runs after H4 and commits BFF-API-ClientId / BFF-API-Audience itself.
+        // H4 waiting for them was the deadlock; H4 must leave them alone.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-245a-h3");
+        var writer = FakeWriter.AllWrote();
+        var entries = BuildCanonicalEntries()
+            .Append(new KvSecretEntry("BFF-API-ClientId", KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg))
+            .Append(new KvSecretEntry("BFF-API-Audience", KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg))
+            .ToList();
+        var handler = BuildHandler(repo, FakeManifest.Success(entries), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.Entries.Select(e => e.CanonicalName)
+            .Should().NotContain(new[] { "BFF-API-ClientId", "BFF-API-Audience" });
+        writer.LastRequest.Entries.Should().HaveCount(entries.Count - 2);
     }
 
     // =========================================================================
@@ -854,7 +1077,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         {
             var run = BuildRun();
             run.CustomerId = customerId;
-            run.Parameters.NonSecret[H4KvSecretsPopulationHandler.KeyVaultNameParameterKey] = vaultName;
+            run.InterStepState.KeyVaultName = vaultName;
             var repo = new FakeRepository(run, etag: $"etag-a38a9-{customerId}");
             var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
                 FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
@@ -1048,13 +1271,16 @@ public sealed class H4KvSecretsPopulationHandlerTests
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };
+        // Intake values (run parameters).
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.KeyVaultNameParameterKey] = KeyVaultName;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.ResourceGroupNameParameterKey] = ResourceGroupName;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.AppServiceNameParameterKey] = AppServiceName;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.UamiResourceIdParameterKey] = UamiResourceId;
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.SecretsVersionParameterKey] = SecretsVer;
+        // H2a outputs (task 245a, G25) — InterStepState, never run parameters.
+        run.InterStepState.KeyVaultName = KeyVaultName;
+        run.InterStepState.ResourceGroupName = ResourceGroupName;
+        run.InterStepState.AppServiceName = AppServiceName;
+        run.InterStepState.AppServiceStagingSlotName = StagingSlotName;
+        run.InterStepState.MiResourceId = UamiResourceId;
         if (provisionedOn is not null)
         {
             run.Parameters.NonSecret[H4KvSecretsPopulationHandler.ProvisionedOnParameterKey] = provisionedOn;

@@ -147,21 +147,13 @@ if ($SeedPlaceholders) {
 
 # ---- BFF-API-Audience (identity) ----
 # Purpose: BFF API audience URI (api://{clientId}).
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BFF-API-Audience' -Value 'placeholder-from-run-parameter' -Description 'BFF API audience URI (api://{clientId}).' -Category 'identity'
-} else {
-    Write-Host '  SKIP: BFF-API-Audience (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: written-by-h3
+Write-Host '  SKIP: BFF-API-Audience (value_source=written-by-h3; written by H3 with the app registration)' -ForegroundColor Gray
 
 # ---- BFF-API-ClientId (identity) ----
 # Purpose: BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BFF-API-ClientId' -Value 'placeholder-from-run-parameter' -Description 'BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.' -Category 'identity'
-} else {
-    Write-Host '  SKIP: BFF-API-ClientId (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: written-by-h3
+Write-Host '  SKIP: BFF-API-ClientId (value_source=written-by-h3; written by H3 with the app registration)' -ForegroundColor Gray
 
 # ---- BFF-API-ClientSecret (auth) ----
 # Purpose: BFF API app-registration client secret. Consumed by the OBO confidential-client flow (per OAuth spec — required even under ADR-028 MI-first outbound) and by any shared-lib Dataverse boot path still on client-credentials. BINDING never-delete per r3 handoff §4a.
@@ -343,12 +335,8 @@ if ($SeedPlaceholders) {
 
 # ---- TenantId (identity) ----
 # Purpose: Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'TenantId' -Value 'placeholder-from-run-parameter' -Description 'Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.' -Category 'identity'
-} else {
-    Write-Host '  SKIP: TenantId (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-intake-parameter
+Write-Host '  SKIP: TenantId (value_source=from-intake-parameter; written by H4 from the intake value)' -ForegroundColor Gray
 
 Write-Host ''
 Write-Host '=================================================================='

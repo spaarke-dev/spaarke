@@ -35,7 +35,8 @@
 //   AC-6     Verifier throws (simulating ODataError bubble) → Resumable, not
 //            Quarantined.
 //   AC-7     Idempotency: second invocation short-circuits.
-//   AC-9     Missing keyVaultName.
+//   AC-9     Missing InterStepState.KeyVaultName (H2a output; task 245a) →
+//            Resumable MissingKeyVaultName.
 //   AC-10    ExpectedDelegatedScopeCount <= 0.
 //   AC-11    Provisioner returns Failure.
 //   AC-12    Provisioner returns Success with blank BffAppRegId.
@@ -112,13 +113,10 @@ public sealed class H3EntraAppRegHandlerTests
         repo.LastWrittenRun.GateStates.Should().ContainKey(EntraAppRegGates.AdminConsent)
             .WhoseValue.Status.Should().Be(GateState.Verified);
 
-        // BFF-API-ClientId / Audience / ClientSecret all referenced (task 129 contract).
-        repo.LastWrittenRun.Parameters.Secrets.Should().ContainKey(GraphAppRegistrationProvisioner.ClientIdSecretName)
-            .WhoseValue.Should().Be(new KeyVaultSecretRef(KeyVaultName, GraphAppRegistrationProvisioner.ClientIdSecretName));
-        repo.LastWrittenRun.Parameters.Secrets.Should().ContainKey(GraphAppRegistrationProvisioner.AudienceSecretName)
-            .WhoseValue.Should().Be(new KeyVaultSecretRef(KeyVaultName, GraphAppRegistrationProvisioner.AudienceSecretName));
-        repo.LastWrittenRun.Parameters.Secrets.Should().ContainKey(GraphAppRegistrationProvisioner.ClientSecretName)
-            .WhoseValue.Should().Be(new KeyVaultSecretRef(KeyVaultName, GraphAppRegistrationProvisioner.ClientSecretName));
+        // Task 245a: H3 commits BFF-API-ClientId / BFF-API-Audience to the vault itself (asserted via
+        // LastCommittedWrites below) and hands nothing on through run.Parameters.Secrets — H4 runs before
+        // H3 and could never read such refs (the deadlock the old task-129 refs caused).
+        repo.LastWrittenRun.Parameters.Secrets.Should().BeEmpty();
 
         provisioner.ProvisionCallCount.Should().Be(1);
         provisioner.CommitCallCount.Should().Be(1, "KV writes commit exactly once, AFTER consent is verified");
@@ -531,16 +529,6 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.CommitCallCount.Should().Be(1);
     }
 
-    // ---------- AC-PARSE KV URI reference round-trip ----------
-
-    [Fact]
-    public void AcParse_KvUriReference_RoundTrips()
-    {
-        var (vault, name) = H3EntraAppRegHandler.ParseKvUriReference(ExpectedKvUriRef);
-        vault.Should().Be(KeyVaultName);
-        name.Should().Be(GraphAppRegistrationProvisioner.ClientSecretName);
-    }
-
     // ---------- helpers ----------
 
     private static H3EntraAppRegHandler BuildHandler(
@@ -588,7 +576,8 @@ public sealed class H3EntraAppRegHandlerTests
         }
         if (includeKvName)
         {
-            run.Parameters.NonSecret[H3EntraAppRegHandler.KeyVaultNameParameterKey] = KeyVaultName;
+            // Task 245a (G25): the customer vault name is H2a's output, not a run parameter.
+            run.InterStepState.KeyVaultName = KeyVaultName;
         }
         if (includeUamiObjectId)
         {

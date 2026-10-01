@@ -90,6 +90,16 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
             return new PerEnvSettingsManifestReadResult.Failure(diagnostic);
         }
 
+        return Parse(yaml);
+    }
+
+    /// <summary>
+    /// Parses + validates manifest YAML text. Split from the embedded-resource load so the
+    /// validation rules (including the task 245a PerEnvSourceCatalog check) can be exercised
+    /// against hand-written YAML.
+    /// </summary>
+    internal PerEnvSettingsManifestReadResult Parse(string yaml)
+    {
         ManifestYamlDocument document;
         try
         {
@@ -127,6 +137,18 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
                     $"'{raw.PerEnvSource}' (expected 'literal' OR 'from-{{handler}}-{{output|parameter}}:{{key}}').");
             }
 
+            // Task 245a (G25): a non-literal source must be one H4b can actually resolve. Before
+            // this check every source was looked up in run.Parameters.NonSecret, where nothing
+            // writes these keys, so a typo or a mislabelled origin surfaced only at run time.
+            if (kind != PerEnvSettingSource.Literal && !PerEnvSourceCatalog.TryGet(raw.PerEnvSource!, out _))
+            {
+                return new PerEnvSettingsManifestReadResult.Failure(
+                    $"manifest.yaml per_env_settings entry '{raw.Key}' has per_env_source '{raw.PerEnvSource}', " +
+                    "which is not in PerEnvSourceCatalog (unknown source key, or the origin prefix does not " +
+                    "match the handler/intake value that actually produces it). Accepted: " +
+                    string.Join(", ", PerEnvSourceCatalog.All.Select(s => s.Expression)) + ".");
+            }
+
             if (kind == PerEnvSettingSource.Literal && raw.LiteralValue is null)
             {
                 return new PerEnvSettingsManifestReadResult.Failure(
@@ -161,9 +183,10 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
 
     /// <summary>
     /// Parses a manifest <c>per_env_source</c> string. Format:
-    /// <c>literal</c> OR <c>from-{handler}-{output|parameter}:{key}</c>.
-    /// Returns the enum kind and (for non-literals) the parameter key H4b
-    /// looks up in <c>envelope.Parameters.NonSecret</c>.
+    /// <c>literal</c> OR <c>from-{origin}-{output|parameter}:{key}</c>.
+    /// Returns the enum kind and (for non-literals) the source key, which H4b
+    /// resolves through <see cref="PerEnvSourceCatalog"/> (task 245a). Grammar only —
+    /// whether the source exists is checked against the catalog by the caller.
     /// </summary>
     internal static bool TryParsePerEnvSource(string? raw, out PerEnvSettingSource kind, out string? parameterKey)
     {

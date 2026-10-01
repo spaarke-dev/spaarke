@@ -7,8 +7,9 @@
 // H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady — the helper that
 // assembles the sprk_dataverseenvironment column set PATCHed BEFORE H13's
 // Ready transition. Covers the "always sprk_provisionedon" invariant + the
-// omit-when-absent contract for optional columns + InterStepState-vs-parameter
-// preference for containerTypeId.
+// omit-when-absent contract for optional columns + the source of each column
+// (task 245a, G25): resource group / App Service / customer Key Vault from
+// InterStepState (H2a outputs); containerTypeId from the intake parameter only.
 // -----------------------------------------------------------------------------
 
 using System;
@@ -79,16 +80,17 @@ public class H13BuildPromotedColumnsTests
                 {
                     ["bffVersion"] = "1.4.2",
                     ["solutionVersion"] = "2.1.0",
-                    ["azureSubscriptionId"] = "11111111-1111-1111-1111-111111111111",
-                    ["resourceGroupName"] = "rg-spaarke-cust1-prod",
-                    ["appServiceName"] = "sprk-cust1-prod-api",
-                    ["keyVaultName"] = "kv-sprk-cust1",
+                    ["subscriptionId"] = "11111111-1111-1111-1111-111111111111",
+                    ["containerTypeId"] = "e2e-container-type-guid",
                     ["clientCacheBustToken"] = "abc123",
                 },
             },
+            // H2a outputs (task 245a, G25).
             InterStepState = new InterStepState
             {
-                ContainerTypeId = "e2e-container-type-guid",
+                ResourceGroupName = "rg-spaarke-cust1-prod",
+                AppServiceName = "sprk-cust1-prod-api",
+                KeyVaultName = "kv-sprk-cust1",
             },
         };
 
@@ -108,45 +110,93 @@ public class H13BuildPromotedColumnsTests
     }
 
     [Fact]
-    public void BuildPromotedColumnsForReady_ContainerTypeId_Prefers_InterStepState_Over_NonSecret()
+    public void BuildPromotedColumnsForReady_ContainerTypeId_Reads_Intake_Parameter_Not_InterStepState()
     {
-        // InterStepState is the authoritative source per design.md §6.2 (H10 output).
+        // Task 245a (G25): the container type pre-exists per environment and is an
+        // intake value; InterStepState.ContainerTypeId has no producer, so a value
+        // there (stale/hand-patched) must NOT win over the intake parameter.
         var run = new ProvisioningRun
         {
             RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
-                NonSecret = { ["containerTypeId"] = "fallback-from-params" },
+                NonSecret = { ["containerTypeId"] = "ct-from-intake" },
             },
             InterStepState = new InterStepState
             {
-                ContainerTypeId = "authoritative-from-h10",
+                ContainerTypeId = "unproduced-interstep-value",
             },
         };
 
         var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
 
-        columns["sprk_containertypeid"].Should().Be("authoritative-from-h10",
-            because: "InterStepState.ContainerTypeId is H10's authoritative output (design.md §6.2).");
+        columns["sprk_containertypeid"].Should().Be("ct-from-intake",
+            because: "the intake parameter containerTypeId is the only source (InterStepState.ContainerTypeId is [NoProducer]).");
     }
 
     [Fact]
-    public void BuildPromotedColumnsForReady_ContainerTypeId_FallsBack_To_NonSecret_When_InterStepState_Empty()
+    public void BuildPromotedColumnsForReady_ContainerTypeId_From_Intake_Parameter_When_InterStepState_Empty()
     {
-        // Fallback for test hosts / upgrade-only runs that don't re-run H10.
         var run = new ProvisioningRun
         {
             RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
             Parameters = new RunParameters
             {
-                NonSecret = { ["containerTypeId"] = "fallback-value" },
+                NonSecret = { ["containerTypeId"] = "intake-value" },
             },
             InterStepState = new InterStepState(),
         };
 
         var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
 
-        columns["sprk_containertypeid"].Should().Be("fallback-value");
+        columns["sprk_containertypeid"].Should().Be("intake-value");
+    }
+
+    [Fact]
+    public void BuildPromotedColumnsForReady_ContainerTypeId_Omitted_When_Only_InterStepState_Carries_It()
+    {
+        var run = new ProvisioningRun
+        {
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            Parameters = new RunParameters(),
+            InterStepState = new InterStepState { ContainerTypeId = "unproduced-interstep-value" },
+        };
+
+        var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
+
+        columns.Should().NotContainKey("sprk_containertypeid",
+            because: "InterStepState.ContainerTypeId is not a source; with no intake value the column is omitted, never guessed.");
+    }
+
+    [Fact]
+    public void BuildPromotedColumnsForReady_StampNames_Read_From_InterStepState_Not_Run_Parameters()
+    {
+        // Task 245a (G25): resource group / App Service / customer Key Vault are H2a
+        // outputs. The intake key "keyVaultName" names the PLATFORM vault and must
+        // not reach sprk_keyvaultname.
+        var run = new ProvisioningRun
+        {
+            RunId = "run-1", CustomerId = "cust1", EnvironmentId = Guid.NewGuid().ToString("D"),
+            Parameters = new RunParameters
+            {
+                NonSecret = { ["keyVaultName"] = "platform-vault-from-intake" },
+            },
+            InterStepState = new InterStepState(),
+        };
+
+        var withoutInterStep = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
+
+        withoutInterStep.Should().NotContainKey("sprk_keyvaultname");
+
+        run.InterStepState.ResourceGroupName = "rg-from-h2a";
+        run.InterStepState.AppServiceName = "app-from-h2a";
+        run.InterStepState.KeyVaultName = "customer-vault-from-h2a";
+
+        var withInterStep = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
+
+        withInterStep["sprk_resourcegroupname"].Should().Be("rg-from-h2a");
+        withInterStep["sprk_appservicename"].Should().Be("app-from-h2a");
+        withInterStep["sprk_keyvaultname"].Should().Be("customer-vault-from-h2a");
     }
 
     [Fact]
@@ -164,18 +214,24 @@ public class H13BuildPromotedColumnsTests
                 {
                     ["bffVersion"] = "1.0",
                     ["solutionVersion"] = "1.0",
-                    ["azureSubscriptionId"] = "sub",
-                    ["resourceGroupName"] = "rg",
-                    ["appServiceName"] = "app",
-                    ["keyVaultName"] = "kv",
+                    ["subscriptionId"] = "sub",
+                    ["containerTypeId"] = "ctype",
                     ["clientCacheBustToken"] = "cbt",
                 },
             },
-            InterStepState = new InterStepState { ContainerTypeId = "ctype" },
+            InterStepState = new InterStepState
+            {
+                ResourceGroupName = "rg",
+                AppServiceName = "app",
+                KeyVaultName = "kv",
+            },
         };
+
+        var expectedColumnCount = 9; // provisionedon + 5 intake + 3 H2a outputs
 
         var columns = H13E2EAcceptanceGateHandler.BuildPromotedColumnsForReady(run, TestStamp);
 
+        columns.Should().HaveCount(expectedColumnCount, because: "every column must be emitted for the lowercase check to cover it");
         foreach (var key in columns.Keys)
         {
             key.Should().Be(key.ToLowerInvariant(),

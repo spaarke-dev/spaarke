@@ -20,6 +20,8 @@
 //   - Added the BFF-API-ClientId / BFF-API-Audience RunParameters.Secrets
 //     writes H4 consumes via its FromRunParameters resolver (task 129's
 //     manifest.yaml reclassification — H3 is the documented value producer).
+//     REMOVED by task 245a: H4 runs before H3 and could never read them; H3
+//     commits both values to the customer vault itself (written-by-h3).
 //   - REMOVED H3's own Dataverse-app-user-assignment step. DELIBERATE
 //     DEVIATION from the POML's literal step 5 text — see the "SCOPE
 //     DEVIATION" note below for the full rationale (Path C per root
@@ -90,7 +92,7 @@
 //   ├──────────────────────────────────────┼───────────────────────────┤
 //   │ Missing/invalid tenancyModel (I6)    │ Resumable                 │
 //   │ Missing tenantId (§4D I1)            │ Resumable                 │
-//   │ Missing keyVaultName                 │ Resumable                 │
+//   │ Missing InterStepState.KeyVaultName  │ Resumable                 │
 //   │ Missing UAMI principalId             │ Resumable                 │
 //   │ Provisioner PS-era shell-out failure │ N/A (no shell-out remains)│
 //   │ Provisioner Graph failure            │ Resumable                 │
@@ -133,8 +135,11 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (required in both tenancy models post-task-222 per D-13 — H3 writes BFF-API-ClientId/Audience KV secret references, and BFF-API-ClientSecret conditionally when non-secret-free).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
+    // Task 245a (G25, run-context contract): the customer Key Vault name is NOT a run
+    // parameter — it is H2a's output, read from run.InterStepState.KeyVaultName (required in
+    // both tenancy models post-task-222 per D-13 — H3 writes BFF-API-ClientId/Audience KV
+    // secret references, and BFF-API-ClientSecret conditionally when non-secret-free). The
+    // former KeyVaultNameParameterKey ("keyVaultName") constant was removed with that move.
 
     // Task 223 (D-12, 2026-09-29): H3-local Model1Shared / Model2Dedicated string consts DELETED
     // + IsRecognizedTenancyModel helper DELETED. Callers use the shared
@@ -282,12 +287,15 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         // different provisioning paths — both values route through the same
         // per-customer creation code below. Item 2 (the shared TenancyModel
         // enum consolidation) will remove the string-comparison layer next.
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // Task 245a (G25): the customer Key Vault name is H2a's output
+        // (InterStepState.KeyVaultName, ARM output keyVaultName) — never a run parameter.
+        var keyVaultName = run.InterStepState.KeyVaultName;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
         {
             var diagnostic =
-                "Run parameter 'keyVaultName' is required by H3 (target for BFF-API-ClientSecret/" +
-                "ClientId/Audience). Upstream handler (H2a Bicep) MUST populate this from the deployed " +
-                "platform KV name before H3 dispatches.";
+                "InterStepState.keyVaultName (the customer Key Vault — target for BFF-API-ClientSecret/" +
+                "ClientId/Audience) is not populated. It is H2a's output (Bicep ARM output keyVaultName); " +
+                "H2a MUST complete before H3 dispatches.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 EntraAppRegRejectionCodes.MissingKeyVaultName, diagnostic, cancellationToken).ConfigureAwait(false);
         }
@@ -644,19 +652,12 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
             return HandlePendingReplace(pendingReplace, run, idempotencyKey);
         }
 
-        // Verified — H3 completed its full job. Populate the RunParameters
-        // .Secrets refs H4's FromRunParameters resolver (task 126) consumes
-        // for BFF-API-ClientId / BFF-API-Audience / BFF-API-ClientSecret (task
-        // 129's manifest.yaml reclassification — H3 is the documented value
-        // producer for the first two; ClientSecret's manifest entry is
-        // from-existing-kv, satisfied identically).
+        // Verified — H3 completed its full job. BFF-API-ClientId / BFF-API-Audience were committed to
+        // the customer vault by the provisioner above (manifest value_source: written-by-h3), so H3
+        // hands nothing on through run.Parameters.Secrets. Task 245a removed those writes: they fed
+        // H4's resolver, but H4 runs BEFORE H3 (H3 needs H4's vault RBAC bootstrap) and so could never
+        // see them — every real run deadlocked at H4.
         var verified = (AdminConsentVerificationResult.Verified)consentResult;
-        var (vaultName, secretName) = ParseKvUriReference(outputs.BffClientSecretKvUri);
-        run.Parameters.Secrets[GraphAppRegistrationProvisioner.ClientIdSecretName] =
-            new KeyVaultSecretRef(vaultName, GraphAppRegistrationProvisioner.ClientIdSecretName);
-        run.Parameters.Secrets[GraphAppRegistrationProvisioner.AudienceSecretName] =
-            new KeyVaultSecretRef(vaultName, GraphAppRegistrationProvisioner.AudienceSecretName);
-        run.Parameters.Secrets[secretName] = new KeyVaultSecretRef(vaultName, secretName);
 
         run.Status = RunStatus.Running;
         run.CurrentPhase = HandlerIdentifier;
@@ -701,23 +702,6 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         }
 
         return new HandlerResult.Success(idempotencyKey);
-    }
-
-    /// <summary>
-    /// Parses a canonical <c>@Microsoft.KeyVault(SecretUri=https://{vault}.
-    /// vault.azure.net/secrets/{name}/)</c> reference into (vault, name).
-    /// Exposed internal so unit tests can construct expected
-    /// RunParameters.Secrets entries without duplicating the parse.
-    /// </summary>
-    internal static (string VaultName, string SecretName) ParseKvUriReference(string kvUriRef)
-    {
-        // https://{vault}.vault.azure.net/secrets/{name}/
-        const string prefix = "@Microsoft.KeyVault(SecretUri=https://";
-        var inner = kvUriRef[prefix.Length..].TrimEnd(')');
-        var vaultHost = inner[..inner.IndexOf(".vault.azure.net/", StringComparison.Ordinal)];
-        var afterSecrets = inner[(inner.IndexOf("/secrets/", StringComparison.Ordinal) + "/secrets/".Length)..];
-        var secretName = afterSecrets.TrimEnd('/');
-        return (vaultHost, secretName);
     }
 
     private HandlerResult HandlePendingReplace(

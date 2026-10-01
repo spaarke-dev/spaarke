@@ -362,11 +362,11 @@ builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 // Placement Justification (CLAUDE.md §10): H3 lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H3
 // uses IProvisioningRunRepository (task 037) + two dedicated seams; no BFF-
-// facade dependencies. Downstream H4 (task 047, Batch 3D) reads bffAppRegId
-// from interStepState AND the BFF-API-ClientId/Audience/ClientSecret KV
-// references H3 now writes to RunParameters.Secrets (task 129's manifest.yaml
-// reclassification of the first two entries to from-run-parameter, owner E3);
-// H3 does NOT enqueue H4 directly — the reconciler owns fan-out.
+// facade dependencies. H3 writes BFF-API-ClientId / BFF-API-Audience straight
+// into the customer vault and records bffAppRegId in InterStepState (H4b, H6,
+// H7, H8, H10, H13, H14 read it); H4 runs BEFORE H3 and skips those two
+// `written-by-h3` manifest entries (task 245a). H3 does NOT enqueue anything
+// directly — the reconciler owns fan-out.
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-028 UAMI-outbound + KV-secret-ref: client secret stored in KV as

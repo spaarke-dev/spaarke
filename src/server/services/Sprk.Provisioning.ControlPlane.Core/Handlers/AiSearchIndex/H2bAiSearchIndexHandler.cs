@@ -127,22 +127,12 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
     public const string IndexVersionParameterKey = "indexVer";
 
     /// <summary>
-    /// Non-secret parameter key carrying the target environment (dev / staging /
-    /// prod / demo) — passed through to <c>Deploy-AllIndexes.ps1 -Environment</c>
-    /// for Model 2. Defaults to <c>prod</c> when absent.
-    /// </summary>
-    public const string EnvironmentNameParameterKey = "environmentName";
-
-    /// <summary>
     /// Optional non-secret parameter key carrying a comma-separated subset of
     /// canonical index short-keys to provision (parity with the script's
     /// <c>-Indexes</c> parameter). Empty / absent ⇒ provision all canonical 7.
     /// The retired-name guard runs BEFORE the provisioner regardless of subset.
     /// </summary>
     public const string RequestedIndexesParameterKey = "requestedIndexes";
-
-    /// <summary>Default target environment when the parameter is absent.</summary>
-    private const string DefaultEnvironmentName = "prod";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly ICanonicalIndexCatalog _catalog;
@@ -299,9 +289,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        var environmentName = TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var env)
-            ? env
-            : DefaultEnvironmentName;
+        var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
 
         var branchResult = tenancyModel switch
         {

@@ -199,13 +199,17 @@ Provisioning steps implemented as idempotent handlers. Each handler is a self-co
 | H13 | End-to-end acceptance gate (Gap 4) | Extended `Validate-DeployedEnvironment.ps1` — asserts effects, not intentions (R7); checks BFF `/health`, sample analysis, sample document upload+index, workspace-layout render, wizard field-map, **all 6 §4B silent-fail traps cleared** | **Validation passed → registry `Ready`** | `validate-{customerId}-{buildId}` |
 | **H14 (v3.2, S2S sub-step removed per r3 task 060)** | **Post-deploy integration wiring** (I1 resolved) — enumerated: (a) **two Exchange ApplicationAccessPolicies** (BFF app-reg + UAMI — T4 with action semantics: create-if-missing then verify), (b) Graph webhook subscriptions per Communication/Email module (with HMAC signing keys from H4), (c) service endpoint webhooks (Dataverse → BFF). **v3.2**: sub-step (d) S2S consent flows REMOVED (r3 task 060 dropped the S2S app-reg). Sub-steps (a)/(b)/(c) are **DAG-parallel** — no cross-dependencies given H4/H10/H12 outputs available. | New scripting; each sub-step idempotent | — | `integrations-{customerId}-{integrationVer}` |
 
-**Handler dependencies** (DAG, v3.2 parallelism corrected):
+**Handler dependencies** (DAG, v3.2 parallelism corrected; task 245a 2026-10-01 — every required input's producer is an ancestor, enforced by `RunContextContractTests` over `DagAdvancer.HandlerDependencies`, which is authoritative):
 ```
 H0 → H1 → H2a → { H2b (indexes), H4 (KV), H5 (dv-env) }  # 3-way parallel post-Bicep
               ↓
-              H4 → H3 (needs KV for secrets storage) → { H8 (SPE), H9 (BFF deploy) }
+              H4 → H3 (needs KV for secrets storage) → H8 (SPE)
+              { H4, H3 } → H4b (app settings — reads H3's BffAppRegId)   # T245a: + H3
+              { H3, H4b } → H9 (BFF deploy)
                                                        ↓
-H5 → H6 (solutions) → H7 → H10 (app-user, needs H6 solutions) → H11
+{ H5, H3 } → H6 (solutions — reads BffAppRegId)      # T245a: + H3
+{ H6, H8 } → H7 (env vars — reads SpeContainerId)    # T245a: + H8
+H7 → H10 (app-user, needs H6 solutions) → H11
                                     ↓
                             { H12a (AI seed), H12b (config seed) }  # v3.2: parallel — H12b doesn't need H12a
                                     ↓
@@ -680,13 +684,13 @@ One execution of the pipeline against a target. Multiple runs per environment ov
 | id | string (GUID) | Unique run identifier |
 | customerId | string | Partition key + customer reference |
 | environmentId | GUID | Lookup → `sprk_dataverseenvironment` |
-| tenancyModel | string | v3 — `Model1Shared` or `Model2Dedicated` (mirrors `sprk_tenancymodel`) |
+| tenancyModel | string | `Model1` or `Model2` (case-sensitive since T223/T224; mirrors `sprk_tenancymodel`) |
 | status | string | NotStarted, Running, WaitingOnGate, Completed, Failed, Cancelled |
 | currentPhase | string | Current handler ID (e.g., `H2a`, `H12b`) — string (not int) because v3 introduces sub-handlers |
 | completedPhases | array | `[{ phase: "H2a", startedAt, completedAt, idempotencyKey, jobId }]` |
 | **gateStates** (v3, I2) | object | `{ [gateId]: { status: "Pending"\|"Verified"\|"Cleared", verifiedAt, verifierHandler, evidence: {...} } }` — evidence is gate-specific (Graph query result for admin-consent, Dataverse query result for app-user, etc.) |
-| parameters | object | Run parameters (**v3, B3**: secrets stored as KV URI refs — `{ "clientSecret": "@Microsoft.KeyVault(SecretUri=https://.../secrets/...)" }`, resolved at handler runtime via UAMI. No cleartext secrets in Cosmos.) |
-| **interStepState** (v3, I2) | object | Enumerated keys: `bffAppRegId`, `s2sAppRegId`, `miObjectId`, `miClientId`, `containerTypeId`, `dataverseEnvUrl`, `openAiEndpoint`, `aiSearchEndpoint`, `cosmosEndpoint`, `systemUserId`, `speConsentCorrelationId`. Handlers write once; downstream handlers read. |
+| parameters | object | Two maps. `nonSecret`: intake values, written ONLY at `POST /api/runs`; keys limited to the closed `IntakeParameterCatalog` set (task 245a; an unknown key is a 400 `intake-unknown-key`). `secrets`: KeyVaultSecretRef map (**B3** — KV URI refs, never cleartext in Cosmos); since task 245a **nothing writes it** (the intake body has no secret field and H3 no longer hands refs on). The manifest secrets that still expect a ref are pinned gaps in `RunContextContractTests`, each owned by a task. |
+| **interStepState** (v3, I2; extended by tasks 049/050/053/054/205b/245a) | object | Enumerated keys: `bffAppRegId`, `s2sAppRegId`, `miObjectId`, `miClientId`, `containerTypeId`, `dataverseEnvUrl`, `openAiEndpoint`, `aiSearchEndpoint`, `cosmosEndpoint`, `systemUserId`, `bffAppRegSystemUserId`, `speConsentCorrelationId`, `ficPendingPostAppServiceVerification`, `importedSolutions`, `speContainerId`, `provisionedUsers`, and (task 245a — H2a's ARM outputs, previously dropped) `resourceGroupName`, `appServiceName`, `appServiceStagingSlotName`, `keyVaultName`, `keyVaultUri`, `miResourceId`, `serviceBusFullyQualifiedNamespace`. Handlers write once; downstream handlers read. **Each key names its single producer** (`[ProducedBy]` / `[NoProducer]` in `Models/InterStepState.cs`); a handler never reads another handler's output from `parameters` (which holds intake values only — `IntakeParameterCatalog`). |
 | profile | string | Environment profile used (`spaarke-hosted-model2`, `customer-owned-model2`, `spaarke-hosted-model1-trial`) |
 | attemptCount | integer | Number of resume attempts (I6 crash recovery increments) |
 | createdAt | datetime | Run creation |

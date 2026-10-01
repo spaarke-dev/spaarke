@@ -201,7 +201,7 @@ public sealed class KvSecretValueResolverTests
         var entry = new KvSecretEntry("SPE-ContainerTypeId", KvSecretOperation.Upsert, KvSecretValueSource.FromTopologyConstants);
         var request = NewRequest() with
         {
-            TopologyConstantValues = new Dictionary<string, string>(StringComparer.Ordinal)
+            IntakeValues = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["SPE-ContainerTypeId"] = containerTypeId,
             },
@@ -224,6 +224,49 @@ public sealed class KvSecretValueResolverTests
         var failed = resolution.Should().BeOfType<KvSecretValueResolution.Failed>().Subject;
         failed.Diagnostic.Should().Contain("SPE-ContainerTypeId");
         failed.Diagnostic.Should().Contain("containerTypeId");
+    }
+
+    // ---------- Task 245a FromIntakeParameter / WrittenByEntraAppReg ----------
+
+    [Fact]
+    public async Task ResolveAsync_FromIntakeParameterEntry_ReturnsTheIntakeValue_WithoutAnySecretRef()
+    {
+        // TenantId used to need a RunParameters.Secrets ref nothing supplied; it is now the intake value.
+        const string tenantId = "11111111-2222-3333-4444-555555555555";
+        var resolver = NewResolver(new FakeSourceVaultHandler());
+        var entry = new KvSecretEntry("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter);
+        var request = NewRequest() with
+        {
+            IntakeValues = new Dictionary<string, string>(StringComparer.Ordinal) { ["TenantId"] = tenantId },
+        };
+
+        var resolution = await resolver.ResolveAsync(entry, request, CancellationToken.None);
+
+        resolution.Should().BeOfType<KvSecretValueResolution.Resolved>().Which.Value.Should().Be(tenantId);
+    }
+
+    [Fact]
+    public async Task ResolveAsync_FromIntakeParameterEntry_WithoutValue_FailsNotFabricated()
+    {
+        var resolver = NewResolver(new FakeSourceVaultHandler());
+        var entry = new KvSecretEntry("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter);
+
+        var resolution = await resolver.ResolveAsync(entry, NewRequest(), CancellationToken.None);
+
+        resolution.Should().BeOfType<KvSecretValueResolution.Failed>().Which.Diagnostic.Should().Contain("TenantId");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_WrittenByEntraAppRegEntry_FailsBecauseH4MustSkipIt()
+    {
+        // Defensive: H4 filters these out before the writer; if one ever reaches the resolver it must
+        // not be resolved from anywhere.
+        var resolver = NewResolver(new FakeSourceVaultHandler());
+        var entry = new KvSecretEntry("BFF-API-ClientId", KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg);
+
+        var resolution = await resolver.ResolveAsync(entry, NewRequest(), CancellationToken.None);
+
+        resolution.Should().BeOfType<KvSecretValueResolution.Failed>().Which.Diagnostic.Should().Contain("H3");
     }
 
     // ---------- T7 no cleartext ever appears in a diagnostic ----------

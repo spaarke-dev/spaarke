@@ -114,8 +114,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the bicep-repo git SHA (feeds idempotency key).</summary>
     public const string BicepVersionParameterKey = "bicepVer";
 
-    /// <summary>Non-secret parameter key carrying the target environment name (dev/staging/prod). Defaults to <c>prod</c> when absent.</summary>
-    public const string EnvironmentNameParameterKey = "environmentName";
 
     /// <summary>Non-secret parameter key carrying the target Azure region. Defaults to <c>westus2</c> when absent.</summary>
     public const string LocationParameterKey = "location";
@@ -146,9 +144,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// wave C4.
     /// </summary>
     public const string ProvisionedOnParameterKey = "provisionedOn";
-
-    /// <summary>Default target environment when the parameter is absent.</summary>
-    private const string DefaultEnvironmentName = "prod";
 
     /// <summary>Default target Azure region when the parameter is absent (parity with <c>customer.bicep</c>).</summary>
     private const string DefaultLocation = "westus2";
@@ -316,9 +311,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         }
 
         // (6) Assemble the deploy request from run parameters + tenancy model.
-        var environmentName = TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var env)
-            ? env
-            : DefaultEnvironmentName;
+        var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
         var location = TryGetNonEmpty(parameters, LocationParameterKey, out var loc)
             ? loc
             : DefaultLocation;
@@ -559,12 +552,12 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         }
 
         var outputs = ((BicepDeployOutcome.Success)outcome).Outputs;
-        if (!AreOutputsComplete(outputs))
+        var missingOutputs = MissingOutputs(outputs);
+        if (missingOutputs.Count > 0)
         {
             var diagnostic =
-                $"Bicep deploy for '{envelope.CustomerId}' completed but returned incomplete outputs " +
-                "(one or more required fields blank: UAMI resource id / object id / client id / " +
-                "AppService name+staging slot / OpenAI+AISearch+Cosmos endpoints). " +
+                $"Bicep deploy for '{envelope.CustomerId}' completed but returned incomplete outputs — blank: " +
+                $"{string.Join(", ", missingOutputs)}. " +
                 "Verify infrastructure/bicep outputs surface all fields required by BicepDeployOutputs.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 BicepDeployRejectionCodes.BicepDeployOutputsIncomplete, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -636,9 +629,11 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// positives / negatives):
     ///   - Storage: <c>take(toLower(replace('sprk{customerId}{env}sa', '-', '')), 24)</c>
     ///     (customer.bicep line 141)
-    ///   - Service Bus namespace: <c>sprk-{customerId}-{env}-sb</c>
-    ///     (F10 verbatim mention: "Service Bus `-sb` suffix was already reserved
-    ///     globally"; matches customer.bicep's serviceBusNamespaceName pattern)
+    ///   - Service Bus namespace: <c>spaarke-{customerId}-{env}-sbus</c>
+    ///     (customer.bicep <c>serviceBusName</c>; the <c>-sbus</c> suffix exists
+    ///     because F10 found Azure reserves names ending in <c>-sb</c>. Until task
+    ///     245a this check probed <c>sprk-{customerId}-{env}-sb</c> — a name the
+    ///     template never creates, so it verified nothing.)
     /// Key Vault is omitted for now (see <see cref="ResourceNameKind.KeyVault"/>
     /// enum comment — Azure.ResourceManager.KeyVault not currently a project
     /// dependency). Exposed <c>internal</c> so unit tests can validate the
@@ -653,10 +648,10 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         var storageName = TruncateTo(
             $"{baseName}sa".ToLowerInvariant().Replace("-", string.Empty, StringComparison.Ordinal),
             24);
-        // Service Bus namespace: keep hyphens for readability (SB name rules
-        // allow hyphens); 50-char cap per ARM (well within customer id +
-        // env-name budget). F10 verbatim reference.
-        var sbName = $"sprk-{customerId}-{environmentName}-sb";
+        // Service Bus namespace: exactly customer.bicep's serviceBusName
+        // ('spaarke-${customerId}-${environmentName}-sbus'); 50-char cap per ARM
+        // is well within the customerId (≤8) + env-name budget.
+        var sbName = $"spaarke-{customerId}-{environmentName}-sbus";
         return new[]
         {
             new ResourceNameCheckEntry(ResourceNameKind.StorageAccount, storageName),
@@ -693,16 +688,33 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         return false;
     }
 
-    private static bool AreOutputsComplete(BicepDeployOutputs outputs)
-        => !string.IsNullOrWhiteSpace(outputs.ResourceGroupName)
-        && !string.IsNullOrWhiteSpace(outputs.UserAssignedIdentityResourceId)
-        && !string.IsNullOrWhiteSpace(outputs.UserAssignedIdentityObjectId)
-        && !string.IsNullOrWhiteSpace(outputs.UserAssignedIdentityClientId)
-        && !string.IsNullOrWhiteSpace(outputs.AppServiceName)
-        && !string.IsNullOrWhiteSpace(outputs.AppServiceStagingSlotName)
-        && !string.IsNullOrWhiteSpace(outputs.OpenAiEndpoint)
-        && !string.IsNullOrWhiteSpace(outputs.AiSearchEndpoint)
-        && !string.IsNullOrWhiteSpace(outputs.CosmosEndpoint);
+    /// <summary>
+    /// Names of the required <see cref="BicepDeployOutputs"/> string fields that are blank.
+    /// Empty list = complete. Every field here is persisted to InterStepState or used by the
+    /// T1 post-condition, so a blank one is a template/runner defect, not a transient fault.
+    /// </summary>
+    private static IReadOnlyList<string> MissingOutputs(BicepDeployOutputs outputs)
+    {
+        var missing = new List<string>();
+        void Check(string value, string name)
+        {
+            if (string.IsNullOrWhiteSpace(value)) missing.Add(name);
+        }
+
+        Check(outputs.ResourceGroupName, nameof(BicepDeployOutputs.ResourceGroupName));
+        Check(outputs.UserAssignedIdentityResourceId, nameof(BicepDeployOutputs.UserAssignedIdentityResourceId));
+        Check(outputs.UserAssignedIdentityObjectId, nameof(BicepDeployOutputs.UserAssignedIdentityObjectId));
+        Check(outputs.UserAssignedIdentityClientId, nameof(BicepDeployOutputs.UserAssignedIdentityClientId));
+        Check(outputs.AppServiceName, nameof(BicepDeployOutputs.AppServiceName));
+        Check(outputs.AppServiceStagingSlotName, nameof(BicepDeployOutputs.AppServiceStagingSlotName));
+        Check(outputs.OpenAiEndpoint, nameof(BicepDeployOutputs.OpenAiEndpoint));
+        Check(outputs.AiSearchEndpoint, nameof(BicepDeployOutputs.AiSearchEndpoint));
+        Check(outputs.CosmosEndpoint, nameof(BicepDeployOutputs.CosmosEndpoint));
+        Check(outputs.KeyVaultName, nameof(BicepDeployOutputs.KeyVaultName));
+        Check(outputs.KeyVaultUri, nameof(BicepDeployOutputs.KeyVaultUri));
+        Check(outputs.ServiceBusFullyQualifiedNamespace, nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace));
+        return missing;
+    }
 
     private async Task<string> WriteDriftReportAsync(
         string customerId,
@@ -793,12 +805,23 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         });
         run.ErrorDetail = null;
 
-        // Populate interStepState (design.md §6.2) — one write per key.
+        // Populate interStepState (design.md §6.2) — one write per key. Every
+        // customer-stamp value a later handler needs is persisted HERE (task
+        // 245a, G25): before, RG / App Service / slot / KV / UAMI resource id
+        // were mapped from ARM and then dropped, and downstream handlers read
+        // them from run parameters nobody wrote.
         run.InterStepState.OpenAiEndpoint = outputs.OpenAiEndpoint;
         run.InterStepState.AiSearchEndpoint = outputs.AiSearchEndpoint;
         run.InterStepState.CosmosEndpoint = outputs.CosmosEndpoint;
         run.InterStepState.MiObjectId = outputs.UserAssignedIdentityObjectId;
         run.InterStepState.MiClientId = outputs.UserAssignedIdentityClientId;
+        run.InterStepState.ResourceGroupName = outputs.ResourceGroupName;
+        run.InterStepState.AppServiceName = outputs.AppServiceName;
+        run.InterStepState.AppServiceStagingSlotName = outputs.AppServiceStagingSlotName;
+        run.InterStepState.KeyVaultName = outputs.KeyVaultName;
+        run.InterStepState.KeyVaultUri = outputs.KeyVaultUri;
+        run.InterStepState.MiResourceId = outputs.UserAssignedIdentityResourceId;
+        run.InterStepState.ServiceBusFullyQualifiedNamespace = outputs.ServiceBusFullyQualifiedNamespace;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

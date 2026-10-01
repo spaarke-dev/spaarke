@@ -76,6 +76,12 @@ public interface IE2ETrapVerifier
 /// count-only verification (pre-A41 behavior, logged distinctly as "DEGRADED") rather than failing —
 /// see DataverseAppUserPairT2Probe for the byte-equality contract.
 /// </param>
+/// <param name="SpeOwnerCertKeyVaultName">
+/// The Spaarke PLATFORM vault holding the SPE owner certificate — T6's cert source. Distinct from
+/// <paramref name="KeyVaultName"/> (the CUSTOMER vault, H2a output, used by T1/T5). OPTIONAL TRAILING
+/// FIELD (task 245a, same additive pattern as <paramref name="UamiObjectId"/>); empty → T6 InfraFault.
+/// Interim source: intake <c>keyVaultName</c>; T245b moves it to L2 configuration.
+/// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
     string RunId,
@@ -87,7 +93,8 @@ public sealed record TrapVerificationRequest(
     string KeyVaultName,
     string AppServiceName,
     string ResourceGroupName,
-    string UamiObjectId = "");
+    string UamiObjectId = "",
+    string SpeOwnerCertKeyVaultName = "");
 
 /// <summary>
 /// The 6 §4B silent-fail traps, enumerated (matches design.md §4B verbatim).

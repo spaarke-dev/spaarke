@@ -113,6 +113,18 @@ Every Class-B routing MUST include an accompanying ArchTest (or equivalent forci
 
 Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 
+## Run-context contract — every handler input has ONE producer (BINDING, task 245a / G25)
+
+- `run.Parameters.NonSecret` holds **intake values only** — the closed set in `Models/IntakeParameterCatalog.cs`; `POST /api/runs` rejects any other key. **NEVER read a value another handler produces from `NonSecret`** — nothing writes it there.
+- A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
+- Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
+- H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`.
+- **`run.Parameters.Secrets` has no writer.** No handler may write it; only H4 may read it, and only for the manifest entries pinned as gaps.
+- Every H4 manifest secret needs a source H4 can reach before H3 runs — a `from-bicep-output` label is only true if `customer.bicep`'s `kvSecretValues` writes it.
+- `RunContextContractTests` enforces all of this with a Roslyn source scan (declared inputs = reads, both ways), a DAG check and the manifest check. A failure means the data flow is wrong — fix the flow, never add a Gap to pass. Handler unit tests seeding a value by hand prove nothing about who writes it (that is how ~20 inputs shipped with no producer).
+
+Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence: `projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md`.
+
 ## Handler idempotency + drift-detection
 
 - Every handler MUST be idempotent. Second run of the same handler against the same customer resources produces the same end state (assuming no external drift).

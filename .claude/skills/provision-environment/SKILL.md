@@ -611,7 +611,7 @@ if ($BatchIntakeFile) {
   $env            = $environment                # alias — Step 0.5a fail-fast + Step 0c URL selector read $env
   $profile        = $intake.profile
   $environmentId  = $intake.environmentId       # may be null → 1f auto-creates
-  $subscriptionId = $intake.subscriptionId      # ISH-02 — REQUIRED for Model2Dedicated (validated in schema allOf); optional for Model1Shared
+  $subscriptionId = $intake.subscriptionId      # ISH-02 — REQUIRED for Model2 (validated in schema allOf); optional for Model1
   $region         = $intake.region              # optional platform region (default westus2)
   $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
   $tier           = $intake.tier                # optional
@@ -642,9 +642,10 @@ if ($BatchIntakeFile) {
   $script:BatchCostEnvelopePolicy    = if ($intake.costEnvelopePolicy)    { $intake.costEnvelopePolicy }    else { 'abortOnOverrun' }       # BAT-10 → Step 2 preflight + Step 4b H0 fail-fast
   $script:BatchPostmortemFile        = $intake.postmortemFile                                                                                # BAT-09 → Step 7b
 
-  # Model2Dedicated + costEnvelopePolicy=warnAndProceed is forbidden per schema description
-  if ($tenancyModel -eq 'Model2Dedicated' -and $script:BatchCostEnvelopePolicy -eq 'warnAndProceed') {
-    Write-Error "[skill] Batch intake HARD STOP: costEnvelopePolicy='warnAndProceed' is FORBIDDEN for Model2Dedicated (per intake.schema.json description; cost envelope MUST abort for prod / customer-owned subs). Change to 'abortOnOverrun' and rerun."
+  # Model2 + costEnvelopePolicy=warnAndProceed is forbidden per schema description.
+  # (T223/T224 renamed the tenancyModel literals to Model1 | Model2 — the old 'Model2Dedicated' test here never matched.)
+  if ($tenancyModel -eq 'Model2' -and $script:BatchCostEnvelopePolicy -eq 'warnAndProceed') {
+    Write-Error "[skill] Batch intake HARD STOP: costEnvelopePolicy='warnAndProceed' is FORBIDDEN for Model2 (per intake.schema.json description; cost envelope MUST abort for prod / customer-owned subs). Change to 'abortOnOverrun' and rerun."
     exit 1
   }
 
@@ -658,14 +659,15 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
 
 ```json
 {
-  "customerId": "trial1",
+  "customerId": "acme",
   "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-  "tenancyModel": "Model1Shared",
+  "tenancyModel": "Model2",
   "controlPlaneEnv": "dev",
-  "profile": "spaarke-hosted-model1-trial",
+  "profile": "spaarke-hosted-model2",
+  "subscriptionId": "00000000-0000-0000-0000-000000000000",
   "region": "westus2",
-  "tier": "shared-trial",
-  "estimatedMonthlyUsd": 412,
+  "tier": "dedicated",
+  "estimatedMonthlyUsd": 900,
   "confirmationAcknowledgment": "proceed with provisioning",
   "costEnvelopePolicy": "abortOnOverrun"
 }
@@ -792,11 +794,14 @@ Choice:
 > creates a Dataverse environment unconditionally). The BFF **Entra app registration is per customer in both
 > models** (D-13, BINDING).
 >
-> ⚠️ **The live L2 enum has NOT yet been migrated**, so the literals below are still what the API accepts.
-> Read them as: `Model1Shared` → retired, `Model2Dedicated` → both new models. Migration is D-12 §6 items 2–3.
+> ⚠️ **Literals (T223/T224):** L2 and `intake.schema.json` accept exactly `Model1` | `Model2`
+> (case-sensitive). The old `Model1Shared` / `Model2Dedicated` spellings are a 400. L2 still pairs `Model1`
+> with the retired `spaarke-hosted-model1-trial` profile until the Model 1 dedicated remediation
+> (`notes/model1-dedicated-remediation-plan.md` §7) reshapes it.
 
-- ~~`Model1Shared`~~ — 🔴 **RETIRED**. Do not provision. No successor value; the old value `0` has none.
-- `Model2Dedicated` — the **only** currently-valid value, and it covers **both** new models. 🔴 This is the
+- `Model1` — L2 pairs it ONLY with `spaarke-hosted-model1-trial`, which Step 1e rejects (retired). Do not
+  provision a Model 1 run until the remediation plan lands.
+- `Model2` — the **only** value to send today, and it covers **both** new models. 🔴 This is the
   2:1 overload D-12 §5 (P-2) identifies as a live defect: `H1SubscriptionReadinessHandler` maps it to
   `CustomerOwned` and therefore **demands Azure Lighthouse delegation even for subscriptions Spaarke already
   owns**. Until the migration lands, expect that for a new **Model 1** customer.
@@ -842,7 +847,7 @@ if ($profile -eq 'spaarke-hosted-model1-trial') {
 }
 ```
 
-Cross-check: `tenancyModel` × `profile` MUST be consistent. **Currently**: `Model2Dedicated` pairs with either `spaarke-hosted-model2` or `customer-owned-model2`; `Model1Shared` is retired and rejected above. Mismatch → reject before POST.
+Cross-check: `tenancyModel` × `profile` MUST be consistent. **Currently**: `Model2` pairs with either `spaarke-hosted-model2` or `customer-owned-model2`; `Model1` pairs only with the retired trial profile rejected above. Mismatch → reject before POST (L2 returns 400 `tenancy-profile-invalid`).
 
 ⚠️ **This cross-check is the mechanism behind the P-2 defect** (D-12 §5): one `tenancyModel` value spanning two profiles with **opposite subscription ownership** is exactly why `H1SubscriptionReadinessHandler` cannot tell them apart and demands Lighthouse for Spaarke-owned subscriptions. After the enum migration the mapping becomes **1:1** — Model 1 ↔ Spaarke tenant, Model 2 ↔ customer tenant — and the defect closes.
 
@@ -951,9 +956,9 @@ INTAKE SUMMARY
   customerId:      acme
   displayName:     Acme Corporation
   tenantId:        12345678-...-...-...  (customer tenant)
-  tenancyModel:    Model1Shared
+  tenancyModel:    Model2
   controlPlaneEnv: dev
-  profile:         spaarke-hosted-model1-trial
+  profile:         spaarke-hosted-model2
   environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
   L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
@@ -1021,7 +1026,7 @@ if ($tierCap -and $estimatedMonthlyUsd -gt $tierCap) {
         exit 1
       }
       'warnAndProceed' {
-        # Already rejected for Model2Dedicated at Step 1.0 — reaching here means Model1Shared shared-trial
+        # Already rejected for Model2 at Step 1.0 — reaching here means Model1
         Write-Warning "[skill] Batch cost overrun ACKNOWLEDGED (BAT-10, warnAndProceed, Model 1 shared-trial only): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Proceeding per intake policy."
         $script:CostWarningLogged = $true
         Set-Content -Path "runs/pre-dispatch-cost-warning.json" -Value (@{estimated=$estimatedMonthlyUsd; cap=$tierCap; acknowledged='intake.costEnvelopePolicy=warnAndProceed'} | ConvertTo-Json)
@@ -1171,7 +1176,7 @@ RUN PLAN
 
   customerId:    acme
   tenantId:      12345678-...
-  tenancyModel:  Model1Shared
+  tenancyModel:  Model2
   profile:       dev
 
   Handlers to execute (17 — one handler set for both models; *amended 2026-09-28, D-12: the 13-handler
@@ -1250,21 +1255,23 @@ Per Wave 0 Decision 1 (`tenantId` flows via `nonSecretParameters`) + Decision 6 
 $intakeFileSha256 = if ($BatchIntakeFile) { (Get-FileHash -Path $BatchIntakeFile -Algorithm SHA256).Hash } else { $null }
 
 # --- ISH-02 subscriptionId flow (Wave 0 Decision 6 + Step-2-body-construction, SESSION 16) ---
-# Model2Dedicated: intake.subscriptionId is REQUIRED (per intake.schema.json allOf constraint).
-# Model1Shared: intake.subscriptionId is OPTIONAL; when omitted the skill auto-defaults to the
+# Model2: intake.subscriptionId is REQUIRED (per intake.schema.json allOf constraint).
+# Model1: intake.subscriptionId is OPTIONAL; when omitted the skill auto-defaults to the
 # Spaarke shared subscription for the target env (looked up from spaarke-constants.yaml or
 # az account context — env-specific).
-if ($tenancyModel -eq 'Model2Dedicated') {
+# (Literals are Model1 | Model2 since T223/T224; this test used to compare 'Model2Dedicated',
+# which never matched, so the Model 2 hard stop below was dead.)
+if ($tenancyModel -eq 'Model2') {
   if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-    Write-Error "[skill] Step 4.0 HARD STOP: Model2Dedicated run requires intake.subscriptionId (customer's own subscription per ADR-027 D4). Missing at dispatch → H1 fail-fast within ~20s with MissingSubscriptionId. Correct the intake and rerun."
+    Write-Error "[skill] Step 4.0 HARD STOP: Model2 run requires intake.subscriptionId (customer's own subscription per ADR-027 D4). Missing at dispatch → L2 returns 400 subscription-id-required. Correct the intake and rerun."
     exit 1
   }
   $resolvedSubscriptionId = $subscriptionId
 } else {
-  # Model1Shared: auto-default from az context if not supplied
+  # Model1: auto-default from az context if not supplied
   $resolvedSubscriptionId = if ($subscriptionId) { $subscriptionId } else { az account show --query id -o tsv }
   if ([string]::IsNullOrWhiteSpace($resolvedSubscriptionId)) {
-    Write-Error "[skill] Step 4.0 HARD STOP: Model1Shared run — no subscriptionId in intake and az account show returned empty. Run `az login` and retry."
+    Write-Error "[skill] Step 4.0 HARD STOP: Model1 run — no subscriptionId in intake and az account show returned empty. Run `az login` and retry."
     exit 1
   }
 }
@@ -1275,7 +1282,7 @@ $resolvedOpenAiLocation = if ($openAiRegion) { $openAiRegion } else { 'westus3' 
 $body = @{
   customerId    = $customerId
   environmentId = $environmentId          # created at Step 1f
-  tenancyModel  = $tenancyModel           # Model1Shared | Model2Dedicated
+  tenancyModel  = $tenancyModel           # Model1 | Model2 (case-sensitive — T223/T224)
   profile       = $profile                # one of 3 enum values per Step 1e
   nonSecretParameters = @{
     tenantId                    = $tenantId              # I1 invariant per Wave 0 Decision 1
@@ -1289,8 +1296,12 @@ $body = @{
     costEnvelopePolicy          = $script:BatchCostEnvelopePolicy  # COMP-10 gate policy (Bucket A HIGH#8 SESSION 18); default 'abortOnOverrun' in batch loader. Interactive mode leaves $script:BatchCostEnvelopePolicy null → H0 treats null as abortOnOverrun-equivalent per its default branch.
     operatorUpn                 = $operatorUpn
     containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4 writes SPE-ContainerTypeId from it; H8 creates the container with it. Missing → both fail (T226, 2026-09-30: was read but never sent)
-    # other operator-supplied intake fields (notes, etc.) can be added here; the L2 side
-    # treats nonSecretParameters as a bag and ignores unknown keys (§4D-adjacent design).
+    # CLOSED SET (task 245a): L2 accepts ONLY the keys in IntakeParameterCatalog
+    # (src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs).
+    # Any other key — a typo, `notes`, a value some handler produces — is a 400 with
+    # errorCode 'intake-unknown-key' (the response lists the accepted keys). Adding a key here
+    # means adding it to that catalog AND declaring which handler reads it.
+    # environmentName may be omitted (L2 stores 'prod'); dev | staging | prod only.
     # DO NOT include the SKILL-LOCAL batch policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode /
     # onFailedPolicy / onQuarantinedPolicy / onManualGatePolicy / postmortemFile) — those are
     # BAT-01..09 control-flow knobs, NOT L2 payload. They control this skill's control flow at
@@ -1462,6 +1473,12 @@ switch ($run.status) {
 ### Step 5: Manual Gate Handling
 
 Some handlers reach `WaitingOnGate` because they require operator-visible action:
+
+> **What a gate holds up (task 245a DAG edges).** H3 (the per-customer BFF app registration, which also
+> verifies the customer's admin consent on Model 2) is an ancestor of H4b, H6, H8 and H9, and through them
+> of H7 onward, because each reads H3's `bffAppRegId`. While H3 waits on consent, the Dataverse branch
+> (H6 solution import → H7 env vars) waits with it; only H2b and H5 keep moving. Expect that when
+> estimating a gated run's time.
 
 **Batch-mode dispatch (BAT-08, SESSION 16)** — the interactive sub-flows below (5a/5b/5c/5d) assume a live operator at stdin. In batch mode (`$script:SkipInteractiveIntake -eq $true`), the shared dispatch block below runs FIRST and short-circuits the interactive sub-flows per `$script:BatchOnManualGatePolicy`:
 

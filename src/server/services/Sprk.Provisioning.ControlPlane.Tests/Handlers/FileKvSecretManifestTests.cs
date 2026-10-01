@@ -52,6 +52,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
+using Sprk.Provisioning.ControlPlane.Models;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -101,7 +102,11 @@ public sealed class FileKvSecretManifestTests
 
     [Theory]
     [InlineData("Dataverse-ClientSecret", KvSecretValueSource.FromExistingKvSecret)]
-    [InlineData("TenantId", KvSecretValueSource.FromRunParameters)]
+    // Task 245a: TenantId comes from the intake tenantId; the BFF app's id + audience are committed by
+    // H3 itself (it runs after H4). All three used to wait on RunParameters.Secrets refs nobody supplied.
+    [InlineData("TenantId", KvSecretValueSource.FromIntakeParameter)]
+    [InlineData("BFF-API-ClientId", KvSecretValueSource.WrittenByEntraAppReg)]
+    [InlineData("BFF-API-Audience", KvSecretValueSource.WrittenByEntraAppReg)]
     // T226: Redis is written by customer.bicep from the customer's own cache.
     [InlineData("Redis-ConnectionString", KvSecretValueSource.FromBicepOutput)]
     // T226: task 214's from-topology-constants — the reader rejected it before T226.
@@ -159,15 +164,19 @@ public sealed class FileKvSecretManifestTests
     // from-topology-constants entry with no mapping fails on every run; a mapping with no
     // entry is dead code.
     [Fact]
-    public async Task ReadAsync_RealEmbeddedManifest_TopologyConstantsMatchH4ParameterMap()
+    public async Task ReadAsync_RealEmbeddedManifest_IntakeSourcedEntriesMatchH4ParameterMap()
     {
+        // Every entry H4 fills from an intake value (from-topology-constants, task 245a's
+        // from-intake-parameter) has a parameter-key mapping in H4, and the map names nothing else.
         var result = await NewManifest().ReadAsync(CancellationToken.None);
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
-        var topologyConstants = success.Entries
-            .Where(e => e.ValueSource == KvSecretValueSource.FromTopologyConstants)
+        var intakeSourced = success.Entries
+            .Where(e => e.ValueSource is KvSecretValueSource.FromTopologyConstants or KvSecretValueSource.FromIntakeParameter)
             .Select(e => e.CanonicalName);
-        H4KvSecretsPopulationHandler.TopologyConstantParameterKeys.Keys.Should().BeEquivalentTo(topologyConstants);
+        H4KvSecretsPopulationHandler.IntakeValueParameterKeys.Keys.Should().BeEquivalentTo(intakeSourced);
+        H4KvSecretsPopulationHandler.IntakeValueParameterKeys.Values
+            .Should().OnlyContain(key => IntakeParameterCatalog.IsKnown(key), "each maps to an accepted intake key");
     }
 
     // T226: from-shared-service is no longer a value_source. A manifest that still

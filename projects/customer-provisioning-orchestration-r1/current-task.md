@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-09-30 SESSION 27 END (context-handoff before /compact) — **T226 ✅ + T237 ✅** committed + pushed; CI `provisioning-prereqs-validate` ajv step fixed (owner: "do not defer"). Next: **T238** (`Customer__Id` via H4b) — POML not yet filed. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G24).
+> **Last Updated**: 2026-10-01 SESSION 29 — **T245a ✅ COMPLETE** (run-context contract, G25; Step 9.5 gates applied — see POML 245a notes (a)–(m)). **Next: T238.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G25).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,26 +36,57 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 27 END, 2026-09-30)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 29, 2026-10-01)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none active.** Completed this session: **T226** (`3aa5c3536`) and **T237** (`c4dc3db9d` filing, `7c7684e69` work) + the CI ajv follow-up commit. Records: `notes/t226-shared-secret-read-path.md` §7, `notes/t237-customerid-standard.md`. |
-| **Next task** | **T238 — H4b emits `Customer__Id`** (INCOMING-CUSTOMER-RUNTIME-IDENTITY; plan §7 row T238). No POML yet: say "continue" → file it with `task-create`, then `task-execute`. |
-| **Status** | Working tree clean after the last commit, except `.husky/_/*` (phantom autocrlf " M", byte-identical to HEAD — never stage them). Root `npm install` was done in this worktree (needed by the pre-commit hook). Last verified: builds 0/0; ControlPlane.Tests 1972 pass / 6 fail (CustomerRunGuardModulePostConfigureTests = T221 baseline) / 1 skip; ArchTests 337/337; BFF Onboarding 51/51; Pester 26/26; prereqs `validate.ps1` OK; `ajv compile -c ajv-formats` OK. |
-| **Owner decisions this session** | (1) T226 dispositions + D13 keyless stamps (see plan §2). (2) T237 live changes in spaarkedev1 APPROVED + applied: `sprk_customerid` MaxLength 8, stale `trial-2026-08-18` row Inactive, `sprk_tenancymodel` labels Model1/Model2. (3) **`spaarke-demo` registry gap → "address later"** (plan G23). (4) **"If there is a fix required and you can make it, address it — do not defer"** → the CI `provisioning-prereqs-validate` ajv step (failing on every PR) was fixed directly (`-c ajv-formats`), plus the skill's batch validation. |
-| **Open items (tracked in plan §4)** | G16 AI Search keys-only · G17 → T243 · G18 SPE container ids unwritten · G19 containerTypeId fail-fast at CreateRun · G20/G21 → T225b · G23 spaarke-demo registry (deferred by owner) · **G24 `docs/procedures/ci-cd-workflow.md` workflow section stale** (documents 6+ deleted workflows, omits ~17) — not started. T237 follow-ups: control-plane 400s lack a stable `errorCode` (ADR-019); `stacks/{dev,staging,prod}.bicepparam` pass >8-char customerIds to `model2-full.bicep`; skill Step 1c/1e tenancy prose pre-T224 (G6 → T225b). |
-| **After T238** | Plan §7 order: T225a → T225b (also G6, G20, G21) → T243 (BFF DocIntel MI) → T242 (Azure Managed Redis B0 Entra) → T244 (keyless Bicep, G16, secret-bearing outputs) → T227 → T228 (G19) → T229 + T230 (per-service MI proof) → T232 → T233 → T240 → T218 → T235 (ADR-028 amendment for D13) → 213.7/207/208/209 → T186. |
+| **Task** | **238 — H4b emits `Customer__Id` + H13 trap T7** · `tasks/238-h4b-emits-customer-id.poml` · **not started** (depends only on 245a ✅) |
+| **Step** | 0 — invoke `task-execute` on the POML (root CLAUDE.md §4). |
+| **Next Action** | `task-execute tasks/238-h4b-emits-customer-id.poml`. Its per_env source for `Customer__Id` is the run's customerId — that is **run identity**, not an intake key: add it to `PerEnvSourceCatalog` (C#) AND `$script:AllowedPerEnvSources` (generator) — `RunContextContractTests.GeneratorPerEnvSources_AreExactlyThePerEnvSourceCatalog` fails if only one side changes — then regenerate + `-Verify`. Then T245b → T245c → plan §7. |
+| **Verified state (end of T245a)** | ControlPlane.Tests **2063 pass / 6 fail (T221 baseline `CustomerRunGuardModulePostConfigureTests`) / 1 skip**; `RunContextContractTests` 30/30; ArchTests **337/337**; Api, Worker, LoadTests build 0/0; generator `-Verify` OK; `customer.json` rebuilt. |
+| **Open for the owner** | 🔒 (1) H4's KV RBAC bootstrap grants **Key Vault Secrets Officer to the customer stamp UAMI** (`InterStepState.MiObjectId`) instead of L2's own principal — over-privileges the BFF identity and would 403 L2's first write on a fresh vault. Filed into **T245b step 4c** for owner review (security, root §6). (2) spec.md ADR Tensions gained two **path A** rows to ratify: ADR-020 (strict intake reader, no deprecation window) and ADR-038 (L2 fitness functions off the KEEP paths). |
+| **Known tooling gap** | `scripts/check-task-status-drift.ps1` exits 1 for this project: it parses `| ✅ 001 |` rows, this TASK-INDEX uses `| 245a | ✅ [done] |` (+ suffixed ids) — 1 of 186 rows parsed. Pre-existing; **T239** owns task-status hygiene. Rows touched by T245a hand-checked consistent. |
+| **Previous** | SESSION 28/29 commits: `cf77697ff` (G24 CI docs), `0d7d545f6` (G25 finding), `a69daff01` (T245a/b/c + T238 filed), then the **T245a** commit (this session). |
+| **Owner decisions in force** | D13 keyless stamps; G23 `spaarke-demo` → later; **"if a fix is required and you can make it, do not defer"**; user (2026-10-01): "commit and /push-to-github; then continue with next tasks". |
 
 ### Critical Context
-Model 1 = per-customer dedicated stamp; Model 2 out of scope. After T226 no customer secret comes from a shared
-service; the two remaining keys (Redis, Document Intelligence) are interim under D13 and go with T242 / T243.
-Before T186 can run, plan §4 G16–G21 must be closed (AI Search Entra auth, DocIntel MI, SPE container-id writes,
-containerTypeId fail-fast, Model 1 template routing, secret-free default for new stamps). Since T237 a customerId
-must match `^[a-z][a-z0-9]{2,7}$` and must not be `platform`/`shared`/`byok` (API, schema, skill, scripts); the
-customer's full name goes in `displayName` → `sprk_name`. Test fixtures must use compliant ids.
+T245a made the run context explicit: intake values in a closed `IntakeParameterCatalog` (enforced at `POST /api/runs`,
+400 `intake-unknown-key` with `acceptedKeys`); handler outputs in `[ProducedBy]` `InterStepState` properties; every
+handler's inputs declared in `HandlerRunInputs`; `RunContextContractTests` (Roslyn source scan, DAG ancestry, manifest
+vs `customer.bicep`, generator vs `PerEnvSourceCatalog`) fails the build on any undeclared read, stale declaration or
+unreachable input. What remains is pinned there with owners (T245b, T245c, T225b, T227) — a real run (T186) needs them.
 
 ## 📁 Files Modified This Session
+
+### SESSION 29 (2026-10-01) — T245a Step 9.5 gates applied + committed
+
+Gate fixes: `Api/ControlPlaneProblems.cs` (new — ADR-019 errorCode on every L2 ProblemDetails) + RunsEndpoints /
+RunLogsEndpoints; H4 leak guard (DNS-host aware, reflects every InterStepState string); Roslyn scanner + controls in
+`RunContextContractTests` (+ `Microsoft.CodeAnalysis.CSharp` in the L2 test csproj); `HandlerRunInputs` (H4 stale
+leak-scan entries removed; H7/H13 gaps pinned); H13 literal keys → constants, `sprk_azuresubscriptionid` ← subscriptionId;
+`PerEnvSourceCatalog` trims intake; generator closed per_env set; H2a/H2b unused consts; MapOutputs/MissingOutputs
+private; H9/H12b/T6 diagnostics; H12b remarks; GraphAppRegistrationProvisioner + Worker Program comments;
+`customer.bicep` comment; skill `Model2` fix + closed-intake note + Step 5 gate note; patterns (run-context-contract,
+manifest-driven-secret-catalog); provisioning.md; CHANGELOG; spec.md ADR Tensions (ADR-020, ADR-038); design.md §6.2;
+inventory doc; gap note §5; plan G25/T245/T227; POML 245a (completed + notes) / 245b (step 4c); TASK-INDEX 245a ✅.
+
+### SESSION 28 (2026-10-01) — T245a (committed in SESSION 29)
+
+**New**: `Core/Models/{ProducedByAttribute,NoProducerAttribute,IntakeParameterCatalog}.cs`,
+`Core/Reconciler/HandlerRunInputs.cs`, `Core/Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`,
+`Tests/Reconciler/RunContextContractTests.cs`, `.claude/patterns/provisioning/run-context-contract.md`.
+**Core**: `Models/InterStepState.cs`; `Reconciler/DagAdvancer.cs`; H2a (`H2aBicepInfraDeployHandler`,
+`ArmDeploymentRunner`, `BicepDeployOutputs`); H2b; H3 (`H3EntraAppRegHandler`); H4 (`H4KvSecretsPopulationHandler`,
+`FileKvSecretManifest`, `IKvSecretManifest`, `IKvSecretsWriter`, `KvSecretValueResolver`); H4b (`H4bBulkAppSettingsHandler`,
+`FilePerEnvSettingsManifest`, `IPerEnvSettingsManifest`, `BulkAppSettingsRejectionCodes`); H8 (comment); H9 (+ options /
+rejection-code comments); H12b (+ rejection codes); H13 (`H13E2EAcceptanceGateHandler`, `H13RejectionCodes`,
+`IE2ETrapVerifier`, `T6SpeConfidentialClientTrapProbe`); H14 (+ rejection codes); `Preflight/KeyVaultCertBootstrapProbe` (comment).
+**Api**: `RunsEndpoints.cs` (intake catalog + environmentName). **Tests**: RunsEndpoints, ArmDeploymentRunner, H2a, H3, A42,
+H4, H4b, FileKvSecretManifest, FilePerEnvSettingsManifest, KvSecretValueResolver, H9, H12b, H13, H13BuildPromotedColumns,
+H14, T6, DagAdvancer, Model1SharedDagParity; LoadTests `EnqueueLatencyScenario` + `LongHandlerScenario`.
+**Catalog/infra**: `manifest.yaml`, `Invoke-CatalogGenerator.ps1`, `generated/*`, `infrastructure/bicep/customer.json`.
+**Docs**: `.claude/constraints/provisioning.md`, `.claude/patterns/provisioning/{INDEX,handler-registration-completeness}.md`,
+`.claude/CHANGELOG.md`, `design.md` (§4.1 DAG, §6.2 keys), plan, `notes/run-context-dataflow-gap.md` §5, POMLs 245b/245c.
 
 ### SESSION 27 (2026-09-30) — T226 + T237 closed
 

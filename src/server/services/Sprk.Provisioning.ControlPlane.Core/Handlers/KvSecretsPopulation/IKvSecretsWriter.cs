@@ -101,7 +101,7 @@ public sealed record KvSecretWriteRequest(
     bool RotateExisting,
     IReadOnlyDictionary<string, Models.KeyVaultSecretRef>? SecretParameters = null,
     IReadOnlySet<string>? OmitCanonicalNames = null,
-    IReadOnlyDictionary<string, string>? TopologyConstantValues = null)
+    IReadOnlyDictionary<string, string>? IntakeValues = null)
 {
     /// <summary>Effective secret-parameter map — never null (empty when the caller passes none).</summary>
     public IReadOnlyDictionary<string, Models.KeyVaultSecretRef> SecretParameters { get; init; } =
@@ -112,8 +112,8 @@ public sealed record KvSecretWriteRequest(
     /// <c>SPE-ContainerTypeId</c>), consumed for <see cref="KvSecretValueSource.FromTopologyConstants"/>
     /// entries. Never null (empty when the caller passes none).
     /// </summary>
-    public IReadOnlyDictionary<string, string> TopologyConstantValues { get; init; } =
-        TopologyConstantValues ?? new Dictionary<string, string>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, string> IntakeValues { get; init; } =
+        IntakeValues ?? new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>Effective FIC-omit set — never null (empty when the caller passes none).</summary>
     public IReadOnlySet<string> OmitCanonicalNames { get; init; } =

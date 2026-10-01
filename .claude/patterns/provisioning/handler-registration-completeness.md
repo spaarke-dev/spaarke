@@ -36,6 +36,7 @@ Load this pattern when:
 3. **Register the concrete type and its dependencies** (`AddScoped<H15WelcomeEmailHandler>()` + any new dependency).
 4. **Add the keyed forwarder** in `HandlerDispatchRegistrationModule.cs`.
 5. **Add the DAG entry** in `DagAdvancer.HandlerDependencies` (upstream ids), plus the matching shape test in `DagAdvancerTests`.
+5b. **Declare its inputs** in `Reconciler/HandlerRunInputs.cs` and map its folder in `RunContextContractTests` — every value it reads needs a producer that runs first ([run-context-contract.md](run-context-contract.md), T245a).
 6. **Run the forcing functions**: `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests --filter "FullyQualifiedName~HandlerRegistrationCompletenessTests|FullyQualifiedName~DagAdvancerTests"` — update the dispatchable count (20 → 21). A failure names the id; fix the gap.
 7. **Feature-gated handler** (ADR-032 P1/P2/P3):
    - **P1** — register the null-object handler under the key UNCONDITIONALLY (outside the feature gate).

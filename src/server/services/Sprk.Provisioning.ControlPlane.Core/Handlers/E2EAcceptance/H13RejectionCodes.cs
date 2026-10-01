@@ -48,6 +48,17 @@ public static class H13Rejections
     /// <summary>Run parameter <c>bffApiUrl</c> (or resolvable BFF App Service URL) missing — no target to sample the /healthz + E2E round-trip.</summary>
     public const string MissingBffApiUrl = "h13-missing-bff-api-url";
 
+    // ---- upstream H2a outputs (InterStepState — task 245a, G25) ----
+
+    /// <summary><c>InterStepState.resourceGroupName</c> missing — H2a (Bicep infra deploy) produces it; H13 scopes the cost-envelope query + T1/T5 ARM trap probes to it. Resumable.</summary>
+    public const string MissingResourceGroupName = "h13-missing-resource-group-name";
+
+    /// <summary><c>InterStepState.appServiceName</c> missing — H2a (Bicep infra deploy) produces it; the T1/T5 ARM trap probes inspect this App Service. Resumable.</summary>
+    public const string MissingAppServiceName = "h13-missing-app-service-name";
+
+    /// <summary><c>InterStepState.keyVaultName</c> (the CUSTOMER Key Vault) missing — H2a (Bicep infra deploy) produces it; the T5 trap probe checks slot-MI RBAC on this vault. Resumable.</summary>
+    public const string MissingKeyVaultName = "h13-missing-key-vault-name";
+
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "h13-run-not-found";
 

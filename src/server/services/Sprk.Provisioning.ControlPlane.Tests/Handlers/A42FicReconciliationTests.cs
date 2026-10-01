@@ -521,7 +521,8 @@ public sealed class A42FicReconciliationTests
             Profile = "spaarke-hosted-model2",
         };
         run.Parameters.NonSecret[H3EntraAppRegHandler.TenantIdParameterKey] = SpaarkeTenantId;
-        run.Parameters.NonSecret[H3EntraAppRegHandler.KeyVaultNameParameterKey] = KeyVaultName;
+        // Task 245a (G25): the customer vault name is H2a's output, not a run parameter.
+        run.InterStepState.KeyVaultName = KeyVaultName;
         run.InterStepState.MiObjectId = UamiPrincipalId;
         return run;
     }

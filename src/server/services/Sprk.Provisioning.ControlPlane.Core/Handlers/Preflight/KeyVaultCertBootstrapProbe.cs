@@ -42,13 +42,14 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 
 /// <summary>
 /// SDK-backed <see cref="IPreflightQuotaProbe"/> for SPE cert-bootstrap
-/// readiness. Reads <c>keyVaultName</c> from
-/// <see cref="PreflightProbeInput.NonSecretParameters"/> (same key convention
-/// as H3/H4/H8/H14's KeyVaultNameParameterKey).
+/// readiness. Reads the intake key <c>keyVaultName</c> from
+/// <see cref="PreflightProbeInput.NonSecretParameters"/> — the Spaarke PLATFORM vault holding the
+/// SPE owner certificate (also H8's and H13/T6's source). It is NOT the customer vault, which is
+/// H2a's <c>InterStepState.KeyVaultName</c> (task 245a). T245b moves this value to L2 configuration.
 /// </summary>
 public sealed class KeyVaultCertBootstrapProbe : IPreflightQuotaProbe
 {
-    /// <summary>Run-parameter key for the target Key Vault name — matches H3/H4/H8/H14's convention.</summary>
+    /// <summary>Intake key for the Spaarke platform vault holding the SPE owner certificate (see class remarks).</summary>
     public const string KeyVaultNameParameterKey = "keyVaultName";
 
     /// <summary>Secret name — matches the T6 helper convention (Test-SpeCertBootstrap.ps1 default).</summary>

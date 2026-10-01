@@ -101,15 +101,15 @@ public static class RunLogsEndpoints
 
         if (string.IsNullOrWhiteSpace(id))
         {
-            return BadRequest(httpContext, "runId is required.");
+            return ControlPlaneProblems.BadRequest(httpContext, ControlPlaneErrorCodes.RunIdRequired, "runId is required.");
         }
         if (string.IsNullOrWhiteSpace(phaseId))
         {
-            return BadRequest(httpContext, "phaseId is required.");
+            return ControlPlaneProblems.BadRequest(httpContext, ControlPlaneErrorCodes.PhaseIdRequired, "phaseId is required.");
         }
         if (string.IsNullOrWhiteSpace(customerId))
         {
-            return BadRequest(httpContext,
+            return ControlPlaneProblems.BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdQueryRequired,
                 "customerId query parameter is required (§4D I3 forbids cross-partition reads).");
         }
 
@@ -118,11 +118,8 @@ public static class RunLogsEndpoints
         var read = await repository.ReadRunAsync(customerId, id, cancellationToken).ConfigureAwait(false);
         if (read is null)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                detail: $"ProvisioningRun '{id}' not found in customer partition '{customerId}'.",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            return ControlPlaneProblems.NotFound(httpContext, ControlPlaneErrorCodes.RunNotFound,
+                $"ProvisioningRun '{id}' not found in customer partition '{customerId}'.");
         }
 
         // Ordinal match — HandlerIdentifier constants (H0, H2a, H12b, ...) are
@@ -134,11 +131,7 @@ public static class RunLogsEndpoints
             var detail = string.Equals(read.Run.CurrentPhase, phaseId, StringComparison.Ordinal)
                 ? $"Phase '{phaseId}' is currently in flight — no completed-phase record yet. Poll GET /api/runs/{id} for status."
                 : $"Phase '{phaseId}' has not completed for run '{id}'.";
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                detail: detail,
-                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            return ControlPlaneProblems.NotFound(httpContext, ControlPlaneErrorCodes.PhaseNotCompleted, detail);
         }
 
         return Results.Ok(new PhaseLogResponse
@@ -156,14 +149,6 @@ public static class RunLogsEndpoints
                 $"customDimensions.HandlerId == \"{entry.Phase}\"",
         });
     }
-
-    private static IResult BadRequest(HttpContext httpContext, string detail) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status400BadRequest,
-            title: "Bad Request",
-            detail: detail,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
 
     /// <summary>
     /// Response body for GET /api/runs/{id}/phases/{phaseId}/logs. Wraps the

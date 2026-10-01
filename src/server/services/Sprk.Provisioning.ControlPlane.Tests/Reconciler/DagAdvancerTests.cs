@@ -10,13 +10,13 @@
 //   2. H0 completed                  -> H1 ready
 //   3. H1 completed                  -> H2a ready
 //   4. H2a completed                 -> {H2b, H4, H5} ready (3-way fan-out post-Bicep)
-//   5. H2a + H4 completed            -> {H2b, H3, H4b, H5} ready (H3 + H4b unlock after H4;
-//                                      task 201 / F20 gate — T226 retired H4-shared, so H4b
-//                                      needs H4 only)
+//   5. H2a + H4 completed            -> {H2b, H3, H5} ready (H3 unlocks after H4; H4b waits
+//                                      for H3 too — T245a: it reads H3's BffAppRegId)
 //   6. H2a + H4 + H3 completed       -> {H2b, H4b, H5, H8} ready (H8 fires from H3; H9
 //                                      still blocked because H4b not landed — EXEC-01 gate)
 //   7. H2a + H4 + H4b + H3           -> {H2b, H5, H8, H9} ready (H9 finally unlocks)
-//   8. H2a + H5 completed            -> {H2b, H4, H6} ready (H6 unlocks after H5)
+//   8. H6 needs H5 AND H3 (T245a — reads BffAppRegId); H7 needs H6 AND H8 (T245a — reads
+//      SpeContainerId)
 //   9. up through H10 completed      -> H11 ready
 //  10. H11 completed                 -> {H12a, H12b} ready (parallel — H12b does NOT need H12a)
 //  11. H12a + H12b + H2a completed   -> H12c ready (3-way join per handler code)
@@ -126,17 +126,27 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH4_UnlocksH3AndH4b()
+    public void ComputeReadyHandlers_AfterH4_UnlocksH3_H4bWaitsForH3()
     {
-        // H2a + H4 completed; H2b + H5 still ready; H3 (needs KV) and H4b (needs the populated
-        // customer KV) now also ready. Also the HANDLER-01 check for H4b: before T226 H4b waited on
-        // H4-shared as well, which failed on every dedicated run and so blocked H4b + H9 for good.
+        // H2a + H4 completed; H2b + H5 still ready; H3 (needs KV) now ready. H4b also needs the
+        // populated customer KV, AND H3's BffAppRegId for AzureAd__ClientId (T245a) — before T245a
+        // it was ready here and would read a value H3 had not written yet.
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H3", "H4b", "H5" },
-            "design.md §4.1 DAG: H4 → H3 (needs KV for secrets storage) and H4 → H4b (batched app-settings).");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H3", "H5" },
+            "design.md §4.1 DAG: H4 → H3 (needs KV for secrets storage); H4b needs H4 and H3.");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH4AndH3_UnlocksH4b()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().Contain("H4b", "H4b's producers (H4 for the populated KV, H3 for BffAppRegId) have both run.");
     }
 
     [Fact]
@@ -188,14 +198,37 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH5_UnlocksH6()
+    public void ComputeReadyHandlers_AfterH5WithoutH3_H6Waits()
     {
+        // T245a: H6 reads InterStepState.BffAppRegId (H3 output). Before, H5 alone unlocked H6,
+        // which could then run before H3 had written the value.
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H5");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H6" },
-            "design.md §4.1 DAG: H5 → H6 (solution import); H4 still pending.");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H4" },
+            "H6 needs H5 (Dataverse environment) and H3 (BFF app registration).");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH5AndH3_UnlocksH6()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().Contain("H6");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6WithoutH8_H7Waits_ThenUnlocksWithH8()
+    {
+        // T245a: H7 writes the SPE container-id env var from InterStepState.SpeContainerId (H8 output).
+        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H6");
+        var withH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H6", "H8");
+
+        _sut.ComputeReadyHandlers(withoutH8).Should().NotContain("H7", "H8 has not produced SpeContainerId yet");
+        _sut.ComputeReadyHandlers(withH8).Should().Contain("H7");
     }
 
     [Fact]

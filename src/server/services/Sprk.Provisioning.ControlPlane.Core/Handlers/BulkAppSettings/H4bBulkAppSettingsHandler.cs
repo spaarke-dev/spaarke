@@ -13,13 +13,15 @@
 //
 // FLOW:
 //   (1) Load ProvisioningRun.
-//   (2) Parameter guards (subscriptionId, keyVaultName, resourceGroupName,
-//       appServiceName, environmentName, secretsVer).
+//   (2) Guards: intake tenantId / subscriptionId / secretsVer; H2a outputs
+//       InterStepState.KeyVaultName / ResourceGroupName / AppServiceName
+//       (task 245a — these were read from run parameters nobody wrote).
+//       environmentName = IntakeParameterCatalog.ResolveEnvironmentName.
 //   (3) Idempotency Level-3: appsettings-{environmentName}-{secretsVer}.
 //   (4) Read per_env_settings manifest.
-//   (5) Resolve each entry from envelope.Parameters.NonSecret (literal /
-//       from-handler-output / from-handler-parameter); required-and-missing
-//       = Resumable Failure BEFORE any script call.
+//   (5) Resolve each non-literal entry through PerEnvSourceCatalog (typed
+//       InterStepState output or intake value); required-and-missing =
+//       Resumable Failure BEFORE any script call.
 //   (6) Shell pwsh Configure-AppServiceSettings.generated.ps1 with fixed
 //       args (-VaultName / -AppServiceName / -ResourceGroupName) + one
 //       -<PsVarName> per unique per-env source. Non-zero exit = Resumable.
@@ -57,18 +59,6 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
     /// <summary>Non-secret parameter key carrying the target subscription id.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
-
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (script's -VaultName arg).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Non-secret parameter key carrying the App Service resource group.</summary>
-    public const string ResourceGroupNameParameterKey = "resourceGroupName";
-
-    /// <summary>Non-secret parameter key carrying the App Service name (script's -AppServiceName arg + /healthz + Kudu URLs).</summary>
-    public const string AppServiceNameParameterKey = "appServiceName";
-
-    /// <summary>Non-secret parameter key carrying the environment name — feeds idempotency key.</summary>
-    public const string EnvironmentNameParameterKey = "environmentName";
 
     /// <summary>Non-secret parameter key carrying the manifest content hash / semantic version — feeds idempotency key.</summary>
     public const string SecretsVersionParameterKey = "secretsVer";
@@ -185,34 +175,35 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H4b.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // Customer-stamp identifiers are H2a outputs (task 245a): H2a persists them from the
+        // ARM deployment; nothing ever wrote them as run parameters.
+        var keyVaultName = run.InterStepState.KeyVaultName;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingKeyVaultName,
-                "Run parameter 'keyVaultName' is required by H4b (Configure script -VaultName arg).",
+                "InterStepState.KeyVaultName (H2a output) is required by H4b (Configure script -VaultName arg). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, ResourceGroupNameParameterKey, out var resourceGroupName))
+        var resourceGroupName = run.InterStepState.ResourceGroupName;
+        if (string.IsNullOrWhiteSpace(resourceGroupName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingResourceGroupName,
-                "Run parameter 'resourceGroupName' is required by H4b (Configure script -ResourceGroupName arg).",
+                "InterStepState.ResourceGroupName (H2a output) is required by H4b (Configure script -ResourceGroupName arg). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, AppServiceNameParameterKey, out var appServiceName))
+        var appServiceName = run.InterStepState.AppServiceName;
+        if (string.IsNullOrWhiteSpace(appServiceName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingAppServiceName,
-                "Run parameter 'appServiceName' is required by H4b (Configure script -AppServiceName arg + /healthz + Kudu URLs).",
+                "InterStepState.AppServiceName (H2a output) is required by H4b (Configure script -AppServiceName arg + /healthz + Kudu URLs). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var environmentName))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                BulkAppSettingsRejectionCodes.MissingEnvironmentName,
-                "Run parameter 'environmentName' is required by H4b (feeds idempotency key appsettings-{env}-{secretsVer}).",
-                cancellationToken).ConfigureAwait(false);
-        }
+        // One stamp environment for every handler (CreateRun stores it; a pre-245a run resolves
+        // to the same default H2a/H2b use).
+        var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
         if (!TryGetNonEmpty(parameters, SecretsVersionParameterKey, out var secretsVer))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
@@ -259,12 +250,12 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
         }
         var entries = ((PerEnvSettingsManifestReadResult.Success)manifestResult).Entries;
 
-        // (5) Resolve per-env values. Non-literal entries look up their
-        //     ParameterKey in envelope.Parameters.NonSecret; required-and-missing
-        //     fails early BEFORE any script call. Deduplicate by source
-        //     (multiple manifest entries may share one source, e.g.
-        //     Graph__ManagedIdentity__ClientId + ManagedIdentity__ClientId
-        //     both reference uami_client_id).
+        // (5) Resolve per-env values through PerEnvSourceCatalog (task 245a): each
+        //     source names the typed InterStepState output or intake value it
+        //     reads. Required-and-missing fails early BEFORE any script call.
+        //     Deduplicate by source key (several manifest entries may share one
+        //     source, e.g. Graph__ManagedIdentity__ClientId + ManagedIdentity__ClientId
+        //     both use uami_client_id).
         var resolvedPerEnv = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
@@ -278,7 +269,18 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             var sourceKey = entry.ParameterKey!;
             if (resolvedPerEnv.ContainsKey(sourceKey)) continue;  // dedup
 
-            if (!TryGetNonEmpty(parameters, sourceKey, out var value))
+            if (!PerEnvSourceCatalog.BySourceKey.TryGetValue(sourceKey, out var source))
+            {
+                // FilePerEnvSettingsManifest rejects unknown sources at load; this guards a
+                // hand-built manifest (tests) or a future reader that skips the check.
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    BulkAppSettingsRejectionCodes.ManifestReadFailed,
+                    $"per_env_settings entry '{entry.Key}' uses source '{sourceKey}', which is not in PerEnvSourceCatalog.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var value = source.Resolve(run);
+            if (string.IsNullOrWhiteSpace(value))
             {
                 if (!entry.Required)
                 {
@@ -289,8 +291,10 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 }
                 var diagnostic =
                     $"per_env_settings entry '{entry.Key}' (BFF module '{entry.IOptionsModuleName}') requires " +
-                    $"envelope.Parameters.NonSecret['{sourceKey}'] but the source key is absent or empty. " +
-                    "Upstream handler MUST populate this parameter before H4b dispatches.";
+                    $"'{sourceKey}' from {source.Location}, which is absent or empty" +
+                    (source.ProducerHandlerId is null
+                        ? " — supply it at intake (POST /api/runs nonSecretParameters)."
+                        : $" — {source.ProducerHandlerId} must complete before H4b.");
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BulkAppSettingsRejectionCodes.PerEnvInputMissing, diagnostic, cancellationToken)
                     .ConfigureAwait(false);

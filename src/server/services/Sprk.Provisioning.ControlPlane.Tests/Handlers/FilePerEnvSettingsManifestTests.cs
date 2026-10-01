@@ -52,6 +52,37 @@ public sealed class FilePerEnvSettingsManifestTests
     }
 
     [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_EveryNonLiteralSourceResolvesThroughTheCatalog()
+    {
+        // Task 245a: each non-literal per_env_source must name a source H4b can resolve
+        // (a typed InterStepState output or an intake value) — not a run-parameter key nothing writes.
+        var success = (PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None);
+
+        success.Entries.Where(e => e.PerEnvSource != PerEnvSettingSource.Literal)
+            .Should().OnlyContain(e => PerEnvSourceCatalog.BySourceKey.ContainsKey(e.ParameterKey!));
+    }
+
+    [Theory]
+    [InlineData("from-h2a-output:not_a_source")]          // unknown source key
+    [InlineData("from-h0-parameter:tenant_id")]           // known key, wrong origin (H0 produces nothing)
+    [InlineData("from-h8-output:container_type_id")]      // known key, wrong origin (an intake value)
+    public void Parse_PerEnvSourceNotInCatalog_FailsTheRead(string perEnvSource)
+    {
+        var yaml = $$"""
+            per_env_settings:
+              - key: 'Some__Setting'
+                per_env_source: '{{perEnvSource}}'
+                iOptionsModule: 'SomeModule'
+                required: true
+            """;
+
+        var result = NewManifest().Parse(yaml);
+
+        result.Should().BeOfType<PerEnvSettingsManifestReadResult.Failure>()
+            .Which.Diagnostic.Should().Contain(perEnvSource);
+    }
+
+    [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_ContainsAllEightSection102Entries()
     {
         var manifest = NewManifest();

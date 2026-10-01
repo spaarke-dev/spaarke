@@ -112,7 +112,7 @@ resource kv_bFF_API_Audience 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'written-by-h3'
   }
   tags: {
     canonicalName: 'BFF-API-Audience'
@@ -132,7 +132,7 @@ resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'written-by-h3'
   }
   tags: {
     canonicalName: 'BFF-API-ClientId'
@@ -524,7 +524,7 @@ resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contai
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'from-intake-parameter'
   }
   tags: {
     canonicalName: 'TenantId'

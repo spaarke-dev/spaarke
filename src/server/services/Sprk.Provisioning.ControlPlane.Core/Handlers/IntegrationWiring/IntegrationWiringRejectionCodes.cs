@@ -35,7 +35,7 @@ public static class H14Rejections
     /// <summary>Run parameter <c>tenantId</c> missing (§4D I1 no-hardcoded-tenant).</summary>
     public const string MissingTenantId = "h14-missing-tenant-id";
 
-    /// <summary>Run parameter <c>keyVaultName</c> missing — H14b/H14c both read the HMAC signing key from this vault.</summary>
+    /// <summary><c>InterStepState.keyVaultName</c> (the CUSTOMER vault, an H2a output) missing — H14b/H14c both read the HMAC signing key from this vault.</summary>
     public const string MissingKeyVaultName = "h14-missing-kv-name";
 
     /// <summary>Run parameter <c>subscriptionId</c> missing — H14b/H14c need it to scope the KV signing-key read.</summary>

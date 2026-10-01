@@ -249,8 +249,15 @@ public sealed class LongHandlerScenario
             {
                 customerId,
                 environmentId = "env-longhandler",
-                tenancyModel = "Model2Dedicated",
+                // T224 renamed the tenancy values (Model2Dedicated → Model2); CreateRun requires
+                // tenantId, and subscriptionId for Model 2.
+                tenancyModel = "Model2",
                 profile = "spaarke-hosted-model2",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-2222-3333-4444-555555555555",
+                    ["subscriptionId"] = "66666666-7777-8888-9999-000000000000",
+                },
             }),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "load-test-token");

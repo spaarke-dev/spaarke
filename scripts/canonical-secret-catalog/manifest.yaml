@@ -171,9 +171,12 @@ secrets:
       - 'L2 control-plane'
     rotation_cadence: 'N/A'
     never_delete: false
-    exception_note: ''
+    exception_note: >-
+      value_source from-intake-parameter since task 245a (2026-10-01): H4 writes
+      the intake tenantId (POST /api/runs, required). It was from-run-parameter
+      — a KV reference in RunParameters.Secrets that nothing ever supplied.
     aliases: []
-    value_source: 'from-run-parameter'
+    value_source: 'from-intake-parameter'
     app_settings:
       - 'TENANT_ID'
       - 'AzureAd__TenantId'
@@ -191,14 +194,14 @@ secrets:
     rotation_cadence: 'N/A'
     never_delete: false
     exception_note: >-
-      Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129,
-      owner E3 confirmation) from from-bicep-output to from-run-parameter. H3
-      (task 130) is the value producer -- it creates the per-customer BFF Entra
-      app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and
-      writes ClientId to RunParameters.Secrets. The DAG runs H3 before H4, so H4
-      resolves this value from RunParameters, not from a Bicep deployment output.
+      H3 is the value producer -- it creates the per-customer BFF Entra
+      app-registration at RUNTIME and commits ClientId to the customer vault
+      itself. value_source written-by-h3 since task 245a (2026-10-01): H4 skips
+      it. Task 129 had made it from-run-parameter on the belief that the DAG
+      runs H3 before H4; it runs H4 first (H3 needs H4's vault RBAC bootstrap),
+      so H4 waited for a reference only H3 could supply -- a deadlock.
     aliases: []
-    value_source: 'from-run-parameter'
+    value_source: 'written-by-h3'
     app_settings:
       - 'API_APP_ID'
       - 'AzureAd__ClientId'
@@ -215,14 +218,12 @@ secrets:
     rotation_cadence: 'N/A'
     never_delete: false
     exception_note: >-
-      Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129,
-      owner E3 confirmation) from from-bicep-output to from-run-parameter. H3
-      (task 130) is the value producer -- it creates the per-customer BFF Entra
-      app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and
-      writes Audience to RunParameters.Secrets. The DAG runs H3 before H4, so H4
-      resolves this value from RunParameters, not from a Bicep deployment output.
+      H3 is the value producer -- it commits Audience (api://{appId}) to the
+      customer vault itself. value_source written-by-h3 since task 245a
+      (2026-10-01): H4 skips it (see BFF-API-ClientId for why the previous
+      from-run-parameter classification deadlocked).
     aliases: []
-    value_source: 'from-run-parameter'
+    value_source: 'written-by-h3'
     app_settings:
       - 'AzureAd__Audience'
     tags: ['identity', 'bff', 'public']
@@ -648,17 +649,23 @@ secrets:
 # the SAME Configure-AppServiceSettings.generated.ps1 output alongside the
 # KV-ref lines (both in the single $settings array so ONE batched
 # `az webapp config appsettings set --settings @settings` call per slot is
-# preserved). Runtime consumer: H4bBulkAppSettingsHandler resolves each entry
-# from HandlerEnvelope.Parameters.NonSecret via `per_env_source`, then shells
-# to the generated script.
+# preserved). Runtime consumer: H4bBulkAppSettingsHandler resolves each
+# non-literal entry through PerEnvSourceCatalog (task 245a) — a typed
+# InterStepState output of a named handler, or an intake parameter — then
+# shells to the generated script.
 #
 # Per-entry schema:
 #   - key                — App Service app-setting name (double underscore for
 #                          nested config, e.g. SpeAdmin__KeyVaultUri).
 #   - per_env_source     — one of:
-#                            literal                        (value in literal_value)
-#                            from-{handler}-output:{k}      (envelope.Parameters.NonSecret[k])
-#                            from-{handler}-parameter:{k}   (envelope.Parameters.NonSecret[k])
+#                            literal                          (value in literal_value)
+#                            from-{handler}-output:{k}        (InterStepState output of {handler})
+#                            from-intake-parameter:{k}        (intake value, IntakeParameterCatalog)
+#                          The non-literal forms are a CLOSED set — every one
+#                          must be listed in
+#                          src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/PerEnvSourceCatalog.cs,
+#                          or H4b's manifest read fails. Adding a source = add
+#                          it there (with where its value lives) first.
 #   - literal_value?     — REQUIRED when per_env_source == "literal"; else null/absent.
 #   - iOptionsModule     — Documentation: which BFF module consumes this
 #                          (per-env-literal drives the F20/F20a fail-fast chain).
@@ -695,12 +702,14 @@ per_env_settings:
       Cosmos account URI (e.g. https://sprk-prod-cosmos.documents.azure.com/).
 
   - key: 'AzureAd__TenantId'
-    per_env_source: 'from-h0-parameter:tenant_id'
+    per_env_source: 'from-intake-parameter:tenant_id'
     iOptionsModule: 'AzureAdOptions'
     required: true
     notes: >-
-      Public identifier; §4D I1 no-hardcoded-tenant compliance. H0 preflight
-      populates from the operator-supplied -TenantId parameter.
+      Public identifier; §4D I1 no-hardcoded-tenant compliance. The intake
+      tenantId (POST /api/runs nonSecretParameters, required). Was labelled
+      from-h0-parameter, but H0 produces nothing — it is an intake value
+      (task 245a).
 
   - key: 'AzureAd__ClientId'
     per_env_source: 'from-h3-output:bff_app_client_id'
@@ -711,12 +720,14 @@ per_env_settings:
       client app-registration for this customer stamp.
 
   - key: 'SharePointEmbedded__ContainerTypeId'
-    per_env_source: 'from-h8-output:container_type_id'
+    per_env_source: 'from-intake-parameter:container_type_id'
     iOptionsModule: 'SpeOptions'
     required: true
     notes: >-
-      Public GUID; H8 SPE creation populates after the 24-hour SPE
-      container-type replication gate clears.
+      Public GUID of the environment's pre-existing SPE container type —
+      the intake containerTypeId (spaarke-constants.yaml per_env_constants,
+      sent by /provision-environment Step 4.0). Was labelled from-h8-output,
+      but H8 creates the container, not the container type (task 245a).
 
   - key: 'Graph__ManagedIdentity__Enabled'
     per_env_source: 'literal'
@@ -804,11 +815,12 @@ per_env_settings:
   #   - Entries 4/5/6 (Service Bus FQNS) share ONE source key
   #     (service_bus_fqns) per the existing dedup convention (see
   #     ManagedIdentity__ClientId / Graph__ManagedIdentity__ClientId above,
-  #     both sharing uami_client_id). The value an upstream handler-output
-  #     promotion step supplies for service_bus_fqns MUST be the FULL FQNS
-  #     (<namespace>.servicebus.windows.net) -- H4b's per_env_settings DSL is
-  #     verbatim substitution only; it performs no string formatting, so the
-  #     ".servicebus.windows.net" suffix cannot be appended here. A36 (BFF
+  #     both sharing uami_client_id). service_bus_fqns is H2a's
+  #     InterStepState.ServiceBusFullyQualifiedNamespace — the HOST of the
+  #     customer.bicep `serviceBusEndpoint` output, i.e. the FULL FQNS
+  #     (<namespace>.servicebus.windows.net) (task 245a; before that, the
+  #     "handler-output promotion step" these notes assumed did not exist).
+  #     H4b's per_env_settings DSL is verbatim substitution only. A36 (BFF
   #     runtime UAMI granted Service Bus Data Sender + Data Receiver,
   #     1bc049e4c) is the RBAC prerequisite this app-setting activates.
 

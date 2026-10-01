@@ -104,9 +104,27 @@ public enum KvSecretValueSource
     /// parameter (manifest <c>value_source: from-topology-constants</c>, introduced by task 214 for
     /// <c>SPE-ContainerTypeId</c>, whose value comes from <c>spaarke-constants.yaml
     /// per_env_constants.&lt;env&gt;.containerTypeId</c>). H4 supplies it via
-    /// <see cref="KvSecretWriteRequest.TopologyConstantValues"/>.
+    /// <see cref="KvSecretWriteRequest.IntakeValues"/>.
     /// </summary>
     FromTopologyConstants = 6,
+
+    /// <summary>
+    /// Task 245a — a non-secret value taken from an INTAKE parameter (<c>IntakeParameterCatalog</c>,
+    /// manifest <c>value_source: from-intake-parameter</c>; e.g. <c>TenantId</c> ← intake <c>tenantId</c>).
+    /// H4 supplies it via <see cref="KvSecretWriteRequest.IntakeValues"/>. Before T245a such values were
+    /// <see cref="FromRunParameters"/>, i.e. a KV reference in <c>run.Parameters.Secrets</c> that nothing
+    /// ever supplied.
+    /// </summary>
+    FromIntakeParameter = 7,
+
+    /// <summary>
+    /// Task 245a — written into the customer vault by H3 (EntraAppReg) itself, when it creates the BFF app
+    /// registration (manifest <c>value_source: written-by-h3</c>; <c>BFF-API-ClientId</c>,
+    /// <c>BFF-API-Audience</c>). H3 runs AFTER H4 (it needs H4's vault RBAC bootstrap), so H4 neither
+    /// writes nor resolves these — it skips them. Before T245a H4 waited for a reference only H3 could
+    /// supply, after H4: a deadlock on every real run.
+    /// </summary>
+    WrittenByEntraAppReg = 8,
 }
 
 /// <summary>

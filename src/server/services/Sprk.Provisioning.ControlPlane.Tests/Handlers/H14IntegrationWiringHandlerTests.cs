@@ -18,6 +18,10 @@
 //         CompletedPhases gains 4 entries (H14a, H14b, H14c, H14); Success.
 //   AC-2  Missing tenantId — Resumable, BEFORE any sub-handler seam invoked.
 //   AC-3  Missing InterStepState.bffAppRegId — Resumable, seams never invoked.
+//   AC-3b Missing InterStepState.keyVaultName (H2a output, task 245a) —
+//         Resumable + MissingKeyVaultName, seams never invoked.
+//   AC-3c A run-parameter keyVaultName (platform vault) does NOT satisfy it.
+//   AC-3d H14b/H14c signing-key reads target the InterStepState customer vault.
 //   AC-4  Partial failure — H14a drifts (QuarantineRequired) while H14b/H14c
 //         succeed; overall Failure is QuarantineRequired (worst); H14b + H14c
 //         CompletedPhase entries ARE persisted (partial success), H14a + the
@@ -123,6 +127,71 @@ public sealed class H14IntegrationWiringHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(H14Rejections.MissingBffAppRegId);
         applier.CallCount.Should().Be(0);
+    }
+
+    // ---------- AC-3b missing InterStepState.keyVaultName (task 245a, G25) ----------
+
+    [Fact]
+    public async Task AC3b_MissingInterStepStateKeyVaultName_FailsResumable_NoSeamInvoked()
+    {
+        var run = BuildRun();
+        run.InterStepState.KeyVaultName = null;
+        var repo = new FakeRepository(run, etag: "etag-3b");
+        var applier = FakeApplier.Applied(2);
+        var reader = FakeReader.Success(SigningKey);
+        var graphCreator = FakeGraphCreator.Success();
+        var dvRegistrar = FakeDvRegistrar.Created();
+        var handler = BuildHandler(repo, applier, reader, graphCreator, dvRegistrar);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H14Rejections.MissingKeyVaultName);
+        failure.Diagnostic.Should().Contain("InterStepState.keyVaultName").And.Contain("H2a",
+            "the diagnostic must name the producing handler");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        applier.CallCount.Should().Be(0);
+        reader.VaultNames.Should().BeEmpty();
+        graphCreator.CallCount.Should().Be(0);
+        dvRegistrar.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC3c_KeyVaultNameOnlyAsRunParameter_IsNotRead_FailsResumable()
+    {
+        // Intake "keyVaultName" is the Spaarke PLATFORM vault — it must never stand in
+        // for the customer vault H14b/H14c read the HMAC signing key from.
+        var run = BuildRun();
+        run.InterStepState.KeyVaultName = null;
+        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
+        var repo = new FakeRepository(run, etag: "etag-3c");
+        var reader = FakeReader.Success(SigningKey);
+        var handler = BuildHandler(repo, FakeApplier.Applied(2), reader, FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H14Rejections.MissingKeyVaultName);
+        reader.VaultNames.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AC3d_SigningKeyReads_UseInterStepStateCustomerVault()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
+        var repo = new FakeRepository(run, etag: "etag-3d");
+        var reader = FakeReader.Success(SigningKey);
+        var handler = BuildHandler(repo, FakeApplier.Applied(2), reader, FakeGraphCreator.Success(), FakeDvRegistrar.Created());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        reader.VaultNames.Should().NotBeEmpty("H14b and H14c both read the HMAC signing key");
+        reader.VaultNames.Should().OnlyContain(v => v == KeyVaultName,
+            "the signing key lives in the CUSTOMER vault (InterStepState.KeyVaultName, H2a output)");
     }
 
     // ---------- AC-4 partial failure (H14a drifts) ----------
@@ -293,7 +362,6 @@ public sealed class H14IntegrationWiringHandlerTests
         {
             run.Parameters.NonSecret[H14IntegrationWiringHandler.TenantIdParameterKey] = TenantId;
         }
-        run.Parameters.NonSecret[H14IntegrationWiringHandler.KeyVaultNameParameterKey] = KeyVaultName;
         run.Parameters.NonSecret[H14IntegrationWiringHandler.SubscriptionIdParameterKey] = SubscriptionId;
         run.Parameters.NonSecret[H14IntegrationWiringHandler.ExchangePolicyScopeGroupIdParameterKey] = PolicyScopeGroupId;
         run.Parameters.NonSecret[H14IntegrationWiringHandler.WebhookNotificationBaseUrlParameterKey] = NotificationBaseUrl;
@@ -305,6 +373,8 @@ public sealed class H14IntegrationWiringHandlerTests
         run.InterStepState.BffAppRegId = BffAppRegId;
         run.InterStepState.MiClientId = UamiClientId;
         run.InterStepState.DataverseEnvUrl = DataverseEnvUrl;
+        // The CUSTOMER vault is an H2a output (task 245a, G25) — not a run parameter.
+        run.InterStepState.KeyVaultName = KeyVaultName;
         return run;
     }
 
@@ -360,11 +430,18 @@ public sealed class H14IntegrationWiringHandlerTests
     private sealed class FakeReader : IKvSecretReader
     {
         private readonly KvSecretReadResult _result;
+        private readonly System.Collections.Concurrent.ConcurrentQueue<string> _vaultNames = new();
         private FakeReader(KvSecretReadResult result) => _result = result;
         public static FakeReader Success(string value) => new(new KvSecretReadResult.Success(value));
 
+        /// <summary>Vault names H14b/H14c read from (H14b + H14c run in parallel — thread-safe capture).</summary>
+        public IReadOnlyCollection<string> VaultNames => _vaultNames.ToArray();
+
         public Task<KvSecretReadResult> ReadSecretAsync(string vaultName, string subscriptionId, string secretName, CancellationToken ct)
-            => Task.FromResult(_result);
+        {
+            _vaultNames.Enqueue(vaultName);
+            return Task.FromResult(_result);
+        }
     }
 
     private sealed class FakeGraphCreator : IGraphSubscriptionCreator

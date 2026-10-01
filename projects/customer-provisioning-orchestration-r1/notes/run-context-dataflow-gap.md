@@ -109,6 +109,50 @@ Plus:
 Probably two tasks (split decided at `task-create`): **T245a** contract + test + H2a outputs + consumers + L2
 configuration + DAG; **T245b** intake additions (schema, API validation, skill).
 
+## 5. Status after T245a (2026-10-01)
+
+**Fixed**
+- H2a persists its ARM outputs (RG, App Service, slot, KV name + URI, UAMI resource id, Service Bus FQNS); H3, H4,
+  H4b, H9, H12b, H13, H14 read them (and H5's `DataverseEnvUrl`) from typed `InterStepState`.
+- `POST /api/runs` accepts only `IntakeParameterCatalog` keys; `environmentName` stored once (default `prod`),
+  resolved the same way by H2a, H2b, H4b.
+- H4b's `per_env_settings` sources are a closed catalog; the two mislabelled sources corrected.
+- DAG: H4b ← H3, H6 ← H3, H7 ← H8.
+- **Secrets channel**: `TenantId` from the intake value (`from-intake-parameter`); `BFF-API-ClientId` /
+  `BFF-API-Audience` written by H3 itself (`written-by-h3`, H4 skips them); H3 no longer writes
+  `run.Parameters.Secrets` (H4 runs before H3 and could never read them — the deadlock).
+- T6 reads the SPE owner certificate from its own vault input, not the customer vault.
+- H2a's name-availability check probes the Service Bus name the template creates (`spaarke-{id}-{env}-sbus`).
+- Forcing function: `RunContextContractTests` (DAG ancestry, intake catalog, a Roslyn source scan of every handler
+  folder — declared inputs equal reads, both ways — producer truthfulness, H4's manifest sources checked against
+  `customer.bicep`'s `kvSecretValues`, the generator's per_env set equal to `PerEnvSourceCatalog`). Every rule has a
+  seeded negative control and a positive control.
+- Found and fixed by the T245a quality gates: H4's cleartext-leak guard flagged ordinary Azure host names (a real
+  `CosmosEndpoint` is 44 characters of the token alphabet) and so would have quarantined every real run at H4 — it now
+  exempts DNS hosts, still scans a URI's path / query / user-info, and covers every `InterStepState` string property;
+  every control-plane ProblemDetails carries a stable `errorCode` (ADR-019); H13's `sprk_azuresubscriptionid` comes from
+  the run's `subscriptionId` (the separate `azureSubscriptionId` intake key is gone); the `/provision-environment`
+  skill's `Model2Dedicated` comparisons (dead since T223/T224 — the Model 2 hard stops never fired) now test `Model2`.
+
+**Still open — pinned in `RunContextContractTests`, each with its owner**
+| Gap | Owner |
+|---|---|
+| H0 / H8 / H13-T6 SPE owner-certificate vault (`keyVaultName` intake, interim) | T245b |
+| `bicepVer`, `indexVer`, `secretsVer` (H2a, H2b, H4, H4b) | T245b |
+| H13 `buildId`, `bffApiUrl`; H14 `webhookNotificationBaseUrl` (H9 outputs) | T245b |
+| H7 `bffApiBaseUrl` — the stamp's own BFF URL (H9 output); today it falls back to the **platform** BFF `https://api.spaarke.com` | T245b |
+| H13 registry columns `bffVersion` (H9), `solutionVersion` (H6), `clientCacheBustToken` (minted per deploy) | T245b |
+| 🔒 H4's KV RBAC bootstrap grants Secrets Officer to the stamp UAMI (`MiObjectId`), not L2's own principal — not a pinned input but the same class: the right value (L2's principal id) has no source yet | T245b (owner review, security) |
+| Manifest: `Dataverse-ServiceUrl` (H5 output, H5 not an ancestor of H4) | T245b |
+| Manifest: `BingSearch-ApiKey`, `ContentSafety-ApiKey`, `LlamaParse-ApiKey` (Spaarke vendor keys → L2 config) | T245b |
+| H11 `identityPreset`, `usersJson`; H14 `exchangePolicyScopeGroupId`, Graph resources | T245c |
+| Manifest: `Communication-DefaultMailbox` (operator intake) | T245c |
+| Manifest: `Dataverse-ClientSecret`, `BFF-API-ClientSecret` (`from-existing-kv` through the writer-less Secrets channel; secret-free default is G21) | T225b |
+| Manifest: `SPE-DefaultContainerId`, `SPE-CommunicationArchiveContainerId` — labelled `from-bicep-output`, but `customer.bicep` cannot write them (H8 creates the containers after H4) | T227 (plan G18) |
+
+A real run still cannot complete until those land; it now fails on a named, owned gap instead of on a value
+nothing writes.
+
 ## 4. Effect on the plan
 
 - **T238** (`Customer__Id` via H4b) depends on H4b being able to run at all; its `customer_id` source is one entry

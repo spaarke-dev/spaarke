@@ -158,11 +158,14 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
             {
                 customerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
+                // T224 renamed the tenancy values (Model1Shared → Model1); CreateRun requires tenantId,
+                // and since T245a accepts only IntakeParameterCatalog keys (the old "display-name"
+                // key was read by no handler).
+                tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
                 nonSecretParameters = new Dictionary<string, string>
                 {
-                    ["display-name"] = $"LoadTest-{customerId}",
+                    ["tenantId"] = "11111111-2222-3333-4444-555555555555",
                 },
             }),
         };

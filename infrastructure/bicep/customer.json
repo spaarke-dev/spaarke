@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "16667426868920976048"
+      "templateHash": "3919834462005111323"
     }
   },
   "parameters": {
@@ -3653,7 +3653,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13116790025346438776"
+              "templateHash": "4071608621154353551"
             }
           },
           "parameters": {
@@ -3742,7 +3742,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "written-by-h3"
               },
               "tags": {
                 "canonicalName": "BFF-API-Audience",
@@ -3762,7 +3762,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "written-by-h3"
               },
               "tags": {
                 "canonicalName": "BFF-API-ClientId",
@@ -4142,7 +4142,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-intake-parameter"
               },
               "tags": {
                 "canonicalName": "TenantId",

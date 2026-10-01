@@ -108,6 +108,9 @@ public sealed class ArmDeploymentRunnerTests
                       "resourceGroupName": { "type": "String", "value": "rg-spaarke-acme-prod" },
                       "cosmosAccountEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-cosmos.documents.azure.com:443/" },
                       "userAssignedIdentityResourceId": { "type": "String", "value": "" },
+                      "keyVaultName": { "type": "String", "value": "sprk-acme-prod-kv" },
+                      "keyVaultUri": { "type": "String", "value": "https://sprk-acme-prod-kv.vault.azure.net/" },
+                      "serviceBusEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-sbus.servicebus.windows.net:443/" },
                       "signalrEnabled": { "type": "Bool", "value": false }
                     }
                     """));
@@ -127,6 +130,10 @@ public sealed class ArmDeploymentRunnerTests
         success.Outputs.ResourceGroupName.Should().Be("rg-spaarke-acme-prod");
         success.Outputs.CosmosEndpoint.Should().Be("https://spaarke-acme-prod-cosmos.documents.azure.com:443/");
         success.Outputs.SignalRDeployed.Should().BeFalse();
+        // Task 245a — customer.bicep outputs H2a now persists for downstream handlers.
+        success.Outputs.KeyVaultName.Should().Be("sprk-acme-prod-kv");
+        success.Outputs.KeyVaultUri.Should().Be("https://sprk-acme-prod-kv.vault.azure.net/");
+        success.Outputs.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
         // Honest-empty per the file-header "BLOCKING DISCOVERY" note — customer.bicep
         // does not currently produce these; the runner must NOT fabricate values.
         success.Outputs.UserAssignedIdentityObjectId.Should().BeEmpty();
@@ -136,6 +143,19 @@ public sealed class ArmDeploymentRunnerTests
         handler.RequestedUris.Should().Contain(
             uri => uri.AbsolutePath.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase),
             "asserts the ARM deployment CreateOrUpdate call was actually invoked over HTTP, not a hard-coded Success");
+    }
+
+    [Theory]
+    [InlineData("https://spaarke-acme-prod-sbus.servicebus.windows.net:443/", "spaarke-acme-prod-sbus.servicebus.windows.net")]
+    [InlineData("https://spaarke-acme-prod-sbus.servicebus.windows.net/", "spaarke-acme-prod-sbus.servicebus.windows.net")]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("not a uri", "")]
+    public void ServiceBusFullyQualifiedNamespaceFromEndpoint_ReturnsTheEndpointHost(string endpoint, string expected)
+    {
+        // The FQNS is parsed from the authoritative ARM endpoint, never composed from
+        // the naming convention; blank/unparseable → empty → H2a reports the output incomplete.
+        ArmDeploymentRunner.ServiceBusFullyQualifiedNamespaceFromEndpoint(endpoint).Should().Be(expected);
     }
 
     // ---------- T2 Model1Shared template routing ----------

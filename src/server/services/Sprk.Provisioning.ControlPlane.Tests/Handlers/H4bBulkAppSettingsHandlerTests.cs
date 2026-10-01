@@ -123,14 +123,55 @@ public sealed class H4bBulkAppSettingsHandlerTests
         args.Should().Contain("https://sprk-prod-kv.vault.azure.net/");
     }
 
+    // ---------- AC-1b every PerEnvSourceCatalog source reaches the script (task 245a) ----------
+
+    [Fact]
+    public async Task AC1b_EverySourceInTheCatalog_PassesItsOwnRunValueToTheScript()
+    {
+        // Expected values are written out from BuildRun(), NOT computed with the catalog's Resolve —
+        // a source wired to the wrong InterStepState property must fail here.
+        var expected = new Dictionary<string, (string Argument, string Value)>(StringComparer.Ordinal)
+        {
+            ["kv_vault_uri"] = ("-KvVaultUri", "https://sprk-prod-kv.vault.azure.net/"),
+            ["cosmos_endpoint"] = ("-CosmosEndpoint", "https://sprk-prod-cosmos.documents.azure.com/"),
+            ["uami_client_id"] = ("-UamiClientId", "00000000-1111-2222-3333-555555555555"),
+            ["service_bus_fqns"] = ("-ServiceBusFqns", "spaarke-acme-prod-sbus.servicebus.windows.net"),
+            ["bff_app_client_id"] = ("-BffAppClientId", "00000000-aaaa-bbbb-cccc-999999999999"),
+            ["tenant_id"] = ("-TenantId", TenantId),
+            ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
+        };
+        expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
+            "a source added to PerEnvSourceCatalog needs a row here");
+
+        IReadOnlyList<PerEnvSettingEntry> oneEntryPerSource = PerEnvSourceCatalog.All
+            .Select(s => new PerEnvSettingEntry($"Setting__For__{s.SourceKey}",
+                s.ProducerHandlerId is null ? PerEnvSettingSource.FromHandlerParameter : PerEnvSettingSource.FromHandlerOutput,
+                LiteralValue: null, ParameterKey: s.SourceKey, Required: true, IOptionsModuleName: "AnyModule"))
+            .ToList();
+        var runner = FakeProcessRunner.Zero();
+        var handler = Build(new FakeRepository(BuildRun(), "etag-1b"), FakePerEnvManifest.Success(oneEntryPerSource),
+            runner, FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var args = runner.LastArgs!.ToList();
+        foreach (var (sourceKey, (argument, value)) in expected)
+        {
+            var at = args.IndexOf(argument);
+            at.Should().BeGreaterThanOrEqualTo(0, $"source '{sourceKey}' must reach the script as {argument}");
+            args[at + 1].Should().Be(value, $"source '{sourceKey}' must carry its own run value");
+        }
+    }
+
     // ---------- AC-2 per-env-input missing ----------
 
     [Fact]
     public async Task AC2_PerEnvInputMissing_ResumableFailure_BeforeAnyScriptCall()
     {
         var run = BuildRun();
-        // Remove kv_vault_uri from Parameters.NonSecret so H2a's expected output is missing.
-        run.Parameters.NonSecret.Remove("kv_vault_uri");
+        // H2a's KeyVaultUri output is missing (kv_vault_uri source).
+        run.InterStepState.KeyVaultUri = null;
         var repo = new FakeRepository(run, "etag-2");
         var manifest = FakePerEnvManifest.Success(BuildStandardEntries());
         var runner = FakeProcessRunner.Zero();
@@ -146,8 +187,54 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.Diagnostic.Should().Contain("kv_vault_uri");
         failure.Diagnostic.Should().Contain("SpeAdmin__KeyVaultUri");
         failure.Diagnostic.Should().Contain("SpeAdminModule");
+        failure.Diagnostic.Should().Contain("InterStepState.KeyVaultUri", "the diagnostic names where the value lives");
+        failure.Diagnostic.Should().Contain("H2a must complete", "and which handler produces it");
         runner.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC2b_IntakeSourcedPerEnvInputMissing_DiagnosticPointsAtIntake()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret.Remove(IntakeParameterCatalog.ContainerTypeId);
+        var repo = new FakeRepository(run, "etag-2b");
+        var runner = FakeProcessRunner.Zero();
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), runner,
+            FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.PerEnvInputMissing);
+        failure.Diagnostic.Should().Contain("container_type_id");
+        failure.Diagnostic.Should().Contain("supply it at intake");
+        runner.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC2c_PerEnvSourceNotInCatalog_FailsManifestReadFailed_BeforeAnyScriptCall()
+    {
+        // A hand-built manifest bypasses FilePerEnvSettingsManifest's load-time check; H4b must
+        // still refuse a source it cannot resolve rather than treat it as "missing".
+        var run = BuildRun();
+        var repo = new FakeRepository(run, "etag-2c");
+        var entries = new List<PerEnvSettingEntry>
+        {
+            new("Some__Setting", PerEnvSettingSource.FromHandlerOutput,
+                LiteralValue: null, ParameterKey: "not_a_catalog_source", Required: true,
+                IOptionsModuleName: "SomeModule"),
+        };
+        var runner = FakeProcessRunner.Zero();
+        var handler = Build(repo, FakePerEnvManifest.Success(entries), runner,
+            FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(BulkAppSettingsRejectionCodes.ManifestReadFailed);
+        failure.Diagnostic.Should().Contain("not_a_catalog_source");
+        runner.CallCount.Should().Be(0);
     }
 
     // ---------- AC-3 PS non-zero exit ----------
@@ -347,14 +434,6 @@ public sealed class H4bBulkAppSettingsHandlerTests
                 BulkAppSettingsRejectionCodes.MissingTenantId)]
     [InlineData(H4bBulkAppSettingsHandler.SubscriptionIdParameterKey,
                 BulkAppSettingsRejectionCodes.MissingSubscriptionId)]
-    [InlineData(H4bBulkAppSettingsHandler.KeyVaultNameParameterKey,
-                BulkAppSettingsRejectionCodes.MissingKeyVaultName)]
-    [InlineData(H4bBulkAppSettingsHandler.ResourceGroupNameParameterKey,
-                BulkAppSettingsRejectionCodes.MissingResourceGroupName)]
-    [InlineData(H4bBulkAppSettingsHandler.AppServiceNameParameterKey,
-                BulkAppSettingsRejectionCodes.MissingAppServiceName)]
-    [InlineData(H4bBulkAppSettingsHandler.EnvironmentNameParameterKey,
-                BulkAppSettingsRejectionCodes.MissingEnvironmentName)]
     [InlineData(H4bBulkAppSettingsHandler.SecretsVersionParameterKey,
                 BulkAppSettingsRejectionCodes.MissingSecretsVersion)]
     public async Task AC9_MissingRequiredParameter_FailsResumable_NoExternalCalls(
@@ -376,6 +455,54 @@ public sealed class H4bBulkAppSettingsHandlerTests
         failure.RejectionCode.Should().Be(expectedRejectionCode);
         runner.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(nameof(InterStepState.KeyVaultName), BulkAppSettingsRejectionCodes.MissingKeyVaultName)]
+    [InlineData(nameof(InterStepState.ResourceGroupName), BulkAppSettingsRejectionCodes.MissingResourceGroupName)]
+    [InlineData(nameof(InterStepState.AppServiceName), BulkAppSettingsRejectionCodes.MissingAppServiceName)]
+    public async Task AC9b_MissingH2aOutput_FailsResumable_NoExternalCalls(
+        string interStepStateProperty, string expectedRejectionCode)
+    {
+        // Task 245a: these are H2a outputs in InterStepState — never run parameters.
+        var run = BuildRun();
+        switch (interStepStateProperty)
+        {
+            case nameof(InterStepState.KeyVaultName): run.InterStepState.KeyVaultName = null; break;
+            case nameof(InterStepState.ResourceGroupName): run.InterStepState.ResourceGroupName = null; break;
+            case nameof(InterStepState.AppServiceName): run.InterStepState.AppServiceName = null; break;
+        }
+        var repo = new FakeRepository(run, "etag-guard-iss");
+        var runner = FakeProcessRunner.Zero();
+        var probe = FakeHealthzProbe.Success();
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), runner, probe,
+            new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(expectedRejectionCode);
+        failure.Diagnostic.Should().Contain($"InterStepState.{interStepStateProperty}");
+        runner.CallCount.Should().Be(0);
+        probe.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC9c_EnvironmentNameAbsent_ResolvesToProd_SameAsH2aAndH2b()
+    {
+        // A run created before CreateRun stored environmentName resolves to the shared default
+        // instead of failing (H4b used to fail where H2a/H2b silently defaulted).
+        var run = BuildRun();
+        run.Parameters.NonSecret.Remove(IntakeParameterCatalog.EnvironmentName);
+        var repo = new FakeRepository(run, "etag-env");
+        var handler = Build(repo, FakePerEnvManifest.Success(BuildStandardEntries()), FakeProcessRunner.Zero(),
+            FakeHealthzProbe.Success(), new FakeContainerLogFetcher());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey
+            .Should().Be(H4bBulkAppSettingsHandler.BuildIdempotencyKey(IntakeParameterCatalog.DefaultEnvironmentName, SecretsVer));
     }
 
     // ---------- AC-10 handler-id mismatch ----------
@@ -443,13 +570,14 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC13_OptionalPerEnvEntryMissing_SkipSilently_HappyPath()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove("optional_key");
+        run.InterStepState.CosmosEndpoint = null;
         var repo = new FakeRepository(run, "etag-13");
         var entries = new List<PerEnvSettingEntry>
         {
-            // Optional entry — missing source → skip; no fail.
+            // Optional entry — missing source → skip; no fail. (Required-ness is per manifest
+            // entry; the source itself must still be a catalog source.)
             new("Some__OptionalSetting", PerEnvSettingSource.FromHandlerOutput,
-                LiteralValue: null, ParameterKey: "optional_key", Required: false,
+                LiteralValue: null, ParameterKey: "cosmos_endpoint", Required: false,
                 IOptionsModuleName: "SomeOptionalModule"),
         };
         var manifest = FakePerEnvManifest.Success(entries);
@@ -523,7 +651,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC16_MissingServiceBusFqns_ResumableFailure_BeforeAnyScriptCall()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove("service_bus_fqns");
+        run.InterStepState.ServiceBusFullyQualifiedNamespace = null;
         var repo = new FakeRepository(run, "etag-16");
         var manifest = FakePerEnvManifest.Success(BuildA39Entries());
         var runner = FakeProcessRunner.Zero();
@@ -547,7 +675,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
     public async Task AC17_MissingUamiClientId_ResumableFailure_DoesNotSilentlySkip()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove("uami_client_id");
+        run.InterStepState.MiClientId = null;
         var repo = new FakeRepository(run, "etag-17");
         var entry3Only = new List<PerEnvSettingEntry>
         {
@@ -639,23 +767,23 @@ public sealed class H4bBulkAppSettingsHandlerTests
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model1",
         };
+        // Intake values (IntakeParameterCatalog) — the only things in Parameters.NonSecret.
         var p = run.Parameters.NonSecret;
         p[H4bBulkAppSettingsHandler.TenantIdParameterKey] = TenantId;
         p[H4bBulkAppSettingsHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        p[H4bBulkAppSettingsHandler.KeyVaultNameParameterKey] = KeyVaultName;
-        p[H4bBulkAppSettingsHandler.ResourceGroupNameParameterKey] = ResourceGroupName;
-        p[H4bBulkAppSettingsHandler.AppServiceNameParameterKey] = AppServiceName;
-        p[H4bBulkAppSettingsHandler.EnvironmentNameParameterKey] = EnvironmentName;
+        p[IntakeParameterCatalog.EnvironmentName] = EnvironmentName;
         p[H4bBulkAppSettingsHandler.SecretsVersionParameterKey] = SecretsVer;
-        // Sources the standard entries reference:
-        p["kv_vault_uri"] = "https://sprk-prod-kv.vault.azure.net/";
-        p["cosmos_endpoint"] = "https://sprk-prod-cosmos.documents.azure.com/";
-        p["tenant_id"] = TenantId;
-        p["bff_app_client_id"] = "00000000-aaaa-bbbb-cccc-999999999999";
-        p["container_type_id"] = "00000000-dead-beef-0000-000000000001";
-        p["uami_client_id"] = "00000000-1111-2222-3333-555555555555";
-        // Source the task 205c / A39 §10.2 FromHandlerOutput entries.
-        p["service_bus_fqns"] = "spaarke-acme-prod-sbus.servicebus.windows.net";
+        p[IntakeParameterCatalog.ContainerTypeId] = "00000000-dead-beef-0000-000000000001";
+        // Upstream handler outputs (task 245a) — H2a's and H3's typed InterStepState.
+        var s = run.InterStepState;
+        s.KeyVaultName = KeyVaultName;
+        s.ResourceGroupName = ResourceGroupName;
+        s.AppServiceName = AppServiceName;
+        s.KeyVaultUri = "https://sprk-prod-kv.vault.azure.net/";
+        s.CosmosEndpoint = "https://sprk-prod-cosmos.documents.azure.com/";
+        s.MiClientId = "00000000-1111-2222-3333-555555555555";
+        s.ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net";
+        s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
         return run;
     }
 
@@ -709,7 +837,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         new("AzureAd__ClientId", PerEnvSettingSource.FromHandlerOutput,
             LiteralValue: null, ParameterKey: "bff_app_client_id", Required: true,
             IOptionsModuleName: "AzureAdOptions"),
-        new("SharePointEmbedded__ContainerTypeId", PerEnvSettingSource.FromHandlerOutput,
+        new("SharePointEmbedded__ContainerTypeId", PerEnvSettingSource.FromHandlerParameter,
             LiteralValue: null, ParameterKey: "container_type_id", Required: true,
             IOptionsModuleName: "SpeOptions"),
         new("Graph__ManagedIdentity__Enabled", PerEnvSettingSource.Literal,

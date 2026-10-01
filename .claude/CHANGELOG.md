@@ -7,6 +7,30 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-01 — provisioning run-context contract: every handler input has one producer (T245a, G25)
+
+`customer-provisioning-orchestration-r1` T245a.
+
+- **`.claude/constraints/provisioning.md`** — new BINDING section "Run-context contract": `run.Parameters.NonSecret`
+  holds intake values only (`IntakeParameterCatalog`, enforced at `POST /api/runs`); a value one handler produces for
+  another goes in a `[ProducedBy]` `InterStepState` property; every handler input is declared in
+  `Reconciler/HandlerRunInputs.cs`; `RunContextContractTests` enforces it (DAG ancestry + source scan). Background:
+  a real run could not get past H0 — ~20 required inputs had no producer and unit tests seeded them by hand.
+- **New pattern** `.claude/patterns/provisioning/run-context-contract.md` (+ INDEX row); `handler-registration-
+  completeness.md` gains step 5b (declare the new handler's inputs).
+- After the quality gates: the contract scan is a Roslyn syntax walk (aliases, `?.`/`!.`, strings and `nameof` handled;
+  declared inputs must also be READ); `run.Parameters.Secrets` has no writer and only H4 may read it; H4's manifest
+  sources are checked against `customer.bicep`'s `kvSecretValues` — all three now in the constraint and the pattern.
+- **`manifest-driven-secret-catalog.md`** — `value_source` table gains `from-intake-parameter` / `written-by-h3`;
+  `from-run-parameter` / `from-existing-kv` marked writer-less (every entry a pinned gap); the closed `per_env_source`
+  set (`PerEnvSourceCatalog`, mirrored in the generator) and the `IntakeValues` rename.
+- **`/provision-environment` SKILL.md** — real defects fixed: Step 1.0 and Step 4.0 compared `tenancyModel` to
+  `'Model2Dedicated'`, which never matches since T223/T224 (`Model1` | `Model2`), so the Model 2 subscription hard stop
+  and the `warnAndProceed` ban were dead; the Step 4.0 comment claiming L2 "ignores unknown keys" now documents the
+  closed intake set (400 `intake-unknown-key` with `acceptedKeys`); Step 1c literals and examples corrected; Step 5
+  notes that H3 now gates H4b / H6 / H8 / H9.
+
+---
 ###### 2026-09-30 — `ci-cd` + `azure-deploy` skills describe the workflows that exist (plan G24)
 
 `customer-provisioning-orchestration-r1` SESSION 28 (owner: fix drift at discovery).

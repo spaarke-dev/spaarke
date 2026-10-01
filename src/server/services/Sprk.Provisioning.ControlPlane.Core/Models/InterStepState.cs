@@ -12,9 +12,17 @@
 // Modeled as a POCO (not IDictionary) because the keys are ENUMERATED — new keys
 // require a design change + type extension, catching typos and unknown keys at
 // compile time rather than at reconciler-runtime.
+//
+// RUN-CONTEXT CONTRACT (task 245a, G25): every property carries exactly one of
+// [ProducedBy(handler)] or [NoProducer(reason)]. A handler that needs a value
+// another handler produces reads it HERE — never from run.Parameters.NonSecret,
+// which only intake writes. RunContextContractTests proves each required
+// reader runs after the producer (Reconciler/HandlerRunInputs.cs declares the
+// readers). Evidence for why: notes/run-context-dataflow-gap.md.
 // -----------------------------------------------------------------------------
 
 using System.Text.Json.Serialization;
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 
@@ -32,54 +40,123 @@ namespace Sprk.Provisioning.ControlPlane.Models;
 /// </remarks>
 public sealed class InterStepState
 {
-    /// <summary>Entra app registration ID for the customer's BFF API app (H3 output).</summary>
+    /// <summary>Entra app registration (client) ID for the customer's BFF API app (H3 output).</summary>
     [JsonPropertyName("bffAppRegId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H3)]
     public string? BffAppRegId { get; set; }
 
     /// <summary>Entra app registration ID for the customer's S2S app if applicable (legacy — Model-2 dedicated only; may remain null in Model 1).</summary>
     [JsonPropertyName("s2sAppRegId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [NoProducer("Legacy S2S app registration, dropped by r3 task 060. H3 reads it only to refuse a run that still carries one; H4's leak scan reads it if present.")]
     public string? S2SAppRegId { get; set; }
 
     /// <summary>UAMI object ID for the customer's App Service managed identity (H2a output).</summary>
     [JsonPropertyName("miObjectId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
     public string? MiObjectId { get; set; }
 
     /// <summary>UAMI client ID for the customer's App Service managed identity (H2a output).</summary>
     [JsonPropertyName("miClientId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
     public string? MiClientId { get; set; }
 
-    /// <summary>SharePoint Embedded container-type ID for the customer (H10 output).</summary>
+    /// <summary>
+    /// SharePoint Embedded container-type ID. NOT written by any handler: the container type is a
+    /// pre-existing per-environment value supplied at intake (run parameter <c>containerTypeId</c>,
+    /// from spaarke-constants.yaml). Readers use the intake value.
+    /// </summary>
     [JsonPropertyName("containerTypeId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [NoProducer("The container type is an intake value (run parameter containerTypeId); no handler writes this property. H4's leak scan reads it if present.")]
     public string? ContainerTypeId { get; set; }
 
-    /// <summary>Dataverse environment URL (e.g. https://spaarke-acme.crm.dynamics.com) — H5/H6 output.</summary>
+    /// <summary>Dataverse environment URL (e.g. https://spaarke-acme.crm.dynamics.com) — H5 output.</summary>
     [JsonPropertyName("dataverseEnvUrl")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H5)]
     public string? DataverseEnvUrl { get; set; }
 
     /// <summary>Azure OpenAI endpoint URI for the customer's deployment (H2a output).</summary>
     [JsonPropertyName("openAiEndpoint")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
     public string? OpenAiEndpoint { get; set; }
 
     /// <summary>Azure AI Search endpoint URI for the customer's search service (H2a output).</summary>
     [JsonPropertyName("aiSearchEndpoint")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
     public string? AiSearchEndpoint { get; set; }
 
     /// <summary>Cosmos DB account endpoint URI for the customer's runtime data (H2a output).</summary>
     [JsonPropertyName("cosmosEndpoint")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
     public string? CosmosEndpoint { get; set; }
+
+    /// <summary>
+    /// Resource group the customer stack deployed into (H2a output — ARM output
+    /// <c>resourceGroupName</c>, e.g. <c>rg-spaarke-acme-prod</c>).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25) — previously captured by H2a and dropped.</remarks>
+    [JsonPropertyName("resourceGroupName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? ResourceGroupName { get; set; }
+
+    /// <summary>The customer BFF App Service name (H2a output — ARM output <c>appServiceName</c>).</summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25).</remarks>
+    [JsonPropertyName("appServiceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? AppServiceName { get; set; }
+
+    /// <summary>The BFF App Service's staging slot name (H2a output — ARM output <c>appServiceStagingSlotName</c>).</summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25).</remarks>
+    [JsonPropertyName("appServiceStagingSlotName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? AppServiceStagingSlotName { get; set; }
+
+    /// <summary>The customer Key Vault name (H2a output — ARM output <c>keyVaultName</c>).</summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25). The CUSTOMER vault — not the Spaarke platform vault holding the SPE owner certificate.</remarks>
+    [JsonPropertyName("keyVaultName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? KeyVaultName { get; set; }
+
+    /// <summary>The customer Key Vault URI (H2a output — ARM output <c>keyVaultUri</c>).</summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25).</remarks>
+    [JsonPropertyName("keyVaultUri")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? KeyVaultUri { get; set; }
+
+    /// <summary>Resource id of the customer stamp's UAMI (H2a output — ARM output <c>userAssignedIdentityResourceId</c>).</summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25).</remarks>
+    [JsonPropertyName("miResourceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? MiResourceId { get; set; }
+
+    /// <summary>
+    /// The customer Service Bus fully-qualified namespace, <c>{namespace}.servicebus.windows.net</c>
+    /// (H2a output — the host of ARM output <c>serviceBusEndpoint</c>).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25).</remarks>
+    [JsonPropertyName("serviceBusFullyQualifiedNamespace")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? ServiceBusFullyQualifiedNamespace { get; set; }
 
     /// <summary>Dataverse `systemuser` GUID for the MI/UAMI Dataverse App User (H10 output; T2 trap subject).</summary>
     [JsonPropertyName("systemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H10)]
     public string? SystemUserId { get; set; }
 
     /// <summary>
@@ -98,11 +175,13 @@ public sealed class InterStepState
     /// </remarks>
     [JsonPropertyName("bffAppRegSystemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H10)]
     public string? BffAppRegSystemUserId { get; set; }
 
-    /// <summary>Correlation ID emitted by the SPE consent-callback (H0.5 output; used by H8/H10 to correlate the consent flow).</summary>
+    /// <summary>Correlation ID for the SPE consent flow (design intent: H0.5 output). No handler writes it today.</summary>
     [JsonPropertyName("speConsentCorrelationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [NoProducer("Model 2 H0.5 consent-flow correlation id (Model 2 is out of scope, D3); H0.5 does not write it. H4's leak scan reads it if present.")]
     public string? SpeConsentCorrelationId { get; set; }
 
     /// <summary>
@@ -130,6 +209,7 @@ public sealed class InterStepState
     /// </remarks>
     [JsonPropertyName("ficPendingPostAppServiceVerification")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H3)]
     public bool? FicPendingPostAppServiceVerification { get; set; }
 
     /// <summary>
@@ -154,6 +234,7 @@ public sealed class InterStepState
     /// </remarks>
     [JsonPropertyName("importedSolutions")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H6)]
     public IList<ImportedSolutionRecord>? ImportedSolutions { get; set; }
 
     /// <summary>
@@ -183,6 +264,7 @@ public sealed class InterStepState
     /// </remarks>
     [JsonPropertyName("speContainerId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H8)]
     public string? SpeContainerId { get; set; }
 
     /// <summary>
@@ -204,5 +286,6 @@ public sealed class InterStepState
     /// </remarks>
     [JsonPropertyName("provisionedUsers")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H11)]
     public IList<ProvisionedUserRecord>? ProvisionedUsers { get; set; }
 }

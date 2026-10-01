@@ -124,20 +124,31 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.BffAppRegId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.KeyVaultName);
+
+        // The SPE owner certificate lives in the Spaarke PLATFORM vault, not the customer vault
+        // (request.KeyVaultName, used by T1/T5). Task 245a split the two; T245b moves this vault to
+        // validated L2 configuration. Until then a blank value is an infra fault, not a crash.
+        var vaultName = request.SpeOwnerCertKeyVaultName;
+        if (string.IsNullOrWhiteSpace(vaultName))
+        {
+            return new TrapVerificationOutcome.InfraFault(Kind,
+                "T6 probe: the vault holding the SPE owner certificate is not known for this run " +
+                "(intake 'keyVaultName' — the Spaarke platform vault — is absent). T245b moves this to L2 " +
+                "configuration; until then supply it at intake.");
+        }
 
         _logger.LogInformation(
             "T6 probe starting: customerId={CustomerId} runId={RunId} tenantId={TenantId} " +
             "vaultName={VaultName} owningAppId={OwningAppId}",
             request.CustomerId, request.RunId, request.TenantId,
-            request.KeyVaultName, request.BffAppRegId);
+            vaultName, request.BffAppRegId);
 
         // (1) KV cert-load half.
         X509Certificate2 cert;
         try
         {
             cert = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-                _sharedCredential, _clientOptions, request.KeyVaultName,
+                _sharedCredential, _clientOptions, vaultName,
                 SpeOwnerCertSecretName, _options.TrapVerifierTimeout, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -146,24 +157,24 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             _logger.LogWarning(ex,
                 "T6 probe InfraFault -- KV cert secret unreadable: customerId={CustomerId} " +
                 "vaultName={VaultName} secretName={SecretName} status={Status}",
-                request.CustomerId, request.KeyVaultName, SpeOwnerCertSecretName, ex.Status);
+                request.CustomerId, vaultName, SpeOwnerCertSecretName, ex.Status);
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
                 $"T6 verdict deferred: KV secret '{SpeOwnerCertSecretName}' on vault " +
-                $"'{request.KeyVaultName}' was unreadable (RequestFailedException status {ex.Status}: " +
-                $"{ex.ErrorCode ?? "(no code)"}). Verify H4 populated the cert secret and that the " +
-                $"platform UAMI has Key Vault Secrets User RBAC on this vault. Re-run H13 after fixing.");
+                $"'{vaultName}' was unreadable (RequestFailedException status {ex.Status}: " +
+                $"{ex.ErrorCode ?? "(no code)"}). Verify the SPE owner certificate exists in this Spaarke " +
+                $"platform vault and that the platform UAMI has Key Vault Secrets User RBAC on it. Re-run H13 after fixing.");
         }
         catch (InvalidOperationException ex)
         {
             _logger.LogWarning(ex,
                 "T6 probe InfraFault -- KV cert secret malformed: customerId={CustomerId} " +
                 "vaultName={VaultName} secretName={SecretName}",
-                request.CustomerId, request.KeyVaultName, SpeOwnerCertSecretName);
+                request.CustomerId, vaultName, SpeOwnerCertSecretName);
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
                 $"T6 verdict deferred: KV secret '{SpeOwnerCertSecretName}' on vault " +
-                $"'{request.KeyVaultName}' is present but not a usable base64-encoded PFX " +
+                $"'{vaultName}' is present but not a usable base64-encoded PFX " +
                 $"({ex.Message}). Re-upload the cert via H4 / scripts/common/Get-SpeConfidentialClientToken.ps1 " +
                 $"conventions and re-run H13.");
         }
@@ -172,10 +183,10 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             _logger.LogWarning(ex,
                 "T6 probe InfraFault -- KV cert secret read timeout: customerId={CustomerId} " +
                 "vaultName={VaultName} timeout={Timeout}",
-                request.CustomerId, request.KeyVaultName, _options.TrapVerifierTimeout);
+                request.CustomerId, vaultName, _options.TrapVerifierTimeout);
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
-                $"T6 verdict deferred: KV cert secret read from vault '{request.KeyVaultName}' " +
+                $"T6 verdict deferred: KV cert secret read from vault '{vaultName}' " +
                 $"exceeded configured timeout {_options.TrapVerifierTimeout}. Vault reachability or " +
                 $"credential-chain latency issue. Re-run H13 once transient is resolved.");
         }
@@ -187,7 +198,7 @@ public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
             return new TrapVerificationOutcome.InfraFault(
                 TrapKind.T6SpeConfidentialClient,
                 $"T6 verdict deferred: unexpected {ex.GetType().Name} loading KV secret " +
-                $"'{SpeOwnerCertSecretName}' from vault '{request.KeyVaultName}': {ex.Message}.");
+                $"'{SpeOwnerCertSecretName}' from vault '{vaultName}': {ex.Message}.");
         }
 
         // (2) Graph confidential-client GET half.

@@ -24,8 +24,8 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `AiSearch-Endpoint` | ai | N/A | - | from-bicep-output |
 | `AppInsights-ConnectionString` | monitoring | on-instrumentation-key-rotation | - | from-bicep-output |
 | `AzureOpenAI-Endpoint` | ai | N/A | - | from-bicep-output |
-| `BFF-API-Audience` | identity | N/A | - | from-run-parameter |
-| `BFF-API-ClientId` | identity | N/A | - | from-run-parameter |
+| `BFF-API-Audience` | identity | N/A | - | written-by-h3 |
+| `BFF-API-ClientId` | identity | N/A | - | written-by-h3 |
 | `BFF-API-ClientSecret` | auth | 90-days | YES | from-existing-kv |
 | `BingSearch-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Communication-DefaultMailbox` | communication | N/A | - | from-run-parameter |
@@ -46,7 +46,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
 | `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
 | `SPE-DefaultContainerId` | spe | N/A | - | from-bicep-output |
-| `TenantId` | identity | N/A | - | from-run-parameter |
+| `TenantId` | identity | N/A | - | from-intake-parameter |
 
 ## Per-secret detail
 
@@ -103,9 +103,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: BFF API audience URI (api://{clientId}).
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: written-by-h3
 - **Tags**: bff, identity, public
-- **Exception note**: Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129, owner E3 confirmation) from from-bicep-output to from-run-parameter. H3 (task 130) is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and writes Audience to RunParameters.Secrets. The DAG runs H3 before H4, so H4 resolves this value from RunParameters, not from a Bicep deployment output.
+- **Exception note**: H3 is the value producer -- it commits Audience (api://{appId}) to the customer vault itself. value_source written-by-h3 since task 245a (2026-10-01): H4 skips it (see BFF-API-ClientId for why the previous from-run-parameter classification deadlocked).
 - **Consumers**:
   - BFF: AzureAd:Audience
 - **App-setting keys**:
@@ -117,9 +117,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: written-by-h3
 - **Tags**: bff, identity, public
-- **Exception note**: Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129, owner E3 confirmation) from from-bicep-output to from-run-parameter. H3 (task 130) is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and writes ClientId to RunParameters.Secrets. The DAG runs H3 before H4, so H4 resolves this value from RunParameters, not from a Bicep deployment output.
+- **Exception note**: H3 is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME and commits ClientId to the customer vault itself. value_source written-by-h3 since task 245a (2026-10-01): H4 skips it. Task 129 had made it from-run-parameter on the belief that the DAG runs H3 before H4; it runs H4 first (H3 needs H4's vault RBAC bootstrap), so H4 waited for a reference only H3 could supply -- a deadlock.
 - **Consumers**:
   - BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId / AgentToken:ClientId
 - **App-setting keys**:
@@ -424,8 +424,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-intake-parameter
 - **Tags**: bff, identity, public
+- **Exception note**: value_source from-intake-parameter since task 245a (2026-10-01): H4 writes the intake tenantId (POST /api/runs, required). It was from-run-parameter — a KV reference in RunParameters.Secrets that nothing ever supplied.
 - **Consumers**:
   - BFF: TENANT_ID / AzureAd:TenantId / Graph:TenantId / Dataverse:TenantId
   - L2 control-plane

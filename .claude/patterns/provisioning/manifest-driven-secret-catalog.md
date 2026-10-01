@@ -1,7 +1,7 @@
 # Manifest-Driven Secret Catalog Pattern
 
-> **Last Reviewed**: 2026-09-30
-> **Reviewed By**: customer-provisioning-orchestration-r1 T226 — rewritten against the code. The 2026-08-25 version (task 203a) described a `source: { type }` field the manifest has never had, and the H4-shared handler T226 retired.
+> **Last Reviewed**: 2026-10-01
+> **Reviewed By**: customer-provisioning-orchestration-r1 T245a — `from-intake-parameter` + `written-by-h3` added; `per_env_source` closed set; the run-parameter secret channel has no writer. (T226, 2026-09-30, rewrote it against the code.)
 > **Status**: Current.
 
 ## When
@@ -15,10 +15,10 @@ Load this pattern when:
 
 ## Read These Files (canonical source)
 
-1. `scripts/canonical-secret-catalog/manifest.yaml` — **single source of truth**. `secrets:` holds one entry per Key Vault secret (`canonical_name`, `category`, `purpose`, `consumers`, `rotation_cadence`, `never_delete`, `exception_note`, `aliases`, `value_source`, `app_settings`, `tags`); `per_env_settings:` holds App Service settings that are literals or handler outputs, never KV references. Changing behavior means changing this file, not the handlers.
+1. `scripts/canonical-secret-catalog/manifest.yaml` — **single source of truth**. `secrets:` holds one entry per Key Vault secret (`canonical_name`, `category`, `purpose`, `consumers`, `rotation_cadence`, `never_delete`, `exception_note`, `aliases`, `value_source`, `app_settings`, `tags`); `per_env_settings:` holds App Service settings that are literals, handler outputs or intake values, never KV references. A non-literal `per_env_source` must be one of the closed set in `…/BulkAppSettings/PerEnvSourceCatalog.cs` (`from-h2a-output:*`, `from-h3-output:bff_app_client_id`, `from-intake-parameter:*`) — the reader rejects an unknown source or a mislabelled origin. Changing behavior means changing this file, not the handlers.
 2. `scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1` — deterministic generator. Writes four artifacts to `generated/`: `kv-secrets.generated.bicep` (called by `infrastructure/bicep/customer.bicep`), `Seed-CustomerKeyVault.generated.ps1`, `Configure-AppServiceSettings.generated.ps1` (run by H4b) and `appsettings.tokens.generated.md`. `-Verify` proves byte-identical regeneration. Never hand-edit `generated/`.
 3. `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/FileKvSecretManifest.cs` — H4's reader (the manifest is embedded in the Core assembly). It refuses an unrecognized `value_source` and enforces the BINDING never-delete invariant on the raw document.
-4. `…/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs` + `KvSecretValueResolver.cs` — H4 writes every entry to the customer's own vault; the resolver maps each `value_source` to where its value comes from.
+4. `…/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs` + `KvSecretValueResolver.cs` — H4 writes every entry to the customer's own vault except the `written-by-h3` ones (H3 writes those itself, after H4); the resolver maps each `value_source` to where its value comes from. `RunContextContractTests` rule (g) proves every entry has a source H4 can reach, or is a pinned gap with an owning task.
 5. `…/BulkAppSettings/H4bBulkAppSettingsHandler.cs` — runs the generated Configure script: one batched settings write per slot → one restart cycle.
 6. `infrastructure/bicep/customer.bicep` (`kvSecretValues`) — the writer for every `from-bicep-output` entry.
 7. `.claude/adr/ADR-028-spaarke-auth-architecture.md` — managed identity first for outbound calls; secret lifecycle.
@@ -28,10 +28,14 @@ Load this pattern when:
 | `value_source` | Where the value comes from | Examples |
 |---|---|---|
 | `from-bicep-output` | Written by `customer.bicep`'s `kvSecrets` module from the customer's **own** resources at H2a; H4 checks that it exists | `Redis-ConnectionString`, `DocumentIntelligence-ApiKey`, the service endpoints |
-| `from-run-parameter` | A KV reference supplied on the run (`RunParameters.Secrets`); H4 copies the value | `TenantId`, `BingSearch-ApiKey`, `LlamaParse-ApiKey` (Spaarke-shared vendor keys, owner D5) |
-| `from-existing-kv` | Copied from another vault through a run reference | `Dataverse-ClientSecret`, `BFF-API-ClientSecret` |
-| `from-topology-constants` | A Spaarke-tier constant carried as a non-secret run parameter (from `spaarke-constants.yaml`) | `SPE-ContainerTypeId` |
+| `from-intake-parameter` | An intake value (`IntakeParameterCatalog`) H4 maps in `IntakeValueParameterKeys` | `TenantId` |
+| `from-topology-constants` | A Spaarke-tier constant carried as an intake value (from `spaarke-constants.yaml`); same map | `SPE-ContainerTypeId` |
+| `written-by-h3` | H3 writes it to the customer vault itself; H4 (which runs before H3) **skips** the entry | `BFF-API-ClientId`, `BFF-API-Audience` |
 | `generated` | A cryptographically random value created by H4 | webhook signing keys |
+| `from-run-parameter` | A KV reference on the run (`RunParameters.Secrets`). 🔴 **Nothing writes that map since task 245a** — every entry here is a pinned gap with an owning task | `Dataverse-ServiceUrl`, `BingSearch-ApiKey`, `LlamaParse-ApiKey`, `ContentSafety-ApiKey` (T245b); `Communication-DefaultMailbox` (T245c) |
+| `from-existing-kv` | Copied from another vault through a run reference — same writer-less channel | `Dataverse-ClientSecret`, `BFF-API-ClientSecret` (T225b) |
+
+A new entry should not use `from-run-parameter` / `from-existing-kv`: there is no producer for them.
 
 `from-shared-service` (task 200's H4-shared, which copied keys from `sprksharedprod-*` services into a shared vault) was **retired by T226 (2026-09-30)**. A customer stamp never reads a credential belonging to a shared service.
 
@@ -50,7 +54,7 @@ Load this pattern when:
 2. **Prove determinism**: `pwsh scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 -Verify` → exit 0. Commit `generated/` in the same commit as the manifest; recompile `customer.json` (`az bicep build`) when `customer.bicep` changes.
 3. **Never-delete entries**: if the manifest says `never_delete: true`, no handler emits a delete for that key, even under drift recovery.
 4. **Wire the writer.** A `from-bicep-output` entry that `customer.bicep` does not write fails H4 on a fresh customer (the secret is absent and the resolver has no other source — the plan's G18 failure for the SPE container ids).
-5. **A new `value_source` changes at least four places**: `FileKvSecretManifest` (reader), `KvSecretValueSource` (enum), `KvSecretValueResolver` (resolution) and the generator's allowed list — plus whatever supplies the value (for `from-topology-constants`: `KvSecretWriteRequest.TopologyConstantValues`, H4's `TopologyConstantParameterKeys` map and the seeder's SKIP branch; `FileKvSecretManifestTests` checks the map against the manifest). Task 214 added `from-topology-constants` to the manifest alone, and every H4 run failed `ManifestReadFailed` until T226.
+5. **A new `value_source` changes at least four places**: `FileKvSecretManifest` (reader), `KvSecretValueSource` (enum), `KvSecretValueResolver` (resolution) and the generator's allowed list — plus whatever supplies the value (for the intake-sourced ones: `KvSecretWriteRequest.IntakeValues`, H4's `IntakeValueParameterKeys` map and the seeder's SKIP branch; `FileKvSecretManifestTests` checks the map against the manifest) — plus a case in `RunContextContractTests.ClassifyManifestEntries`. Task 214 added `from-topology-constants` to the manifest alone, and every H4 run failed `ManifestReadFailed` until T226.
 6. **Drift recovery is not scheduled rotation** — ADR-028's 90-day cadence bounds SCHEDULED rotations; an externally rotated key is a different failure mode. Handle via the ADR conflict protocol (see the [`manual-gates.md`](../../../provisioning-runs/_templates/manual-gates.md) escalation entry).
 7. **Test update obligation** (bff-extensions.md § F, applied analogously): manifest PRs add/update tests in `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/` — at minimum a `value_source` mapping row in `FileKvSecretManifestTests`.
 

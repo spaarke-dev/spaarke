@@ -21,6 +21,12 @@
 //   AC-2c  Missing buildId → Resumable + MissingBuildId.
 //   AC-2d  Missing bffApiUrl → Resumable + MissingBffApiUrl.
 //   AC-2e  Missing InterStepState.dataverseEnvUrl → Resumable + MissingDataverseEnvUrl.
+//   AC-2f/g/h Missing InterStepState.resourceGroupName / appServiceName /
+//          keyVaultName (H2a outputs, task 245a) → Resumable + MissingResourceGroupName /
+//          MissingAppServiceName / MissingKeyVaultName; no probe invoked; a
+//          same-named run parameter does NOT satisfy the guard.
+//   AC-2i  Stamp names flow from InterStepState to the trap/cost requests +
+//          registry columns; containerTypeId comes from the intake parameter.
 //   AC-3   Extended validate script Failure (SC #5) → QuarantineRequired +
 //          ExtendedValidationFailed.
 //   AC-4   Extended validate script infra fault → Resumable + ExtendedValidationInfraFault.
@@ -186,6 +192,95 @@ public sealed class H13E2EAcceptanceGateHandlerTests
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(H13Rejections.MissingDataverseEnvUrl);
+    }
+
+    // ---------- AC-2f/g/h H2a outputs required from InterStepState (task 245a, G25) ----------
+
+    [Theory]
+    [InlineData(nameof(InterStepState.ResourceGroupName), H13Rejections.MissingResourceGroupName, "resourceGroupName")]
+    [InlineData(nameof(InterStepState.AppServiceName), H13Rejections.MissingAppServiceName, "appServiceName")]
+    [InlineData(nameof(InterStepState.KeyVaultName), H13Rejections.MissingKeyVaultName, "keyVaultName")]
+    public async Task AC2fgh_MissingH2aOutputInInterStepState_FailsResumable_NoProbeInvoked(
+        string property, string expectedCode, string jsonName)
+    {
+        var run = BuildRun();
+        ClearInterStepStateValue(run, property);
+        var repo = new FakeRepository(run, etag: $"etag-2-{property}");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(expectedCode);
+        failure.Diagnostic.Should().Contain($"InterStepState.{jsonName}").And.Contain("H2a",
+            "the diagnostic must name the producing handler so the operator knows which upstream step is missing");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().StartWith($"[{expectedCode}]");
+        seams.Validator.CallCount.Should().Be(0);
+        seams.Traps.CallCount.Should().Be(0);
+        seams.Invariants.CallCount.Should().Be(0);
+        seams.Naming.CallCount.Should().Be(0);
+        seams.Cost.CallCount.Should().Be(0);
+        seams.Registry.CallCount.Should().Be(0);
+        seams.RegistryClient.UpdateColumnsCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC2h_CustomerVaultMissing_PlatformVaultIntakeKeyDoesNotStandIn_FailsResumable()
+    {
+        // Intake "keyVaultName" is the Spaarke PLATFORM vault (a real, accepted key); it must never
+        // stand in for the customer vault H2a writes to InterStepState.KeyVaultName.
+        var run = BuildRun();
+        ClearInterStepStateValue(run, nameof(InterStepState.KeyVaultName));
+        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
+        var repo = new FakeRepository(run, etag: "etag-2h-platform-vault");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.MissingKeyVaultName);
+        seams.Traps.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC2i_StampNames_FlowFromInterStepState_ToProbesCostAndRegistryColumns()
+    {
+        var run = BuildRun();
+        // Intake carries the PLATFORM vault under "keyVaultName" and the container type id;
+        // InterStepState carries the CUSTOMER stamp names from H2a.
+        run.Parameters.NonSecret["keyVaultName"] = "platform-vault-from-intake";
+        run.Parameters.NonSecret["containerTypeId"] = "ct-from-intake";
+        var repo = new FakeRepository(run, etag: "etag-2i");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var trapRequest = seams.Traps.LastRequest!;
+        trapRequest.ResourceGroupName.Should().Be(ResourceGroupName);
+        trapRequest.AppServiceName.Should().Be(AppServiceName);
+        trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
+        seams.Cost.LastRequest!.ResourceGroupName.Should().Be(ResourceGroupName);
+
+        var columns = seams.RegistryClient.LastColumns!;
+        columns["sprk_resourcegroupname"].Should().Be(ResourceGroupName);
+        columns["sprk_appservicename"].Should().Be(AppServiceName);
+        columns["sprk_keyvaultname"].Should().Be(KeyVaultName);
+        columns["sprk_containertypeid"].Should().Be("ct-from-intake");
+    }
+
+    private static void ClearInterStepStateValue(ProvisioningRun run, string property)
+    {
+        switch (property)
+        {
+            case nameof(InterStepState.ResourceGroupName): run.InterStepState.ResourceGroupName = null; break;
+            case nameof(InterStepState.AppServiceName): run.InterStepState.AppServiceName = null; break;
+            case nameof(InterStepState.KeyVaultName): run.InterStepState.KeyVaultName = null; break;
+            default: throw new ArgumentOutOfRangeException(nameof(property), property, "Unknown InterStepState property.");
+        }
     }
 
     // ---------- AC-3 extended validate script Failure ----------
@@ -728,13 +823,14 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.SubscriptionIdParameterKey] = SubscriptionId;
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.BuildIdParameterKey] = BuildId;
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.BffApiUrlParameterKey] = BffApiUrl;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.ResourceGroupNameParameterKey] = ResourceGroupName;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.AppServiceNameParameterKey] = AppServiceName;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.KeyVaultNameParameterKey] = KeyVaultName;
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.RegistryDataverseUrlParameterKey] = RegistryDataverseUrl;
         run.InterStepState.DataverseEnvUrl = DataverseUrl;
         run.InterStepState.BffAppRegId = "bff-appreg-id";
         run.InterStepState.MiClientId = "uami-client-id";
+        // H2a outputs (task 245a, G25) — H13 reads these from InterStepState, not run parameters.
+        run.InterStepState.ResourceGroupName = ResourceGroupName;
+        run.InterStepState.AppServiceName = AppServiceName;
+        run.InterStepState.KeyVaultName = KeyVaultName;
         return run;
     }
 
@@ -889,9 +985,12 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             return new FakeTrapVerifier(new TrapCatalogVerificationResult(outcomes));
         }
 
+        public TrapVerificationRequest? LastRequest { get; private set; }
+
         public Task<TrapCatalogVerificationResult> VerifyAllAsync(TrapVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             if (_throws is not null) throw _throws;
             return Task.FromResult(_result);
         }
@@ -973,9 +1072,12 @@ public sealed class H13E2EAcceptanceGateHandlerTests
                 ExceedsAdvisoryThreshold: true, Summary: $"drift={drift:P0}")));
         public static FakeCostChecker Throws(Exception ex) => new(() => throw ex);
 
+        public CostEnvelopeRequest? LastRequest { get; private set; }
+
         public Task<CostEnvelopeReport> CheckAsync(CostEnvelopeRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return _check();
         }
     }

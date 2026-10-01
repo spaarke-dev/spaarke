@@ -421,11 +421,10 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     /// <summary>
     /// Maps the ARM deployment's raw <c>outputs</c> BinaryData (ARM output
     /// shape: <c>{ "key": { "type": "...", "value": ... } }</c>) onto
-    /// <see cref="BicepDeployOutputs"/>. Fields customer.bicep does not
-    /// currently produce (see file-header "BLOCKING DISCOVERY" note) map to
-    /// <see cref="string.Empty"/> — <see cref="H2aBicepInfraDeployHandler.AreOutputsComplete"/>
-    /// already treats blank as incomplete, so this is an honest signal, not
-    /// a fabricated value.
+    /// <see cref="BicepDeployOutputs"/>. An output the template did not emit
+    /// maps to <see cref="string.Empty"/> — H2a's <c>MissingOutputs</c> check
+    /// treats blank as incomplete and names the field, so this is an honest
+    /// signal, not a fabricated value.
     /// </summary>
     private static BicepDeployOutputs MapOutputs(BinaryData? outputsJson, string fallbackResourceGroupName)
     {
@@ -475,8 +474,31 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             OpenAiEndpoint = hasRoot ? ReadString(root, "openAiEndpoint") : string.Empty,
             AiSearchEndpoint = hasRoot ? ReadString(root, "aiSearchEndpoint") : string.Empty,
             CosmosEndpoint = hasRoot ? ReadString(root, "cosmosAccountEndpoint") : string.Empty,
+            KeyVaultName = hasRoot ? ReadString(root, "keyVaultName") : string.Empty,
+            KeyVaultUri = hasRoot ? ReadString(root, "keyVaultUri") : string.Empty,
+            ServiceBusFullyQualifiedNamespace = hasRoot
+                ? ServiceBusFullyQualifiedNamespaceFromEndpoint(ReadString(root, "serviceBusEndpoint"))
+                : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
+    }
+
+    /// <summary>
+    /// The fully-qualified namespace (<c>{ns}.servicebus.windows.net</c>) is the HOST of the
+    /// namespace's <c>serviceBusEndpoint</c> (<c>https://{ns}.servicebus.windows.net:443/</c>).
+    /// Parsed from the authoritative ARM value — never composed from the naming convention.
+    /// Blank or unparseable input returns <see cref="string.Empty"/>, which H2a reports as an
+    /// incomplete output.
+    /// </summary>
+    internal static string ServiceBusFullyQualifiedNamespaceFromEndpoint(string? serviceBusEndpoint)
+    {
+        if (string.IsNullOrWhiteSpace(serviceBusEndpoint)
+            || !Uri.TryCreate(serviceBusEndpoint.Trim(), UriKind.Absolute, out var uri)
+            || string.IsNullOrEmpty(uri.Host))
+        {
+            return string.Empty;
+        }
+        return uri.Host;
     }
 }
 

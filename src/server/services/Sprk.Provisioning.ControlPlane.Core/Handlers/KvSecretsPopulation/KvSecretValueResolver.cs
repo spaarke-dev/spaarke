@@ -191,6 +191,11 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                     "to read ARM deployment outputs directly (InterStepState is a locked enumerated POCO " +
                     "without a slot for this entry). See notes/task-126-deviations.md 'FromBicepOutput gap'.")),
             KvSecretValueSource.FromTopologyConstants => Task.FromResult(ResolveTopologyConstant(entry, request)),
+            KvSecretValueSource.FromIntakeParameter => Task.FromResult(ResolveIntakeParameter(entry, request)),
+            KvSecretValueSource.WrittenByEntraAppReg => Task.FromResult<KvSecretValueResolution>(
+                new KvSecretValueResolution.Failed(
+                    $"'{entry.CanonicalName}' is written by H3 (EntraAppReg), which runs after H4 — H4 must skip " +
+                    "value_source=written-by-h3 entries, never resolve them (task 245a).")),
             _ => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
                     $"Unrecognized KvSecretValueSource '{entry.ValueSource}' for '{entry.CanonicalName}'.")),
@@ -200,12 +205,12 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
     /// <summary>
     /// TOPOLOGY-CONSTANT branch (T226): the value is a Spaarke-wide constant the run
     /// carries as a non-secret parameter, projected by H4 into
-    /// <see cref="KvSecretWriteRequest.TopologyConstantValues"/>. Fails loudly when the
+    /// <see cref="KvSecretWriteRequest.IntakeValues"/>. Fails loudly when the
     /// run has none — never a blank or fabricated secret.
     /// </summary>
     private static KvSecretValueResolution ResolveTopologyConstant(KvSecretEntry entry, KvSecretWriteRequest request)
     {
-        if (request.TopologyConstantValues.TryGetValue(entry.CanonicalName, out var value)
+        if (request.IntakeValues.TryGetValue(entry.CanonicalName, out var value)
             && !string.IsNullOrWhiteSpace(value))
         {
             return new KvSecretValueResolution.Resolved(value);
@@ -217,6 +222,25 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
             "non-secret parameters (e.g. 'containerTypeId' for SPE-ContainerTypeId, set by the " +
             "/provision-environment intake from spaarke-constants.yaml). Run parameters are fixed at intake, " +
             "so populate the constant and start the run with it.");
+    }
+
+    /// <summary>
+    /// INTAKE-PARAMETER branch (task 245a): a non-secret intake value (e.g. TenantId ← intake
+    /// <c>tenantId</c>), projected by H4 into <see cref="KvSecretWriteRequest.IntakeValues"/>.
+    /// Fails loudly when absent — never a blank or fabricated value.
+    /// </summary>
+    private static KvSecretValueResolution ResolveIntakeParameter(KvSecretEntry entry, KvSecretWriteRequest request)
+    {
+        if (request.IntakeValues.TryGetValue(entry.CanonicalName, out var value)
+            && !string.IsNullOrWhiteSpace(value))
+        {
+            return new KvSecretValueResolution.Resolved(value);
+        }
+
+        return new KvSecretValueResolution.Failed(
+            $"value_source=from-intake-parameter on '{entry.CanonicalName}' but the run carries no intake value for it " +
+            "(H4KvSecretsPopulationHandler.IntakeValueParameterKeys names the intake key). Intake values are fixed at " +
+            "POST /api/runs — start the run with the value supplied.");
     }
 
     /// <summary>

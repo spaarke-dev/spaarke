@@ -64,11 +64,11 @@
 // RBAC is granted to L2's own UAMI directly — Model 2 customer-owned KV
 // cross-tenant reachability is an Azure Lighthouse subscription delegation,
 // per H1's SubscriptionReadinessProbe — NOT a per-call tenant-scoped
-// credential like the Graph calls above need). H3EntraAppRegHandler then
-// points RunParameters.Secrets at these SAME (vault, name) pairs so H4's
-// FromRunParameters resolver (task 126) can "copy" them — a harmless
-// self-referential re-write — per manifest.yaml's BFF-API-ClientId/Audience
-// exception_note (task 129 reclassification, owner E3).
+// credential like the Graph calls above need). These writes are the ONLY
+// source of BFF-API-ClientId / BFF-API-Audience: manifest.yaml labels them
+// `written-by-h3` and H4 (which runs BEFORE H3) skips them. H3 hands nothing
+// on through RunParameters.Secrets (task 245a, G25 — that hand-off was a
+// deadlock: H4 waited on refs H3 only wrote after H4).
 //
 // FIC RECIPE (auth-v4 §3.1; runs for BOTH tenancy models post-task-222 per
 // D-13 — every per-customer app-reg gets a FIC trusting the customer's BFF

@@ -12,6 +12,7 @@
 |---------|--------------|--------|
 | [manifest-driven-secret-catalog.md](manifest-driven-secret-catalog.md) | Adding a new provisioning handler that seeds KV secrets | Skeleton |
 | [handler-registration-completeness.md](handler-registration-completeness.md) | Adding a new `IProvisioningHandler` implementation | Skeleton |
+| [run-context-contract.md](run-context-contract.md) | A handler needs a value (intake, run identity, or another handler's output); `RunContextContractTests` fails | Current (T245a) |
 | [progressive-fail-fast-recovery.md](progressive-fail-fast-recovery.md) | Diagnosing BFF SIGABRT chain / IOptions ValidateOnStart cascades | Skeleton |
 | [operator-rbac-bootstrap.md](operator-rbac-bootstrap.md) | Fresh sub + fresh KV data-plane bootstrap (F15/F18 pattern) | Skeleton |
 | [keyvault-reference-identity-invariant.md](keyvault-reference-identity-invariant.md) | App Service KV ref binding correctness (T1 + F16/F16.5) | Skeleton |

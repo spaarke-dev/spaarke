@@ -39,7 +39,8 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
     private const string DataverseUrl = "https://sprk-acme.crm.dynamics.com";
     private const string BffAppRegId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
     private const string UamiClientId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-    private const string KeyVaultName = "sprk-acme-prod-kv";
+    private const string KeyVaultName = "sprk-acme-prod-kv";      // the CUSTOMER vault (T1/T5 input)
+    private const string SpeOwnerCertVault = "sprk-dev-kv";       // the Spaarke PLATFORM vault (T6 input)
     private const string AppServiceName = "sprk-bff-acme";
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
 
@@ -105,7 +106,7 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
         var infra = outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>().Subject;
         infra.Kind.Should().Be(TrapKind.T6SpeConfidentialClient);
         infra.Diagnostic.Should().Contain("SPE-OwnerCert-Pfx");
-        infra.Diagnostic.Should().Contain(KeyVaultName);
+        infra.Diagnostic.Should().Contain(SpeOwnerCertVault, "the diagnostic names the platform vault T6 read (task 245a)");
         infra.Diagnostic.Should().ContainAny("unreadable", "RequestFailedException");
         graphProbe.CallCount.Should().Be(0);
     }
@@ -235,15 +236,35 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
     }
 
     [Fact]
-    public async Task ProbeAsync_MissingKeyVaultName_Throws()
+    public async Task ProbeAsync_MissingSpeOwnerCertVault_ReturnsInfraFault_NoKvRead()
     {
-        var probe = BuildProbe(new FakeKvSecretGetHandler(base64PfxOrNull: null),
-            FakeT6GraphAppOnlyProbe.WithResult(T6GraphAppOnlyProbeResults.Succeeded));
+        // Task 245a: T6 reads the certificate from the Spaarke PLATFORM vault
+        // (SpeOwnerCertKeyVaultName), not the customer vault (KeyVaultName, used by T1/T5).
+        // An unknown platform vault is an infra fault the operator can fix, not a crash.
+        var kv = new FakeKvSecretGetHandler(base64PfxOrNull: null);
+        var probe = BuildProbe(kv, FakeT6GraphAppOnlyProbe.WithResult(T6GraphAppOnlyProbeResults.Succeeded));
 
-        var act = async () => await probe.ProbeAsync(
-            BuildRequest() with { KeyVaultName = string.Empty }, CancellationToken.None);
+        var outcome = await probe.ProbeAsync(
+            BuildRequest() with { SpeOwnerCertKeyVaultName = string.Empty }, CancellationToken.None);
 
-        await act.Should().ThrowAsync<ArgumentException>();
+        outcome.Should().BeOfType<TrapVerificationOutcome.InfraFault>()
+            .Which.Diagnostic.Should().Contain("SPE owner certificate");
+        kv.RequestedHosts.Should().BeEmpty("with no platform vault named, no vault is read at all");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ReadsCertificateFromSpeOwnerCertVault_NotTheCustomerVault()
+    {
+        using var sourceCert = CreateSelfSignedTestCertificate();
+        var base64Pfx = Convert.ToBase64String(sourceCert.Export(X509ContentType.Pfx));
+        var kv = new FakeKvSecretGetHandler(base64Pfx);
+        var probe = BuildProbe(kv, FakeT6GraphAppOnlyProbe.WithResult(T6GraphAppOnlyProbeResults.Succeeded));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Passed>();
+        kv.RequestedHosts.Should().OnlyContain(h => h.StartsWith(SpeOwnerCertVault + ".", StringComparison.OrdinalIgnoreCase),
+            "the owner certificate lives in the platform vault; the customer vault is T1/T5's input");
     }
 
     // ---------- INV-1 -- trap kind is always T6 ----------
@@ -292,7 +313,8 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
         UamiClientId: UamiClientId,
         KeyVaultName: KeyVaultName,
         AppServiceName: AppServiceName,
-        ResourceGroupName: ResourceGroupName);
+        ResourceGroupName: ResourceGroupName,
+        SpeOwnerCertKeyVaultName: SpeOwnerCertVault);
 
     private static T6SpeConfidentialClientTrapProbe BuildProbe(
         FakeKvSecretGetHandler kvHandler, IT6GraphAppOnlyProbe graphProbe)
@@ -339,8 +361,12 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
             _base64PfxOrNull = base64PfxOrNull;
         }
 
+        /// <summary>Vault hosts the probe read from (task 245a — proves which vault T6 uses).</summary>
+        public List<string> RequestedHosts { get; } = new();
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            RequestedHosts.Add(request.RequestUri!.Host);
             if (_base64PfxOrNull is null)
             {
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
@@ -354,7 +380,7 @@ public sealed class T6SpeConfidentialClientTrapProbeTests
             var body = System.Text.Json.JsonSerializer.Serialize(new
             {
                 value = _base64PfxOrNull,
-                id = $"https://{KeyVaultName}.vault.azure.net/secrets/{name}/v1",
+                id = $"https://{request.RequestUri!.Host}/secrets/{name}/v1",
                 attributes = new { enabled = true },
             });
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)

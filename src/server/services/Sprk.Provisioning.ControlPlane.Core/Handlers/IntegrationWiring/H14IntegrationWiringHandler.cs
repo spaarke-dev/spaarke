@@ -23,8 +23,9 @@
 //   rationale — 3 TRUE-parallel writers against the SAME ProvisioningRun
 //   ETag would race on every single invocation). This parent handler:
 //     1. Reads the run ONCE.
-//     2. Extracts + validates every shared input (tenantId, keyVaultName,
-//        InterStepState fields) BEFORE building any sub-envelope — a missing
+//     2. Extracts + validates every shared input (tenantId + other intake
+//        parameters, InterStepState fields incl. the customer keyVaultName)
+//        BEFORE building any sub-envelope — a missing
 //        upstream field fails the WHOLE H14 invocation Resumable (parity
 //        with every other H-series handler's upstream-guard posture) rather
 //        than partially dispatching.
@@ -58,11 +59,11 @@
 //   ┌────────────────────────────────────────────┬───────────────────────────┐
 //   │ Failure mode                               │ §4C class                 │
 //   ├────────────────────────────────────────────┼───────────────────────────┤
-//   │ Missing tenantId/keyVaultName/subscriptionId│ Resumable                 │
-//   │ /exchangePolicyScopeGroupId/                │                           │
+//   │ Missing tenantId/subscriptionId/            │ Resumable                 │
+//   │ exchangePolicyScopeGroupId/                 │                           │
 //   │ webhookNotificationBaseUrl (run params)     │                           │
-//   │ Missing bffAppRegId/miClientId/             │ Resumable (upstream       │
-//   │ dataverseEnvUrl (InterStepState)            │ handler hasn't run yet)   │
+//   │ Missing keyVaultName/bffAppRegId/           │ Resumable (upstream       │
+//   │ miClientId/dataverseEnvUrl (InterStepState) │ handler hasn't run yet)   │
 //   │ Run not found in Cosmos partition           │ Resumable                 │
 //   │ T4 drift (H14a)                             │ QuarantineRequired        │
 //   │ Graph subscription create/renew failure     │ RetryableWithCleanup      │
@@ -94,8 +95,10 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (H14b/H14c signing-key reads).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
+    // The customer Key Vault name (H14b/H14c read the HMAC signing key from it)
+    // is NOT a run parameter (task 245a, G25): H2a writes it to
+    // InterStepState.KeyVaultName. The intake key "keyVaultName" is the Spaarke
+    // PLATFORM vault (IntakeParameterCatalog), not the customer vault.
 
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4; KV read scoping).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
@@ -228,10 +231,14 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 "Run parameter 'tenantId' is required by H14 (§4D I1 no-hardcoded-tenant).", cancellationToken)
                 .ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // The CUSTOMER vault is an H2a output (task 245a, G25) — read from
+        // InterStepState, never from the intake "keyVaultName" (platform vault).
+        var keyVaultName = run.InterStepState.KeyVaultName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingKeyVaultName,
-                "Run parameter 'keyVaultName' is required by H14 (H14b/H14c read the HMAC signing key from this vault).",
+                "InterStepState.keyVaultName (the CUSTOMER Key Vault) is not populated — H2a (Bicep infra deploy) " +
+                "produces it and must complete before H14 (H14b/H14c read the HMAC signing key from this vault).",
                 cancellationToken).ConfigureAwait(false);
         }
         if (!TryGetNonEmpty(parameters, SubscriptionIdParameterKey, out var subscriptionId))
