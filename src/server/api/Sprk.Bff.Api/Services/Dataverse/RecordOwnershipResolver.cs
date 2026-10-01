@@ -55,6 +55,11 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// back to app-only ownership is exactly the defect this type exists to remove, and a silent fallback would
 /// reintroduce it invisibly — a record that looks created but is unreachable by the person who created it.
 /// </para>
+/// <para>
+/// <b>An answer versus a fault.</b> <c>null</c> means the data says there is no team (a missing or unowned
+/// target, no such user, an ambiguous user, no single default team). A Dataverse fault is NOT that answer and
+/// PROPAGATES — a throttled read must not become a permanent refusal telling the user to fix their setup.
+/// </para>
 /// </remarks>
 public interface IRecordOwnershipResolver
 {
@@ -131,10 +136,12 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private const int OwnerTeamType = 0;
 
-    private readonly IDataverseService _dataverse;
+    // Read-only by construction: the narrowest seam that answers the three queries below — the same one
+    // RecordContainerResolver reads the same facts through. DI hands out the one app-only IDataverseService behind it.
+    private readonly IGenericEntityService _dataverse;
     private readonly ILogger<RecordOwnershipResolver> _logger;
 
-    public RecordOwnershipResolver(IDataverseService dataverse, ILogger<RecordOwnershipResolver> logger)
+    public RecordOwnershipResolver(IGenericEntityService dataverse, ILogger<RecordOwnershipResolver> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -151,7 +158,8 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         if (context.HasTarget)
         {
             var fromTarget = await ResolveFromTargetRecordAsync(
-                context.TargetEntityLogicalName!, context.TargetRecordId!.Value, ct).ConfigureAwait(false);
+                ToTargetLogicalName(context.TargetEntityLogicalName!), context.TargetRecordId!.Value, ct)
+                .ConfigureAwait(false);
 
             if (fromTarget is not null)
             {
@@ -214,46 +222,48 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     }
 
     /// <summary>
+    /// A target type in either spelling a caller may hold. LOAD-BEARING for every filed Office save: the save
+    /// endpoint accepts only the FRIENDLY form (<c>matter</c>, <c>project</c>, …), and so does the queued job's
+    /// <c>AssociationType</c> — reading <c>matter</c> as an entity would fail. The alias table is
+    /// <see cref="DocumentAssociationMap"/>'s, not a copy (the container resolver's call site uses the same one,
+    /// GitHub #1038). A name outside it (a To Do's <c>sprk_document</c> / <c>sprk_communication</c> carrier, or a
+    /// To Do regarding's <c>sprk_matter</c>) is already logical and passes through.
+    /// </summary>
+    internal static string ToTargetLogicalName(string entityTypeOrAlias) =>
+        DocumentAssociationMap.ToLogicalName(entityTypeOrAlias) ?? entityTypeOrAlias.Trim().ToLowerInvariant();
+
+    /// <summary>
     /// Reads the target record's <c>owningbusinessunit</c> and returns that business unit's default owner
     /// team. Works whether the target is itself user-owned or team-owned, because the BU is derived either way.
     /// </summary>
     private async Task<Guid?> ResolveFromTargetRecordAsync(
         string entityLogicalName, Guid recordId, CancellationToken ct)
     {
-        try
+        // A missing row, or one with no owning business unit, is an ANSWER — "there is no team" — and the caller
+        // refuses (never falls back to the acting user; see ResolveOwningTeamAsync). A Dataverse FAULT is not an
+        // answer: it propagates, so a throttled or timed-out read surfaces as the caller's retryable 5xx instead of
+        // a permanent 403 that tells the user to check the record.
+        var query = new QueryExpression(entityLogicalName)
         {
-            var query = new QueryExpression(entityLogicalName)
-            {
-                ColumnSet = new ColumnSet(OwningBusinessUnitColumn),
-                TopCount = 1,
-                NoLock = true
-            };
-            query.Criteria.AddCondition($"{entityLogicalName}id", ConditionOperator.Equal, recordId);
+            ColumnSet = new ColumnSet(OwningBusinessUnitColumn),
+            TopCount = 1,
+            NoLock = true
+        };
+        query.Criteria.AddCondition($"{entityLogicalName}id", ConditionOperator.Equal, recordId);
 
-            var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var businessUnitId = results.Entities.FirstOrDefault()
-                ?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+        var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var businessUnitId = results.Entities.FirstOrDefault()
+            ?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
 
-            if (businessUnitId is null || businessUnitId == Guid.Empty)
-            {
-                return null;
-            }
-
-            return await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
+        if (businessUnitId is null || businessUnitId == Guid.Empty)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Not fatal — the caller falls back to the acting user. Logged so a systematically unreadable
-            // target (a wrong logical name, a missing primary-key column) is visible rather than silent.
-            _logger.LogWarning(ex,
-                "Could not read owningbusinessunit from target {EntityLogicalName} {RecordId}.",
+            _logger.LogWarning(
+                "Target {EntityLogicalName} {RecordId} does not exist or has no owning business unit.",
                 entityLogicalName, recordId);
             return null;
         }
+
+        return await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -262,44 +272,43 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private async Task<Guid?> ResolveFromUserAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
     {
-        try
+        // TOP 2, not TOP 1 — the same contract RecordContainerResolver.ResolveForActingUserAsync keeps for the
+        // same fact. One row is the answer; two mean the key maps to more than one Dataverse user and the
+        // business unit is AMBIGUOUS. TOP 1 would silently pick a winner, so this component and the
+        // container resolver could put one save's bytes and its row in different business units.
+        var userQuery = new QueryExpression(SystemUserEntity)
         {
-            var userQuery = new QueryExpression(SystemUserEntity)
-            {
-                ColumnSet = new ColumnSet(BusinessUnitColumn),
-                TopCount = 1,
-                NoLock = true
-            };
-            userQuery.Criteria.AddCondition(userKeyColumn, ConditionOperator.Equal, userKey);
+            ColumnSet = new ColumnSet(BusinessUnitColumn),
+            TopCount = 2,
+            NoLock = true
+        };
+        userQuery.Criteria.AddCondition(userKeyColumn, ConditionOperator.Equal, userKey);
 
-            var users = await _dataverse.RetrieveMultipleAsync(userQuery, ct).ConfigureAwait(false);
-            var businessUnitId = users.Entities.FirstOrDefault()
-                ?.GetAttributeValue<EntityReference>(BusinessUnitColumn)?.Id;
-
-            if (businessUnitId is null || businessUnitId == Guid.Empty)
-            {
-                _logger.LogWarning(
-                    "Cannot resolve an owning team: no systemuser with {UserKeyColumn}={UserKey}, or that user "
-                    + "has no business unit.",
-                    userKeyColumn, userKey);
-                return null;
-            }
-
-            return await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
+        var users = await _dataverse.RetrieveMultipleAsync(userQuery, ct).ConfigureAwait(false);
+        if (users.Entities.Count > 1)
         {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            // Fail-closed, never fail-open-to-app-ownership: an unresolved team is a refusal upstream.
-            _logger.LogWarning(ex,
-                "Owning-team lookup failed for caller {UserKeyColumn}={UserKey}; the record must be refused "
-                + "rather than created app-owned.",
+            _logger.LogError(
+                "Cannot resolve an owning team: {UserKeyColumn}={UserKey} matches more than one Dataverse "
+                + "user, so the business unit is ambiguous. Refusing rather than choosing one.",
                 userKeyColumn, userKey);
             return null;
         }
+
+        var businessUnitId = users.Entities.FirstOrDefault()
+            ?.GetAttributeValue<EntityReference>(BusinessUnitColumn)?.Id;
+
+        if (businessUnitId is null || businessUnitId == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "Cannot resolve an owning team: no systemuser with {UserKeyColumn}={UserKey}, or that user "
+                + "has no business unit.",
+                userKeyColumn, userKey);
+            return null;
+        }
+
+        // As for the target read: "no such user" / "no business unit" is an answer (refuse); a Dataverse
+        // fault propagates as the caller's retryable 5xx, never as a refusal that blames the user's setup.
+        return await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -307,10 +316,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private async Task<Guid?> ResolveDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
     {
+        // TOP 2 for the same reason as the user lookup. Dataverse keeps exactly one default team per business
+        // unit, so a second row means the two predicates are not selecting what they claim to — refuse rather
+        // than own the record by whichever row came back first.
         var teamQuery = new QueryExpression(TeamEntity)
         {
             ColumnSet = new ColumnSet("teamid"),
-            TopCount = 1,
+            TopCount = 2,
             NoLock = true
         };
         teamQuery.Criteria.AddCondition(BusinessUnitColumn, ConditionOperator.Equal, businessUnitId);
@@ -318,6 +330,15 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         teamQuery.Criteria.AddCondition("teamtype", ConditionOperator.Equal, OwnerTeamType);
 
         var teams = await _dataverse.RetrieveMultipleAsync(teamQuery, ct).ConfigureAwait(false);
+        if (teams.Entities.Count > 1)
+        {
+            _logger.LogError(
+                "Business unit {BusinessUnitId} returned more than one default owner team "
+                + "(isdefault = true AND teamtype = {OwnerTeamType}). Refusing rather than choosing one.",
+                businessUnitId, OwnerTeamType);
+            return null;
+        }
+
         var teamId = teams.Entities.FirstOrDefault()?.Id;
 
         if (teamId is null || teamId == Guid.Empty)

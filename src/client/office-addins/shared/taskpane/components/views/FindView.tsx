@@ -16,6 +16,7 @@ import { apiClient, ApiClientError, authService } from '@shared/services';
 import { cleanGuid } from '../../utils/cleanGuid';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { useDocumentProfile } from '../../hooks/useDocumentProfile';
+import { deriveRecordSearchSeed, useFindRecordMatches } from '../../hooks/useFindRecordMatches';
 import type { DocumentIdentityState } from '../../services/documentIdentityService';
 import { FindResultsList, type FindResultNode } from '../FindResultsList';
 
@@ -32,7 +33,7 @@ import { FindResultsList, type FindResultNode } from '../FindResultsList';
  * |---|---|
  * | No `sprk_document` | "Save this document to Spaarke…" + a control that switches to Save |
  * | Resolved, not indexed (`sprk_searchindexed` false or null — not distinguished) | "This document isn't indexed yet." + Run Index |
- * | Resolved, indexed (`sprk_searchindexed` true) | A minimal results container (task 034 fills it in) |
+ * | Resolved, indexed (`sprk_searchindexed` true) | Similar documents (task 034) and matching records (task 077) |
  *
  * **The identity outcomes task 013 can produce are richer than "exists or not".**
  * `documentIdentityService.resolveDocumentIdentity` returns one of `resolved` / `new` / `conflict` /
@@ -80,26 +81,59 @@ export type FindState =
  *
  * `documentIdentity === undefined` means identity resolution does not apply on this host (Outlook —
  * `hostAdapter.getCapabilities().canGetDocumentUrl` is always false there; see
- * `documentIdentityService.ts` and `App.tsx`'s `DocumentIdentityState` doc). There is currently no
- * Outlook-side equivalent of task 013's URL-based resolution, so this is treated the SAME as `'new'`
- * — consistent with `SaveModeSection.resolveSaveMode`'s `identity === undefined → view: 'none'`
- * (defaults to "we don't know of an existing record"), and an honest default: Find cannot show
- * similarity results for a document it has no id for. See
- * `projects/spaarkeai-word-add-in-r1/notes/033-find-view-index-gating-decisions.md` for the full
- * reasoning and the known gap this inherits (no client flow threads a just-completed save's
- * documentId back into `App.savedContext` for either host today — pre-existing, not introduced here).
+ * `documentIdentityService.ts` and `App.tsx`'s `DocumentIdentityState` doc). There is no Outlook-side
+ * equivalent of task 013's URL-based resolution, so on its own it is treated the SAME as `'new'` —
+ * consistent with `SaveModeSection.resolveSaveMode`'s `identity === undefined → view: 'none'`
+ * (defaults to "we don't know of an existing record"). See
+ * `projects/spaarkeai-word-add-in-r1/notes/033-find-view-index-gating-decisions.md` for that reasoning.
+ *
+ * ⚠️ **Task 077 CLOSED the gap task 033 recorded here.** This comment used to state that "no client
+ * flow threads a just-completed save's documentId back into `App.savedContext` for either host today".
+ * That was true when task 033 was written and **task 036 / FR-15 made it false**: `SaveView.onComplete`
+ * (`App.tsx`) now writes `savedContext.documentId` on BOTH hosts. So `undefined`/`new` is only the
+ * save-prompt state when NO save has completed either — see the `savedDocumentId` parameter below.
+ * Left as a corrected note rather than deleted, so a reader who remembers the old limitation can see
+ * that it was closed rather than overlooked.
  */
 export function resolveFindState(
   documentIdentity: DocumentIdentityState | undefined,
   searchIndexed: boolean | null | undefined,
-  indexStatusErrorMessage: string | undefined
+  indexStatusErrorMessage: string | undefined,
+  savedDocumentId?: string | undefined
 ): FindState {
   if (documentIdentity === 'checking') {
     return { kind: 'checking' };
   }
 
+  // Task 077 gaps (b) + (c). `undefined` (identity does not apply — Outlook) and `new` (no existing
+  // record was found) are the two outcomes that mean "we do not know of a `sprk_document` for this
+  // item". A COMPLETED SAVE answers exactly that question, so when one has handed us an id, use it
+  // rather than showing the save prompt for a document that is already saved.
+  //
+  // This fixes BOTH gaps with one branch, which is why they are one change:
+  //   (c) Word — a document saved during this pane session becomes findable without reopening.
+  //   (b) Outlook — `canGetDocumentUrl` is always false there (an email has no document URL), so
+  //       `documentIdentity` is permanently `undefined` and the Find tab could NEVER leave state 1.
+  //       A completed save is the only place Outlook ever learns a documentId, so this is the only
+  //       thing that makes its Find tab reachable at all. No Graph call, no manifest change.
+  //
+  // Deliberately NOT applied to `conflict` / `indeterminate` / `denied` / `error`: those are honest
+  // refusals reporting that something is WRONG with identity resolution, and papering over them with
+  // a save id would hide a real defect. Only the two "we don't know" outcomes are overridden — the
+  // same principle as this view's existing rule that none of those four is ever treated as `new`.
   if (documentIdentity === undefined || documentIdentity.kind === 'new') {
-    return { kind: 'no-document' };
+    if (savedDocumentId === undefined) {
+      return { kind: 'no-document' };
+    }
+    if (indexStatusErrorMessage) {
+      return { kind: 'index-status-error', message: indexStatusErrorMessage };
+    }
+    if (searchIndexed === undefined) {
+      return { kind: 'loading-index-status' };
+    }
+    return searchIndexed
+      ? { kind: 'indexed', documentId: savedDocumentId }
+      : { kind: 'not-indexed', documentId: savedDocumentId };
   }
 
   switch (documentIdentity.kind) {
@@ -126,12 +160,19 @@ export function resolveFindState(
   }
 }
 
-function announceMessageFor(state: FindState): string {
+/**
+ * The noun for the pane's item. Only the states Outlook can reach use it — `checking`, `conflict`,
+ * `indeterminate`, `denied` and `error` arise solely from Word's URL-based identity resolution, where
+ * "document" is exactly right.
+ */
+export type FindItemNoun = 'document' | 'email';
+
+function announceMessageFor(state: FindState, noun: FindItemNoun): string {
   switch (state.kind) {
     case 'checking':
       return 'Checking whether this document is in Spaarke…';
     case 'no-document':
-      return 'This document is not yet saved to Spaarke.';
+      return `This ${noun} is not yet saved to Spaarke.`;
     case 'identity-conflict':
       return 'This document has a conflicting Spaarke record and cannot be checked for indexing.';
     case 'identity-indeterminate':
@@ -141,13 +182,13 @@ function announceMessageFor(state: FindState): string {
     case 'identity-error':
       return 'Something went wrong checking this document.';
     case 'loading-index-status':
-      return 'Checking this document’s indexing status…';
+      return `Checking this ${noun}’s indexing status…`;
     case 'index-status-error':
-      return "Couldn't check this document's indexing status.";
+      return `Couldn't check this ${noun}'s indexing status.`;
     case 'not-indexed':
-      return 'This document is not indexed yet.';
+      return `This ${noun} is not indexed yet.`;
     case 'indexed':
-      return 'This document is indexed. Loading similar documents.';
+      return `This ${noun} is indexed. Loading similar documents and matching records.`;
   }
 }
 
@@ -252,20 +293,43 @@ export interface FindViewProps {
    * apply for this host (Outlook) — see `resolveFindState`'s remarks.
    */
   documentIdentity?: DocumentIdentityState;
+  /**
+   * The documentId a COMPLETED SAVE produced this session (`App.savedContext.documentId`), used as an
+   * identity source of last resort — see `resolveFindState`. Task 077 gaps (b) + (c).
+   *
+   * The producer is `SaveView.onComplete` in `App.tsx`, which fires on BOTH hosts (task 036 / FR-15).
+   * For Outlook this is the ONLY source of a documentId that exists.
+   */
+  savedDocumentId?: string;
   /** Re-runs identity resolution ("Try again" / "Check again"). Omitted → no retry control. */
   onRetryDocumentIdentity?: () => void;
   /** Switches the pane to the Save tab. Omitted → no control shown in the save-prompt state. */
   onGoToSave?: () => void;
+  /**
+   * Task 077: what the pane's item is called in copy — `email` in Outlook, `document` in Word. `App`
+   * derives it from the `canGetSender` CAPABILITY (an item with a sender is an email), not from
+   * `hostType`, per NFR-10. Defaults to `document`.
+   */
+  itemNoun?: FindItemNoun;
 }
 
-export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDocumentIdentity, onGoToSave }) => {
+export const FindView: React.FC<FindViewProps> = ({
+  documentIdentity,
+  savedDocumentId,
+  onRetryDocumentIdentity,
+  onGoToSave,
+  itemNoun = 'document',
+}) => {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
 
+  // Identity resolution wins when it produced a record; a completed save is the fallback. Both feed
+  // the SAME `useDocumentProfile` read, so the index-status states work identically however the id
+  // was learned — which is what makes Outlook's Find tab reachable at all.
   const resolvedDocumentId =
     documentIdentity !== undefined && documentIdentity !== 'checking' && documentIdentity.kind === 'resolved'
       ? documentIdentity.documentId
-      : undefined;
+      : savedDocumentId;
 
   const {
     outcome: profileOutcome,
@@ -275,7 +339,13 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
 
   const indexStatusErrorMessage = profileOutcome.kind === 'error' ? profileOutcome.message : undefined;
 
-  const state = resolveFindState(documentIdentity, searchIndexed, indexStatusErrorMessage);
+  const state = resolveFindState(documentIdentity, searchIndexed, indexStatusErrorMessage, savedDocumentId);
+
+  // Task 077 gap (a) — the records half. Seeded from THIS document's AI profile (keywords → TL;DR →
+  // summary), read by the same `useDocumentProfile` call above — no second read. Only in the `indexed`
+  // state, where results render; `null` seed issues no request.
+  const recordSeed = state.kind === 'indexed' ? deriveRecordSearchSeed(profileOutcome) : null;
+  const recordMatches = useFindRecordMatches(recordSeed);
 
   // NFR-11: announce every state transition (not the initial mount — mirrors useAnnounceOnChange).
   const prevKindRef = useRef<FindState['kind']>(state.kind);
@@ -284,8 +354,10 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
       return;
     }
     prevKindRef.current = state.kind;
-    announce(announceMessageFor(state), 'polite');
-  }, [state, announce]);
+    announce(announceMessageFor(state, itemNoun), 'polite');
+    // `itemNoun` is listed for correctness; it cannot cause a duplicate announcement, because the guard
+    // above only announces when `state.kind` changes.
+  }, [state, announce, itemNoun]);
 
   // ── Run Index ──────────────────────────────────────────────────────────────────────────────
   const [runIndexStatus, setRunIndexStatus] = useState<'idle' | 'running'>('idle');
@@ -397,7 +469,7 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
           {liveRegion}
           <div className={styles.loadingContainer}>
             <Spinner size="medium" />
-            <Text>Checking whether this document is in Spaarke…</Text>
+            <Text>Checking whether this {itemNoun} is in Spaarke…</Text>
           </div>
         </div>
       );
@@ -408,8 +480,11 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
           {liveRegion}
           <div className={styles.emptyState}>
             <DocumentSearchRegular className={styles.icon} />
-            <Text weight="semibold">Save this document to Spaarke</Text>
-            <Body1>Save this document to Spaarke so it can be indexed for AI similarity search.</Body1>
+            <Text weight="semibold">Save this {itemNoun} to Spaarke</Text>
+            <Body1>
+              Save this {itemNoun} to Spaarke so it can be indexed for AI similarity search. Once it&rsquo;s saved, Find
+              shows similar documents and matching records here.
+            </Body1>
             {onGoToSave && (
               <Button appearance="primary" onClick={onGoToSave}>
                 Go to Save
@@ -504,7 +579,7 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
           {liveRegion}
           <MessageBar intent="error" layout="multiline">
             <MessageBarBody>
-              <MessageBarTitle>Couldn&rsquo;t check this document&rsquo;s indexing status</MessageBarTitle>
+              <MessageBarTitle>Couldn&rsquo;t check this {itemNoun}&rsquo;s indexing status</MessageBarTitle>
               {state.message}
             </MessageBarBody>
             <MessageBarActions>
@@ -521,9 +596,9 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
         <div className={styles.container}>
           {liveRegion}
           <div className={styles.section}>
-            <Text weight="semibold">This document isn&rsquo;t indexed yet.</Text>
+            <Text weight="semibold">This {itemNoun} isn&rsquo;t indexed yet.</Text>
             <Body1>
-              Index this document to find documents similar to it. This uses the AI similarity search this document
+              Index this {itemNoun} to find documents similar to it. This uses the AI similarity search this {itemNoun}{' '}
               belongs to.
             </Body1>
             <Button
@@ -574,7 +649,7 @@ export const FindView: React.FC<FindViewProps> = ({ documentIdentity, onRetryDoc
                   </MessageBarBody>
                 </MessageBar>
               )}
-              <FindResultsList nodes={relatedState.nodes} announce={announce} />
+              <FindResultsList nodes={relatedState.nodes} announce={announce} records={recordMatches} />
             </div>
           )}
         </div>

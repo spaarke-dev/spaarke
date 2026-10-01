@@ -71,6 +71,21 @@ jobs:
           # point at. Unset, the pane hides the Open buttons rather than showing ones that do nothing.
           ORG_URL: https://spaarkedev1.crm.dynamics.com
 
+      # Task 078 (FR-05): the combined Outlook + Word unified app package. The build above emits its parts into
+      # dist/spaarke/; this zips them for the Microsoft 365 admin center (Integrated apps -> Upload custom apps ->
+      # App type "Teams app") and fails the run on a wrong-size icon. The zips are written OUTSIDE dist/ so the
+      # static site does not publish them; download them from this run's artifacts.
+      - name: Package unified add-in (Outlook + Word)
+        shell: pwsh
+        run: ./scripts/Package-OfficeAddinUnified.ps1
+
+      - name: Upload unified add-in packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: spaarke-addin-unified-package
+          path: src/client/office-addins/app-package/*.zip
+          if-no-files-found: error
+
       - name: Deploy to Azure Static Web App
         uses: Azure/static-web-apps-deploy@v1
         with:

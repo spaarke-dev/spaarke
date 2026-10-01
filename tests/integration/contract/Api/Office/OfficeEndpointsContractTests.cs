@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.Services.Compose;
 using Sprk.Bff.Api.Tests.Shared.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
@@ -633,6 +634,13 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 /// </summary>
 public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// Task 080: the owner-team resolver every Office create consults. Registered in place of the real one (which
+    /// would read the doubled <see cref="IDataverseService"/>, get nothing back, and correctly refuse every create).
+    /// Tests about ownership set <see cref="RecordOwnershipResolverDouble.TeamId"/> and read its requests.
+    /// </summary>
+    public RecordOwnershipResolverDouble Ownership { get; } = new();
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.ConfigureHostConfiguration(config =>
@@ -742,6 +750,9 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
         {
             // Test hosts must not authenticate for real — see TestTokenCredential.
             services.UseStubTokenCredential();
+
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
 
             // Add test authentication
             services.AddAuthentication("Test")
@@ -1376,6 +1387,26 @@ public sealed class OfficeVersionSaveWorld
     /// </summary>
     public List<string?> CreatedDocumentDescriptions { get; } = new();
 
+    /// <summary>
+    /// The <c>ownerid</c> team each <c>CreateDocumentAsync</c> was given, in order (task 080). <c>null</c> would mean an
+    /// app-owned row in the ROOT business unit — the defect task 080 removes — so no Office create should record one.
+    /// </summary>
+    public List<Guid?> CreatedDocumentOwningTeams { get; } = new();
+
+    /// <summary>
+    /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
+    /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
+    /// factory's <see cref="ISecurableEntityRegistry"/> double reports those LOGICAL names securable — and only the
+    /// logical names, as the production registry does — so a writer that passes a friendly name ("project") is seen
+    /// to miss the secure branch.
+    /// </summary>
+    public Dictionary<(string Entity, Guid Id), string> SecureRecords { get; } = new();
+
+    internal Microsoft.Xrm.Sdk.Entity? RetrieveRecord(string entity, Guid id) =>
+        SecureRecords.TryGetValue((entity, id), out var container)
+            ? new Microsoft.Xrm.Sdk.Entity(entity, id) { ["sprk_issecure"] = true, ["sprk_containerid"] = container }
+            : null;
+
     internal string CreateDocument(CreateDocumentRequest request)
     {
         lock (_gate)
@@ -1389,6 +1420,7 @@ public sealed class OfficeVersionSaveWorld
             DocumentCreates++;
             CreatedDocumentNames.Add(request.Name);
             CreatedDocumentDescriptions.Add(request.Description);
+            CreatedDocumentOwningTeams.Add(request.OwningTeamId);
             // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
             // document-create path now supplies one so the row's id matches the id stamped into the bytes it
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare
@@ -1964,8 +1996,24 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => world.RetrieveMultiple(query));
+            // Task 080 review (F1): the secure-record read RecordContainerResolver makes. Null for anything the world
+            // has not registered as secure — the loose mock's previous answer, so no other test changes.
+            dataverse
+                .Setup(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => world.RetrieveRecord(entity, id)!);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverse.Object);
+
+            var securable = new Mock<ISecurableEntityRegistry>();
+            securable
+                .Setup(r => r.IsSecurableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) =>
+                    world.SecureRecords.Keys.Any(k => k.Entity == name.Trim().ToLowerInvariant()));
+            securable
+                .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => world.SecureRecords.Keys.Select(k => k.Entity).ToHashSet(StringComparer.OrdinalIgnoreCase));
+            services.RemoveAll<ISecurableEntityRegistry>();
+            services.AddSingleton(securable.Object);
 
             // Task 025: the collision-target lookup (OfficeDocumentPersistence.FindDocumentIdByLocationAsync)
             // reads through IGenericEntityService, not IDataverseService — but per GraphModule.cs,

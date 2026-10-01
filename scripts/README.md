@@ -555,6 +555,24 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 
 ## Release & Deployment Orchestration
 
+### `Package-OfficeAddinUnified.ps1`
+**Purpose:** Zips the combined Outlook + Word Spaarke add-in — ONE Microsoft 365 unified-manifest app (schema 1.30) — into the two packages the admin center accepts: `spaarke-addin-<ver>.zip` (production; hides the live XML add-ins on clients that can run it) and `spaarke-addin-<ver>-TEST.zip` (own id, "(TEST)" name, hides nothing). Reads the parts webpack's `SpaarkeUnifiedPackagePlugin` emits into `src/client/office-addins/dist/spaarke/`; writes OUTSIDE `dist/` so the public site does not serve them. **Fails (exit 1)** if the build output is missing or the icons are not 192×192 (color) / 32×32 (outline).
+**Usage:** 🟢 Active - every add-in release (run by `deploy-office-addins.yml`, which uploads the zips as the artifact `spaarke-addin-unified-package`)
+**Lifecycle:** ✅ Maintained
+**Dependencies:** PowerShell 7 (`pwsh`), a prior `npm run build` in `src/client/office-addins`
+**Owner:** spaarkeai-word-add-in-r1 (task 078)
+**Last Used:** September 2026
+
+**When to Use:**
+- Producing the admin-center upload for the unified Spaarke add-in (Integrated apps → Upload custom apps → App type "Teams app")
+- Rollout and cutover steps: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md` §6
+
+**Command:**
+```powershell
+# After `npm run build` in src/client/office-addins:
+.\scripts\Package-OfficeAddinUnified.ps1
+```
+
 ### `Deploy-Release.ps1`
 **Purpose:** Master release orchestrator — deploys the full Spaarke platform to one or more environments. Runs a 7-phase pipeline: pre-flight checks, client build, BFF API deployment, Dataverse solution import, web resource deployment, post-deploy validation, and git release tagging. Environments are processed sequentially; each phase delegates to existing deployment scripts.
 **Usage:** 🟢 Active - Production and demo releases
@@ -1038,6 +1056,62 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Safety model:** dry-run default (`-WhatIf` also forces preview even combined with `-Apply`); idempotent (compares the derived value against the row's current value, not just null-vs-populated); a disagreeing existing stamp is reported as a `Conflict` and never overwritten; an escalation gate (>50,000 total candidates, or any entity >20% unresolvable) blocks `-Apply` until `-AcknowledgeEscalation` is passed. Full detail: `Get-Help .\Backfill-CoreAncestorStamps.ps1 -Full` and [`projects/unified-access-control-r2/notes/phase3-backfill-runbook.md`](../projects/unified-access-control-r2/notes/phase3-backfill-runbook.md).
 
+### `Backfill-RecordOwnership.ps1`
+**Purpose:** Re-owns EXISTING **app-owned** `sprk_document` / `sprk_todo` rows to a business unit's DEFAULT OWNER TEAM, record-first — the backfill for write-path invariant **I-6**. Before task 080 every BFF-created record was owned by the BFF application user in the ROOT business unit, which no child-business-unit user can read at Deep depth. The team comes from the record the row is filed against (document: `sprk_matter` → `sprk_project` → `sprk_invoice` → `sprk_workassignment`; To Do: record regarding → document → communication), mirroring `RecordOwnershipResolver`. Rows filed against nothing are **reported, never written** — the create was app-only, so the data does not record who made it ("we can't guess").
+**Usage:** 🔴 One-time (per environment); idempotent — re-owned rows are no longer candidates.
+**Lifecycle:** ✅ Maintained (added 2026-09-30 by `spaarkeai-word-add-in-r1` task 080)
+**Dependencies:** Azure CLI (`az login`) with access to the environment, PowerShell 7+
+**Owner:** `spaarkeai-word-add-in-r1`
+**Last Used:** 2026-09-30 — **dry run only** against `spaarkedev1` (407 app-owned documents: 31 would re-own, 376 unfiled; 10 To Dos: all 10 would re-own). **No `-Apply` has been run** — that is the operator's call.
+
+**When to Use:**
+- Once per environment after task 080's writers ship, to fix rows created before them.
+- After a `sprk_document` run, run again for `sprk_todo`, so To Dos filed to a document follow that document's new business unit.
+
+**Command:**
+```powershell
+# Dry run (default) — zero writes; the plan per row + totals in the log. Always run first.
+.\Backfill-RecordOwnership.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# SAMPLE — re-own five rows (each read back), then check them in the app as a child-BU user.
+.\Backfill-RecordOwnership.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply -MaxWritesPerRun 5
+
+# Undo a run exactly, from the manifest it printed.
+.\Backfill-RecordOwnership.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -RevertManifest .\logs\record-ownership-manifest-<stamp>.csv -Apply
+```
+
+**Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
+
+### `Set-SecureRecordOwnerRolePrivileges.ps1`
+**Purpose:** Gives the `Secure Record Owner` role `Read` at User (Basic) depth on every table in [`config/secure-record-owner-role.json`](../config/secure-record-owner-role.json). Without it, Dataverse refuses the Secure Record team as the OWNER of a row ("Read Privilege Check For Owner failed … missing prvRead…"). Write-path invariant I-6 assigns a secure record's children (documents, To Dos, …) to that team, so the role must cover child tables as well as the three `sprk_issecure` roots. The JSON file is the ONE list, also read by the setup guide and by `unified-access-control-r2`'s NFR-05 census.
+**Usage:** 🟡 Per environment, at secure-record setup and whenever the JSON gains a table; `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-09-30 by `spaarkeai-word-add-in-r1` task 082)
+**Dependencies:** Azure CLI (`az login`) with System Administrator in the environment, PowerShell 7+
+**Owner:** `spaarkeai-word-add-in-r1` (the JSON file is extended by `unified-access-control-r2` task 146 too)
+**Last Used:** 2026-09-30, `-Apply` against `spaarkedev1`: added todo, communication, event and memo Read (36 → 40, 0 removed); `-Verify` PASS.
+
+**Command:**
+```powershell
+# Dry run (default): present / missing / "outside the file" (reported, never removed). Zero writes.
+.\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Add the missing Read privileges at Basic, then read the role back.
+.\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+
+# Check: exit 0 = the role covers every table in the file; exit 1 names each gap.
+.\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
+```
+
+**Safety model:**
+- Adds only. It never removes or re-depths a privilege; removal is an owner decision (setup guide §5.4).
+- Refuses any config asking for other than Read at Basic.
+- Resolves the business unit and the role to exactly one each.
+- Takes privilege ids from entity metadata and refuses a name mismatch.
+- Reads every addition back, and names any privilege the platform injected unasked.
+- Dataverse caches principal privileges, so re-probe an assignment until it is stable across 3 polls (setup guide §7).
+
+Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
+
 ---
 
 ## Testing & Validation Scripts
@@ -1492,3 +1566,4 @@ Most scripts require:
 - **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).
 - **2026-04-04:** Added Release & Deployment Orchestration section with three new scripts: Deploy-Release.ps1 (master release orchestrator), Build-AllClientComponents.ps1 (dependency-ordered client build), Deploy-AllWebResources.ps1 (all web resources to Dataverse) — Task PRPR-032.
 - **2026-09-04:** Added new "Data Backfill Scripts" section with Backfill-CoreAncestorStamps.ps1 — one-time FR-26 core-ancestor stamp backfill for existing child records (`unified-access-control-r2` task 053). Discovers ancestor-stamp + child-of-child lookup columns from live Dataverse metadata every run rather than a hard-coded list, after a live-metadata check during authoring found the project's own prior notes stale on which columns `sprk_todo` carries, and found `sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema (filed for owner decision, not fixed by this script).
+- **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).

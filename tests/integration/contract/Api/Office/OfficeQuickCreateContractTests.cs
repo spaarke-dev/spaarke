@@ -16,6 +16,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
 
@@ -44,6 +45,8 @@ public class OfficeQuickCreateContractTests
     private const int ObjectDoesNotExist = -2147220969;
 
     private static readonly Guid OwnerId = Guid.Parse("7d0e8a41-3b5c-4f2e-9a10-5c2b7e4f1a01");
+    /// <summary>Task 080: every quick-created record is owned by the caller's business-unit DEFAULT OWNER TEAM (the factory's <see cref="RecordOwnershipResolverDouble"/>), never by the caller.</summary>
+    private static readonly EntityReference OwnerTeam = new("team", RecordOwnershipResolverDouble.DefaultTeamId);
     private static readonly Guid MatterTypeId = Guid.Parse("b2c4e6a8-1d3f-4a5b-8c7d-9e0f1a2b3c01");
     private static readonly Guid BusinessUnitId = Guid.Parse("cb15f587-baa0-f111-aaac-000d3a99d1d7");
     private static readonly Guid SearchIndexId = Guid.Parse("fdcc183b-8b71-f111-ab0d-7ced8ddc4cc6");
@@ -82,7 +85,7 @@ public class OfficeQuickCreateContractTests
 
         var matter = created.Entity!;
         matter.GetAttributeValue<EntityReference>("sprk_mattertype").Should().BeEquivalentTo(new EntityReference("sprk_mattertype_ref", MatterTypeId));
-        matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", OwnerId));
+        matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         matter.GetAttributeValue<string>("sprk_mattername").Should().Be("Acme v. Globex");
         matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be("From Word");
         matter.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
@@ -94,7 +97,7 @@ public class OfficeQuickCreateContractTests
     // ── Matter type: never a rejection (owner decision 2026-09-11) ──────────────────────────────────────
 
     [Fact]
-    public async Task Post_Matter_NameOnly_Returns201_NotA400_OwnedByCaller_AndWarnsAboutTheType()
+    public async Task Post_Matter_NameOnly_Returns201_NotA400_OwnedByCallersTeam_AndWarnsAboutTheType()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -108,7 +111,7 @@ public class OfficeQuickCreateContractTests
         body!.Warnings.Should().ContainSingle(w => w.Contains("No matter type was supplied"));
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse();
         AssertNoMatterNumberSent(created.Entity);
-        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
     }
 
     [Fact]
@@ -151,7 +154,7 @@ public class OfficeQuickCreateContractTests
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().ContainSingle(w => w.Contains("matter type was not found"));
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse("a dangling lookup would fail the whole create");
-        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -174,7 +177,7 @@ public class OfficeQuickCreateContractTests
         body!.Warnings.Should().ContainSingle(w => w.Contains("could not be checked"))
             .And.NotContain(w => w.Contains("was not found"), "an unanswered check is reported distinctly from a missing type");
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse("an unverified lookup that dangled would fault the whole create");
-        created.Entity.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
     }
 
     // ── Field mapping ───────────────────────────────────────────────────────────────────────────────────
@@ -233,7 +236,7 @@ public class OfficeQuickCreateContractTests
         // The protected attributes: never sent on create, whatever the profile says — Default, Copy, Template,
         // Concat, and a mis-cased, padded target alike.
         AssertNoMatterNumberSent(matter);
-        matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(new EntityReference("systemuser", OwnerId));
+        matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         matter.Contains("sprk_containerid").Should().BeFalse();
 
         body!.Warnings.Should().NotBeNull();
@@ -381,7 +384,7 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().BeNull("a missing profile is a silent no-op");
-        created.Entity!.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(OwnerId);
+        created.Entity!.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         created.Entity.GetAttributeValue<EntityReference>("sprk_mattertype").Id.Should().Be(MatterTypeId);
         factory.Entities.Verify(
             e => e.RetrieveAsync("sprk_project", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
@@ -463,6 +466,27 @@ public class OfficeQuickCreateContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("owner_unresolved");
         AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenTheCallersTeamCannotBeResolved_Returns403_AndCreatesNothingAppOwned()
+    {
+        // Task 080: a RESOLVED caller whose business unit yields no default owner team. Creating the matter anyway
+        // would leave it owned by the app user in the ROOT business unit — unreadable by the caller who made it.
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        factory.Ownership.TeamId = null;
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            Route, new QuickCreateRequest { Name = "No Team", MatterTypeId = MatterTypeId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_022");
+        AssertNothingCreated(factory);
+        factory.Ownership.Requests.Should().ContainSingle()
+            .Which.CallerSystemUserId.Should().Be(OwnerId, "a new matter is filed against nothing, so the caller's unit decides");
     }
 
     // ── Negative: validation ────────────────────────────────────────────────────────────────────────────

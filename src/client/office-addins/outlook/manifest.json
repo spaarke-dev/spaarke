@@ -27,9 +27,15 @@
   },
   "authorization": {
     "permissions": {
-      "resourceSpecific": []
+      "resourceSpecific": [
+        {
+          "name": "MailboxItem.ReadWrite.User",
+          "type": "Delegated"
+        }
+      ]
     }
   },
+  "validDomains": ["https://localhost:3000", "https://login.microsoftonline.com"],
   "extensions": [
     {
       "requirements": {

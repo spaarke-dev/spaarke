@@ -47,6 +47,13 @@ public class OfficeService : IOfficeService
 
     /// <summary>FR-26 core-ancestor derivation for the To Do write path (task 052).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
+    /// <summary>
+    /// Write-path invariant I-6 (task 080): the BU default owner team every record created here is owned by.
+    /// Required, not optional (ADR-032) — it is registered unconditionally, and a missing one must fail at
+    /// startup rather than quietly re-open app-user ownership, the defect it exists to remove.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownershipResolver;
     private readonly IMembershipEventPublisher _membershipEventPublisher;
     // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
     // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
@@ -105,6 +112,7 @@ public class OfficeService : IOfficeService
         RecordContainerResolver containerResolver,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         RecordCreationService recordCreation,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null,
         DataverseWebApiClient? dataverseClient = null,
@@ -123,6 +131,8 @@ public class OfficeService : IOfficeService
             ?? throw new ArgumentNullException(nameof(recordCreation));
         _coreAncestors = coreAncestors
             ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _ownershipResolver = ownershipResolver
+            ?? throw new ArgumentNullException(nameof(ownershipResolver));
         _jobStatusService = jobStatusService;
         _jobService = jobService;
         _emailEnricher = emailEnricher;
@@ -224,8 +234,16 @@ public class OfficeService : IOfficeService
     {
         if (request.TargetEntity is { } target && target.EntityId != Guid.Empty)
         {
+            // The LOGICAL name, not the wire spelling. The save endpoint accepts only the friendly types
+            // ("matter", "project", …), while RecordContainerResolver and ISecurableEntityRegistry are keyed on
+            // logical names. Passed through as-is, "project" was never securable, so a save filed to a SECURE
+            // project skipped the secure branch, resolved Unresolved, and landed in the tenant-wide default
+            // container — irreversibly, because SPE permissions are additive-only. Found by task 080's review;
+            // mapped through the same alias table the ownership resolver uses, so the two cannot disagree.
+            var targetLogicalName = DocumentAssociationMap.ToLogicalName(target.EntityType) ?? target.EntityType;
+
             var decision = await _containerResolver
-                .ResolveForRecordAsync(target.EntityType, target.EntityId, ct)
+                .ResolveForRecordAsync(targetLogicalName, target.EntityId, ct)
                 .ConfigureAwait(false);
 
             // FailClosed means the record is SECURE and has no container of its own. Falling through to
@@ -386,6 +404,50 @@ public class OfficeService : IOfficeService
                     StatusUrl = $"/api/office/jobs/{existingJob.JobId}",
                     StreamUrl = $"/api/office/jobs/{existingJob.JobId}/stream"
                 };
+            }
+
+            // ══ RECORD OWNERSHIP (task 080, write-path invariant I-6) ═════════════════════════════════
+            // The sprk_document this save creates is owned by a business unit's DEFAULT OWNER TEAM — the team of
+            // the record it is filed against, or the acting user's when it is filed against nothing (owner
+            // decisions 2026-09-22 / 2026-09-25). Left unset, Dataverse makes the app user the owner, which sits
+            // in the ROOT business unit, so no child-BU user could ever read their own saved document.
+            //
+            // Resolved HERE — before the email capture, the job row, the upload and the document row — so a
+            // refusal writes nothing at all. A version save is skipped: it creates no document, and its row keeps
+            // the owner it already has. `IsVersionSave` is the cheap intent predicate; the target is read below.
+            Guid? owningTeamId = null;
+            if (!IsVersionSave(request))
+            {
+                owningTeamId = await _ownershipResolver.ResolveOwningTeamAsync(
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                    {
+                        TargetEntityLogicalName = request.TargetEntity?.EntityType,
+                        TargetRecordId = request.TargetEntity?.EntityId,
+                        // The oid is enough: the resolver keys systemuser on azureactivedirectoryobjectid, the same
+                        // key OfficeAuthFilter resolved and RecordContainerResolver uses for this save's container.
+                        CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                    },
+                    cancellationToken);
+
+                if (owningTeamId is null)
+                {
+                    // Fail-closed, never app-owned: an app-owned row is invisible to its own author, which is the
+                    // defect this exists to remove. The resolver has already logged which link in the chain broke.
+                    return new SaveResponse
+                    {
+                        Success = false,
+                        Error = new SaveError
+                        {
+                            Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                            Message = request.TargetEntity is not null
+                                ? "This item could not be assigned an owner from the record it is filed to, so it "
+                                  + "was not saved. Check that the record still exists and that you can open it."
+                                : "This item could not be assigned an owner from your business unit, so it was not "
+                                  + "saved. Ask an administrator to check your user record's business unit.",
+                            Retryable = false
+                        }
+                    };
+                }
             }
 
             // FR-B3 (task 043): route a user-saved EMAIL through the SAME capture engine as mailbox intake —
@@ -875,7 +937,9 @@ public class OfficeService : IOfficeService
                     cancellationToken,
                     // FR-02 (task 014): the id already stamped into the uploaded bytes becomes this row's
                     // primary key, so the stored file self-identifies as the record that owns it.
-                    preAssignedDocumentId);
+                    preAssignedDocumentId,
+                    // Task 080: resolved (or refused) before anything was written — see RECORD OWNERSHIP above.
+                    owningTeamId);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
@@ -929,8 +993,10 @@ public class OfficeService : IOfficeService
 
                 // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
                 // Per event-source-inventory §3B (line 64), POST /office/save
-                // creates a sprk_document with ownerid defaulted by Dataverse to
-                // the OBO caller. Publish Added event so the junction-updater
+                // creates a sprk_document. ⚠️ CORRECTED 2026-09-30 (task 080): its ownerid is NOT the caller —
+                // the row is owned by a business-unit default owner TEAM (RECORD OWNERSHIP above); the event
+                // records the caller as the creator-member (ADR-034's call, flagged to UAC-r2). Publish Added
+                // event so the junction-updater
                 // (task 084) + nightly recon (task 085) observe the new
                 // association. When MembershipEventPublisherOptions.Enabled=false
                 // (default), the NullMembershipEventPublisher peer logs + returns
@@ -977,6 +1043,7 @@ public class OfficeService : IOfficeService
                     fileSize,
                     documentId,
                     isVersionSave: false,
+                    owningTeamId,
                     cancellationToken);
 
                 // Mark job as complete - background workers will process asynchronously
@@ -1607,6 +1674,7 @@ public class OfficeService : IOfficeService
             fileSize,
             target.DocumentId,
             isVersionSave: true,
+            owningTeamId: null, // a version save creates no document; its row keeps its existing owner
             cancellationToken);
 
         await _documentPersistence.UpdateJobStatusInDataverseAsync(
@@ -2563,10 +2631,11 @@ public class OfficeService : IOfficeService
     /// A refusal surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
     /// written); see <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
     /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
-    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name only. Ownership is attributed to the caller
-    /// when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-034 — best-effort;
-    /// unresolved → app-owned, still created). There is no impersonated-create helper in the BFF, so ownership is
-    /// set via the <c>ownerid</c> lookup rather than MSCRMCallerID.</para>
+    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name only. It is owned by the caller's business-unit
+    /// default owner team (task 080, invariant I-6), and REFUSED with <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/>
+    /// when no team resolves — no longer best-effort, which left an unresolved caller's invoice app-owned in ROOT.
+    /// There is no impersonated-create helper in the BFF, so ownership is set via the <c>ownerid</c> lookup rather
+    /// than MSCRMCallerID.</para>
     /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
@@ -2620,16 +2689,33 @@ public class OfficeService : IOfficeService
         var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
         entity["sprk_invoicename"] = name;
 
-        // Attribute ownership to the caller when resolved (ADR-034 — ownership is what confers access.
-        // NOT ADR-024: that is the polymorphic RESOLVER pattern, it governs the denormalized id/name
-        // fields elsewhere in this file, and it contains zero mentions of ownerid/owningteam/BU. The
-        // miscitation was corrected 2026-09-22 before task 080 could make the wrong ADR load-bearing in
-        // two projects at once.) Best-effort: an unresolved
-        // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
-        if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
+        // Ownership (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER
+        // pattern and says nothing about ownerid, a miscitation corrected 2026-09-22). Task 080 (invariant I-6): the
+        // caller's business-unit DEFAULT OWNER TEAM. A new invoice is filed against nothing here, so the acting user's
+        // business unit decides. This used to be best-effort — an unresolved caller left the invoice app-owned in the
+        // ROOT business unit, invisible to its own creator — and is now a refusal, like Matter and Project.
+        var invoiceOwnerTeamId = await _ownershipResolver.ResolveOwningTeamAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
+                    ? callerSystemUserId
+                    : null,
+                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (invoiceOwnerTeamId is null)
         {
-            entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);
+            // Rendered by the quick-create endpoint's SdapProblemException catch; no row was written.
+            throw new SdapProblemException(
+                OfficeErrorCodes.RecordOwnerUnresolved,
+                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
+                "The new invoice could not be assigned to your business unit's team, so it was not created. Ask an "
+                + "administrator to check that your user has a business unit and that the unit has its default team.",
+                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
         }
+
+        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", invoiceOwnerTeamId.Value);
 
         var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
@@ -2853,11 +2939,14 @@ public class OfficeService : IOfficeService
             entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
         }
 
-        // Owner attribution (ADR-034, not ADR-024 — see QuickCreate) — best-effort, same posture.
-        if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
-        {
-            entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);
-        }
+        // Owner (task 080, write-path invariant I-6): a business unit's DEFAULT OWNER TEAM, never the app user and
+        // never an individual. RECORD-FIRST — the To Do belongs with what it is filed against: the record regarding
+        // first, then the document or email it was created from, and only when there is neither, the acting user.
+        // Before this, a resolved caller owned the To Do and an unresolved one silently left it app-owned in ROOT.
+        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference(
+            "team",
+            await ResolveTodoOwnerTeamAsync(request, userId, ownerSystemUserId, cancellationToken)
+                .ConfigureAwait(false));
 
         var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
@@ -2866,6 +2955,59 @@ public class OfficeService : IOfficeService
             todoId, name, request.RegardingEntityType ?? "(none)");
 
         return new CreateTodoResponse { TodoId = todoId, Name = name };
+    }
+
+    /// <summary>
+    /// The owner team for a new To Do (task 080): the default owner team of the business unit of whatever the To Do
+    /// is filed against — the regarding record, else its document carrier, else its communication carrier — or the
+    /// acting user's when it is filed against nothing.
+    /// </summary>
+    /// <remarks>
+    /// The target is the FIRST that was named, and it is passed alone:
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/> refuses a
+    /// named-but-unreadable target rather than trying the next one, and that is right here too — dropping past a
+    /// secure regarding record to its document would own the To Do outside the secure business unit.
+    /// </remarks>
+    /// <exception cref="SdapProblemException"><see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> (403) when no team
+    /// resolves. Thrown rather than returned as null so the endpoint can tell this refusal from its generic one.</exception>
+    private async Task<Guid> ResolveTodoOwnerTeamAsync(
+        CreateTodoRequest request,
+        string userId,
+        string? ownerSystemUserId,
+        CancellationToken cancellationToken)
+    {
+        (string? LogicalName, Guid? Id) target =
+            !string.IsNullOrWhiteSpace(request.RegardingEntityType)
+            && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
+            && TodoRegardingMap.TryGetValue(request.RegardingEntityType!, out var regarding)
+                ? (regarding.LogicalName, regardingId)
+                : request.DocumentId is { } documentId && documentId != Guid.Empty
+                    ? (TodoRegardingMap["Document"].LogicalName, documentId)
+                    : request.CommunicationId is { } communicationId && communicationId != Guid.Empty
+                        ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
+                        : (null, null);
+
+        var teamId = await _ownershipResolver.ResolveOwningTeamAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                TargetEntityLogicalName = target.LogicalName,
+                TargetRecordId = target.Id,
+                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
+                    ? callerSystemUserId
+                    : null,
+                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return teamId ?? throw new SdapProblemException(
+            OfficeErrorCodes.RecordOwnerUnresolved,
+            OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
+            target.LogicalName is not null
+                ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
+                  + "Check that the item still exists and that you can open it."
+                : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
+                  + "administrator to check your user record's business unit.",
+            OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
     }
 
     /// <summary>

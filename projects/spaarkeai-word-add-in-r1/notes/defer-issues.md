@@ -378,6 +378,229 @@ row in dev currently holds another document's content, profile and index chunks.
 
 ---
 
+## ISS-007 — Write-path invariant I-6 (record owner = BU default Owner team) is not yet applied by ~20 BFF writers outside the Office surface
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-30 |
+| **Source** | task 080 full create-path inventory (`notes/080-record-ownership.md` §6.5 — 78 create sites + 4 upserts) |
+| **GitHub Issue** | [#1034](https://github.com/spaarke-dev/spaarke/issues/1034) |
+
+**Description**
+
+Task 080 made every Office writer own what it creates by a business unit's default Owner team (`IRecordOwnershipResolver`,
+record-first, refuse when unresolved). The same defect remains everywhere else the BFF creates a user-facing record
+app-only with no `ownerid`: the row is owned by the BFF application user in the ROOT business unit, so no child-BU user can
+read it at Deep depth. Only two BFF creates run as the user; none impersonates.
+
+Unfixed writers of record entities: `sprk_communication` (5 app-only paths, **including the Office email-save capture** —
+the owner's 066 decision, Communication project), `sprk_document` from Communication archive/inbound attachments
+(`CommunicationService` ×3, `IncomingCommunicationProcessor` ×2), the external portal (`ExternalDataService`) and the
+Compose upsert (`ComposeCreateOnSavePromoter`), `sprk_event` (`TaskActionCore` when no owner is passed,
+`/api/v1/events`, external portal), `sprk_todo` (`TodoGenerationService` — it has an owner parameter no caller passes —
+and the external portal), `sprk_invoice` (`InvoiceReviewService` PATCH upsert), `sprk_analysis` (×6, AI zone), and the
+Finance job's `sprk_spendsignal` / `sprk_spendsnapshot`. Also `ThreadResolver`'s per-user MASTER thread has no owner.
+
+**Entry-points**
+
+- `projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md` §6.5 (the full table, file:line per site) and §6.6
+  (recipes for analysis and communication)
+- The seam to call: `src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs`
+- For the Office email capture: `OfficeService.SaveAsync` already resolves the team before
+  `EmailUploadCaptureService.CaptureAsync`; that service needs to accept it and set it in `BuildCommunicationEntity`.
+
+**Suggested fix**
+
+Each owning project adopts the resolver in its writers (inject `IRecordOwnershipResolver`; record-first context; refuse,
+never app-own). Then add an ArchTest census — the `RouteAuthorizationGuardTests` shape — that fails when an app-only create
+of a registered record entity sets no owner and carries no documented waiver, so a new writer cannot quietly reintroduce
+root ownership.
+
+**Estimated effort**: ~0.5 day per owning area; the census guard ~1 day.
+**Blockers**: owner decision on WHO does it — task 080 (the I-6 owner per the write-path registry) or each owning project.
+**Related**: ADR-002 WP-1 / invariant registry I-6 (`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5); UAC-r2
+#1010 (grant ownership), #1011 (membership resolver).
+
+---
+
+## ISS-008 — `POST /api/v1/work-assignments` writes two columns that do not exist, and uses `ownerid` as the only record of the assignee
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-30 |
+| **Source** | task 080 — live schema check of `sprk_workassignment` (Dataverse MCP `describe`) while deciding its owner |
+| **GitHub Issue** | [#1035](https://github.com/spaarke-dev/spaarke/issues/1035) |
+
+**Description**
+
+`WorkAssignmentEndpoints.CreateWorkAssignmentAsync` writes `sprk_matterid` and `sprk_duedate`. Neither column exists on
+`sprk_workassignment` — the real ones are `sprk_regardingmatter` and `sprk_responseduedate`. So any create that supplies a
+matter or a due date faults at Dataverse. Separately it sets `ownerid = AssignedToUserId` (a `systemuser` from the request
+body), and that is the ONLY place the assignee is recorded: every `sprk_assignedto*` lookup on the entity points at
+`contact`. The owner has ruled work assignments are core records that must be team-owned (2026-09-22), which this endpoint
+cannot do without losing who the work is assigned to.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Api/WorkAssignmentEndpoints.cs:71-84`
+- `describe tables/sprk_workassignment` (Dataverse MCP) — lookups `sprk_regardingmatter`, `sprk_responseduedate`,
+  `sprk_assignedto` → contact
+
+**Suggested fix**
+
+Owner decision first: where the assignee lives once the record is team-owned (a `systemuser` lookup would be a schema
+change; or map the assignee to their contact). Then fix the two column names and own the row by the matter's team.
+
+**Estimated effort**: ~0.5 day after the decision.
+**Blockers**: owner decision on the assignee column.
+**Related**: task 080 §6.6; ISS-007.
+
+---
+
+## ISS-009 — Playbook create and clone set no owner, yet playbook ownership checks filter on `ownerid = user`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-30 |
+| **Source** | task 080 full create-path inventory |
+| **GitHub Issue** | [#1036](https://github.com/spaarke-dev/spaarke/issues/1036) |
+
+**Description**
+
+`PlaybookService.CreatePlaybookAsync` and `ClonePlaybookAsync` are passed the caller's `userId` but never write `ownerid`,
+so every playbook — including a clone meant to be private to its creator — is owned by the BFF application user. The same
+service's ownership checks filter on `_ownerid_value eq {userId}` (`PlaybookService.cs:254`, `:318`), so a user's own
+playbooks cannot satisfy them.
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookService.cs:133` (create), `:254`, `:318` (the checks)
+
+**Suggested fix**
+
+Decide whether a playbook is per-user (then `ownerid = the caller's systemuserid`, as `WorkspaceLayoutService` does for
+layouts) or team-owned (then the checks must change). Per-user matches the checks' intent.
+
+**Estimated effort**: ~2 hours plus tests.
+**Blockers**: none.
+**Related**: ISS-007.
+
+---
+
+## ISS-010 — The record picker trims by Read, but the save demands AppendTo: a View-Only user can pick a record and then fail to save
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-09-30 |
+| **Source** | UAC-r2 post-merge message 2026-09-30 (`notes/uac-r2-findings-2026-09-30.md` §6 (e)) |
+| **GitHub Issue** | [#1037](https://github.com/spaarke-dev/spaarke/issues/1037) |
+
+**Description**
+
+Task 062's impersonated entity search returns every record the caller can READ. The save authorizes its target by
+APPENDTO. A View-Only access grant (Read without AppendTo) — realistically a secure record reached through a UAC view-only
+grant — lets the user pick the record in the pane and then fail the save. It fails closed (nothing is written), so this is a
+correctness/UX defect, not a leak. Granting AppendTo on the role does not close it: the gap is per-record access.
+
+**Entry-points**
+
+- `OfficeService.SearchEntitiesAsync` / `QuerySearchEntityAsync` (the picker); `EntityAccessFilter` +
+  `OperationAccessPolicy.cs:176-185` (the save's AppendTo demand)
+
+**Suggested fix**
+
+Make "pickable" equal "savable": either hide records the caller cannot AppendTo, or show them disabled with the reason.
+Which is an owner call — it decides whether a view-only user can see in the pane that the record exists.
+
+**Estimated effort**: ~1 day (per-row AppendTo evaluation for a page of results).
+**Blockers**: ~~owner decision (hide vs disable)~~ **DECIDED 2026-09-30: option A, show the record DISABLED with the
+reason** (UAC-r2 `session27` note; relayed again 2026-09-30). The picker is this project's code (062 + the pane), but
+no task has been authored yet. 🔔 That needs the owner's go, because it expands scope.
+**Related**: tasks 062, 065; UAC-r2 task 128's verification lesson (check that a role holds the right a filter demands).
+
+---
+
+## ISS-011 — `POST /api/v1/documents` lets any caller choose the owning team and primary key (LIVE on master)
+
+| Field | Value |
+|---|---|
+| **Status** | Fixed on this branch; open until it merges |
+| **Urgency** | now |
+| **Filed** | 2026-09-30 |
+| **Source** | task 080 inventory; master exposure confirmed by UAC-r2 |
+| **GitHub Issue** | [#1043](https://github.com/spaarke-dev/spaarke/issues/1043) |
+
+`CreateDocumentRequest.OwningTeamId` (`db046e534`) and `.Id` (task 014) reached master in #960 without
+`[JsonIgnore]`. `DataverseDocumentsEndpoints` binds the type from the request body, so a caller can set the owning
+team (Secure Record included) and the GUID. Fixed by `5d870b898`. Detail: `notes/080-record-ownership.md` §6.12.
+
+---
+
+## ISS-012 — Team-owned To Dos drop out of the Daily Briefing (regression introduced by task 080)
+
+| Field | Value |
+|---|---|
+| **Status** | Open. **Route decided by the owner 2026-09-30**; split between task **083** (ours) and UAC-r2 tasks 141 + 152 |
+| **Urgency** | now |
+| **Filed** | 2026-09-30 |
+| **Source** | UAC-r2 session review of task 080 |
+| **GitHub Issue** | [#1044](https://github.com/spaarke-dev/spaarke/issues/1044) |
+
+`DailyBriefingCollector` filters to-dos on `owninguser = caller`; a team-owned To Do matches nobody. The options
+(caller-owned To Dos / a "for" user column / accept until the "who is notified" design) are in the issue. Detail:
+`notes/080-record-ownership.md` §6.12.
+
+**Owner decision, 2026-09-30, relayed by UAC-r2:** use the existing `sprk_todo.sprk_assignedto` (contact) plus
+Created By. No new column.
+
+Created By cannot identify the person for BFF-created To Dos: they are app-only, and live `createdby` is
+`# mi-bff-api-dev`. So:
+- **083 (ours):** the Office writer defaults `sprk_assignedto` to the caller's contact.
+- **UAC-r2 141:** the user↔contact link.
+- **UAC-r2 152:** the briefing matches Assigned To plus human-only Created By, and fixes the server generators.
+
+Detail: `notes/uac-r2-findings-2026-09-30.md` §9.
+
+---
+
+## ISS-013 — The `Secure Record Owner` role cannot own the children task 080 assigns to it, and the setup guide strips what it has
+
+| Field | Value |
+|---|---|
+| **Status** | **Fixed live in dev by task 082 (⚠️ 2026-09-30)**: role 36 → 40; the list is `config/secure-record-owner-role.json`. Open until the 082 PR merges. Owner decision on the 32 drift privileges is pending |
+| **Urgency** | now |
+| **Filed** | 2026-09-30 |
+| **Source** | 080 note §6.12 item 3; ownership moved to this project by owner instruction 2026-09-30 |
+| **GitHub Issue** | [#1046](https://github.com/spaarke-dev/spaarke/issues/1046) |
+
+Record-first ownership gives a child of a secure record to the Secure Record team. Dataverse requires that team's
+role to hold `Read` on the child's table.
+
+Measured live on 2026-09-30:
+- `sprk_todo`: none, so a secure-record To Do is refused.
+- `sprk_document`: all 8, so secure-target saves work in dev.
+- `sprk_communication`/`event`/`memo`: none.
+
+The guide's §5.4 strip script keeps only the three root Reads, so re-running it removes the document privilege.
+Earlier notes called this "UAC-r2's C10"; that was wrong on both sides. Detail: the 082 POML.
+
+**UAC-r2 agreed on 2026-09-30:**
+- 082 owns it and grants on the existing role.
+- The drift has no known origin.
+- The guide edits are ours.
+- The ONE codified JSON set is extended by their task 146.
+- The NFR-05 census clause is theirs and reads our file.
+
+---
+
 ## Deferrals
 
 ### ✅ D-032-1 — WITHDRAWN 2026-09-10 (final). The cascade setting was the wrong question.
@@ -576,6 +799,7 @@ change does not belong inside a security fix — the same call `RecordSearchEndp
 
 **Found by** task 043 while path-filtering the new office-addins CI gate.
 **Owner**: whoever next touches `.github/workflows/deploy-office-addins.yml`. One-line change.
+**GitHub Issue**: [#1039](https://github.com/spaarke-dev/spaarke/issues/1039) (filed 2026-09-30 at push time — it had been recorded here only).
 
 `src/client/office-addins/webpack.config.js:101` aliases
 `@spaarke/communication-components/logic/connections/provenance` at
@@ -606,6 +830,7 @@ Detail: `notes/043-office-addins-ci-gate.md` §8 F-1.
 
 **Found by** task 043 on a from-scratch `npm install` of `src/client/office-addins`.
 **Owner**: next person editing that package's test setup. One `devDependencies` line.
+**GitHub Issue**: [#1040](https://github.com/spaarke-dev/spaarke/issues/1040) (filed 2026-09-30 at push time — it had been recorded here only).
 
 `src/client/office-addins/jest.config.js` maps `\.(css|less|scss|sass)$` → `identity-obj-proxy`,
 which appears in neither `package.json` nor `package-lock.json`, and is not installed.
@@ -622,6 +847,7 @@ Detail: `notes/043-office-addins-ci-gate.md` §8 F-4.
 
 **Found by** task 063 while closing F2 on `/send-to-index`.
 **Owner**: whoever next hardens `Api/Ai/RagEndpoints.cs`. Not this project's finding.
+**GitHub Issue**: [#1041](https://github.com/spaarke-dev/spaarke/issues/1041) (filed 2026-09-30 at push time — it had been recorded here only).
 
 `POST /api/ai/rag/index`, `/index/batch` and `/index-file` are all bound by
 `AddTenantAuthorizationFilter()` — and unlike `send-to-index` they always were, because their request
@@ -652,6 +878,7 @@ Detail: `notes/063-send-to-index-authz.md` §8.4 and §8.5.
 
 **Found by** task 063, which depends on the corrected behaviour.
 **Owner**: main session (sub-agents cannot write to `.claude/`). One paragraph.
+**GitHub Issue**: [#1042](https://github.com/spaarke-dev/spaarke/issues/1042) (filed 2026-09-30 at push time — it had been recorded here only).
 
 The "Authorization Check Pattern" section carries a ⚠️ correction dated **2026-08-20** claiming that
 `RetrievePrincipalAccess` **"has zero call sites in the repository"** and that both modes **"grant at
