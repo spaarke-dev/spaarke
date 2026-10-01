@@ -53,9 +53,10 @@ Load when:
 
 ### Authorization Architecture (ADR-003)
 
-- ✅ **MUST** implement new auth logic as `IAuthorizationRule`
+- ✅ **MAY** implement new auth logic as an `IAuthorizationRule` **or** as an evaluator term (ADR-003 Amendment A1, 2026-09-04 — the rule shape is no longer mandated)
 - ✅ **MUST** call authorization before `SpeFileStore` operations
-- ✅ **MUST** cache UAC snapshots per-request only (not across requests)
+- ✅ **MUST** key any cached access **data** by caller identity **and** credential mode (SP vs OBO); a short explicit cross-request TTL is permitted (A1 retired "per-request only")
+- ✅ **MUST** fail closed on every error path — and **MUST NOT** cache a fault-derived result as if it were an answer (session 26 C12 / task 132)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
 
 ### SPE File Access — Writer-Identity Matching (binding — Pattern 4, 2026-06-08)
@@ -92,10 +93,9 @@ Load when:
 
 ### Authorization Architecture (ADR-003)
 
-- ❌ **MUST NOT** create new service layers for auth (use rules instead)
+- ❌ **MUST NOT** create a new auth service layer **unless it is the evaluator or an evaluator term**, and then only with root CLAUDE.md §11's three-question justification (ADR-003 A1)
 - ❌ **MUST NOT** make direct Graph/SPE calls outside `SpeFileStore`
-- ❌ **MUST NOT** cache authorization decisions (cache data only)
-- ❌ **MUST NOT** reuse UAC snapshots across requests/jobs
+- ❌ **MUST NOT** cache authorization **decisions** (cache data only — unchanged by A1)
 
 ### @spaarke/auth Shared Library
 

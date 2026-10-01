@@ -110,4 +110,7 @@
   <notes>spec.md FR-23/FR-25; design.md §6. Completes the Manage Access target table with 065/066.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments>
+    <amendment n="S27" date="2026-09-30" source="session 27 remediation set">The deny-list (ethical wall) UI must offer a USER picker as well as contact and organization (task 143, owner Q4: the No Access List applies to internal users on secure records), and show a "not enforceable for this user" state where 143 reports access that cannot be removed for one person (team/role/BU-held). Depends on 143.</amendment>
+  </amendments>
 </task>

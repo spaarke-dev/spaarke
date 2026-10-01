@@ -104,4 +104,7 @@
   <notes>spec.md FR-30/FR-23; design.md §4.5/§6/§7. Consumed by 066/067. The FR-32 event log (Phase 5) will hook the deny-list writes — keep them behind the seam so 081 can wrap one choke point.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments>
+    <amendment n="S27" date="2026-09-30" source="session 27 remediation set">Consumers added by the session-27 tasks: (1) the deny-list management endpoints must accept a SYSTEMUSER subject (task 143, owner Q4) and call 143's enforcer on add, applying 143's entry-author rule; (2) the provenance read must expose the source of AUTO grants (task 142 — which Assigned field produced it, and the declined/removed marker) and the contact GRANTOR of contact-issued grants (task 140); (3) suppressed-row reasons must include LIMITED (task 138), not only Secure and Restricted. Coordinate merge order with 138/140/142/143.</amendment>
+  </amendments>
 </task>
