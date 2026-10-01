@@ -524,9 +524,134 @@ public class SecureBuRoleDepthAssertionTests
             SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set));
 
         census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(1);
+        census.OwnerRoleCoverage.InheritedFromRootRoleId.Should().BeNull("the role was created in the secure BU");
         census.OwnerRoleCoverage.Tables.Should().HaveCount(set.Tables.Count);
         census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => t.HeldDepth == null)
             .Which.LogicalName.Should().Be("sprk_invoice");
+    }
+
+    /// <summary>
+    /// Only the owner role IN the secure BU is graded. A role carrying the same name in a sibling business unit — here
+    /// one that even covers the whole set — is a different role: counting it would make the secure BU look like it holds
+    /// two owner roles, and grading it would hide the secure role's real gap.
+    /// </summary>
+    [Fact]
+    public void Build_WhenASameNamedRoleLivesInASiblingBu_GradesOnlyTheSecureBuRole()
+    {
+        var ownerRole = Guid.NewGuid();
+        var siblingRole = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var set = SecureRecordOwnerRoleSet.Embedded;
+        var depths = set.Tables
+            .Where(t => t.LogicalName != "sprk_invoice")
+            .ToDictionary(t => (ownerRole, t.PrivilegeName), _ => PrivilegeDepth.Basic);
+        foreach (var table in set.Tables)
+        {
+            depths[(siblingRole, table.PrivilegeName)] = PrivilegeDepth.Basic;
+        }
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(siblingRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SiblingBu, siblingRole),
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole)
+            },
+            Array.Empty<CensusUser>(),
+            new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            set,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set));
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(1, "the sibling BU's role is not in the secure BU");
+        census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => t.HeldDepth == null)
+            .Which.LogicalName.Should().Be("sprk_invoice", "the SECURE BU's role is the one graded, and it lacks invoice");
+    }
+
+    /// <summary>
+    /// A <c>Secure Record Owner</c> role created in the ROOT business unit reaches the secure BU only as a replica (its
+    /// copy there has <c>roleid != parentrootroleid</c>). The script and the provisioning handler design refuse that
+    /// shape; the census must too — a finding naming the root role, even though the root copy covers the whole set.
+    /// </summary>
+    [Fact]
+    public void Build_WhenTheSecureBuRoleIsAReplicaOfAnAncestorRole_ReportsIt_AndDoesNotGradeIt()
+    {
+        var rootCopy = Guid.NewGuid();
+        var secureCopy = Guid.NewGuid();
+        var siblingCopy = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var set = SecureRecordOwnerRoleSet.Embedded;
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            set.Tables.ToDictionary(t => (rootCopy, t.PrivilegeName), _ => PrivilegeDepth.Basic),
+            new[]
+            {
+                new CensusRole(rootCopy, SecureBuRoleDepthAssertion.SecureOwnerRoleName, RootBu, rootCopy),
+                new CensusRole(secureCopy, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, rootCopy),
+                new CensusRole(siblingCopy, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SiblingBu, rootCopy)
+            },
+            Array.Empty<CensusUser>(),
+            new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { secureCopy }, Array.Empty<Guid>()) },
+            set,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set));
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(1);
+        census.OwnerRoleCoverage.InheritedFromRootRoleId.Should().Be(rootCopy);
+
+        var finding = SecureBuRoleDepthAssertion.Evaluate(census with
+        {
+            Grants = new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) }
+        }).Findings.Should().ContainSingle().Subject;
+        finding.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
+        finding.Message.Should().Contain("REPLICA").And.Contain(rootCopy.ToString());
+    }
+
+    /// <summary>
+    /// Clause 5 fails CLOSED, so it must never headline a run in which someone can READ secure records. Seeded with a
+    /// clause-1 exposure and a clause-5 gap together, the headline is the exposure — the verdict the job heartbeat and
+    /// the live gate's summary line print.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenAnExposureAndACodifiedGapCoexist_HeadlinesTheExposure()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, RootBu, "Test User 1", isHuman: true) },
+            coverage: CoverageOfTheWholeSet(overrides: ("sprk_invoice", null))));
+
+        outcome.Findings.Select(f => f.Verdict).Should().BeEquivalentTo(new[]
+        {
+            SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
+            SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege
+        });
+        outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+    }
+
+    /// <summary>
+    /// The same ranking against EVERY verdict that means exposure or an unknown isolation state: each outranks a clause-5
+    /// finding, whichever was enumerated first.
+    /// </summary>
+    [Theory]
+    [InlineData(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit)]
+    [InlineData(SecureBuVerdict.SecureBusinessUnitHasUsers)]
+    [InlineData(SecureBuVerdict.OwnerTeamHasMembers)]
+    [InlineData(SecureBuVerdict.AdministrativeRoleHeldByTeam)]
+    [InlineData(SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam)]
+    [InlineData(SecureBuVerdict.SecureOwnerTeamNotResolved)]
+    [InlineData(SecureBuVerdict.SecureBusinessUnitAmbiguous)]
+    public void Verdict_RanksACodifiedGapBelowEveryExposure(SecureBuVerdict exposure)
+    {
+        var outcome = new SecureBuAssertionOutcome(new[]
+        {
+            new SecureBuFinding(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege, "gap"),
+            new SecureBuFinding(exposure, "exposure")
+        });
+
+        outcome.Verdict.Should().Be(exposure);
     }
 
     /// <summary>

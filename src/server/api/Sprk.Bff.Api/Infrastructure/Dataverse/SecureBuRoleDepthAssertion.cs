@@ -35,7 +35,8 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///   <c>config/secure-record-owner-role.json</c>). A missing one makes Dataverse refuse every assignment of that table
 ///   to the owner team, so the secure child fails closed; a wider depth makes the team's ownership reach further than
 ///   it owns. Each gap is its own finding, naming the table — the same rule as
-///   <c>Set-SecureRecordOwnerRolePrivileges.ps1 -Verify</c>.</item>
+///   <c>Set-SecureRecordOwnerRolePrivileges.ps1 -Verify</c>. A role that is only a REPLICA of one created in an
+///   ancestor business unit is a finding and is not graded, as the script refuses it.</item>
 /// </list></para>
 ///
 /// <para><b>Why this is a standing assertion and not an audit.</b> Every clause above is a
@@ -212,6 +213,22 @@ public static class SecureBuRoleDepthAssertion
                 + "exactly one is required, so its coverage of the codified set cannot be graded. Create it in the "
                 + "secure business unit per docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md §5.2 (one role, never a "
                 + "replica of a role from an ancestor business unit).");
+            yield break;
+        }
+
+        if (coverage.InheritedFromRootRoleId is { } rootRoleId)
+        {
+            // The one owner-role copy in the secure BU is a REPLICA: the role was created in an ANCESTOR business unit,
+            // so Dataverse replicated it into every business unit beneath that ancestor and keeps its privileges on the
+            // root copy outside the secure BU. Set-SecureRecordOwnerRolePrivileges.ps1 and the provisioning handler
+            // design (S4) refuse this shape before grading anything; the census refuses it the same way.
+            yield return new SecureBuFinding(
+                SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege,
+                $"The '{SecureOwnerRoleName}' role in the secure business unit is a REPLICA of root role {rootRoleId}, "
+                + "so it was created in an ANCESTOR business unit and exists in every business unit beneath that one. "
+                + "Its coverage of the codified set is not graded: setup guide §5.2 creates the role IN the secure "
+                + "business unit, and Set-SecureRecordOwnerRolePrivileges.ps1 refuses a replica the same way. Recreate "
+                + "it in the secure business unit and move the owner team onto it.");
             yield break;
         }
 
@@ -658,12 +675,22 @@ public static class SecureBuRoleDepthCensusBuilder
         IReadOnlyList<CensusRole> roles,
         IReadOnlySet<Guid> secureBuIds)
     {
-        var ownerRootRoleIds = roles
+        var ownerRoleCopiesInSecureBu = roles
             .Where(role => secureBuIds.Contains(role.BusinessUnitId)
                            && string.Equals(role.Name, SecureBuRoleDepthAssertion.SecureOwnerRoleName, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        var ownerRootRoleIds = ownerRoleCopiesInSecureBu
             .Select(role => role.RootRoleId)
             .Distinct()
             .ToArray();
+
+        // A role created IN the secure BU is its own root (roleid == parentrootroleid). One created in an ANCESTOR
+        // reaches the secure BU only as a replica whose root copy lives elsewhere — the shape the script refuses.
+        var inheritedFromRootRoleId = ownerRootRoleIds.Length == 1
+                                      && ownerRoleCopiesInSecureBu.All(role => role.Id != role.RootRoleId)
+            ? ownerRootRoleIds[0]
+            : (Guid?)null;
 
         var tables = ownerRoleSet.Tables
             .Select(table => new OwnerRoleTableCoverage(
@@ -676,7 +703,7 @@ public static class SecureBuRoleDepthCensusBuilder
                 resolvedPrivilegeNames.Contains(table.PrivilegeName, StringComparer.Ordinal)))
             .ToArray();
 
-        return new SecureOwnerRoleCoverage(ownerRootRoleIds.Length, tables);
+        return new SecureOwnerRoleCoverage(ownerRootRoleIds.Length, tables, inheritedFromRootRoleId);
     }
 
     private static string Describe(Guid userId, IReadOnlyDictionary<Guid, CensusUser> usersById)
@@ -809,7 +836,11 @@ public sealed record SecureBuRoleDepthCensus(
 /// <param name="OwnerRoleCount">How many distinct roles of that name live in the secure BU. Only 1 is gradeable.</param>
 /// <param name="Tables">One entry per codified table, in file order; <c>HeldDepth</c> is null when the role lacks it
 /// (or when <paramref name="OwnerRoleCount"/> is not 1).</param>
-public sealed record SecureOwnerRoleCoverage(int OwnerRoleCount, IReadOnlyList<OwnerRoleTableCoverage> Tables);
+/// <param name="InheritedFromRootRoleId">When the one owner role in the secure BU is a REPLICA of a role created in an
+/// ancestor business unit (<c>roleid != parentrootroleid</c>), that root role's id; null when the role is the secure
+/// BU's own. A replica is a clause-5 finding and is not graded.</param>
+public sealed record SecureOwnerRoleCoverage(
+    int OwnerRoleCount, IReadOnlyList<OwnerRoleTableCoverage> Tables, Guid? InheritedFromRootRoleId = null);
 
 /// <summary>One codified table and the depth the owner role holds on its Read privilege.</summary>
 /// <param name="LogicalName">The codified table.</param>

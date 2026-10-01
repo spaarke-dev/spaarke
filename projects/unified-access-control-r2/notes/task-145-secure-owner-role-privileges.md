@@ -14,7 +14,7 @@
 | PR #1045 (RecordOwnershipResolver wiring, #1038/#1043) | merged 2026-09-30 23:40Z | `gh pr view 1045` |
 | **#1046** | **CLOSED** 2026-09-30 23:44Z by the peer; last comment records F1 (32 drift privileges removed, 40 → 8) | `gh issue view 1046` |
 | Drift decision (F1) | **asked once, jointly with 082; answered** "yes can remove them if not needed"; done by the peer 2026-10-01 | peer note 082 §4.1; session27 round 3b |
-| Peer exchange | The peer session (`spaarke-wt-spaarkeai-word-add-in-r1-54`) is live and busy. Not messaged from this sub-agent: no live write was made here, so nothing races the shared role; the main session owns cross-session coordination and delivers §8's outcome | — |
+| Peer exchange | **NOT DONE — open (verifier findings 7/11).** The peer session (`spaarke-wt-spaarkeai-word-add-in-r1-54`) is live and busy. Neither the start-of-task message (POML step 1: "message the word-add-in-r1 session with this task's plan") nor the close message was sent from the sub-agents: no live write was made here, so nothing raced the shared role, but the AC requires the exchange at start AND at close. The main session sends both — the plan message (text in §8a) before gate G1 runs, the outcome after it. Until then the TRACKING criterion is **partially met** | — |
 
 The first escalation trigger (082 not landed) did **not** fire: 082 is live and merged.
 
@@ -81,8 +81,13 @@ $H = @{ Authorization = "Bearer $tok"; Accept = 'application/json'; 'OData-MaxVe
 # After task 144's §4.3 cutover: the named team 'Secure Record Owners' (guide §4.2 query).
 $teamId = 'daec0b6f-80a0-f111-aaac-000d3a99d1d7'
 
-# 1) NEGATIVE CONTROL — 3 polls ~25 s apart. Expect a refusal naming prvReadsprk_Invoice. Record the text VERBATIM
-#    into the sprk_invoice entry's "evidence" in config/secure-record-owner-role.json.
+# 1) NEGATIVE CONTROL — 3 polls ~25 s apart. Expect a refusal naming prvReadsprk_Invoice.
+#    REFUSED  -> REPLACE the sprk_invoice entry's "evidence" in config/secure-record-owner-role.json (today it starts
+#                "VERBATIM REFUSAL PENDING") with the date, the poll count and the message VERBATIM, and commit that
+#                BEFORE step 2. The file's howToExtend rule requires the quoted refusal; the entry was committed ahead
+#                of it (verifier finding 5), so this write-back is what makes it compliant.
+#    NOT REFUSED in 3 polls -> the premise is wrong (POML AC 3): do NOT run -Apply; remove the sprk_invoice entry in a
+#                revert commit, record the result here, and escalate (task 130's confirm then needs no grant).
 #    ESCALATE (POML trigger 3) if it names anything other than a Read privilege.
 $b = @{ sprk_name = 'task145-probe-invoice'; 'ownerid@odata.bind' = "/teams($teamId)" } | ConvertTo-Json
 try { Invoke-RestMethod -Method Post "$Api/sprk_invoices" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes($b)) } catch { $_.ErrorDetails.Message }
@@ -114,8 +119,9 @@ refusal → dry run → `-Apply` → §5.4 strip → `-Verify` → positive prob
 
 `SecureBuRoleDepthAssertion` clause 5: the ONE `Secure Record Owner` role in the secure BU must hold Read at `Basic` on
 every table of the codified set. Each missing table, or one held wider than Basic, is a finding
-`SecureOwnerRoleLacksCodifiedPrivilege` naming the table and privilege; no owner role, two owner roles, or an empty set
-is a finding too (never a quiet pass). Same rule as `-Verify`. Ranked below every exposure verdict (it fails closed).
+`SecureOwnerRoleLacksCodifiedPrivilege` naming the table and privilege; no owner role, two owner roles, a role that is
+only a REPLICA of one created in an ancestor BU (added in verifier round 1, §10), or an empty set is a finding too
+(never a quiet pass). Same rule as `-Verify`. Ranked below every exposure verdict (it fails closed).
 
 - The set is read from the file itself: `config/secure-record-owner-role.json` is LINKED into `Sprk.Bff.Api` as an
   embedded resource (`SecureRecordOwnerRoleSet.Embedded`), so the scheduled job (deployed, no repo on disk) and the
@@ -191,6 +197,18 @@ post once (it cites both tasks):
 > environments get the setup through a control-plane handler (owner F10), designed in
 > `projects/unified-access-control-r2/notes/handoffs/INCOMING-145-secure-setup-handler.md`.
 
+### 8a. Peer messages for the main session to send (word-add-in-r1 session)
+
+**At start (before G1 runs)** — "UAC-r2 task 145 plan for the shared `Secure Record Owner` role: one table added to
+`config/secure-record-owner-role.json` (`sprk_invoice`, for task 130's team-owned invoice confirm, owner Q12). Live
+sequence (G1): negative control → verbatim refusal written into the entry → script dry run → `-Apply` → guide §5.4
+strip (re-injected SharePoint four) → `-Verify` → positive probes ×3 → NFR-05 run. Role goes 8 → 9, all Read at
+Basic; nothing removed. Census clause 5 now grades the role against the file. Please say if you have a pending change
+to the role or the file so we do not race."
+
+**At close (after G1)** — the before/after lists, the verbatim refusal, the probe results and the clause-5 PASS
+output, plus the #1046 comment link (§8).
+
 ## 9. Test scope
 
 Clause 5's two seeded directions (lacks one table / covers all), plus: wider-than-Basic; 0 or 2 owner roles; an empty
@@ -210,3 +228,38 @@ the "exists in environment" flag forced true → the builder test red.
 
 Second live run on the final code (after the review fix): identical — 18 findings, "covering 8 of 9", finding 18 names
 `prvReadsprk_Invoice`.
+
+## 10. Verifier round 1 (branch `task/uac-r2-145-f1`, 2026-10-01)
+
+Code and tests (no live call of any kind in this round):
+
+| Finding | Change | Proven by seeding |
+|---|---|---|
+| 2 — "clause 5 ranks below every exposure" unpinned | `Evaluate_WhenAnExposureAndACodifiedGapCoexist_HeadlinesTheExposure` (clause-1 exposure + clause-5 gap → headline = `HumanPrincipalReachesSecureBusinessUnit`) and `Verdict_RanksACodifiedGapBelowEveryExposure` (theory over all 7 exposure/unknown verdicts, the clause-5 finding enumerated FIRST) | rank 7 → −1: 8 red (both tests). The verifier's exact seed, rank 7 → 0: 7 red (the theory; the Evaluate test alone survives a tie because clause 1 is enumerated first and the sort is stable — which is why the theory exists) |
+| 3 — owner-role secure-BU filter unpinned | `Build_WhenASameNamedRoleLivesInASiblingBu_GradesOnlyTheSecureBuRole` (sibling role covers the whole set; the secure role lacks invoice → count 1, gap = invoice) | filter → `true`: 2 red |
+| 4 — replica promised, not detected | Builder sets `SecureOwnerRoleCoverage.InheritedFromRootRoleId` when the one owner role in the secure BU has `roleid != parentrootroleid`; clause 5 reports it (`SecureOwnerRoleLacksCodifiedPrivilege`, message names the root role and "REPLICA") and does not grade it — the script's refusal (`Set-SecureRecordOwnerRolePrivileges.ps1:134-138`) and handoff S4. Test `Build_WhenTheSecureBuRoleIsAReplicaOfAnAncestorRole_ReportsIt_AndDoesNotGradeIt`; `Build_GradesTheOwnerRole…` now also asserts a native role is NOT flagged | builder detection off: 1 red; evaluator branch off: 1 red |
+| 5 — entry precedes its quoted refusal | The `sprk_invoice` evidence now opens with **"VERBATIM REFUSAL PENDING"**, states that G1 step 1 replaces it with the verbatim text and that a not-refused result removes the entry by revert, and adds the one quoted invoice owner-check message that exists (note 085, root default team). §4 step 1 spells out both branches. The verbatim Secure-team text cannot be captured without a live create — that IS G1 step 1 | — (data) |
+
+Live state is unchanged by this round, so dev's census still logs the clause-5 Error naming `prvReadsprk_Invoice` until G1
+(intended). G1 must precede any dev deployment of task 130's invoice confirm against a secure matter. Once G1 is applied,
+the file and the live role must change in lockstep (every entry → the §4 procedure), or the census goes red.
+
+**Acceptance criteria — honest status after this round** (supersedes any "met" for these in the first report):
+
+| Criterion | Status |
+|---|---|
+| TRACKING | **Partially met.** 082 status, #1046 state, PR #1045 recorded; the peer exchange at start and at close was NOT done (§1, §8a — main session) |
+| Codified set covers 146/147/148 scope | **Not met as written; deferred by design.** 9 tables. analysis, communicationthread, spendsignal, spendsnapshot, emailreviewlog, analysisoutput, reportcard have no writer yet; 146 and 147's POMLs bind each to add its table through this procedure in the task that wires the writer (§3) |
+| Negative control (live) | Pending G1 step 1 |
+| Positive probes (live) | Pending G1 step 3 |
+| Basic-only + before/after lists | Pending G1 (before = 8 recorded; expected after = 9, +1) |
+| AUTHORIZATION (named team sole holder; clauses 2/3 live) | **Not met** — depends on task 144's §4.3 cutover (G2) |
+| NEGATIVE census clause | Seeded both directions + live FAIL: met. Live PASS: pending G1 step 4 |
+| Guide re-run removes nothing | Met (§6) |
+| NEW ENVIRONMENT step | **Not built** — owner F10 = (a), handed to customer-provisioning-orchestration-r1 (INCOMING-145); dry-run/idempotency checks unverifiable until built |
+| Drift asked once | Met (F1, by 082) |
+| #1046 closed citing both + peer told | **Not met** — closed by the peer citing 082 only; the comment (§8) and peer message (§8a) are for the main session |
+| Test scope | Met; the two test gaps (findings 2, 3) are closed above |
+
+Publish size (CLAUDE.md §10 item 4) was not measured, by orchestrator instruction; the change is ~6 KB of embedded
+JSON plus code — the main session measures after merge.

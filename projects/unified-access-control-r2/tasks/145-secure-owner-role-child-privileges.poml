@@ -213,6 +213,30 @@ NEW ENVIRONMENTS. No provisioning code creates the Secure Record BU, the owner t
       noted (SecureBuRoleDepthAssertion.cs is ~900 lines - cohesive evaluator + builder + census records; a later split of
       the builder is optional). adr-check: 0 violations.
     </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-145-f1" round="verifier-1">
+      Verifier round 1 closed (task note section 10). No live call of any kind in this round.
+      (F2) Clause-5 ranking pinned: Evaluate test (clause-1 exposure + clause-5 gap headlines the exposure) and a theory over
+           all 7 exposure/unknown verdicts with the clause-5 finding enumerated first. Seeded rank 7 -> -1: 8 red; the
+           verifier's exact rank 7 -> 0: 7 red.
+      (F3) Owner-role secure-BU filter pinned: Build test with a same-named role in a sibling BU (count 1, secure role
+           graded). Seeded filter -> true: 2 red.
+      (F4) Replica now detected, matching the comment, the script (Set-SecureRecordOwnerRolePrivileges.ps1:134-138) and
+           handoff S4: SecureOwnerRoleCoverage.InheritedFromRootRoleId (optional record parameter, default null) set when
+           the one owner role in the secure BU has roleid != parentrootroleid; clause 5 reports it and does not grade it.
+           Seeded builder detection off: 1 red; evaluator branch off: 1 red.
+      (F5) sprk_invoice evidence now opens "VERBATIM REFUSAL PENDING", names G1 step 1 as the step that replaces it, and
+           states the revert if the create is not refused (AC 3); note section 4 step 1 spells out both branches. The
+           verbatim Secure-team text needs a live create - it is G1 step 1, not capturable read-only.
+      (F7/F11) TRACKING corrected to PARTIALLY MET: the peer exchange at start and close was not done; the plan and close
+           messages are drafted (note section 8a) for the main session.
+      (F8) Publish size not measured (orchestrator instruction); main session measures after merge.
+      (F12-F19) Criteria status recorded honestly in note section 10: codified set 9 tables (146/147 add theirs by binding
+           constraint); negative control, positive probes, before/after = pending G1; AUTHORIZATION not met (G2, task 144
+           cutover); live PASS of clause 5 pending G1; new-environment step not built (F10 = (a), handed off); #1046
+           comment + peer told = main session.
+      PLACEMENT/JUSTIFICATION: no new service, DI registration, endpoint, option, job or package; one optional parameter
+      on an existing census record. TESTS: affected 70/70; full suite and ArchTests in the structured result.
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(F11) Only one account holds "Spaarke Basic User" in dev — the owner's guest account ralph.schroeder_hotmail.com#EXT# (BU "Spaarke"), verified 2026-09-30 — so the census clause-1 finding is not structural. UPDATE 2026-10-01: the owner will change that account themselves ("this is in dev and we'll change this") — add NO census exception; clause 1 must pass on its own. Also: 082 (F1) removed the 32 drifted privileges live (role 40 to 8, all Read at Basic); AddPrivilegesRole re-injects the SharePoint four, so after any -Apply that extends the codified set, re-run the guide section 5.4 strip and -Verify.</amendment>
