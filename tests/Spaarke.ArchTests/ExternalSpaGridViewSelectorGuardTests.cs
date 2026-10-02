@@ -38,8 +38,8 @@ namespace Spaarke.ArchTests;
 /// <c>cloneElement</c> or <c>createElement</c> of <c>ExternalDataGrid</c> can turn the picker on. Its text is
 /// PINNED (whitespace-insensitive) by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>.</item>
 /// <item><b>Scan:</b> no OTHER file under <c>src/client/external-spa/src</c> may reach the shared grid. The rules
-/// are written to refuse what they cannot attribute, but a regex scan is not a proof — three review rounds
-/// each found a compiled bypass of the previous version. So the scan's job is narrow (keep every path to the
+/// are written to refuse what they cannot attribute, but a regex scan is not a proof — each review round
+/// so far has found a compiled bypass of the previous version. So the scan's job is narrow (keep every path to the
 /// grid going through the pinned wrapper), and the known residuals are listed below.</item>
 /// </list>
 /// <para><b>Scan rules</b> (every script file under <c>src/client/external-spa/src</c>):</para>
@@ -60,10 +60,18 @@ namespace Spaarke.ArchTests;
 /// to an import or re-export the scan parsed (so <c>import { "DataGrid" as G }</c> cannot hide). A relative,
 /// <c>/</c> or <c>@/</c> specifier must resolve inside the external SPA source or into the shared library;
 /// a bare <c>@spaarke/…</c> specifier must be the shared library. A module elsewhere could re-export the grid
-/// under any name.</item>
+/// under any name. <b>Round 4:</b> side-effect imports (<c>import '…'</c>) get the same rules, because a module
+/// outside the SPA source can import the grid and park it on <c>window</c> with no binding name to see (a
+/// seed in fix round b2 compiled into a live mount with the picker on). Any other bare specifier must name a
+/// package declared in <c>external-spa/package.json</c>, so a resolve alias, a <c>#…</c> subpath import or a
+/// <c>node:</c> builtin is refused.</item>
 /// <item><b>Dynamic loads (round 3).</b> Every <c>import(…)</c> / <c>require(…)</c> must take one plain string
-/// literal that resolves inside the external SPA source. <c>import.meta.glob</c> is refused in any form: its
-/// pattern can match the grid's file without naming it (V1).</item>
+/// literal that resolves inside the external SPA source or names a declared package. <c>import.meta.glob</c> is
+/// refused in any form: its pattern can match the grid's file without naming it (V1). <b>Round 4:</b>
+/// <c>eval(…)</c> and the <c>Function</c> constructor are refused, because code built from a string can import
+/// anything.</item>
+/// <item><b>Build entry (round 4).</b> Every <c>&lt;script&gt;</c> in <c>external-spa/index.html</c> must load a file
+/// under <c>src/</c> and hold no inline code. Vite bundles each entry, and the scan reads only <c>src/</c>.</item>
 /// </list>
 /// <para><b>Shared-library fan-in (round 3).</b> The scan refuses <c>DataGridPageShell</c> by name, which is
 /// only enough while it is the one shared component that mounts the grid.
@@ -74,13 +82,24 @@ namespace Spaarke.ArchTests;
 /// <para><b>Comments are NOT stripped.</b> Inside JSX children a line reading <c>// &lt;X /&gt;</c> is TEXT
 /// followed by a live element (round 2, S2/S3), so every comment is scanned as code. In a file that holds a
 /// grid binding, a comment must not quote a mount, name the binding, or spell an element-cloning API.</para>
-/// <para><b>Residual (documented, not scanned).</b> (1) A NEW npm dependency (a <c>package.json</c> change) that
-/// itself bundles and re-exports the shared grid under another name. (2) Inside the shared library, a dynamic
-/// <c>import()</c> whose path is built in a variable elsewhere (the fan-in fact reads the call's own argument
-/// text only, because the library's prose says "import (" in many comments). (3) Edits to the shared
-/// library's own <c>DataGrid.tsx</c> (e.g. ignoring the prop). All three are reviewed changes outside
-/// <c>external-spa/src</c>, and the BFF allow-list still refuses every column the picker's views would
-/// need.</para>
+/// <para><b>Residual (documented, not scanned).</b> The scan is NOT a proof that no code path can mount the grid
+/// with the picker on. What it does not cover:</para>
+/// <list type="number">
+/// <item>A NEW npm dependency (a <c>package.json</c> change) that itself bundles and re-exports the shared grid
+/// under another name.</item>
+/// <item>Build configuration: a <c>vite.config.ts</c> resolve alias or plugin that re-points a DECLARED name
+/// (e.g. <c>react</c> or <c>@spaarke/ui-components</c> itself) at another file.</item>
+/// <item>Inside the shared library, a dynamic <c>import()</c> whose path is built in a variable elsewhere (the
+/// fan-in fact reads the call's own argument text only, because the library's prose says "import (" in many
+/// comments).</item>
+/// <item>Edits to the shared library's own <c>DataGrid.tsx</c> (e.g. ignoring the prop).</item>
+/// <item>Reflection over React internals at runtime (a fiber walk from a rendered <c>ExternalDataGrid</c> to the
+/// inner component type, then <c>createElement</c> of it). That is deliberate obfuscation, not a regression a
+/// developer makes while fixing a column error, and no fixed spelling identifies it.</item>
+/// </list>
+/// <para>Items 1–4 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still
+/// refuses every column the picker's views would need, with a 400: this guard removes the pressure to widen that
+/// list; it is not the data control.</para>
 /// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each
 /// rule is paired with a negative control proving it fires and a positive control proving it does not fire
 /// on the sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected
@@ -157,8 +176,18 @@ public class ExternalSpaGridViewSelectorGuardTests
         @"\bexport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""]" + SharedModule + @"['""]",
         RegexOptions.Compiled);
 
-    // Every `from '<specifier>'` in the file, whatever precedes it (round 3: the specifier rules).
+    // Every `from '<specifier>'` in the file, whatever precedes it (round 3: the specifier rules), and every
+    // side-effect `import '<specifier>'` (round 4: such a module can hand the grid over through a global).
     private static readonly Regex AnyFrom = new(@"\bfrom\s*(?<q>['""])(?<spec>[^'""\n]*)\k<q>", RegexOptions.Compiled);
+    private static readonly Regex SideEffectImport = new(@"\bimport\s*(?<q>['""])(?<spec>[^'""\n]*)\k<q>", RegexOptions.Compiled);
+
+    // Code built from a string at runtime: its imports cannot be read (round 4).
+    private static readonly Regex DynamicCode = new(@"(?<![\w$.])(?:eval|Function)\s*\(", RegexOptions.Compiled);
+
+    // `<script …>` tags in the SPA's index.html, Vite's build entry (round 4).
+    private static readonly Regex ScriptTag = new(
+        @"<script\b(?<attrs>[^>]*)>(?<body>.*?)</script\s*>", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
+    private static readonly Regex ScriptSrc = new(@"\bsrc\s*=\s*(?<q>['""])(?<src>[^'""]*)\k<q>", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Every `import(` / `require(`; the argument is then checked with DynamicLiteralArgAt.
     private static readonly Regex DynamicCall = new(@"\b(?:import|require)\s*\(", RegexOptions.Compiled);
@@ -283,7 +312,9 @@ public class ExternalSpaGridViewSelectorGuardTests
         }
 
         // ── Round 3: module specifiers. A module the scan does not see could re-export the grid under any name. ──
-        foreach (Match fromClause in AnyFrom.Matches(text))
+        // Round 4: side-effect imports get the same rules (a module outside the SPA source can import the grid
+        // and park it on `window`, with no binding name for this scan to see).
+        foreach (Match fromClause in AnyFrom.Matches(text).Concat(SideEffectImport.Matches(text)))
         {
             var spec = fromClause.Groups["spec"].Value;
             if (spec.Contains('\\'))
@@ -297,8 +328,8 @@ public class ExternalSpaGridViewSelectorGuardTests
                 if (!parsedSharedSpans.Any(span => fromClause.Index >= span.Start && fromClause.Index < span.End))
                 {
                     violations.Add($"{Where(fromClause.Index)}: import from '{spec}' is not attributed to a parsed import or "
-                                   + "re-export (e.g. a string-named specifier such as { \"DataGrid\" as G }). Import "
-                                   + "from the shared library with plain identifiers.");
+                                   + "re-export (e.g. a string-named specifier such as { \"DataGrid\" as G }, or a "
+                                   + "side-effect import). Import from the shared library with plain identifiers.");
                 }
                 if (ResolvesOutsideSanctionedRoots(spec, fileName, allowSharedLibrary: true) is { } where)
                 {
@@ -340,6 +371,12 @@ public class ExternalSpaGridViewSelectorGuardTests
         {
             violations.Add($"{Where(glob.Index)}: import.meta.glob is refused. Its pattern can match the shared "
                            + "DataGrid's file without naming it, so the grid it loads cannot be checked.");
+        }
+
+        foreach (Match code in DynamicCode.Matches(text))
+        {
+            violations.Add($"{Where(code.Index)}: eval / Function constructor is refused. Code built from a string can "
+                           + "import a module this scan cannot read.");
         }
 
         var compliant = 0;
@@ -463,7 +500,13 @@ public class ExternalSpaGridViewSelectorGuardTests
         }
         else
         {
-            return null; // a third-party npm package (residual: see the class remarks)
+            // Round 4: a bare specifier must name a package the SPA's package.json declares. Anything else — a
+            // `#…` subpath import, a resolve alias, `node:…` — can point at any file, the shared grid included.
+            // A declared third-party package is a residual (see the class remarks).
+            return DeclaredPackages.Value.Contains(PackageNameOf(spec))
+                ? null
+                : "an undeclared bare specifier: not a package in external-spa/package.json (a resolve alias, a '#' "
+                  + "subpath import or a builtin can point at any file)";
         }
 
         if (IsUnder(full, ExternalSpaSource))
@@ -477,6 +520,31 @@ public class ExternalSpaGridViewSelectorGuardTests
             return null;
         }
         return Path.GetRelativePath(SourceScan.RepoRoot, full).Replace('\\', '/');
+    }
+
+    /// <summary>The package names external-spa/package.json declares, in any dependency section.</summary>
+    private static readonly Lazy<HashSet<string>> DeclaredPackages = new(() =>
+    {
+        using var manifest = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(ExternalSpaRoot, "package.json")));
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var section in new[] { "dependencies", "devDependencies", "peerDependencies", "optionalDependencies" })
+        {
+            if (manifest.RootElement.TryGetProperty(section, out var deps))
+            {
+                foreach (var dep in deps.EnumerateObject())
+                {
+                    names.Add(dep.Name);
+                }
+            }
+        }
+        return names;
+    });
+
+    /// <summary><c>@scope/name/sub</c> → <c>@scope/name</c>; <c>name/sub</c> → <c>name</c>.</summary>
+    private static string PackageNameOf(string spec)
+    {
+        var segments = spec.Split('/');
+        return spec.StartsWith('@') && segments.Length > 1 ? $"{segments[0]}/{segments[1]}" : segments[0];
     }
 
     private static bool IsUnder(string full, string root) =>
@@ -648,6 +716,36 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     private static string RepoRelative(string file) => Path.GetRelativePath(SourceScan.RepoRoot, file).Replace('\\', '/');
 
+    /// <summary>
+    /// Every <c>&lt;script&gt;</c> in the SPA's <c>index.html</c> must load a file inside the scanned source and carry no
+    /// inline code: Vite bundles each one, so another entry would put an unscanned module in the build (round 4).
+    /// </summary>
+    internal static IReadOnlyList<string> ScanEntryHtml(string html)
+    {
+        var violations = new List<string>();
+        var tags = ScriptTag.Matches(html);
+        if (tags.Count == 0 || Regex.Matches(html, @"<script\b", RegexOptions.IgnoreCase).Count != tags.Count)
+        {
+            violations.Add("src/client/external-spa/index.html: its <script> tags could not be read (none, or one "
+                           + "without a closing tag). Keep one plain <script type=\"module\" src=\"/src/…\"></script>.");
+            return violations;
+        }
+        foreach (Match tag in tags)
+        {
+            var src = ScriptSrc.Match(tag.Groups["attrs"].Value);
+            var full = src.Success && src.Groups["src"].Value.StartsWith('/')
+                ? Path.GetFullPath(Path.Combine(ExternalSpaRoot, src.Groups["src"].Value.TrimStart('/')))
+                : null;
+            if (full is null || !IsUnder(full, ExternalSpaSource) || !string.IsNullOrWhiteSpace(tag.Groups["body"].Value))
+            {
+                violations.Add($"src/client/external-spa/index.html: <script{tag.Groups["attrs"].Value}> must load a file "
+                               + "under src/ by a root-relative src and hold no inline code. Vite bundles it, and the "
+                               + "scan only reads src/.");
+            }
+        }
+        return violations;
+    }
+
     [Fact(DisplayName = "No external-SPA file reaches the shared DataGrid except ExternalDataGrid.tsx, whose mount passes showViewSelector={false}")]
     public void ExternalSpa_EverySpaarkeDataGridMount_TurnsTheViewSelectorOff()
     {
@@ -665,6 +763,10 @@ public class ExternalSpaGridViewSelectorGuardTests
                 compliantByFile[relative] = result.CompliantMounts;
             }
         }
+
+        // Round 4: Vite builds every script index.html names, so an entry outside the scanned source would be
+        // bundled unscanned.
+        violations.AddRange(ScanEntryHtml(File.ReadAllText(Path.Combine(ExternalSpaRoot, "index.html"))));
 
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
         // Not vacuous: the wrapper was found, scanned, and holds exactly the one sanctioned mount.
@@ -1063,6 +1165,16 @@ public class ExternalSpaGridViewSelectorGuardTests
     [InlineData("X4-dynamic-outside", OtherSpaFile, "const G = React.lazy(() => import('../../../../solutions/Other/src/grid'));", "dynamic import")]
     // The wrapper rule: a fully compliant mount in any OTHER file is still refused
     [InlineData("Y1-compliant-mount-outside-wrapper", OtherSpaFile, SpaarkeImport + "const A = () => <DataGrid configId=\"x\" showViewSelector={false} />;", "outside ExternalDataGrid.tsx")]
+    // Round 4 (task 157 fix round b2): a side-effect import of a module outside the SPA that parks the grid on
+    // `window` compiled (vite build) into a live mount with the picker on; plus its class
+    [InlineData("Z1-side-effect-outside", OtherSpaFile, "import '../../zzoutside/gridGlobal';\nconst G = (window as any).SprkGrid;\nconst A = () => <G configId=\"x\" />;", "outside the external SPA")]
+    [InlineData("Z2-side-effect-library", OtherSpaFile, "import '@spaarke/ui-components/components/DataGrid/DataGrid';", "not attributed")]
+    [InlineData("Z3-subpath-import", OtherSpaFile, "import { Grid } from '#grid';\n<Grid configId=\"x\" />", "undeclared bare specifier")]
+    [InlineData("Z4-resolve-alias", OtherSpaFile, "import { Grid } from '@grid/DataGrid';\n<Grid configId=\"x\" />", "undeclared bare specifier")]
+    [InlineData("Z5-builtin", OtherSpaFile, "import { createRequire } from 'node:module';", "undeclared bare specifier")]
+    [InlineData("Z6-dynamic-undeclared", OtherSpaFile, "const G = React.lazy(() => import('#grid'));", "dynamic import")]
+    [InlineData("Z7-eval", OtherSpaFile, "const m = eval('im' + 'port(p)');", "eval / Function")]
+    [InlineData("Z8-function-constructor", OtherSpaFile, "const load = new Function('p', 'return im' + 'port(p)');", "eval / Function")]
     public void Scan_WhenARound3EvasionShapeIsSeeded_ReportsIt(string shape, string fileName, string source, string expected)
     {
         // CompliantMounts is not asserted: V3 rows hold a compliant JSX mount and are refused for the clone.
@@ -1081,6 +1193,10 @@ public class ExternalSpaGridViewSelectorGuardTests
                    "import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';\n" +
                    "import type { DataGridProps } from '@spaarke/ui-components/components/DataGrid/DataGrid';\n" +
                    "import { ExternalDataGrid } from './ExternalDataGrid';\n" +
+                   "import { createRoot } from 'react-dom/client';\n" +
+                   "import 'react';\n" +
+                   "import './local-side-effect';\n" +
+                   "const isFn = typeof x === 'function'; const ev = evaluate(1); const f = myFunction(2);\n" +
                    "import { isEntitled } from '../registry/widgetRegistry';\n" +
                    "import { config } from '@/config';\n" +
                    "const L = () => import('../widgets/ProjectsWidget').then(m => ({ default: m.ProjectsWidgetBody }));\n" +
@@ -1091,6 +1207,19 @@ public class ExternalSpaGridViewSelectorGuardTests
 
         Assert.Empty(result.Violations);
         Assert.Equal(0, result.CompliantMounts);
+    }
+
+    [Fact(DisplayName = "Control: index.html may only load scripts from src/ (round 4)")]
+    public void ScanEntryHtml_RefusesAnEntryOutsideTheScannedSource()
+    {
+        const string Sanctioned = "<body><div id=\"root\"></div>\n<script type=\"module\" src=\"/src/main.tsx\"></script></body>";
+        Assert.Empty(ScanEntryHtml(Sanctioned));
+
+        Assert.Single(ScanEntryHtml(Sanctioned + "<script type=\"module\" src=\"/zzoutside/mountGrid.tsx\"></script>"));
+        Assert.Single(ScanEntryHtml(Sanctioned + "<script type=\"module\" src=\"/src/../zzoutside/mountGrid.tsx\"></script>"));
+        Assert.Single(ScanEntryHtml(Sanctioned + "<script type=\"module\">import '/zzoutside/mountGrid.tsx';</script>"));
+        Assert.Single(ScanEntryHtml(Sanctioned + "<script type=\"module\" src=\"../shared/Spaarke.UI.Components/src/x.tsx\"></script>"));
+        Assert.Single(ScanEntryHtml(Sanctioned + "<script type=\"module\" src=\"/zzoutside/a.tsx\" />"));
     }
 
     [Fact(DisplayName = "Control: the shared-library fan-in detector reports a new carrier and ignores Fluent and type-only imports")]

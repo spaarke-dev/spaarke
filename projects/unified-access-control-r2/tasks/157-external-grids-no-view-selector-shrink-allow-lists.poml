@@ -162,7 +162,7 @@
       Justification: no new service, DI registration, endpoint, option, job or package. Changes: one test file,
       comment-only edits to one client file, and documentation.
     </outcome>
-    <outcome date="2026-10-02" branch="task/uac-r2-157-b1" round="review-3">
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b1" round="review-3" verified="no (written by fix round b1, cut off by a usage limit; re-checked in the b2 outcome below)">
       Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
       design) and the owner decision on F1.
       BLOCKING item (criterion 1, the guard failed open a third time). The verifier compiled three shapes with
@@ -229,6 +229,59 @@
       Section 10: no BFF surface was added. The BFF edit is comment-only (no IL change), so the publish size was
       not re-measured.
       Runs: see note section 7 (round 3).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b2" round="review-3-fix-b2" base="1f3e7bd76">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, note section 5) and the owner decision on F1 (note section 8).
+      Base: task/uac-r2-157-b1 merged with work/unified-access-control-r2 (origin/master 93634db58 plus integrated
+      batch 3). The merge was clean, with no conflicts.
+      Re-check of b1's unverified commit: kept. ExternalDataGrid.tsx, GridWidgetBody.tsx, the comment-only
+      ExternalAccessModule.cs edit and the guard's round-3 rules are correct. b2 re-ran these proofs itself:
+      - vite build: the bundle holds nle=e=&gt;u.jsx(ole,{...e,showViewSelector:!1}), and showViewSelector:!0
+        occurs 0 times.
+      - Seeds V1, V2 and V3 were each red.
+      - P4 (spread after the forced prop): 2 red, the production fact and the pin.
+      - P1 (GridWidgetBody mounting the grid directly): 1 red.
+      - P6 (a new shared carrier): 1 red, the fan-in fact.
+      Not re-run: P5. Any text change fails the pin, as P4 shows.
+      BLOCKING item, criterion 1 (V1 glob, V2 escaped identifier, V3 cloneElement): CLOSED.
+      - V1: import.meta.glob is refused.
+      - V2: a grid import outside the wrapper is refused, and so is a \u escape.
+      - V3: neutralised at runtime by ExternalDataGrid, and cloneElement is refused in a grid-binding file.
+      - The production fact is red on all three seeds.
+      NEW in b2, a fourth compiled bypass (V4). A side-effect import '../../zzoutside/gridGlobal' of a module
+      outside src/ imported the grid and set window.SprkGrid, and a src file then mounted window.SprkGrid. vite
+      build compiled it into a live picker-on mount, and the round-3 guard passed it.
+      Fix: side-effect imports now get the from-specifier rules. Three cheap fail-closed rules were added from the
+      same class:
+      - a bare specifier must be a package declared in external-spa/package.json, which refuses a resolve
+        alias, a '#' subpath import or a node: builtin;
+      - eval( and the Function constructor are refused;
+      - every script in external-spa/index.html must load a file under src/ and hold no inline code.
+      Proof: each seed (V4, '#grid', and a second index.html script) turned the production fact red, then was
+      removed and touched. There are 8 new Theory rows (Z1-Z8) and 1 index.html control. The sanctioned control
+      gained react-dom/client, a side-effect import 'react', a local side-effect import, and look-alikes of eval
+      and Function.
+      MINOR item (overclaims): CLOSED.
+      - ExternalAccessModule.cs: the comment names the runtime wrapper and the residuals, and no longer says
+        "fails the build otherwise".
+      - Guard remarks: they now say the scan is NOT a proof, that each review round so far found a compiled
+        bypass, and list five residuals: a new npm dependency; vite.config alias/plugin re-pointing a declared
+        name; a variable-built shared-library import(); edits to DataGrid.tsx; React-internals reflection.
+      - Note sections 4 (G5) and 7: rewritten without a "no remaining shape" claim.
+      CONFIRMED / INFO / CLEAN items: no change.
+      OPEN by design, F1: still an owner decision; out of scope.
+      Live: none performed (no deploy, no Dataverse write). Deploy order for the main session:
+      1. SPA first: gh workflow run deploy-external-spa.yml --ref &lt;branch-or-master-containing-157&gt;. The
+         workflow runs npm install --legacy-peer-deps --no-audit --no-fund and then npm run build.
+      2. Then the BFF: pwsh scripts/Deploy-BffApi.ps1.
+      3. Then the note section 6 gate.
+      Publish size: not measured here (the main session measures). b2 makes no BFF edit, and b1's is
+      comment-only.
+      Section 10/11: b2 adds no service, DI registration, endpoint, option, job, column or package. It changes one
+      test file plus documentation. ExternalDataGrid.tsx (b1) keeps the round-3 justification above.
+      Runs: guard class 81/81; NetArchTest Passed 426, Failed 0, Total 426; BFF unit Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 18m54s); SPA npm run
+      build exit 0; npx tsc --noEmit 6 errors, all pre-existing, none in a changed file.
     </outcome>
   </execution>
 </task>
