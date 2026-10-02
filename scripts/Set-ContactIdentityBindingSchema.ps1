@@ -462,11 +462,24 @@ foreach ($f in $SecuredFields) {
         }
         if ($Verify) { Report 'MISSING' "$($spec.Name) on $($f.Entity).$($f.Attribute)"; continue }
         if ($IsDryRun) { Report 'WOULD' "grant $($spec.Name) on $($f.Entity).$($f.Attribute) (read=4 create=$($spec.Create) update=$($spec.Update))"; continue }
-        Invoke-DvWrite POST 'fieldpermissions' @{
-            entityname = $f.Entity; attributelogicalname = $f.Attribute
-            canread = 4; cancreate = $spec.Create; canupdate = $spec.Update
-            'fieldsecurityprofileid@odata.bind' = "/fieldsecurityprofiles($($spec.Id))"
-        } | Out-Null
+        # Securing a column propagates asynchronously: the FIRST grant after securing may succeed while the second is
+        # refused 0x8004f508 "... is NOT secured for entity fieldpermission" (live run 2026-10-02, on both columns).
+        # Retry that one error; anything else propagates.
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                Invoke-DvWrite POST 'fieldpermissions' @{
+                    entityname = $f.Entity; attributelogicalname = $f.Attribute
+                    canread = 4; cancreate = $spec.Create; canupdate = $spec.Update
+                    'fieldsecurityprofileid@odata.bind' = "/fieldsecurityprofiles($($spec.Id))"
+                } | Out-Null
+                break
+            } catch {
+                $notYetSecured = "$($_.ErrorDetails.Message) $($_.Exception.Message)" -match '0x8004f508'
+                if (-not $notYetSecured -or $attempt -ge 12) { throw }
+                Write-Host "    $($f.Entity).$($f.Attribute) not yet seen as secured by the field-permission service; retrying ($attempt/12)..."
+                Start-Sleep -Seconds 10
+            }
+        }
         Report 'DONE' "granted $($spec.Name) on $($f.Entity).$($f.Attribute)"
     }
 
