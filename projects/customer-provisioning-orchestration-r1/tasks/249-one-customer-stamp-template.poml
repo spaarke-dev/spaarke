@@ -4,7 +4,7 @@
     <title>One customer-stamp template (owner D19) — delete `stacks/model2-full.bicep` + its parameter files, `deploy-infrastructure.yml` validates `customer.bicep`, and fix the five `customer.bicep` defects the comparison found</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T249 (owner decision D19, open item O5)</phase>
     <gate>startable after T225b (file overlap: customer.json, controlplane-worker-app-service.bicep); must land before T242</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes Bicep stacks + parameter files, edits a CI workflow, edits customer.bicep (deployed by H2a) and ArmDeploymentRunner (.cs) + its tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
