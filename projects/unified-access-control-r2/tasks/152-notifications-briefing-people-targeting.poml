@@ -4,7 +4,7 @@
     <title>Notifications and Daily Briefing target PEOPLE (Created By, Assigned To), never owner teams or business units; server to-do writers set Assigned To; membership events state the row's real owner</title>
     <phase>Register-driven (authored 2026-09-30, session 27; owner round-2 item 9 "Notifications" and Q8, the membership half of GitHub #1044 plus the #1044 split agreed with word-add-in-r1, ADR-034 event semantics)</phase>
     <gate>after-141 (the systemuser-to-contact link) AND after origin/master (with word-add-in-r1 PR #1045) is merged into this branch; the ADR-034 amendment approved by the owner before merge (CLAUDE.md §6.5 path B)</gate>
-    <status>code-complete-live-gates-pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an attention/disclosure surface (the Daily Briefing reads app-only today), the membership resolver that the authorization plane also consumes, four event publishers, the reconciliation backstop and three server to-do writers; tags bff-api/auth; ADR amendment.</rigor-reason>
     <model-tier>opus</model-tier>
