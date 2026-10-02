@@ -186,3 +186,5 @@ The completion was run by the main session; no subagent was available (weekly us
 - **G-5 / G-6:** the job runs.
 - **G-7 / G-8:** manual checks.
 - The deployed BFF (`bca0941f6`) does not read the new columns yet. The schema is in place ahead of the deploy, as G-1-before-G-4 requires.
+
+**G-1b DONE (2026-10-02, owner-approved: "yes can deactivate stale registry row if not needed").** The "Demo 1" `sprk_dataverseenvironment` row (`5762061b-ef31-f111-88b5-7ced8d1dc988`, `https://spaarke-demo.crm.dynamics.com`) is set to `sprk_isactive = false` (PATCH 204, read back). It was not needed: the dev BFF's identities are not application users in spaarke-demo, so neither registration nor reconciliation could work there. Reversible: set `sprk_isactive = true` after adding the dev BFF MI as an application user in spaarke-demo.
