@@ -46,6 +46,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private readonly ICommunicationAssessedProducer _assessedProducer;
     private readonly IActionSeam _actionSeam;
     private readonly Engine.CategoryRoutingGate _routingGate;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
 
     // ── Job B propose (task 030, FR-09) — sprk_emailreviewlog / sprk_emailupdatefield constants ──
@@ -180,6 +181,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         ICommunicationAssessedProducer assessedProducer,
         IActionSeam actionSeam,
         Engine.CategoryRoutingGate routingGate,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<CommunicationEnrichmentService> logger)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
@@ -188,6 +190,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
         _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
         _routingGate = routingGate ?? throw new ArgumentNullException(nameof(routingGate));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
     }
 
@@ -1177,7 +1180,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ["sprk_aisuggestion"] = suggestionJson,
         };
 
-        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        await CreateReviewLogAsync(entity, communicationId, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Enrichment[email-propose] stored Proposed row | CommunicationId: {CommunicationId}, TargetEntity: {Entity}, TargetField: {Field}, Confidence: {Confidence:F2}, PrivilegeFlagged: {PrivilegeFlagged}.",
@@ -1186,6 +1189,26 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
     private static string Truncate(string value, int maxLength) =>
         string.IsNullOrEmpty(value) || value.Length <= maxLength ? value : value[..maxLength];
+
+    /// <summary>
+    /// Creates ONE <c>sprk_emailreviewlog</c> row (every writer in this service goes through here). Task 146: a review
+    /// log carries its communication's AI suggestions — owned like the communication (the named Secure team's for a
+    /// secure message; the creator while the message is unfiled, E1). A REFUSAL throws
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException"/> before the row exists; every caller
+    /// runs inside a <see cref="RunStepAsync"/> step, whose non-fatal catch logs it and leaves the step without its row
+    /// (enrichment is best-effort per step, FR-08).
+    /// </summary>
+    private async Task<Guid> CreateReviewLogAsync(Entity entity, Guid communicationId, CancellationToken ct)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId),
+            ct).ConfigureAwait(false);
+        if (owner.IsRefused)
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_emailreviewlog", owner);
+
+        owner.ApplyTo(entity);
+        return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+    }
 
     // ── Step 4.7: Job C create-task (task 040, FR-14) ────────────────────────────
     /// <summary>
@@ -1443,7 +1466,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ["sprk_aisuggestion"] = suggestionJson,
         };
 
-        var rowId = await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        var rowId = await CreateReviewLogAsync(entity, communicationId, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Enrichment[email-create-task] stored Proposed row | CommunicationId: {CommunicationId}, TargetEntity: {Entity}, Subject: {Subject}, DeadlineBearing: {DeadlineBearing}.",
@@ -1499,7 +1522,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ["sprk_aisuggestion"] = suggestionJson,
         };
 
-        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        await CreateReviewLogAsync(entity, communicationId, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Enrichment[email-create-task] created task {TaskId} and stored Applied row | CommunicationId: {CommunicationId}, Entity: {Entity}, Subject: {Subject}.",
@@ -1622,7 +1645,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ["sprk_aisuggestion"] = suggestionJson,
         };
 
-        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        await CreateReviewLogAsync(entity, communicationId, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Enrichment[email-regarding-intent] stored Proposed row | CommunicationId: {CommunicationId}, ProposedType: {Type}, Referenced: [{Referenced}].",
@@ -1911,7 +1934,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ["sprk_aisuggestion"] = suggestionJson,
         };
 
-        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        await CreateReviewLogAsync(entity, communicationId, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Enrichment[email-attachment-action] stored Proposed row | CommunicationId: {CommunicationId}, TargetEntity: {Entity}, Subject: {Subject}, Locator: {Locator}, DeadlineBearing: {DeadlineBearing}.",
@@ -1967,7 +1990,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             ["sprk_aisuggestion"] = suggestionJson,
         };
 
-        await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+        await CreateReviewLogAsync(entity, communicationId, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Enrichment[email-attachment-action] created task {TaskId} and stored Applied row | CommunicationId: {CommunicationId}, Entity: {Entity}, Subject: {Subject}, Locator: {Locator}.",

@@ -4,8 +4,8 @@ using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Engine;
-using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -41,6 +41,12 @@ public sealed class IncomingAssociationResolver
     /// <summary>FR-26 core-ancestor derivation for the inbound association write (task 052).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
 
+    /// <summary>
+    /// unified-access-control-r2 task 146: filing an EXISTING communication is a reparent — its owner is re-derived
+    /// from its parents after the change (the named Secure team when one is secure) before the change is written.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     private readonly ILogger<IncomingAssociationResolver> _logger;
 
     /// <summary>Deterministic rungs (Kind 0–3), evaluated unconditionally, in ascending Order.</summary>
@@ -70,12 +76,14 @@ public sealed class IncomingAssociationResolver
         IGenericEntityService genericEntityService,
         AssociationStatusMapper statusMapper,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<IncomingAssociationResolver> logger)
     {
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _statusMapper = statusMapper;
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
 
         // Rungs are DI-registered (CommunicationModule). Partition into deterministic (0–3) and AI (4–5),
@@ -112,7 +120,40 @@ public sealed class IncomingAssociationResolver
         // unchanged on this path (behavior-preserving).
         var decision = await EvaluateInternalAsync(message, context, communicationId, ct);
 
-        await ApplyDecisionAsync(communicationId, decision, ct);
+        // An EXISTING row being filed: a reparent (task 146) — the owner is re-derived before the write.
+        await ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: false, ct);
+    }
+
+    /// <summary>
+    /// Applies a decision evaluated BEFORE the communication was created to the row just created with the owner
+    /// that decision resolved (unified-access-control-r2 task 146 — the inbound and upload-capture paths evaluate
+    /// first so a secure email is owned by the named Secure team from its first write, never exposed in between).
+    /// Writes the same fields <see cref="ResolveAsync"/> does; skips the reparent re-derivation, because the
+    /// caller created the row from these very parents.
+    /// </summary>
+    public Task ApplyToNewRecordAsync(Guid communicationId, AssociationDecision decision, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(decision);
+        return ApplyDecisionAsync(communicationId, decision, ownerAlreadyResolved: true, ct);
+    }
+
+    /// <summary>
+    /// The ownership question for a communication filed by <paramref name="decision"/> (task 146): every record the
+    /// decision writes as a regarding is a parent (secure-if-any — a candidate secure matter makes the email the named
+    /// Secure team's, the fail-closed direction). With none, the communication keeps its creator (E1). Null decision
+    /// (evaluation failed) = unfiled.
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextFor(AssociationDecision? decision)
+    {
+        var parents = decision?.RegardingWrites.Values
+            .OfType<EntityReference>()
+            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id))
+            ?? Enumerable.Empty<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>();
+
+        return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents) with
+        {
+            WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+        };
     }
 
     /// <summary>
@@ -296,6 +337,7 @@ public sealed class IncomingAssociationResolver
     private async Task ApplyDecisionAsync(
         Guid communicationId,
         AssociationDecision decision,
+        bool ownerAlreadyResolved,
         CancellationToken ct)
     {
         var fields = new Dictionary<string, object>();
@@ -331,7 +373,32 @@ public sealed class IncomingAssociationResolver
         // 050/051), not to this engine.
         await ApplyCoreAncestorStampsAsync(communicationId, fields, decision, ct);
 
-        await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
+        var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesIn(fields);
+        if (ownerAlreadyResolved || parentChanges.Count == 0)
+        {
+            await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct);
+        }
+        else
+        {
+            // Task 146 — a REPARENT of an existing communication: re-derive its owner from its parents AFTER this
+            // change (additive: the engine never clears a sibling regarding), BEFORE the write, and reassign it
+            // (separately, read back) when it moves — into a secure record's named team, or anywhere else. A refusal
+            // throws before anything is written: this class's existing fail-closed contract (the communication
+            // survives, unassociated — NFR-06).
+            var reparent = await _ownership.ReparentAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                {
+                    EntityLogicalName = "sprk_communication",
+                    RecordId = communicationId,
+                    ParentChanges = parentChanges,
+                    WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+                },
+                token => _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, token),
+                ct);
+
+            if (reparent.IsRefused)
+                throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", reparent);
+        }
 
         _logger.LogDebug(
             "Applied association to communication {CommunicationId} | Status: {Status}, AutoFiled: {AutoFiled}, FieldCount: {FieldCount}",

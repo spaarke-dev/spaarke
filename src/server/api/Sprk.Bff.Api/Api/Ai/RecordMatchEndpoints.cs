@@ -90,6 +90,7 @@ public static class RecordMatchEndpoints
     private static async Task<IResult> AssociateRecord(
         AssociateRecordRequest request,
         IDocumentDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -127,8 +128,22 @@ public static class RecordMatchEndpoints
                 return Results.BadRequest($"Unsupported record type: {request.RecordType}");
             }
 
-            // Update the Document record
-            await dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, cancellationToken);
+            // Update the Document record. Task 146: associating FILES the document under the record — a reparent. Its
+            // owner is re-derived (secure-if-any over every parent it will have) BEFORE the lookup is written, and
+            // reassigned when it moves; a refusal writes nothing (409 + reason code).
+            var reparent = await ownershipResolver.ReparentAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                {
+                    EntityLogicalName = "sprk_document",
+                    RecordId = Guid.Parse(request.DocumentId),
+                    ParentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(updateRequest),
+                },
+                token => dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, token),
+                cancellationToken);
+            if (reparent.IsRefused)
+            {
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(reparent, "association");
+            }
 
             logger.LogInformation(
                 "Successfully associated document {DocumentId} with {RecordType} {RecordId}",

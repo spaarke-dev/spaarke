@@ -46,17 +46,23 @@ public sealed class EmailUploadCaptureService
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IncomingAssociationResolver _associationResolver;
     private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<EmailUploadCaptureService> _logger;
 
     public EmailUploadCaptureService(
         ICommunicationDataverseService communicationService,
         IncomingAssociationResolver associationResolver,
         ICommunicationEnrichmentService enrichmentService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<EmailUploadCaptureService> logger)
     {
         _communicationService = communicationService;
         _associationResolver = associationResolver;
         _enrichmentService = enrichmentService;
+        // unified-access-control-r2 task 146 (the word-add-in-r1 note 080 §6.6 hand-off): the captured communication
+        // is owned by the records the association files it to (the named Secure team for a secure one) from its first
+        // write; an unfiled capture keeps its creator (E1).
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
     }
 
@@ -78,11 +84,41 @@ public sealed class EmailUploadCaptureService
             var envelope = BuildEnvelope(email);
             var context = BuildContext(request.TargetEntity);
 
+            // ── Association EVALUATED BEFORE the create (task 146): rung 0 (ExplicitReferenceRung) treats the
+            //    add-in save-pane selection as the authoritative regarding (CallerSuppliedRegarding). The decision's
+            //    records decide the OWNER, so a capture filed to a secure record is the named Secure team's from its
+            //    first write. Non-fatal, as before: a failed evaluation captures the email unfiled. ──
+            AssociationDecision? decision = null;
+            try
+            {
+                decision = await _associationResolver.EvaluateAsync(envelope, context, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Upload-capture association evaluation failed (non-fatal); capturing unfiled.");
+            }
+
+            var owner = await _ownership.ResolveOwnerAsync(IncomingAssociationResolver.OwnershipContextFor(decision), ct);
+            if (owner.IsRefused)
+            {
+                // Best-effort writer (NFR-04): a refusal is a SKIPPED capture — nothing is written, the save proceeds
+                // as an archive (whose own owner the Office save already resolved).
+                _logger.LogWarning(
+                    "Upload email capture SKIPPED for message {MessageId}: no owner — {Reason} ({Code}) (task 146).",
+                    email.InternetMessageId, owner.Reason, owner.RefusalCode);
+                return null;
+            }
+
             // Message-level dedup (FR-C1 / NFR-02): the race-proof create keys on the UNIQUE
             // sprk_internetmessageid alternate key. A same-email save (already captured from a mailbox, or
             // saved by another user) reconciles to the canonical row (WasDuplicate=true) instead of inserting
             // a duplicate — the SINGLE dedup authority. A null/blank internet-message-id creates unguarded.
             var communication = BuildCommunicationEntity(email, envelope);
+            if (owner.IsOwned)
+            {
+                communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+            }
+
             var (communicationId, wasDuplicate) = await _communicationService
                 .CreateCommunicationRaceProofAsync(communication, email.InternetMessageId, ct);
 
@@ -98,18 +134,21 @@ public sealed class EmailUploadCaptureService
                 return communicationId;
             }
 
-            // ── Association: rung 0 (ExplicitReferenceRung) treats the add-in save-pane selection as the
-            //    authoritative regarding (CallerSuppliedRegarding). Non-fatal — the record already exists. ──
-            try
+            // ── Association: apply the decision evaluated above to the row just created with its owner.
+            //    Non-fatal — the record already exists. ──
+            if (decision is not null)
             {
-                await _associationResolver.ResolveAsync(communicationId, envelope, context, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
-                    communicationId);
+                try
+                {
+                    await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
+                        communicationId);
+                }
             }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture

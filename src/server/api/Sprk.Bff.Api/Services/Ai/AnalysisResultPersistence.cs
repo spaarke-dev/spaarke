@@ -25,6 +25,7 @@ public class AnalysisResultPersistence
     private readonly AiTelemetry? _telemetry;
     private readonly JobSubmissionService? _jobSubmissionService;
     private readonly IPostUploadIndexingEnqueuer? _postUploadIndexingEnqueuer;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<AnalysisResultPersistence> _logger;
 
     public AnalysisResultPersistence(
@@ -33,6 +34,7 @@ public class AnalysisResultPersistence
         IWorkingDocumentService workingDocumentService,
         IStorageRetryPolicy storageRetryPolicy,
         ExportServiceRegistry exportRegistry,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AnalysisResultPersistence> logger,
         AiTelemetry? telemetry = null,
         JobSubmissionService? jobSubmissionService = null,
@@ -43,6 +45,9 @@ public class AnalysisResultPersistence
         _workingDocumentService = workingDocumentService;
         _storageRetryPolicy = storageRetryPolicy;
         _exportRegistry = exportRegistry;
+        // Task 146: the analysis rows this class creates (and their outputs) are owned by the analysed document's team
+        // — the named Secure team for a document of a secure record. Required, like the resolver's registration.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
         _telemetry = telemetry;
         _jobSubmissionService = jobSubmissionService;
@@ -109,9 +114,33 @@ public class AnalysisResultPersistence
         try
         {
             // Step 1: Use existing analysis record if analysisId was provided, otherwise create a new one.
+            //
+            // Task 146: the analysis and its outputs are owned by a TEAM — a new analysis by its document's team, the
+            // outputs of an existing analysis by that analysis's team (record-first) — the named Secure team for a
+            // secure record. A REFUSAL skips the analysis rows only (logged; best-effort, never a failed profile): the
+            // document-field mapping below still runs, since it writes no new row. A Dataverse FAULT is not a refusal
+            // and falls to the outer catch.
             Guid dataverseAnalysisId;
+            var owner = await _ownership.ResolveOwnerAsync(
+                analysisId != Guid.Empty
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                    {
+                        TargetEntityLogicalName = "sprk_analysis",
+                        TargetRecordId = analysisId,
+                    }
+                    : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                        new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }),
+                cancellationToken);
 
-            if (analysisId != Guid.Empty)
+            if (!owner.IsOwned)
+            {
+                _logger.LogWarning(
+                    "[OWNERSHIP-REFUSED] Document Profile analysis rows NOT written for document {DocumentId}: {Reason} "
+                    + "({Code}). The document fields are still mapped (task 146).",
+                    documentId, owner.Reason, owner.RefusalCode);
+                dataverseAnalysisId = analysisId;
+            }
+            else if (analysisId != Guid.Empty)
             {
                 _logger.LogInformation(
                     "Using existing analysis record for Document Profile: AnalysisId={AnalysisId}, DocumentId={DocumentId}",
@@ -127,35 +156,47 @@ public class AnalysisResultPersistence
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
+                    owningTeamId: owner.OwningTeamId,
                     ct: cancellationToken);
             }
 
-            // Step 2: Store outputs in sprk_analysisoutput (critical path)
-            _logger.LogInformation(
-                "Storing {OutputCount} outputs in sprk_analysisoutput for analysis {AnalysisId}",
-                toolResults.Count, dataverseAnalysisId);
-
-            var sortOrder = 0;
-            foreach (var (outputTypeName, value) in toolResults)
+            // Step 2: Store outputs in sprk_analysisoutput (critical path) — owned like their analysis.
+            if (owner.IsOwned)
             {
-                if (string.IsNullOrWhiteSpace(value))
+                _logger.LogInformation(
+                    "Storing {OutputCount} outputs in sprk_analysisoutput for analysis {AnalysisId}",
+                    toolResults.Count, dataverseAnalysisId);
+
+                var sortOrder = 0;
+                foreach (var (outputTypeName, value) in toolResults)
                 {
-                    _logger.LogDebug("Skipping empty output for type {OutputType}", outputTypeName);
-                    continue;
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        _logger.LogDebug("Skipping empty output for type {OutputType}", outputTypeName);
+                        continue;
+                    }
+
+                    var output = new AnalysisOutputEntity
+                    {
+                        Name = outputTypeName,
+                        Value = value,
+                        AnalysisId = dataverseAnalysisId,
+                        OutputTypeId = null,
+                        SortOrder = sortOrder++,
+                        OwningTeamId = owner.OwningTeamId,
+                    };
+
+                    await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
+                    _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
                 }
-
-                var output = new AnalysisOutputEntity
-                {
-                    Name = outputTypeName,
-                    Value = value,
-                    AnalysisId = dataverseAnalysisId,
-                    OutputTypeId = null,
-                    SortOrder = sortOrder++
-                };
-
-                await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
-                _logger.LogDebug("Stored output {OutputType} in sprk_analysisoutput", outputTypeName);
             }
+
+            // A full success that skipped the analysis rows on an ownership refusal is reported as partial (task 146).
+            DocumentProfileResult Done() => owner.IsOwned
+                ? DocumentProfileResult.FullSuccess(dataverseAnalysisId)
+                : DocumentProfileResult.PartialSuccess(
+                    dataverseAnalysisId,
+                    "Document Profile completed, but its analysis record was not saved: " + owner.Reason + ".");
 
             // Step 3: Map outputs to sprk_document fields (optional path, with retry)
             if (playbookName.Equals("Document Profile", StringComparison.OrdinalIgnoreCase))
@@ -172,7 +213,7 @@ public class AnalysisResultPersistence
                     {
                         _logger.LogWarning(
                             "No mappable outputs found for Document Profile. Skipping document field update.");
-                        return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+                        return Done();
                     }
 
                     await _storageRetryPolicy.ExecuteAsync(async ct =>
@@ -188,7 +229,7 @@ public class AnalysisResultPersistence
 
                     }, cancellationToken);
 
-                    return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+                    return Done();
                 }
                 catch (Exception ex)
                 {
@@ -203,7 +244,7 @@ public class AnalysisResultPersistence
                 }
             }
 
-            return DocumentProfileResult.FullSuccess(dataverseAnalysisId);
+            return Done();
         }
         catch (Exception ex)
         {
@@ -302,6 +343,21 @@ public class AnalysisResultPersistence
     {
         ArgumentNullException.ThrowIfNull(memo);
 
+        // Task 146: the memo carries the analysis's content, so it is owned like its analysis (record-first from it —
+        // the named Secure team for an analysis of a secure record). A refusal writes nothing and throws in this
+        // method's contract; a Dataverse fault propagates unchanged.
+        var owner = await _ownership.ResolveOwnerAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_analysis",
+                TargetRecordId = analysisId,
+            },
+            cancellationToken);
+        if (!owner.IsOwned)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_analysisoutput", owner);
+        }
+
         var json = JsonSerializer.Serialize(memo);
 
         var output = new AnalysisOutputEntity
@@ -322,6 +378,7 @@ public class AnalysisResultPersistence
             // ReviewMemoOutputNameGuardTests makes a silent change impossible. Revisit when a second
             // output type needs the same treatment, or when rows exist and a rename is genuinely wanted.
             OutputTypeId = null,
+            OwningTeamId = owner.OwningTeamId, // task 146
         };
 
         var outputId = await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);

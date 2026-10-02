@@ -68,6 +68,16 @@ public class InvoiceReviewWritePathTests
         _ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(TeamId);
 
+        // Task 146: linking the document files it under the invoice — a reparent through the resolver, which runs the
+        // create + link as its change. This pass-through applies the change and answers the matter's team.
+        _ownership.Setup(o => o.ReparentAsync(
+                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (RecordReparent _, Func<CancellationToken, Task> apply, CancellationToken token) =>
+            {
+                await apply(token);
+                return RecordOwnerResolution.Owned(TeamId);
+            });
+
         _recordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_recordtype_ref", MatterRecordTypeId));
     }
@@ -217,6 +227,46 @@ public class InvoiceReviewWritePathTests
         (await act.Should().ThrowAsync<InvoiceReviewException>())
             .Which.Failure.Should().Be(InvoiceReviewFailure.OwnerTeamUnresolved);
         _records.Writes.Should().BeEmpty("an invoice nobody's team owns is never created — not user-owned, not app-owned");
+        _submitted.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Confirm_LinkingTheDocument_IsAReparentUnderTheMatter_ThatWrapsTheCreateAndTheLink()
+    {
+        // Task 146: the document is filed under the invoice, so its owner is re-derived (secure-if-any) over its own
+        // parents plus the invoice's — the matter stands in for the not-yet-created invoice.
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+
+        await Sut().ConfirmInvoiceAsync(request, "corr-146");
+
+        _ownership.Verify(o => o.ReparentAsync(
+            It.Is<RecordReparent>(r =>
+                r.EntityLogicalName == "sprk_document"
+                && r.RecordId == request.DocumentId
+                && r.InheritedParents.Count == 1
+                && r.InheritedParents[0].EntityLogicalName == "sprk_matter"
+                && r.InheritedParents[0].RecordId == request.MatterId),
+            It.IsAny<Func<CancellationToken, Task>>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Confirm_DocumentReparentRefused_CreatesNoInvoice_AndWritesNothing()
+    {
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _ownership.Setup(o => o.ReparentAsync(
+                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.SecureParentNotIsolated, "the matter is marked secure but is not isolated"));
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-146r");
+
+        (await act.Should().ThrowAsync<InvoiceReviewException>())
+            .Which.Failure.Should().Be(InvoiceReviewFailure.OwnerTeamUnresolved);
+        _records.Writes.Should().BeEmpty("a refused re-file writes nothing — no invoice, no link");
         _submitted.Should().BeEmpty();
     }
 

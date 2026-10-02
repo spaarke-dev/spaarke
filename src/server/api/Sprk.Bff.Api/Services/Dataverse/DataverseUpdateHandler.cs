@@ -10,20 +10,62 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 {
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IGenericEntityService _genericEntityService;
+    private readonly IRecordOwnershipResolver _ownership;
     private readonly ILogger<DataverseUpdateHandler> _logger;
 
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
+        IRecordOwnershipResolver ownership,
         ILogger<DataverseUpdateHandler> logger)
     {
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
+    /// <exception cref="RecordOwnerUnresolvedException">
+    /// The update re-files a child record (an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> value onto a parent)
+    /// whose new owner cannot be resolved. Nothing was written (task 146).
+    /// </exception>
     public async Task UpdateAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        ConcurrencyMode concurrencyMode,
+        int maxRetries,
+        CancellationToken ct)
+    {
+        // Task 146: an EntityReference value onto a parent FILES a child table under a record — a reparent. The child's
+        // owner is re-derived over every parent it will have (secure-if-any) BEFORE the write, and reassigned when it
+        // moves. A root's own lookups never reassign it (provisioning owns a root's ownership).
+        var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
+            ? RecordReparent.ParentChangesIn(fields)
+            : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
+        if (parentChanges.Count == 0)
+        {
+            await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
+            return;
+        }
+
+        var reparent = await _ownership.ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = entityLogicalName,
+                RecordId = recordId,
+                ParentChanges = parentChanges,
+            },
+            token => WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, token),
+            ct);
+        if (reparent.IsRefused)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
+        }
+    }
+
+    private async Task WriteAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,

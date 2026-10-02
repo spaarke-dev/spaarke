@@ -306,6 +306,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             await CreateArtifactRecordsAsync(
                 payload,
                 documentId,
+                message.UserId,
                 cancellationToken);
 
             await UpdateJobStatusAsync(
@@ -672,21 +673,36 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private async Task CreateArtifactRecordsAsync(
         UploadFinalizationPayload payload,
         Guid documentId,
+        string userId,
         CancellationToken cancellationToken)
     {
+        if (!(payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
+            && !(payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null))
+        {
+            return;
+        }
+
+        // Task 146: an artifact is content of its document — owned by the same team (the carried team wins, exactly
+        // as for the document itself). Refuse rather than create it app-owned in the root business unit.
+        var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "No owner team could be resolved for this save's artifact record; refusing to create it app-owned "
+                + "(task 146). See the preceding RecordOwnershipResolver warning for which link broke.");
+
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
         {
-            await CreateEmailArtifactAsync(payload.EmailMetadata, documentId, cancellationToken);
+            await CreateEmailArtifactAsync(payload.EmailMetadata, documentId, owningTeamId, cancellationToken);
         }
         else if (payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null)
         {
-            await CreateAttachmentArtifactAsync(payload.AttachmentMetadata, documentId, cancellationToken);
+            await CreateAttachmentArtifactAsync(payload.AttachmentMetadata, documentId, owningTeamId, cancellationToken);
         }
     }
 
     private async Task CreateEmailArtifactAsync(
         EmailArtifactPayload metadata,
         Guid documentId,
+        Guid owningTeamId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
@@ -722,7 +738,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             BodyPreview = metadata.BodyPreview,
             HasAttachments = metadata.HasAttachments,
             Priority = priorityValue, // Changed from Importance to Priority per Dataverse schema
-            DocumentId = documentId
+            DocumentId = documentId,
+            OwningTeamId = owningTeamId // task 146 → ownerid
         };
 
         var emailArtifactId = await _processingJobService.CreateEmailArtifactAsync(request, cancellationToken);
@@ -736,6 +753,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private async Task CreateAttachmentArtifactAsync(
         AttachmentArtifactPayload metadata,
         Guid documentId,
+        Guid owningTeamId,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
@@ -751,7 +769,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Size = (int)metadata.Size, // Convert long to int for Dataverse
             IsInline = metadata.IsInline,
             EmailArtifactId = metadata.EmailArtifactId,
-            DocumentId = documentId
+            DocumentId = documentId,
+            OwningTeamId = owningTeamId // task 146 → ownerid
         };
 
         var attachmentArtifactId = await _processingJobService.CreateAttachmentArtifactAsync(request, cancellationToken);

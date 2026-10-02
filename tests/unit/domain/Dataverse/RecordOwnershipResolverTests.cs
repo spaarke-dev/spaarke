@@ -7,6 +7,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Dataverse;
 using Xunit;
+using FakeDirectory = Sprk.Bff.Api.Tests.TestInfrastructure.OwnershipDirectory;
 
 namespace Sprk.Bff.Api.Tests.Domain.Dataverse;
 
@@ -331,175 +332,386 @@ public class RecordOwnershipResolverTests
     }
 
     // =====================================================================================
+    // Task 146 — every parent, secure-if-any, the flagged-not-isolated refusal
+    // =====================================================================================
+
+    private static readonly Guid OrdinaryProjectId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid FlaggedProjectId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid ContactId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    [Fact]
+    public async Task ResolveOwner_WhenOnlyTheRelatedProjectIsSecure_OwnsTheDocumentByTheNamedSecureTeam()
+    {
+        // The both-project-lookups case (design.md §5.1d): sprk_document carries sprk_project AND
+        // sprk_relatedproject. The ORDINARY project is the primary parent; the SECURE one is named only by the second
+        // lookup. A writer passing its first lookup alone would hand the document the ordinary team.
+        var directory = Directory()
+            .WithRecord("sprk_project", OrdinaryProjectId, ChildBu)
+            .WithRecord("sprk_project", SecureProjectId, SecureBu);
+
+        var document = new Entity("sprk_document")
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProjectId),
+            ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProjectId),
+        };
+
+        var resolution = await Build(directory).ResolveOwnerAsync(RecordOwnershipContext.ForChild(document), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Owned);
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam).And.NotBe(SecureDefaultTeam).And.NotBe(ChildTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenEveryParentIsOrdinary_UsesThePrimaryParentsBusinessUnitTeam()
+    {
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_project", OrdinaryProjectId, GeneralBu);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_matter",
+                TargetRecordId = MatterId,
+                Parents = new[] { new RecordOwnershipParent("sprk_project", OrdinaryProjectId) },
+                CallerSystemUserId = CallerUserId,
+            },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the primary parent decides an ordinary child's business unit");
+        directory.QueriedEntities.Should().NotContain("systemuser");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenAParentIsFlaggedSecureButNotIsolated_RefusesWithTheStableCode_NeverAnOrdinaryTeam()
+    {
+        // A failed or interrupted provisioning (C11): sprk_issecure = true, still owned in an ordinary BU.
+        // Record-first would read "ordinary" from its ownership; the flag says secure. Fail closed.
+        var directory = Directory().WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: true);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_project", TargetRecordId = FlaggedProjectId },
+            CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Refused);
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+        resolution.Reason.Should().Contain(FlaggedProjectId.ToString("D"));
+        resolution.OwningTeamId.Should().BeNull();
+        directory.QueriedEntities.Should().NotContain("team", "a refusal is decided before any team is looked up");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenAFlaggedRootIsIsolated_OwnsTheChildByTheNamedTeam()
+    {
+        var directory = Directory().WithRecord("sprk_project", SecureProjectId, SecureBu, isSecure: true);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_project", TargetRecordId = SecureProjectId },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenTheEnvironmentHasNoSecureBusinessUnit_RefusesAFlaggedRoot()
+    {
+        var directory = new FakeDirectory()
+            .WithBusinessUnit(ChildBu, "Spaarke Business Unit 1")
+            .WithTeam(ChildTeam, ChildBu, isDefault: true, teamType: 0)
+            .WithRecord("sprk_matter", MatterId, ChildBu, isSecure: true);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_matter", TargetRecordId = MatterId },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenASecondParentIsMissing_RefusesWithoutConsultingTheCaller()
+    {
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu); // SecureProjectId absent
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_matter",
+                TargetRecordId = MatterId,
+                Parents = new[] { new RecordOwnershipParent("sprk_project", SecureProjectId) },
+                CallerSystemUserId = CallerUserId,
+            },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved,
+            "the unreadable parent might be the secure one");
+        directory.QueriedEntities.Should().NotContain("systemuser");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenReadingASecondParentFaults_PropagatesTheFault()
+    {
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu).WithUnreadable("sprk_project");
+
+        var act = () => Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_matter",
+                TargetRecordId = MatterId,
+                Parents = new[] { new RecordOwnershipParent("sprk_project", SecureProjectId) },
+            },
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>("a fault is not a refusal");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenAParentEntryIsNotAnOwnershipParent_IgnoresIt()
+    {
+        // A contact (or organization) on a child is a relationship, not a parent: it is never read for ownership.
+        var directory = Directory().WithRecord("sprk_matter", MatterId, ChildBu);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_matter",
+                TargetRecordId = MatterId,
+                Parents = new[] { new RecordOwnershipParent("contact", ContactId) },
+            },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.QueriedEntities.Should().NotContain("contact");
+    }
+
+    [Fact]
+    public void ParentsOf_TakesEveryOwnershipParentReference_AndNoOther()
+    {
+        var fields = new Dictionary<string, object>
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProjectId),
+            ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProjectId),
+            ["sprk_relatedmatter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_relatedcontact"] = new EntityReference("contact", ContactId),
+            ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", Guid.NewGuid()),
+            ["sprk_documentname"] = "x.docx",
+        };
+
+        RecordOwnershipContext.ParentsOf(fields).Should().BeEquivalentTo(new[]
+        {
+            new RecordOwnershipParent("sprk_project", OrdinaryProjectId),
+            new RecordOwnershipParent("sprk_project", SecureProjectId),
+            new RecordOwnershipParent("sprk_matter", MatterId),
+        });
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenUnfiledAndTheWriterKeepsItsCreator_AnswersUnchanged_WithoutAnyRead()
+    {
+        var directory = Directory();
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext { WhenUnfiled = UnfiledOwnership.KeepCreator, CallerSystemUserId = CallerUserId },
+            CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        directory.QueriedEntities.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenAFiledRowKeepsCreatorWhenUnfiled_StillResolvesFromItsParent()
+    {
+        // KeepCreator governs ONLY the unfiled case: a filed communication is owned like any child.
+        var directory = Directory().WithRecord("sprk_project", SecureProjectId, SecureBu);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = new[] { new RecordOwnershipParent("sprk_project", SecureProjectId) },
+                WhenUnfiled = UnfiledOwnership.KeepCreator,
+            },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAContentRowOfAParentThatIsNotTeamOwned_AnswersUnchanged()
+    {
+        var communicationId = Guid.NewGuid();
+        var directory = Directory().WithRecord("sprk_communication", communicationId, GeneralBu, owningTeam: null);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_communication",
+                TargetRecordId = communicationId,
+                KeepCreatorUnlessTargetIsTeamOwned = true,
+            },
+            CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAContentRowOfATeamOwnedSecureParent_OwnsItByTheNamedTeam()
+    {
+        var communicationId = Guid.NewGuid();
+        var directory = Directory().WithRecord("sprk_communication", communicationId, SecureBu, owningTeam: SecureNamedTeam);
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                TargetEntityLogicalName = "sprk_communication",
+                TargetRecordId = communicationId,
+                KeepCreatorUnlessTargetIsTeamOwned = true,
+            },
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+    }
+
+    // ---- Reparent ----
+
+    [Fact]
+    public async Task Reparent_WhenAChildMovesUnderASecureParent_AppliesTheChangeThenAssignsTheNamedTeam_ReadBack()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_relatedproject"] = new EntityReference("sprk_project", SecureProjectId),
+                },
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+        directory.Assignments.Should().ContainSingle().Which.Should().Be(("sprk_document", documentId, SecureNamedTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_WhenAChildMovesOutOfEverySecureParent_AssignsTheNewParentsBusinessUnitTeam()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_project"] = null, // cleared
+                    ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                },
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.Assignments.Should().ContainSingle().Which.Item3.Should().Be(ChildTeam);
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheNewParentIsFlaggedButNotIsolated_RefusesAndDoesNotApplyTheChange()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: true)
+            .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam);
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_project"] = new EntityReference("sprk_project", FlaggedProjectId),
+                },
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+        applied.Should().BeFalse("a refused re-file writes nothing");
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheOwnerDoesNotReadBack_Throws()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam)
+            .IgnoringAssignments();
+
+        var act = () => Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+                },
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*did not read back*");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheRowIsAlreadyOwnedByTheResolvedTeam_AssignsNothing()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam);
+
+        await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                },
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    // =====================================================================================
     // Harness
     // =====================================================================================
 
-    private static RecordOwnershipResolver Build(FakeDirectory directory)
-    {
-        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
-        entities
-            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((QueryExpression query, CancellationToken _) => directory.Answer(query));
+    private static RecordOwnershipResolver Build(FakeDirectory directory) => directory.Resolver();
 
-        // The configured names are set explicitly, so a test proves the CONFIGURED names are honoured.
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["SecureRecord:BusinessUnitName"] = SecureBuName,
-            ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
-        }).Build();
-
-        return new RecordOwnershipResolver(entities.Object, configuration, NullLogger<RecordOwnershipResolver>.Instance);
-    }
-
-    /// <summary>
-    /// One caller in the general unit; three named business units; each unit's default Owner team present unless told
-    /// otherwise; and in the Secure Record BU the NAMED owner team plus two near-miss decoys (task 144) — an ACCESS team
-    /// with the right name and an OWNER team with the wrong name — inserted BEFORE the named team, so a named-team
-    /// query that dropped <c>teamtype</c> or <c>name</c> matches two rows (or a decoy first) and refuses.
-    /// </summary>
-    private static FakeDirectory Directory(bool withDefaultTeams = true, bool withNamedSecureTeam = true)
-    {
-        var directory = new FakeDirectory()
-            .WithUser(CallerUserId, CallerOid, GeneralBu)
-            .WithBusinessUnit(GeneralBu, "Spaarke")
-            .WithBusinessUnit(ChildBu, "Spaarke Business Unit 1")
-            .WithBusinessUnit(SecureBu, SecureBuName);
-
-        if (withDefaultTeams)
-        {
-            directory
-                .WithTeam(GeneralTeam, GeneralBu, isDefault: true, teamType: 0, "Spaarke")
-                .WithTeam(ChildTeam, ChildBu, isDefault: true, teamType: 0, "Spaarke Business Unit 1")
-                .WithTeam(SecureDefaultTeam, SecureBu, isDefault: true, teamType: 0, SecureBuName);
-        }
-
-        directory
-            .WithTeam(Guid.NewGuid(), SecureBu, isDefault: false, teamType: 1, SecureOwnerTeamName)
-            .WithTeam(Guid.NewGuid(), SecureBu, isDefault: false, teamType: 0, SecureOwnerTeamName + " Extra");
-
-        if (withNamedSecureTeam)
-        {
-            directory.WithTeam(SecureNamedTeam, SecureBu, isDefault: false, teamType: 0, SecureOwnerTeamName);
-        }
-
-        return directory;
-    }
-
-    /// <summary>
-    /// An in-memory Dataverse that evaluates a query's Equal conditions against its rows and honours TopCount.
-    /// </summary>
-    private sealed class FakeDirectory
-    {
-        private readonly Dictionary<(string Entity, Guid Id), Guid?> _records = new();
-        private readonly HashSet<string> _unreadable = new(StringComparer.OrdinalIgnoreCase);
-        private readonly List<(Guid SystemUserId, Guid ObjectId, Guid BusinessUnit)> _users = new();
-        private readonly List<(Guid TeamId, Guid BusinessUnit, bool IsDefault, int TeamType, string Name)> _teams = new();
-        private readonly List<(Guid BusinessUnitId, string Name)> _businessUnits = new();
-
-        public List<string> QueriedEntities { get; } = new();
-        public List<string> UserKeyColumns { get; } = new();
-
-        public FakeDirectory WithRecord(string entity, Guid id, Guid? owningBusinessUnit)
-        {
-            _records[(entity, id)] = owningBusinessUnit;
-            return this;
-        }
-
-        public FakeDirectory WithUnreadable(string entity)
-        {
-            _unreadable.Add(entity);
-            return this;
-        }
-
-        public FakeDirectory WithUser(Guid systemUserId, Guid objectId, Guid businessUnit)
-        {
-            _users.Add((systemUserId, objectId, businessUnit));
-            return this;
-        }
-
-        public FakeDirectory WithTeam(Guid teamId, Guid businessUnit, bool isDefault, int teamType, string name = "")
-        {
-            _teams.Add((teamId, businessUnit, isDefault, teamType, name));
-            return this;
-        }
-
-        public FakeDirectory WithBusinessUnit(Guid businessUnitId, string name)
-        {
-            _businessUnits.Add((businessUnitId, name));
-            return this;
-        }
-
-        public EntityCollection Answer(QueryExpression query)
-        {
-            QueriedEntities.Add(query.EntityName);
-            var conditions = query.Criteria.Conditions.ToDictionary(
-                c => c.AttributeName, c => c.Values.Single(), StringComparer.OrdinalIgnoreCase);
-
-            IEnumerable<Entity> rows = query.EntityName switch
-            {
-                "systemuser" => UsersMatching(conditions),
-                "team" => _teams
-                    .Where(t => Matches(conditions, "businessunitid", t.BusinessUnit)
-                                && Matches(conditions, "isdefault", t.IsDefault)
-                                && Matches(conditions, "teamtype", t.TeamType)
-                                && MatchesName(conditions, t.Name))
-                    .Select(t => new Entity("team", t.TeamId)),
-                "businessunit" => _businessUnits
-                    .Where(b => MatchesName(conditions, b.Name))
-                    .Select(b => new Entity("businessunit", b.BusinessUnitId)),
-                _ => RecordsMatching(query.EntityName, conditions),
-            };
-
-            var list = rows.ToList();
-            if (query.TopCount is { } top)
-            {
-                list = list.Take(top).ToList();
-            }
-
-            return new EntityCollection(list);
-        }
-
-        private IEnumerable<Entity> UsersMatching(IReadOnlyDictionary<string, object> conditions)
-        {
-            var (column, key) = conditions.Single();
-            UserKeyColumns.Add(column);
-            return _users
-                .Where(u => column == "systemuserid" ? u.SystemUserId.Equals(key) : u.ObjectId.Equals(key))
-                .Select(u => new Entity("systemuser", u.SystemUserId)
-                {
-                    ["businessunitid"] = new EntityReference("businessunit", u.BusinessUnit),
-                });
-        }
-
-        private IEnumerable<Entity> RecordsMatching(string entity, IReadOnlyDictionary<string, object> conditions)
-        {
-            if (_unreadable.Contains(entity))
-            {
-                throw new InvalidOperationException($"Test: {entity} is not readable.");
-            }
-
-            var id = (Guid)conditions[$"{entity}id"];
-            if (!_records.TryGetValue((entity, id), out var businessUnit))
-            {
-                return Array.Empty<Entity>();
-            }
-
-            var row = new Entity(entity, id);
-            if (businessUnit is { } bu)
-            {
-                row["owningbusinessunit"] = new EntityReference("businessunit", bu);
-            }
-
-            return new[] { row };
-        }
-
-        /// <summary>An ABSENT condition matches everything — so a dropped predicate widens the match.</summary>
-        private static bool Matches(IReadOnlyDictionary<string, object> conditions, string attribute, object value) =>
-            !conditions.TryGetValue(attribute, out var expected) || expected.Equals(value);
-
-        /// <summary>Dataverse compares names case-insensitively; an absent name condition matches everything.</summary>
-        private static bool MatchesName(IReadOnlyDictionary<string, object> conditions, string name) =>
-            !conditions.TryGetValue("name", out var expected)
-            || string.Equals(expected as string, name, StringComparison.OrdinalIgnoreCase);
-    }
+    /// <summary>The standard world (<see cref="FakeDirectory.Standard"/>) — shared with SecureChildOwnershipTests.</summary>
+    private static FakeDirectory Directory(bool withDefaultTeams = true, bool withNamedSecureTeam = true) =>
+        FakeDirectory.Standard(withDefaultTeams, withNamedSecureTeam);
 }

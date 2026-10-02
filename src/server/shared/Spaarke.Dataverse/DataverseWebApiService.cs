@@ -408,6 +408,16 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // unified-access-control-r2 task 146: the owner is resolved upstream (the regarding record's team; the named
+        // Secure team for a secure one) and its absence REFUSES — never an app-owned event in the root business unit.
+        if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "CreateEventAsync requires CreateEventRequest.OwningTeamId (resolved by IRecordOwnershipResolver); "
+                + "refusing to create an app-owned sprk_event (task 146).");
+        }
 
         var payload = new Dictionary<string, object?>
         {
@@ -415,7 +425,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ["sprk_description"] = request.Description,
             ["statuscode"] = 3, // Open
             ["statecode"] = 0,  // Active
-            ["sprk_source"] = 0 // User
+            ["sprk_source"] = 0, // User
+            ["ownerid@odata.bind"] = $"/teams({owningTeamId})"
         };
 
         if (request.EventTypeId.HasValue)
@@ -563,7 +574,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         }
     }
 
-    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
+    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, CancellationToken ct = default)
     {
 
         var logName = $"Event Log - {EventLogAction.GetDisplayName(action)} - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
@@ -575,6 +586,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ["sprk_action"] = action,
             ["sprk_description"] = description
         };
+        if (owningTeamId is { } teamId && teamId != Guid.Empty)
+        {
+            // Task 146: owned like its event (the caller resolved it). Unset only for an event that is not team-owned.
+            payload["ownerid@odata.bind"] = $"/teams({teamId})";
+        }
 
         _logger.LogInformation("Creating event log for event {EventId}: {Action}", eventId, EventLogAction.GetDisplayName(action));
 

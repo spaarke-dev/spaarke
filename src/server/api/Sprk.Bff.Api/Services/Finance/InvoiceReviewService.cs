@@ -385,6 +385,7 @@ public class InvoiceReviewService : IInvoiceReviewService
 
         Guid invoiceId;
         long? statusVersion;
+        var reconcileOwnerAfterStatus = false;
 
         if (first.Link == LinkState.SameMatterAndVendor)
         {
@@ -394,16 +395,30 @@ public class InvoiceReviewService : IInvoiceReviewService
                 request.DocumentId, first.LinkedInvoiceId);
             invoiceId = first.LinkedInvoiceId!.Value;
             statusVersion = first.Version; // nothing written since the read: the status write is conditional on it
+            reconcileOwnerAfterStatus = true; // task 146 — see after step 3
         }
         else
         {
-            // Step 1: create the invoice, owned by the MATTER's team. Nothing has been written before this.
-            var created = await CreateInvoiceRecordAsync(request, ct);
+            // Task 146: linking FILES the document under the invoice — a reparent. Its owner is re-derived over every
+            // parent it will have (secure-if-any; the invoice's securability is its matter's, so the matter stands in
+            // for the not-yet-created invoice) BEFORE anything is written. A refusal writes nothing at all — no
+            // invoice, no link. Steps 1-2 run inside the reparent, which then reassigns the document (read back).
+            Guid created = Guid.Empty;
+            LinkOutcome? linkOutcome = null;
+            await RefileDocumentUnderInvoiceAsync(
+                request,
+                async token =>
+                {
+                    // Step 1: create the invoice, owned by the MATTER's team.
+                    created = await CreateInvoiceRecordAsync(request, token);
 
-            // Step 2: link the document to it — only if the document is still at the version read above. On
-            // failure, undo step 1 so no orphan invoice is left behind. A concurrent confirm that linked first
-            // makes this answer with ITS invoice (same matter and vendor) or refuse (409).
-            var link = await LinkDocumentOrCompensateAsync(request, created, first, ct);
+                    // Step 2: link the document to it — only if the document is still at the version read above. On
+                    // failure, undo step 1 so no orphan invoice is left behind. A concurrent confirm that linked
+                    // first makes this answer with ITS invoice (same matter and vendor) or refuse (409).
+                    linkOutcome = await LinkDocumentOrCompensateAsync(request, created, first, token);
+                },
+                ct);
+            var link = linkOutcome!.Value; // set by the change, which ran (a refusal threw above)
 
             if (link.ConcurrentInvoiceId is { } winner)
             {
@@ -446,6 +461,14 @@ public class InvoiceReviewService : IInvoiceReviewService
                 $"Invoice {invoiceId} was created and linked to the document, but the document could not be marked " +
                 "as a confirmed invoice. Retry the confirmation; it will reuse this invoice.",
                 invoiceId, ex);
+        }
+
+        // Task 146 — a RESUMED confirmation: the first attempt linked the document but may have failed before the
+        // document's owner moved under the invoice. Completed here, after the status write so that write keeps its
+        // version condition (an already-owned document is left as it is — the common case is a no-op).
+        if (reconcileOwnerAfterStatus)
+        {
+            await RefileDocumentUnderInvoiceAsync(request, applyChange: _ => Task.CompletedTask, ct);
         }
 
         // Step 4: enqueue extraction. Its idempotency key is per invoice and becomes the Service Bus MessageId, but
@@ -592,6 +615,37 @@ public class InvoiceReviewService : IInvoiceReviewService
     // ═══════════════════════════════════════════════════════════════════════════
     // Step 1: Create Invoice Record (app-only, team-owned)
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Task 146: files the document under the invoice as a REPARENT through the one owner resolver. The document's
+    /// owner is re-derived over every parent it carries plus the confirmed matter (the invoice's own securability is
+    /// its matter's — the invoice is owned by the matter's team) BEFORE <paramref name="applyChange"/> runs; a refusal
+    /// throws <see cref="InvoiceReviewFailure.OwnerTeamUnresolved"/> with nothing written. After the change the
+    /// document is reassigned (a separate owner write, read back) when its owner moves — into the named Secure team
+    /// for a secure matter. A Dataverse fault propagates.
+    /// </summary>
+    private async Task RefileDocumentUnderInvoiceAsync(
+        InvoiceReviewConfirmRequest request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
+    {
+        var reparent = await _ownership.ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = DocumentEntity,
+                RecordId = request.DocumentId,
+                ParentChanges = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(),
+                InheritedParents = new[] { new RecordOwnershipParent(MatterEntity, request.MatterId) },
+            },
+            applyChange,
+            ct);
+
+        if (reparent.IsRefused)
+        {
+            throw new InvoiceReviewException(
+                InvoiceReviewFailure.OwnerTeamUnresolved,
+                $"The document could not be filed under the invoice because its owner could not be resolved "
+                + $"({reparent.RefusalCode}: {reparent.Reason}). Nothing was saved.");
+        }
+    }
 
     /// <summary>
     /// Create a new sprk_invoice OWNED BY THE MATTER'S TEAM — the matter's business-unit default owner team, which

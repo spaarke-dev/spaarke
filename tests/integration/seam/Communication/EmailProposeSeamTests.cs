@@ -130,6 +130,7 @@ public sealed class EmailProposeSeamTests
             producer.Object,
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

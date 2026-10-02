@@ -83,7 +83,7 @@ public sealed class ComposeServiceUploadFidelityTests
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
     /// unmodified by any editor round-trip.</summary>

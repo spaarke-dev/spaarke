@@ -7,10 +7,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
-using Spaarke.Dataverse;
 using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -24,7 +25,6 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -276,6 +276,9 @@ public class ComposeService : IComposeService
         ILogger<ComposeService> logger,
         RecordContainerResolver containerResolver,
         CallerRecordAccessProbe accessProbe,
+        // Task 146: who owns a promoted sprk_document (required — the resolver is registered unconditionally, and a
+        // missing one must fail at startup rather than quietly re-open app ownership).
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IDistributedCache? cache = null,
         IDocumentProfileAi? documentProfileAi = null,
         IServiceScopeFactory? scopeFactory = null,
@@ -331,7 +334,7 @@ public class ComposeService : IComposeService
         // Task 070 cluster 2b — record RESOLUTION. Constructed after _dedupDetector because it takes it.
         _recordResolution = new ComposeRecordResolution(_sessions, _dataverse, _logger, _dedupDetector);
         // Cluster 2a takes 2b: the promotion path resolves an existing row before creating one.
-        _createOnSave = new ComposeCreateOnSavePromoter(_dataverse, _logger, _dedupDetector, _recordResolution);
+        _createOnSave = new ComposeCreateOnSavePromoter(_dataverse, _logger, _dedupDetector, _recordResolution, ownership);
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
         // re-anchor) in a bare test constructor.
         _cache = cache;

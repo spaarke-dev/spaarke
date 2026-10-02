@@ -94,6 +94,7 @@ public class MessagingSpineSeamTests
         new(
             new IThreadKeyStrategy[] { new MessagingThreadKeyStrategy(entity.Object) },
             entity.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<ThreadResolver>.Instance);
 
     private static DataverseEntity Communication(Guid id) => new("sprk_communication") { Id = id };
@@ -225,6 +226,9 @@ public class MessagingSpineSeamTests
             {
                 new("sprk_communicationchannelref") { ["sprk_thread"] = new EntityReference("sprk_communicationthread", existingThreadId) },
             }));
+        // Task 146: a JOIN reads the thread's regarding first (a Direct chat thread — no record to file under).
+        _entity.Setup(s => s.RetrieveAsync("sprk_communicationthread", existingThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_communicationthread") { Id = existingThreadId });
         var updates = CaptureUpdates();
 
         var handler = CreateHandler(CreateRealResolver(_entity));

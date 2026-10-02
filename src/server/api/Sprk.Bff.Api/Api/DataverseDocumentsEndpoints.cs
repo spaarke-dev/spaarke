@@ -3,11 +3,11 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Telemetry;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -204,6 +204,7 @@ public static class DataverseDocumentsEndpoints
             string id,
             [FromBody] UpdateDocumentRequest request,
             IDocumentDataverseService dataverseService,
+            Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -232,7 +233,34 @@ public static class DataverseDocumentsEndpoints
                     });
                 }
 
-                await dataverseService.UpdateDocumentAsync(id, request);
+                // Task 146: an update that FILES the document under a record (a matter, project, parent document, …)
+                // is a reparent — its owner is re-derived over every parent it will have (secure-if-any) BEFORE the
+                // lookup is written, and reassigned when it moves. A refusal writes nothing (409 + reason code); a
+                // Dataverse fault propagates to the 500 below.
+                var parentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(request);
+                if (parentChanges.Count == 0)
+                {
+                    await dataverseService.UpdateDocumentAsync(id, request);
+                }
+                else
+                {
+                    var reparent = await ownershipResolver.ReparentAsync(
+                        new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+                        {
+                            EntityLogicalName = "sprk_document",
+                            RecordId = Guid.Parse(id),
+                            ParentChanges = parentChanges,
+                            CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(context.User), out var callerOid)
+                                ? callerOid
+                                : null,
+                        },
+                        token => dataverseService.UpdateDocumentAsync(id, request, token),
+                        context.RequestAborted);
+                    if (reparent.IsRefused)
+                    {
+                        return ProblemDetailsHelper.RecordOwnerRefused(reparent, "document", traceId);
+                    }
+                }
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
 

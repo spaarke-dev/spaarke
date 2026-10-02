@@ -423,9 +423,10 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["TENANT_ID"] = Tenant })
                 .Build(),
-            // Task 080: never consulted here — every payload in this suite carries its DocumentId, so the worker
-            // creates no document. A resolver that answers nothing would refuse any create that did happen.
-            Mock.Of<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>());
+            // Task 080: every payload in this suite carries its DocumentId, so the worker creates no document. Task
+            // 146: an email save still creates its sprk_emailartifact, owned like its document — so the resolver is
+            // consulted for the artifact and must answer a team.
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
         /// <summary>Queues the save's finalization (production <see cref="OfficeJobQueue"/>) and delivers it.</summary>
         public async Task<IReadOnlyList<JobContract>> FinalizeAsync(

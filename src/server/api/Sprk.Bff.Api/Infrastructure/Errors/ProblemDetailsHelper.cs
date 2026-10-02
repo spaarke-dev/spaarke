@@ -172,6 +172,39 @@ public static partial class ProblemDetailsHelper
         );
     }
 
+    /// <summary>
+    /// The ONE 409 for a record-owner refusal (unified-access-control-r2 task 146): the write was not made because no
+    /// owner resolves for the row — a named parent unreadable, a root flagged secure but not isolated, the Secure team
+    /// missing. Carries the stable <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/> code as
+    /// <c>reasonCode</c>, so every HTTP writer reports the same condition the same way (ADR-019).
+    /// </summary>
+    /// <param name="refusalCode">The resolution's refusal code.</param>
+    /// <param name="reason">The resolution's reason (names what is wrong; never a secure record's content).</param>
+    /// <param name="noun">What was not saved ("event", "document", …), for the detail.</param>
+    /// <param name="traceId">Optional correlation id for support.</param>
+    public static IResult RecordOwnerRefused(string? refusalCode, string? reason, string noun, string? traceId = null)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = refusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+        };
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
+        return Results.Problem(
+            title: "Record owner unresolved",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: $"The {noun} was not saved: {reason ?? "no owner could be resolved"}.",
+            extensions: extensions);
+    }
+
+    /// <inheritdoc cref="RecordOwnerRefused(string?, string?, string, string?)"/>
+    public static IResult RecordOwnerRefused(
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal, string noun, string? traceId = null) =>
+        RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
+
     private static string GetErrorCode(string? errorCode, int status)
     {
         // Graph SDK v5.x: Error codes are in ex.Error.Code property

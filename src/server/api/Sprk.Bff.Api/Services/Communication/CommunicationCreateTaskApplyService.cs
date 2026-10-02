@@ -210,6 +210,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     private readonly IGenericEntityService _genericEntityService;
     private readonly IActionSeam _actionSeam;
     private readonly ICommunicationEnvelopeReader _envelopeReader;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<CommunicationCreateTaskApplyService> _logger;
 
     public CommunicationCreateTaskApplyService(
@@ -217,8 +218,10 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         IGenericEntityService genericEntityService,
         IActionSeam actionSeam,
         ICommunicationEnvelopeReader envelopeReader,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<CommunicationCreateTaskApplyService> logger)
     {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
@@ -321,6 +324,10 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 statusCode: 422);
         }
 
+        // Task 146: the audit row is owned like its communication. Resolved BEFORE the task is created, so a refusal
+        // (409) leaves no unaudited task behind.
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, ct).ConfigureAwait(false);
+
         // (6) CREATE the sprk_event via the blessed write core (Subject/Description/DueDate/Regarding/Owner). App-only:
         //     the facade exposes no impersonated create and ADR-013 forbids widening it (see class remarks); the
         //     confirming user is attributed via ownerid + the impersonated PATCH below + the audit row.
@@ -380,7 +387,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         {
             auditLogId = await WriteAppliedAuditRowAsync(
                 communicationRef.Id, targetEntity!, regardingRecordId, sentinelField, createdTaskId,
-                suggestion, fieldsPatched, patchResult?.Error, callerSystemUserId, ct).ConfigureAwait(false);
+                suggestion, fieldsPatched, patchResult?.Error, callerSystemUserId, auditOwner, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -466,6 +473,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 statusCode: 422);
         }
 
+        // Task 146: resolve the audit row's owner BEFORE the create (as the applied-proposal path does).
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationId, ct).ConfigureAwait(false);
+
         // (3) CREATE the sprk_event via the blessed write core (app-only create, same as the applied-proposal path —
         //     the confirming user is attributed via ownerid + the impersonated PATCH + the audit row).
         var createResult = await _actionSeam.CreateTaskAsync(
@@ -519,7 +529,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         {
             auditLogId = await WriteAdHocAppliedAuditRowAsync(
                 communicationId, regardingEntity, regardingRecordId, subject, request.Description, createdTaskId,
-                fieldsPatched, patchResult?.Error, callerSystemUserId, ct).ConfigureAwait(false);
+                fieldsPatched, patchResult?.Error, callerSystemUserId, auditOwner, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -578,6 +588,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 statusCode: 403);
         }
 
+        // Task 146: resolve the compensating audit row's owner BEFORE the cancel write.
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationId, ct).ConfigureAwait(false);
+
         // (2) Soft-cancel via the SAME blessed impersonated write core the create PATCH uses (String mapping →
         //     metadata-driven Choice coercion). Preserves the event + its audit trail; reversible. Impersonation is
         //     the authorization gate — a caller who cannot write the event gets 422 (no app-only "cancel any event").
@@ -622,6 +635,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 ["sprk_targetrecordid"] = Truncate(taskId.ToString(), 100),
                 ["sprk_targetfield"] = Truncate(UndoTaskSentinelField, 100),
             };
+            auditOwner.ApplyTo(entity); // task 146
             auditLogId = await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -745,7 +759,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     private async Task<Guid> WriteAppliedAuditRowAsync(
         Guid communicationId, string targetEntity, Guid regardingRecordId, string sentinelField, Guid createdTaskId,
         CreateTaskSuggestion suggestion, IReadOnlyList<string> fieldsPatched, string? patchError,
-        Guid callerSystemUserId, CancellationToken ct)
+        Guid callerSystemUserId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         // The Applied audit row carries the SAME (communication, targetEntity, sentinelField) key as the Proposed row
         // so the open-walk closes the proposal; the created task id + patched fields ride in the suggestion JSON so the
@@ -787,6 +801,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
         if (suggestion.Confidence.HasValue)
             entity["sprk_confidence"] = (decimal)suggestion.Confidence.Value;
 
+        owner.ApplyTo(entity); // task 146
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
     }
 
@@ -800,7 +815,7 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
     private async Task<Guid> WriteAdHocAppliedAuditRowAsync(
         Guid communicationId, string regardingEntity, Guid regardingRecordId, string subject, string? description,
         Guid createdTaskId, IReadOnlyList<string> fieldsPatched, string? patchError, Guid callerSystemUserId,
-        CancellationToken ct)
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         var applied = new
         {
@@ -829,7 +844,31 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
             ["sprk_aisuggestion"] = appliedJson,
         };
 
+        owner.ApplyTo(entity); // task 146
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Task 146: the owner of an audit row written under <paramref name="communicationId"/> — the communication's team
+    /// (the named Secure team's for a secure message), or the creator while the message is unfiled (E1). A REFUSAL is
+    /// a 409 carrying the stable reason code; nothing has been written yet.
+    /// </summary>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveAuditRowOwnerAsync(
+        Guid communicationId, CancellationToken ct)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId),
+            ct).ConfigureAwait(false);
+        if (owner.IsRefused)
+        {
+            throw new SdapProblemException(
+                code: owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                title: "Record owner unresolved",
+                detail: $"Nothing was written: the audit row's owner could not be resolved ({owner.Reason}).",
+                statusCode: 409);
+        }
+
+        return owner;
     }
 
     private static CreateTaskSuggestion? ParseSuggestion(string? json)

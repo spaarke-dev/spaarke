@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -6,6 +5,7 @@ using System.Text.Json;
 using Azure.Core;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 
@@ -22,6 +22,7 @@ public class DocumentCheckoutService
     private readonly ILogger<DocumentCheckoutService> _logger;
     private readonly string _dataverseApiUrl;
     private readonly TokenCredential _credential;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private AccessToken? _currentToken;
 
     // Dataverse entity set names
@@ -42,12 +43,14 @@ public class DocumentCheckoutService
         SpeFileStore speFileStore,
         IConfiguration configuration,
         TokenCredential credential,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<DocumentCheckoutService> logger)
     {
         _httpClient = httpClient;
         _speFileStore = speFileStore;
         _logger = logger;
         _credential = credential;
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"]
             ?? configuration["Dataverse:EnvironmentUrl"]
@@ -931,6 +934,17 @@ public class DocumentCheckoutService
         DateTime checkoutDate,
         CancellationToken ct)
     {
+        // Task 146: a file version is content of its document — owned by the document's team (the named Secure team's
+        // for a secure document). Resolved BEFORE the POST; a refusal throws and nothing is written (the checkout
+        // endpoint reports it). A document that is not team-owned (a pre-task-080 row) leaves the version with its
+        // creator, as before.
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_document", documentId), ct);
+        if (owner.IsRefused)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_fileversion", owner);
+        }
+
         // FileVersion stores version metadata including who checked out
         var payload = new Dictionary<string, object>
         {
@@ -940,6 +954,10 @@ public class DocumentCheckoutService
             ["sprk_CheckedOutBy@odata.bind"] = $"/systemusers({userId})",
             ["statuscode"] = StatusCheckedOut
         };
+        if (owner.IsOwned)
+        {
+            payload["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
+        }
 
         if (_logger.IsEnabled(LogLevel.Debug))
         {

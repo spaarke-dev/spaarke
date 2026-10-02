@@ -35,6 +35,7 @@ public class CommunicationParticipantIndexerTests
         new(
             (resolver ?? new Mock<ICommunicationDataverseService>()).Object,
             generic.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationParticipantIndexer>>());
 
     /// <summary>
@@ -293,6 +294,7 @@ public class CommunicationParticipantIndexerTests
         var indexer = new CommunicationParticipantIndexer(
             new Mock<ICommunicationDataverseService>().Object,
             generic.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationParticipantIndexer>>());
 
         var sut = new MessagingIngestor(
@@ -345,6 +347,7 @@ public class CommunicationParticipantIndexerTests
         var indexer = new CommunicationParticipantIndexer(
             new Mock<ICommunicationDataverseService>().Object,
             generic.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationParticipantIndexer>>());
 
         var sut = new MessagingIngestor(

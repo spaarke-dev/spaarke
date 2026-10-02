@@ -21,12 +21,12 @@ public class CreateDocumentRequest
     /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
     /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
     /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
-    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
-    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
-    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
-    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
-    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
-    /// unreachable by any child-BU user at Deep depth.</para>
+    /// <para><b>Required in practice, nullable in shape.</b> Since unified-access-control-r2 task 146 (#1034)
+    /// <c>DataverseServiceClientImpl.CreateDocumentAsync</c> REFUSES (throws, before any write) when this is null:
+    /// every caller resolves it, and "null keeps the calling identity" made the BFF application user the owner, in
+    /// the ROOT business unit (measured 2026-09-22, ALL 512 existing rows sat there, unreachable by any child-BU user
+    /// at Deep depth, and readable by every root-BU user — which is how a secure record's documents were never
+    /// isolated). It stays a nullable property so the JSON shape of this shared contract does not change.</para>
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
     /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
     /// and so the business unit — that owns the document it creates, including a secure business unit it has no
@@ -828,6 +828,13 @@ public class AnalysisOutputEntity
 
     /// <summary>Created date/time</summary>
     public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// The team that owns a NEW output (unified-access-control-r2 task 146) — the same team as its analysis, resolved by
+    /// the BFF's <c>IRecordOwnershipResolver</c>. Required by <c>CreateAnalysisOutputAsync</c>; never bound from a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -951,6 +958,17 @@ public class CreateEventRequest
 
     /// <summary>Regarding record name</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
+    /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
+    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create
+    /// without it: the write is app-only, so an unset owner would make the BFF application user own the event in the
+    /// root business unit, where any root-BU user with ordinary depth reads it. Same shape as
+    /// <see cref="CreateDocumentRequest.OwningTeamId"/>, and for the same reason never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
 }
 
 /// <summary>

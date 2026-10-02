@@ -100,6 +100,7 @@ public sealed class EmailRegardingIntentSeamTests
             entityService, config, producer.Object,
             actionSeam.Object,
             TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

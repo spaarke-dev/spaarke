@@ -368,7 +368,7 @@ public sealed class ComposeDriveProvenanceApplyTemplateTests
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     /// <summary>Minimal real OOXML — the merge engine under the service is the REAL one, so the bytes
     /// have to be a valid package. Content is irrelevant to this test; only the drive is.</summary>

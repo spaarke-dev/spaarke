@@ -133,14 +133,67 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(
+        Task Patch(CancellationToken ct) => _fieldMappingService.UpdateRecordFieldsAsync(
             input.EntityLogicalName,
             input.RecordId,
             updatePayload,
-            cancellationToken,
+            ct,
             input.ImpersonateSystemUserId);
 
+        // Task 146: a lookup that FILES a child table under a record (a document onto a matter, an event onto a
+        // secure project) is a reparent — the child's owner is re-derived over every parent it will have
+        // (secure-if-any) BEFORE the PATCH, and reassigned when it moves. A refusal writes nothing and throws
+        // RecordOwnerUnresolvedException (ActionSeam returns it as a typed failure; the node executor fails the node).
+        // The resolver is a singleton; it is resolved from the scope factory because this core's constructor is
+        // frozen (task 031).
+        var parentChanges = ParentChangesOf(input);
+        if (parentChanges.Count == 0)
+        {
+            await Patch(cancellationToken);
+            return updatePayload.Keys.ToArray();
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var ownership = scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>();
+        var reparent = await ownership.ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = input.EntityLogicalName,
+                RecordId = input.RecordId,
+                ParentChanges = parentChanges,
+                CallerSystemUserId = input.ImpersonateSystemUserId,
+            },
+            Patch,
+            cancellationToken).ConfigureAwait(false);
+        if (reparent.IsRefused)
+        {
+            throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
+        }
+
         return updatePayload.Keys.ToArray();
+    }
+
+    /// <summary>
+    /// The parent lookups this update writes, as <c>column → parent</c>, when the target is a child table whose
+    /// owner follows its parents (<see cref="RecordOwnershipResolver.IsReparentableChild"/>). The column is the
+    /// lookup's attribute name, lower-cased (the navigation-property spelling the bind uses differs only in case).
+    /// </summary>
+    private static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesOf(UpdateRecordActionInput input)
+    {
+        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        if (input.Lookups is not { Count: > 0 } || !RecordOwnershipResolver.IsReparentableChild(input.EntityLogicalName))
+            return changes;
+
+        foreach (var lookup in input.Lookups)
+        {
+            if (RecordOwnershipResolver.IsOwnershipParent(lookup.TargetEntity)
+                && Guid.TryParse(lookup.RenderedTargetId, out var targetId) && targetId != Guid.Empty)
+            {
+                changes[lookup.Field.ToLowerInvariant()] = new Microsoft.Xrm.Sdk.EntityReference(lookup.TargetEntity, targetId);
+            }
+        }
+
+        return changes;
     }
 
     // ---------------------------------------------------------------------------

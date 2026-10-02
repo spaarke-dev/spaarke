@@ -52,6 +52,7 @@ public sealed class EmailTriageSeamTests
             producer.Object,
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             routingGate ?? TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

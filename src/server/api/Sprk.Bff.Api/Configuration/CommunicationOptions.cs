@@ -74,6 +74,16 @@ public class CommunicationOptions
     /// notifications.
     /// </summary>
     public string? LifecycleNotificationUrl { get; set; }
+
+    /// <summary>
+    /// Dataverse <c>systemuserid</c>s of the administrators alerted (an in-app <c>appnotification</c> each) when an
+    /// inbound email is HELD because its owner cannot be resolved (unified-access-control-r2 task 146, owner round 3
+    /// amendment R3: "never create a record nobody can see" — the email is retried, then left unprocessed in the
+    /// ingestion queue's dead-letter, and administrators are alerted; nothing is written to Dataverse until it is
+    /// resolved). Optional: when empty, the hold is still logged at Critical (the operator log alert), and the
+    /// dead-letter keeps the message — no email is lost either way.
+    /// </summary>
+    public Guid[] OwnershipHoldAlertUserIds { get; set; } = Array.Empty<Guid>();
 }
 
 /// <summary>

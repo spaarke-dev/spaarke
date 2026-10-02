@@ -71,6 +71,7 @@ public class StaleCheckoutSweeperHostedServiceTests
             null!, // SpeFileStore - not touched by virtual seams under test
             config,
             credential,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             loggerMock)
         {
             CallBase = false, // override all virtuals; we drive observation through .Setup

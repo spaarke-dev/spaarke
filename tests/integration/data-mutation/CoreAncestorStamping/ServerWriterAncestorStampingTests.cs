@@ -1,10 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Communication;
@@ -116,6 +116,7 @@ public class ServerWriterAncestorStampingTests
         var core = new TaskActionCore(
             entityService.Object,
             CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger.Instance);
 
         var id = await core.CreateAsync(
@@ -134,7 +135,7 @@ public class ServerWriterAncestorStampingTests
         var created = new List<Entity>();
         var entityService = EntityServiceCapturingCreates(created);
         var core = new TaskActionCore(
-            entityService.Object, CoreAncestorResolverFixtures.Failing(), NullLogger.Instance);
+            entityService.Object, CoreAncestorResolverFixtures.Failing(), new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger.Instance);
 
         var id = await core.CreateAsync(
             new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),
@@ -271,6 +272,7 @@ public class ServerWriterAncestorStampingTests
             dataverse.Object,
             MapperWithCoreWritable(coreWritableEntities),
             coreAncestors,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<IncomingAssociationResolver>.Instance);
 
         return (resolver, updates);

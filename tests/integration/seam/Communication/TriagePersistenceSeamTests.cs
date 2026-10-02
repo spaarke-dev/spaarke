@@ -91,6 +91,7 @@ public sealed class TriagePersistenceSeamTests
             assessedProducer,
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

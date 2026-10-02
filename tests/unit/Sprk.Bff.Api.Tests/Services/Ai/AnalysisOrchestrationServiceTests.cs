@@ -86,6 +86,7 @@ public class AnalysisOrchestrationServiceTests
             _workingDocumentServiceMock.Object,
             storageRetryPolicyMock.Object,
             exportRegistry,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             new Mock<ILogger<AnalysisResultPersistence>>().Object);
 
         // Post DI-cycle-break (2026-06-08): AnalysisOrchestrationService takes

@@ -66,6 +66,7 @@ public class EmailAnalysisIntegrationTests
             _toolHandlerRegistryMock.Object,
             _nodeServiceMock.Object,
             _playbookOrchestratorMock.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 

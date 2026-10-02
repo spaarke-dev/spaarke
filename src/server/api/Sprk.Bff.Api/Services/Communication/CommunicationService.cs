@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -6,6 +5,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -84,6 +84,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// <summary>FR-26 core-ancestor derivation for the outbound communication write path (task 052).</summary>
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
 
+    /// <summary>
+    /// unified-access-control-r2 task 146 (C10 part 2): who owns a communication this service records and the
+    /// documents / attachment rows it creates under one. A FILED communication is owned by its parents' team (the
+    /// named Secure team when any is secure); an UNFILED one keeps its creator (escalation E1 —
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator"/>), and its content rows follow it.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -95,6 +103,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<CommunicationService> logger,
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
@@ -113,6 +122,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _threadResolver = threadResolver;
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
@@ -299,6 +309,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         {
             archiveDocumentId = await ArchiveToSpeAsync(request, response, communicationId, ct, emailDirection);
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146: no owner for the archive document, so nothing was archived or written. A refusal with a stable
+            // reason code (409), not the ARCHIVE_NOT_CONFIGURED 500 below — it derives from InvalidOperationException,
+            // so this catch MUST stay first.
+            throw new SdapProblemException(
+                code: refused.RefusalCode,
+                title: "Record owner unresolved",
+                detail: refused.Message,
+                statusCode: 409);
+        }
         catch (InvalidOperationException ex)
         {
             throw new SdapProblemException(
@@ -454,6 +475,19 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var correlationId = Guid.NewGuid().ToString();
         var created = 0;
 
+        // Task 146: attachment documents are owned like their communication. A refusal creates none of them (logged;
+        // the .eml archive below refuses the same way and that is what the caller reports).
+        var docOwner = attachments.Entities.Count == 0
+            ? Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Unchanged("no attachments")
+            : await ResolveContentOwnerAsync(communicationId, ct);
+        if (docOwner.IsRefused)
+        {
+            _logger.LogWarning(
+                "On-demand attachment documents NOT created for communication {CommunicationId}: {Reason} ({Code}) (task 146)",
+                communicationId, docOwner.Reason, docOwner.RefusalCode);
+            return 0;
+        }
+
         foreach (var att in attachments.Entities)
         {
             // Skip attachments that already have a Document, or that were never uploaded to SPE.
@@ -480,6 +514,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_graphitemid"] = itemId,
                     ["sprk_graphdriveid"] = driveId,
                 };
+                ApplyContentOwner(attachmentDoc, docOwner); // task 146
 
                 var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 
@@ -873,6 +908,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
+        // Task 146: owned by its parents' team (an unfiled message keeps its creator — E1/E2), set before the create.
+        await ApplyCommunicationOwnerAsync(communication, ct);
+
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
         _logger.LogInformation(
@@ -994,13 +1032,22 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     {
         try
         {
-            await _genericEntityService.UpdateAsync(
-                "sprk_communication",
+            // Task 146 / S6: joining a RECORD thread files the message under the thread's record — the same shared
+            // step the resolver's JOIN path takes (owner re-derived before the stamp; a refusal stamps nothing and
+            // lands in the best-effort catch below, leaving the sent message unthreaded rather than mis-owned).
+            await ThreadResolver.AssignToThreadReconcilingOwnerAsync(
+                _genericEntityService,
+                _ownership,
                 communicationId,
-                new Dictionary<string, object>
-                {
-                    ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
-                },
+                threadId,
+                token => _genericEntityService.UpdateAsync(
+                    "sprk_communication",
+                    communicationId,
+                    new Dictionary<string, object>
+                    {
+                        ["sprk_communicationthread"] = new EntityReference("sprk_communicationthread", threadId),
+                    },
+                    token),
                 ct);
 
             _logger.LogInformation(
@@ -1787,6 +1834,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Map primary association (regarding lookup + denormalized fields)
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
+        // Task 146: owned by its parents' team (unfiled keeps its creator — E1), set before the create.
+        await ApplyCommunicationOwnerAsync(communication, ct);
+
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
         _logger.LogInformation(
@@ -1797,6 +1847,52 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         return recordId;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────
+    // Ownership (unified-access-control-r2 task 146, C10 part 2 / #1034)
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Sets the owner of a <c>sprk_communication</c> about to be created: the team the ONE resolver names over every
+    /// parent lookup now on the row (the regarding, the FR-26 stamps, an inherited reply regarding) — the named Secure
+    /// team when any is secure. An UNFILED communication keeps its creator (escalation E1,
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator"/>): its per-user master thread is keyed
+    /// on the message's owning user, and Direct-thread privacy rests on per-participant shares of an app-owned row.
+    /// </summary>
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException">
+    /// The communication is filed but no owner resolves. Thrown BEFORE the create, so nothing is written; every
+    /// send path's existing non-fatal record-step catch logs it and the response carries no communication id.
+    /// </exception>
+    private async Task ApplyCommunicationOwnerAsync(DataverseEntity communication, CancellationToken ct)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(communication) with
+            {
+                WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+            },
+            ct);
+
+        if (owner.IsRefused)
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", owner);
+
+        if (owner.IsOwned)
+            communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+    }
+
+    /// <summary>
+    /// The owner of a row created UNDER a communication — its archived <c>.eml</c> document, an attachment document,
+    /// an attachment row (task 146). It follows the communication: record-first from it when it is team-owned (so a
+    /// secure communication's content rows are the named Secure team's), and the creator — like the communication
+    /// itself — when it is still unfiled (E1).
+    /// </summary>
+    private Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveContentOwnerAsync(
+        Guid communicationId, CancellationToken ct) =>
+        _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId), ct);
+
+    /// <summary>Writes a resolved content-row owner onto <paramref name="row"/> (unchanged leaves the creator).</summary>
+    private static void ApplyContentOwner(DataverseEntity row, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner) =>
+        owner.ApplyTo(row);
 
     private static void ValidateRequest(SendCommunicationRequest request, string correlationId)
     {
@@ -1891,6 +1987,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         // Map primary association (regarding lookup + denormalized fields)
         await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
+
+        // Task 146: owned by its parents' team (unfiled keeps its creator — E1), set before the create.
+        await ApplyCommunicationOwnerAsync(communication, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -2076,6 +2175,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // — ADR-045 rule 4) WITH those attachments embedded, so opening the .eml reproduces the original
         // email intact (UAT #4 — faithful original). The attachments are STILL archived separately as
         // sprk_document records elsewhere; both copies exist by design.
+        // Task 146: the archive document is owned like its communication. Resolved FIRST, so a refusal leaves neither
+        // bytes in SPE nor a row (the callers' existing handling: non-fatal on both send paths, a 409 on demand).
+        var archiveOwner = await ResolveContentOwnerAsync(communicationId, ct);
+        if (archiveOwner.IsRefused)
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_document", archiveOwner);
+
         var emlAttachments = await FetchEmlAttachmentsForEmbedAsync(communicationId, ct);
 
         var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
@@ -2170,6 +2275,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_emaildirection"] = new OptionSetValue(emailDirection), // 100000001 Sent (default) / 100000000 Received
             ["sprk_emaildate"] = partialResponse.SentAt.DateTime,
         };
+        ApplyContentOwner(document, archiveOwner); // task 146
 
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
@@ -2285,6 +2391,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     {
         var createdCount = 0;
 
+        // Task 146: attachment rows carry the communication's attachment names — owned like the communication. A
+        // refusal throws before any row (the caller's non-fatal catch turns it into the attachment-record warning).
+        var rowOwner = await ResolveContentOwnerAsync(communicationId, ct);
+        if (rowOwner.IsRefused)
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communicationattachment", rowOwner);
+
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
         {
             var documentId = attachmentDocumentIds[i];
@@ -2297,6 +2409,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ["sprk_document"] = new EntityReference("sprk_document", Guid.Parse(documentId)),
                 ["sprk_attachmenttype"] = new OptionSetValue(100000000) // File
             };
+            ApplyContentOwner(attachment, rowOwner);
 
             var attachmentId = await _genericEntityService.CreateAsync(attachment, ct);
             createdCount++;
@@ -2325,6 +2438,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         string correlationId,
         CancellationToken ct)
     {
+        // Task 146: each attachment document is owned like its communication. A refusal archives none of them
+        // (logged; best-effort — the send is already complete).
+        var docOwner = await ResolveContentOwnerAsync(communicationId, ct);
+        if (docOwner.IsRefused)
+        {
+            _logger.LogWarning(
+                "Outbound attachment documents NOT created for communication {CommunicationId}: {Reason} ({Code}) (task 146) | CorrelationId: {CorrelationId}",
+                communicationId, docOwner.Reason, docOwner.RefusalCode, correlationId);
+            return;
+        }
+
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
         {
             var speItemId = attachmentDocumentIds[i];
@@ -2342,6 +2466,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_graphitemid"] = speItemId,
                     ["sprk_graphdriveid"] = driveId,
                 };
+                ApplyContentOwner(attachmentDoc, docOwner);
 
                 var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 

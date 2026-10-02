@@ -2030,7 +2030,7 @@ public class OfficeService : IOfficeService
         // Before this, a resolved caller owned the To Do and an unresolved one silently left it app-owned in ROOT.
         entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference(
             "team",
-            await ResolveTodoOwnerTeamAsync(request, userId, ownerSystemUserId, cancellationToken)
+            await ResolveTodoOwnerTeamAsync(entity, request, userId, ownerSystemUserId, cancellationToken)
                 .ConfigureAwait(false));
 
         var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
@@ -2048,14 +2048,16 @@ public class OfficeService : IOfficeService
     /// acting user's when it is filed against nothing.
     /// </summary>
     /// <remarks>
-    /// The target is the FIRST that was named, and it is passed alone:
-    /// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/> refuses a
-    /// named-but-unreadable target rather than trying the next one, and that is right here too — dropping past a
-    /// secure regarding record to its document would own the To Do outside the secure business unit.
+    /// Task 146 (secure-if-any): EVERY parent the To Do carries is passed — the record regarding, its core-ancestor
+    /// stamps, and the document / email carriers — with the first named as the primary (its business unit decides an
+    /// ordinary To Do). Any secure parent makes the To Do the named Secure team's; any named-but-unreadable parent
+    /// refuses rather than being skipped (a carrier could be the secure one). Before 146 only the first target was
+    /// passed, so a To Do on an ordinary matter carrying a SECURE document was owned in the ordinary unit.
     /// </remarks>
     /// <exception cref="SdapProblemException"><see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> (403) when no team
     /// resolves. Thrown rather than returned as null so the endpoint can tell this refusal from its generic one.</exception>
     private async Task<Guid> ResolveTodoOwnerTeamAsync(
+        Microsoft.Xrm.Sdk.Entity todo,
         CreateTodoRequest request,
         string userId,
         string? ownerSystemUserId,
@@ -2072,11 +2074,12 @@ public class OfficeService : IOfficeService
                         ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
                         : (null, null);
 
+        var primary = target.LogicalName is not null && target.Id is { } targetId
+            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(target.LogicalName, targetId)
+            : null;
         var teamId = await _ownershipResolver.ResolveOwningTeamAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo, primary) with
             {
-                TargetEntityLogicalName = target.LogicalName,
-                TargetRecordId = target.Id,
                 CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
                     ? callerSystemUserId
                     : null,

@@ -1,9 +1,9 @@
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
 using Sprk.Bff.Api.Services.Compose;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -163,7 +163,17 @@ public static class ReviewMemoEndpoints
         // ReviewMemoAssembler.Assemble is total over a non-empty, already-validated Sections list.
         var memo = ReviewMemoAssembler.Assemble(request);
 
-        var outputId = await persistence.PersistReviewMemoAsync(analysisId, memo, cancellationToken);
+        Guid outputId;
+        try
+        {
+            outputId = await persistence.PersistReviewMemoAsync(analysisId, memo, cancellationToken);
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146: the memo is owned like its analysis; when no owner resolves, nothing was written.
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                refused.RefusalCode, refused.Reason, "review memo");
+        }
 
         return Results.Created(
             $"/api/ai/analysis/{analysisId}",

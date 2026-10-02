@@ -103,6 +103,7 @@ public sealed class EmailCreateTaskSeamTests
             producer.Object,
             actionSeam,
             TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

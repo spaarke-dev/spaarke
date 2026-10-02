@@ -38,11 +38,28 @@
 // default team — the default team's membership follows every user placed in the BU and cannot be curated, which
 // is the hole this task closes. So "business unit → team" now means: the Secure Record BU → its named team (or
 // REFUSE when that team cannot be resolved); every other business unit → its default team, exactly as before.
+//
+// unified-access-control-r2 task 146 (C10 part 2, #1034), 2026-10-01: "every child of a secure record is secure,
+// server-side". Three things changed, all IN PLACE (owner D-1: one owner for the owner invariant, no second
+// resolver):
+//   (a) A child names EVERY parent it has, not one. sprk_document alone carries six root lookups (live metadata
+//       2026-10-01: sprk_project, sprk_relatedproject, sprk_matter, sprk_relatedmatter, sprk_workassignment,
+//       sprk_relatedworkassignment). A writer that passed only its first lookup would miss a secure parent named
+//       in another, so RecordOwnershipContext.Parents carries all of them and the resolver applies SECURE-IF-ANY:
+//       any parent in the Secure Record business unit makes the child the named Secure team's.
+//   (b) A root FLAGGED sprk_issecure but not owned in the Secure Record business unit (an interrupted or failed
+//       provisioning, C11) REFUSES. Record-first reads ownership, and such a root's ownership says "ordinary", so
+//       without this check its children would be handed an ordinary team (ADR-003: fail closed).
+//   (c) Refusals carry a stable code and a reason (RecordOwnerResolution), so each writer can refuse in its own
+//       error contract with a message that names WHY — and a reparent re-derives the owner through the same rule
+//       (ReparentAsync), assigning it in a separate update and reading it back.
+//   Contact access is unaffected: contacts reach children through app-only reads keyed on the parent.
 
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
 
@@ -59,14 +76,20 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// answers with the Secure Record BU's default team.
 /// </para>
 /// <para>
+/// <b>Secure-if-any (task 146).</b> A child names every parent it has (<see cref="RecordOwnershipContext.Parents"/>).
+/// If ANY of them is owned in the Secure Record business unit, the child is the named Secure team's. If any root
+/// parent is FLAGGED <c>sprk_issecure</c> but is not owned there, the resolver refuses — never an ordinary team.
+/// </para>
+/// <para>
 /// Setting <c>ownerid</c> to that team makes <c>owningbusinessunit</c> <b>derive</b> from it —
 /// <c>owningbusinessunit</c> is never assigned directly. This is the shape <c>sprk_matter</c> rows already
 /// have in every environment checked, which is why it is the target rather than an invention.
 /// </para>
 /// <para>
-/// <b>Fail-closed.</b> An unresolvable team returns <c>null</c> and callers MUST refuse the create. Falling
-/// back to app-only ownership is exactly the defect this type exists to remove, and a silent fallback would
-/// reintroduce it invisibly — a record that looks created but is unreachable by the person who created it.
+/// <b>Fail-closed.</b> An unresolvable team returns <c>null</c> (a <see cref="RecordOwnerOutcome.Refused"/>
+/// resolution) and callers MUST refuse the create. Falling back to app-only ownership is exactly the defect this
+/// type exists to remove, and a silent fallback would reintroduce it invisibly — a record that looks created but
+/// is unreachable by the person who created it.
 /// </para>
 /// <para>
 /// <b>An answer versus a fault.</b> <c>null</c> means the data says there is no team (a missing or unowned
@@ -81,7 +104,60 @@ public interface IRecordOwnershipResolver
     /// site can get it wrong: <b>the target record's business unit first, the acting user's second</b>.
     /// Returns <c>null</c> when neither resolves — callers MUST then refuse.
     /// </summary>
+    /// <remarks>The pre-146 shape, kept for the Office writers. It is <see cref="ResolveOwnerAsync"/> without the
+    /// reason: every rule (secure-if-any, the flagged-not-isolated refusal) applies to it too.</remarks>
     Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct);
+
+    /// <summary>
+    /// The same decision as <see cref="ResolveOwningTeamAsync"/>, with the outcome named: the team, or a refusal
+    /// carrying a stable <see cref="RecordOwnerRefusal"/> code and a reason a writer can put in its own error
+    /// contract, or — only when the context opts in — <see cref="RecordOwnerOutcome.Unchanged"/>.
+    /// </summary>
+    Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct);
+
+    /// <summary>
+    /// Re-derives the owner of an EXISTING row whose parent lookups are changing (a reparent), BEFORE the change
+    /// is written: reads the row's current parents, overlays <see cref="RecordReparent.ParentChanges"/>, resolves
+    /// through the same rule as a create, and only then runs <paramref name="applyChange"/>. When the resolved team
+    /// differs from the row's owner it is assigned in a SEPARATE update (never folded into the field update — an
+    /// owner change is its own Dataverse operation) and read back.
+    /// </summary>
+    /// <returns>
+    /// A refusal WITHOUT having run <paramref name="applyChange"/> — the caller refuses in its own contract.
+    /// Otherwise the resolution after the change and any reassignment succeeded.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">The reassignment did not read back as applied.</exception>
+    Task<RecordOwnerResolution> ReparentAsync(
+        RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct);
+}
+
+/// <summary>One parent record a child is filed under: a lookup value the child carries.</summary>
+public sealed record RecordOwnershipParent(string EntityLogicalName, Guid RecordId)
+{
+    /// <summary>True when the reference names a real row.</summary>
+    public bool IsSpecified => !string.IsNullOrWhiteSpace(EntityLogicalName) && RecordId != Guid.Empty;
+}
+
+/// <summary>
+/// What a create does when it names NO parent at all. The default is the owner's I-6 convention (the acting
+/// user's business-unit team); the alternative exists for writers whose unfiled rows carry an existing contract
+/// an owner team would break (task 146 escalation E1 — see <see cref="KeepCreator"/>).
+/// </summary>
+public enum UnfiledOwnership
+{
+    /// <summary>The acting user's business-unit team (owner decision 2026-09-25, §6.5 Path A recorded by the peer);
+    /// refuse when there is no acting user either.</summary>
+    ActingUserTeam = 0,
+
+    /// <summary>
+    /// Leave <c>ownerid</c> unset — the creating identity keeps the row — and answer
+    /// <see cref="RecordOwnerOutcome.Unchanged"/>. Used ONLY for unfiled <c>sprk_communication</c> rows (and their
+    /// content rows), pending owner decision E1: inbound mail has no acting user and must never be dropped
+    /// (constraint vs owner contract, escalation trigger 7); <c>ThreadResolver</c>'s per-user master thread is
+    /// keyed on the message's OWNING USER; Direct-thread privacy rests on per-participant shares of an
+    /// application-owned row. A team owner would break all three. A FILED communication never takes this branch.
+    /// </summary>
+    KeepCreator = 1,
 }
 
 /// <summary>
@@ -107,6 +183,13 @@ public interface IRecordOwnershipResolver
 /// second one. It is also the same instinct as FR-26's <c>CoreAncestorResolver</c>, which exists precisely
 /// because access for a server-created child has to be inherited from its core ancestor.
 /// </para>
+/// <para>
+/// <b>Every parent, not the first (task 146).</b> <see cref="TargetEntityLogicalName"/>/<see cref="TargetRecordId"/>
+/// is the PRIMARY parent — it decides the business unit of an ordinary child. <see cref="Parents"/> carries every
+/// OTHER parent lookup value the child has; together they are the set secure-if-any is applied to. Build them
+/// from the row being written with <see cref="ParentsOf(IEnumerable{KeyValuePair{string, object}})"/> so a lookup
+/// cannot be forgotten.
+/// </para>
 /// </remarks>
 public sealed record RecordOwnershipContext
 {
@@ -115,6 +198,14 @@ public sealed record RecordOwnershipContext
 
     /// <summary>Id of the record this one is being filed against. Null when unfiled.</summary>
     public Guid? TargetRecordId { get; init; }
+
+    /// <summary>
+    /// Every OTHER parent the child is filed under (task 146) — both project lookups of a document, the FR-26
+    /// core-ancestor stamps, a reply's source communication. Entries whose type is not an ownership parent
+    /// (<see cref="RecordOwnershipResolver.IsOwnershipParent"/> — a contact, an organization, a record-type ref)
+    /// are ignored: they are relationships, not parents.
+    /// </summary>
+    public IReadOnlyList<RecordOwnershipParent> Parents { get; init; } = Array.Empty<RecordOwnershipParent>();
 
     /// <summary>The acting user's Dataverse systemuserid, when known (HTTP paths that already resolved it).</summary>
     public Guid? CallerSystemUserId { get; init; }
@@ -128,10 +219,292 @@ public sealed record RecordOwnershipContext
     /// </summary>
     public Guid? CallerObjectId { get; init; }
 
+    /// <summary>What happens when no parent at all is named. Default: the acting user's team (I-6).</summary>
+    public UnfiledOwnership WhenUnfiled { get; init; } = UnfiledOwnership.ActingUserTeam;
+
+    /// <summary>
+    /// For a CONTENT row hanging off its primary target (a review log, a participant row, an attachment row of a
+    /// communication): when the target is not itself owned by a team — an unfiled communication that kept its
+    /// creator under <see cref="UnfiledOwnership.KeepCreator"/> — the content row keeps its creator too and the
+    /// answer is <see cref="RecordOwnerOutcome.Unchanged"/>. When the target IS team-owned, the row resolves
+    /// record-first from it like any child. Keeps a parent and its content rows owned alike.
+    /// </summary>
+    public bool KeepCreatorUnlessTargetIsTeamOwned { get; init; }
+
     /// <summary>True when a target record was supplied — i.e. the preferred source is available.</summary>
     public bool HasTarget =>
         !string.IsNullOrWhiteSpace(TargetEntityLogicalName)
         && TargetRecordId is { } id && id != Guid.Empty;
+
+    /// <summary>True when ANY parent (the target, or an ownership-parent entry of <see cref="Parents"/>) is named.</summary>
+    public bool HasParent =>
+        HasTarget || Parents.Any(p => p.IsSpecified && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName));
+
+    /// <summary>
+    /// Every ownership-parent reference among <paramref name="fields"/> — the attributes of a row being written, or
+    /// an update payload. Reads <see cref="EntityReference"/> values only, keyed by whatever column holds them, so
+    /// a child table's every parent lookup is picked up without a per-table column list (the set of lookups comes
+    /// from the row itself, never from a guess).
+    /// </summary>
+    public static IReadOnlyList<RecordOwnershipParent> ParentsOf(IEnumerable<KeyValuePair<string, object>> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var parents = new List<RecordOwnershipParent>();
+        foreach (var (_, value) in fields)
+        {
+            if (value is EntityReference reference
+                && reference.Id != Guid.Empty
+                && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName))
+            {
+                parents.Add(new RecordOwnershipParent(reference.LogicalName, reference.Id));
+            }
+        }
+
+        return parents.Distinct().ToArray();
+    }
+
+    /// <summary>
+    /// The context for a row filed under <paramref name="parents"/> — nulls and non-parent types dropped, the first
+    /// remaining parent primary — with the acting user (when the path has one) for a row left with no parent.
+    /// </summary>
+    public static RecordOwnershipContext ForParents(
+        IEnumerable<RecordOwnershipParent?> parents, Guid? callerObjectId = null, Guid? callerSystemUserId = null)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var specified = parents
+            .Where(p => p is { IsSpecified: true } && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName))
+            .Select(p => p!)
+            .Distinct()
+            .ToArray();
+        var primary = specified.FirstOrDefault();
+        return new RecordOwnershipContext
+        {
+            TargetEntityLogicalName = primary?.EntityLogicalName,
+            TargetRecordId = primary?.RecordId,
+            Parents = specified,
+            CallerObjectId = callerObjectId,
+            CallerSystemUserId = callerSystemUserId,
+        };
+    }
+
+    /// <summary>
+    /// The context for a child row about to be created: every ownership-parent lookup on <paramref name="child"/>
+    /// becomes a parent. The first parent in attribute order is not meaningful, so an ordinary child's business unit
+    /// comes from <paramref name="primaryParent"/> when it is an ownership parent (a contact regarding is not), else
+    /// the first parent found.
+    /// </summary>
+    public static RecordOwnershipContext ForChild(Entity child, RecordOwnershipParent? primaryParent = null)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        var parents = ParentsOf(child.Attributes);
+        var primary = primaryParent is { IsSpecified: true } p && RecordOwnershipResolver.IsOwnershipParent(p.EntityLogicalName)
+            ? p
+            : parents.FirstOrDefault();
+        return new RecordOwnershipContext
+        {
+            TargetEntityLogicalName = primary?.EntityLogicalName,
+            TargetRecordId = primary?.RecordId,
+            Parents = parents,
+        };
+    }
+
+    /// <summary>
+    /// The context for a CONTENT row created under <paramref name="parentEntityLogicalName"/> — an attachment, a
+    /// participant, a review log, an archived document of a communication (task 146). Record-first from the parent
+    /// when it is team-owned (so a secure parent's content is the named Secure team's), and
+    /// <see cref="RecordOwnerOutcome.Unchanged"/> — the creator — while the parent is still an unfiled row that kept
+    /// its own creator (E1).
+    /// </summary>
+    public static RecordOwnershipContext ContentOf(string parentEntityLogicalName, Guid parentId) => new()
+    {
+        TargetEntityLogicalName = parentEntityLogicalName,
+        TargetRecordId = parentId,
+        KeepCreatorUnlessTargetIsTeamOwned = true,
+    };
+}
+
+/// <summary>A reparent: an existing row whose parent lookups are about to change.</summary>
+public sealed record RecordReparent
+{
+    /// <summary>The row's table.</summary>
+    public required string EntityLogicalName { get; init; }
+
+    /// <summary>The row.</summary>
+    public required Guid RecordId { get; init; }
+
+    /// <summary>
+    /// The lookups the change writes: column → new parent, or <c>null</c> for a column the change CLEARS. Entries
+    /// whose value is not an ownership parent are ignored (the row's other columns are not parents).
+    /// </summary>
+    public required IReadOnlyDictionary<string, EntityReference?> ParentChanges { get; init; }
+
+    /// <summary>
+    /// Parents the row takes on from something it is being ATTACHED to rather than from one of its own columns — a
+    /// message joining a record thread takes on that thread's regarding record (S6: a record thread's messages are
+    /// children of its record). Added to the row's current parents.
+    /// </summary>
+    public IReadOnlyList<RecordOwnershipParent> InheritedParents { get; init; } = Array.Empty<RecordOwnershipParent>();
+
+    /// <summary>The acting user, for a row left with no parent at all.</summary>
+    public Guid? CallerSystemUserId { get; init; }
+
+    /// <summary>The acting user's Entra object id, when that is all the path has.</summary>
+    public Guid? CallerObjectId { get; init; }
+
+    /// <summary>What a row left with no parent does. Communications keep their creator (E1).</summary>
+    public UnfiledOwnership WhenUnfiled { get; init; } = UnfiledOwnership.ActingUserTeam;
+
+    /// <summary>
+    /// The parent changes as <see cref="EntityReference"/> values from an update payload: every
+    /// <see cref="EntityReference"/> value whose type is an ownership parent. A payload that names no parent yields
+    /// an empty map — the caller then has no reparent to do.
+    /// </summary>
+    public static IReadOnlyDictionary<string, EntityReference?> ParentChangesIn<TValue>(IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var changes = new Dictionary<string, EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, value) in fields)
+        {
+            if (value is EntityReference reference && RecordOwnershipResolver.IsOwnershipParent(reference.LogicalName))
+            {
+                changes[column] = reference.Id == Guid.Empty ? null : reference;
+            }
+        }
+
+        return changes;
+    }
+
+    /// <summary>
+    /// The parent lookups a <c>sprk_document</c> update WRITES, as <c>sprk_document</c> columns — the same column/target
+    /// pairs <c>DataverseServiceClientImpl.UpdateDocumentAsync</c> maps them to (an update only ever SETS a lookup;
+    /// nothing in <see cref="UpdateDocumentRequest"/> clears one). <c>ContactLookup</c> is not an ownership parent.
+    /// Empty when the update files the document under nothing new — the caller then has no reparent to do.
+    /// </summary>
+    public static IReadOnlyDictionary<string, EntityReference?> ParentChangesOf(UpdateDocumentRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var changes = new Dictionary<string, EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        void Set(string column, string target, Guid? id)
+        {
+            if (id is { } value && value != Guid.Empty)
+                changes[column] = new EntityReference(target, value);
+        }
+
+        Set("sprk_parentdocument", "sprk_document", request.ParentDocumentLookup);
+        Set("sprk_matter", "sprk_matter", request.MatterLookup);
+        Set("sprk_project", "sprk_project", request.ProjectLookup);
+        Set("sprk_invoice", "sprk_invoice", request.InvoiceLookup);
+        Set("sprk_workassignment", "sprk_workassignment", request.WorkAssignmentLookup);
+        Set("sprk_relatedevent", "sprk_event", request.EventLookup);
+        Set("sprk_relatedtodo", "sprk_todo", request.TodoLookup);
+        return changes;
+    }
+}
+
+/// <summary>How an ownership question was answered.</summary>
+public enum RecordOwnerOutcome
+{
+    /// <summary>A team owns the row: <see cref="RecordOwnerResolution.OwningTeamId"/>.</summary>
+    Owned,
+
+    /// <summary>No owner can be determined; the writer MUST NOT write the row.</summary>
+    Refused,
+
+    /// <summary>
+    /// The context opted in (<see cref="UnfiledOwnership.KeepCreator"/> or
+    /// <see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/>) and the row keeps its creating
+    /// identity; the writer leaves <c>ownerid</c> unset. Never returned to a context that did not opt in.
+    /// </summary>
+    Unchanged,
+}
+
+/// <summary>Stable refusal codes. HTTP writers return them as their ProblemDetails reason code.</summary>
+public static class RecordOwnerRefusal
+{
+    /// <summary>A parent the child names does not exist, or has no owning business unit.</summary>
+    public const string ParentUnresolved = "record_owner_parent_unresolved";
+
+    /// <summary>A root is flagged <c>sprk_issecure</c> but is not owned in the Secure Record business unit.</summary>
+    public const string SecureParentNotIsolated = "record_owner_secure_parent_not_isolated";
+
+    /// <summary>The Secure Record business unit's named owner team is missing or ambiguous.</summary>
+    public const string SecureOwnerTeamUnresolved = "record_owner_secure_team_unresolved";
+
+    /// <summary>More than one business unit carries the Secure Record name.</summary>
+    public const string SecureBusinessUnitAmbiguous = "record_owner_secure_bu_ambiguous";
+
+    /// <summary>The business unit has no single default Owner team.</summary>
+    public const string NoDefaultOwnerTeam = "record_owner_no_default_team";
+
+    /// <summary>The acting user is unknown, or maps to more than one Dataverse user.</summary>
+    public const string ActingUserUnresolved = "record_owner_acting_user_unresolved";
+
+    /// <summary>No parent and no acting user: nothing to own the row from.</summary>
+    public const string NoOwnerSource = "record_owner_no_source";
+
+    /// <summary>The row being reparented does not exist.</summary>
+    public const string RecordMissing = "record_owner_record_missing";
+}
+
+/// <summary>The answer to an ownership question: a team, a reasoned refusal, or (opted-in only) unchanged.</summary>
+public sealed record RecordOwnerResolution(
+    RecordOwnerOutcome Outcome, Guid? OwningTeamId, string? RefusalCode, string? Reason)
+{
+    /// <summary>True when a team was resolved.</summary>
+    public bool IsOwned => Outcome == RecordOwnerOutcome.Owned && OwningTeamId is { } id && id != Guid.Empty;
+
+    /// <summary>True when the writer must not write.</summary>
+    public bool IsRefused => Outcome == RecordOwnerOutcome.Refused;
+    /// <summary>A resolved team.</summary>
+    public static RecordOwnerResolution Owned(Guid teamId) => new(RecordOwnerOutcome.Owned, teamId, null, null);
+
+    /// <summary>A refusal with its stable code and a reason that names what is wrong.</summary>
+    public static RecordOwnerResolution Refused(string code, string reason) =>
+        new(RecordOwnerOutcome.Refused, null, code, reason);
+
+    /// <summary>The row keeps its creator (opted-in contexts only).</summary>
+    public static RecordOwnerResolution Unchanged(string reason) =>
+        new(RecordOwnerOutcome.Unchanged, null, null, reason);
+
+    /// <summary>
+    /// Writes this answer's owner onto a row about to be created: <c>ownerid</c> = the team when
+    /// <see cref="IsOwned"/>; nothing when <see cref="RecordOwnerOutcome.Unchanged"/> (the row keeps its creator).
+    /// Never call it for a refusal — the writer must not write at all.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The answer is a refusal.</exception>
+    public void ApplyTo(Entity row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (IsRefused)
+            throw new InvalidOperationException($"A refused owner ({RefusalCode}) cannot be applied to a new {row.LogicalName}.");
+        if (IsOwned)
+            row["ownerid"] = new EntityReference("team", OwningTeamId!.Value);
+    }
+}
+
+/// <summary>
+/// Thrown by a writer whose own error contract is "throw" when the owner is refused — background writers whose
+/// caller turns it into a retry or a hold. Carries the stable code so the caller can report it.
+/// </summary>
+public sealed class RecordOwnerUnresolvedException : InvalidOperationException
+{
+    public RecordOwnerUnresolvedException(string entityLogicalName, RecordOwnerResolution resolution)
+        : base($"No owner could be resolved for a new {entityLogicalName}, so it was not written: "
+               + $"{resolution.Reason} ({resolution.RefusalCode}).")
+    {
+        EntityLogicalName = entityLogicalName;
+        RefusalCode = resolution.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource;
+        Reason = resolution.Reason;
+    }
+
+    /// <summary>The resolution's reason — what is wrong, for the caller's ProblemDetails detail.</summary>
+    public string? Reason { get; }
+
+    /// <summary>The table the refused row belongs to.</summary>
+    public string EntityLogicalName { get; }
+
+    /// <summary>The stable <see cref="RecordOwnerRefusal"/> code.</summary>
+    public string RefusalCode { get; }
 }
 
 /// <inheritdoc cref="IRecordOwnershipResolver" />
@@ -142,6 +515,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string BusinessUnitEntity = "businessunit";
     private const string BusinessUnitColumn = "businessunitid";
     private const string OwningBusinessUnitColumn = "owningbusinessunit";
+    private const string OwningTeamColumn = "owningteam";
+    private const string OwnerColumn = "ownerid";
+    private const string IsSecureColumn = "sprk_issecure";
 
     /// <summary>
     /// Owner-team teamtype. Dataverse defines 0 = Owner, 1 = Access. BOTH this and <c>isdefault</c> are
@@ -150,8 +526,72 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// </summary>
     private const int OwnerTeamType = SecureRecordOwnerTeam.OwnerTeamType;
 
-    // Read-only by construction: the narrowest seam that answers the queries below — the same one
-    // RecordContainerResolver reads the same facts through. DI hands out the one app-only IDataverseService behind it.
+    /// <summary>
+    /// The tables that carry <c>sprk_issecure</c> — the three secure-root types, from the ONE root table
+    /// (<see cref="ExternalGrantRoot"/>), never re-listed. A parent of one of these is read with its flag.
+    /// </summary>
+    private static readonly HashSet<string> SecureFlaggedRoots = new(
+        Enum.GetValues<ExternalGrantRootType>().Select(ExternalGrantRoot.LogicalNameFor),
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The tables a child can be filed under for ownership: the three secure-flagged roots, the internal core root
+    /// (<c>sprk_servicerequest</c>), and every Spaarke table that is itself a child of a root — enumerated from LIVE
+    /// metadata (task 146 step 2, spaarkedev1 2026-10-01, <c>EntityDefinitions(sprk_project|sprk_matter|
+    /// sprk_workassignment)/OneToManyRelationships</c>), all UserOwned. A child-of-a-child (a document filed to a
+    /// communication) follows its parent's owner, which is how a grandchild of a secure root becomes secure.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately excluded, each with its reason: <c>sprk_externalrecordaccess</c> (a GRANT row, not a child);
+    /// <c>sprk_communicationrule</c> (filing configuration); <c>sprk_communicationthread</c> (a grouping container —
+    /// a per-user master or Direct thread is owned by a USER, and following it would hand a private message to that
+    /// user's whole business unit; record threads carry their own regarding, which their messages are filed under);
+    /// identity tables (<c>contact</c>, <c>account</c>, <c>sprk_organization</c>, <c>systemuser</c>, <c>team</c>) and
+    /// organization-owned reference tables (<c>sprk_recordtype_ref</c>), which have no owning business unit at all.
+    /// Pinned by test; a table added here must be UserOwned (a parent with no owning business unit refuses).
+    /// </remarks>
+    public static readonly IReadOnlyList<string> OwnershipParentEntities =
+    [
+        "sprk_project",
+        "sprk_matter",
+        "sprk_workassignment",
+        "sprk_servicerequest",
+        "sprk_agreement",
+        "sprk_analysis",
+        "sprk_billingevent",
+        "sprk_budget",
+        "sprk_communication",
+        "sprk_document",
+        "sprk_event",
+        "sprk_invoice",
+        "sprk_kpiassessment",
+        "sprk_memo",
+        "sprk_reportcard",
+        "sprk_spendsignal",
+        "sprk_spendsnapshot",
+        "sprk_todo",
+    ];
+
+    private static readonly HashSet<string> ParentSet = new(OwnershipParentEntities, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>True when a lookup to <paramref name="entityLogicalName"/> files a child under a parent for ownership.</summary>
+    public static bool IsOwnershipParent(string? entityLogicalName) =>
+        !string.IsNullOrWhiteSpace(entityLogicalName) && ParentSet.Contains(entityLogicalName);
+
+    /// <summary>
+    /// True for a CHILD table whose owner a generic re-filing must re-derive: an ownership parent that is not itself a
+    /// root. A root's own ownership (the three secure-flagged roots and the service request) is provisioning's — a
+    /// secure root is provisioned into isolation through task 144's endpoint, never by a bare re-own (owner S6) — so a
+    /// generic update that changes a root's lookups does not reassign it.
+    /// </summary>
+    public static bool IsReparentableChild(string? entityLogicalName) =>
+        IsOwnershipParent(entityLogicalName)
+        && !SecureFlaggedRoots.Contains(entityLogicalName!)
+        && !string.Equals(entityLogicalName, "sprk_servicerequest", StringComparison.OrdinalIgnoreCase);
+
+    // Read-only for creates: the narrowest seam that answers the queries below — the same one RecordContainerResolver
+    // reads the same facts through. ReparentAsync is the one writer (an owner assignment, task 146): DI hands out the
+    // one app-only IDataverseService behind it.
     private readonly IGenericEntityService _dataverse;
     private readonly IConfiguration _configuration;
     private readonly ILogger<RecordOwnershipResolver> _logger;
@@ -169,44 +609,33 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// <inheritdoc />
     public async Task<Guid?> ResolveOwningTeamAsync(RecordOwnershipContext context, CancellationToken ct)
     {
+        var resolution = await ResolveOwnerAsync(context, ct).ConfigureAwait(false);
+        return resolution.IsOwned ? resolution.OwningTeamId : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<RecordOwnerResolution> ResolveOwnerAsync(RecordOwnershipContext context, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(context);
 
-        // ── 1. PREFERRED: the target record's business unit ────────────────────────────────────────
+        var parents = CollectParents(context);
+
+        // ── 1. PREFERRED: the parents' business units (record-first, secure-if-any) ─────────────────────
         // A filed record belongs with what it is filed against, not with whoever uploaded it. This is also
         // the only source available when there is no acting user at all (inbound email).
-        if (context.HasTarget)
+        if (parents.Count > 0)
         {
-            var fromTarget = await ResolveFromTargetRecordAsync(
-                ToTargetLogicalName(context.TargetEntityLogicalName!), context.TargetRecordId!.Value, ct)
-                .ConfigureAwait(false);
-
-            if (fromTarget is not null)
-            {
-                return fromTarget;
-            }
-
-            // ⛔ REFUSE — do NOT fall back to the acting user when a target WAS named but could not be
-            // resolved. This branch used to fall through, which was wrong, and the reason is the secure-record
-            // case that RecordContainerResolver already documents (task 076,
-            // notes/secure-project-workflow-review-2026-08-24.md §A): users sit in the Operations subtree
-            // while SECURE records are owned in `Secure Record`. Falling back to the acting user's business
-            // unit would assign a secure record's child to the general Operations team — the precise isolation
-            // failure that resolver refuses to make for containers, and it fails the same way here.
-            //
-            // Record-first already handles secure targets correctly when the read SUCCEEDS, because a secure
-            // record's own owningbusinessunit IS the Secure Record BU. The danger was only ever this
-            // fallback. Per 076: an indeterminate answer read as "not secure" is the same isolation failure
-            // with an extra step, so indeterminate must refuse.
-            _logger.LogWarning(
-                "Refusing to resolve an owning team: target {TargetEntity} {TargetId} was named but its "
-                + "business unit could not be read. NOT falling back to the acting user — for a secure record "
-                + "that would assign it to the caller's general business unit and defeat its isolation "
-                + "(task 076 / task 080).",
-                context.TargetEntityLogicalName, context.TargetRecordId);
-            return null;
+            return await ResolveFromParentsAsync(parents, context, ct).ConfigureAwait(false);
         }
 
-        // ── 2. FALLBACK: the acting user's business unit ───────────────────────────────────────────
+        // ── 2. Nothing named ──────────────────────────────────────────────────────────────────────────────
+        if (context.WhenUnfiled == UnfiledOwnership.KeepCreator)
+        {
+            return RecordOwnerResolution.Unchanged(
+                "no parent is named; this writer's unfiled rows keep their creating identity (task 146 E1)");
+        }
+
+        // FALLBACK: the acting user's business unit.
         //
         // OWNER DECISION 2026-09-25, and a DELIBERATE divergence worth naming (CLAUDE.md §6.5 Path A —
         // project-scoped exception, not an oversight). The ADR-002 write-path review's gap G5 flags that
@@ -222,7 +651,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // nobody else yet.
         //
         // The secure-record risk that motivates 076's stricter rule does NOT arise here, because this branch
-        // is reached only when NO target was named at all. A named-but-unresolvable target refuses above.
+        // is reached only when NO parent was named at all. A named-but-unresolvable parent refuses below.
         if (context.CallerSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
         {
             return await ResolveFromUserAsync("systemuserid", systemUserId, ct).ConfigureAwait(false);
@@ -233,11 +662,124 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return await ResolveFromUserAsync("azureactivedirectoryobjectid", objectId, ct).ConfigureAwait(false);
         }
 
-        // ── 3. Neither. Refuse upstream. ───────────────────────────────────────────────────────────
+        // ── 3. Neither. Refuse upstream. ───────────────────────────────────────────────────────────────
         _logger.LogWarning(
-            "Cannot resolve an owning team: no target record and no acting-user identity were supplied. The "
+            "Cannot resolve an owning team: no parent record and no acting-user identity were supplied. The "
             + "record must be refused rather than created app-owned (task 080).");
-        return null;
+        return RecordOwnerResolution.Refused(
+            RecordOwnerRefusal.NoOwnerSource,
+            "the record names no parent record and there is no acting user to own it");
+    }
+
+    /// <inheritdoc />
+    public async Task<RecordOwnerResolution> ReparentAsync(
+        RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(applyChange);
+
+        // The row's current state — every column, because a child's parents are whatever lookups it carries, and a
+        // per-table column list is exactly the guess this task forbids. A reparent is an explicit filing action,
+        // not a hot path, so the wide read is the honest price.
+        var query = new QueryExpression(request.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(true),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition($"{request.EntityLogicalName}id", ConditionOperator.Equal, request.RecordId);
+        var current = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+
+        if (current is null)
+        {
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.RecordMissing,
+                $"the {request.EntityLogicalName} {request.RecordId:D} being re-filed does not exist");
+        }
+
+        // Current parents, keyed by column, overlaid with the change.
+        var byColumn = new Dictionary<string, RecordOwnershipParent>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, value) in current.Attributes)
+        {
+            if (value is EntityReference reference && reference.Id != Guid.Empty
+                && IsOwnershipParent(reference.LogicalName))
+            {
+                byColumn[column] = new RecordOwnershipParent(reference.LogicalName, reference.Id);
+            }
+        }
+
+        foreach (var (column, value) in request.ParentChanges)
+        {
+            if (value is null || value.Id == Guid.Empty)
+            {
+                byColumn.Remove(column);
+            }
+            else if (IsOwnershipParent(value.LogicalName))
+            {
+                byColumn[column] = new RecordOwnershipParent(value.LogicalName, value.Id);
+            }
+        }
+
+        var parents = byColumn.Values
+            .Concat(request.InheritedParents.Where(p => p.IsSpecified && IsOwnershipParent(p.EntityLogicalName)))
+            .Distinct()
+            .ToArray();
+        var resolution = await ResolveOwnerAsync(
+            new RecordOwnershipContext
+            {
+                Parents = parents,
+                CallerSystemUserId = request.CallerSystemUserId,
+                CallerObjectId = request.CallerObjectId,
+                WhenUnfiled = request.WhenUnfiled,
+            },
+            ct).ConfigureAwait(false);
+
+        if (resolution.IsRefused)
+        {
+            _logger.LogWarning(
+                "Refusing to re-file {Entity} {RecordId}: {Reason} ({Code}). The change was NOT written.",
+                request.EntityLogicalName, request.RecordId, resolution.Reason, resolution.RefusalCode);
+            return resolution;
+        }
+
+        await applyChange(ct).ConfigureAwait(false);
+
+        if (!resolution.IsOwned)
+        {
+            return resolution; // Unchanged — the row keeps its owner.
+        }
+
+        var teamId = resolution.OwningTeamId!.Value;
+        var currentOwner = current.GetAttributeValue<EntityReference>(OwnerColumn);
+        if (currentOwner is not null
+            && string.Equals(currentOwner.LogicalName, TeamEntity, StringComparison.OrdinalIgnoreCase)
+            && currentOwner.Id == teamId)
+        {
+            return resolution; // already owned by the resolved team
+        }
+
+        // Ownership is assigned on its own, not folded into the field update: Dataverse treats an owner change as a
+        // distinct operation, and combining them is a documented way to have one of the two quietly not happen
+        // (the ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync rationale).
+        await _dataverse.UpdateAsync(
+            request.EntityLogicalName,
+            request.RecordId,
+            new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, teamId) },
+            ct).ConfigureAwait(false);
+
+        var readBack = await _dataverse.RetrieveAsync(
+            request.EntityLogicalName, request.RecordId, new[] { OwningTeamColumn }, ct).ConfigureAwait(false);
+        if (readBack?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id != teamId)
+        {
+            throw new InvalidOperationException(
+                $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as team {teamId:D} "
+                + "after the reassignment; the re-filed row may be readable outside its new parent's team (task 146).");
+        }
+
+        _logger.LogInformation(
+            "Re-filed {Entity} {RecordId}: owner reassigned to team {TeamId}.",
+            request.EntityLogicalName, request.RecordId, teamId);
+        return resolution;
     }
 
     /// <summary>
@@ -252,45 +794,157 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         DocumentAssociationMap.ToLogicalName(entityTypeOrAlias) ?? entityTypeOrAlias.Trim().ToLowerInvariant();
 
     /// <summary>
-    /// Reads the target record's <c>owningbusinessunit</c> and returns that business unit's owning team — its default
-    /// owner team, or for the Secure Record business unit its NAMED owner team (task 144). Works whether the target is
-    /// itself user-owned or team-owned, because the BU is derived either way.
+    /// The primary target (as named, alias-normalized — the pre-146 contract) first, then every ownership-parent
+    /// entry of <see cref="RecordOwnershipContext.Parents"/>, without duplicates.
     /// </summary>
-    private async Task<Guid?> ResolveFromTargetRecordAsync(
-        string entityLogicalName, Guid recordId, CancellationToken ct)
+    private static List<RecordOwnershipParent> CollectParents(RecordOwnershipContext context)
     {
-        // A missing row, or one with no owning business unit, is an ANSWER — "there is no team" — and the caller
-        // refuses (never falls back to the acting user; see ResolveOwningTeamAsync). A Dataverse FAULT is not an
-        // answer: it propagates, so a throttled or timed-out read surfaces as the caller's retryable 5xx instead of
-        // a permanent 403 that tells the user to check the record.
-        var query = new QueryExpression(entityLogicalName)
+        var parents = new List<RecordOwnershipParent>();
+        if (context.HasTarget)
         {
-            ColumnSet = new ColumnSet(OwningBusinessUnitColumn),
-            TopCount = 1,
-            NoLock = true
-        };
-        query.Criteria.AddCondition($"{entityLogicalName}id", ConditionOperator.Equal, recordId);
-
-        var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-        var businessUnitId = results.Entities.FirstOrDefault()
-            ?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
-
-        if (businessUnitId is null || businessUnitId == Guid.Empty)
-        {
-            _logger.LogWarning(
-                "Target {EntityLogicalName} {RecordId} does not exist or has no owning business unit.",
-                entityLogicalName, recordId);
-            return null;
+            parents.Add(new RecordOwnershipParent(
+                ToTargetLogicalName(context.TargetEntityLogicalName!), context.TargetRecordId!.Value));
         }
 
-        return await ResolveOwnerTeamForBusinessUnitAsync(businessUnitId.Value, ct).ConfigureAwait(false);
+        foreach (var parent in context.Parents)
+        {
+            if (!parent.IsSpecified || !IsOwnershipParent(parent.EntityLogicalName))
+                continue;
+
+            var normalized = parent with { EntityLogicalName = parent.EntityLogicalName.Trim().ToLowerInvariant() };
+            if (!parents.Contains(normalized))
+                parents.Add(normalized);
+        }
+
+        return parents;
+    }
+
+    /// <summary>One parent's ownership facts.</summary>
+    private sealed record ParentFacts(
+        RecordOwnershipParent Parent, Guid BusinessUnitId, bool HasOwningTeam, bool FlaggedSecure);
+
+    /// <summary>
+    /// Secure-if-any over every parent. Order of the checks is the point: an unreadable parent refuses before any
+    /// answer (it might be the secure one); a flagged-but-not-isolated root refuses before the secure branch (its
+    /// children must not inherit the ordinary BU its ownership still shows); any parent in the Secure Record BU wins
+    /// over every ordinary parent; only then does the primary parent's business unit decide an ordinary child.
+    /// </summary>
+    private async Task<RecordOwnerResolution> ResolveFromParentsAsync(
+        IReadOnlyList<RecordOwnershipParent> parents, RecordOwnershipContext context, CancellationToken ct)
+    {
+        var facts = new List<ParentFacts>(parents.Count);
+        foreach (var parent in parents)
+        {
+            var fact = await ReadParentAsync(parent, ct).ConfigureAwait(false);
+            if (fact is null)
+            {
+                // ⛔ REFUSE — do NOT fall back to the acting user when a parent WAS named but could not be
+                // resolved. The secure-record case RecordContainerResolver documents (task 076,
+                // notes/secure-project-workflow-review-2026-08-24.md §A): users sit in the Operations subtree while
+                // SECURE records are owned in `Secure Record`. Falling back to the acting user's business unit would
+                // assign a secure record's child to the general Operations team. An indeterminate answer read as
+                // "not secure" is the same isolation failure with an extra step, so indeterminate must refuse.
+                _logger.LogWarning(
+                    "Refusing to resolve an owning team: parent {ParentEntity} {ParentId} was named but its "
+                    + "business unit could not be read. NOT falling back to the acting user — for a secure record "
+                    + "that would assign it to the caller's general business unit and defeat its isolation "
+                    + "(task 076 / task 080 / task 146).",
+                    parent.EntityLogicalName, parent.RecordId);
+                return RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the parent {parent.EntityLogicalName} {parent.RecordId:D} does not exist or has no owning business unit");
+            }
+
+            facts.Add(fact);
+        }
+
+        // A content row of a parent that is not team-owned keeps its creator, as its parent did (E1).
+        if (context.KeepCreatorUnlessTargetIsTeamOwned && !facts[0].HasOwningTeam)
+        {
+            return RecordOwnerResolution.Unchanged(
+                $"the parent {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D} is not team-owned "
+                + "(an unfiled row that kept its creator, task 146 E1); its content row keeps its creator too");
+        }
+
+        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+        {
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
+                "more than one business unit carries the Secure Record name, so whether a parent is secure cannot be decided");
+        }
+
+        // A root flagged secure but not owned in the Secure Record BU is a failed or interrupted provisioning (C11).
+        // Its ownership says "ordinary"; its flag says "secure". Fail closed: refuse, never the ordinary team.
+        var notIsolated = facts.FirstOrDefault(f => f.FlaggedSecure && f.BusinessUnitId != secureBu.Id);
+        if (notIsolated is not null)
+        {
+            _logger.LogError(
+                "Refusing to resolve an owning team: parent {ParentEntity} {ParentId} is flagged sprk_issecure but is "
+                + "owned in business unit {BusinessUnitId}, not the Secure Record business unit — a failed or "
+                + "interrupted provisioning (task 146 / C11). Its children are not given an ordinary owner.",
+                notIsolated.Parent.EntityLogicalName, notIsolated.Parent.RecordId, notIsolated.BusinessUnitId);
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.SecureParentNotIsolated,
+                $"the parent {notIsolated.Parent.EntityLogicalName} {notIsolated.Parent.RecordId:D} is marked secure "
+                + "but is not isolated (its provisioning did not complete); re-run Make Secure on it, then retry");
+        }
+
+        if (secureBu.Id is { } secureBuId && facts.Any(f => f.BusinessUnitId == secureBuId))
+        {
+            return await ResolveNamedSecureOwnerTeamAsync(secureBuId, ct).ConfigureAwait(false);
+        }
+
+        return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Resolves the acting user's business unit, then that BU's default owner team.
+    /// Reads one parent's <c>owningbusinessunit</c> (and <c>owningteam</c>; and <c>sprk_issecure</c> for the three
+    /// secure-flagged roots). A missing row, or one with no owning business unit, is an ANSWER — "there is no team"
+    /// — and the caller refuses. A Dataverse FAULT is not an answer: it propagates, so a throttled or timed-out read
+    /// surfaces as the caller's retryable 5xx instead of a permanent refusal that tells the user to check the record.
+    /// </summary>
+    private async Task<ParentFacts?> ReadParentAsync(RecordOwnershipParent parent, CancellationToken ct)
+    {
+        var isSecureFlaggedRoot = SecureFlaggedRoots.Contains(parent.EntityLogicalName);
+        var columns = isSecureFlaggedRoot
+            ? new ColumnSet(OwningBusinessUnitColumn, OwningTeamColumn, IsSecureColumn)
+            : new ColumnSet(OwningBusinessUnitColumn, OwningTeamColumn);
+
+        var query = new QueryExpression(parent.EntityLogicalName)
+        {
+            ColumnSet = columns,
+            TopCount = 1,
+            NoLock = true
+        };
+        query.Criteria.AddCondition($"{parent.EntityLogicalName}id", ConditionOperator.Equal, parent.RecordId);
+
+        var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        var row = results.Entities.FirstOrDefault();
+        var businessUnitId = row?.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id;
+
+        if (row is null || businessUnitId is null || businessUnitId == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "Parent {EntityLogicalName} {RecordId} does not exist or has no owning business unit.",
+                parent.EntityLogicalName, parent.RecordId);
+            return null;
+        }
+
+        var hasOwningTeam = row.GetAttributeValue<EntityReference>(OwningTeamColumn) is { } team && team.Id != Guid.Empty;
+
+        // NULL sprk_issecure is "No" — owner decision Q1 (2026-10-01) sets every NULL to No and defaults the column
+        // to No; it is not read as secure. A flagged root that IS isolated takes the secure branch anyway by its BU.
+        var flaggedSecure = isSecureFlaggedRoot && row.GetAttributeValue<bool?>(IsSecureColumn) == true;
+
+        return new ParentFacts(parent, businessUnitId.Value, hasOwningTeam, flaggedSecure);
+    }
+
+    /// <summary>
+    /// Resolves the acting user's business unit, then that BU's owner team.
     /// <paramref name="userKeyColumn"/> selects which identity the caller is known by.
     /// </summary>
-    private async Task<Guid?> ResolveFromUserAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
+    private async Task<RecordOwnerResolution> ResolveFromUserAsync(string userKeyColumn, Guid userKey, CancellationToken ct)
     {
         // TOP 2, not TOP 1 — the same contract RecordContainerResolver.ResolveForActingUserAsync keeps for the
         // same fact. One row is the answer; two mean the key maps to more than one Dataverse user and the
@@ -311,7 +965,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Cannot resolve an owning team: {UserKeyColumn}={UserKey} matches more than one Dataverse "
                 + "user, so the business unit is ambiguous. Refusing rather than choosing one.",
                 userKeyColumn, userKey);
-            return null;
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.ActingUserUnresolved,
+                "the acting user matches more than one Dataverse user, so their business unit is ambiguous");
         }
 
         var businessUnitId = users.Entities.FirstOrDefault()
@@ -323,38 +979,49 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Cannot resolve an owning team: no systemuser with {UserKeyColumn}={UserKey}, or that user "
                 + "has no business unit.",
                 userKeyColumn, userKey);
-            return null;
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.ActingUserUnresolved,
+                "the acting user has no Dataverse user record with a business unit");
         }
 
-        // As for the target read: "no such user" / "no business unit" is an answer (refuse); a Dataverse
+        // As for a parent read: "no such user" / "no business unit" is an answer (refuse); a Dataverse
         // fault propagates as the caller's retryable 5xx, never as a refusal that blames the user's setup.
-        return await ResolveOwnerTeamForBusinessUnitAsync(businessUnitId.Value, ct).ConfigureAwait(false);
+        //
+        // The user path should never meet the Secure Record BU (it holds no users; provisioning and the census job
+        // refuse and report otherwise), but if it does, the answer is still the named team or a refusal — never the
+        // default team task 144 retired.
+        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+        {
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
+                "more than one business unit carries the Secure Record name, so the acting user's business unit cannot be classified");
+        }
+
+        return secureBu.Id == businessUnitId
+            ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false)
+            : await ResolveDefaultOwnerTeamAsync(businessUnitId.Value, ct).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// "Business unit → owning team", with the one exception task 144 adds: the Secure Record business unit's records
-    /// are owned by its NAMED owner team, never its default team. Every other business unit keeps its default team.
+    /// Which business unit is the Secure Record BU, decided by ID: the BU named by
+    /// <c>SecureRecord:BusinessUnitName</c> (default <c>Secure Record</c>), looked up with TOP 2. Two matches are
+    /// <c>Ambiguous</c> (refuse). No match means this environment has no Secure Record BU, so no BU can be it.
     /// </summary>
     /// <remarks>
-    /// <para>Both call sites route through here — the target-record path (a child filed to a secure record) and the
-    /// acting-user path. The second should never meet the Secure Record BU (it holds no users; provisioning and the
-    /// census job refuse and report otherwise), but if it does, the answer is still the named team or a refusal —
-    /// never the default team this task retires.</para>
-    /// <para><b>Which business unit is the Secure Record BU</b> is decided by ID: the BU named by
-    /// <c>SecureRecord:BusinessUnitName</c> (default <c>Secure Record</c>), looked up with TOP 2. Two matches refuse.
-    /// No match means this environment has no Secure Record BU, so no BU can be it and every BU keeps its default
-    /// team. That is the right answer for an environment without secure records, and for a misconfigured name it is
-    /// still not silent: provisioning refuses with <c>secure_bu_not_found</c>, the census job reports the BU missing,
-    /// and once the setup-guide cutover has removed the role from the default team, Dataverse refuses any assignment
-    /// to it.</para>
+    /// <para>No Secure Record BU is the right answer for an environment without secure records, and for a
+    /// misconfigured name it is still not silent: provisioning refuses with <c>secure_bu_not_found</c>, the census
+    /// job reports the BU missing, and once the setup-guide cutover has removed the role from the default team,
+    /// Dataverse refuses any assignment to it. (A root FLAGGED secure in such an environment refuses here as not
+    /// isolated — task 146.)</para>
     /// <para><b>Documented fail-open edge — until the live cutover.</b> With a misconfigured
     /// <c>SecureRecord:BusinessUnitName</c>, a child filed to a secure record resolves to the Secure Record BU's
-    /// DEFAULT team. Of the three mitigations above, only the last makes Dataverse refuse that assignment, and it exists
+    /// DEFAULT team. Of the mitigations above, only the last makes Dataverse refuse that assignment, and it exists
     /// only after guide §4.3 step 4 (the <c>Secure Record Owner</c> role removed from the default team). Before that
     /// step, the assignment succeeds and is visible only through the provisioning refusal and the census job's inert
     /// warning. Accepted by the task-144 verifier (round 2) on that condition; the PR names it.</para>
     /// </remarks>
-    private async Task<Guid?> ResolveOwnerTeamForBusinessUnitAsync(Guid businessUnitId, CancellationToken ct)
+    private async Task<(Guid? Id, bool Ambiguous)> ResolveSecureBusinessUnitAsync(CancellationToken ct)
     {
         var secureBuName = SecureRecordOwnerTeam.BusinessUnitName(_configuration);
 
@@ -371,24 +1038,22 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             _logger.LogError(
                 "Cannot resolve an owning team: more than one business unit is named '{SecureBuName}' "
-                + "(SecureRecord:BusinessUnitName), so whether business unit {BusinessUnitId} is the Secure Record "
-                + "business unit cannot be decided. Refusing rather than guessing (task 144).",
-                secureBuName, businessUnitId);
-            return null;
+                + "(SecureRecord:BusinessUnitName), so whether a business unit is the Secure Record business unit "
+                + "cannot be decided. Refusing rather than guessing (task 144).",
+                secureBuName);
+            return (null, true);
         }
 
-        var isSecureRecordBusinessUnit = secureBus.Entities.Count == 1 && secureBus.Entities[0].Id == businessUnitId;
-
-        return isSecureRecordBusinessUnit
-            ? await ResolveNamedSecureOwnerTeamAsync(businessUnitId, ct).ConfigureAwait(false)
-            : await ResolveDefaultOwnerTeamAsync(businessUnitId, ct).ConfigureAwait(false);
+        return secureBus.Entities.Count == 1 && secureBus.Entities[0].Id != Guid.Empty
+            ? (secureBus.Entities[0].Id, false)
+            : (null, false);
     }
 
     /// <summary>
     /// The Secure Record business unit's NAMED owner team: the configured name, an Owner team, NOT the default team.
-    /// Exactly one match, or null — never the default team as a fallback.
+    /// Exactly one match, or a refusal — never the default team as a fallback.
     /// </summary>
-    private async Task<Guid?> ResolveNamedSecureOwnerTeamAsync(Guid secureBusinessUnitId, CancellationToken ct)
+    private async Task<RecordOwnerResolution> ResolveNamedSecureOwnerTeamAsync(Guid secureBusinessUnitId, CancellationToken ct)
     {
         var teamName = SecureRecordOwnerTeam.OwnerTeamName(_configuration);
 
@@ -412,16 +1077,18 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "required. Refusing — a record in the Secure Record business unit is never owned by its default "
                 + "team (task 144, #967).",
                 secureBusinessUnitId, teams.Entities.Count, teamName);
-            return null;
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.SecureOwnerTeamUnresolved,
+                $"the secure record's owner team '{teamName}' is missing or not unique in the Secure Record business unit");
         }
 
-        return teams.Entities[0].Id;
+        return RecordOwnerResolution.Owned(teams.Entities[0].Id);
     }
 
     /// <summary>
     /// A business unit's DEFAULT OWNER team. Both predicates are load-bearing — see <see cref="OwnerTeamType"/>.
     /// </summary>
-    private async Task<Guid?> ResolveDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
+    private async Task<RecordOwnerResolution> ResolveDefaultOwnerTeamAsync(Guid businessUnitId, CancellationToken ct)
     {
         // TOP 2 for the same reason as the user lookup. Dataverse keeps exactly one default team per business
         // unit, so a second row means the two predicates are not selecting what they claim to — refuse rather
@@ -443,7 +1110,9 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Business unit {BusinessUnitId} returned more than one default owner team "
                 + "(isdefault = true AND teamtype = {OwnerTeamType}). Refusing rather than choosing one.",
                 businessUnitId, OwnerTeamType);
-            return null;
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.NoDefaultOwnerTeam,
+                $"business unit {businessUnitId:D} has more than one default owner team");
         }
 
         var teamId = teams.Entities.FirstOrDefault()?.Id;
@@ -454,11 +1123,13 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 "Business unit {BusinessUnitId} has no default owner team "
                 + "(isdefault = true AND teamtype = {OwnerTeamType}).",
                 businessUnitId, OwnerTeamType);
-            return null;
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.NoDefaultOwnerTeam,
+                $"business unit {businessUnitId:D} has no default owner team");
         }
 
         _logger.LogDebug(
             "Resolved owning team {TeamId} for business unit {BusinessUnitId}.", teamId, businessUnitId);
-        return teamId;
+        return RecordOwnerResolution.Owned(teamId.Value);
     }
 }

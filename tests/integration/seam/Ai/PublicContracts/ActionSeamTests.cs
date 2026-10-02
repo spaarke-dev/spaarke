@@ -71,6 +71,7 @@ public class ActionSeamTests
         _fieldMappingMock.Object,
         _scopeFactoryMock.Object,
         Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+        new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
         NullLogger<ActionSeam>.Instance);
 
     // ── CreateNotification: parity + negative case ────────────────────────────────────────────
@@ -235,7 +236,12 @@ public class ActionSeamTests
         captured.GetAttributeValue<EntityReference>("sprk_eventtype_ref").Id.Should().Be(
             Guid.Parse("124f5fc9-98ff-f011-8406-7c1e525abd8b"), "event type = Task");
         captured.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(regardingId);
-        captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ownerId);
+        // unified-access-control-r2 task 146: owned by the record's team (the resolver's answer), not the supplied
+        // user (task 152 carries the assignee in Assigned To; owner B2).
+        captured.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team");
+        captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(
+            Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
+        captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().NotBe(ownerId);
     }
 
     [Fact]

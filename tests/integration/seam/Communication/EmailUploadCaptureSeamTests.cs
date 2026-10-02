@@ -2,8 +2,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Office;
@@ -59,12 +59,12 @@ public sealed class EmailUploadCaptureSeamTests
             new ParticipantCorrelationRung(dv.Object),
         };
         var resolver = new IncomingAssociationResolver(
-            rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), NullLogger<IncomingAssociationResolver>.Instance);
+            rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<IncomingAssociationResolver>.Instance);
 
         var enrich = enrichment ?? new Mock<ICommunicationEnrichmentService>();
 
         return new EmailUploadCaptureService(
-            dv.Object, resolver, enrich.Object, NullLogger<EmailUploadCaptureService>.Instance);
+            dv.Object, resolver, enrich.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<EmailUploadCaptureService>.Instance);
     }
 
     private static SaveRequest EmailSave(string? internetMessageId, SaveEntityReference? target)
