@@ -124,6 +124,16 @@ public sealed record CreateTaskRequest
     public Guid? RegardingObjectId { get; init; }
     public string? RegardingObjectType { get; init; }
     public Guid? OwnerId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 152: the systemuser the task is created on behalf of (the confirming user, the
+    /// recipient a signal is for). Their linked contact becomes <c>sprk_event.sprk_assignedto</c> when no
+    /// <see cref="AssignedToContactId"/> is supplied. Null → the regarding parent's responsible internal contact.
+    /// </summary>
+    public Guid? ActingUserId { get; init; }
+
+    /// <summary>A supplied assignee (contact) for <c>sprk_event.sprk_assignedto</c>. Never overwritten.</summary>
+    public Guid? AssignedToContactId { get; init; }
 }
 
 /// <summary>Result of a <see cref="IActionSeam.CreateTaskAsync"/> call. <see cref="TaskId"/> is

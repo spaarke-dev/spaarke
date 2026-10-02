@@ -357,7 +357,7 @@ public sealed class DailyBriefingCompositeServiceTests
             Guid systemUserId, BriefingWindowOptions windows, CancellationToken ct)
             => Task.FromResult(Payload);
 
-        public override Task<HighPriorityItemDto[]> CollectHighPriorityAsync(Guid systemUserId, CancellationToken ct)
-            => Task.FromResult(HighPriority);
+        public override Task<HighPriorityCollection> CollectHighPriorityAsync(Guid systemUserId, CancellationToken ct)
+            => Task.FromResult(new HighPriorityCollection(HighPriority, Array.Empty<string>()));
     }
 }

@@ -69,7 +69,7 @@
       "configJson": {
         "__actionType": 52,
         "entityType": "sprk_matter",
-        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "targeting": "people",
         "includeRelated": false,
         "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal) per ADR-034. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
       }

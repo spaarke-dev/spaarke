@@ -430,6 +430,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (request.Priority.HasValue)
             payload["sprk_priority"] = request.Priority.Value;
 
+        // unified-access-control-r2 task 152 (owner S1): the person the event is FOR. PascalCase navigation property,
+        // the same bind the client event wizard uses (CreateEventWizard eventService).
+        if (request.AssignedToContactId is { } assignedTo && assignedTo != Guid.Empty)
+            payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
+
         if (request.RegardingRecordType.HasValue)
         {
             payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;

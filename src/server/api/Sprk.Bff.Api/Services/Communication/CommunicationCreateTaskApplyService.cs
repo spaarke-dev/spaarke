@@ -334,6 +334,8 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 RegardingObjectId = regardingRecordId,
                 RegardingObjectType = targetEntity,
                 OwnerId = request?.AssignedTo,
+                // Task 152: the confirming user is the triggering person — their linked contact names the task.
+                ActingUserId = callerSystemUserId,
             },
             ct).ConfigureAwait(false);
 
@@ -477,6 +479,8 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 RegardingObjectId = regardingRecordId,
                 RegardingObjectType = regardingEntity,
                 OwnerId = request.AssignedTo,
+                // Task 152: the confirming user is the triggering person — their linked contact names the task.
+                ActingUserId = callerSystemUserId,
             },
             ct).ConfigureAwait(false);
 

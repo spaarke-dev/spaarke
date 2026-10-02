@@ -46,6 +46,7 @@ public sealed class DailyBriefingOverviewHandlerTests
 
     private readonly Mock<IDataverseService> _dataverseMock = new(MockBehavior.Strict);
     private readonly Mock<IMembershipResolverService> _resolverMock = new(MockBehavior.Strict);
+    private readonly Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery> _callerQueryMock = new();
     private readonly IDistributedCache _briefingCache = new MemoryDistributedCache(
         Options.Create(new MemoryDistributedCacheOptions()));
     private readonly Mock<IDistributedCache> _portfolioCacheMock = new(MockBehavior.Loose);
@@ -77,6 +78,7 @@ public sealed class DailyBriefingOverviewHandlerTests
             cache: _briefingCache,
             membershipResolver: _resolverMock.Object,
             dataverse: _dataverseMock.Object,
+            callerQuery: _callerQueryMock.Object,
             logger: NullLogger<BriefingService>.Instance,
             briefingAi: null); // deterministic template narrative — no AI facade in unit tests
 
@@ -117,19 +119,25 @@ public sealed class DailyBriefingOverviewHandlerTests
             .ReturnsAsync(systemUserCollection);
     }
 
-    private static Entity BuildMatterEntity(Guid id, string name, int overdue, decimal spend, decimal budget, DateTime? deadline)
+    /// <summary>
+    /// Task 152: the caller-context read returns the matter's detail row (and no overdue tasks), as Dataverse would
+    /// under impersonation for a matter the caller may read.
+    /// </summary>
+    private void SetupCallerMatter(Guid id, string name, decimal spend, decimal budget)
     {
-        var entity = new Entity("sprk_matter", id);
-        entity["sprk_name"] = name;
-        entity["sprk_overdueeventcount"] = overdue;
-        entity["sprk_totalspend"] = new Money(spend);
-        entity["sprk_totalbudget"] = new Money(budget);
-        entity["statecode"] = new OptionSetValue(0);
-        if (deadline.HasValue)
-        {
-            entity["sprk_duedate"] = deadline.Value;
-        }
-        return entity;
+        var row = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sprk_matterid"] = id.ToString("D"),
+                ["sprk_mattername"] = name,
+                ["sprk_totalspendtodate"] = spend,
+                ["sprk_totalbudget"] = budget,
+            }))!;
+        _callerQueryMock
+            .Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), TestSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string set, string? _, Guid _, CancellationToken _) => set == "sprk_matters"
+                ? new List<Dictionary<string, System.Text.Json.JsonElement>> { row }
+                : new List<Dictionary<string, System.Text.Json.JsonElement>>());
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
@@ -253,13 +261,8 @@ public sealed class DailyBriefingOverviewHandlerTests
             .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(memberships);
 
-        var deadline = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
-        _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                BuildMatterEntity(MatterId, "Matter Alpha", overdue: 3, spend: 60_000m, budget: 100_000m, deadline: deadline)
-            }));
+        // Task 152: the matter detail is read AS THE CALLER (IImpersonatedCommunicationQuery), never app-only.
+        SetupCallerMatter(MatterId, "Matter Alpha", spend: 60_000m, budget: 100_000m);
 
         var ctx = BuildContext(userId: TestAadOidString);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildTool(), CancellationToken.None);
@@ -371,12 +374,7 @@ public sealed class DailyBriefingOverviewHandlerTests
         _resolverMock
             .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(memberships);
-        _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                BuildMatterEntity(MatterId, sensitiveMatterName, overdue: 1, spend: 10_000m, budget: 20_000m, deadline: null)
-            }));
+        SetupCallerMatter(MatterId, sensitiveMatterName, spend: 10_000m, budget: 20_000m);
 
         var ctx = BuildContext(userId: TestAadOidString);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildTool(), CancellationToken.None);

@@ -960,34 +960,22 @@ public class OfficeService : IOfficeService
                 }
 
                 // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
-                // Per event-source-inventory §3B (line 64), POST /office/save
-                // creates a sprk_document. ⚠️ CORRECTED 2026-09-30 (task 080): its ownerid is NOT the caller —
-                // the row is owned by a business-unit default owner TEAM (RECORD OWNERSHIP above); the event
-                // records the caller as the creator-member (ADR-034's call, flagged to UAC-r2). Publish Added
-                // event so the junction-updater
-                // (task 084) + nightly recon (task 085) observe the new
-                // association. When MembershipEventPublisherOptions.Enabled=false
-                // (default), the NullMembershipEventPublisher peer logs + returns
-                // (ADR-032 P2). The Task is discarded explicitly to signal
-                // fire-and-forget semantics — publisher contract guarantees no
-                // exceptions propagate to this site.
-                if (Guid.TryParse(userId, out var callerOid))
-                {
-                    var membershipEvent = new MembershipChangedEvent
-                    {
-                        PersonId = callerOid,
-                        PersonIdType = PersonIdentityType.User,
-                        EntityLogicalName = "sprk_document",
-                        EntityRecordId = documentId,
-                        SourceField = "ownerid",
-                        Role = "owner",
-                        MutationType = MembershipMutationType.Added,
-                        CorrelationId = correlationId,
-                        OccurredOnUtc = DateTime.UtcNow,
-                    };
-
-                    _ = _membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
-                }
+                // Per event-source-inventory §3B (line 64), POST /office/save creates a sprk_document owned by the
+                // business-unit default owner TEAM resolved above (RECORD OWNERSHIP). UAC-r2 task 152 (ADR-034 A3):
+                // the event states that real owner — PersonIdType=Team, PersonId=owningTeamId — the same key
+                // MembershipReconciliationJob builds for this row, instead of the caller's AAD oid as a User.
+                // When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns
+                // (ADR-032 P2). The Task is discarded explicitly: fire-and-forget, never throws.
+                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                    _membershipEventPublisher,
+                    _genericEntityService,
+                    "sprk_document",
+                    documentId,
+                    // The team this save resolved; should it ever be absent, the owner is read back from the row.
+                    owningTeamId is { } savedTeamId ? new Microsoft.Xrm.Sdk.EntityReference("team", savedTeamId) : null,
+                    correlationId,
+                    _logger,
+                    cancellationToken);
 
                 // Update job status to records created
                 jobRecord = jobRecord with

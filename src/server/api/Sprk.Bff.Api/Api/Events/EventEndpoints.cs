@@ -331,6 +331,9 @@ public static class EventEndpoints
         [FromBody] ApiCreateEventRequest request,
         IEventDataverseService dataverseService,
         IMembershipEventPublisher membershipEventPublisher,
+        Spaarke.Dataverse.IGenericEntityService genericEntityService,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -378,9 +381,16 @@ public static class EventEndpoints
 
         try
         {
+            // UAC-r2 task 152 / owner decision S1: the create is app-only, so Created By is the BFF application user
+            // and cannot say who the event is FOR. The acting user's LINKED contact (task 141) is written to
+            // sprk_assignedto — never an email match; no link → blank + todo_unassigned.
+            var assignedToContactId = await ResolveActingUserContactAsync(
+                callerResolver, identity, httpContext, logger, ct);
+
             var (eventId, createdOn) = await CreateEventInDataverseAsync(
                 dataverseService,
                 request,
+                assignedToContactId,
                 ct);
 
             var response = new CreateEventResponse(eventId, request.Subject, createdOn);
@@ -389,33 +399,21 @@ public static class EventEndpoints
                 "Event created successfully. EventId={EventId}, Subject={Subject}",
                 eventId, request.Subject);
 
-            // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
-            // Per event-source-inventory §3C, event Create has only the implicit
-            // ownerid Lookup (defaulted by Dataverse to the OBO caller).
-            // Publish Added event so the junction-updater (task 084) + nightly
-            // recon (task 085) observe the new association. When
-            // MembershipEventPublisherOptions.Enabled=false (default), the
-            // NullMembershipEventPublisher peer logs + returns (ADR-032 P2).
-            // Publisher contract guarantees no exceptions propagate here.
-            var traceId = httpContext.TraceIdentifier;
-            var oid = CallerResolution.ResolveObjectId(httpContext.User);
-            if (Guid.TryParse(oid, out var callerOid))
-            {
-                var membershipEvent = new MembershipChangedEvent
-                {
-                    PersonId = callerOid,
-                    PersonIdType = PersonIdentityType.User,
-                    EntityLogicalName = "sprk_event",
-                    EntityRecordId = eventId,
-                    SourceField = "ownerid",
-                    Role = "owner",
-                    MutationType = MembershipMutationType.Added,
-                    CorrelationId = traceId,
-                    OccurredOnUtc = DateTime.UtcNow,
-                };
-
-                _ = membershipEventPublisher.PublishAsync(membershipEvent, ct);
-            }
+            // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event, describing the row's REAL owner
+            // (UAC-r2 task 152, ADR-034 A3). The create runs on the app-only IEventDataverseService and sets no owner,
+            // so the owner is read back: today that is the BFF application user, which is not a person — no event is
+            // published, exactly as reconciliation records no junction row for it. (Before task 152 this published
+            // the caller's AAD oid under a comment claiming Dataverse defaulted the owner to the OBO caller; it never
+            // did.) When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns.
+            _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                membershipEventPublisher,
+                genericEntityService,
+                "sprk_event",
+                eventId,
+                knownOwner: null,
+                httpContext.TraceIdentifier,
+                logger,
+                ct);
 
             return TypedResults.Created($"/api/v1/events/{eventId}", response);
         }
@@ -713,6 +711,47 @@ public static class EventEndpoints
     }
 
     /// <summary>
+    /// UAC-r2 task 152: the acting user's LINKED contact (task 141 — <c>PersonIdentity.ContactId</c>), or null when the
+    /// caller does not resolve to a systemuser, has no link, or the read fails. Never an email/UPN match.
+    /// </summary>
+    private static async Task<Guid?> ResolveActingUserContactAsync(
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var resolution = await callerResolver.ResolveAsync(httpContext.User, ct);
+            if (resolution.IsResolved
+                && Guid.TryParse(resolution.SystemUserId, out var systemUserId)
+                && systemUserId != Guid.Empty)
+            {
+                var person = await identity.ResolveAsync(systemUserId, ct);
+                if (person.ContactId is { } contactId && contactId != Guid.Empty)
+                {
+                    return contactId;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Event create: the acting user's linked contact could not be resolved");
+        }
+
+        logger.LogWarning(
+            "todo_unassigned: entity=sprk_event parentEntity={ParentEntity} parentId={ParentId} reason={Reason} — the acting "
+            + "user has no linked contact; sprk_assignedto left blank (never a team, never an email match)",
+            "none", (Guid?)null, "acting_user_has_no_linked_contact");
+        return null;
+    }
+
+    /// <summary>
     /// Creates a new event in Dataverse.
     /// </summary>
     /// <remarks>
@@ -721,6 +760,7 @@ public static class EventEndpoints
     private static async Task<(Guid Id, DateTime CreatedOn)> CreateEventInDataverseAsync(
         IEventDataverseService dataverseService,
         ApiCreateEventRequest request,
+        Guid? assignedToContactId,
         CancellationToken ct)
     {
         // Map API request to Dataverse request
@@ -734,7 +774,8 @@ public static class EventEndpoints
             Priority = request.Priority,
             RegardingRecordType = request.RegardingRecordType,
             RegardingRecordId = request.RegardingRecordId?.ToString(),
-            RegardingRecordName = request.RegardingRecordName
+            RegardingRecordName = request.RegardingRecordName,
+            AssignedToContactId = assignedToContactId,
         };
 
         // Create the event record

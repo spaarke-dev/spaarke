@@ -33,6 +33,7 @@ public static class DataverseDocumentsEndpoints
             IDocumentDataverseService dataverseService,
             IMembershipEventPublisher membershipEventPublisher,
             Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+            Spaarke.Dataverse.IGenericEntityService genericEntityService,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct) =>
@@ -84,32 +85,24 @@ public static class DataverseDocumentsEndpoints
 
                 logger.LogInformation("Document created successfully with ID: {DocumentId}", documentId);
 
-                // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
-                // ⚠️ CORRECTED 2026-09-30 (task 080): this said ownerid was "defaulted by Dataverse to the OBO
-                // caller". It never was — the create is app-only, so the owner was the BFF application user — and
-                // it is now the caller's business-unit default owner TEAM (set above). The event still records the
-                // CALLER as the creator-member, which is the membership model's own decision (ADR-034); team-owned
-                // rows additionally confer through owningteam (UAC-r2 task 043). Publish Added event so the
-                // junction-updater (task 084) + nightly recon (task 085) observe the new association.
-                // When MembershipEventPublisherOptions.Enabled=false (default),
-                // the NullMembershipEventPublisher peer logs + returns (ADR-032 P2).
-                if (Guid.TryParse(documentId, out var documentGuid)
-                    && Guid.TryParse(userId, out var callerOid))
+                // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event, describing the row's REAL owner
+                // (UAC-r2 task 152, ADR-034 A3): the create is app-only and the row is owned by the business-unit
+                // default owner TEAM set above, so the event is PersonIdType=Team, PersonId=that team — the same key
+                // MembershipReconciliationJob builds for this row. (Before task 152 it published the caller's AAD oid
+                // as a User owner — false, and in an identity space reconciliation never writes.)
+                // When MembershipEventPublisherOptions.Enabled=false (default), the NullMembershipEventPublisher peer
+                // logs + returns (ADR-032 P2).
+                if (Guid.TryParse(documentId, out var documentGuid))
                 {
-                    var membershipEvent = new MembershipChangedEvent
-                    {
-                        PersonId = callerOid,
-                        PersonIdType = PersonIdentityType.User,
-                        EntityLogicalName = "sprk_document",
-                        EntityRecordId = documentGuid,
-                        SourceField = "ownerid",
-                        Role = "owner",
-                        MutationType = MembershipMutationType.Added,
-                        CorrelationId = traceId,
-                        OccurredOnUtc = DateTime.UtcNow,
-                    };
-
-                    _ = membershipEventPublisher.PublishAsync(membershipEvent, ct);
+                    _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                        membershipEventPublisher,
+                        genericEntityService,
+                        "sprk_document",
+                        documentGuid,
+                        new Microsoft.Xrm.Sdk.EntityReference("team", owningTeamId.Value),
+                        traceId,
+                        logger,
+                        ct);
                 }
 
                 return TypedResults.Created($"/api/v1/documents/{documentId}", new
