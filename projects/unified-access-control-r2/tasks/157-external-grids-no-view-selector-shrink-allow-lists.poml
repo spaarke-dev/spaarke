@@ -129,5 +129,38 @@
       Justification: no new service, DI registration, endpoint, option, job or package. Only a test file and
       documentation changed.
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-r1-r2" round="review-2">
+      Status stays "completed-with-escalation". The same two items stay open: the MANUAL live gate (criterion 6,
+      pending by design) and the owner decision on F1.
+      Item 5/9 (guard still failed open, criterion 1): ExternalSpaGridViewSelectorGuardTests now refuses all five
+      seeded shapes.
+      S1, a generic mount (&lt;DataGrid&lt;any&gt;): a mount is now "&lt;X" followed by anything that cannot
+      continue the identifier. Type arguments are refused.
+      S2/S3, a JSX-children line starting "//" or "/*": comments are no longer stripped; every comment is scanned
+      as code. GridWidgetBody.tsx's JSDoc was reworded so no comment names the binding (comments only; the mount
+      line is unchanged).
+      S4, a brace inside a string attribute: the opening-tag walk now skips string literals as strings. It refuses
+      an attribute string holding { } &lt; &gt;, a JS string or template literal holding { } inside a prop
+      expression, any "/" except the closing "/&gt;", a bare JSX element as an attribute value, an unbalanced }, and
+      a tag that never closes. A bare showViewSelector after the false one counts as true. A namespaced
+      x:showViewSelector does not count.
+      S5, a node_modules-relative import: the shared-library pattern now matches @spaarke/ui-components or
+      Spaarke.UI.Components anywhere in the specifier.
+      Each shape has a Theory control row: 16 rows covering S1-S5 plus the neighbours above. The comment control now
+      asserts that comments ARE reported. The sanctioned control drops its JSX comment and adds a second compliant
+      mount: a plain string attribute, a nested arrow prop, "{ false }" and "/ &gt;".
+      Seeded under external-spa/src/zzseed (S1-S5 verbatim plus 5 extras), the production fact went red with 10
+      violations, one per mount. The seeds were then deleted. P1 re-run: red at GridWidgetBody.tsx:73, then
+      restored and touched.
+      Item 7 (INFO): F1 is still open for the owner. The task-134 comparison test is tautological on its own, as
+      acknowledged. No change.
+      Item 10 (live gate): unchanged. Deploy the SPA first (gh workflow run deploy-external-spa.yml --ref
+      &lt;branch&gt;), then the BFF (pwsh scripts/Deploy-BffApi.ps1), then run note section 6. Not run here: no
+      live write was made.
+      Runs: guard 45/45; NetArchTest Passed 386, Failed 0, Total 386; BFF unit Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 22m15s); SPA npm run build
+      (vite) exit 0.
+      Justification: no new service, DI registration, endpoint, option, job or package. Changes: one test file,
+      comment-only edits to one client file, and documentation.
+    </outcome>
   </execution>
 </task>

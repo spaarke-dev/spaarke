@@ -26,18 +26,27 @@ namespace Spaarke.ArchTests;
 /// </para>
 /// <para>
 /// <b>What it scans.</b> Every script file under <c>src/client/external-spa/src</c>. The shared library is
-/// any module specifier starting <c>@spaarke/ui-components</c> or reaching into a <c>Spaarke.UI.Components</c>
-/// folder by path. Fluent's own <c>DataGrid</c> (from <c>@fluentui/react-components</c>) has no view picker
-/// and is ignored.
+/// any module specifier that names <c>@spaarke/ui-components</c> or <c>Spaarke.UI.Components</c> ANYWHERE
+/// (the package alias, a path into the library's source, or a <c>…/node_modules/@spaarke/ui-components/…</c>
+/// path). Fluent's own <c>DataGrid</c> (from <c>@fluentui/react-components</c>) has no view picker and is
+/// ignored.
 /// </para>
 /// <para><b>Fail closed.</b> The rules are written so that a shape the scan cannot attribute is REFUSED, not
-/// passed (task 157 review round 1 seeded nine shapes that the first version let through):</para>
+/// passed (task 157 review round 1 seeded nine shapes that the first version let through; review round 2
+/// seeded five more):</para>
 /// <list type="number">
 /// <item>A grid binding is ANY import of <c>DataGrid</c> / <c>DataGridDefault</c> from the shared library —
 /// named, aliased, <c>{ default as X }</c>, default import, or mixed default + named — where a default import
-/// counts when the module's last path segment is <c>DataGrid</c>. Every JSX mount of a binding must pass
-/// <c>showViewSelector={false}</c> as its LAST top-level <c>showViewSelector</c> attribute, with no attribute
-/// spread after it (a later <c>{...rest}</c> could switch it back on).</item>
+/// counts when the module's last path segment is <c>DataGrid</c>. A mount is <c>&lt;X</c> followed by
+/// anything that cannot continue the identifier, so <c>&lt;X&lt;T&gt;</c>, <c>&lt;X{...p}</c> and
+/// <c>&lt;X.Y</c> are mounts too. Every mount must pass <c>showViewSelector={false}</c> as its LAST top-level
+/// <c>showViewSelector</c> attribute (a bare <c>showViewSelector</c> counts as a later <c>true</c>), with no
+/// attribute spread after it (a later <c>{...rest}</c> could switch it back on).</item>
+/// <item>A mount whose opening tag the scan cannot walk with certainty is refused: type arguments
+/// (<c>&lt;X&lt;T&gt;</c>), a string attribute holding <c>{ } &lt; &gt;</c>, a string or template literal
+/// holding <c>{ }</c> inside a prop expression, a <c>/</c> (comment, regex, division, nested closing tag)
+/// anywhere in the tag except its closing <c>/&gt;</c>, a bare JSX element as an attribute value, an
+/// unbalanced <c>}</c>, or a tag that never closes. Hoist such expressions to a const above the JSX.</item>
 /// <item>A binding may appear only as a JSX tag (<c>&lt;X</c>, <c>&lt;/X</c>), after <c>typeof</c>, or as a
 /// member name (<c>.X</c>). Any other reference — <c>React.createElement(X, …)</c>, <c>const G = X</c>,
 /// <c>export { X }</c>, <c>export default X</c>, <c>memo(X)</c> — lets the grid leave this file unchecked and
@@ -50,11 +59,12 @@ namespace Spaarke.ArchTests;
 /// library (<c>React.lazy</c>), and any import clause the scan cannot parse are refused.</item>
 /// </list>
 /// <para>
-/// <b>Comments.</b> Only comments that START their line are stripped (a <c>//</c> line, a <c>/* … */</c> or
-/// JSX <c>{/* … */}</c> block opening the line), so a JSDoc example such as GridWidgetBody's own
-/// <c>&lt;DataGrid configId=… /&gt;</c> is not read as a mount. A <c>/*</c> or <c>//</c> later in a line —
-/// including inside a string such as <c>'src/**/*.ts'</c> or <c>'a // b'</c> — is left in place, so it can
-/// never hide code. The cost is fail-closed: a mount quoted in a TRAILING comment is reported.
+/// <b>Comments are NOT stripped.</b> Without a parser the scan cannot tell a comment from JSX text: inside JSX
+/// children a line reading <c>// &lt;X configId="x" /&gt;</c> or <c>/* &lt;X /&gt; */</c> is TEXT followed by a
+/// live element, and a <c>{…}</c> on such a line is a live expression (review round 2, S2/S3). So every
+/// comment is scanned as code. The cost is fail-closed: in a file that imports the grid, a comment must not
+/// quote a mount or name the binding (write "the shared grid" instead) — GridWidgetBody's JSDoc is worded
+/// that way.
 /// </para>
 /// <para>
 /// <b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each rule
@@ -78,9 +88,11 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <summary>The shared shell that mounts the grid with the picker on and no way to switch it off.</summary>
     private static readonly HashSet<string> ShellNames = new(StringComparer.Ordinal) { "DataGridPageShell", "DataGridPageShellDefault" };
 
-    // A module specifier that resolves into the shared UI library: the package alias, or a path into its source.
+    // A module specifier that resolves into the shared UI library: one that names the package alias or the
+    // library's folder ANYWHERE — `@spaarke/ui-components/…`, `../../shared/Spaarke.UI.Components/…`, or
+    // `../../node_modules/@spaarke/ui-components/…` (review round 2, S5: a start-anchored alias missed the last).
     private const string SharedModule =
-        @"(?<module>(?i:@spaarke/ui-components|[^'""`\n]*Spaarke\.UI\.Components)[^'""`\n]*)";
+        @"(?<module>[^'""`\n]*(?i:@spaarke/ui-components|Spaarke\.UI\.Components)[^'""`\n]*)";
 
     // `import <clause> from '<shared>'`. The clause starts at a name, `{` or `*` (so `import.meta` and
     // `import(` never match) and cannot cross a quote or `;`, so it cannot swallow a neighbouring statement.
@@ -106,8 +118,10 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     private static readonly Regex GridNameInClause = new(@"(?<![\w$])(?:DataGrid|DataGridDefault|DataGridPageShell|DataGridPageShellDefault|default)(?![\w$])", RegexOptions.Compiled);
 
-    // Anchored (\G) probes used while walking an opening tag at brace depth 0.
-    private static readonly Regex SelectorProp = new(@"\G(?<![\w$.-])showViewSelector\s*=", RegexOptions.Compiled);
+    // Anchored (\G) probes used while walking an opening tag at brace depth 0. SelectorProp matches the
+    // attribute with OR without a value (a bare `showViewSelector` is `true`), and not a namespaced or
+    // hyphenated neighbour (`x:showViewSelector`, `data-showViewSelector`) — those are different props.
+    private static readonly Regex SelectorProp = new(@"\G(?<![\w$.:-])showViewSelector(?![\w$:-])", RegexOptions.Compiled);
     private static readonly Regex SelectorOffAt = new(@"\GshowViewSelector\s*=\s*\{\s*false\s*\}", RegexOptions.Compiled);
     private static readonly Regex SpreadAt = new(@"\G\{\s*\.\.\.", RegexOptions.Compiled);
 
@@ -117,7 +131,8 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <summary>Scans one file's text. Pure, so the controls below exercise exactly the production detector.</summary>
     internal static ScanResult Scan(string source, string fileName)
     {
-        var text = StripComments(source);
+        // Comments are scanned as code: a line-leading `//` or `/*` inside JSX children is text, not a comment.
+        var text = source;
         var violations = new List<string>();
         var localNames = new List<string>();
         // Import / re-export / dynamic-load statements: their module paths name `DataGrid` and are not references.
@@ -202,19 +217,29 @@ public class ExternalSpaGridViewSelectorGuardTests
         {
             var name = Regex.Escape(local);
 
-            var mountPattern = new Regex($@"<\s*{name}(?=[\s/>])");
+            // A mount is `<X` followed by anything that cannot continue the identifier — including `<` (type
+            // arguments, review round 2 S1), `{` (a spread with no space) and `.` (a member tag).
+            var mountPattern = new Regex($@"<\s*{name}(?![\w$])");
             foreach (Match mount in mountPattern.Matches(text))
             {
-                if (TurnsSelectorOff(OpeningTag(text, mount.Index)))
+                var verdict = AnalyzeOpeningTag(text, mount.Index + mount.Length);
+                if (verdict.Uncheckable is { } reason)
+                {
+                    violations.Add($"{Where(mount.Index)}: <{local}> mount cannot be checked: {reason}. Write the tag "
+                                   + "plainly (hoist complex prop values to a const above the JSX) so the scan can see "
+                                   + "showViewSelector={false}.");
+                }
+                else if (verdict.TurnsOff)
                 {
                     compliant++;
                 }
                 else
                 {
                     violations.Add($"{Where(mount.Index)}: <{local}> mounted without a final top-level "
-                                   + "showViewSelector={false} (missing, not false, nested, or overridden by a later "
-                                   + "{...spread}). The shared DataGrid would offer the entity's internal MDA views, and "
-                                   + "the server column allow-list (task 157) does not admit their columns.");
+                                   + "showViewSelector={false} (missing, not false, nested, overridden by a later "
+                                   + "showViewSelector or {...spread}). The shared DataGrid would offer the entity's "
+                                   + "internal MDA views, and the server column allow-list (task 157) does not admit "
+                                   + "their columns.");
                 }
             }
 
@@ -272,83 +297,140 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     private static int LineOf(string text, int index) => text[..index].Count(c => c == '\n') + 1;
 
-    // A comment that OPENS its line: `/* … */`, a JSX `{/* … */}`, or a `//` line. Mid-line comment starts are
-    // left alone, so a `/*` or `//` inside a string can never blank real code.
-    private static readonly Regex BlockComment = new(
-        @"^[ \t]*(?:\{[ \t]*/\*.*?\*/[ \t]*\}|/\*.*?\*/)", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.Multiline);
+    /// <summary>The walk of one opening tag: whether it turns the picker off, or why it cannot be checked.</summary>
+    private readonly record struct TagVerdict(bool TurnsOff, string? Uncheckable);
 
-    private static readonly Regex LineComment = new(@"^[ \t]*//[^\n]*", RegexOptions.Compiled | RegexOptions.Multiline);
+    private static TagVerdict Refuse(string reason) => new(false, reason);
 
-    /// <summary>
-    /// Removes comments that start their line, so a documentation example (GridWidgetBody's JSDoc names
-    /// <c>&lt;DataGrid configId=… /&gt;</c>) is not read as a mount. Block comments keep their newlines, so
-    /// reported line numbers stay true.
-    /// </summary>
-    private static string StripComments(string source)
-    {
-        var withoutBlocks = BlockComment.Replace(source, m => new string('\n', m.Value.Count(c => c == '\n')));
-        return LineComment.Replace(withoutBlocks, string.Empty);
-    }
+    private const string BraceOrAngle = "{}<>";
 
     /// <summary>
-    /// True when the tag's LAST top-level <c>showViewSelector</c> attribute is <c>{false}</c> and no attribute
-    /// spread follows it. A <c>showViewSelector</c> inside a prop expression (brace depth &gt; 0) belongs to some
-    /// other element and does not count.
+    /// Walks the opening tag whose element name ends at <paramref name="nameEnd"/>, up to its closing
+    /// <c>&gt;</c> at brace depth 0 (so an arrow function's <c>=&gt;</c> inside a prop does not end it early).
+    /// The tag turns the picker off when its LAST top-level <c>showViewSelector</c> attribute is <c>{false}</c>
+    /// and no attribute spread follows it; a <c>showViewSelector</c> inside a prop expression (depth &gt; 0)
+    /// belongs to some other element and does not count. String literals are skipped as strings, so a brace or
+    /// <c>&gt;</c> inside one cannot shift the depth or end the tag (review round 2, S4). Anything the walk cannot
+    /// follow with certainty is refused rather than guessed.
     /// </summary>
-    private static bool TurnsSelectorOff(string tag)
+    private static TagVerdict AnalyzeOpeningTag(string text, int nameEnd)
     {
+        var next = nameEnd;
+        while (next < text.Length && char.IsWhiteSpace(text[next]))
+        {
+            next++;
+        }
+        if (next < text.Length && text[next] == '<')
+        {
+            return Refuse("type arguments (<X<T>>) — the scan cannot tell where they end");
+        }
+
         var depth = 0;
         var lastProp = -1;
         var spreadAfterLastProp = false;
-        for (var i = 0; i < tag.Length; i++)
+        for (var i = nameEnd; i < text.Length; i++)
         {
+            var c = text[i];
             if (depth == 0)
             {
-                if (SelectorProp.IsMatch(tag, i))
+                switch (c)
+                {
+                    case '>':
+                        return new TagVerdict(
+                            lastProp >= 0 && !spreadAfterLastProp && SelectorOffAt.IsMatch(text, lastProp), null);
+                    case '<':
+                        return Refuse("a bare JSX element as an attribute value");
+                    case '/':
+                    {
+                        var j = i + 1;
+                        while (j < text.Length && char.IsWhiteSpace(text[j]))
+                        {
+                            j++;
+                        }
+                        if (j < text.Length && text[j] == '>')
+                        {
+                            i = j - 1; // the self-closing `/>`; the next iteration ends the tag
+                            continue;
+                        }
+                        return Refuse("a comment or '/' between attributes");
+                    }
+                    case '"' or '\'':
+                    {
+                        // A JSX attribute string: no escapes, ends at the same quote.
+                        var close = text.IndexOf(c, i + 1);
+                        if (close < 0)
+                        {
+                            return Refuse("an unterminated string attribute");
+                        }
+                        if (text.AsSpan(i + 1, close - i - 1).IndexOfAny(BraceOrAngle) >= 0)
+                        {
+                            return Refuse("a string attribute holding { } < or >");
+                        }
+                        i = close;
+                        continue;
+                    }
+                    case '}':
+                        return Refuse("an unbalanced }");
+                }
+
+                if (SelectorProp.IsMatch(text, i))
                 {
                     lastProp = i;
                     spreadAfterLastProp = false;
                 }
-                else if (lastProp >= 0 && SpreadAt.IsMatch(tag, i))
+                else if (lastProp >= 0 && SpreadAt.IsMatch(text, i))
                 {
                     spreadAfterLastProp = true;
                 }
-            }
-            switch (tag[i])
-            {
-                case '{':
+                if (c == '{')
+                {
                     depth++;
-                    break;
-                case '}':
-                    depth--;
-                    break;
+                }
+            }
+            else
+            {
+                switch (c)
+                {
+                    case '"' or '\'' or '`':
+                    {
+                        // A JS string or template literal inside a prop expression: skip it, honouring escapes.
+                        var j = i + 1;
+                        var holdsBrace = false;
+                        while (j < text.Length && text[j] != c)
+                        {
+                            if (text[j] == '\\')
+                            {
+                                j++;
+                            }
+                            else if (text[j] is '{' or '}')
+                            {
+                                holdsBrace = true;
+                            }
+                            j++;
+                        }
+                        if (j >= text.Length)
+                        {
+                            return Refuse("an unterminated string inside a prop expression");
+                        }
+                        if (holdsBrace)
+                        {
+                            return Refuse("a string or template literal holding { or } inside a prop expression");
+                        }
+                        i = j;
+                        continue;
+                    }
+                    case '/':
+                        return Refuse("a '/' (comment, regex, division or nested closing tag) inside a prop expression");
+                    case '{':
+                        depth++;
+                        break;
+                    case '}':
+                        depth--;
+                        break;
+                }
             }
         }
-        return lastProp >= 0 && !spreadAfterLastProp && SelectorOffAt.IsMatch(tag, lastProp);
-    }
-
-    /// <summary>
-    /// The opening tag starting at <paramref name="start"/>: up to the first <c>&gt;</c> outside any
-    /// <c>{…}</c> expression, so an arrow function in a prop (<c>=&gt;</c>) does not end the tag early.
-    /// </summary>
-    private static string OpeningTag(string text, int start)
-    {
-        var depth = 0;
-        for (var i = start + 1; i < text.Length; i++)
-        {
-            switch (text[i])
-            {
-                case '{':
-                    depth++;
-                    break;
-                case '}':
-                    depth--;
-                    break;
-                case '>' when depth == 0:
-                    return text[start..(i + 1)];
-            }
-        }
-        return text[start..];
+        return Refuse("the opening tag never closes");
     }
 
     private static IEnumerable<string> ExternalSpaFiles() =>
@@ -429,8 +511,8 @@ public class ExternalSpaGridViewSelectorGuardTests
             Assert.Single(Scan("import * as UI from '@spaarke/ui-components';\n<UI.DataGrid configId={id} />", "ns.tsx").Violations));
     }
 
-    [Fact(DisplayName = "Control: a commented-out mount is ignored; a real one after a URL string is still checked")]
-    public void Scan_WhenAMountIsOnlyInAComment_IgnoresItButStillChecksCodeAfterAUrl()
+    [Fact(DisplayName = "Control: a mount inside a comment is reported (inside JSX children a // or /* line is text)")]
+    public void Scan_WhenAMountIsQuotedInAComment_ReportsIt()
     {
         var text = SpaarkeImport +
                    "/**\n * Example: <DataGrid configId={id} />\n */\n" +
@@ -439,7 +521,10 @@ public class ExternalSpaGridViewSelectorGuardTests
 
         var result = Scan(text, "comments.tsx");
 
-        Assert.Contains("comments.tsx:6", Assert.Single(result.Violations));
+        Assert.Equal(3, result.Violations.Count);
+        Assert.Contains(result.Violations, v => v.StartsWith("comments.tsx:3", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith("comments.tsx:5", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith("comments.tsx:6", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Control: Fluent's own DataGrid (no view picker) is ignored")]
@@ -500,6 +585,43 @@ public class ExternalSpaGridViewSelectorGuardTests
         Assert.Equal(0, result.CompliantMounts);
     }
 
+    // ── Review round 2 (2026-10-02): five more shapes compiled (esbuild) into a live mount with the picker on,
+    // plus the neighbours the string-aware tag walk now refuses. Each one MUST be reported. ──
+
+    private const string JsxOpen = "const A = () => (\n  <div>\n";
+    private const string JsxClose = "  </div>\n);";
+
+    [Theory(DisplayName = "Control: every evasion shape seeded in review round 2 is reported")]
+    // S1: a generic JSX element — the old mount regex needed whitespace, / or > after the name
+    [InlineData("S1-generic", SpaarkeImport + "const A = () => <DataGrid<any> configId=\"x\" />;", "type arguments")]
+    [InlineData("S1b-generic-with-prop", SpaarkeImport + "<DataGrid<any> showViewSelector={false} />", "type arguments")]
+    // S2 / S3: inside JSX children a line-leading // or /* is TEXT, and the element after it renders
+    [InlineData("S2-jsx-text-slashes", SpaarkeImport + JsxOpen + "    // <DataGrid configId=\"x\" />\n" + JsxClose, "<DataGrid>")]
+    [InlineData("S3-jsx-text-block", SpaarkeImport + JsxOpen + "    /* <DataGrid configId=\"x\" /> */\n" + JsxClose, "<DataGrid>")]
+    [InlineData("S2b-jsx-text-expression", SpaarkeImport + JsxOpen + "    // {React.createElement(DataGrid, { configId: id })}\n" + JsxClose, "outside a JSX tag")]
+    // S4: a brace inside a string attribute shifted the depth, hiding the later spread
+    [InlineData("S4-brace-in-string", SpaarkeImport + "<DataGrid showViewSelector={false} configId=\"{\" {...p} />", "string attribute holding")]
+    [InlineData("S4b-gt-in-string", SpaarkeImport + "<DataGrid showViewSelector={false} title=\">\" {...p} />", "string attribute holding")]
+    [InlineData("S4c-brace-in-js-string", SpaarkeImport + "<DataGrid showViewSelector={false} configId={\"}\"} {...p} />", "string or template literal")]
+    [InlineData("S4d-template-brace", SpaarkeImport + "<DataGrid showViewSelector={false} configId={`${a}`} {...p} />", "string or template literal")]
+    [InlineData("S4e-comment-between-attributes", SpaarkeImport + "<DataGrid showViewSelector={false} /* > */ {...p} />", "comment or '/'")]
+    [InlineData("S4f-bare-jsx-attribute-value", SpaarkeImport + "<DataGrid showViewSelector={false} empty=<X/> {...p} />", "bare JSX element")]
+    [InlineData("S4g-unterminated-tag", SpaarkeImport + "<DataGrid showViewSelector={false}", "never closes")]
+    // A bare `showViewSelector` after the false one is `true`; a namespaced neighbour is a different prop
+    [InlineData("S4h-bare-prop-later", SpaarkeImport + "<DataGrid showViewSelector={false} showViewSelector />", "<DataGrid> mounted without")]
+    [InlineData("S4i-namespaced-prop", SpaarkeImport + "<DataGrid x:showViewSelector={false} />", "<DataGrid> mounted without")]
+    // A spread straight after the name (no whitespace) was not read as a mount
+    [InlineData("S4j-spread-no-space", SpaarkeImport + "<DataGrid{...p} />", "<DataGrid> mounted without")]
+    // S5: a node_modules-relative path to the shared library
+    [InlineData("S5-node-modules-path", "import { DataGrid } from '../../node_modules/@spaarke/ui-components/src/components/DataGrid/DataGrid';\n<DataGrid" + Bad, "<DataGrid>")]
+    public void Scan_WhenARound2EvasionShapeIsSeeded_ReportsIt(string shape, string source, string expected)
+    {
+        var result = Scan(source, shape + ".tsx");
+
+        Assert.Contains(result.Violations, v => v.Contains(expected, StringComparison.Ordinal));
+        Assert.Equal(0, result.CompliantMounts);
+    }
+
     [Fact(DisplayName = "Control: a /* or // inside a string does not hide the code after it (fail closed)")]
     public void Scan_WhenAStringHoldsCommentMarkers_StillChecksTheCodeAfterIt()
     {
@@ -516,18 +638,20 @@ public class ExternalSpaGridViewSelectorGuardTests
         Assert.Contains(result.Violations, v => v.StartsWith("strings.tsx:5", StringComparison.Ordinal));
     }
 
-    [Fact(DisplayName = "Control: sanctioned neighbours pass — spread BEFORE the prop, closing tag, typeof, type-only re-export, JSX comment")]
+    [Fact(DisplayName = "Control: sanctioned neighbours pass — spread BEFORE the prop, closing tag, typeof, type-only re-export, plain string and arrow props")]
     public void Scan_WhenOnlySanctionedShapesArePresent_Passes()
     {
         var text = "import DataGrid, { type DataGridProps } from " + GridModule + ";\n" +
                    "export type { DataGridProps } from '@spaarke/ui-components/components/DataGrid';\n" +
                    "type P = React.ComponentProps<typeof DataGrid>;\n" +
-                   "const A = () => (\n  <div>\n    {/* <DataGrid configId={id} /> */}\n" +
-                   "    <DataGrid {...base} configId={id} showViewSelector={false}></DataGrid>\n  </div>\n);";
+                   "const A = () => (\n  <div>\n" +
+                   "    <DataGrid {...base} configId={id} showViewSelector={false}></DataGrid>\n" +
+                   "    <DataGrid aria-label=\"Matters & invoices\" onRecordsLoaded={rows => setRows(rows.map(r => ({ ...r, k: 'a' })))}\n" +
+                   "      showViewSelector={ false } / >\n  </div>\n);";
 
         var result = Scan(text, "sanctioned.tsx");
 
         Assert.Empty(result.Violations);
-        Assert.Equal(1, result.CompliantMounts);
+        Assert.Equal(2, result.CompliantMounts);
     }
 }

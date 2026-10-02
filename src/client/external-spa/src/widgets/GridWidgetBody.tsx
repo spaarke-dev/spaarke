@@ -1,11 +1,11 @@
 /**
- * GridWidgetBody — the thin `<DataGrid configId=… />` wrapper factory every outside-counsel
+ * GridWidgetBody — the thin shared-grid (`configId=…`) wrapper factory every outside-counsel
  * workspace widget resolves to (task 016). Per constraints ("a widget = a sprk_gridconfiguration
  * record + a thin wrapper + a registry entry"), each of the five widget files under this directory
  * is a one-line call to `createGridWidgetBody(CONFIG_ID)` — this file is the ONE shared
  * implementation, not five hand-rolled grids (§11).
  *
- * Deliberately mounts `<DataGrid>` directly rather than `<DataGridPageShell>` — the shell injects a
+ * Deliberately mounts the shared grid directly rather than `<DataGridPageShell>` — the shell injects a
  * GLOBAL `html/body { overflow:hidden; height:100% }` CSS reset intended for a standalone Custom
  * Page's own document (see DataGridPageShell.tsx file header: "the shell's canonical Custom Page
  * mount"). This SPA embeds the grid as ONE TAB inside the larger workspace shell (tab strip +
@@ -29,7 +29,9 @@
  * external module's server column allow-list (ExternalAccessModule.cs) is that config's columns plus the
  * scope and /record default columns, and nothing more. Turning the selector back on would make every
  * sibling view error with DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard
- * ExternalSpaGridViewSelectorGuardTests fails the build if any external DataGrid mount drops this prop.
+ * ExternalSpaGridViewSelectorGuardTests fails the build if any external shared-grid mount drops this prop.
+ * That guard scans comments as code, so comments in this file say "the shared grid" rather than the
+ * imported component's name.
  */
 import * as React from 'react';
 import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';
@@ -58,7 +60,7 @@ function useAmbientTheme(): Theme {
 
 /**
  * Builds a widget-body component bound to one `sprk_gridconfiguration` record id. The returned
- * component ignores the incoming `title`/`description` props (the DataGrid framework renders its
+ * component ignores the incoming `title`/`description` props (the shared grid framework renders its
  * OWN header from `sprk_configjson.display.title`) — matches `WidgetBodyComponent`'s contract so it
  * plugs into `widgetRegistry.ts`'s `lazyLoader` unchanged.
  */

@@ -11,7 +11,7 @@
 | The one Spaarke `<DataGrid>` mount in the external SPA passes `showViewSelector={false}`. Header comment says why it is a security setting. | `src/client/external-spa/src/widgets/GridWidgetBody.tsx` |
 | Four module allow-lists shrink. Three are unchanged. The derivation comment drops rule (b) and warns that re-enabling a selector needs rule (b) back first. | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs` |
 | Section 6: each list pinned to its live derivation; shrink-only proven against the task-134 lists; every dropped column refused by `/fetch` and `/record $select` and stripped from a `/record` read | `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs` |
-| Arch guard: every Spaarke `DataGrid` mount under `src/client/external-spa/src` passes `showViewSelector={false}` as its last top-level attribute, with no spread after it. It fails closed (review round 1): any import of `DataGrid`/`DataGridDefault` (named, aliased, `default as`, default, mixed) is a mount source; the grid may appear only as a JSX tag; `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, dynamic `import()`/`require()` of the shared lib, and unparseable import clauses are refused. Negative and positive controls are included. | `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` (new) |
+| Arch guard: every Spaarke `DataGrid` mount under `src/client/external-spa/src` passes `showViewSelector={false}` as its last top-level attribute, with no spread after it. It fails closed (review round 1): any import of `DataGrid`/`DataGridDefault` (named, aliased, `default as`, default, mixed) is a mount source; the grid may appear only as a JSX tag; `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, dynamic `import()`/`require()` of the shared lib, and unparseable import clauses are refused. Review round 2 adds: generic mounts are refused; comments are scanned as code; the tag walk is string-aware and refuses what it cannot follow; and the shared-library path is matched anywhere in the specifier (§7). Negative and positive controls are included. | `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` (new) |
 
 The shared `DataGrid`'s default (`showViewSelector = true`) is **unchanged**. Internal surfaces keep the picker.
 
@@ -49,7 +49,7 @@ Primary id / name (live, unchanged from task 134 §8): project → sprk_projectn
 ## 4. Decisions
 
 - **G1: where the "no selector" assertion lives.** The SPA has no test runner, so the assertion is a source-scan arch guard in `tests/Spaarke.ArchTests`. That is the established home for client↔server agreement guards (`ClientUploadRouteAgreementTests`, `SpeAdminClientRouteAgreementTests`). It is a test file, not new product surface, so no §11 justification is needed.
-- **G2: the guard strips comments before scanning.** Its first run flagged `GridWidgetBody.tsx`'s own JSDoc (`<DataGrid configId=… />`). Block comments keep their newlines so line numbers stay true. **Revised in review round 1:** only comments that START their line are stripped (a `//` line, a `/* … */` or JSX `{/* … */}` block opening the line). The first version also stripped a `/*` or a whitespace-preceded `//` mid-line, so a string such as `'src/**/*.ts'` or `'a // b'` could blank real code (fail open). Now a mid-line marker is left alone; the cost is fail-closed (a mount quoted in a trailing comment is reported). Controls cover both string cases and the URL case.
+- **G2: the guard strips comments before scanning.** Its first run flagged `GridWidgetBody.tsx`'s own JSDoc (`<DataGrid configId=… />`). Block comments keep their newlines so line numbers stay true. **Revised in review round 1:** only comments that START their line are stripped (a `//` line, a `/* … */` or JSX `{/* … */}` block opening the line). The first version also stripped a `/*` or a whitespace-preceded `//` mid-line, so a string such as `'src/**/*.ts'` or `'a // b'` could blank real code (fail open). Now a mid-line marker is left alone; the cost is fail-closed (a mount quoted in a trailing comment is reported). Controls cover both string cases and the URL case. **Revised again in review round 2: comments are no longer stripped at all.** Inside JSX children, a line starting `//` or `/*` is text, so a mount on that line renders live (shapes S2/S3, see §7). Every comment is now scanned as code. GridWidgetBody's JSDoc was reworded so that no comment names the binding.
 - **G4: the guard fails closed (review round 1).** The verifier seeded nine files, covering eight evasion shapes, that the first version passed: (A) default import, (B) the barrel's `DataGridDefault`, (C) mixed default+named import, (D) `showViewSelector={false}` followed by `{...rest}`, (E) `DataGridPageShellDefault`, (F) a local re-export file, (G) `React.createElement(DataGrid, …)`, (H) `React.lazy(() => import(…DataGrid))`. The rewritten detector treats every import of `DataGrid`/`DataGridDefault` from the shared lib (package alias or a path into `Spaarke.UI.Components`) as a mount source, requires the LAST top-level `showViewSelector` to be `{false}` with no spread after it, refuses any non-JSX reference to the grid binding (createElement, aliasing, `export { X }`, `export default X`, HOCs), and refuses `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, any dynamic `import()`/`require()` of the shared lib and any import clause it cannot parse. Each shape has a Theory control row. The same nine files were re-seeded under `src/client/external-spa/src/zzseed`. The production fact went red with eight violations, one per shape; F was caught through `F_reexport.ts`. They were then deleted. P1 was re-run against the new detector: red at `GridWidgetBody.tsx:71`, then restored and touched.
 - **G3: the `/record` tests use a caller granted the id as project, matter and work assignment at once.** Row scope then passes for every module, including invoices, whose record gate checks the scope dimensions. Any refusal or strip in those tests can only come from the column scope.
 - **No new service, DI registration, endpoint, option, job or package.** This change edits data in existing registrations, one prop on an existing mount, and tests. Placement: the column scope stays in the BFF's existing external read seam (task 134 §5). NuGet: no change.
@@ -93,6 +93,35 @@ On dev, after deploying the SPA and then the BFF, sign in as an outside-counsel 
 | NetArchTest `dotnet test tests/Spaarke.ArchTests` | Passed 370, Failed 0, Total 370 (349 at `3d858490b` + 21 new control rows) |
 | BFF unit `dotnet test tests/unit/Sprk.Bff.Api.Tests` | Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 20m24s); the verifier's Release run at `3d858490b` gave the same counts |
 | SPA `npm run build` (vite) | exit 0 at `3d858490b` (verifier); no client file changed in round 1 |
+
+**Review round 2 (`task/uac-r2-157-r1-r2`, 2026-10-02): the guard still failed open on five shapes.** All five compiled
+(esbuild) into a live mount with the picker on, and all five are now refused:
+
+| Shape | Why it passed | Fix |
+|---|---|---|
+| S1 `<DataGrid<any> configId="x" />` | the mount regex needed whitespace, `/` or `>` after the name | a mount is `<X` followed by anything that cannot continue the identifier; type arguments are refused (the scan cannot tell where they end) |
+| S2 / S3: a JSX-children line starting `//` or `/*` that quotes a mount | inside JSX children such a line is TEXT and the element renders, but the guard stripped it as a comment | comments are no longer stripped: every comment is scanned as code. GridWidgetBody's JSDoc was reworded (doc-only) so no comment names the binding |
+| S4 `<DataGrid showViewSelector={false} configId="{" {...p} />` | the `{` in the string shifted the brace depth, hiding the later spread | the tag walk skips string literals as strings and refuses any string holding `{ } < >` (attribute) or `{ }` (inside a prop expression) |
+| S5 `import { DataGrid } from '../../node_modules/@spaarke/ui-components/…'` | the shared-library pattern matched the alias only at the START of the specifier | the specifier may name `@spaarke/ui-components` or `Spaarke.UI.Components` anywhere |
+
+The string-aware walk also closes neighbours found while fixing S4: a `>` in a string attribute ending the tag
+early, a comment between attributes (`/* > */`), a bare JSX element as an attribute value (`empty=<X/>`), a
+bare `showViewSelector` after the false one (it is `true`), a namespaced `x:showViewSelector`, a spread
+straight after the name (`<DataGrid{...p}/>`), and a tag that never closes. A `/` anywhere in a grid tag except
+its closing `/>` is refused, so complex prop values must be hoisted to a const.
+
+Proof it bites: seeded under `external-spa/src/zzseed` (S1–S5 as the verifier wrote them, plus five extras), the
+production fact went red with 10 violations, one per seeded mount; seeds deleted. P1 re-run: red at
+`GridWidgetBody.tsx:73`, restored and touched.
+
+**Runs (review round 2):**
+
+| Suite | Result |
+|---|---|
+| `ExternalSpaGridViewSelectorGuardTests` | 45 / 45 passed (29 + 16 round-2 Theory rows; the comment control now asserts comments ARE reported; the sanctioned control now has 2 compliant mounts) |
+| NetArchTest `dotnet test tests/Spaarke.ArchTests` | Passed 386, Failed 0, Total 386 (370 + 16) |
+| BFF unit `dotnet test tests/unit/Sprk.Bff.Api.Tests` | Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 22m15s) |
+| SPA `npm run build` (vite) | exit 0 (GridWidgetBody.tsx changed in comments only) |
 
 ## 8. Read-only findings (not acted on; out of scope)
 
