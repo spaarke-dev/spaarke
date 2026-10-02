@@ -28,9 +28,17 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 ///
 /// <para><b>What is preserved.</b> A communication whose row names no root by any route keeps the global archive
 /// container (or "none — skip" when the archive is unconfigured; the business unit is never derived here — see
-/// <c>RecordContainerResolver.ResolveForRecordWithFixedFallbackAsync</c>). An invoice regarding is still resolved
-/// LIVE through the invoice's own flag, container and links, as since task 155 r0. An empty securable-entity set is
-/// still refused before anything is read.</para>
+/// <c>RecordContainerResolver.ResolveForRecordWithFixedFallbackAsync</c>). That includes the shape the OUTBOUND sender
+/// writes for an email regarding a person, organization or account — the typed party lookup plus the same id in
+/// <c>sprk_regardingrecordid</c>, and no <c>sprk_regardingrecordtype</c> (<c>CommunicationService.MapAssociationFieldsAsync</c>
+/// never writes it): the pair's id is the row's own typed party, so it names a party (task 155 f5). An invoice regarding
+/// is still resolved LIVE through the invoice's own flag, container and links, as since task 155 r0. An empty
+/// securable-entity set is still refused before anything is read.</para>
+///
+/// <para><b>What is NOT the archive any more (f4, by design).</b> A pair id naming a record whose type nothing on the row
+/// states — the sender's UNMAPPED primaries (<c>sprk_todo</c>, <c>sprk_document</c>: no typed column, no type) — is
+/// refused <c>container_ancestor_unresolved</c>: a to-do or a document can belong to a secure matter, so a root CAN be
+/// involved and the archive would be a guess.</para>
 /// </summary>
 public sealed class CommunicationContainerResolver
 {

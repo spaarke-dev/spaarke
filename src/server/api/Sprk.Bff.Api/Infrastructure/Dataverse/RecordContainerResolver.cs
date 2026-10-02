@@ -954,7 +954,13 @@ public sealed class RecordContainerResolver
     /// <item>An id that is not a GUID → refused (<see cref="AncestorUnresolvedCode"/>, 409).</item>
     /// <item>The id is the id of a followed link set on the same row → the pair names THAT record: agreement by
     /// identity, nothing new, no read. The typed lookup is referentially enforced, so it — not the pair's type
-    /// label — says what the record is; a mislabelled type (1 live event) cannot hide a second record.</item>
+    /// label — says what the record is; a mislabelled type (1 live event) cannot hide a second record. The same
+    /// holds for the row's typed PARTY regarding lookups (<see cref="ChildAncestorLinks.PartyRegardingColumns"/>,
+    /// task 155 f5): an id equal to the row's own <c>sprk_regardingperson</c> / <c>…contact</c> /
+    /// <c>…organization</c> / <c>…account</c> names that person or organization, which is not ownership, so the pair
+    /// adds nothing. This is the shape the OUTBOUND sender writes for every email regarding a person, organization or
+    /// account (<c>CommunicationService.MapAssociationFieldsAsync</c> sets the typed lookup and the pair id, and never
+    /// the pair's type); without it rule 5 refused every one of them as "no type" and lost its <c>.eml</c> archive.</item>
     /// <item>A followed link is set and the pair names a DIFFERENT record → the row says two things about what it
     /// is filed under → refused as ambiguous (<see cref="AncestorAmbiguousCode"/>, 409). Neither is picked.</item>
     /// <item>The pair is the only thing naming a record → its type decides, read from <c>sprk_recordtype_ref</c>: a
@@ -998,7 +1004,9 @@ public sealed class RecordContainerResolver
                 logDetail: $"{via} = '{SanitizeForMessage(rawId)}'");
         }
 
-        if (followedHops.Any(h => h.Id == pairId))
+        // Rule 3: agreement by identity — with a followed link, or (f5) with the row's own typed PARTY regarding. Both
+        // are referentially enforced lookups on the same row, so the pair names that record; a party is not ownership.
+        if (followedHops.Any(h => h.Id == pairId) || NamesTypedParty(row, rowLinks, pairId))
         {
             return null;
         }
@@ -1063,6 +1071,15 @@ public sealed class RecordContainerResolver
                     logDetail: $"{via} = {pairId}, type {pairEntity}");
         }
     }
+
+    /// <summary>
+    /// Whether the pair's id is the id of one of the row's typed PARTY regarding lookups (rule 3, task 155 f5). Those
+    /// columns ride on the row's read whenever the row carries the pair (<see cref="ChildAncestorLinks.AllColumns"/>).
+    /// Identity only: a party that is set with a DIFFERENT id leaves the pair to rules 4 and 5.
+    /// </summary>
+    private static bool NamesTypedParty(Entity row, ChildAncestorLinks rowLinks, Guid pairId)
+        => rowLinks.PartyRegardingColumns.Any(column =>
+            row.GetAttributeValue<EntityReference>(column) is { } party && party.Id == pairId);
 
     /// <summary>The entity logical name a <c>sprk_recordtype_ref</c> row stands for — or a refusal.</summary>
     private async Task<string> ReadRegardingTypeAsync(
@@ -1156,8 +1173,10 @@ public sealed class RecordContainerResolver
     /// (<see cref="RecordKind.Intermediate"/>) is the held path, unless the entry explicitly follows that target (only
     /// the communication's invoice); party targets (contact, account, organization) and reference / principal /
     /// grouping targets (systemuser, team, businessunit, currency, the <c>*_ref</c> tables, eventset, AI search index,
-    /// triage category, communication thread) are not ownership and are not read. A <c>sprk_regardingrecordid</c>
-    /// column means the row carries the polymorphic pair, which is read too.</para>
+    /// triage category, communication thread) are not ownership and are not FOLLOWED. A <c>sprk_regardingrecordid</c>
+    /// column means the row carries the polymorphic pair, which is read too — and with it the row's typed PARTY
+    /// REGARDING columns (<see cref="PartyRegardingColumns"/>, f5), on the same read, for one purpose only: the pair's
+    /// rule 3 (an id equal to the row's own typed party names that party). They never move content.</para>
     ///
     /// <para><b>The same table serves every row the walk reads</b> (task 155 f4): the record's own row AND each root
     /// above it — so a work assignment's links are read whether the work assignment is the record or the root of a
@@ -1240,12 +1259,38 @@ public sealed class RecordContainerResolver
             ("sprk_regardingreportcard", "sprk_reportcard"),
         ];
 
+        /// <summary>
+        /// The typed PARTY regarding lookups (f5), from the f3 / f4 live sweeps. Read only on a row that carries the
+        /// pair, and only for the pair's rule 3: the regarding builders write the typed regarding column and the pair id
+        /// together, and the outbound sender writes NO type (<c>CommunicationService.MapAssociationFieldsAsync</c>), so
+        /// for a party the typed column is the only thing on the row that says what the pair id is. sprk_invoice,
+        /// sprk_workassignment and sprk_project have no regarding-party lookup (their party columns are assignees and
+        /// vendors, which no builder pairs with the pair id), so they have none here.
+        /// </summary>
+        private static readonly (string Column, string Target)[] TodoPartyRegarding =
+        [
+            ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+        ];
+
+        private static readonly (string Column, string Target)[] EventPartyRegarding =
+        [
+            ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+            ("sprk_regardingaccount", "account"),
+        ];
+
+        private static readonly (string Column, string Target)[] CommunicationPartyRegarding =
+        [
+            ("sprk_regardingperson", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+            ("sprk_regardingaccount", "account"),
+        ];
+
         private static readonly IReadOnlyDictionary<string, ChildAncestorLinks> ByEntity =
             new Dictionary<string, ChildAncestorLinks>(StringComparer.Ordinal)
             {
                 ["sprk_todo"] = new(polymorphic: true,
-                    [.. SharedRegardingLinks, ("sprk_regardingdocument", "sprk_document")]),
-                ["sprk_event"] = new(polymorphic: true, SharedRegardingLinks),
+                    [.. SharedRegardingLinks, ("sprk_regardingdocument", "sprk_document")],
+                    parties: TodoPartyRegarding),
+                ["sprk_event"] = new(polymorphic: true, SharedRegardingLinks, parties: EventPartyRegarding),
                 // Typed sprk_project / sprk_matter are its OWN root links; sprk_regardingagreement is an intermediate
                 // (f3: the f2 table gave the invoice no intermediates at all, so an invoice regarding an agreement of a
                 // SECURE matter resolved a shared container).
@@ -1276,9 +1321,10 @@ public sealed class RecordContainerResolver
                 // and links — because that is what the communication path has done since task 155 r0 (it resolved
                 // the invoice as a record), and an invoice's typed sprk_project / sprk_matter are its OWN links, not
                 // a CoreAncestorResolver stamp. Not ownership, not read: sprk_regardingperson / organization /
-                // account (party); sprk_communicationthread (a GROUPING whose anchor is COPIED from its messages'
-                // regarding — IThreadResolver — and which every message gets by the 3-tier ladder, so holding on it
-                // would refuse every threaded message); sprk_triagecategory, sprk_sentby and the system columns.
+                // account (party — not FOLLOWED; read for the pair's rule 3, f5); sprk_communicationthread (a GROUPING
+                // whose anchor is COPIED from its messages' regarding — IThreadResolver — and which every message gets
+                // by the 3-tier ladder, so holding on it would refuse every threaded message); sprk_triagecategory,
+                // sprk_sentby and the system columns.
                 ["sprk_communication"] = new(polymorphic: true,
                 [
                     ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),
@@ -1287,7 +1333,7 @@ public sealed class RecordContainerResolver
                     ("sprk_regardingservicerequest", "sprk_servicerequest"), ("sprk_regardingevent", "sprk_event"),
                     ("sprk_regardinganalysis", "sprk_analysis"), ("sprk_regardingbudget", "sprk_budget"),
                     ("sprk_regardingreportcard", "sprk_reportcard"),
-                ], followed: ["sprk_invoice"]),
+                ], followed: ["sprk_invoice"], parties: CommunicationPartyRegarding),
             };
 
         private readonly IReadOnlySet<string> _followedTargets;
@@ -1295,7 +1341,8 @@ public sealed class RecordContainerResolver
         private ChildAncestorLinks(
             bool polymorphic,
             IReadOnlyList<(string Column, string Target)> links,
-            IReadOnlyCollection<string>? followed = null)
+            IReadOnlyCollection<string>? followed = null,
+            IReadOnlyList<(string Column, string Target)>? parties = null)
         {
             HasPolymorphicRegarding = polymorphic;
             _followedTargets = new HashSet<string>(followed ?? [], StringComparer.Ordinal);
@@ -1307,6 +1354,20 @@ public sealed class RecordContainerResolver
                 .Where(l => !Follows(l.Target) && KindOf(l.Target) == RecordKind.Intermediate)
                 .Select(l => l.Column)
                 .ToArray();
+
+            // A party column is only ever an identity witness for the pair, never an ownership link: a non-party target
+            // here would let rule 3 swallow a pair that names a ROOT, so it is a defect in this table, not data.
+            var partyLinks = parties ?? [];
+            var notParty = partyLinks.Where(p => KindOf(p.Target) != RecordKind.Party).Select(p => p.Column).ToArray();
+            if (notParty.Length > 0 || (partyLinks.Count > 0 && !polymorphic))
+            {
+                throw new ArgumentException(
+                    "Party regarding columns must target a party and belong to a row that carries the polymorphic pair: "
+                    + string.Join(", ", partyLinks.Select(p => p.Column)),
+                    nameof(parties));
+            }
+
+            PartyRegardingColumns = partyLinks.Select(p => p.Column).ToArray();
         }
 
         /// <summary>
@@ -1327,10 +1388,18 @@ public sealed class RecordContainerResolver
         /// <summary>The row carries the polymorphic regarding pair (<c>sprk_regardingrecordid</c> + type).</summary>
         public bool HasPolymorphicRegarding { get; }
 
+        /// <summary>
+        /// The row's typed PARTY regarding lookups (task 155 f5): read with the pair, used only by its rule 3 — an id
+        /// equal to one of them names that party, which is not ownership. Never followed.
+        /// </summary>
+        public IReadOnlyList<string> PartyRegardingColumns { get; }
+
         /// <summary>Every column the row's read must carry for the decision.</summary>
         public IEnumerable<string> AllColumns => FollowedLinks.Select(l => l.LinkColumn)
             .Concat(IntermediateColumns)
-            .Concat(HasPolymorphicRegarding ? PolymorphicColumns : Array.Empty<string>());
+            .Concat(HasPolymorphicRegarding
+                ? PolymorphicColumns.Concat(PartyRegardingColumns)
+                : Array.Empty<string>());
 
         /// <summary>
         /// Whether a link from this row to <paramref name="target"/> is walked: every root, plus a type this entry

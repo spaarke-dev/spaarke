@@ -166,6 +166,10 @@ is not a child (`CoreAncestorResolver`: unclassified), so it takes its own busin
 
 > **Superseded by the consolidated list in "Round f4" → "AC7 manual live gates (all rounds)".** Items 1–4 below are
 > kept as written in round r0; the consolidated list carries them forward with every later round's additions.
+> **Do not use the container id below (f5 correction):** the task-144 cutover on 2026-10-02 re-provisioned project
+> `65a3fab2`, so `b!HBRbo…` is now an orphaned, empty drive. Its live `sprk_containerid` is
+> `b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN` (read-only, 2026-10-02); the consolidated list
+> names it.
 
 1. **Deploy the BFF to dev.** This is a deploy, owned by the main session.
 2. **Upload to a to-do under the secure test project.**
@@ -643,6 +647,11 @@ secure. This is interpretation (vii), and it is an owner question.
 **Live (read-only simulation):** 10 of 276 communications change outcome, all from "archive" to a permanent refusal. None
 was under a secure root.
 
+> **f5 correction.** Three of the ten below — `d3516503`, `83349fe9` and `84d04780` — were NOT refusals the brief allowed:
+> each pair id is the row's OWN typed person, and `d3516503` is exactly the row the current outbound sender writes for an
+> email regarding a person. Round f5 extends rule 3 to the row's typed party regarding lookups, and all three return to
+> the archive. "Pair id with no type … a data fix" was also wrong for two of the six: see "Round f5" → item 1.
+
 - Unverifiable: `3b7b5825-8a96-f111-b8db-0022482fb5a7` (regarding an event) and `a36784ef-e38e-f111-b8db-7ced8ddc4a05`
   (an analysis).
 - Unresolved 409, a pair id with no type:
@@ -685,21 +694,29 @@ either way.
 | **work assignment `b10b7dab-437b-f111-ab0e-7ced8ddc4cc6`** | 409 `container_ancestor_unverifiable` | regarding invoice `a1652ca5-…` | f3 |
 | event `a30254d0-7f1e-f111-88b3-7ced8d1dc988` | 409 `container_ancestor_unresolved` | its work assignment `9c0254d0` names the deleted matter (transitive walk) | **f4** |
 | communication `3b7b5825-8a96-f111-b8db-0022482fb5a7` / `a36784ef-e38e-f111-b8db-7ced8ddc4a05` | 409 `container_ancestor_unverifiable` (inbound: permanent skip) | regarding an event / an analysis | **f4** |
-| communication `ab302254-ab58-f111-a824-3833c5d9bcb1`, `d3516503-748b-f111-8076-7ced8d1dc216`, `4971a3c2-236b-f111-ab0d-7ced8ddc4a05`, `817708e9-427b-f111-ab0e-7ced8ddc4a05`, `70741c9f-477b-f111-ab0e-7ced8ddc4a05`, `a4c9b0ca-9b7b-f111-ab0e-7ced8ddc4cc6` | 409 `container_ancestor_unresolved` (permanent) | pair id with no type | **f4** |
-| communication `83349fe9-828c-f111-8077-7ced8ddc4a05` / `84d04780-2f81-f111-ab0f-7ced8ddc4a05` | 409 `container_ancestor_ambiguous` (permanent) | the typed link and the pair disagree (the second's pair names a contact — interpretation ix) | **f4** |
+| communication `4971a3c2-236b-f111-ab0d-7ced8ddc4a05` (to-do "Test To Do Item"), `ab302254-ab58-f111-a824-3833c5d9bcb1` (document "Discovery Status Report — January 2026.docx") | 409 `container_ancestor_unresolved` (permanent) | a pair id the CURRENT outbound sender writes for a primary it does not map (`sprk_todo`, `sprk_document`): no typed column, no type — and a to-do or a document can belong to a secure matter. **Recurs** (see "Round f5") | **f4** |
+| communication `817708e9-427b-f111-ab0e-7ced8ddc4a05` (report card), `70741c9f-477b-f111-ab0e-7ced8ddc4a05`, `a4c9b0ca-9b7b-f111-ab0e-7ced8ddc4cc6` (events) | 409 `container_ancestor_unresolved` (permanent) | pair id with no type, written BEFORE the sender mapped those types (event 2026-07-14, report card 2026-07-29); today's sender writes the typed column, which is the held path. A data fix | **f4** |
+| ~~communication `d3516503-748b-f111-8076-7ced8d1dc216`~~ | archive again in **f5** | the outbound sender's party shape: typed person + the same id in the pair, no type | f4 → reverted f5 |
+| ~~communication `83349fe9-828c-f111-8077-7ced8ddc4a05`, `84d04780-2f81-f111-ab0f-7ced8ddc4a05`~~ | archive again in **f5** | each pair id is the row's own typed person (the first untyped next to a typed invoice; the second typed contact next to a typed matter); the invoice / matter above them is not secure | f4 → reverted f5 |
 
-Totals under f4: 29 record-path refusals (15 to-dos, 12 events, 2 work assignments; 0 invoices, 0 projects, 0
-contacts) and 10 communication refusals. Cleaning the dangling and type-less pair ids is a data fix. It was not done,
-because no live writes were allowed.
+Totals after f5: 29 record-path refusals (15 to-dos, 12 events, 2 work assignments; 0 invoices, 0 projects, 0
+contacts; unchanged by f5 — no live to-do or event carries a typed party regarding) and **7** communication refusals
+(10 under f4). Of the type-less pair ids, only the three written before the sender's mappings (`817708e9`, `70741c9f`,
+`a4c9b0ca`) and the record-path ones (dangling matters, to-do `4ff4dc1f`) are a data fix; `4971a3c2` and `ab302254` are
+the shape the sender still writes. No data was changed, because no live writes were allowed.
 
 ### AC7 manual live gates (all rounds; NOT run — no live writes or deploys in this session)
 
 1. **Deploy** the BFF to dev. This is owned by the main session.
 2. **Secure child.** As an existing non-admin user shared on the secure test project
-   `65a3fab2-77a5-f111-aaad-70a8a590c51c` (container `b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm`):
+   `65a3fab2-77a5-f111-aaad-70a8a590c51c` (container `b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   — corrected in f5: the task-144 cutover on 2026-10-02 re-provisioned the project, and the earlier id `b!HBRbo…` is an
+   orphaned, empty drive that would make this check pass or fail for the wrong reason):
+   - first re-read the CURRENT id, read-only — `SELECT sprk_containerid FROM sprk_project WHERE sprk_projectid =
+     '65a3fab2-77a5-f111-aaad-70a8a590c51c'` — and use it below if it differs again;
    - create a to-do with `sprk_regardingproject` set to it (a live write);
    - upload through its document control;
-   - confirm read-only: `GET https://graph.microsoft.com/v1.0/drives/b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm/root/children`.
+   - confirm read-only: `GET https://graph.microsoft.com/v1.0/drives/b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN/root/children`.
 3. **Ordinary child.** Upload to a to-do under an ordinary project. Confirm it lands in the to-do's `owningbusinessunit`
    container (`SELECT owningbusinessunit FROM sprk_todo …`, then `SELECT sprk_containerid FROM businessunit …`).
 4. **Held path (r0 / f2).** An upload to to-do `1432926a-0266-f111-ab0c-70a8a590c51c` (regarding an invoice) and to-do
@@ -715,13 +732,25 @@ because no live writes were allowed.
      is written.
    - Positive case: a live write. Set an existing non-secure work assignment's `sprk_regardingproject` to the secure test
      project, create an event regarding that work assignment, upload, and confirm read-only that the file is in the
-     project's container (the same GET as gate 2).
+     project's CURRENT container — `b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN` as of 2026-10-02,
+     re-read as in gate 2 (the same GET as gate 2; NOT the orphaned `b!HBRbo…`).
 7. **f4 communication.**
    - Re-run archival for communication `3b7b5825-8a96-f111-b8db-0022482fb5a7` (regarding an event). It is skipped as a
      permanent refusal (`container_ancestor_unverifiable` in the `[SECURE-CONTAINER] REFUSING` log line), and nothing
      reaches the archive container.
    - Positive case: a live write. An inbound email associated to the secure test project lands its `.eml` in the
-     project's container, not the archive.
+     project's container (gate 2's id), not the archive.
+8. **f5 outbound party shape.**
+   - A live write. Send an outbound email from the composer (archive on, the default) whose primary association is a
+     contact. Its `.eml` lands in the archive container (`Communication:ArchiveContainerId`) and the send reports no
+     archival failure. Before f5 this was refused `container_ancestor_unresolved` and the `.eml` was lost.
+   - On demand, a live write: archive existing communication `d3516503-748b-f111-8076-7ced8d1dc216` (typed person, pair
+     id = that person, no type). It archives to the archive container; f4 answered 409.
+   - Expected refusal, nothing written: archive existing communication `4971a3c2-236b-f111-ab0d-7ced8ddc4a05` (the to-do
+     wizard's email: pair id only) → 409 `container_ancestor_unresolved`.
+   - Precondition, read-only: neither communication has an archive document yet (`SELECT sprk_documentid FROM
+     sprk_document WHERE sprk_relatedcommunication = '<id>'` → 0 rows, 2026-10-02). `ArchiveExistingAsync` returns an
+     existing archive idempotently WITHOUT asking the resolver, so if a row appears the gate proves nothing.
 
 ### Read budget after f4 (two-argument overload unless stated)
 
@@ -834,6 +863,183 @@ Every seed turned tests red. Out of 364 affected tests:
 | S16 (item 2): the adapter's empty-securable-set refusal removed | 1 |
 | S17 (item 2): the communication's pair not read | 4 |
 
+## Round f5: fifth adversarial-verifier findings (branch `task/uac-r2-155-f5`)
+
+The f4 verifier closed items 1 (two-hop walk) and 2's routing, and judged NEEDS-FIXES on one blocking item and three
+bookkeeping / test items. All four are closed below. Escalation trigger 2 options (a)/(b) are still NOT implemented
+(task 156 does (b)); `OfficeService` and `CommunicationService` are untouched.
+
+### Item 1 (BLOCKING): f4 refused the shape the outbound sender writes for a person, organization or account
+
+**The defect.** `CommunicationService.MapAssociationFieldsAsync` sets the primary association's typed lookup and
+`sprk_regardingrecordid` = the same id. It never writes `sprk_regardingrecordtype` (only the reply-inheritance path tries
+to copy one from the source message). For an email whose primary is a contact, organization or account the row is: `sprk_regardingperson` /
+`…organization` / `…account` = X, pair id = X, no type, no root anywhere. The party columns were not in the pair's rule 3
+(which compared only FOLLOWED links), so rule 5 refused "a record id without a type": `container_ancestor_unresolved`
+409, a permanent refusal. Every ArchiveToSpe send regarding a person, organization or account lost its `.eml`
+("archival failed", non-fatal), and `ArchiveExistingAsync` answered 409. Before f4 all of these went to the archive. The
+brief's preservation clause ("archive fallback stays only when no root can be involved") did not hold, and the f4 note
+mislabelled the live example `d3516503` as "a pair id with no type … a data fix" — the sender writes it on every send.
+
+**The fix — rule 3 reads the row's typed PARTY regarding lookups** (`RecordContainerResolver`):
+
+- `ChildAncestorLinks` gains `PartyRegardingColumns`, per entry, from the f3 / f4 live sweeps:
+  - `sprk_communication`: `sprk_regardingperson` → contact, `sprk_regardingorganization` → sprk_organization,
+    `sprk_regardingaccount` → account;
+  - `sprk_todo`: `sprk_regardingcontact`, `sprk_regardingorganization`;
+  - `sprk_event`: `sprk_regardingcontact`, `sprk_regardingorganization`, `sprk_regardingaccount`;
+  - none for invoice, work assignment and project: they have no regarding-party lookup (their party columns are assignees,
+    vendors and law firms, which no builder pairs with the pair id).
+- They ride on the row's ONE read whenever the row carries the pair (`AllColumns`), so they cost no round trip.
+- Rule 3 is now: the pair's id equals a followed link's id **or one of these columns' id** on the same row → the pair names
+  that record. A party is not ownership, so the pair adds nothing; the row's followed links are walked as before. This is
+  the rule's own reasoning (the typed lookup is referentially enforced), applied to every typed regarding on the row.
+- Identity, not presence: a typed party with a DIFFERENT id leaves the pair to rules 4 and 5 (tested).
+- A guard in the `ChildAncestorLinks` constructor refuses a "party" column whose target is not a party, or one on a row
+  without the pair: a root there would let rule 3 swallow a pair that names that root.
+- The columns were checked live, read-only (2026-10-02), by selecting each one: the SQL endpoint refuses a column that does
+  not exist (a deliberately bogus column was refused), so the eight columns exist. A column missing live would fault the
+  row read, which fails closed.
+
+**Why not change the sender instead.** (1) The resolver must place the rows already written (`d3516503` and every earlier
+send). (2) With rule 3 extended, a type on a party pair would only add a type read. (3) For the sender's UNMAPPED
+primaries (below) a type would change only the refusal code (`unresolved` → `unverifiable`), not the outcome. The sender is
+untouched; having it write `sprk_regardingrecordtype` stays a data-hygiene option for the owner.
+
+**Live (read-only, 2026-10-02).** The rows the extension can affect are those whose pair id equals a typed party on the
+same row: 67 communications (of the 87 carrying both a typed person and a pair id; none carries a typed organization or
+account), 0 to-dos, 0 events (none carries a typed party regarding). Three change outcome, all from a refusal back to the
+archive:
+
+| Communication | Shape | f4 | f5 |
+|---|---|---|---|
+| `d3516503-748b-f111-8076-7ced8d1dc216` | outbound; typed person `8e9918a9`, pair id = it, no type | 409 unresolved | archive |
+| `83349fe9-828c-f111-8077-7ced8ddc4a05` | typed invoice `55328b00` + typed person; pair id = the person, no type | 409 ambiguous | the invoice is followed → its matter `b68299c6` (pair agrees; `sprk_issecure` NULL) → archive |
+| `84d04780-2f81-f111-ab0f-7ced8ddc4a05` | inbound; typed matter `375fa95a` + typed person; pair id = the person, type contact | 409 ambiguous | the matter (not secure) → archive |
+
+The other 64 already resolved to the archive (their pair carries the contact type and nothing else names a record, so rule
+5 read the type and found a party); they now skip that type read. No record-path outcome changes. Communication refusals:
+10 → **7**. No row reaches a shared container while a secure root is above it: the only live secure root (project
+`65a3fab2`) has no communication, to-do, event or work assignment under it.
+
+**What stays refused, and why — corrected from f4.** The f4 note filed six communications under "pair id with no type …
+a data fix". Read-only, each pair id was resolved to its record:
+
+| Communication | Pair id names | Why it has no typed column | Outcome |
+|---|---|---|---|
+| `d3516503` | contact `8e9918a9` | it has one (`sprk_regardingperson`) | **archive (f5)** |
+| `4971a3c2-236b-f111-ab0d-7ced8ddc4a05` | to-do `286a7bc0` "Test To Do Item" | the sender maps no `sprk_todo` (`RegardingLookupMap`), and the communication has no to-do lookup | 409 unresolved — **recurs** |
+| `ab302254-ab58-f111-a824-3833c5d9bcb1` | document `25b83b0d` "Discovery Status Report — January 2026.docx" | the sender maps no `sprk_document`, and the communication has no document lookup | 409 unresolved — **recurs** |
+| `817708e9-427b-f111-ab0e-7ced8ddc4a05` | report card `9d1477e8` | written 2026-07-08, before the sender mapped report cards (2026-07-29, `71ac390871`) | 409 unresolved — data fix |
+| `70741c9f-477b-f111-ab0e-7ced8ddc4a05`, `a4c9b0ca-9b7b-f111-ab0e-7ced8ddc4cc6` | events `a2bd239a`, `9ac9b0ca` | written 2026-07-08/09, before the sender mapped events (2026-07-14, `bbffb4532b`) | 409 unresolved — data fix |
+
+The to-do and document rows are the shape the CURRENT sender writes for those primaries (it logs "Unknown entity type …
+Regarding lookup will not be set" and writes only the pair id). They stay refused **by design**: nothing on the row says
+what the id is, and a to-do or a document can belong to a secure matter — so a root CAN be involved and the archive would
+be a guess, which is the fail-open the brief closes. Pinned with the real sender's row
+(`OutboundEmail_RegardingAnUnmappedType_AsTheSenderWritesIt_IsRefused`).
+
+**AC5 after f5** ("CommunicationContainerResolver behaves as before for records without a secure ancestor"). It now holds
+for every communication whose row can involve no root — no regarding, a party (typed, or the pair naming the row's own
+typed party), a thread, a triage category: the archive, or "skip" when none is configured. It deviates only where a root
+CAN be involved and nothing on the row says which: a held intermediate, a pair id naming a to-do / document / any record
+whose type the row does not state, a pair naming a deleted record, or a pair that disagrees with a typed root. Those are the
+shapes brief item 2 routes through the record path's refusals, so the deviation is the brief's, and each is listed above
+with its live rows.
+
+### 🔔 Owner: archival skips that RECUR from now on (verifier observation 11, in so many words)
+
+Until task 156 lands, and for some shapes beyond it, these sends are permanent archival skips — the email is sent, its
+`.eml` is not archived ("archival failed", non-fatal; inbound: a logged permanent skip; on demand: 409):
+
+1. **Every email — inbound or outbound — filed to an event, analysis, budget, report card or service request**
+   (`container_ancestor_unverifiable`, the held path). This is the branch task 156 (option b) is scoped to replace; until
+   it lands, every such email skips archival.
+2. **Every outbound email whose primary association is a to-do or a document** (`container_ancestor_unresolved`). The
+   composer archives by default (`archiveToSpe ?? true`), so **"Email this document" from the file preview
+   (`FilePreviewDialog`, primary `sprk_document`) loses its `.eml` on every send**. The to-do wizard's follow-on email does
+   not ask to archive, so it matters only for on-demand archival. **Task 156 does NOT fix these**: the sender applies the
+   core-ancestor stamp only inside its `RegardingLookupMap` branch, so an unmapped primary gets no stamp either (that is
+   also an ACCESS gap for those emails under FR-26, outside this task). Placing them needs a sender change — map the type
+   and stamp its ancestor — which is the owner's call.
+
+Before f4 all of these went to the shared archive container, which was the fail-open.
+
+### Item 2 (bookkeeping): gates 2 and 6 named an orphaned container
+
+The consolidated AC7 gates 2 and 6 cited `b!HBRbokLX…` for the secure test project `65a3fab2`. The task-144 cutover on
+2026-10-02 re-provisioned the project; read-only, its live `sprk_containerid` is
+`b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`, and the old drive is orphaned and empty, so the gates'
+GET would have checked the wrong drive. Both gates now name the current id and tell the operator to re-read
+`sprk_containerid` first. The r0 gate section and the r0 POML block carry the same correction. Gate 8 (f5) is new.
+
+### Item 3 (AC6): two branches the verifier's seeds showed unpinned
+
+- **V4, ambiguity by distinct CONTAINERS** (the f3 adapter's behaviour). New test: two DIFFERENT secure roots that share ONE
+  container refuse `container_ancestor_ambiguous` — a to-do under a secure project and a secure matter, and an email
+  regarding a secure matter and a secure work assignment (permanent on the inbound path).
+- **V15, a pair naming an invoice held instead of followed.** It failed closed, but the f4 note claimed the communication's
+  pair follows invoices. New test: an email whose pair ALONE names an invoice under a secure matter routes to the matter's
+  container.
+
+### Verifier observations 10 and 12
+
+- **10** (a secure record is not walked) is now interpretation (x), with its reversal.
+- **12** (the thread is not ownership) stays interpretation (vii), an open owner question. Live: 5 messages, none under a
+  secure root.
+
+### Tests (f5)
+
+**`ChildRecordContainerResolutionTests`** — 153 cases (136 in f4):
+
+- the REAL sender's row (new helper `OutboundCommunicationRow`, beside the tests: runs `CommunicationService.SendAsync`
+  with only Dataverse and Graph doubled and returns the entity handed to `CreateAsync`):
+  - party theory ×3 (contact / organization / account): archive kept, no archive → null, only the communication row read;
+    it also asserts the row has the pair id and NO type, so a sender change that starts writing one is noticed;
+  - secure matter control: the matter's container, no type read;
+  - unmapped theory ×2 (to-do, document): 409 `container_ancestor_unresolved`, permanent;
+- the pair names the row's own typed person next to a typed root, with and without the type (`84d04780`) ×2: the root is
+  followed, no type read;
+- typed invoice + the pair naming the row's own untyped person (`83349fe9`): the invoice is followed;
+- a typed person with a DIFFERENT id does not vouch for the pair: still refused;
+- to-do / event untyped pair naming its own typed contact / organization / account ×5: resolves (BU), no type read;
+- AC6: two different secure roots sharing one container — record path and communication path;
+- AC6: a pair alone naming an invoice is followed;
+- changed: the live-sweep pin theory now also expects each pair-carrying row's `sprk_regarding*` party columns (derived from
+  the snapshot by name and target kind); one f4 display name dropped the two live ids that are no longer that shape.
+
+**Counts:**
+
+| Suite | Result |
+|---|---|
+| `ChildRecordContainerResolutionTests` | 153 cases (136 in f4) |
+| Affected suites (resolver, child-record, route, registry, Office no-target / provenance, #1038, communication service / processor / materializer, association mapping, SPE upload paths, document list, acting user, decision table, lockstep) | 416 / 416 |
+| Full BFF unit suite (`dotnet test tests/unit/Sprk.Bff.Api.Tests`) | Passed 13356, Failed 0, Skipped 54 (Total 13410; f4 13393 + 17 new) |
+| `Spaarke.ArchTests` | 337 / 337 |
+
+`dotnet format --include` (what the pre-commit hook runs) was run on the four changed / new `.cs` files before the
+counts; `--verify-no-changes` on the same files then exits 0.
+
+### Mutation proof (f5)
+
+Same harness as f4 (`seed_harness.py`, session scratchpad, `f5/`): one exact anchor per seed (asserted unique), rebuild,
+the affected suites, restore + touch + byte-identity assert.
+
+Every seed turned tests red. Out of 416 affected tests:
+
+| Seed | Tests that failed |
+|---|---|
+| P1 (item 1): rule 3 compares followed links only — the party identity removed | 11 (the three real-sender party rows, the `84d04780` and `83349fe9` shapes, the five to-do / event party rows) |
+| P2 (item 1): the party regarding columns left out of the row read (`AllColumns`) | 14 (P1's eleven + three pin rows) |
+| P3 (item 1): the communication's party list dropped | 7 |
+| P4 (item 1): the to-do's party list dropped | 3 |
+| P5 (item 1): the event's party list dropped | 4 |
+| P6 (item 1): identity weakened to presence (any typed party vouches for any pair) | 1 |
+| P7 (item 1): party agreement only when no followed link is set (rule 4 fires first) | 3 |
+| P8 (item 1): a ROOT column put in the communication's party list (the constructor guard) | 214 (the table fails to initialize) |
+| V4 (item 3, the verifier's seed): ambiguity by distinct CONTAINERS | 1 |
+| V15 (item 3, the verifier's seed): a pair naming an invoice is held instead of followed | 1 |
+
 ## Owner-reversible interpretations
 
 Each line is a reading this task chose where the brief or the data left room. The second line is the change that
@@ -876,5 +1082,21 @@ reverses it. All but (vii) are in `RecordContainerResolver.cs`.
   - *Reverse:* drop `followed: ["sprk_invoice"]` from the communication entry. An email regarding an invoice then refuses
     `container_ancestor_unverifiable` (3 live).
 - **(ix) f4 (inherited from f3 rule 4) — a typed link and a pair that name DIFFERENT records refuse as ambiguous without
-  reading the pair's type, even when the pair names a PARTY.** Live: communication `84d04780` (matter + a contact pair).
+  reading the pair's type, even when the pair names a PARTY.** f4 cited communication `84d04780` (matter + a contact pair);
+  f5 found its pair is its OWN typed person, which rule 3 now reads as agreement (xi), so it archives. No live row is this
+  shape any more: (ix) now bites only a pair naming a party that is NOT the row's typed party.
   - *Reverse:* on disagreement, read the type and ignore the pair when `KindOf(pairEntity) == RecordKind.Party`.
+- **(x) f4, recorded in f5 (verifier observation) — a record that is ITSELF secure keeps its own container and is not
+  walked.** A secure work assignment filed regarding a DIFFERENT secure matter keeps the work assignment's container,
+  while a to-do under that work assignment refuses as ambiguous (vi). Inconsistent, but both answers fail closed (neither
+  reaches a shared container), and live has no such rows (one secure root, nothing filed under it).
+  - *Reverse:* in `ResolveCoreAsync`, call `ResolveSecureAncestorAsync` for a secure record too (drop `!isSecure &&` from
+    its guard) and refuse `container_ancestor_ambiguous` when it finds a secure root other than the record. The secure
+    work assignment's own uploads then refuse like its to-do's.
+- **(xi) f5 — rule 3 counts the row's typed PARTY REGARDING lookups as identity witnesses for the pair**
+  (`sprk_regardingperson` / `…organization` / `…account` on a communication, `sprk_regardingcontact` / `…organization`
+  [/ `…account`] on a to-do / event). Assignee, vendor and law-firm party columns are not counted: no builder pairs them
+  with the pair id. The pair then names a party, which is not ownership (i).
+  - *Reverse:* drop the `parties:` arguments from `ChildAncestorLinks.ByEntity`. Do not, unless the outbound sender is
+    first changed to write `sprk_regardingrecordtype`: without it every outbound email regarding a person, organization or
+    account is refused `container_ancestor_unresolved` and loses its `.eml` archive (the f4 regression).

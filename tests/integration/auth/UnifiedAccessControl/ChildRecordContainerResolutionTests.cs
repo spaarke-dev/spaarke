@@ -688,9 +688,20 @@ public class ChildRecordContainerResolutionTests
                 or RecordContainerResolver.ChildAncestorLinks.RecordKind.Intermediate))
             .Select(c => c.Column);
 
+        // f5: on a row that carries the pair, its typed PARTY REGARDING lookups ride on the same read — the pair's rule 3
+        // compares its id with them (the outbound sender writes a party's typed lookup and the pair id, never the type).
+        // Derived by name and target kind: a sprk_regarding* column whose target is a party. Assignees, vendors and
+        // law firms are parties too, but no builder pairs them with the pair id, so they are not read.
+        var partyRegardingColumns = swept
+            .Where(c => c.Column.StartsWith("sprk_regarding", StringComparison.Ordinal)
+                        && c.Targets.Any(t => RecordContainerResolver.ChildAncestorLinks.KindOf(t) is
+                            RecordContainerResolver.ChildAncestorLinks.RecordKind.Party))
+            .Select(c => c.Column);
+
         var securable = SecurableWithInvoice.Contains(entity);
         var expected = ownershipColumns
             .Concat(hasPolymorphicPair ? ["sprk_regardingrecordid", "sprk_regardingrecordtype"] : Array.Empty<string>())
+            .Concat(hasPolymorphicPair ? partyRegardingColumns : Array.Empty<string>())
             .Concat(securable ? ["sprk_issecure", "sprk_containerid"] : Array.Empty<string>())
             .Append("owningbusinessunit")
             .ToList();
@@ -1697,7 +1708,9 @@ public class ChildRecordContainerResolutionTests
         IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue();
     }
 
-    [Fact(DisplayName = "Task 155 f4: an email whose typed matter and polymorphic pair name DIFFERENT records is a PERMANENT ambiguity refusal (live communications 83349fe9 and 84d04780)")]
+    // f5: live communications 83349fe9 and 84d04780 were cited here in f4. Neither is this shape: each pair names the row's
+    // OWN typed person, which rule 3 now reads as agreement (see the f5 tests below). No live row is this shape.
+    [Fact(DisplayName = "Task 155 f4: an email whose typed matter and polymorphic pair name DIFFERENT records is a PERMANENT ambiguity refusal")]
     public async Task Communication_WhoseTypedRegardingAndPairDisagree_IsAPermanentRefusal()
     {
         var world = new World()
@@ -1745,6 +1758,180 @@ public class ChildRecordContainerResolutionTests
         var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
         ex.Code.Should().Be("securable_entities_unknown");
         world.TotalReads().Should().Be(0);
+    }
+
+    // ============================================================================================
+    // Task 155 f5 — the row the OUTBOUND sender actually writes; rule 3 reads the row's typed PARTY regarding
+    // ============================================================================================
+
+    [Theory(DisplayName = "Task 155 f5: an outbound email regarding a person / organization / account — the row the REAL sender writes (typed party + pair id, NO type) — keeps the ARCHIVE; nothing but its own row is read")]
+    [InlineData("contact", "sprk_regardingperson")]
+    [InlineData("sprk_organization", "sprk_regardingorganization")]
+    [InlineData("account", "sprk_regardingaccount")]
+    public async Task OutboundEmail_RegardingAParty_AsTheSenderWritesIt_KeepsTheArchive(string partyEntity, string typedColumn)
+    {
+        // f4 refused this 409 container_ancestor_unresolved (permanent): the pair id named no followed link and carried
+        // no type. Every ArchiveToSpe send regarding a person, organization or account lost its .eml (live d3516503).
+        var written = await OutboundCommunicationRow.WriteAsync(partyEntity, ContactId);
+
+        written.GetAttributeValue<EntityReference>(typedColumn)?.Id.Should().Be(ContactId);
+        written.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(ContactId.ToString());
+        written.Contains("sprk_regardingrecordtype").Should().BeFalse(
+            "MapAssociationFieldsAsync never writes the pair's type — this IS the shape the resolver must place");
+
+        var world = new World().WithCommunicationRow(written).WithBusinessUnit(BusinessUnitContainer);
+
+        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(ArchiveContainer, "a person, organization or account is not ownership — no root can be involved");
+        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, archiveContainerId: null))
+            .Should().BeNull("an unconfigured archive still means 'skip'");
+
+        world.TotalReads().Should().Be(2, "the communication row once per call: no type read, no party read, no BU");
+    }
+
+    [Fact(DisplayName = "Task 155 f5: an outbound email regarding a SECURE matter — the row the REAL sender writes — routes to the MATTER's container (the writer-shape harness reaches the walk)")]
+    public async Task OutboundEmail_RegardingASecureMatter_AsTheSenderWritesIt_RoutesToTheMattersContainer()
+    {
+        var written = await OutboundCommunicationRow.WriteAsync("sprk_matter", MatterId);
+
+        var world = new World()
+            .WithCommunicationRow(written)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(RootContainer);
+        world.Reads("sprk_recordtype_ref").Should().Be(0, "the pair id is the typed matter's id — agreement by identity");
+    }
+
+    [Theory(DisplayName = "Task 155 f5: an outbound email whose primary is a type the sender does NOT map (to-do, document) — a pair id with no typed column and no type — stays a PERMANENT refusal: a to-do or a document can belong to a secure matter")]
+    [InlineData("sprk_todo")]
+    [InlineData("sprk_document")]
+    public async Task OutboundEmail_RegardingAnUnmappedType_AsTheSenderWritesIt_IsRefused(string entityType)
+    {
+        // Live: 4971a3c2 (the to-do wizard's follow-on email) and ab302254 (a document). The writer logs "Unknown entity
+        // type" and writes only the pair id. Nothing on the row says what the id is, and either type can hang off a root,
+        // so the archive would be a guess — the brief's "archive only when no root can be involved" does not hold.
+        var written = await OutboundCommunicationRow.WriteAsync(entityType, ChildId);
+
+        written.Contains("sprk_regardingrecordtype").Should().BeFalse();
+
+        var world = new World().WithCommunicationRow(written);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "Task 155 f5: an email whose pair names its OWN typed person NEXT TO a typed root follows the ROOT — with or without the pair's type (live 84d04780; the reply-inheritance shape)")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Communication_WhosePairNamesItsOwnTypedPerson_NextToARoot_FollowsTheRoot(bool pairTyped)
+    {
+        // f4 refused this as ambiguous (rule 4: a typed root and a pair naming a different record). The pair names the
+        // row's own person — referentially enforced — so it says nothing about ownership.
+        var world = new World()
+            .WithCommunication(
+                regardingMatter: MatterId,
+                regardingParty: ("sprk_regardingperson", "contact", ContactId),
+                pairId: ContactId.ToString("D").ToUpperInvariant(),
+                pairType: pairTyped ? ContactTypeRef : null)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(RootContainer);
+        world.Reads("sprk_recordtype_ref").Should().Be(0, "identity decides; the type label is not read (interpretation ii)");
+    }
+
+    [Fact(DisplayName = "Task 155 f5: an email regarding an invoice under a SECURE matter, whose pair names its own typed person with NO type, routes to the MATTER's container (live 83349fe9)")]
+    public async Task Communication_RegardingAnInvoice_WithAPairNamingItsOwnTypedPerson_FollowsTheInvoice()
+    {
+        var world = new World(securable: SecurableWithInvoice)
+            .WithCommunication(
+                regardingInvoice: ChildId,
+                regardingParty: ("sprk_regardingperson", "contact", ContactId),
+                pairId: ContactId.ToString())
+            .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(RootContainer);
+    }
+
+    [Fact(DisplayName = "Task 155 f5: a typed person with a DIFFERENT id does not vouch for the pair — an untyped pair naming some other record is still refused (identity, not presence)")]
+    public async Task Communication_WhosePairIsNotItsTypedPerson_IsStillRefused()
+    {
+        var world = new World()
+            .WithCommunication(
+                regardingParty: ("sprk_regardingperson", "contact", OtherMatterId),
+                pairId: ContactId.ToString());
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+    }
+
+    [Theory(DisplayName = "Task 155 f5: a to-do / event whose untyped pair names its OWN typed contact / organization / account resolves like any non-secure record — not refused")]
+    [InlineData("sprk_todo", "sprk_regardingcontact", "contact")]
+    [InlineData("sprk_todo", "sprk_regardingorganization", "sprk_organization")]
+    [InlineData("sprk_event", "sprk_regardingcontact", "contact")]
+    [InlineData("sprk_event", "sprk_regardingorganization", "sprk_organization")]
+    [InlineData("sprk_event", "sprk_regardingaccount", "account")]
+    public async Task Child_WhoseUntypedPairNamesItsOwnTypedParty_ResolvesTheBusinessUnit(
+        string entity, string column, string target)
+    {
+        var world = new World()
+            .WithChild(entity, party: (column, target, ContactId), pairId: ContactId.ToString())
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync(entity, ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_recordtype_ref").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f5 (AC6): two DIFFERENT secure roots that share ONE container still refuse as ambiguous — on the record path and the communication path")]
+    public async Task TwoDifferentSecureRoots_SharingOneContainer_AreStillAmbiguous()
+    {
+        // Two secure records sharing a container is co-mingling; the refusal is about WHICH RECORD owns the content, not
+        // which drive it lands in. f4's note claimed this; nothing pinned it (verifier seed V4: dedup by container).
+        var todo = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId, regardingMatter: MatterId)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        var todoAct = async () => await todo.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        (await todoAct.Should().ThrowAsync<SdapProblemException>()).Which.Code
+            .Should().Be(RecordContainerResolver.AncestorAmbiguousCode);
+
+        var communication = new World()
+            .WithCommunication(regardingMatter: MatterId, regardingWorkAssignment: WorkAssignmentId)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithRoot("sprk_workassignment", WorkAssignmentId, isSecure: true, RootContainer);
+
+        var communicationAct = async () =>
+            await communication.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await communicationAct.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorAmbiguousCode);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "Task 155 f5: an email whose pair ALONE names an invoice FOLLOWS the invoice (the communication entry follows invoices) — routed to the secure matter above it, never held")]
+    public async Task Communication_WhosePairAloneNamesAnInvoice_FollowsTheInvoice()
+    {
+        var world = new World(securable: SecurableWithInvoice)
+            .WithCommunication(pairId: ChildId.ToString(), pairType: InvoiceTypeRef)
+            .WithRecordType(InvoiceTypeRef, "sprk_invoice")
+            .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
+            .Should().Be(RootContainer);
     }
 
     // ============================================================================================
@@ -1818,12 +2005,16 @@ public class ChildRecordContainerResolutionTests
             string? ownContainer = null,
             (string Column, Guid Id)? intermediate = null,
             string? pairId = null,
-            Guid? pairType = null)
+            Guid? pairType = null,
+            (string Column, string Target, Guid Id)? party = null)
         {
             var row = new Entity(entity, ChildId)
             {
                 ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId)
             };
+
+            // f5: a typed PARTY regarding (sprk_regardingcontact / …organization / …account) — the pair's rule 3 witness.
+            if (party is { } pt) row[pt.Column] = new EntityReference(pt.Target, pt.Id);
 
             if (regardingProject is { } p) row["sprk_regardingproject"] = new EntityReference("sprk_project", p);
             if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
@@ -1934,13 +2125,15 @@ public class ChildRecordContainerResolutionTests
             (string Column, Guid Id)? intermediate = null,
             string? pairId = null,
             Guid? pairType = null,
-            bool withNonOwnerLinks = false)
+            bool withNonOwnerLinks = false,
+            (string Column, string Target, Guid Id)? regardingParty = null)
         {
             var row = new Entity("sprk_communication", CommunicationId)
             {
                 ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId)
             };
 
+            if (regardingParty is { } party) row[party.Column] = new EntityReference(party.Target, party.Id);
             if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
             if (regardingWorkAssignment is { } w)
                 row["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", w);
@@ -1961,6 +2154,16 @@ public class ChildRecordContainerResolutionTests
             }
 
             _rows[("sprk_communication", CommunicationId)] = () => row;
+            return this;
+        }
+
+        /// <summary>
+        /// Task 155 f5: the communication row is EXACTLY the entity <paramref name="written"/> — the row the real outbound
+        /// sender produced (<see cref="OutboundCommunicationRow"/>) — served for <see cref="CommunicationId"/>.
+        /// </summary>
+        public World WithCommunicationRow(Entity written)
+        {
+            _rows[("sprk_communication", CommunicationId)] = () => written;
             return this;
         }
 
