@@ -1005,6 +1005,44 @@ public class UpdateEventRequest
 
     /// <summary>Regarding record name</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>
+    /// The event's regarding type BEFORE this update, as the caller read it. When the update names a DIFFERENT type, that
+    /// type's entity-specific lookup is cleared, so the event stays filed under one regarding — the one this update
+    /// names. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public int? PreviousRegardingRecordType { get; set; }
+
+    /// <summary>
+    /// The entity-specific regarding LOOKUPS this update writes (unified-access-control-r2 task 146 r1, verifier item 2):
+    /// the new regarding (<c>RecordId</c> null when the update names a type with no record — a clear), plus a clear of the
+    /// previous type's lookup when the type changes. Empty when the update does not touch the regarding.
+    /// </summary>
+    /// <remarks>
+    /// The ONE derivation of the lookups: <c>DataverseWebApiService.UpdateEventAsync</c> writes exactly these, and the
+    /// BFF re-derives the event's owner from exactly these (a reparent). Before this, the update wrote only the regarding
+    /// TEXT fields while the owner was re-derived from a lookup that was never written — so an event moved from a secure
+    /// project to an ordinary one was re-owned by the ordinary team while its lookup still named the secure project.
+    /// </remarks>
+    public IReadOnlyList<(int RecordType, Guid? RecordId)> RegardingLookupWrites()
+    {
+        if (RegardingRecordType is not { } type || global::Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(type) is null)
+            return Array.Empty<(int, Guid?)>();
+
+        var writes = new List<(int RecordType, Guid? RecordId)>
+        {
+            (type, Guid.TryParse(RegardingRecordId, out var id) && id != Guid.Empty ? id : null),
+        };
+
+        if (PreviousRegardingRecordType is { } previous && previous != type
+            && global::Spaarke.Dataverse.RegardingRecordType.GetLookupFieldName(previous) is not null)
+        {
+            writes.Add((previous, null));
+        }
+
+        return writes;
+    }
 }
 
 /// <summary>
@@ -1250,6 +1288,43 @@ public static class RegardingRecordType
         Contact => "sprk_regardingcontact",
         WorkAssignment => "sprk_regardingworkassignment",
         Budget => "sprk_regardingbudget",
+        _ => null
+    };
+
+    /// <summary>
+    /// The <c>sprk_event</c> single-valued navigation property for a regarding record type — the CASE-SENSITIVE name a
+    /// Web API <c>@odata.bind</c> must use (the lookup's schema name). Read from live metadata, spaarkedev1 2026-10-02:
+    /// <c>EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships</c> →
+    /// <c>ReferencingEntityNavigationPropertyName</c> (unified-access-control-r2 task 146 r1, verifier item 2).
+    /// </summary>
+    public static string? GetEventNavigationPropertyName(int recordType) => recordType switch
+    {
+        Project => "sprk_RegardingProject",
+        Matter => "sprk_RegardingMatter",
+        Invoice => "sprk_RegardingInvoice",
+        Analysis => "sprk_RegardingAnalysis",
+        Account => "sprk_RegardingAccount",
+        Contact => "sprk_RegardingContact",
+        WorkAssignment => "sprk_RegardingWorkAssignment",
+        Budget => "sprk_RegardingBudget",
+        _ => null
+    };
+
+    /// <summary>
+    /// The Dataverse entity SET for a regarding record type, as live metadata names it (spaarkedev1 2026-10-02,
+    /// <c>EntityDefinitions</c> → <c>EntitySetName</c>). Never derived by appending "s": <c>sprk_analysis</c>'s set is
+    /// <c>sprk_analysises</c>.
+    /// </summary>
+    public static string? GetEntitySetName(int recordType) => recordType switch
+    {
+        Project => "sprk_projects",
+        Matter => "sprk_matters",
+        Invoice => "sprk_invoices",
+        Analysis => "sprk_analysises",
+        Account => "accounts",
+        Contact => "contacts",
+        WorkAssignment => "sprk_workassignments",
+        Budget => "sprk_budgets",
         _ => null
     };
 

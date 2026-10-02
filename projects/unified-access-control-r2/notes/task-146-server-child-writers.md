@@ -1,7 +1,8 @@
 # Task 146 — server child writers own their rows through the one resolver (C10 part 2, #1034)
 
 > Branch `task/uac-r2-146` (base `integ/uac-r2-batch2` @ `2a9b4b26c`). Status: **code complete, not deployed**.
-> Ships together with task 149. Deploy order with task 152 accepted as B2. Live steps are manual gates (§7).
+> Ships together with task 149. Deploy order with task 152 accepted as B2. Live steps are manual gates (§7, §11d).
+> Verifier round 1 fixes (branch `task/uac-r2-146-r1`): §11.
 
 ## 1. Outcome
 
@@ -29,15 +30,18 @@ Each writer refuses in its own existing error contract:
 | AI task core | Degraded success, `Guid.Empty` |
 | Inbound email | **Held** (owner amendment R3): retry, then dead-letter, then alert administrators. Nothing is created. |
 
-`RecordOwnerAssignmentCensusTests` fails the build on any unlisted create of a child table. Each guard was proven to
-bite by seeding (§8).
+`RecordOwnerAssignmentCensusTests` fails the build on any unlisted LITERAL create of a child table (`new Entity("t")`, a
+POST to a literal entity set), on any routed create SITE whose row gets no owner write in the member that builds it (r1),
+and on any unclassified run-as-user POST (r1); creates through computed URLs, upserts and seams are a hand-kept list that
+must call the resolver. Each guard was proven to bite by seeding (§8, §11b).
 
 ## 2. Resolver changes (`Services/Dataverse/RecordOwnershipResolver.cs`, extended in place, no second resolver)
 
 - **Context.** `RecordOwnershipContext` gains three members:
   - `Parents`, with `ForChild` (every ownership-parent lookup on the row), `ForParents` and `ContentOf`.
   - `WhenUnfiled = KeepCreator` (E1).
-  - `KeepCreatorUnlessTargetIsTeamOwned`, for content rows of a creator-owned unfiled parent.
+  - `KeepCreatorUnlessTargetIsTeamOwned`, for content rows of a creator-owned unfiled parent (r1: a creator-owned
+    parent that IS filed hands its content rows the owner of what it is filed under — §11a item 3).
 - **Resolution.** `ResolveOwnerAsync` returns `RecordOwnerResolution`: Owned, Refused (with a stable
   `RecordOwnerRefusal` code) or Unchanged.
   - `ResolveOwningTeamAsync` is kept and delegates to it.
@@ -119,6 +123,11 @@ bite by seeding (§8).
 |---|---|
 | Services/Ai/Handlers/DataverseCreateRecordHandler.cs:245 | run-as-user (OBO) create, "User-OBO ONLY" spec rule |
 | Services/Ai/Handlers/EmailDraftToolHandler.cs:352 | run-as-user (OBO) sprk_communication create |
+
+r1: both are now NAMED in the ArchTest (`RecordOwnerAssignmentCensusTests.EscalatedWriters`), and
+`EveryRunAsUserPostIsClassified` fails on any run-as-user (`IDataverseUserClient`) POST that is not listed as an
+escalated writer, a routed/unscanned writer, or a non-create (`DataverseSearchDataHandler`: a search READ). An entry goes
+stale (fails) when its create disappears or its file starts routing its owner.
 
 Per-user by design, and not children: `appnotification`, `sprk_notificationoutbox`, `sprk_workspacelayout`,
 `sprk_aichatmessage`/`summary`. Organization-owned: `sprk_affinity`, `sprk_precedent`, `sprk_userentityassociation`.
@@ -293,3 +302,102 @@ its children. This is the reason this task exists.
   drop-out.** Record it in the PR description.
 - **Task 145:** G146-1 extends 145's codified set with its procedure. No second list.
 - **#1034 (word-add-in-r1 ISS-007):** close it once, citing both projects, after merge. The main session coordinates.
+
+## 11. Verifier round 1 (r1, 2026-10-02, branch `task/uac-r2-146-r1`)
+
+An adversarial verifier reported 23 items. Each is closed below, or stated as not closed with the reason.
+
+### 11a. Code fixes
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | `associate-record` re-filed a document (and changed its owner) with no per-record check | The route now carries the body-declared per-record filter (`AddFinanceAuthorizationFilter(ResolveAssociateTargets)` — the one filter that authorizes several BODY ids; reused, not a new one): Write on the document (the same document path `PUT /api/v1/documents/{id}` uses) and AppendTo (`entity.associate_document`) on the target's entity set, resolved through `EntityAccessFilter`'s one type→set table. Unreadable id / unsupported type = 400 before any rights query. `RecordMatchEndpoints.cs` is now IN `RouteAuthorizationGuardTests` (RouteLevelGate); `match-records` is a **Pending "UNOWNED" waiver** — a pre-existing tenant-wide AI-index read, surfaced by bringing the file into the census, not task 146's scope. The report's earlier claim that "only the document is authorized" on this route was wrong: nothing was. |
+| 2 | Event re-file re-owned from a lookup the PATCH never wrote | ONE derivation, `Spaarke.Dataverse.UpdateEventRequest.RegardingLookupWrites()`: the new regarding (null id = a clear) plus a clear of the PREVIOUS type's lookup when the type changes. `DataverseWebApiService.BuildEventUpdatePayload` writes exactly those lookups (live-verified nav props `sprk_RegardingProject` … and entity sets incl. `sprk_analysises`, spaarkedev1 2026-10-02), and `EventEndpoints.ParentChangesFor(update)` re-derives the owner from exactly those. The previous type comes from the denormalized type or the ONE populated typed lookup (`CurrentRegardingRecordType`). A re-file is now authorized AS THE CALLER (Write on the event, AppendTo on the target; deny/fault = 403). |
+| 3 | `ContentOf` kept the creator for any parent that was not team-owned, even a FILED one | The resolver now reads the non-team-owned parent's own ownership-parent lookups (`ReadOwnershipParentsOfAsync`, every column — the read only happens on this branch): filed → resolves from what the parent is filed under (secure-if-any; a flagged-not-isolated grandparent refuses); unfiled → Unchanged (E1). Docs corrected to match. |
+| 4 | Inbound / upload-capture owners ignored the FR-26 stamps; an evaluation fault produced an unfiled creator-owned email | `IncomingAssociationResolver.OwnershipContextForNewRecordAsync(decision)` derives the stamps with the SAME derivation the apply writes (`DeriveCoreAncestorStampsAsync`, factored out of `ApplyCoreAncestorStampsAsync`) and adds them as parents. Inbound: an evaluation or stamp-derivation failure is now a HOLD (`RecordOwnerUnresolvedException`, new code `record_owner_parent_undetermined` → retry → dead-letter + admin alert, R3); the filing step is `IncomingCommunicationProcessor.ResolveInboundFilingAsync` (internal, testable without Graph). Upload capture: the same failure SKIPS the capture (its refusal contract; the save proceeds as an archive). Note: the engine auto-writes only the tenant's `AutoFileOptions.CoreWritableEntities` (default matter/project/service request, whose stamps are themselves), so the stamp case arises for tenants that make a child type auto-writable. |
+| 6 | Census proved ownership per FILE; the two run-as-user writers were absent | `EveryRoutedCreateSiteWritesItsOwnRowsOwner`: each routed create SITE's row must get an owner write in the member that builds it (by variable; inline constructions in their initializer or handed to an owner-writing call; builder members are checked at every caller; POST sites at member level; `row[CONST]` where the const is `"ownerid"`; a same-file helper that owns its first parameter counts). `EscalatedWriters` + `EveryRunAsUserPostIsClassified` (see §3c). Negative controls for both. `DATAVERSE-WRITE-PATH` row I-2 now states the guard's real scope (literal shapes; computed URLs are hand-listed). |
+| 8 | A cleared lookup (null) was not a re-file | `RecordReparent.ParentChangesWithClearsIn` passes every null as a candidate clear (`DataverseUpdateHandler`); `UpdateRecordActionCore` passes every null payload value (`X@odata.bind: null` → column `x`). `ReparentAsync` treats a null for a column that holds no parent as no change and, when nothing a row is filed under changes, writes the change and decides no owner (Unchanged). |
+| 9 | `PUT /events` answered 409 after the update had landed | The status log row's owner is resolved BEFORE any write (a refusal = 409, nothing written); a re-file's log row takes the event's resolved owner, so no second resolution follows the write. |
+| 10 | Outbound send: owner decided after the email had gone | `BuildDataverseRecordAsync` / `BuildDataverseRecordForUserAsync` / `BuildMessageDataverseRecordAsync` build the record and resolve its owner BEFORE the send (`ResolveOutboundOwnerAsync`): refusal = 409 `SdapProblemException` with the refusal code, nothing sent or created; a fault propagates (5xx), nothing sent. After the send, `CreatePreparedRecordAsync` creates it (still best-effort — the email has gone). For chat, a refused message is no longer sent, so no echo can persist it unfiled. |
+
+### 11b. Tests (writer families, real resolver) — verifier items 5, 7, 15, 16
+
+New files under `tests/integration/data-mutation/RecordOwnership/`:
+
+- `SecureChildOwnershipEndpointTests` (15): event re-file (lookup written = lookup re-owned from; type change clears the old lookup; 403 without Write on the event; 403 without AppendTo on the target; 409 flagged target, nothing written), event status 409 before any write, event create (named team + log row; 409), the ParentChanges ≡ PATCH pin, associate-record (403 no rights — the verifier's repro; 403 no AppendTo; authorized → named team, read back; 400 before any rights query), operation key pin.
+- `SecureChildOwnershipExternalTests` (8): external to-do on a secure project / matter / work assignment → named team; ordinary project → its BU team; external event → named team (the verifier's `sprk_matter` plant now fails it); 409 flagged; document upload → named team; 409 flagged with NO bytes uploaded.
+- `SecureChildOwnershipWriterTests` (23): shared-mailbox send → named team; 409 before the send, nothing sent; fault → propagates, nothing sent; chat send 409, nothing sent; inbound filing → named team THROUGH the stamp; inbound undeterminable → HOLD; inbound flagged → hold with the refusal; upload capture through the stamp; upload capture undeterminable → skipped; spend signals (secure / ordinary / missing → skipped); generated to-dos (regarding secure matter; source event; flagged → refused); analysis create → document's named team; 409 missing document; enrichment review log (secure communication; user-owned communication FILED to a secure matter — item 3 end to end); apply audit row (named team; 409 BEFORE the target write); inbound attachment documents (`EmailAttachmentProcessor`: named team; flagged → none created).
+- `SecureChildOwnershipDocumentRefileTests` (2): `PUT /api/v1/documents/{id}` → named team (read back); 409 flagged, not written.
+- `SecureChildOwnershipTests` (+2): a generic update that clears the only secure lookup → reassigned out; clearing only non-lookup columns → no reassignment.
+- `RecordOwnershipResolverTests` (+5): content rows of a user-owned FILED communication (secure → named team; ordinary → the matter's team; flagged → refused); reparent by clearing with null (read back); null on non-parent columns → Unchanged, no assignment.
+- `ExternalTodoScopeTests` fixture comment (item 7) now points at `SecureChildOwnershipExternalTests`.
+
+**Seed-and-bite (r1), every plant failed its tests and passed again once restored (files touched):**
+P1 inbound attachment `ApplyOwner` removed → per-site census (`IncomingCommunicationProcessor.cs:1008`);
+P2 shared-mailbox send `owner.ApplyTo` removed → per-site census (`CommunicationService.cs:1983`) + send test;
+P3 external event owner from `sprk_matter` → 2 external event tests; P4 signal evaluation targeting `sprk_project` →
+2 signal tests; P5 event create dropping the regarding parent → 2 event create tests; P6 event PATCH writing no lookup →
+2 re-file tests + the pin; P7 associate-record filter removed → Rule A (`associate-record` UNGATED) + 2 associate tests;
+P8 content rows ignoring the parent's filing → 3 resolver tests + enrichment test + event status test; P9 update handler
+ignoring nulls → the clear test; P10 inbound fault swallowed → hold test; P12 stamps not derived for the owner →
+2 inbound + 2 upload tests; P13 status log owner not pre-resolved → event status test; P14 re-file authorization
+removed → 2 re-file 403 tests; P15 outbound refusal not thrown → 2 send tests.
+
+**Not driven end to end, with the reason (item 5 remainder):** the inbound `.eml`/attachment rows and the inbound create
+itself (they sit behind the Graph message fetch — the Graph SDK request builders cannot be doubled; `InboundPipelineTests`
+skips the same path), `SpendSnapshotService` (writes through an unwrapped `ServiceClient`, like `FinanceRollupService`)
+and `DocumentCheckoutService` (raw `HttpClient`) — their only offline doubles are the transport mocks ADR-038 B1 rules
+out — and the Compose promoter (no real-resolver harness without the full Compose save fixture). Each of these sites is
+pinned by the PER-SITE census (proven by P1/P2), and their owner decision is one resolver call already covered by the
+resolver tests. Analysis fork/promote resolve the owner exactly as create does (the document); create is tested.
+
+### 11c. Proved by design, not changed
+
+- **AC6 for best-effort writers (item 17).** The task's own constraint binds best-effort writers to stay best-effort ("a
+  refusal is a skipped row, never a failed profile or a failed job"); the enrichment, participant index and post-send
+  record step therefore log a fault and write nothing — nothing is created, which is the AC's substance. The one place a
+  fault could have produced a success response for a filed record (the outbound send) now resolves the owner BEFORE the
+  send and propagates a fault (item 10).
+- **Documents PUT target authorization.** `PUT /api/v1/documents/{id}` authorizes Write on the document but not AppendTo on
+  the record it files to (pre-existing; the verifier named only associate-record and the event PUT). Not changed here
+  (a live route with clients; tightening it could break the wizard's association step for callers without AppendTo) —
+  recorded for the owner.
+
+### 11d. Gates (r1) — G146-2 extended (item 11)
+
+Read-only check, spaarkedev1 2026-10-02 (`RetrieveRolePrivilegesRole` over each default team's roles, Read privilege of
+every census "fix" table):
+
+| BU default team | Roles | Read on the child tables |
+|---|---|---|
+| Spaarke (root) | Spaarke Basic User `11f93c04…` | all **except `sprk_emailreviewlog`** (G146-2) |
+| Spaarke Business Unit 1 | Basic User `dc44312f…`, Reporting Viewer, AI Analysis, Office Add In | all **except `sprk_emailreviewlog`** (G146-2) |
+| Spaarke Dev 1 `7cdb15ee-e39e-f011-bbd3-7c1e5215b8b5` | **none** | none — every child owned here is refused by Dataverse |
+| Spaarke Test 1 `1c75377a-e29e-f011-bbd3-7c1e5217cd7c` | **none** | none |
+| Spaarke Demo | System Administrator | all |
+| Secure Record (default) | none | none — by design (task 144: never the owner) |
+
+Today Dev 1, Test 1 and Demo own **no** projects, matters, work assignments or documents and hold **no** active users, so
+no child is currently filed there; the moment a user or record is placed in Dev 1 / Test 1, every child write for it is
+refused (fail closed, not a leak). **G146-5** (before placing any user or record in those business units):
+
+```
+POST {org}/api/data/v9.2/teams(7cdb15ee-e39e-f011-bbd3-7c1e5215b8b5)/teamroles_association/$ref
+{ "@odata.id": "{org}/api/data/v9.2/roles(fe4b2a83-f18c-44e7-a30b-ea7391bdcbec)" }      # Spaarke Basic User, Dev 1 copy
+POST {org}/api/data/v9.2/teams(1c75377a-e29e-f011-bbd3-7c1e5217cd7c)/teamroles_association/$ref
+{ "@odata.id": "{org}/api/data/v9.2/roles(b5aff661-8494-4756-a8a9-ae13368fce25)" }      # Spaarke Basic User, Test 1 copy
+```
+
+…then G146-2's `prvReadsprk_EmailReviewLog` (Basic) on those copies too. Rule for every future BU: its default team must
+hold a role with Read on every census "fix" table before it owns children (re-run the read-only check above).
+
+### 11e. Still not closed (and why)
+
+- **AC1 / items 12, 14:** the run-as-user AI handlers and work-assignment S6 b remain escalated (security-sensitive / needs
+  task 144's endpoint as a service). They are now NAMED in the census. E1, E2, trigger 3, E3/G146-2 unchanged.
+- **AC13 / item 21:** publish size is measured by the main session; #1034 closes after merge.
+- **AC14 / items 11, 22:** G146-1 (role set) and G146-2/G146-5 (default-team Read) are manual live gates.
+- **AC11 / item 23:** G146-4 (live gate after deploy with task 149).
+- Pre-existing, observed while fixing item 2: the event create and update write `sprk_regardingrecordtype` as an int, but
+  live metadata types it as a lookup (`sprk_recordtype_ref`) — the events API write path may fail live. Not task 146's
+  scope; recorded.

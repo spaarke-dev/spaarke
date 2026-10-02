@@ -192,6 +192,20 @@ public class RouteAuthorizationGuardTests
         new GovernedFile("Api/Ai/RecordSearchEndpoints.cs", Scope.RouteLevelGate,
             "/api/ai/search/records — Dataverse record content over the same AI search surface."),
 
+        // ---- AI document association: added 2026-10-02 by unified-access-control-r2 task 146 r1 (verifier item 1) ----
+        //
+        // ABSENT from this census until now, so NotGoverned by omission while it RE-FILED documents: task 146 made
+        // associate-record a reparent that re-derives the document's OWNER, so an authentication-only route let any
+        // signed-in user move a secure document into an ordinary business unit by GUID. associate-record now carries
+        // the body-declared per-record filter (Write on the document + AppendTo on the target). match-records serves
+        // record names/ids from the AI record index with no per-caller trimming — the same shape /api/ai/search/records
+        // closed — and is a Pending waiver below, not a hidden pass.
+        new GovernedFile("Api/Ai/RecordMatchEndpoints.cs", Scope.RouteLevelGate,
+            "/api/ai/document-intelligence/* — associate-record RE-FILES a document (a reparent that changes its owner; "
+            + "gated by AddFinanceAuthorizationFilter(ResolveAssociateTargets): Write on the body DocumentId through the "
+            + "document path + AppendTo on the body RecordId's entity set). match-records returns matched matter/"
+            + "project/invoice records from the AI record index — Pending waiver."),
+
         // ---- Office add-in surface: added 2026-09-29 by task 120 (GitHub #1015) ----
         //
         // This census governed 14 files and did not include either of these, which classified the whole
@@ -568,6 +582,20 @@ public class RouteAuthorizationGuardTests
         //
         // 078 perturbation-proved the gate is what keeps Rule A green here, not a waiver: removing
         // .AddContainerDocumentAuthorizationFilter() makes Rule A FAIL naming this route again.
+
+        // ---------- task 146 r1: first measurement of Api/Ai/RecordMatchEndpoints.cs ----------
+        //
+        // PENDING, and honestly so (maintenance rule 4). The file entered this census because its sibling route,
+        // associate-record, became an ownership-changing re-file (now gated). match-records was already
+        // authentication-only before task 146 and still is: it returns matched record names and ids from the AI record
+        // index without trimming to what the caller may read — the shape /api/ai/search/records closed with
+        // RecordSearchAuthorizationFilter. Gating it is not task 146's scope (it writes nothing and changes no owner),
+        // so it is recorded here as a work item rather than left invisible.
+        new Waiver("POST /api/ai/document-intelligence/match-records", WaiverKind.Pending, "UNOWNED",
+            "COLLECTION READ over the AI record index (matter / project / invoice names and ids matched to a document's "
+            + "extracted entities) with no per-caller result trimming. Pre-existing, surfaced when task 146 r1 brought "
+            + "the file into this census for associate-record. Needs the RecordSearchAuthorizationFilter treatment "
+            + "(trim to records the caller can read) — no owning task yet."),
 
         // ---------- PERMANENT ----------
         new Waiver("POST /api/v1/documents", WaiverKind.Permanent, "-",

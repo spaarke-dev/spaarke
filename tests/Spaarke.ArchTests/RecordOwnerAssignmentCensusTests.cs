@@ -345,6 +345,117 @@ public class RecordOwnerAssignmentCensusTests
         Assert.True(problems.Count == 0, "Routed census entries that no longer route their owner:\n" + string.Join("\n", problems));
     }
 
+    /// <summary>
+    /// Task 146 r1 (verifier item 6): the file-level check above passes when a file holds ANY resolver call and ANY owner
+    /// write — so removing one site's owner write in a multi-site file went unnoticed (IncomingCommunicationProcessor's
+    /// attachment document, CommunicationService's shared-mailbox send). This asserts it PER SITE: the row a Routed create
+    /// builds must itself receive an owner write in the member that builds it (see <see cref="SiteOwnerProblems"/>).
+    /// </summary>
+    [Fact(DisplayName = "Task 146 r1: every Routed create SITE writes its own row's owner, in the member that builds it")]
+    public void EveryRoutedCreateSiteWritesItsOwnRowsOwner()
+    {
+        var files = ServerFiles();
+        var routed = Census
+            .Where(e => e.Disposition == Disposition.Routed && e.OwnerFile is null)
+            .Select(e => (e.FileName, e.Table))
+            .ToHashSet();
+
+        var problems = ScanSiteIndexes(files)
+            .Where(kv => routed.Contains(kv.Key))
+            .SelectMany(kv => SiteOwnerProblems(files[kv.Key.File], kv.Key.File, kv.Key.Table, kv.Value))
+            .ToList();
+
+        Assert.True(
+            problems.Count == 0,
+            "Routed create sites whose row receives no owner write in the member that builds it (task 146 r1). Write "
+            + "the resolved owner onto THAT row — resolution.ApplyTo(row), row[\"ownerid\"] = …, or the file's "
+            + "Apply…Owner(row, …) helper — before it is created:\n" + string.Join("\n", problems));
+    }
+
+    /// <summary>
+    /// Writers that create a child row RUN AS THE USER through a computed-URL POST the literal scanner cannot see, and are
+    /// NOT routed through the resolver: task 146 escalation (owner S1 vs the handlers' spec "User-OBO ONLY" MUST — an
+    /// app-only create needs an as-user pre-check, security-sensitive, CLAUDE.md §6). Listed so the census names them
+    /// (verifier item 6): the row is owned by the calling user in the user's business unit — NOT isolated when filed to a
+    /// secure record.
+    /// </summary>
+    private sealed record EscalatedWriter(string FileName, Regex Shape, string Reason);
+
+    private static readonly IReadOnlyList<EscalatedWriter> EscalatedWriters = new[]
+    {
+        new EscalatedWriter("DataverseCreateRecordHandler.cs", new Regex(@"_dataverse\.PostAsync\s*\("),
+            "AI create-record tool: run-as-user (OBO) POST to a computed entity set — any table the tool is allowed to "
+            + "create, children of a secure record included. Escalated in task 146 (§5 'Run-as-user AI handlers'): "
+            + "pending the owner's S1 implementation (app-only create owned by the team + an as-user pre-check)."),
+        new EscalatedWriter("EmailDraftToolHandler.cs", new Regex(@"_dataverse\.PostAsync\s*\("),
+            "AI email-draft tool: run-as-user (OBO) POST of a sprk_communication draft, possibly filed to a secure "
+            + "record. Escalated in task 146 with DataverseCreateRecordHandler (same decision)."),
+    };
+
+    /// <summary>
+    /// Run-as-user POSTs that are not creates (so not census entries), each with its reason. Together with
+    /// <see cref="EscalatedWriters"/> this classifies every run-as-user POST in the BFF.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> RunAsUserPostsThatAreNotCreates = new Dictionary<string, string>
+    {
+        ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
+    };
+
+    [Fact(DisplayName = "Task 146 r1: every run-as-user POST in the BFF is classified — escalated create or not a create")]
+    public void EveryRunAsUserPostIsClassified()
+    {
+        var files = ServerFiles();
+        var unclassified = UnclassifiedRunAsUserPosts(files);
+
+        Assert.True(
+            unclassified.Count == 0,
+            "Run-as-user (IDataverseUserClient) POSTs that the census does not classify (task 146 r1). A run-as-user CREATE "
+            + "of a child record leaves the row owned by the caller in an ordinary business unit: route its owner through "
+            + "IRecordOwnershipResolver, or list it as an EscalatedWriter with the escalation that stops it; a POST that "
+            + "writes no row goes in RunAsUserPostsThatAreNotCreates with its reason:\n  " + string.Join("\n  ", unclassified));
+
+        var stale = EscalatedWriters
+            .Where(w => CodeOf(files, w.FileName) is not { } code || !w.Shape.IsMatch(code) || ResolverCall.IsMatch(code))
+            .Select(w => $"{w.FileName}: the escalated create is gone, or the file now routes its owner — move or delete the entry")
+            .ToList();
+        Assert.True(stale.Count == 0, "Stale escalated-writer entries:\n" + string.Join("\n", stale));
+    }
+
+    /// <summary>Files that POST through the run-as-user client (<c>IDataverseUserClient</c>) and are classified nowhere.</summary>
+    private static List<string> UnclassifiedRunAsUserPosts(IReadOnlyDictionary<string, string> files)
+    {
+        var userPost = new Regex(@"\b_dataverse\s*\.\s*PostAsync\s*\(");
+        var classified = EscalatedWriters.Select(w => w.FileName)
+            .Concat(RunAsUserPostsThatAreNotCreates.Keys)
+            .Concat(Census.Select(e => e.FileName))
+            .Concat(UnscannedWriters.Select(w => w.FileName))
+            .ToHashSet(StringComparer.Ordinal);
+
+        return files
+            .Where(f => f.Value.Contains("IDataverseUserClient", StringComparison.Ordinal) && userPost.IsMatch(f.Value))
+            .Select(f => f.Key)
+            .Where(name => !classified.Contains(name))
+            .ToList();
+    }
+
+    [Fact(DisplayName = "Task 146 r1: negative control — an unlisted run-as-user POST fails the classification")]
+    public void RunAsUserPostDetector_NegativeControl()
+    {
+        var files = new Dictionary<string, string>
+        {
+            ["NewCreateHandler.cs"] = SourceScan.CodeText(new[]
+            {
+                "internal sealed class NewCreateHandler(IDataverseUserClient _dataverse)",
+                "{",
+                "    Task A() => _dataverse.PostAsync($\"/api/data/v9.2/{set}\", body, ct);",
+                "}",
+            }),
+            ["DataverseSearchDataHandler.cs"] = "IDataverseUserClient _dataverse; _dataverse.PostAsync(x);",
+        };
+
+        Assert.Equal(new[] { "NewCreateHandler.cs" }, UnclassifiedRunAsUserPosts(files));
+    }
+
     [Fact(DisplayName = "Task 146: every seam refuses a create with no resolved owner team")]
     public void EverySeamRefusesAnOwnerlessCreate()
     {
@@ -425,6 +536,46 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Single(sites[("Seeded.cs", "sprk_todo")]); // the two-argument update is not a create
     }
 
+    [Fact(DisplayName = "Task 146 r1: negative control — the per-site check flags the one site in a multi-site member that lost its owner")]
+    public void PerSiteDetector_NegativeControl()
+    {
+        // The shape of the plants the file-level check missed: two creates in one member, ONE owner write.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private async Task ArchiveAsync(RecordOwnerResolution owner)",
+            "    {",
+            "        var attachmentDoc = new DataverseEntity(\"sprk_document\");",
+            "        ApplyOwner(attachmentDoc, owner);",
+            "        await _svc.CreateAsync(attachmentDoc, ct);",
+            "        var emlDoc = new DataverseEntity(\"sprk_document\");",
+            "        await _svc.CreateAsync(emlDoc, ct);",
+            "    }",
+            "    private async Task InlineAsync(RecordOwnerResolution owner)",
+            "    {",
+            "        await _svc.CreateAsync(new Entity(\"sprk_document\") { [\"ownerid\"] = team }, ct);",
+            "        await _svc.CreateAsync(new Entity(\"sprk_document\") { [\"sprk_name\"] = \"x\" }, ct);",
+            "    }",
+            "    private async Task ResolvedAsync(RecordOwnerResolution owner)",
+            "    {",
+            "        var row = new Entity(\"sprk_document\");",
+            "        owner.ApplyTo(row);",
+            "        await _svc.CreateAsync(row, ct);",
+            "    }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+
+        var sites = ScanSiteIndexes(files)[("Seeded.cs", "sprk_document")];
+        var problems = SiteOwnerProblems(code, "Seeded.cs", "sprk_document", sites).ToList();
+
+        Assert.Equal(5, sites.Count);
+        Assert.Equal(2, problems.Count); // the emlDoc (its member has an owner write — for the OTHER row) and the bare inline create
+        Assert.Contains(problems, p => p.Contains("Seeded.cs:8", StringComparison.Ordinal));
+        Assert.Contains(problems, p => p.Contains("Seeded.cs:14", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "Task 146: negative control — the scan reaches every server assembly")]
     public void Scan_ReachesEveryServerAssembly()
     {
@@ -457,6 +608,125 @@ public class RecordOwnerAssignmentCensusTests
 
     /// <summary>(file, table) → the 1-based lines of each create site.</summary>
     private static Dictionary<(string File, string Table), List<int>> ScanSites(IReadOnlyDictionary<string, string> files)
+        => ScanSiteIndexes(files).ToDictionary(
+            kv => kv.Key,
+            kv => kv.Value.Select(index => SourceScan.LineOf(files[kv.Key.File], index)).ToList());
+
+    /// <summary>A member declaration line: an access modifier, then a parameter list (methods, constructors, local
+    /// members with a modifier). Field initializers (<c>= new(...)</c>) are excluded by the no-<c>=</c> rule.</summary>
+    private static readonly Regex MemberDeclaration = new(
+        @"^[ \t]*(?:public|internal|private|protected)\b[^;=\n]*?\(",
+        RegexOptions.Compiled | RegexOptions.Multiline);
+
+    /// <summary>
+    /// The owner problems of one routed file's create sites (task 146 r1): each site's row must receive an owner write in
+    /// the MEMBER that builds it — the text from the member declaration before the site to the next one. When the row is
+    /// assigned to a variable, the write must name THAT variable (<c>v["ownerid"] =</c>, <c>.ApplyTo(v)</c>,
+    /// <c>Apply…Owner(v, …)</c>) or sit in the construction's own initializer; an inline construction falls back to any
+    /// owner write in the member. Crude by design, like every <see cref="SourceScan"/> rule — proven to bite by
+    /// <see cref="PerSiteDetector_NegativeControl"/>.
+    /// </summary>
+    private static IEnumerable<string> SiteOwnerProblems(string code, string fileName, string table, IEnumerable<int> siteIndexes)
+    {
+        var members = MemberDeclaration.Matches(code).Select(m => m.Index).ToList();
+
+        string RegionAt(int index)
+        {
+            var start = members.LastOrDefault(i => i <= index);
+            var end = members.FirstOrDefault(i => i > index);
+            return code[start..(end > index ? end : code.Length)];
+        }
+
+        // `row["ownerid"]` — or `row[FieldOwnerId]` through a const whose value is "ownerid".
+        var ownerKey = string.Join("|", StringConst.Matches(code)
+            .Where(m => m.Groups["value"].Value == "ownerid")
+            .Select(m => Regex.Escape(m.Groups["name"].Value))
+            .Prepend(@"""ownerid"""));
+
+        // Members of this file that write an owner onto their FIRST parameter — a create helper the row is handed to
+        // (CommunicationEnrichmentService.CreateReviewLogAsync(entity, …) resolves and applies the owner itself).
+        var ownerWritingHelpers = MemberDeclaration.Matches(code)
+            .Select(m => (Match: m, Signature: Regex.Match(code[m.Index..], @"\b(?<name>\w+)\s*\(\s*(?:[\w\.<>\?]+\s+)(?<param>\w+)\s*[,)]")))
+            .Where(x => x.Signature.Success
+                        && WritesOwnerOn(RegionAt(x.Match.Index), x.Signature.Groups["param"].Value, ownerKey, helpers: null))
+            .Select(x => x.Signature.Groups["name"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        foreach (var index in siteIndexes)
+        {
+            var region = RegionAt(index);
+            var statementEnd = code.IndexOf(';', index);
+            var construction = code[index..(statementEnd < 0 ? code.Length : statementEnd)];
+            var lead = code[Math.Max(0, index - 120)..index];
+            var assigned = Regex.Match(lead, @"\b(?<v>[A-Za-z_]\w*)\s*=\s*$");
+            var isPost = !construction.StartsWith("new", StringComparison.Ordinal)
+                         || construction.StartsWith("new HttpRequestMessage", StringComparison.Ordinal);
+
+            bool written;
+            if (Regex.IsMatch(construction, ownerKey))
+            {
+                written = true; // the construction's own initializer sets the owner
+            }
+            else if (isPost)
+            {
+                // A Web API POST: the row is a JSON payload built in the member — its owner bind must be there.
+                written = OwnerWrite.IsMatch(region);
+            }
+            else if (assigned.Success)
+            {
+                var v = assigned.Groups["v"].Value;
+                written = WritesOwnerOn(region, v, ownerKey, ownerWritingHelpers)
+                          || BuilderCallersWriteOwner(code, region, v, ownerKey, ownerWritingHelpers, RegionAt);
+            }
+            else
+            {
+                // An inline construction cannot be named afterwards, so its owner is either in its own initializer
+                // (handled above) or it is handed straight to an owner-writing call.
+                written = Regex.IsMatch(lead, @"(?:\bApply\w*Owner\w*|\.ApplyTo)\s*\(\s*$");
+            }
+
+            if (!written)
+                yield return $"    {fileName}:{SourceScan.LineOf(code, index)} — {table} created with no owner write on its row";
+        }
+    }
+
+    /// <summary>True when <paramref name="region"/> writes an owner onto the row variable <paramref name="v"/>.</summary>
+    private static bool WritesOwnerOn(string region, string v, string ownerKey, IReadOnlySet<string>? helpers)
+    {
+        var name = Regex.Escape(v);
+        if (Regex.IsMatch(region,
+                $@"\b{name}\s*\[\s*(?:{ownerKey})\s*\]\s*=|\.ApplyTo\s*\(\s*{name}\s*\)|\bApply\w*Owner\w*\s*\(\s*{name}\b"))
+        {
+            return true;
+        }
+
+        return helpers is { Count: > 0 }
+               && Regex.IsMatch(region, $@"\b(?:{string.Join("|", helpers.Select(Regex.Escape))})\s*\(\s*{name}\b");
+    }
+
+    /// <summary>
+    /// A BUILDER member — one that returns the row it constructs (<c>return v;</c>) without owning it — is acceptable
+    /// only when EVERY caller of it in the file writes the owner onto what it receives
+    /// (<c>var row = BuildRow(…); owner.ApplyTo(row);</c>). A builder nobody calls fails.
+    /// </summary>
+    private static bool BuilderCallersWriteOwner(
+        string code, string region, string v, string ownerKey, IReadOnlySet<string> helpers, Func<int, string> regionAt)
+    {
+        if (!Regex.IsMatch(region, $@"\breturn\s+{Regex.Escape(v)}\s*;"))
+            return false;
+
+        var builder = Regex.Match(region, @"^[ \t]*(?:public|internal|private|protected)\b[^;=\n]*?\b(?<name>\w+)\s*\(",
+            RegexOptions.Multiline);
+        if (!builder.Success)
+            return false;
+
+        var calls = Regex.Matches(code,
+            $@"\b(?<w>[A-Za-z_]\w*)\s*=\s*(?:await\s+)?{Regex.Escape(builder.Groups["name"].Value)}\s*\(");
+        return calls.Count > 0 && calls.All(c => WritesOwnerOn(regionAt(c.Index), c.Groups["w"].Value, ownerKey, helpers));
+    }
+
+    /// <summary>(file, table) → the character index of each create site.</summary>
+    private static Dictionary<(string File, string Table), List<int>> ScanSiteIndexes(IReadOnlyDictionary<string, string> files)
     {
         // Constants are resolved within the file first, then across the server (a qualified ComposeService.X).
         var globalConsts = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -488,7 +758,7 @@ public class RecordOwnerAssignmentCensusTests
                 var key = (fileName, table);
                 if (!sites.TryGetValue(key, out var list))
                     sites[key] = list = new List<int>();
-                list.Add(SourceScan.LineOf(code, index));
+                list.Add(index);
             }
 
             foreach (Match m in EntityCreate.Matches(code))

@@ -146,7 +146,7 @@ internal sealed class UpdateRecordActionCore
         // RecordOwnerUnresolvedException (ActionSeam returns it as a typed failure; the node executor fails the node).
         // The resolver is a singleton; it is resolved from the scope factory because this core's constructor is
         // frozen (task 031).
-        var parentChanges = ParentChangesOf(input);
+        var parentChanges = ParentChangesOf(input, updatePayload);
         if (parentChanges.Count == 0)
         {
             await Patch(cancellationToken);
@@ -178,19 +178,39 @@ internal sealed class UpdateRecordActionCore
     /// owner follows its parents (<see cref="RecordOwnershipResolver.IsReparentableChild"/>). The column is the
     /// lookup's attribute name, lower-cased (the navigation-property spelling the bind uses differs only in case).
     /// </summary>
-    private static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesOf(UpdateRecordActionInput input)
+    /// <remarks>
+    /// Every value the PATCH writes as <c>null</c> is a candidate CLEAR (task 146 verifier item 8): a field mapping can
+    /// clear a lookup (<c>"sprk_Matter@odata.bind": null</c>, or an empty rendered value), which moves the child OUT of
+    /// that parent and must re-derive its owner like a move to another parent. This core cannot tell a cleared lookup
+    /// from a cleared text column, so it passes them all; the resolver reads the row and ignores a null for a column
+    /// that holds no parent.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesOf(
+        UpdateRecordActionInput input, IReadOnlyDictionary<string, object?> payload)
     {
         var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
-        if (input.Lookups is not { Count: > 0 } || !RecordOwnershipResolver.IsReparentableChild(input.EntityLogicalName))
+        if (!RecordOwnershipResolver.IsReparentableChild(input.EntityLogicalName))
             return changes;
 
-        foreach (var lookup in input.Lookups)
+        foreach (var lookup in input.Lookups ?? [])
         {
             if (RecordOwnershipResolver.IsOwnershipParent(lookup.TargetEntity)
                 && Guid.TryParse(lookup.RenderedTargetId, out var targetId) && targetId != Guid.Empty)
             {
                 changes[lookup.Field.ToLowerInvariant()] = new Microsoft.Xrm.Sdk.EntityReference(lookup.TargetEntity, targetId);
             }
+        }
+
+        const string bindSuffix = "@odata.bind";
+        foreach (var (key, value) in payload)
+        {
+            if (value is not null || string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = key.EndsWith(bindSuffix, StringComparison.OrdinalIgnoreCase)
+                ? key[..^bindSuffix.Length]
+                : key;
+            changes.TryAdd(column.ToLowerInvariant(), null);
         }
 
         return changes;

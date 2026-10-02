@@ -477,6 +477,33 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
     {
+        var payload = BuildEventUpdatePayload(request);
+
+        if (payload.Count == 0)
+        {
+            _logger.LogDebug("No fields to update for event {Id}", id);
+            return;
+        }
+
+        _logger.LogInformation("Updating event: {Id}", id);
+
+        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogDebug("Event updated: {Id}", id);
+    }
+
+    /// <summary>
+    /// The PATCH body of an event update: only the fields the request sets. A regarding change writes the denormalized
+    /// regarding text fields AND the entity-specific regarding lookups
+    /// (<see cref="UpdateEventRequest.RegardingLookupWrites"/>) — the lookups the BFF re-derives the event's owner from
+    /// (unified-access-control-r2 task 146 r1, verifier item 2: the update used to write only the text, so the owner
+    /// followed a lookup that was never written). A lookup is bound by its live navigation-property name and entity set;
+    /// a clear binds <c>null</c>.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildEventUpdatePayload(UpdateEventRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
 
         var payload = new Dictionary<string, object?>();
 
@@ -508,18 +535,15 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_regardingrecordname"] = request.RegardingRecordName;
         }
 
-        if (payload.Count == 0)
+        foreach (var (recordType, recordId) in request.RegardingLookupWrites())
         {
-            _logger.LogDebug("No fields to update for event {Id}", id);
-            return;
+            var navigationProperty = RegardingRecordType.GetEventNavigationPropertyName(recordType)!;
+            payload[$"{navigationProperty}@odata.bind"] = recordId is { } target
+                ? $"/{RegardingRecordType.GetEntitySetName(recordType)}({target})"
+                : null;
         }
 
-        _logger.LogInformation("Updating event: {Id}", id);
-
-        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        _logger.LogDebug("Event updated: {Id}", id);
+        return payload;
     }
 
     public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)

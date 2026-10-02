@@ -665,6 +665,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var (senderParticipant, senderEmail, senderDisplayName) =
             await ResolveMessageSenderAsync(httpContext, correlationId, ct);
 
+        // Task 146 r1 (verifier item 10): the message's record — its filing and OWNER — is prepared BEFORE it is sent: a
+        // refusal is a 409 and nothing is sent or created; a fault is the request's 5xx. Deciding the owner after the send
+        // left a delivered message with no record (and, for chat, an echo that would persist it UNFILED) behind a success
+        // response.
+        var preparedRecord = await BuildMessageDataverseRecordAsync(request, senderEmail, correlationId, ct);
+
         try
         {
             // Dispatch by CommunicationType through the EXISTING dispatcher (ADR-045 — no second send path). The
@@ -690,8 +696,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             Guid? communicationId = null;
             try
             {
-                communicationId = await CreateMessageDataverseRecordAsync(
-                    request, senderEmail, sendResult, correlationId, ct);
+                // ACS transport ids (AS-BUILT schema names): the dedupe key + denormalized thread id — known only after
+                // the send. The sprk_communicationthread LOOKUP (grouping key) is set by task 040's resolver, NOT here.
+                if (!string.IsNullOrWhiteSpace(sendResult.ProviderMessageId))
+                    preparedRecord["sprk_acsmessageid"] = sendResult.ProviderMessageId;
+                if (!string.IsNullOrWhiteSpace(sendResult.ProviderThreadId))
+                    preparedRecord["sprk_acsthreadid"] = sendResult.ProviderThreadId;
+
+                communicationId = await CreatePreparedRecordAsync(preparedRecord, correlationId, ct);
             }
             catch (Exception dvEx)
             {
@@ -854,15 +866,16 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
-    /// Persists the outbound message as exactly one <c>sprk_communication</c> (type=Message, Direction=Outgoing),
-    /// recording the ACS correlation ids under the AS-BUILT schema names — <c>sprk_acsmessageid</c> (the
-    /// echo-dedup key) and <c>sprk_acsthreadid</c>. Mirrors <see cref="Channels.MessagingIngestor"/>'s persist
-    /// shape for the inbound direction so both directions land one comparable record.
+    /// Builds — BEFORE the send — the one <c>sprk_communication</c> (type=Message, Direction=Outgoing) the outbound
+    /// message persists as, with its filing and owner decided (task 146 r1). The caller adds the ACS correlation ids
+    /// after the send under the AS-BUILT schema names — <c>sprk_acsmessageid</c> (the echo-dedup key) and
+    /// <c>sprk_acsthreadid</c> — and creates it. Mirrors <see cref="Channels.MessagingIngestor"/>'s persist shape for
+    /// the inbound direction so both directions land one comparable record.
     /// </summary>
-    private async Task<Guid> CreateMessageDataverseRecordAsync(
+    /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
+    private async Task<DataverseEntity> BuildMessageDataverseRecordAsync(
         SendCommunicationRequest request,
         string senderEmail,
-        Channels.ChannelSendResult sendResult,
         string correlationId,
         CancellationToken ct)
     {
@@ -884,13 +897,6 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_correlationid"] = correlationId
         };
 
-        // ACS transport ids (AS-BUILT schema names): the dedupe key + denormalized thread id. The
-        // sprk_communicationthread LOOKUP (grouping key) is set by task 040's resolver, NOT here.
-        if (!string.IsNullOrWhiteSpace(sendResult.ProviderMessageId))
-            communication["sprk_acsmessageid"] = sendResult.ProviderMessageId;
-        if (!string.IsNullOrWhiteSpace(sendResult.ProviderThreadId))
-            communication["sprk_acsthreadid"] = sendResult.ProviderThreadId;
-
         if (request.Cc is { Length: > 0 })
             communication["sprk_cc"] = string.Join("; ", request.Cc);
 
@@ -900,22 +906,27 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (!string.IsNullOrWhiteSpace(request.InReplyToMessageId))
             communication["sprk_inreplyto"] = request.InReplyToMessageId;
 
-        // Reply regarding inheritance (UAT R4 D12-1 / task 124) — a Message reply/forward inherits the
-        // parent message's regarding the same way email does; copy before explicit associations.
-        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
-            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+        // Reply regarding inheritance (task 124) + primary association (ADR-024 — same mechanism as email), then the
+        // owner over every parent now on the row (task 146): its parents' team; an unfiled message keeps its creator
+        // (E1/E2). A refusal is a 409 BEFORE the send.
+        var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct);
+        owner.ApplyTo(communication);
 
-        // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
-        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
+        return communication;
+    }
 
-        // Task 146: owned by its parents' team (an unfiled message keeps its creator — E1/E2), set before the create.
-        await ApplyCommunicationOwnerAsync(communication, ct);
-
+    /// <summary>
+    /// Creates an outbound <c>sprk_communication</c> prepared before the send (task 146 r1), stamping the send time.
+    /// Best-effort at its call sites, as the record step always was: the message has already been sent.
+    /// </summary>
+    private async Task<Guid> CreatePreparedRecordAsync(DataverseEntity communication, string correlationId, CancellationToken ct)
+    {
+        communication["sprk_sentat"] = DateTimeOffset.UtcNow.DateTime;
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
         _logger.LogInformation(
-            "Persisted outbound message | CommunicationId: {RecordId}, AcsMessageId: {AcsMessageId}, AcsThreadId: {AcsThreadId}, CorrelationId: {CorrelationId}",
-            recordId, sendResult.ProviderMessageId, sendResult.ProviderThreadId, correlationId);
+            "Dataverse communication record created | Id: {RecordId}, Type: {Type}, CorrelationId: {CorrelationId}",
+            recordId, communication.GetAttributeValue<OptionSetValue>("sprk_communicationtype")?.Value, correlationId);
 
         return recordId;
     }
@@ -1178,6 +1189,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 });
         }
 
+        // Step 2c (task 146 r1, verifier item 10): the communication's record — its filing and OWNER — is prepared BEFORE
+        // the email is sent. A refusal is a 409 and nothing is sent or created; a fault is the request's 5xx. Deciding
+        // the owner after the send (in the best-effort record step) answered success for a delivered email that had no
+        // record.
+        var preparedRecord = await BuildDataverseRecordAsync(request, senderResult, correlationId, cancellationToken);
+
         // Step 3+4: Send via the email channel seam (dispatch by CommunicationType — ADR-045 rule 4).
         // The sender owns Graph message construction, transport, and provider-error mapping; a provider
         // failure surfaces as SdapProblemException (GRAPH_SEND_FAILED) and propagates unchanged.
@@ -1219,7 +1236,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             Guid? communicationId = null;
             try
             {
-                communicationId = await CreateDataverseRecordAsync(request, senderResult, correlationId, cancellationToken);
+                communicationId = await CreatePreparedRecordAsync(preparedRecord, correlationId, cancellationToken);
             }
             catch (Exception dvEx)
             {
@@ -1508,6 +1525,10 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             correlationId,
             userEmail);
 
+        // Step 2c (task 146 r1, verifier item 10): the record — its filing and OWNER — is prepared BEFORE the send: a
+        // refusal is a 409 and nothing is sent or created; a fault is the request's 5xx.
+        var preparedRecord = await BuildDataverseRecordForUserAsync(request, userEmail, userObjectId, correlationId, ct);
+
         // Step 3+4: Send via the email channel seam in user (OBO) mode — dispatch by CommunicationType.
         // The sender resolves the OBO Graph client and sends as /me; provider failures surface as
         // SdapProblemException (GRAPH_SEND_FAILED, sendMode=User) and propagate unchanged.
@@ -1533,8 +1554,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             Guid? communicationId = null;
             try
             {
-                communicationId = await CreateDataverseRecordForUserAsync(
-                    request, userEmail, userObjectId, correlationId, ct);
+                communicationId = await CreatePreparedRecordAsync(preparedRecord, correlationId, ct);
             }
             catch (Exception dvEx)
             {
@@ -1757,10 +1777,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
-    /// Creates a Dataverse sprk_communication record for user-mode sends.
-    /// Sets sprk_from to user's email and sprk_sentby to user's Azure AD object ID.
+    /// Builds — BEFORE the send — the Dataverse sprk_communication record for a user-mode send, with its filing and
+    /// owner decided (task 146 r1). Sets sprk_from to user's email and sprk_sentby to user's Azure AD object ID.
     /// </summary>
-    private async Task<Guid> CreateDataverseRecordForUserAsync(
+    /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
+    private async Task<DataverseEntity> BuildDataverseRecordForUserAsync(
         SendCommunicationRequest request,
         string userEmail,
         string? userObjectId,
@@ -1826,26 +1847,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
 
-        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — see the shared-mailbox
-        // create path; copies the parent's regarding onto this new draft before explicit associations.
-        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
-            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+        // Reply/Reply All/Forward regarding inheritance (task 124) + primary association, then the owner over every parent
+        // now on the row (task 146): its parents' team; unfiled keeps its creator (E1). A refusal is a 409 BEFORE the send.
+        var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct);
+        owner.ApplyTo(communication);
 
-        // Map primary association (regarding lookup + denormalized fields)
-        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
-
-        // Task 146: owned by its parents' team (unfiled keeps its creator — E1), set before the create.
-        await ApplyCommunicationOwnerAsync(communication, ct);
-
-        var recordId = await _genericEntityService.CreateAsync(communication, ct);
-
-        _logger.LogInformation(
-            "Dataverse communication record created (user mode) | Id: {RecordId}, UserEmail: {UserEmail}, CorrelationId: {CorrelationId}",
-            recordId,
-            userEmail,
-            correlationId);
-
-        return recordId;
+        return communication;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1853,18 +1860,31 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Sets the owner of a <c>sprk_communication</c> about to be created: the team the ONE resolver names over every
-    /// parent lookup now on the row (the regarding, the FR-26 stamps, an inherited reply regarding) — the named Secure
-    /// team when any is secure. An UNFILED communication keeps its creator (escalation E1,
-    /// <see cref="Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator"/>): its per-user master thread is keyed
-    /// on the message's owning user, and Direct-thread privacy rests on per-participant shares of an app-owned row.
+    /// Files an outbound communication BEFORE it is sent (task 146 r1, verifier item 10) — the inherited reply regarding,
+    /// then the primary association (regarding lookup, FR-26 stamp, denormalized fields) — and resolves its OWNER: the
+    /// team the ONE resolver names over every parent lookup now on the row, the named Secure team when any is secure. An
+    /// UNFILED communication keeps its creator (escalation E1,
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator"/>): its per-user master thread is keyed on
+    /// the message's owning user, and Direct-thread privacy rests on per-participant shares of an app-owned row. The
+    /// caller writes the answer onto the row (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.ApplyTo"/>).
     /// </summary>
-    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException">
-    /// The communication is filed but no owner resolves. Thrown BEFORE the create, so nothing is written; every
-    /// send path's existing non-fatal record-step catch logs it and the response carries no communication id.
+    /// <exception cref="SdapProblemException">
+    /// 409 with the stable <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/> code when the communication
+    /// is filed but no owner resolves — NOTHING has been sent or written. (A core-ancestor derivation failure is this
+    /// class's existing 502, also before the send.) A Dataverse fault during resolution propagates as the request's 5xx.
     /// </exception>
-    private async Task ApplyCommunicationOwnerAsync(DataverseEntity communication, CancellationToken ct)
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveOutboundOwnerAsync(
+        DataverseEntity communication, SendCommunicationRequest request, string correlationId, CancellationToken ct)
     {
+        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — copy the parent's regarding BEFORE
+        // mapping any explicit association, so an explicitly-supplied association still wins on its field
+        // (CopyRegardingFromSourceAsync skips already-set fields).
+        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
+            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+
+        // Map primary association (regarding lookup + FR-26 stamp + denormalized fields)
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
+
         var owner = await _ownership.ResolveOwnerAsync(
             Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(communication) with
             {
@@ -1873,10 +1893,23 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ct);
 
         if (owner.IsRefused)
-            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", owner);
+        {
+            _logger.LogWarning(
+                "Outbound communication REFUSED before the send: no owner ({Code}: {Reason}) | CorrelationId: {CorrelationId}",
+                owner.RefusalCode, owner.Reason, correlationId);
+            throw new SdapProblemException(
+                code: owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                title: "Record owner unresolved",
+                detail: $"The message was not sent: {owner.Reason}.",
+                statusCode: 409,
+                extensions: new Dictionary<string, object>
+                {
+                    ["correlationId"] = correlationId,
+                    ["reasonCode"] = owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                });
+        }
 
-        if (owner.IsOwned)
-            communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+        return owner;
     }
 
     /// <summary>
@@ -1937,9 +1970,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     }
 
     /// <summary>
-    /// Creates a Dataverse sprk_communication record to track the sent email.
+    /// Builds — BEFORE the send — the Dataverse sprk_communication record that tracks a shared-mailbox email, with its
+    /// filing and owner decided (task 146 r1).
     /// </summary>
-    private async Task<Guid> CreateDataverseRecordAsync(
+    /// <exception cref="SdapProblemException">409 owner refusal (nothing sent or written).</exception>
+    private async Task<DataverseEntity> BuildDataverseRecordAsync(
         SendCommunicationRequest request,
         ApprovedSenderResult sender,
         string correlationId,
@@ -1979,26 +2014,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             communication["sprk_attachmentcount"] = request.AttachmentDocumentIds.Length;
         }
 
-        // Reply/Reply All/Forward regarding inheritance (UAT R4 D12-1 / task 124) — copy the parent's
-        // regarding onto this new draft BEFORE mapping any explicit association, so an explicitly-supplied
-        // association still wins on its field (CopyRegardingFromSourceAsync skips already-set fields).
-        if (request.InheritRegardingFromCommunicationId is { } srcCommId)
-            await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
+        // Reply/Reply All/Forward regarding inheritance (task 124) + primary association (regarding lookup, FR-26 stamps,
+        // denormalized fields), then the owner over every parent now on the row (task 146): its parents' team; unfiled
+        // keeps its creator (E1). A refusal is a 409 BEFORE the send.
+        var owner = await ResolveOutboundOwnerAsync(communication, request, correlationId, ct);
+        owner.ApplyTo(communication);
 
-        // Map primary association (regarding lookup + denormalized fields)
-        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
-
-        // Task 146: owned by its parents' team (unfiled keeps its creator — E1), set before the create.
-        await ApplyCommunicationOwnerAsync(communication, ct);
-
-        var recordId = await _genericEntityService.CreateAsync(communication, ct);
-
-        _logger.LogInformation(
-            "Dataverse communication record created | Id: {RecordId}, CorrelationId: {CorrelationId}",
-            recordId,
-            correlationId);
-
-        return recordId;
+        return communication;
     }
 
     /// <summary>

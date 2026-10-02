@@ -301,35 +301,8 @@ public sealed class IncomingCommunicationProcessor
         // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
         envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
 
-        // ── Step 3.7: EVALUATE the association BEFORE the create (unified-access-control-r2 task 146) ─────────
-        // The decision names the records this email will be filed to, and those decide its OWNER: an email filed to
-        // a secure matter is owned by the named Secure team from its very first write, never visible in between.
-        // Evaluation is non-fatal exactly as before (NFR-06): a failure leaves the email unfiled.
-        AssociationDecision? decision = null;
-        try
-        {
-            decision = await _associationResolver.EvaluateAsync(
-                envelope, new AssociationContext { Account = account }, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Association evaluation failed (non-fatal) | GraphMessageId: {GraphMessageId}",
-                graphMessageId);
-        }
-
-        // ── Step 3.8: OWNER (task 146; owner round 3 amendment R3 — "never create a record nobody can see") ──
-        // Filed → the team the ONE resolver names over the decision's records (secure-if-any). Unfiled → the creator
-        // (E1: inbound mail has no acting user and is never dropped). REFUSED — a named record unreadable, flagged
-        // secure but not isolated, or its team missing — throws BEFORE anything is written: the job retries
-        // transient conditions, and at its last attempt the email is held in the dead-letter queue and administrators
-        // are alerted (IncomingCommunicationJobHandler). A Dataverse fault propagates the same way.
-        var owner = await _ownership.ResolveOwnerAsync(IncomingAssociationResolver.OwnershipContextFor(decision), ct);
-        if (owner.IsRefused)
-        {
-            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", owner);
-        }
+        // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
+        var (decision, owner) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
 
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
@@ -382,21 +355,18 @@ public sealed class IncomingCommunicationProcessor
         // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
         // The row was created with the owner this decision resolved (task 146), so this writes only the regarding
         // fields, status and provenance — no reparent re-derivation is needed.
-        if (decision is not null)
+        try
         {
-            try
-            {
-                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
-            }
-            catch (Exception ex)
-            {
-                // Association resolution failure is non-fatal
-                _logger.LogWarning(
-                    ex,
-                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
-                    "GraphMessageId: {GraphMessageId}",
-                    communicationId, graphMessageId);
-            }
+            await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+        }
+        catch (Exception ex)
+        {
+            // Association resolution failure is non-fatal
+            _logger.LogWarning(
+                ex,
+                "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                "GraphMessageId: {GraphMessageId}",
+                communicationId, graphMessageId);
         }
 
         // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
@@ -651,6 +621,60 @@ public sealed class IncomingCommunicationProcessor
                 mailboxEmail);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Steps 3.7 + 3.8 of <see cref="ProcessAsync"/> (unified-access-control-r2 task 146): EVALUATE the association
+    /// BEFORE the create, then decide the email's OWNER from it. The decision names the records the email will be filed
+    /// to, and those — with the FR-26 core-ancestor stamps derived from them (r1, verifier item 4) — decide the owner:
+    /// an email filed to a secure matter, or to an invoice/event/document under one, is owned by the named Secure team
+    /// from its very first write, never visible in between. Filed → the team the ONE resolver names (secure-if-any).
+    /// Unfiled → the creator (E1: inbound mail has no acting user and is never dropped).
+    /// </summary>
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException">
+    /// HOLD (owner round 3 amendment R3 — "never create a record nobody can see"), thrown BEFORE anything is written:
+    /// the owner is REFUSED (a named record unreadable, flagged secure but not isolated, its team missing), or — r1 —
+    /// the records the email is filed to cannot be DETERMINED (the evaluation or the stamp derivation failed;
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined"/>). The job retries, and at its
+    /// last attempt holds the email in the dead-letter queue and alerts administrators
+    /// (<c>IncomingCommunicationJobHandler</c>). Such a failure used to be swallowed into an UNFILED, creator-owned
+    /// email in an ordinary business unit — the exposure R3 forbids. Individual rungs stay defensive (a rung that
+    /// throws is a non-match, NFR-06); a Dataverse fault while resolving the owner itself propagates as a fault.
+    /// </exception>
+    internal async Task<(AssociationDecision Decision, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Owner)>
+        ResolveInboundFilingAsync(
+            NormalizedMessage envelope, CommunicationAccount? account, string graphMessageId, CancellationToken ct)
+    {
+        AssociationDecision decision;
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext ownershipContext;
+        try
+        {
+            decision = await _associationResolver.EvaluateAsync(
+                envelope, new AssociationContext { Account = account }, ct);
+            ownershipContext = await _associationResolver.OwnershipContextForNewRecordAsync(decision, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Association evaluation failed — the email's records cannot be determined, so it is HELD, not captured "
+                + "unfiled (task 146 / R3) | GraphMessageId: {GraphMessageId}",
+                graphMessageId);
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(
+                "sprk_communication",
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                    $"the records the email is filed to could not be determined ({ex.GetType().Name})"),
+                ex);
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(ownershipContext, ct);
+        if (owner.IsRefused)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", owner);
+        }
+
+        return (decision, owner);
     }
 
     /// <summary>

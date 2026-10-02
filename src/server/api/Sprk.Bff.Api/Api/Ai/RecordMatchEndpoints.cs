@@ -1,4 +1,5 @@
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.RecordMatching;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -26,18 +27,81 @@ public static class RecordMatchEndpoints
             .ProducesProblem(500);
 
         // POST /api/ai/document-intelligence/associate-record - Associate document with a record
+        //
+        // unified-access-control-r2 task 146 r1 (verifier item 1): associating FILES the document under the record — a
+        // reparent that re-derives its OWNER, moving it into or out of a secure record's named team. This route was
+        // authentication-only, so any signed-in user who knew a secure document's GUID could re-file it under an
+        // ordinary matter and hand it to that matter's business unit. Both ids come from the BODY, so the decision is
+        // declared by ResolveAssociateTargets and enforced by the body-declared per-record filter before the handler:
+        // Write on the document (the gate PUT /api/v1/documents/{id} carries) and AppendTo on the record it is filed to.
         group.MapPost("/associate-record", AssociateRecord)
+            .AddFinanceAuthorizationFilter(ResolveAssociateTargets)
             .WithName("AssociateRecord")
             .WithSummary("Associate a document with a Dataverse record")
             .WithDescription("Updates the Document record in Dataverse to associate it with the specified Matter, Project, or Invoice.")
             .Produces<AssociateRecordResponse>(StatusCodes.Status200OK)
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(404)
+            .ProducesProblem(409)
             .ProducesProblem(500);
 
         return app;
     }
+
+    /// <summary>
+    /// The per-record authorization of <c>associate-record</c> (task 146 r1, verifier item 1), evaluated AS THE CALLER on
+    /// the very ids the handler binds (the bound body argument): Write on the document, through the document path PUT
+    /// /api/v1/documents/{id} uses, and AppendTo (<c>entity.associate_document</c>) on the record it is filed to, whose
+    /// entity set comes from the ONE type → set table (<see cref="Filters.EntityAccessFilter"/>). An unreadable id or an
+    /// unsupported type is a 400 before any rights query.
+    /// </summary>
+    /// <remarks>Reuses the body-declared multi-check filter the finance routes established (CLAUDE.md §11: the one filter
+    /// that authorizes several BODY ids per route) rather than adding another.</remarks>
+    internal static Filters.FinanceAuthorizationTargets ResolveAssociateTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<AssociateRecordRequest>().FirstOrDefault();
+        if (request is null)
+            return Filters.FinanceAuthorizationTargets.Reject(AssociateValidationProblem("body", "A JSON request body is required."));
+
+        if (!Guid.TryParse(request.DocumentId, out var documentId) || documentId == Guid.Empty)
+            return Filters.FinanceAuthorizationTargets.Reject(AssociateValidationProblem("documentId", "DocumentId must be a GUID."));
+
+        if (!Guid.TryParse(request.RecordId, out var recordId) || recordId == Guid.Empty)
+            return Filters.FinanceAuthorizationTargets.Reject(AssociateValidationProblem("recordId", "RecordId must be a GUID."));
+
+        if (!Filters.EntityAccessFilter.TryResolveEntitySet(request.RecordType, out var targetSet))
+        {
+            return Filters.FinanceAuthorizationTargets.Reject(
+                AssociateValidationProblem("recordType", $"Unsupported record type: {request.RecordType}"));
+        }
+
+        return Filters.FinanceAuthorizationTargets.Authorize(
+            new Filters.FinanceAuthorizationCheck
+            {
+                Path = Filters.FinanceCheckPath.Document,
+                EntitySetName = Filters.FinanceAuthorizationFilter.DocumentEntitySet,
+                RecordId = documentId,
+                Operation = "write",
+                Source = "body.documentId",
+            },
+            new Filters.FinanceAuthorizationCheck
+            {
+                Path = Filters.FinanceCheckPath.Record,
+                EntitySetName = targetSet,
+                RecordId = recordId,
+                Operation = AssociateTargetOperation,
+                Source = "body.recordId",
+            });
+    }
+
+    /// <summary>The right associating costs on the TARGET record: AppendTo — the document is attached to it.</summary>
+    internal const string AssociateTargetOperation = "entity.associate_document";
+
+    private static IResult AssociateValidationProblem(string field, string message) =>
+        Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.ValidationProblem(
+            new Dictionary<string, string[]> { [field] = [message] });
 
     /// <summary>
     /// Find matching Dataverse records based on extracted document entities.

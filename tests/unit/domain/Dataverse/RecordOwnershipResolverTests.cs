@@ -570,7 +570,116 @@ public class RecordOwnershipResolverTests
         resolution.OwningTeamId.Should().Be(SecureNamedTeam);
     }
 
+    // ---- Content rows of a parent that is NOT team-owned but IS filed (task 146 r1, verifier item 3) ----
+
+    [Fact]
+    public async Task ResolveOwner_ForAContentRowOfAUserOwnedCommunicationFiledToASecureMatter_OwnsItByTheNamedTeam()
+    {
+        // A run-as-user / client-created / pre-146 communication: owned by its creator in an ordinary BU, but FILED to a
+        // secure matter. Its content (review logs, participants, attachments, archived documents) must not go to the
+        // creator — the parent's own filing decides.
+        var communicationId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_communication", communicationId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ContentOf("sprk_communication", communicationId), CancellationToken.None);
+
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Owned);
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAContentRowOfAUserOwnedCommunicationFiledToAnOrdinaryMatter_OwnsItByTheMattersTeam()
+    {
+        var communicationId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, isSecure: false, owningTeam: ChildTeam)
+            .WithRecord("sprk_communication", communicationId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ContentOf("sprk_communication", communicationId), CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam, "the filing decides, never the parent's creator");
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAContentRowOfAUserOwnedCommunicationFiledToAFlaggedButNotIsolatedProject_Refuses()
+    {
+        var communicationId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: true, owningTeam: ChildTeam)
+            .WithRecord("sprk_communication", communicationId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_regardingproject"] = new EntityReference("sprk_project", FlaggedProjectId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ContentOf("sprk_communication", communicationId), CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+    }
+
     // ---- Reparent ----
+
+    [Fact]
+    public async Task Reparent_WhenTheOnlySecureLookupIsClearedWithNull_ReassignsOutOfTheSecureTeam_ReadBack()
+    {
+        // Task 146 r1 (verifier item 8): clearing a lookup moves the child OUT of that parent exactly as setting another does.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_matter", MatterId, ChildBu)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new()
+                {
+                    ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+                    ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                });
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn(
+                    new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_description"] = null }),
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
+        directory.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("owningteam").Id
+            .Should().Be(ChildTeam, "read back");
+    }
+
+    [Fact]
+    public async Task Reparent_WhenTheChangeOnlyClearsColumnsThatHoldNoParent_WritesIt_AndDecidesNoOwner()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu)
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: GeneralTeam,
+                extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId) });
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = RecordReparent.ParentChangesWithClearsIn(
+                    new Dictionary<string, object?> { ["sprk_description"] = null }),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        applied.Should().BeTrue();
+        resolution.Outcome.Should().Be(RecordOwnerOutcome.Unchanged);
+        directory.Assignments.Should().BeEmpty("no parent changed, so the owner is not re-derived");
+    }
 
     [Fact]
     public async Task Reparent_WhenAChildMovesUnderASecureParent_AppliesTheChangeThenAssignsTheNamedTeam_ReadBack()

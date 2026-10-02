@@ -130,6 +130,44 @@ public class SecureChildOwnershipTests
     }
 
     [Fact]
+    public async Task Refile_ClearingTheOnlySecureLookupWithNull_ReassignsOutOfTheSecureTeam()
+    {
+        // Task 146 r1 (verifier item 8): a generic update that CLEARS the lookup moves the child out of its secure parent
+        // exactly as setting another parent does — it used to keep the Secure team (only EntityReference values counted).
+        var documentId = Guid.NewGuid();
+        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new()
+            {
+                ["sprk_project"] = new EntityReference("sprk_project", SecureProject),
+                ["sprk_matter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+            });
+        var (handler, writes) = UpdateHandler(world.Resolver());
+
+        await handler.UpdateAsync("sprk_document", documentId,
+            new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_documentdescription"] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        writes.Should().ContainSingle("the clear itself is written");
+        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
+    }
+
+    [Fact]
+    public async Task Refile_ClearingOnlyNonLookupColumns_WritesTheChange_AndReassignsNothing()
+    {
+        var documentId = Guid.NewGuid();
+        var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProject) });
+        var (handler, writes) = UpdateHandler(world.Resolver());
+
+        await handler.UpdateAsync("sprk_document", documentId,
+            new Dictionary<string, object?> { ["sprk_documentdescription"] = null },
+            ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
+
+        writes.Should().ContainSingle();
+        world.Assignments.Should().BeEmpty("no parent changed");
+    }
+
+    [Fact]
     public async Task Refile_OfARootsOwnLookups_NeverReassignsTheRoot()
     {
         // A root's ownership is provisioning's (task 144 / owner S6) — a generic update never re-owns it.

@@ -41,8 +41,12 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
         // Task 146: an EntityReference value onto a parent FILES a child table under a record — a reparent. The child's
         // owner is re-derived over every parent it will have (secure-if-any) BEFORE the write, and reassigned when it
         // moves. A root's own lookups never reassign it (provisioning owns a root's ownership).
+        //
+        // A NULL value may CLEAR a lookup — moving the child OUT of a parent — so every null is passed as a candidate
+        // clear (verifier item 8). This handler cannot tell a lookup from a text column; the resolver reads the row and
+        // treats a null for a column that holds no parent as no parent change (the write then decides no owner).
         var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
-            ? RecordReparent.ParentChangesIn(fields)
+            ? RecordReparent.ParentChangesWithClearsIn(fields)
             : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
         if (parentChanges.Count == 0)
         {

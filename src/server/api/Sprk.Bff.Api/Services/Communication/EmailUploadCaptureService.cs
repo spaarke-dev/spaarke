@@ -86,19 +86,31 @@ public sealed class EmailUploadCaptureService
 
             // ── Association EVALUATED BEFORE the create (task 146): rung 0 (ExplicitReferenceRung) treats the
             //    add-in save-pane selection as the authoritative regarding (CallerSuppliedRegarding). The decision's
-            //    records decide the OWNER, so a capture filed to a secure record is the named Secure team's from its
-            //    first write. Non-fatal, as before: a failed evaluation captures the email unfiled. ──
-            AssociationDecision? decision = null;
+            //    records — and the FR-26 core-ancestor stamps derived from them — decide the OWNER, so a capture filed to
+            //    a secure record is the named Secure team's from its first write.
+            //
+            //    r1 (verifier item 4): a failed evaluation or stamp derivation means the records — and so whether one is
+            //    secure — cannot be determined. It used to capture the email UNFILED and creator-owned; now the capture is
+            //    SKIPPED, this best-effort writer's refusal shape (the save proceeds as an archive, whose own owner the
+            //    Office save already resolved). ──
+            AssociationDecision decision;
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext ownershipContext;
             try
             {
                 decision = await _associationResolver.EvaluateAsync(envelope, context, ct);
+                ownershipContext = await _associationResolver.OwnershipContextForNewRecordAsync(decision, ct);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "Upload-capture association evaluation failed (non-fatal); capturing unfiled.");
+                _logger.LogWarning(
+                    ex,
+                    "Upload email capture SKIPPED for message {MessageId}: its records could not be determined, so it is "
+                    + "not captured unfiled ({Code}, task 146).",
+                    request.Email?.InternetMessageId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined);
+                return null;
             }
 
-            var owner = await _ownership.ResolveOwnerAsync(IncomingAssociationResolver.OwnershipContextFor(decision), ct);
+            var owner = await _ownership.ResolveOwnerAsync(ownershipContext, ct);
             if (owner.IsRefused)
             {
                 // Best-effort writer (NFR-04): a refusal is a SKIPPED capture — nothing is written, the save proceeds
@@ -136,19 +148,16 @@ public sealed class EmailUploadCaptureService
 
             // ── Association: apply the decision evaluated above to the row just created with its owner.
             //    Non-fatal — the record already exists. ──
-            if (decision is not null)
+            try
             {
-                try
-                {
-                    await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
-                        communicationId);
-                }
+                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
+                    communicationId);
             }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture

@@ -1004,8 +1004,10 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
     /// <summary>
     /// Task 146: the create routes resolve the to-do's owner from its root before writing. The scope tests here
-    /// assert the AUTHORIZATION gate, so the resolver answers every root with one team at its module boundary; the
-    /// ownership rules are pinned by RecordOwnershipResolverTests and the data-mutation SecureChildOwnershipTests.
+    /// assert the AUTHORIZATION gate, so the resolver answers every root with one team at its module boundary. The
+    /// ownership rules are pinned by RecordOwnershipResolverTests; the external routes' owners (to-do on each root type,
+    /// event, document upload — secure, ordinary and refused) by the data-mutation SecureChildOwnershipExternalTests,
+    /// which drives these same routes over the REAL resolver (task 146 r1, verifier item 7).
     /// </summary>
     public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
 

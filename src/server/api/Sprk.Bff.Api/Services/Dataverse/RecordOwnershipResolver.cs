@@ -224,10 +224,16 @@ public sealed record RecordOwnershipContext
 
     /// <summary>
     /// For a CONTENT row hanging off its primary target (a review log, a participant row, an attachment row of a
-    /// communication): when the target is not itself owned by a team — an unfiled communication that kept its
-    /// creator under <see cref="UnfiledOwnership.KeepCreator"/> — the content row keeps its creator too and the
-    /// answer is <see cref="RecordOwnerOutcome.Unchanged"/>. When the target IS team-owned, the row resolves
-    /// record-first from it like any child. Keeps a parent and its content rows owned alike.
+    /// communication). When the target IS team-owned, the row resolves record-first from it like any child. When the
+    /// target is NOT team-owned (it kept a user or application owner), the target's OWN parent lookups decide:
+    /// <list type="bullet">
+    /// <item>the target names no parent — an UNFILED row that kept its creator under
+    /// <see cref="UnfiledOwnership.KeepCreator"/> (E1) — so the content row keeps its creator too and the answer is
+    /// <see cref="RecordOwnerOutcome.Unchanged"/>;</item>
+    /// <item>the target IS filed (a run-as-user or client-created row, or one written before task 146) — so the content
+    /// row resolves from the records the TARGET is filed under, secure-if-any. A user-owned communication filed to a
+    /// secure matter must not hand its content to its creator in an ordinary business unit (task 146 verifier item 3).</item>
+    /// </list>
     /// </summary>
     public bool KeepCreatorUnlessTargetIsTeamOwned { get; init; }
 
@@ -311,9 +317,10 @@ public sealed record RecordOwnershipContext
     /// <summary>
     /// The context for a CONTENT row created under <paramref name="parentEntityLogicalName"/> — an attachment, a
     /// participant, a review log, an archived document of a communication (task 146). Record-first from the parent
-    /// when it is team-owned (so a secure parent's content is the named Secure team's), and
-    /// <see cref="RecordOwnerOutcome.Unchanged"/> — the creator — while the parent is still an unfiled row that kept
-    /// its own creator (E1).
+    /// when it is team-owned (so a secure parent's content is the named Secure team's); from the records the parent is
+    /// filed under when the parent kept a user or application owner but IS filed; and
+    /// <see cref="RecordOwnerOutcome.Unchanged"/> — the creator — only while the parent is an UNFILED row that kept its
+    /// own creator (E1). See <see cref="KeepCreatorUnlessTargetIsTeamOwned"/>.
     /// </summary>
     public static RecordOwnershipContext ContentOf(string parentEntityLogicalName, Guid parentId) => new()
     {
@@ -334,7 +341,11 @@ public sealed record RecordReparent
 
     /// <summary>
     /// The lookups the change writes: column → new parent, or <c>null</c> for a column the change CLEARS. Entries
-    /// whose value is not an ownership parent are ignored (the row's other columns are not parents).
+    /// whose value is not an ownership parent are ignored (the row's other columns are not parents). A <c>null</c>
+    /// entry for a column that holds no ownership parent on the row is not a parent change either; when the change
+    /// neither sets a parent nor clears one the row holds, <see cref="IRecordOwnershipResolver.ReparentAsync"/> writes
+    /// the change and makes no ownership decision (verifier item 8 — a writer may pass every null it writes without
+    /// knowing which of them are lookups).
     /// </summary>
     public required IReadOnlyDictionary<string, EntityReference?> ParentChanges { get; init; }
 
@@ -369,6 +380,28 @@ public sealed record RecordReparent
             {
                 changes[column] = reference.Id == Guid.Empty ? null : reference;
             }
+        }
+
+        return changes;
+    }
+
+    /// <summary>
+    /// <see cref="ParentChangesIn{TValue}"/> plus every column the payload CLEARS: a <c>null</c> value is entered as a
+    /// <c>null</c> change, because a generic update cannot tell a cleared lookup from a cleared text column — the row
+    /// can (<see cref="IRecordOwnershipResolver.ReparentAsync"/> reads it, and a null for a column that holds no parent
+    /// is no parent change). Task 146 verifier item 8: a child moved OUT of its secure parent by clearing the lookup
+    /// must be re-owned like one moved by setting another.
+    /// </summary>
+    public static IReadOnlyDictionary<string, EntityReference?> ParentChangesWithClearsIn<TValue>(
+        IEnumerable<KeyValuePair<string, TValue>> fields)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        var pairs = fields.ToArray();
+        var changes = new Dictionary<string, EntityReference?>(ParentChangesIn(pairs), StringComparer.OrdinalIgnoreCase);
+        foreach (var (column, value) in pairs)
+        {
+            if (value is null && !string.IsNullOrWhiteSpace(column) && !changes.ContainsKey(column))
+                changes[column] = null;
         }
 
         return changes;
@@ -413,7 +446,9 @@ public enum RecordOwnerOutcome
     /// <summary>
     /// The context opted in (<see cref="UnfiledOwnership.KeepCreator"/> or
     /// <see cref="RecordOwnershipContext.KeepCreatorUnlessTargetIsTeamOwned"/>) and the row keeps its creating
-    /// identity; the writer leaves <c>ownerid</c> unset. Never returned to a context that did not opt in.
+    /// identity; the writer leaves <c>ownerid</c> unset. Never returned to a CREATE context that did not opt in. A
+    /// reparent also answers it when the change touches no parent the row is filed under (the change was written, the
+    /// owner was left as it was).
     /// </summary>
     Unchanged,
 }
@@ -444,6 +479,13 @@ public static class RecordOwnerRefusal
 
     /// <summary>The row being reparented does not exist.</summary>
     public const string RecordMissing = "record_owner_record_missing";
+
+    /// <summary>
+    /// The records a new row is filed under could not be DETERMINED — the association evaluation or a core-ancestor
+    /// derivation failed before the owner could be asked. Inbound mail is HELD on it (owner amendment R3: "secure parent
+    /// cannot be determined → held"), never created unfiled in its place (task 146 verifier item 4).
+    /// </summary>
+    public const string ParentUndetermined = "record_owner_parent_undetermined";
 }
 
 /// <summary>The answer to an ownership question: a team, a reasoned refusal, or (opted-in only) unchanged.</summary>
@@ -488,9 +530,10 @@ public sealed record RecordOwnerResolution(
 /// </summary>
 public sealed class RecordOwnerUnresolvedException : InvalidOperationException
 {
-    public RecordOwnerUnresolvedException(string entityLogicalName, RecordOwnerResolution resolution)
+    public RecordOwnerUnresolvedException(
+        string entityLogicalName, RecordOwnerResolution resolution, Exception? innerException = null)
         : base($"No owner could be resolved for a new {entityLogicalName}, so it was not written: "
-               + $"{resolution.Reason} ({resolution.RefusalCode}).")
+               + $"{resolution.Reason} ({resolution.RefusalCode}).", innerException)
     {
         EntityLogicalName = entityLogicalName;
         RefusalCode = resolution.RefusalCode ?? RecordOwnerRefusal.NoOwnerSource;
@@ -708,16 +751,29 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
         }
 
+        // A change that sets a parent, or clears one the row holds, is a parent change. A null for a column that holds
+        // no parent (a cleared text column a generic writer could not tell from a lookup) is not.
+        var changesAParent = request.InheritedParents.Any(p => p.IsSpecified && IsOwnershipParent(p.EntityLogicalName));
         foreach (var (column, value) in request.ParentChanges)
         {
             if (value is null || value.Id == Guid.Empty)
             {
-                byColumn.Remove(column);
+                changesAParent |= byColumn.Remove(column);
             }
             else if (IsOwnershipParent(value.LogicalName))
             {
                 byColumn[column] = new RecordOwnershipParent(value.LogicalName, value.Id);
+                changesAParent = true;
             }
+        }
+
+        if (!changesAParent)
+        {
+            // Nothing the row is filed under changes, so its owner does not either: write the change and decide nothing
+            // (task 146 verifier item 8 — the writer passed every null it writes; none of them was a parent).
+            await applyChange(ct).ConfigureAwait(false);
+            return RecordOwnerResolution.Unchanged(
+                $"the change to {request.EntityLogicalName} {request.RecordId:D} sets no parent and clears none it holds");
         }
 
         var parents = byColumn.Values
@@ -858,12 +914,36 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             facts.Add(fact);
         }
 
-        // A content row of a parent that is not team-owned keeps its creator, as its parent did (E1).
+        // A content row of a parent that is not team-owned: the PARENT's own filing decides (task 146 verifier item 3).
+        // Its owner says nothing about secrecy — a run-as-user, client-created or pre-146 communication is user-owned
+        // even when it is filed to a secure matter — so the parent's own parent lookups are read. Filed → the content
+        // row resolves from what the parent is filed under (secure-if-any), never the parent's creator. Unfiled → the
+        // content row keeps its creator, as its parent did (E1).
         if (context.KeepCreatorUnlessTargetIsTeamOwned && !facts[0].HasOwningTeam)
         {
-            return RecordOwnerResolution.Unchanged(
-                $"the parent {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D} is not team-owned "
-                + "(an unfiled row that kept its creator, task 146 E1); its content row keeps its creator too");
+            var parentFiling = await ReadOwnershipParentsOfAsync(facts[0].Parent, ct).ConfigureAwait(false);
+            if (parentFiling is null)
+            {
+                return RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the parent {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D} could not be read");
+            }
+
+            var inherited = parentFiling
+                .Concat(facts.Skip(1).Select(f => f.Parent))
+                .Where(p => p != facts[0].Parent)
+                .Distinct()
+                .ToList();
+            if (inherited.Count == 0)
+            {
+                return RecordOwnerResolution.Unchanged(
+                    $"the parent {facts[0].Parent.EntityLogicalName} {facts[0].Parent.RecordId:D} is not team-owned and is "
+                    + "filed under nothing (an unfiled row that kept its creator, task 146 E1); its content row keeps its "
+                    + "creator too");
+            }
+
+            return await ResolveFromParentsAsync(
+                inherited, context with { KeepCreatorUnlessTargetIsTeamOwned = false }, ct).ConfigureAwait(false);
         }
 
         var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
@@ -896,6 +976,27 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The ownership parents <paramref name="row"/> is itself filed under — every ownership-parent lookup value it
+    /// carries (task 146 verifier item 3). Every column is read, for the reason <see cref="ReparentAsync"/> gives: a
+    /// row's parents are whatever lookups it carries, and a per-table column list is the guess this task forbids. The
+    /// read happens only for a CONTENT row whose parent is not team-owned. <c>null</c> when the row cannot be read; a
+    /// Dataverse fault propagates.
+    /// </summary>
+    private async Task<IReadOnlyList<RecordOwnershipParent>?> ReadOwnershipParentsOfAsync(
+        RecordOwnershipParent row, CancellationToken ct)
+    {
+        var query = new QueryExpression(row.EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(true),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition($"{row.EntityLogicalName}id", ConditionOperator.Equal, row.RecordId);
+        var entity = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return entity is null ? null : RecordOwnershipContext.ParentsOf(entity.Attributes);
     }
 
     /// <summary>

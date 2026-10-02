@@ -138,17 +138,29 @@ public sealed class IncomingAssociationResolver
     }
 
     /// <summary>
-    /// The ownership question for a communication filed by <paramref name="decision"/> (task 146): every record the
-    /// decision writes as a regarding is a parent (secure-if-any — a candidate secure matter makes the email the named
-    /// Secure team's, the fail-closed direction). With none, the communication keeps its creator (E1). Null decision
-    /// (evaluation failed) = unfiled.
+    /// The ownership question for a NEW communication that <paramref name="decision"/> will file (task 146): every
+    /// lookup <see cref="ApplyToNewRecordAsync"/> will write is a parent — each regarding the decision writes AND the
+    /// FR-26 core-ancestor stamps derived from them (secure-if-any: an email filed to an intermediate record — an
+    /// invoice, an event, a document — whose ancestor is a secure matter is the named Secure team's even while the
+    /// intermediate itself is not yet re-owned). With none, the communication keeps its creator (E1).
     /// </summary>
-    public static Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext OwnershipContextFor(AssociationDecision? decision)
+    /// <remarks>
+    /// r1 (verifier item 4): the stamps used to be derived only when the decision was APPLIED, after the owner had been
+    /// resolved from the regarding writes alone, so they never reached the resolver. The derivation here is the same one
+    /// <see cref="ApplyDecisionAsync"/> writes (<see cref="DeriveCoreAncestorStampsAsync"/>). A derivation failure THROWS
+    /// (NFR-01, fail closed) — the caller treats it as "the parent cannot be determined" (inbound: HELD; upload capture:
+    /// skipped), never as unfiled.
+    /// </remarks>
+    public async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext> OwnershipContextForNewRecordAsync(
+        AssociationDecision decision, CancellationToken ct)
     {
-        var parents = decision?.RegardingWrites.Values
+        ArgumentNullException.ThrowIfNull(decision);
+
+        var stamps = await DeriveCoreAncestorStampsAsync(Guid.Empty, decision, ct).ConfigureAwait(false);
+        var parents = decision.RegardingWrites.Values
             .OfType<EntityReference>()
-            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id))
-            ?? Enumerable.Empty<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>();
+            .Concat(stamps.Values)
+            .Select(r => new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(r.LogicalName, r.Id));
 
         return Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents) with
         {
@@ -429,8 +441,26 @@ public sealed class IncomingAssociationResolver
         AssociationDecision decision,
         CancellationToken ct)
     {
+        foreach (var (lookupAttribute, stamp) in await DeriveCoreAncestorStampsAsync(communicationId, decision, ct))
+        {
+            fields[lookupAttribute] = stamp;
+        }
+    }
+
+    /// <summary>
+    /// The FR-26 core-ancestor stamps the decision's CHILD-class regarding targets carry, keyed by the stamp's lookup
+    /// attribute — the fields <see cref="ApplyCoreAncestorStampsAsync"/> writes, and (task 146 r1) the extra parents
+    /// <see cref="OwnershipContextForNewRecordAsync"/> resolves the owner over. A core lookup a rung wrote explicitly is
+    /// never overwritten by a derived stamp. Throws on a derivation failure (NFR-01, fail closed).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, EntityReference>> DeriveCoreAncestorStampsAsync(
+        Guid communicationId,
+        AssociationDecision decision,
+        CancellationToken ct)
+    {
+        var stamps = new Dictionary<string, EntityReference>(StringComparer.OrdinalIgnoreCase);
         if (decision.RegardingWrites.Count == 0)
-            return;
+            return stamps;
 
         // Snapshot the lookups the rungs wrote explicitly - these are never overwritten below.
         var explicitLookups = new HashSet<string>(decision.RegardingWrites.Keys, StringComparer.OrdinalIgnoreCase);
@@ -460,9 +490,11 @@ public sealed class IncomingAssociationResolver
                 if (explicitLookups.Contains(stamp.LookupAttribute))
                     continue; // a rung asserted this core target directly - its evidence outranks inheritance
 
-                fields[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
+                stamps[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
             }
         }
+
+        return stamps;
     }
 
     /// <summary>
