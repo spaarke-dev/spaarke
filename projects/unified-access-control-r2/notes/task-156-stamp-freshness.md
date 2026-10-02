@@ -347,7 +347,11 @@ unseeded, which is the finding. Its items, and what this round did with each:
 to `sprk_recordtype_ref` (the live lookup sweep pinned in `ChildRecordContainerResolutionTests`). A PUT that sets the
 regarding type therefore most likely fails at Dataverse before the cascade is reached (the route answers 500). Not
 verified live: that would be a write. The wiring is correct for the day the pair write succeeds and costs nothing until
-then; fixing the pair write belongs to the event writer's owner.
+then; fixing the pair write belongs to the event writer's owner. Also observed on the same route, and also pre-existing:
+`PUT /api/v1/events/{id}` checks only that the caller is signed in (the group's `RequireAuthorization()`, no endpoint
+filter), and the update runs app-only (`DataverseWebApiService`, no impersonation). There is no per-record rights check
+on the event being changed. This is outside task 156 and is flagged for the endpoint's owner. The re-stamp added here
+writes only values derived from the data, never a value from the caller.
 
 **Item 13a — not closed in this round, and why.** Mirroring `IntermediateRootColumns` in
 `PolymorphicResolverService.deriveCoreAncestorStamps` is a change to the shared client library (`@spaarke/ui-components`).
@@ -421,9 +425,26 @@ Results:
 - Full BFF unit suite **Passed 13527 / Failed 0 / Skipped 54 (Total 13581)**; NetArchTest **337 / 337** (details and one
   caveat under "Tests" below).
 
-### Publish size (CLAUDE.md §10 item 4)
+### Publish size (CLAUDE.md §10 item 4) — measured 2026-10-02
 
-Recorded in the commit that follows this one: a fresh tree of a commit is needed to measure it.
+Method:
+- three FRESH exports (`git archive`) at short paths (`C:\w156r2m`, `C:\w156r2a`, `C:\w156r2b`), removed afterwards;
+- each published exactly as `scripts/Deploy-BffApi.ps1` does (`dotnet restore`, then
+  `dotnet publish -c Release -o deploy/api-publish --no-restore`);
+- each zipped with PowerShell `Compress-Archive`;
+- no `MSB3030`, and **212 files on every side**;
+- the full test suite was not running during the publishes.
+
+| Commit | Zip incl. PDBs | Zip excl. PDBs |
+|---|---|---|
+| `c726acd65` — origin/master today (it now includes batch 2, #1093, which this branch does not) | 45.54 MB (47 747 531 B) | 44.55 MB |
+| `a67263cc7` — task 156 after verifier round 1 | 45.52 MB (47 731 877 B) | 44.53 MB |
+| `aafe12ee7` — task 156 after verifier round 2 | 45.52 MB (47 731 757 B) | 44.53 MB |
+
+**This round: −120 bytes (0.00 MB).** The round-1 and round-2 commits differ only by this round's diff, so that pair isolates
+it. The comparison with master is not a clean isolation: master moved on (#1093), and the branch reads 0.02 MB smaller.
+The whole of task 156 remains +0.04 MB (round 1's base-to-branch measurement). Code only: no package, project reference
+or new assembly, so there is no new CVE surface.
 
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
@@ -439,7 +460,8 @@ package or plugin; every registration is unconditional (ADR-032: no Null-Object 
 | `container_ancestor_stale` (problem code) | `container_ancestor_unverifiable` means "cannot be compared"; `container_ancestor_unresolved` means "unknown / unreadable" | Reusing either would mis-classify the inbound retry (stale is transient — the re-stamp makes the retry succeed; unverifiable / unresolved-409 are permanent skips) | A stale email would be skipped permanently, losing its archive |
 
 **Publish size:** code only — no package, no new assembly reference. Measured in verifier round 1 from fresh short-path
-worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that section).
+worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that section). Verifier round 2 added −120 bytes
+(table in that section).
 
 ## Tests
 
@@ -458,8 +480,9 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
   suites **499 / 499** (filter in the verifier round 2 section); full BFF unit **Passed 13527 / Failed 0 / Skipped 54
   (Total 13581)**, which is round 1's 13516 + 11; NetArchTest **337 / 337**; 6 seeds, each red.
   - One honest caveat: the first full run, made while NetArchTest ran in parallel on the same machine, reported 1 failure
-    whose name the truncated console output did not keep. The re-run on its own was clean. Nothing in this round's diff
-    is timing-dependent.
+    whose name the truncated console output did not keep. The re-run on its own was clean, and so was the run at the
+    commit `aafe12ee7`, after the pre-commit formatter (13527 / 0 / 54 in 11 m 13 s; NetArchTest 337 / 337). Nothing in
+    this round's diff is timing-dependent.
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,
