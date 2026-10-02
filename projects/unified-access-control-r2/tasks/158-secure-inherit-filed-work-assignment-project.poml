@@ -49,7 +49,13 @@ Because the record is then a secure root, every existing secure rule applies to 
     <constraint source="owner">Fail closed (ADR-003). If the parent's flag cannot be read, refuse the create or re-file, or leave it to the job, rather than treat the record as not secure. The S5 invariant holds: a secured record always has at least one user who can see it (the creator share, via provisioning).</constraint>
     <constraint source="owner">No Dataverse plugins (ADR-002 / D-1). Securing happens in the BFF write paths, the transition path (task 148) and a BFF `IScheduledJob` registered via `AddScheduledJob&lt;&gt;` (ADR-036 / ADR-052). There is no hand-rolled timer.</constraint>
     <constraint source="project">Reuse the existing provisioning path (tasks 133 and 144). Do not write a second "make secure" implementation. `sprk_issecure` is locked by FLS (task 150) and changed only by the BFF secure/unsecure endpoints. Go through them.</constraint>
-    <constraint source="owner">Never auto-unsecure (owner round 6, 2026-10-02: "yes"). When the parent is unsecured, its secured work assignments and projects STAY secure. Unsecuring them is an explicit act by the people F3 allows (Full Access holders plus the creator). Report them in the unsecure response so the user can see what stayed secure.</constraint>
+    <constraint source="owner">Never auto-unsecure (owner round 6, 2026-10-02: "yes"). When the parent is unsecured, its secured work assignments and projects STAY secure by default.</constraint>
+    <constraint source="owner">"But the user can unsecure any related records" (owner round 6, 2026-10-02):
+- The parent's unsecure response LISTS the related records that stayed secure.
+- The same unsecure action accepts an OPTIONAL set of those related records to unsecure along with the parent. Each one is checked against F3 rights: Full Access holder or creator. Records failing the check are reported, not unsecured.
+- Any related record can also be unsecured on its own later, through the same endpoint.
+- The UI (the secure/unsecure ribbon flow, task 150) offers the list with a checkbox per record.
+Interpretation (owner-reversible): a related record whose parent is STILL secure cannot be unsecured. The unsecure endpoint refuses with a message naming the secure parent, because the round-6 rule (and the reconciliation job) would secure it again.</constraint>
     <constraint source="project">ADR-038 test bans. Prove each new guard bites by seeding. Drive at least one real route end to end.</constraint>
     <constraint source="project">Live Dataverse is read-only during development. The live gate below is run by the main session.</constraint>
   </constraints>
@@ -69,6 +75,7 @@ Because the record is then a secure root, every existing secure rule applies to 
     <criterion testable="true">The reconciliation job secures a row filed out-of-band within one run. A second run changes nothing, and a failed scan reports a failed run.</criterion>
     <criterion testable="true">Negative: an unreadable parent flag refuses the create or re-file, and nothing is written. A contact granted on such a work assignment gets only what FR-22 allows for a secure root, which is direct grants only.</criterion>
     <criterion testable="true">Unsecuring the parent does NOT unsecure the child.</criterion>
+    <criterion testable="true">Unsecuring a parent lists its related records that stayed secure. Passing a subset unsecures exactly those for which the caller holds F3 rights, and reports the rest as refused. A related record can be unsecured on its own once its parent is not secure. Unsecuring a related record whose parent is still secure is refused with a message that names the parent.</criterion>
     <criterion testable="true">Each new branch is proven to bite by seeding. The BFF unit suite and NetArchTest are green.</criterion>
     <criterion testable="false">MANUAL LIVE GATE (dev): file a new work assignment under the secure test project 65a3fab2. Confirm (read-only) that it is secure and owned by the named team, and that a non-admin user in a non-root BU with no share is DENIED on it.</criterion>
   </acceptance-criteria>
