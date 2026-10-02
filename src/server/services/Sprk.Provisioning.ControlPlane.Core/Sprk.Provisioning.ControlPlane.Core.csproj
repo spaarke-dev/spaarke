@@ -161,7 +161,7 @@
          via a probe-local ArmClient — no second credential chain, parity
          with the other Wave-G-2 ARM collaborators). -->
     <PackageReference Include="Azure.ResourceManager.Authorization" Version="1.1.4" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.2" />
 
     <!-- Azure.ResourceManager.Search / .ServiceBus / .Storage / .Redis —
          task 200 (Phase B) H4-shared source-service key-extraction SDK
