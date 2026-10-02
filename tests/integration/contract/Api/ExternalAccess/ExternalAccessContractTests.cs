@@ -1043,19 +1043,34 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
         return Task.FromResult<Guid?>(Guid.TryParse(contact, out var id) ? id : Guid.NewGuid());
     }
 
-        // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
-        // and fails CLOSED — every record would read as secure AND restricted and this double would
-        // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
-        // Task 136: X-Test-SecureProjects flags the named ids sprk_issecure (never Restricted).
-        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
-            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
-        {
-            var secure = ParseGuidHeader("X-Test-SecureProjects");
-            return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
-                recordIds.Distinct().ToDictionary(
-                    id => id,
-                    id => secure.Contains(id) ? new RootRecordFlags(IsSecure: true, IsRestricted: false) : RootRecordFlags.None));
-        }
+    // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
+    // and fails CLOSED — every record would read as secure AND restricted and this double would
+    // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
+    // Task 136: X-Test-SecureProjects flags the named ids sprk_issecure.
+    // Task 138: X-Test-RestrictedProjects / X-Test-LimitedProjects set sprk_accesspermission for the named ids
+    // (combinable with Secure). X-Test-RootFlags: "unreadable" answers RootRecordFlags.Unreadable for every
+    // id (a failed read); "absent" leaves every id OUT of the map (the non-flag-bearing-type shape).
+    public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        var mode = Header("X-Test-RootFlags");
+        if (string.Equals(mode, "absent", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(new Dictionary<Guid, RootRecordFlags>());
+
+        var unreadable = string.Equals(mode, "unreadable", StringComparison.OrdinalIgnoreCase);
+        var secure = ParseGuidHeader("X-Test-SecureProjects");
+        var restricted = ParseGuidHeader("X-Test-RestrictedProjects");
+        var limited = ParseGuidHeader("X-Test-LimitedProjects");
+        return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+            recordIds.Distinct().ToDictionary(
+                id => id,
+                id => unreadable
+                    ? RootRecordFlags.Unreadable
+                    : new RootRecordFlags(
+                        IsSecure: secure.Contains(id),
+                        IsRestricted: restricted.Contains(id),
+                        IsLimited: limited.Contains(id))));
+    }
 
     // Task 135 (C1): a CIAM caller is now composed by the unified evaluator, which also reads the contact's
     // organization memberships (the deny-veto subject) and each candidate's referenced organizations. Without
@@ -1111,13 +1126,15 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
             // converts at Collaborate — the level a bare id effectively resolved to before levels existed.
             MatterGrants = matters.Select(id => new ExternalRootGrant
             {
-                RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
+                RecordId = id,
+                AccessLevel = ExternalAccessLevel.Collaborate
             })
             .Concat(nullLevelMatters.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = null }))
             .ToList(),
             WorkAssignmentGrants = was.Select(id => new ExternalRootGrant
             {
-                RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
+                RecordId = id,
+                AccessLevel = ExternalAccessLevel.Collaborate
             })
             .Concat(nullLevelWas.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = null }))
             .ToList(),
@@ -1295,9 +1312,11 @@ public sealed class EntitledCallerRecordAccessProbe : CallerRecordAccessProbe
         // Write is all the delegation gate needs. The rest matter since task 063 made a share the INTERSECTION of the
         // requested level with the caller's OWN rights (owner 2026-09-16): an entitled caller must hold a full working
         // set, or these contract tests would silently be exercising the narrowing path instead of the contract. The
-        // narrowing itself is owned by InternalUserShareTests.
+        // narrowing itself is owned by InternalUserShareTests. Share joined the working set with task 139 (Collaborate and
+        // Full Access carry it), so without it every Collaborate share here would be narrowed.
         => Task.FromResult(
-            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete);
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
+            | AccessRights.Share);
 }
 
 /// <summary>
@@ -1345,6 +1364,9 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
     public List<string> CreatedEntitySets { get; } = new();
     public List<string> ContactUpdates { get; } = new();
 
+    /// <summary>Every entity set queried (task 138: a refused invite must not even look the Contact up).</summary>
+    public List<string> QueriedEntitySets { get; } = new();
+
     /// <summary>Every CREATE with its payload, so a test can read what was written (task 097: the expiry).</summary>
     public List<(string EntitySet, object Payload)> Creates { get; } = new();
 
@@ -1353,12 +1375,16 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
         ContactQueryResult = "[]";
         CreatedEntitySets.Clear();
         ContactUpdates.Clear();
+        QueriedEntitySets.Clear();
         Creates.Clear();
     }
 
     public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
         int? top = null, int? skip = null, CancellationToken cancellationToken = default)
-        => Task.FromResult(JsonSerializer.Deserialize<List<T>>(ContactQueryResult) ?? new List<T>());
+    {
+        QueriedEntitySets.Add(entitySetName);
+        return Task.FromResult(JsonSerializer.Deserialize<List<T>>(ContactQueryResult) ?? new List<T>());
+    }
 
     public override Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
     {

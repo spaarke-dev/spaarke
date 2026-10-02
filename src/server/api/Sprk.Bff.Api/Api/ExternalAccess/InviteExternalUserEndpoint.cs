@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -48,7 +49,11 @@ public static class InviteExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            // 422: the named record is Restricted, so no contact may be invited to it (task 138).
+            // 503: the record's access settings could not be read. Both before any Contact or CIAM write.
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -60,6 +65,7 @@ public static class InviteExternalUserEndpoint
     private static async Task<IResult> InviteExternalUserAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         IConfiguration configuration,
@@ -71,9 +77,30 @@ public static class InviteExternalUserEndpoint
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
 
-        // Note (task 070): ProjectId is NOT required — /invite only onboards (resolve-or-create Contact +
-        // CIAM account); it writes NO grant. The grant (and its root) is created separately by /grant or
-        // /invite-and-grant. The field is retained on the DTO for back-compat but no longer gates /invite.
+        // Note (task 070): /invite only onboards (resolve-or-create Contact + CIAM account); it writes NO grant.
+        // The grant is created separately by /grant or /invite-and-grant.
+        //
+        // Task 138: the request still names a record — DelegationRuleFilter refuses one that does not, before
+        // this handler runs — and inviting someone TO a Restricted record provisions an identity and emails a
+        // person who can never get access to it. So the record's access policy is checked here, before the
+        // Contact or the CIAM account is touched, with the same decision function the grant routes use. The
+        // invitee is a named contact, so only Restricted (or an unreadable policy) refuses; Secure and Limited
+        // admit named contacts.
+        var root = GrantExternalAccessEndpoint.ResolveGrantRoot(new GrantAccessRequest(
+            ContactId: Guid.Empty,      // irrelevant to root resolution
+            ProjectId: request.ProjectId,
+            AccessLevel: default,
+            ExpiryDate: null,
+            OrganizationId: null,
+            RecordType: request.RecordType,
+            RecordId: request.RecordId));
+        if (!root.Ok)
+            return ProblemDetailsHelper.ValidationError(root.Error!);
+
+        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            participations, root.Type, root.Id, GrantGranteeKind.Contact, logger, ct);
+        if (!policy.IsAllowed)
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
         logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
 
@@ -179,18 +206,13 @@ public static class InviteExternalUserEndpoint
         try
         {
             // Check if Contact already exists by email (and read any existing oid binding).
-            var existing = await dataverseClient.QueryAsync<ContactRow>(
-                ContactEntitySet,
-                filter: $"emailaddress1 eq '{request.Email.Replace("'", "''")}'",
-                select: "contactid,sprk_externalobjectid",
-                top: 1,
-                cancellationToken: ct);
+            var existing = await FindContactByEmailAsync(dataverseClient, request.Email, ct);
 
-            if (existing.Count > 0)
+            if (existing is { } found)
             {
                 logger.LogDebug("[EXT-INVITE] Found existing Contact {ContactId} for email {Email} (oid bound: {Bound})",
-                    existing[0].contactid, request.Email, !string.IsNullOrWhiteSpace(existing[0].sprk_externalobjectid));
-                return (existing[0].contactid, existing[0].sprk_externalobjectid);
+                    found.ContactId, request.Email, !string.IsNullOrWhiteSpace(found.ExistingOid));
+                return found;
             }
 
             // Create new Contact
@@ -212,6 +234,28 @@ public static class InviteExternalUserEndpoint
             logger.LogError(ex, "[EXT-INVITE] Failed to resolve or create Contact for email {Email}", request.Email);
             return (Guid.Empty, null);
         }
+    }
+
+    /// <summary>
+    /// The EXISTING Contact the onboarding seam would resolve for <paramref name="email"/>, READ-ONLY — or <c>null</c>
+    /// when none exists. The one email match: <see cref="ProvisionAsync"/> resolves through it, and
+    /// <c>/invite-and-grant</c> calls it BEFORE onboarding (task 139) so its never-lower and No Access checks judge
+    /// the same contact onboarding would use, without creating one. Exceptions propagate — a failed lookup must
+    /// never read as "no such contact".
+    /// </summary>
+    internal static async Task<(Guid ContactId, string? ExistingOid)?> FindContactByEmailAsync(
+        DataverseWebApiClient dataverseClient, string email, CancellationToken ct)
+    {
+        var existing = await dataverseClient.QueryAsync<ContactRow>(
+            ContactEntitySet,
+            filter: $"emailaddress1 eq '{email.Replace("'", "''")}'",
+            select: "contactid,sprk_externalobjectid",
+            top: 1,
+            cancellationToken: ct);
+
+        return existing.Count > 0
+            ? (existing[0].contactid, existing[0].sprk_externalobjectid)
+            : null;
     }
 
     // ── Dataverse row DTOs ───────────────────────────────────────────────────

@@ -13,9 +13,23 @@
 import {
   mapRowToEmailCardItem,
   deriveEmailWorkspaceVisibleState,
+  toWorkspaceRecordState,
+  EMAIL_TRACKING_FIELDS,
   EMAIL_VISIBLE_SNIPPET_CAP_CHARS,
   type EmailWorkspaceRecordState,
 } from '../EmailWorkspace.mapping';
+
+describe('Access Permission is inherited, never read from the communication (task 138, owner Q6)', () => {
+  it('the record state carries no access permission, even when the retired column still holds a value', () => {
+    // A live retrieveRecord (no $select) still returns the retired column until the operator script deletes
+    // it. The workspace must ignore it: a communication's effective permission is its parent's.
+    const state = toWorkspaceRecordState({ sprk_accesspermission: 100000002, sprk_ismonitored: true });
+
+    expect(state).not.toHaveProperty('accessPermission');
+    expect(Object.values(EMAIL_TRACKING_FIELDS)).not.toContain('sprk_accesspermission');
+    expect(state.monitor).toBe(true);
+  });
+});
 
 const EMAIL_TYPE = 100000000;
 
@@ -71,7 +85,6 @@ function buildRecordState(overrides: Partial<EmailWorkspaceRecordState> = {}): E
     filedAssociations: [],
     monitor: false,
     highPriority: false,
-    accessPermission: null,
     ...overrides,
   };
 }

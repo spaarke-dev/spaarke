@@ -1082,6 +1082,23 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
+### `Retire-CommunicationAccessPermission.ps1`
+**Purpose:** Retires the dead `sprk_communication.sprk_accesspermission` column (owner decision Q6: a communication inherits its parent's Access Permission). Removes form, view and Copilot form-fill (`aiskillconfig`) references first, re-checks `RetrieveDependenciesForDelete`, then deletes the column and publishes. Refuses (exit 2) on any managed reference, any workflow/business rule, or a view that FILTERS on the column.
+**Usage:** 🔴 One-time (per environment); idempotent — a second run reports "nothing to do".
+**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 138)
+**Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-02 — **dry run only** against `spaarkedev1` (plan: delete 1 unmanaged FormFillFieldOptOut `aiskillconfig`, then the column; no form/view/workflow references). **No `-Apply` has been run** — that is the operator's manual gate (task 138 criterion 16e).
+
+**Command:**
+```powershell
+# Dry run (default) — zero writes; prints the plan.
+.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Perform the retirement (operator only).
+.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+```
+
 ### `Set-SecureRecordOwnerRolePrivileges.ps1`
 **Purpose:** Gives the `Secure Record Owner` role `Read` at User (Basic) depth on every table in [`config/secure-record-owner-role.json`](../config/secure-record-owner-role.json). Without it, Dataverse refuses the Secure Record team as the OWNER of a row ("Read Privilege Check For Owner failed … missing prvRead…"). Write-path invariant I-6 assigns a secure record's children (documents, To Dos, …) to that team, so the role must cover child tables as well as the three `sprk_issecure` roots. The JSON file is the ONE list, also read by the setup guide and by `unified-access-control-r2`'s NFR-05 census.
 **Usage:** 🟡 Per environment, at secure-record setup and whenever the JSON gains a table; `-Verify` any time.

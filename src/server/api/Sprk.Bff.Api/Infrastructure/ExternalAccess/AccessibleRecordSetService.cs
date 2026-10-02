@@ -118,6 +118,31 @@ public interface IAccessibleRecordSetService
         Guid recordId,
         AccessRights requiredRights,
         CancellationToken ct);
+
+    /// <summary>
+    /// The WRITE-time No Access check (unified-access-control-r2 task 139 · FR-23 · C4 fix direction): would the
+    /// FR-23 deny veto deny <paramref name="recordId"/> to this grantee? <c>true</c> means refuse the grant.
+    /// </summary>
+    /// <param name="entityType">The root's LOGICAL name (<c>sprk_project</c> / <c>sprk_matter</c> / <c>sprk_workassignment</c>).</param>
+    /// <param name="recordId">The record the grant would be written on.</param>
+    /// <param name="granteeContactId">The contact grantee, checked as a direct subject AND through its active
+    /// organization memberships (read here). <c>null</c> for an organization-wide grant, or for a contact that does
+    /// not exist yet.</param>
+    /// <param name="granteeOrganizationIds">Further organization subjects: the organization of an organization-wide
+    /// grant, or the firm a contact grant names.</param>
+    /// <remarks>
+    /// <para>The decision comes from the SAME code as the read-path veto (<c>ResolveDenyVetoAsync</c>) — the record's
+    /// referenced organizations, the subject's wall set, the one <see cref="INoAccessListReader"/> — so the key shapes
+    /// are never re-implemented for the write path.</para>
+    /// <para>Fails CLOSED like the veto: an unreadable membership read, an unreadable record, a faulted deny-list read
+    /// — every one answers <c>true</c>. Nothing to check (no contact, no organization) answers <c>false</c>.</para>
+    /// </remarks>
+    Task<bool> IsGranteeDeniedOnRecordAsync(
+        string entityType,
+        Guid recordId,
+        Guid? granteeContactId,
+        IReadOnlyCollection<Guid> granteeOrganizationIds,
+        CancellationToken ct);
 }
 
 /// <summary>
@@ -330,15 +355,36 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </summary>
     private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
         ExternalGrantSet grants, string entityType)
-        => GrantedRightsFor(grants, entityType, isSecure: _ => false);
+        => GrantedRightsFor(grants, entityType, isDirectOnly: _ => false);
 
     /// <summary>
-    /// The grant term with <b>Secure pre-max suppression</b> applied (task 037 · FR-22).
+    /// The ONE pre-max suppression predicate over a composition's flag read (ADR-003 item 8; FR-22 widened by
+    /// task 138): is this record DIRECT-ONLY — Secure OR Limited — for contacts?
     /// </summary>
-    /// <param name="isSecure">Whether a given record id is flagged <c>sprk_issecure</c>.</param>
     /// <remarks>
-    /// For a secure record the grant contributes only its <b>direct</b> level — the caller's own grant rows.
-    /// Anything inherited through an organization grant is suppressed, per FR-22.
+    /// <para>Both compositions (the systemuser plane's contact-grants term, and the shared contact plane that
+    /// serves the workforce contact AND the CIAM contact since task 135) build their predicate HERE, and every
+    /// term that suppresses consults it: the grant term (<see cref="GrantedRightsFor(ExternalGrantSet, string, Func{Guid, bool})"/>,
+    /// direct level only), the standing-grant membership term and the organization-expansion term (nothing).
+    /// There is no second suppression path, and no post-max subtraction.</para>
+    /// <para>An id absent from the map is not suppressed. That is safe on the read path because
+    /// <c>ExternalParticipationService.GetRootRecordFlagsAsync</c> returns every id it was asked about for a
+    /// flag-bearing type (unreadable ones as <see cref="RootRecordFlags.Unreadable"/>, which IS direct-only);
+    /// the write-time policy, which cannot rely on that, treats absence as unreadable instead
+    /// (<see cref="ExternalGrantLifecycle.DecideGrantPolicy"/>).</para>
+    /// </remarks>
+    private static Func<Guid, bool> DirectOnlyPredicate(IReadOnlyDictionary<Guid, RootRecordFlags> flags)
+        => id => flags.TryGetValue(id, out var f) && f.IsDirectOnly;
+
+    /// <summary>
+    /// The grant term with <b>direct-only pre-max suppression</b> applied (task 037 · FR-22; Limited joined
+    /// Secure in task 138).
+    /// </summary>
+    /// <param name="isDirectOnly">Whether a given record id is direct-only for contacts — Secure OR Limited
+    /// (<see cref="DirectOnlyPredicate"/>).</param>
+    /// <remarks>
+    /// For a direct-only record the grant contributes only its <b>direct</b> level — the caller's own grant
+    /// rows. Anything inherited through an organization grant is suppressed, per FR-22.
     /// <para>
     /// ⚠️ <b>This is suppression, not subtraction, and the difference is the whole point.</b> The org
     /// contribution is never added, so it cannot participate in the max. Subtracting afterwards would be
@@ -347,7 +393,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// already been absorbed. That is why <c>ExternalParticipation.DirectAccessLevel</c> exists.
     /// </para>
     /// <para>
-    /// A secure record whose ONLY source was an org grant has a null direct level, which maps to
+    /// A direct-only record whose ONLY source was an org grant has a null direct level, which maps to
     /// <see cref="AccessRights.None"/>. The term enters it at None (the max cannot resurrect it), and
     /// <see cref="RemoveEntriesWithoutRead"/> deletes it at the end of the composition (task 136 · defect C2).
     /// Until then it stayed in the answer as a key worth nothing, and every read route that asked "is the id
@@ -355,25 +401,25 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </para>
     /// </remarks>
     private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
-        ExternalGrantSet grants, string entityType, Func<Guid, bool> isSecure)
+        ExternalGrantSet grants, string entityType, Func<Guid, bool> isDirectOnly)
     {
         if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
             return grants.Projects.Select(p => KeyValuePair.Create(
                 p.ProjectId,
                 ExternalAccessLevels.ToAccessRights(
-                    isSecure(p.ProjectId) ? p.DirectAccessLevel : p.AccessLevel)));
+                    isDirectOnly(p.ProjectId) ? p.DirectAccessLevel : p.AccessLevel)));
 
         if (string.Equals(entityType, MatterEntity, StringComparison.OrdinalIgnoreCase))
             return grants.MatterGrants.Select(g => KeyValuePair.Create(
                 g.RecordId,
                 ExternalAccessLevels.ToAccessRights(
-                    isSecure(g.RecordId) ? g.DirectAccessLevel : g.AccessLevel)));
+                    isDirectOnly(g.RecordId) ? g.DirectAccessLevel : g.AccessLevel)));
 
         if (string.Equals(entityType, WorkAssignmentEntity, StringComparison.OrdinalIgnoreCase))
             return grants.WorkAssignmentGrants.Select(g => KeyValuePair.Create(
                 g.RecordId,
                 ExternalAccessLevels.ToAccessRights(
-                    isSecure(g.RecordId) ? g.DirectAccessLevel : g.AccessLevel)));
+                    isDirectOnly(g.RecordId) ? g.DirectAccessLevel : g.AccessLevel)));
 
         return Enumerable.Empty<KeyValuePair<Guid, AccessRights>>();
     }
@@ -439,16 +485,16 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
     /// <summary>
     /// The ordered veto pipeline (ADR-003 as amended by task 030 — design §4.5): deny-list (task 039 /
-    /// FR-23), then Restricted (task 037 / FR-21). Secure suppression (task 037 / FR-22) happens
-    /// EARLIER, on the additive TERMS before they are accumulated into <paramref name="composed"/> —
-    /// it is not a slot in this method at all; see the <c>isSecure</c> parameter of
+    /// FR-23), then Restricted (task 037 / FR-21). Direct-only suppression (Secure or Limited — task 037 /
+    /// FR-22, widened by task 138) happens EARLIER, on the additive TERMS before they are accumulated into
+    /// <paramref name="composed"/> — it is not a slot in this method at all; see the <c>isDirectOnly</c> parameter of
     /// <see cref="GrantedRightsFor(ExternalGrantSet, string, Func{Guid, bool})"/>.
     /// <para>
     /// The order is load-bearing and is asserted by the shape of this method rather than by a comment
     /// elsewhere:
     /// </para>
     /// <list type="number">
-    /// <item><b>Pre-max suppression (Secure)</b> — must run BEFORE the max, on the TERMS. After the max
+    /// <item><b>Pre-max suppression (Secure or Limited)</b> — must run BEFORE the max, on the TERMS. After the max
     /// the suppressed term has already won and the suppression is a no-op on the only inputs that
     /// mattered. (Not in this method — see above.)</item>
     /// <item><b>Deny list</b> — post-max, FIRST among the vetoes below; removes the entry.</item>
@@ -723,8 +769,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             return EmptyDeniedSet;
         }
 
+        // No subject on EITHER axis: nothing to check. On the read path this is exactly "no contact" — the org set is
+        // read FROM the contact, so it is empty (and readable) whenever the contact is absent. Task 139's write-time
+        // entry point is the one caller that can supply an organization subject with no contact (an organization-wide
+        // grant, or a contact not created yet), and then the organization axis is checked.
         var hasContactSubject = subjectContactId is { } cid && cid != Guid.Empty;
-        if (!hasContactSubject)
+        if (!hasContactSubject && !subjectOrgs.Unreadable && subjectOrgs.WallSubjectOrganizationIds.Count == 0)
         {
             return EmptyDeniedSet;
         }
@@ -934,6 +984,51 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // RightsFor is None for an absent record, so out-of-set is denied by the same expression —
         // there is no separate membership branch that could drift from the rights branch.
         return set.RightsFor(recordId).HasFlag(requiredRights);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsGranteeDeniedOnRecordAsync(
+        string entityType,
+        Guid recordId,
+        Guid? granteeContactId,
+        IReadOnlyCollection<Guid> granteeOrganizationIds,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(entityType) || recordId == Guid.Empty)
+        {
+            // No record to check against is a caller bug; a write-time check that cannot be evaluated refuses.
+            _logger.LogError(
+                "[WF-AUTHZ] IsGranteeDeniedOnRecordAsync called without a record ({EntityType} {RecordId}); " +
+                "refusing the grant (fail closed).", entityType, recordId);
+            return true;
+        }
+
+        // The contact's OWN memberships, read once by the same reader the composition uses (statecode-only wall set,
+        // owner D-2 part 2 / D-10). None when there is no contact — not a fault.
+        var contactOrgs = await ReadActiveOrgMembershipsAsync(granteeContactId, ct).ConfigureAwait(false);
+
+        // The caller-supplied organizations (an org-wide grant's organization, or the firm a contact grant names) join
+        // the WALL set only — never the conferring set. Over-matching is the specified direction for a veto (B-10).
+        var wall = contactOrgs.WallSubjectOrganizationIds
+            .Concat(granteeOrganizationIds ?? Array.Empty<Guid>())
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+        var subjectOrgs = contactOrgs with { WallSubjectOrganizationIds = wall };
+
+        var denied = await ResolveDenyVetoAsync(entityType, new[] { recordId }, granteeContactId, subjectOrgs, ct)
+            .ConfigureAwait(false);
+
+        if (denied.Contains(recordId))
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Write-time No Access check DENIES {EntityType} {RecordId} to contact {ContactId} / " +
+                "organizations {OrganizationIds} (a matching entry, or an unreadable input — fail closed).",
+                entityType, recordId, granteeContactId, string.Join(",", wall));
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1177,26 +1272,28 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             .ToList();
         var flags = await _participations
             .GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false);
-        bool IsSecure(Guid id) => flags.TryGetValue(id, out var f) && f.IsSecure;
+        var isDirectOnly = DirectOnlyPredicate(flags);
 
         // Term 1 — ADR-034 membership. NOT contact-sourced, so it survives BOTH vetoes: it is the
         // systemuser's own Dataverse-governed access, which is exactly what Restricted preserves
-        // ("only system users may have access") and what Secure leaves alone (the Secure BU covers the
-        // Dataverse half; the veto covers the grant half — design §5.1).
+        // ("only system users may have access") and what Secure and Limited leave alone (the Secure BU covers
+        // the Dataverse half; the suppression covers the grant half — design §5.1). Task 138: Limited governs
+        // which CONTACT grant types count, never internal access, so this term never consults isDirectOnly.
         var membershipTerm = walk.Ids
             .Select(id => KeyValuePair.Create(id, MembershipTermRights))
             .ToList();
         AccumulateTerm(composed, membershipTerm);
 
-        // Term 2 — contact grants, with Secure suppression applied BEFORE the max: on a secure record only
-        // the caller's OWN grant rows contribute; org-inherited access is suppressed (FR-22).
+        // Term 2 — contact grants, with direct-only suppression applied BEFORE the max: on a Secure or
+        // Limited record only the caller's OWN grant rows contribute; org-inherited access is suppressed
+        // (FR-22; Limited since task 138).
         //
         // ⚠️ This applies on the SYSTEMUSER plane too, deliberately. A Type 1 user whose linked contact
         // holds an org grant would otherwise derive access to a secure record through the contact term —
         // access Dataverse knows nothing about, so the Secure BU cannot catch it (design §5.1, register C-10).
         if (grants is not null)
         {
-            AccumulateTerm(composed, GrantedRightsFor(grants, entityType, IsSecure));
+            AccumulateTerm(composed, GrantedRightsFor(grants, entityType, isDirectOnly));
         }
 
         // ── VETOES, after the max, in order: deny-list (task 039) → Restricted (task 037) ──────────
@@ -1208,7 +1305,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // exactly once. Org EXPANSION itself is NOT applied on this plane: design §5 composes a
         // systemuser as ADR-034 membership ∪ the caller's own contact grants, and the org-derived
         // access a Type 1 user can reach through their linked contact is the org-INHERITED GRANT —
-        // which term 2 above already suppresses on a secure record via DirectAccessLevel (FR-22).
+        // which term 2 above already suppresses on a Secure or Limited record via DirectAccessLevel (FR-22).
         // Adding a second org path here would invent access design §5 does not give.
         // ⚠️ Gated on there being candidates at all (NFR-02, corrected by task 043's code-review gate).
         // Hoisting this read moved it ABOVE ResolveDenyVetoAsync's `candidateIds.Count == 0`
@@ -1232,7 +1329,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             membershipTerm.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
 
         // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's
-        // organization-only grant on a Secure root, which term 2 enters at None.
+        // organization-only grant on a Secure or Limited root, which term 2 enters at None.
         RemoveEntriesWithoutRead(composed);
 
         _logger.LogInformation(
@@ -1452,37 +1549,40 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             .ToList();
         var flags = await _participations
             .GetRootRecordFlagsAsync(entityType, candidates, ct).ConfigureAwait(false);
-        bool IsSecure(Guid id) => flags.TryGetValue(id, out var f) && f.IsSecure;
+        var isDirectOnly = DirectOnlyPredicate(flags);
 
-        // Term 1 — explicit sprk_externalrecordaccess grants, with Secure suppression applied BEFORE the
-        // max: on a secure record only the contact's OWN grant rows contribute (FR-22).
+        // Term 1 — explicit sprk_externalrecordaccess grants, with direct-only suppression applied BEFORE the
+        // max: on a Secure or Limited record only the contact's OWN grant rows contribute (FR-22; Limited
+        // since task 138). Shared by both contact sign-ins, so CIAM inherits Limited with no CIAM code.
         if (grants is not null)
         {
-            AccumulateTerm(composed, GrantedRightsFor(grants, entityType, IsSecure));
+            AccumulateTerm(composed, GrantedRightsFor(grants, entityType, isDirectOnly));
         }
 
-        // Term 2 — standing-grant membership. This is a DERIVED-MEMBER term, so Secure suppresses it
-        // entirely: the record simply never receives the contribution (structural suppression, per FR-22 —
-        // not a post-hoc subtraction that the max would already have absorbed).
+        // Term 2 — standing-grant membership. This is a DERIVED-MEMBER term, so a direct-only (Secure or
+        // Limited) record suppresses it entirely: the record simply never receives the contribution
+        // (structural suppression, per FR-22 — not a post-hoc subtraction that the max would already have
+        // absorbed).
         if (standingApplied)
         {
             AccumulateTerm(
                 composed,
                 standingIds
-                    .Where(id => !IsSecure(id))
+                    .Where(id => !isDirectOnly(id))
                     .Select(id => KeyValuePair.Create(id, standingRights)));
         }
 
-        // Term 3 — ORG EXPANSION. A DERIVED-MEMBER term, so Secure suppresses it ENTIRELY and
-        // STRUCTURALLY: a secure record never receives the contribution at all (FR-22), exactly as the
-        // standing term above — not a post-hoc subtraction, which the max would already have absorbed.
+        // Term 3 — ORG EXPANSION. A DERIVED-MEMBER term, so a direct-only (Secure or Limited) record
+        // suppresses it ENTIRELY and STRUCTURALLY: the record never receives the contribution at all
+        // (FR-22), exactly as the standing term above — not a post-hoc subtraction, which the max would
+        // already have absorbed.
         // This covers every principal kind that can reach the term, which on this plane is the contact.
         foreach (var (orgRights, recordIds) in orgTerms)
         {
             AccumulateTerm(
                 composed,
                 recordIds
-                    .Where(id => !IsSecure(id))
+                    .Where(id => !isDirectOnly(id))
                     .Select(id => KeyValuePair.Create(id, orgRights)));
         }
 
@@ -1509,7 +1609,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
 
         // Last: no key without Read (task 136 · C2), on both contact sign-ins. Reachable cases: an
-        // organization-only grant on a Secure root, and a matter / work-assignment grant row with no level
+        // organization-only grant on a Secure or Limited root, and a matter / work-assignment grant row with no level
         // (owner 2026-09-30: no level = not granted).
         RemoveEntriesWithoutRead(composed);
 

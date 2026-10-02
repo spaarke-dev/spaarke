@@ -135,25 +135,32 @@ public static class ProvisionProjectEndpoint
     // ── Share rights (task 061) ──────────────────────────────────────────────
 
     /// <summary>
-    /// Rights the creating user receives on their own secure record.
+    /// Rights the creating user receives on their own secure record: the Collaborate level of
+    /// <see cref="RecordShareLevels"/> — Read, Write, Append, AppendTo and Share.
     /// </summary>
     /// <remarks>
-    /// Read/Write/Append/AppendTo is "can actually work the matter"; <c>ShareAccess</c> is what lets
-    /// them bring colleagues in through the FR-29 "+ User" surface without an administrator. Delete
-    /// and Assign are deliberately absent — a secure record leaves the secure business unit only
-    /// through the explicit unsecure path, not by being reassigned out of it.
+    /// Read/Write/Append/AppendTo is "can actually work the matter"; <c>ShareAccess</c> lets them bring colleagues
+    /// in, through the FR-29 "+ User" surface or the model-driven app's own Share command, without an
+    /// administrator. Delete and Assign are deliberately absent — a secure record leaves the secure business unit
+    /// only through the explicit unsecure path, not by being reassigned out of it. Before task 139 this constant was
+    /// spelled <c>CollaborateRights + ",ShareAccess"</c>; since the owner's 2026-09-30 rule put Share INTO
+    /// Collaborate it is the level itself, and the value is unchanged (mask 262167).
     /// </remarks>
-    internal const string CreatorAccessRights = RecordShareLevels.CollaborateRights + ",ShareAccess";
+    internal const string CreatorAccessRights = RecordShareLevels.CollaborateRights;
 
     /// <summary>
-    /// Rights a named colleague receives at provisioning time: the same working access as the creator,
-    /// WITHOUT <c>ShareAccess</c> — re-sharing stays with the creator so the access list cannot widen
-    /// through a chain nobody reviewed.
+    /// Rights a named colleague receives at provisioning time: EXACTLY the creator's rights (owner, 2026-09-30, C4).
     /// </summary>
     /// <remarks>
-    /// The Collaborate level of <see cref="RecordShareLevels"/> (task 063), the one level-to-rights table — so a
-    /// colleague shared at provisioning and one shared later at Collaborate through the "+ User" picker hold the
-    /// same rights, and the two cannot drift apart.
+    /// <para>The owner's rule: a person with Write may share (OOB) and use Manage Access; only a View holder may not
+    /// pass access on. A colleague named at provisioning is a Collaborate holder, so they carry <c>ShareAccess</c>
+    /// like the creator. This supersedes the 2026-09-15 rationale that kept re-sharing with the creator alone; every
+    /// grant they make is still capped at their own level (Dataverse's native sharing rule in the model-driven app,
+    /// the grantor ceiling on every Spaarke grant route).</para>
+    /// <para>The Collaborate level of <see cref="RecordShareLevels"/> (task 063), the one level-to-rights table — so
+    /// a colleague shared at provisioning and one shared later at Collaborate through the "+ User" picker hold the
+    /// same rights, and the two cannot drift apart. Kept as its own name, beside <see cref="CreatorAccessRights"/>,
+    /// because the two shares are written by different steps and a test pins each against the literal.</para>
     /// </remarks>
     internal const string CollaboratorAccessRights = RecordShareLevels.CollaborateRights;
 
