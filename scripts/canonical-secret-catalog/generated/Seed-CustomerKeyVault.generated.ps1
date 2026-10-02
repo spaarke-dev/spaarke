@@ -165,11 +165,6 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
     Set-VaultSecret -Name 'BFF-API-ClientSecret' -Value 'placeholder-value-source-is-existing-kv' -Description 'BFF API app-registration client secret. Consumed by the OBO confidential-client flow (per OAuth spec — required even under ADR-028 MI-first outbound) and by any shared-lib Dataverse boot path still on client-credentials. BINDING never-delete per r3 handoff §4a. [BINDING never-delete: skip in seed]' -Category 'auth'
 }
 
-# ---- BingSearch-ApiKey (ai) ----
-# Purpose: Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
-# Value source: from-platform-vault
-Write-Host '  SKIP: BingSearch-ApiKey (value_source=from-platform-vault; copied by H4 from the Spaarke platform vault)' -ForegroundColor Gray
-
 # ---- Communication-DefaultMailbox (communication) ----
 # Purpose: Default mailbox address for Communication module (outbound + Approved-Senders default).
 # Value source: from-intake-parameter
@@ -274,11 +269,6 @@ if ($SeedPlaceholders) {
 } else {
     Write-Host '  SKIP: Email-WebhookSigningKey (value_source=generated; supplied downstream)' -ForegroundColor Gray
 }
-
-# ---- LlamaParse-ApiKey (ai) ----
-# Purpose: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
-# Value source: from-platform-vault
-Write-Host '  SKIP: LlamaParse-ApiKey (value_source=from-platform-vault; copied by H4 from the Spaarke platform vault)' -ForegroundColor Gray
 
 # ---- Redis-ConnectionString (data-services) ----
 # Purpose: Azure Cache for Redis connection string.

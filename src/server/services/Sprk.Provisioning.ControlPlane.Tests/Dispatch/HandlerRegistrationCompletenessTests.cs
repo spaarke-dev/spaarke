@@ -210,10 +210,9 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         builder.UseSetting("BffDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
 
         // Task 245b — KvSecretsPopulationOptions.Validate() fails fast at boot on a missing L2
-        // principal (the identity H4 grants Secrets Officer on customer vaults) or vendor-key vault;
-        // syntactically-valid placeholders, nothing is invoked here.
+        // principal (the identity H4 grants Secrets Officer on customer vaults); syntactically-valid
+        // placeholder, nothing is invoked here.
         builder.UseSetting("KvSecretsPopulationOptions:ControlPlanePrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
-        builder.UseSetting("KvSecretsPopulationOptions:PlatformVaultName", "l2-test-platform-kv");
 
         // Task 142 — EnvVarValuesOptions.Validate() (H7) fails fast at boot on
         // a missing ClientSecret (NFR-05), same convention as the other

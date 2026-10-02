@@ -1,9 +1,15 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 4 · **Last Updated**: 2026-10-02
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 4)
+> **Version**: 5 · **Last Updated**: 2026-10-02
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 5)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v5 (2026-10-02, `customer-provisioning-orchestration-r1` T225b)**: `PRQ-E-14` **added** — the registry schema on
+> the admin environment, including the new `sprk_credentialmode` column. Every new stamp is secret-free by default
+> since T225b, so H4 always records the A38a marker; without the column H4 fails after writing the vault. The column
+> is added by the existing idempotent `Extend-DataverseEnvironmentSchema-v3.3.ps1` (not yet run on `spaarkedev1`,
+> checked 2026-10-02).
 >
 > **v4 (2026-10-02, `customer-provisioning-orchestration-r1` T225a)**: the Model 1 shared stack is retired (files
 > deleted). `PRQ-E-05` moved `once_per_env` → `once_per_customer` and now targets the stamp's own BFF — it is an H2a
@@ -57,15 +63,15 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 33 prereqs across 4 scopes (31 active)
+## Summary — 34 prereqs across 4 scopes (32 active)
 
 | Scope | Count | IDs |
 |---|---|---|
 | `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
-| `once_per_env` | 10 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`; ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_env` | 11 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
 | `once_per_customer` | 10 | `PRQ-C-01` … `PRQ-C-08`, `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
-| **Total** | **33** (31 active) | Authoritative count: `validate.ps1` over the YAML |
+| **Total** | **34** (32 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -127,7 +133,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-S-04 | L2 UAMI subscription Contributor | Spaarke admin | H2a `ArmDeploymentRunner` 403s |
 | PRQ-S-05 | Operator has Owner OR Contributor+UAA on sub | Sub owner | F15/F18 — operator KV data-plane bootstrap 403 |
 
-### Once-per-env (10 active + 1 retired)
+### Once-per-env (11 active + 1 retired)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -142,6 +148,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-10 | L2 UAMI KV Secrets User on platform + per-tenant KVs | Spaarke admin (Bicep) | F16 — `@Microsoft.KeyVault(...)` refs silently unresolvable |
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
+| PRQ-E-14 | Registry schema current on the admin env — v3.3 columns + `sprk_credentialmode` (T225b) | Spaarke admin (`Extend-DataverseEnvironmentSchema-v3.3.ps1`, idempotent) | H4 fails `kvsecrets-secret-free-marker-apply-failed` after writing the vault |
 
 ### Once-per-customer (10)
 

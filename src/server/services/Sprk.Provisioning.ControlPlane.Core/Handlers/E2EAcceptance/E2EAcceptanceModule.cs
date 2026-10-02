@@ -168,15 +168,15 @@ public static class E2EAcceptanceModule
         // rationale). Without this adapter, the composite swap would silently
         // regress task-170's shipped Wave G-7 I1 real check to InfraFault.
         services.AddSingleton<IInvariantProbe, PackagedScriptTenantLiteralInvariantProbe>(); // I1 (task 170 IP; task 173 adapter)
-        // I2 (task 173) — real AI Search tenant-filter probe. Reads Model 1
-        // template artifact from Cosmos + issues a live /docs/search POST
-        // asserting `tenantId eq '{TenantId}'` is enforced server-side. See
-        // AiSearchTenantFilterInvariantProbe.cs file header for the honest
+        // I2 (task 173) — real AI Search tenant-filter probe. Issues a live
+        // /docs/search POST on each canonical index of the stamp's own AI
+        // Search service asserting `tenantId eq '{TenantId}'` is enforced
+        // server-side (task 225b retired the Model 1 template-artifact read).
+        // See AiSearchTenantFilterInvariantProbe.cs file header for the honest
         // can-vs-cannot-detect breakdown. Needs IHttpClientFactory (named
         // HttpClient below) + TokenCredential + AiSearchIndexOptions +
-        // ITenantFilterTemplateStore + ICanonicalIndexCatalog +
-        // IProvisioningRunRepository — all pre-registered by Program.cs or by
-        // task 045/124's H2b DI.
+        // ICanonicalIndexCatalog + IProvisioningRunRepository — all
+        // pre-registered by Program.cs or by task 045/124's H2b DI.
         services.AddHttpClient(AiSearchTenantFilterInvariantProbe.HttpClientName);
         services.AddSingleton<IInvariantProbe, AiSearchTenantFilterInvariantProbe>();   // I2 (task 173)
         services.AddSingleton<IInvariantProbe, CosmosPartitionKeyInvariantProbe>();     // I3 (task 174)

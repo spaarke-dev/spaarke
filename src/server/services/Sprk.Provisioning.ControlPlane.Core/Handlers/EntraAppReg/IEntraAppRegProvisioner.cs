@@ -96,13 +96,13 @@ public sealed record PendingKvSecretWrite(string VaultName, string SecretName, s
 /// </param>
 /// <param name="Profile">
 /// The run's environment profile — determines the FIC <c>issuer</c> tenant per
-/// auth-v4 §3.1. Valid values include (a) Model 1 (Spaarke-tenant per-customer
-/// stamps, e.g. <c>spaarke-hosted-model1-trial</c>), (b) Model 2 dedicated —
-/// Spaarke-hosted (<c>spaarke-hosted-model2</c>: UAMI lives in Spaarke's
-/// subscription; issuer = Spaarke's own tenant), and (c) Model 2 dedicated —
-/// customer-owned (<c>customer-owned-model2</c>: UAMI lives in the customer's
-/// subscription; issuer = this request's <see cref="TenantId"/>). The Model 1
-/// case is intra-Spaarke-tenant (issuer = Spaarke's own tenant).
+/// auth-v4 §3.1. The two values POST /api/runs accepts (task 225b, D-12 pairing):
+/// (a) <c>spaarke-hosted-model2</c> — Model 1, the Spaarke-hosted dedicated
+/// stamp (UAMI lives in Spaarke's subscription; issuer = Spaarke's own tenant,
+/// intra-Spaarke-tenant), and (b) <c>customer-owned-model2</c> — Model 2, the
+/// customer-hosted dedicated stamp (UAMI lives in the customer's subscription;
+/// issuer = this request's <see cref="TenantId"/>). The profile names predate
+/// the D-12 renumbering.
 /// </param>
 /// <param name="RequireSecretFreeIdentity">
 /// Bucket B HIGH#3 (customer-provisioning-orchestration-r1 SESSION 18, adversarial

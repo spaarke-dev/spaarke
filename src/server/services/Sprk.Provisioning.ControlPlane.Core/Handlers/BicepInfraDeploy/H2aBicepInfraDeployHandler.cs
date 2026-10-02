@@ -124,9 +124,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the SignalR feature flag (ADR-032). Defaults to <c>false</c> when absent.</summary>
     public const string SignalREnabledParameterKey = "signalrEnabled";
 
-    /// <summary>Non-secret parameter key carrying the auth-v4 §9.1 secret-free gate (customer-provisioning-orchestration-r1 punch row A38b). Defaults to <c>false</c> when absent (pre-migration/backwards-compat behavior).</summary>
-    public const string RequireSecretFreeIdentityParameterKey = "requireSecretFreeIdentity";
-
     /// <summary>
     /// Non-secret parameter key carrying an ISO-8601 timestamp for
     /// <c>sprk_dataverseenvironment.sprk_provisionedon</c>. When present +
@@ -318,9 +315,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         var signalrEnabled = TryGetNonEmpty(parameters, SignalREnabledParameterKey, out var signalRaw)
             && bool.TryParse(signalRaw, out var signalParsed)
             && signalParsed;
-        var requireSecretFreeIdentity = TryGetNonEmpty(parameters, RequireSecretFreeIdentityParameterKey, out var secretFreeRaw)
-            && bool.TryParse(secretFreeRaw, out var secretFreeParsed)
-            && secretFreeParsed;
         // ISH-08: optional OpenAI region override (see OpenAiLocationParameterKey doc).
         // Absence => null => Bicep parameter default (westus3) wins.
         var openAiLocation = TryGetNonEmpty(parameters, OpenAiLocationParameterKey, out var openAiLoc)
@@ -337,7 +331,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
             EnvironmentName: environmentName,
             Location: location,
             SignalREnabled: signalrEnabled,
-            RequireSecretFreeIdentity: requireSecretFreeIdentity,
             OpenAiLocation: openAiLocation);
 
         // (7) Structural pre-flight on the resolved template — model-version pin + Key Vault

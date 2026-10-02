@@ -252,7 +252,7 @@ public sealed class LongHandlerScenario
                 // T224 renamed the tenancy values (Model2Dedicated → Model2); CreateRun requires
                 // tenantId, and subscriptionId for Model 2.
                 tenancyModel = "Model2",
-                profile = "spaarke-hosted-model2",
+                profile = "customer-owned-model2", // T225b pairing: Model2 ↔ customer-owned-model2
                 nonSecretParameters = new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-2222-3333-4444-555555555555",

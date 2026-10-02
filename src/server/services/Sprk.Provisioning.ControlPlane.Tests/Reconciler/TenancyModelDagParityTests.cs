@@ -1,7 +1,9 @@
 // -----------------------------------------------------------------------------
-// Model1SharedDagParityTests.cs
+// TenancyModelDagParityTests.cs
 //
-// EXEC-09 regression net — Model1Shared vs Model2Dedicated DAG shape parity
+// EXEC-09 regression net — Model1 vs Model2 DAG shape parity: the DAG is
+// deliberately TenancyModel-agnostic. (Renamed from Model1SharedDagParityTests
+// by task 225b / G13 — the shared tier it was named after is retired, D-12.)
 // (pre-dispatch audit punchlist row EXEC-09, Wave 8; authored per operator
 // directive 2026-08-27 "every issue is a priority").
 //
@@ -30,7 +32,7 @@
 //
 //   1. Asserts the DAG is DELIBERATELY TenancyModel-agnostic (its output
 //      ready-set for a given completedPhases must be identical for both
-//      Model1Shared and Model2Dedicated). Regression net for any accidental
+//      Model1 and Model2). Regression net for any accidental
 //      future TenancyModel-conditional branching added to
 //      DagAdvancer.ComputeReadyHandlers.
 //
@@ -66,7 +68,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 /// See file header for the full finding + why this is unit-level rather than
 /// the audit's proposed full-DAG integration test.
 /// </summary>
-public sealed class Model1SharedDagParityTests
+public sealed class TenancyModelDagParityTests
 {
     private const string TestCustomerId = "trial1";
     private const string TestRunId = "00000000-0000-0000-0000-000000000042";
@@ -75,7 +77,7 @@ public sealed class Model1SharedDagParityTests
 
     // -----------------------------------------------------------------------
     // Parity tests — every meaningful DAG-shape checkpoint asserted
-    // identical for Model1Shared and Model2Dedicated. If any of these
+    // identical for Model1 and Model2. If any of these
     // starts to fail, DagAdvancer has silently grown a tenancyModel branch
     // and the audit's EXEC-09 mitigation (per-handler branching + integration
     // test) MUST be re-evaluated.
@@ -99,15 +101,15 @@ public sealed class Model1SharedDagParityTests
         var completed = completedCsv.Split(',');
 
         var model1Ready = _sut.ComputeReadyHandlers(
-            MakeRun("Model1", "spaarke-hosted-model1-trial", completed));
+            MakeRun("Model1", "spaarke-hosted-model2", completed));
 
         var model2Ready = _sut.ComputeReadyHandlers(
-            MakeRun("Model2", "spaarke-hosted-model2", completed));
+            MakeRun("Model2", "customer-owned-model2", completed));
 
         model2Ready.Should().BeEquivalentTo(model1Ready,
             "EXEC-09: DagAdvancer.ComputeReadyHandlers is deliberately TenancyModel-agnostic — " +
             "the DAG does NOT branch on tenancy. Any accidental branch introduced by future " +
-            "changes silently drops handlers under one model (Model1Shared trial1 dispatch " +
+            "changes silently drops handlers under one model (Model 1 trial1 dispatch " +
             "regressions were the audit's flagged failure mode).");
 
         // Also-order-agnostic parity — the returned lists themselves are
@@ -178,7 +180,7 @@ public sealed class Model1SharedDagParityTests
         // discoverable by grep / test explorers so the inventory does not
         // rot in isolation. See file header for the full EXEC-09 audit
         // record + main-session-deferred follow-on.
-        typeof(Model1SharedDagParityTests).Should().NotBeNull();
+        typeof(TenancyModelDagParityTests).Should().NotBeNull();
     }
 
     // -----------------------------------------------------------------------

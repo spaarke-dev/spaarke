@@ -44,7 +44,7 @@
     "tenancyModel": {
       "type": "string",
       "enum": ["Model1", "Model2"],
-      "description": "Model1 = shared trial/SMB tier; Model2 = dedicated sub + dedicated Dataverse + admin-consent flow"
+      "description": "Model1 = Spaarke-hosted dedicated stamp in Spaarke's tenant (owner decision D-12; profile spaarke-hosted-model2); Model2 = dedicated stamp in the customer's own tenant + subscription with the admin-consent flow (profile customer-owned-model2). The shared trial/SMB tier is retired."
     },
     "controlPlaneEnv": {
       "type": "string",
@@ -53,8 +53,8 @@
     },
     "profile": {
       "type": "string",
-      "enum": ["spaarke-hosted-model1-trial", "spaarke-hosted-model2", "customer-owned-model2"],
-      "description": "L2 API profile enum — MUST match L2 accepted values EXACTLY (per DS-5 c6-1). Any drift = L2 400."
+      "enum": ["spaarke-hosted-model2", "customer-owned-model2"],
+      "description": "L2 API profile enum — MUST match L2 accepted values EXACTLY (per DS-5 c6-1). Any drift = L2 400. Pairing (allOf below): Model1 ↔ spaarke-hosted-model2, Model2 ↔ customer-owned-model2 (the profile names predate the D-12 renumbering). spaarke-hosted-model1-trial is retired (D-12) and refused by POST /api/runs as an unknown profile."
     },
     "environmentId": {
       "type": ["string", "null"],
@@ -179,26 +179,26 @@
   },
   "allOf": [
     {
-      "description": "tenancyModel × profile invariant — Model1 pairs ONLY with spaarke-hosted-model1-trial",
+      "description": "tenancyModel × profile invariant — Model1 pairs ONLY with spaarke-hosted-model2 (same rule as POST /api/runs: tenancy-profile-invalid)",
       "if": {
         "properties": { "tenancyModel": { "const": "Model1" } },
         "required": ["tenancyModel"]
       },
       "then": {
         "properties": {
-          "profile": { "const": "spaarke-hosted-model1-trial" }
+          "profile": { "const": "spaarke-hosted-model2" }
         }
       }
     },
     {
-      "description": "tenancyModel × profile invariant — Model2 pairs with spaarke-hosted-model2 or customer-owned-model2",
+      "description": "tenancyModel × profile invariant — Model2 pairs ONLY with customer-owned-model2 (same rule as POST /api/runs: tenancy-profile-invalid)",
       "if": {
         "properties": { "tenancyModel": { "const": "Model2" } },
         "required": ["tenancyModel"]
       },
       "then": {
         "properties": {
-          "profile": { "enum": ["spaarke-hosted-model2", "customer-owned-model2"] }
+          "profile": { "const": "customer-owned-model2" }
         }
       }
     },
@@ -248,7 +248,7 @@
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
       "tenancyModel": "Model1",
       "controlPlaneEnv": "dev",
-      "profile": "spaarke-hosted-model1-trial",
+      "profile": "spaarke-hosted-model2",
       "region": "westus2",
       "openAiRegion": "westus3",
       "tier": "shared-trial",

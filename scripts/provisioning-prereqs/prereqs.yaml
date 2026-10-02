@@ -31,7 +31,7 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 4
+manifest_version: 5
 last_updated: 2026-10-02
 author_task: customer-provisioning-orchestration-r1 / task 202
 # manifest_version 4 (2026-10-02, customer-provisioning-orchestration-r1 T245c + T225a): PRQ-C-08 ADDED (Exchange
@@ -400,6 +400,18 @@ prereqs:
       expect: '`{"sessions": true, "dedup": true}`'
     remediation: '`az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost.'
     related_findings: [T108-*, queue-recreate-runbook]
+
+  - id: PRQ-E-14
+    name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b)
+    scope: once_per_env
+    frequency: once per registry env; re-run the (idempotent) script after it gains a column
+    owner: Spaarke platform admin (via `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`)
+    consequence_of_absence: H4 writes the customer vault, then fails Resumable `kvsecrets-secret-free-marker-apply-failed` (HTTP 400 naming `sprk_credentialmode`) — every new stamp is secret-free by default since T225b, so H4 always records the marker. Missing v3.3 columns fail H13's registry write the same way.
+    check_recipe:
+      cli: az rest --method get --resource "{adminDvUrl}" --url "{adminDvUrl}/api/data/v9.2/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='sprk_credentialmode')?$select=LogicalName" --query LogicalName -o tsv
+      expect: '`sprk_credentialmode`'
+    remediation: '`scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 -EnvironmentDomain <admin env host>` — additive and idempotent (skips existing columns, never modifies one).'
+    related_findings: [A38a-secret-free-marker, T225b-G21]
 
   - id: PRQ-E-13
     name: '`sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`'

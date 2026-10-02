@@ -120,10 +120,8 @@ param adminDataverseEnvironmentUrl string
 @description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer\'s target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
-@description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer\'s sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a\'s Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash.')
-param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
 
-@description('Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name "Redis-ConnectionString" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module\'s platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName / azureOpenAiEndpointSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments.')
+@description('Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name "Redis-ConnectionString" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module\'s platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments.')
 param redisConnectionStringSecretName string = 'Redis-ConnectionString'
 
 @description('HTTPS URI of the provisioning-artifacts blob CONTAINER (e.g. https://{account}.blob.core.windows.net/provisioning-artifacts) -- output of modules/controlplane-artifacts-storage.bicep (G-8 Batch 2, audit defect #5). Threaded into the three handler option sections that each REQUIRE it at boot per NFR-05 (G-8 audit defect #7): BicepInfraDeployOptions (H2a), BffDeployOptions (H9), SolutionImportOptions (H6) -- Program.cs binds each via GetSection(nameof(...Options)), so the app-setting keys below carry the literal "...Options" section names. All three Validate() throw on empty, so this param is REQUIRED (no default) -- platform-controlplane.bicep MUST pass the artifacts-storage module\'s container URI output here (wiring owned by G-8 Batch 2). The Worker\'s UAMI reads blobs via DefaultAzureCredential (Storage Blob Data Reader grant -- audit defect #3); no account key or SAS in config.')
@@ -188,8 +186,6 @@ var secretFreeCredentialAppSettings = [
 @description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as KvSecretsPopulationOptions__ControlPlanePrincipalObjectId -- the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead). REQUIRED: KvSecretsPopulationOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
 param controlPlanePrincipalId string
 
-@description('Spaarke platform Key Vault holding the Spaarke-shared vendor keys (owner D5: BingSearch-ApiKey, LlamaParse-ApiKey) under their canonical names. Emitted as KvSecretsPopulationOptions__PlatformVaultName -- H4 copies each manifest value_source=from-platform-vault entry from here into the customer vault (task 245b). Defaults to this module\'s platform vault (keyVaultName), on which platform-controlplane.bicep grants the Worker UAMI Key Vault Secrets User. Any OTHER vault named here must grant the Worker UAMI Key Vault Secrets User itself -- nothing in this template does, and H4 then fails Resumable before writing anything.')
-param vendorKeysKeyVaultName string = keyVaultName
 
 // Task 245b. Deliberately `array`, not a user-defined type: a `type` makes
 // Bicep emit languageVersion 2.0 (symbolic-name resources) for this module AND
@@ -328,23 +324,6 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
 
         // ---------------------------------------------------------------
-        // Task 153 (Wave G-5): RuntimeReferences -- H12c's shared-platform
-        // Azure OpenAI endpoint for Model1Shared customers. Sourced from the
-        // SAME canonical "AzureOpenAI-Endpoint" KV secret the .Api site
-        // already resolves (AzureOpenAI__Endpoint / DocumentIntelligence__
-        // OpenAiEndpoint) -- single source of truth for this environment's
-        // shared platform OpenAI resource, not a duplicate. CONDITIONALLY
-        // required (Model1Shared branch only) -- RuntimeReferencesOptions.
-        // Validate() does NOT fail-fast at boot on this being unset (unlike
-        // EnvVarValues__ClientSecret above); a missing value fails the
-        // affected Model1Shared run Resumable, not the whole Worker boot.
-        // ---------------------------------------------------------------
-        {
-          name: 'RuntimeReferences__SharedPlatformOpenAiEndpoint'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${azureOpenAiEndpointSecretName})'
-        }
-
-        // ---------------------------------------------------------------
         // G-8 Batch 3 (audit defect #6): Level-2 dispatch-idempotency Redis
         // (DispatchModule.cs:154-199, task 105 / DS-2 §4-L2). The code reads
         // GetConnectionString("Redis") FIRST, then Redis:ConnectionString --
@@ -436,12 +415,18 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         // Task 245b (G25): L2-owned run inputs, validated at Worker startup.
         // H4's KV RBAC bootstrap grants THIS principal (L2's own identity)
-        // Secrets Officer on each customer vault; H4 copies the Spaarke
-        // vendor keys from the platform vault. SPE owning-app credentials
-        // are appended below (speContainerTypeOwnerSettings).
+        // Secrets Officer on each customer vault. SPE owning-app credentials
+        // are appended below (speContainerTypeOwnerSettings). Task 225b (D18)
+        // removed the vendor-key platform vault setting (no Spaarke-shared
+        // vendor key remains in the customer catalog).
+        //
+        // Task 225b (G21): every new stamp is secret-free — H4 omits
+        // BFF-API-ClientSecret and Dataverse-ClientSecret (BINDING
+        // credential-lifecycle rule; no sentinel). Stated explicitly so the
+        // deployed Worker never depends on the code default.
         // ---------------------------------------------------------------
         { name: 'KvSecretsPopulationOptions__ControlPlanePrincipalObjectId', value: controlPlanePrincipalId }
-        { name: 'KvSecretsPopulationOptions__PlatformVaultName', value: vendorKeysKeyVaultName }
+        { name: 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', value: 'true' }
       ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
     }
   }

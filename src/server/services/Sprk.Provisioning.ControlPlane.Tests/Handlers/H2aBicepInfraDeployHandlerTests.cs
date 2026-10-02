@@ -774,38 +774,11 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.LastRequest!.SignalREnabled.Should().Be(expected);
     }
 
-    // ---------- A38b requireSecretFreeIdentity gate (auth-v4 §9.1) ----------
-
-    [Theory]
-    [InlineData("false", false)]
-    [InlineData("true", true)]
-    public async Task RequireSecretFreeIdentityFlag_FlowsToRunnerRequest(string flagValue, bool expected)
-    {
-        var run = BuildRun();
-        run.Parameters.NonSecret[H2aBicepInfraDeployHandler.RequireSecretFreeIdentityParameterKey] = flagValue;
-        var repo = new FakeRepository(run, etag: "etag-a38b");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), RealInspector());
-
-        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        runner.LastRequest!.RequireSecretFreeIdentity.Should().Be(expected);
-    }
-
-    [Fact]
-    public async Task RequireSecretFreeIdentityFlag_AbsentParameter_DefaultsFalse()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-a38b-absent");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), RealInspector());
-
-        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        runner.LastRequest!.RequireSecretFreeIdentity.Should().BeFalse();
-    }
+    // ---------- A38b requireSecretFreeIdentity gate — retired by task 225b ----------
+    // customer.bicep's `requireSecretFreeIdentity` parameter had no effect after T226 and was removed together
+    // with the intake key, the H2a read and the runner payload entry. Secret-free is now the H4 default
+    // (KvSecretsPopulationOptions.RequireSecretFreeIdentity) — see FileKvSecretManifestTests / H4 tests. Payload ↔
+    // template parity is pinned by ArmTemplateInspectorTests.RealCustomerTemplate_DeclaresEveryParameterTheRunnerSends.
 
     // ---------- ISH-08 OpenAI location override (Wave 5 punchlist, 2026-08-27) ----------
 
@@ -873,7 +846,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
             EnvironmentName: "prod",
             Location: "westus2",
             SignalREnabled: false,
-            RequireSecretFreeIdentity: false,
             OpenAiLocation: null);
         var payload = ArmDeploymentRunner.BuildParametersPayload(request);
         var json = payload.ToString();
@@ -893,7 +865,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
             EnvironmentName: "prod",
             Location: "westus2",
             SignalREnabled: false,
-            RequireSecretFreeIdentity: false,
             OpenAiLocation: "eastus2");
         var payload = ArmDeploymentRunner.BuildParametersPayload(request);
         var json = payload.ToString();
@@ -1025,7 +996,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             EnvironmentId = "env-guid",
             TenancyModel = tenancyModel,
             Status = RunStatus.Running,
-            Profile = tenancyModel == "Model1" ? "spaarke-hosted-model1-trial" : "spaarke-hosted-model2",
+            Profile = tenancyModel == "Model1" ? "spaarke-hosted-model2" : "customer-owned-model2",
         };
         if (includeTenantId)
         {

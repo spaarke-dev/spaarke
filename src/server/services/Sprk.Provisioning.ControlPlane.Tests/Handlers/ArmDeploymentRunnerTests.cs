@@ -33,7 +33,7 @@
 //       customer.bicep does not currently produce — see ArmDeploymentRunner.cs
 //       file-header "BLOCKING DISCOVERY" note).
 //   T2  Model 1 fails closed (task 225a): its shared stack is retired and the dedicated
-//       Model 1 path is tasks 225b + 228 — no template is resolved or downloaded
+//       Model 1 path is task 228 (T225b landed) — no template is resolved or downloaded
 //       (ResolveTemplateAsync — task 245b split template resolution from deploy).
 //   T3  RG-ensure ARM rejection (403) -> BicepDeployOutcome.Failure, domain
 //       result (does NOT throw).
@@ -186,8 +186,8 @@ public sealed class ArmDeploymentRunnerTests
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1, CancellationToken.None);
 
         (await resolve.Should().ThrowAsync<InvalidOperationException>())
-            .WithMessage("*not deployable yet*225b*228*");
-        templateRequests.Should().Be(0, "no customer.bicep template may be deployed for Model 1 before tasks 225b + 228");
+            .WithMessage("*not deployable yet*task 228*");
+        templateRequests.Should().Be(0, "no customer.bicep template may be deployed for Model 1 before task 228");
     }
 
     // ---------- T3 RG-ensure ARM rejection ----------

@@ -82,7 +82,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
     // Task 245b: secretsVer is the manifest's content version (KvSecretManifestReadResult.Success.ContentVersion).
     private const string SecretsVer = "manifest-hash-abc123";
     private const string L2PrincipalObjectId = "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f";
-    private const string PlatformVault = "sprk-controlplane-dev-kv";
     private const string UamiResourceId = "/subscriptions/sub-cus-acme-prod/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
     // ---------- AC-1 fresh populate happy path (all seams green) ----------
@@ -868,14 +867,16 @@ public sealed class H4KvSecretsPopulationHandlerTests
     // =========================================================================
 
     // T226: ServiceBus-ConnectionString + AiSearch--AdminKey were removed from the catalog
-    // for every stamp, leaving BFF-API-ClientSecret as the only secret-free omit target.
+    // for every stamp, leaving BFF-API-ClientSecret; task 225b (G21) added Dataverse-ClientSecret —
+    // the BINDING rule: neither credential secret is ever created in a secret-free environment.
     private static readonly string[] A38aOmitTargets =
     {
         "BFF-API-ClientSecret",
+        "Dataverse-ClientSecret",
     };
 
     [Fact]
-    public async Task A38a1_SecretFreeTrue_UnionsTargetIntoExistingOmitSeam()
+    public async Task A38a1_SecretFreeTrue_UnionsBothCredentialSecretsIntoExistingOmitSeam()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-a38a1");
@@ -889,24 +890,26 @@ public sealed class H4KvSecretsPopulationHandlerTests
         result.Should().BeOfType<HandlerResult.Success>();
         // The omit flows through the SAME KvSecretWriteRequest.OmitCanonicalNames
         // seam task 126 landed — no parallel mechanism.
-        writer.LastRequest!.OmitCanonicalNames.Should().Contain(A38aOmitTargets);
-        writer.LastRequest.OmitCanonicalNames.Should().NotContain("Dataverse-ClientSecret",
-            "Q3 Path A rollback copy is never omitted (§6.5 record 2026-08-25)");
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEquivalentTo(A38aOmitTargets,
+            "task 225b: both credential secrets are omitted (never a sentinel) on secret-free environments");
     }
 
     [Fact]
-    public async Task A38a2_DefaultOptions_OmitSetStaysEmpty_NoRegression()
+    public async Task A38a2_DefaultOptions_AreSecretFree_OmitBothCredentialSecrets()
     {
+        // The production default (only the Worker-validated principal set): task 225b / G21 made
+        // RequireSecretFreeIdentity default to true.
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-a38a2");
         var writer = FakeWriter.AllWrote();
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
-            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            options: new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = L2PrincipalObjectId });
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
-            "client-secret environments are unchanged by A38a (default RequireSecretFreeIdentity=false)");
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEquivalentTo(A38aOmitTargets,
+            "every new stamp runs MI-FIC by default — H4 never creates either credential secret");
     }
 
     [Fact]
@@ -928,8 +931,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
         writer.LastRequest!.OmitCanonicalNames.Should().Contain("Some-Operator-Chosen-Secret");
         writer.LastRequest.OmitCanonicalNames.Should().Contain("Another-One");
         writer.LastRequest.OmitCanonicalNames.Should().Contain(A38aOmitTargets);
-        writer.LastRequest.OmitCanonicalNames.Should().HaveCount(3,
-            "2 operator-chosen names + the 1 remaining A38a target (T226 removed 2 targets from the catalog)");
+        writer.LastRequest.OmitCanonicalNames.Should().HaveCount(4,
+            "2 operator-chosen names + the 2 A38a targets (BFF-API-ClientSecret + Dataverse-ClientSecret, task 225b)");
     }
 
     [Fact]
@@ -948,7 +951,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
 
         result.Should().BeOfType<HandlerResult.Success>();
         writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
-            "Q3 Path A rollback re-includes the A38a target (regression path)");
+            "Q3 Path A rollback re-includes both A38a targets (regression path)");
         marker.CallCount.Should().Be(0,
             "a rolled-back environment is not secret-free — the positive marker MUST NOT be applied");
     }
@@ -975,18 +978,22 @@ public sealed class H4KvSecretsPopulationHandlerTests
     }
 
     [Fact]
-    public async Task A38a6_SecretFreeFalse_MarkerNotApplied()
+    public async Task A38a6_SecretFreeFalse_MarkerNotApplied_OmitSetStaysEmpty()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-a38a6");
         var marker = FakeMarkerApplier.Success();
+        var writer = FakeWriter.AllWrote();
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
-            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
-            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker);
+            writer, FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: false));
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         marker.CallCount.Should().Be(0);
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
+            "the explicit legacy client-secret path (RequireSecretFreeIdentity=false) omits nothing");
     }
 
     [Fact]
@@ -1204,7 +1211,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
             Options.Create(new KvSecretsPopulationOptions
             {
                 ControlPlanePrincipalObjectId = L2PrincipalObjectId,
-                PlatformVaultName = PlatformVault,
             }),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
 
@@ -1214,27 +1220,25 @@ public sealed class H4KvSecretsPopulationHandlerTests
         bootstrapper.LastRequest!.PrincipalObjectId.Should().Be(L2PrincipalObjectId);
         bootstrapper.LastRequest.PrincipalObjectId.Should().NotBe(run.InterStepState.MiObjectId);
         bootstrapper.LastRequest.RoleDefinitionId.Should().Be(KvBuiltInRoleIds.SecretsOfficer);
-        writer.LastRequest!.PlatformVaultName.Should().Be(PlatformVault, "vendor keys are copied from the configured platform vault");
     }
 
     [Theory]
-    [InlineData("", PlatformVault, "ControlPlanePrincipalObjectId")]
-    [InlineData("not-a-guid", PlatformVault, "ControlPlanePrincipalObjectId")]
-    [InlineData("00000000-0000-0000-0000-000000000000", PlatformVault, "ControlPlanePrincipalObjectId")]
-    [InlineData(L2PrincipalObjectId, " ", "PlatformVaultName")]
-    public void Options_Validate_RejectsMissingL2Principal_OrPlatformVault(string principal, string vault, string expectedSetting)
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void Options_Validate_RejectsMissingL2Principal(string principal)
     {
-        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = principal, PlatformVaultName = vault };
+        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = principal };
 
         var act = () => options.Validate();
 
-        act.Should().Throw<InvalidOperationException>().WithMessage($"*{expectedSetting}*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlanePrincipalObjectId*");
     }
 
     [Fact]
-    public void Options_Validate_AcceptsAPrincipalGuidAndAVault()
+    public void Options_Validate_AcceptsAPrincipalGuid()
     {
-        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = L2PrincipalObjectId, PlatformVaultName = PlatformVault };
+        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = L2PrincipalObjectId };
 
         options.Invoking(o => o.Validate()).Should().NotThrow();
     }
@@ -1324,12 +1328,14 @@ public sealed class H4KvSecretsPopulationHandlerTests
     /// <summary>
     /// Options in the shape Worker startup guarantees (KvSecretsPopulationOptions.Validate() runs under
     /// ValidateOnStart, task 245b) — the handler relies on it and does not re-validate.
+    /// <paramref name="requireSecretFreeIdentity"/> defaults to the LEGACY client-secret path (false),
+    /// set explicitly: the production default became true in task 225b (G21), and the tests that build
+    /// on this helper exercise the write path for every canonical entry; the A38a tests opt in.
     /// </summary>
     private static KvSecretsPopulationOptions ValidOptions(
         bool requireSecretFreeIdentity = false, bool secretFreeIdentityRollback = false) => new()
     {
         ControlPlanePrincipalObjectId = L2PrincipalObjectId,
-        PlatformVaultName = PlatformVault,
         RequireSecretFreeIdentity = requireSecretFreeIdentity,
         SecretFreeIdentityRollback = secretFreeIdentityRollback,
     };

@@ -126,15 +126,9 @@ public enum KvSecretValueSource
     /// </summary>
     WrittenByEntraAppReg = 8,
 
-    /// <summary>
-    /// Task 245b — a Spaarke-shared vendor key (owner D5: <c>BingSearch-ApiKey</c>, <c>LlamaParse-ApiKey</c>)
-    /// copied from the Spaarke platform Key Vault (<see cref="KvSecretsPopulationOptions.PlatformVaultName"/>),
-    /// where it is stored under the same canonical name (manifest <c>value_source: from-platform-vault</c>).
-    /// Before T245b these were <see cref="FromRunParameters"/> — a reference in <c>run.Parameters.Secrets</c>
-    /// that nothing wrote. Not for Azure service credentials: a stamp reaches its own services with the
-    /// stamp UAMI (D13), and never reads a shared service's credential (T226).
-    /// </summary>
-    FromPlatformVault = 9,
+    // 9 was FromPlatformVault (task 245b — Spaarke-shared vendor keys copied from the Spaarke platform
+    // vault) — removed by task 225b (owner D18, 2026-10-02) with its only entries, the Bing Search key
+    // (Bing Search v7 retired by Microsoft 2025-08-11) and the LlamaParse key (no production caller); not reused.
 }
 
 /// <summary>

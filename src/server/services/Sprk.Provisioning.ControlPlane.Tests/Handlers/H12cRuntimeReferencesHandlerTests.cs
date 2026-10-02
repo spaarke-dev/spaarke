@@ -10,8 +10,8 @@
 //
 // COVERAGE (POML acceptance criteria mapping):
 //   AC-1  H12cRuntimeReferencesHandler implements IProvisioningHandler + registers in L2 DI (module test not here — see RuntimeReferencesModule; HandlerId test covers the contract)
-//   AC-2  Model2Dedicated happy path — writer invoked with customer's dedicated OpenAI endpoint from InterStepState
-//   AC-3  Model1Shared happy path — writer invoked with shared platform endpoint + metering-attribution note
+//   AC-2  Happy path, both tenancy models (task 225b — one path) — writer invoked with the stamp's own OpenAI endpoint from InterStepState
+//   (AC-3, the Model 1 shared-platform endpoint + metering note, was retired with that branch by task 225b)
 //   AC-4  Endpoint URIs reference the ADR-020 pinned model catalog (gpt-4o/gpt-4o-mini/text-embedding-3-large with pinned versions)
 //   AC-5  Idempotency key = h12c-{customerId}-{tenancyModel}-{endpointHash}; second call is durable no-op
 //   AC-6  Negative: unknown tenancyModel → Failed with clear diagnostic; writer NOT invoked
@@ -21,8 +21,7 @@
 //   - Missing tenantId (§4D I1) → Failure(Resumable, MissingTenantId); writer NOT invoked
 //   - Missing H12a and/or H12b in CompletedPhases (DAG-join guard) → Failure(Resumable, MissingUpstreamHandlers)
 //   - Missing dataverseUrl → Failure(Resumable, MissingDataverseUrl)
-//   - Model2 missing InterStepState.OpenAiEndpoint → Failure(Resumable, MissingOpenAiEndpoint)
-//   - Model1 missing SharedPlatformOpenAiEndpoint config → Failure(Resumable, MissingSharedPlatformEndpointConfiguration)
+//   - Missing InterStepState.OpenAiEndpoint (both tenancy models) → Failure(Resumable, MissingOpenAiEndpoint)
 //   - Run not found in Cosmos partition → Failure(Resumable, RunNotFound)
 //   - HandlerId mismatch → throws InvalidOperationException
 //   - Writer failure → Failure(Resumable, ModelDeploymentWriteFailed)
@@ -33,7 +32,6 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
@@ -50,14 +48,15 @@ public sealed class H12cRuntimeReferencesHandlerTests
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string DataverseUrl = "https://acme.crm.dynamics.com";
     private const string DedicatedEndpoint = "https://openai-acme-prod.openai.azure.com/";
-    private const string SharedEndpoint = "https://openai-spaarke-platform-shared.openai.azure.com/";
 
-    // ---------- AC-2 Model2Dedicated happy path ----------
+    // ---------- AC-2 happy path, both tenancy models (task 225b) ----------
 
-    [Fact]
-    public async Task Model2Dedicated_HappyPath_WriterInvokedWithDedicatedEndpoint_AndEnqueuesH14()
+    [Theory]
+    [InlineData(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1))]
+    [InlineData(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2))]
+    public async Task HappyPath_WriterInvokedWithStampEndpoint_AndEnqueuesH14(string tenancyModel)
     {
-        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
+        var run = BuildRun(tenancyModel);
         run.InterStepState.OpenAiEndpoint = DedicatedEndpoint;
         var repo = new FakeRepository(run, etag: "etag-1");
         var enqueuer = new FakeEnqueuer();
@@ -67,8 +66,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var expectedHash = H12cRuntimeReferencesHandler.ComputeEndpointHash(DedicatedEndpoint);
-        var expectedKey = H12cRuntimeReferencesHandler.BuildIdempotencyKey(
-            CustomerId, nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2), expectedHash);
+        var expectedKey = H12cRuntimeReferencesHandler.BuildIdempotencyKey(CustomerId, tenancyModel, expectedHash);
         result.Should().BeOfType<HandlerResult.Success>()
             .Which.IdempotencyKey.Should().Be(expectedKey);
 
@@ -85,26 +83,6 @@ public sealed class H12cRuntimeReferencesHandlerTests
 
         enqueuer.Sent.Should().ContainSingle();
         enqueuer.Sent[0].HandlerId.Should().Be("H14");
-    }
-
-    // ---------- AC-3 Model1Shared happy path ----------
-
-    [Fact]
-    public async Task Model1Shared_HappyPath_WriterInvokedWithSharedEndpoint_AndMeteringNote()
-    {
-        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
-        var repo = new FakeRepository(run, etag: "etag-1");
-        var enqueuer = new FakeEnqueuer();
-        var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, enqueuer, sharedEndpoint: SharedEndpoint);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        writer.LastRequest.Should().NotBeNull();
-        writer.LastRequest!.Deployments.Should().OnlyContain(d => d.EndpointUri == SharedEndpoint);
-        writer.LastRequest.Deployments.Should().OnlyContain(d =>
-            d.Description != null && d.Description.Contains(TenantId, StringComparison.Ordinal));
     }
 
     // ---------- AC-4 Pinned model catalog ----------
@@ -180,7 +158,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
         h1.Should().Be(h2);
         h1.Length.Should().Be(64, "SHA-256 hex is 32 bytes = 64 hex chars.");
 
-        var h3 = H12cRuntimeReferencesHandler.ComputeEndpointHash(SharedEndpoint);
+        var h3 = H12cRuntimeReferencesHandler.ComputeEndpointHash("https://openai-acme-prod-rotated.openai.azure.com/");
         h1.Should().NotBe(h3, "a different endpoint MUST produce a different hash to force a re-write.");
     }
 
@@ -285,12 +263,14 @@ public sealed class H12cRuntimeReferencesHandlerTests
         writer.CallCount.Should().Be(0);
     }
 
-    // ---------- Defensive: Model2 missing OpenAiEndpoint ----------
+    // ---------- Defensive: missing OpenAiEndpoint, both tenancy models ----------
 
-    [Fact]
-    public async Task Model2Dedicated_MissingOpenAiEndpoint_ReturnsFailure()
+    [Theory]
+    [InlineData(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1))]
+    [InlineData(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2))]
+    public async Task MissingOpenAiEndpoint_ReturnsFailure(string tenancyModel)
     {
-        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
+        var run = BuildRun(tenancyModel);
         run.InterStepState.OpenAiEndpoint = null; // H2a hasn't run / populated yet.
         var repo = new FakeRepository(run, etag: "etag-1");
         var writer = new FakeWriter();
@@ -300,23 +280,6 @@ public sealed class H12cRuntimeReferencesHandlerTests
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(RuntimeReferencesRejectionCodes.MissingOpenAiEndpoint);
-        writer.CallCount.Should().Be(0);
-    }
-
-    // ---------- Defensive: Model1 missing shared-endpoint config ----------
-
-    [Fact]
-    public async Task Model1Shared_MissingSharedEndpointConfig_ReturnsFailure()
-    {
-        var run = BuildRun(nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));
-        var repo = new FakeRepository(run, etag: "etag-1");
-        var writer = new FakeWriter();
-        var handler = NewHandler(repo, writer, new FakeEnqueuer(), sharedEndpoint: null);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.RejectionCode.Should().Be(RuntimeReferencesRejectionCodes.MissingSharedPlatformEndpointConfiguration);
         writer.CallCount.Should().Be(0);
     }
 
@@ -452,22 +415,9 @@ public sealed class H12cRuntimeReferencesHandlerTests
     // ---------- NFR-05: RuntimeReferencesOptions.Validate() (task 153) ----------
 
     [Fact]
-    public void OptionsValidate_Passes_With_Defaults_NoSharedPlatformEndpointRequired()
+    public void OptionsValidate_Passes_With_Defaults()
     {
-        // Deliberately does NOT set SharedPlatformOpenAiEndpoint — it is a
-        // conditionally-required field (Model1Shared branch only), NOT a
-        // boot-time requirement. See RuntimeReferencesOptions.Validate doc
-        // comment. A Worker serving only Model2Dedicated customers must NOT
-        // crash-loop for a setting it never uses.
         var options = new RuntimeReferencesOptions();
-        var act = () => options.Validate();
-        act.Should().NotThrow();
-    }
-
-    [Fact]
-    public void OptionsValidate_Passes_With_SharedPlatformOpenAiEndpoint_Set()
-    {
-        var options = new RuntimeReferencesOptions { SharedPlatformOpenAiEndpoint = SharedEndpoint };
         var act = () => options.Validate();
         act.Should().NotThrow();
     }
@@ -502,8 +452,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
     public void OptionsValidate_SectionName_Is_RuntimeReferences()
     {
         // Regression-guard: ground-truths the literal Bicep app-setting-key
-        // prefix contract (RuntimeReferences__SharedPlatformOpenAiEndpoint /
-        // RuntimeReferences__DataverseRequestTimeout) so a future section-name
+        // prefix contract (RuntimeReferences__DataverseRequestTimeout) so a future section-name
         // drift (e.g. an accidental rename back to nameof(RuntimeReferencesOptions))
         // fails at build time, not silently at deploy time — parity with
         // EnvVarValuesOptions's identical regression-guard (task 142).
@@ -517,15 +466,12 @@ public sealed class H12cRuntimeReferencesHandlerTests
     private static H12cRuntimeReferencesHandler NewHandler(
         IProvisioningRunRepository repository,
         IModelDeploymentReferenceWriter writer,
-        IHandlerEnqueuer enqueuer,
-        string? sharedEndpoint = SharedEndpoint)
+        IHandlerEnqueuer enqueuer)
     {
-        var options = Options.Create(new RuntimeReferencesOptions { SharedPlatformOpenAiEndpoint = sharedEndpoint });
         return new H12cRuntimeReferencesHandler(
             repository,
             writer,
             enqueuer,
-            options,
             NullLogger<H12cRuntimeReferencesHandler>.Instance);
     }
 

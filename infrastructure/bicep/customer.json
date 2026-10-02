@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8524100886764261837"
+      "templateHash": "6946112015181829184"
     }
   },
   "parameters": {
@@ -139,13 +139,6 @@
       ],
       "metadata": {
         "description": "SignalR SKU (ignored when signalrEnabled=false). Default Free_F1 for scaffold + dev; production customers requiring realtime bump to Standard_S1 (~$48/mo/unit per notes/pricing-research-2026-08-12.md)."
-      }
-    },
-    "requireSecretFreeIdentity": {
-      "type": "bool",
-      "defaultValue": false,
-      "metadata": {
-        "description": "RETAINED FOR THE H2a PARAMETER CONTRACT ONLY - no effect in this template since T226 (2026-09-30). It used to omit `AiSearch--AdminKey` + `ServiceBus-ConnectionString` from kvSecretValues on secret-free stamps; both keys are now removed from the process for every stamp (the BFF reaches AI Search and Service Bus with the stamp UAMI). ArmDeploymentRunner still passes it and ARM rejects undeclared parameters, so its removal is paired with the runner change (T225b)."
       }
     },
     "deployAcsMessaging": {
@@ -3653,7 +3646,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "5827967201281677018"
+              "templateHash": "7393164696199473406"
             }
           },
           "parameters": {
@@ -3768,26 +3761,6 @@
                 "canonicalName": "BFF-API-ClientId",
                 "category": "identity",
                 "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'BingSearch-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BingSearch-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['BingSearch-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-platform-vault"
-              },
-              "tags": {
-                "canonicalName": "BingSearch-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
                 "neverDelete": "false",
                 "managedBy": "canonical-secret-catalog-generator"
               }
@@ -4013,26 +3986,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'LlamaParse-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'LlamaParse-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['LlamaParse-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-platform-vault"
-              },
-              "tags": {
-                "canonicalName": "LlamaParse-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'Redis-ConnectionString')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4143,7 +4096,6 @@
                 "BFF-API-Audience",
                 "BFF-API-ClientId",
                 "BFF-API-ClientSecret",
-                "BingSearch-ApiKey",
                 "Communication-DefaultMailbox",
                 "Communication-Webhook-SigningKey",
                 "Communication-WebhookClientState",
@@ -4156,7 +4108,6 @@
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",
                 "Email-WebhookSigningKey",
-                "LlamaParse-ApiKey",
                 "Redis-ConnectionString",
                 "SPE-CommunicationArchiveContainerId",
                 "SPE-ContainerTypeId",

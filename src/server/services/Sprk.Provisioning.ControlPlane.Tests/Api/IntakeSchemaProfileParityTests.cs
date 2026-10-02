@@ -79,6 +79,43 @@ public sealed class IntakeSchemaProfileParityTests
     /// field stays required at ajv-validation time, so a future well-meaning removal fails
     /// the build here instead of failing silently in prod.
     /// </summary>
+    /// <summary>
+    /// Task 225b (G6): the schema's tenancyModel × profile <c>allOf</c> rules and the endpoint's
+    /// <c>TryValidateTenancyProfilePair</c> accept exactly the same pairs — over every known model × profile.
+    /// The enum tests above compare only the value lists, not the pairing.
+    /// </summary>
+    [Fact]
+    public void TenancyProfilePairs_SchemaAllOfAndEndpoint_AcceptTheSamePairs()
+    {
+        var schemaPath = ResolveRepoRelativePath(IntakeSchemaRelativePath);
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        var requiredProfileByModel = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var rule in doc.RootElement.GetProperty("allOf").EnumerateArray())
+        {
+            if (rule.TryGetProperty("if", out var cond)
+                && cond.TryGetProperty("properties", out var condProps)
+                && condProps.TryGetProperty("tenancyModel", out var tm) && tm.TryGetProperty("const", out var model)
+                && rule.TryGetProperty("then", out var then)
+                && then.TryGetProperty("properties", out var thenProps)
+                && thenProps.TryGetProperty("profile", out var prof) && prof.TryGetProperty("const", out var profile))
+            {
+                requiredProfileByModel[model.GetString()!] = profile.GetString()!;
+            }
+        }
+
+        requiredProfileByModel.Keys.Should().BeEquivalentTo(RunsEndpoints.KnownTenancyModels.All,
+            "every tenancy model needs exactly one schema pairing rule");
+        foreach (var model in RunsEndpoints.KnownTenancyModels.All)
+        {
+            foreach (var profile in RunsEndpoints.KnownProfiles.All)
+            {
+                var schemaAccepts = requiredProfileByModel[model] == profile;
+                RunsEndpoints.TryValidateTenancyProfilePair(model, profile, out _).Should().Be(schemaAccepts,
+                    $"schema and POST /api/runs must agree on {model} + {profile}");
+            }
+        }
+    }
+
     [Fact]
     public void ConfirmationAcknowledgment_IsRequired_InIntakeSchema()
     {

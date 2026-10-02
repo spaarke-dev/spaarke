@@ -150,8 +150,8 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |
 | Azure region | `westus2` (default) | Customer intake / geo requirement |
 | Dataverse region | `unitedstates` (default) | Must match Azure region locality |
-| Tenancy model | `Model2Dedicated` — ⚠️ currently the **only** valid value, and it covers **both** new models. `Model1Shared` is retired. Migration pending (D-12 §6). | Per §3 selection criteria |
-| Deployment profile | `spaarke-hosted-model2` (= the new **Model 1**), `customer-owned-model2` (= the new **Model 2**), `demo`. ⚠️ `spaarke-hosted-model1-trial` is **retired — never select it**. Names still encode the old vocabulary because the live L2 API validates them; renaming is part of the D-12 §6 enum migration. | Per D15 |
+| Tenancy model | `Model1` (dedicated stamp hosted in Spaarke's tenant) or `Model2` (dedicated stamp in the customer's tenant). Exact case — `POST /api/runs` refuses any other value. | Per §3 selection criteria |
+| Deployment profile | Follows from the tenancy model: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`. `POST /api/runs` refuses any other pair (`tenancy-profile-invalid`). The names predate the D-12 renumbering. `spaarke-hosted-model1-trial` is **retired** and refused as an unknown profile. | Per D15 |
 | Customer admin contact | Name, email, phone | For H0.5 consent flow (Model 2) |
 
 ### 2.4 External lead-time items (surface BEFORE starting pipeline)
@@ -272,10 +272,9 @@ Handlers execute the same code and, as of D-12, almost the same inputs.
 H2a `model1-shared.bicep`, H2b "7 indexes already exist on shared platform", H7/H12c pointing at shared
 platform OpenAI, H13 verifying `tenantId`-filter enforcement — described the retired tier and is deleted.
 
-⚠️ **A known live defect until the enum migration lands** (D-12 §6): `sprk_tenancymodel` value `1`
-(`Model2Dedicated`) covers **both** new models, and `H1SubscriptionReadinessHandler` maps that literal to
-`CustomerOwned` unconditionally — so it currently **demands Lighthouse delegation for subscriptions Spaarke
-already owns**. Expect this when provisioning a new Model 1 customer today.
+✅ **Resolved** (T224 enum rename + T225b pairing): `Model1` maps to Spaarke-owned (no Lighthouse) and `Model2` to
+customer-owned (Lighthouse required), and intake pairs `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔
+`customer-owned-model2`. A Model 1 run still stops at H2a until T228 (one subscription per customer).
 
 ### 3.4 Invariants — what I1–I5 actually enforce
 
@@ -333,13 +332,13 @@ parameters: `POST /api/runs` rejects them. A missing or malformed value stops th
 | Setting (`Worker` app setting) | What it is | Read by |
 |---|---|---|
 | `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId` | Object id of L2's own UAMI — the principal H4 grants **Key Vault Secrets Officer** on each customer vault before writing it. Never the stamp's BFF UAMI (that one only reads its vault). | H4 |
-| `KvSecretsPopulationOptions__PlatformVaultName` | Spaarke platform vault holding the Spaarke-shared vendor keys (`BingSearch-ApiKey`, `LlamaParse-ApiKey`) under their canonical names; H4 copies them into each customer vault. Defaults to the Worker's platform vault, where Bicep grants the Worker UAMI Key Vault Secrets User — **any other vault must grant it itself**. | H4 |
+| `KvSecretsPopulationOptions__RequireSecretFreeIdentity` | `true` — every new stamp is secret-free: H4 omits `BFF-API-ClientSecret` and `Dataverse-ClientSecret` (BINDING credential-lifecycle rule; no sentinel). The code default is also `true` (T225b, G21). | H4 |
 | `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId`, `OwnerAppId` (the container type's **owning** app), `OwnerCertKeyVaultName` + `OwnerCertSecretName` (its certificate, base64 PFX — canonical `SPE-OwnerCert-Pfx`). The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run until the topology runbook has created a container type + owning app and its entry is added. | H0 (SpeCertBootstrap), H8, H13 (T6) |
 | `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
 
-Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`),
-`vendorKeysKeyVaultName` (default: the Worker's platform vault) and `speContainerTypeOwners` (array; threaded from
-`platform-controlplane.bicep`).
+Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`)
+and `speContainerTypeOwners` (array; threaded from `platform-controlplane.bicep`). T225b removed `vendorKeysKeyVaultName`
+(owner D18: no Spaarke-shared vendor key remains in the customer catalog).
 
 Artifact versions in idempotency keys (`bicepVer`, `indexVer`, `secretsVer`) are computed by L2 from the artifact each
 handler applies — the ARM template H2a deploys, the index schemas H2b PUTs, the secret-catalog manifest H4 / H4b read —
@@ -411,8 +410,8 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
 | **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12), OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR. Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
-| **H2b** | AI Search indexes | Provision 7 canonical indexes via `scripts/ai-search/Deploy-AllIndexes.ps1` (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
-| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ⚠️ **The code does not do this yet**: `H3EntraAppRegHandler` still has a `Model1Shared` branch that creates **zero** app registrations and reuses `SharedBffAppRegistrationId`. Deleting it is open work. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
+| **H2b** | AI Search indexes | Provision the 7 canonical indexes (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) on the stamp's own AI Search service via the SDK (`SearchIndexClientProvisioner`, L2 identity), then verify them — same path for both models (T225b) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
+| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
@@ -824,7 +823,6 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
     -CustomerId "acme" `
     -TenantId "<customer-tenant-guid>" `   # MANDATORY per I1
     -Environment "prod" `
-    -TenancyModel "Model2Dedicated" `      # covers BOTH models until the D-12 enum migration; "Model1Shared" is retired
     -SubscriptionId "<sub-guid>" `
     -Region "westus2"
 

@@ -4,7 +4,7 @@
     <title>Converge Model 1 onto the dedicated code path — H2b / H12c shared-platform branches out, tenancy × profile pairing (G6), secret-free default (G21), Bing + LlamaParse keys out (D18), `Model1SharedDagParityTests` rename (G13)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T225b (gaps G6, G13, G21; owner decisions D12-era D-12 + D18)</phase>
     <gate>startable — T225a ✅ (b9fd48bbe); owner decisions D16–D19 recorded (6240f41d8)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs handlers, options, validation and tests across H2b, H12c, H4, the Api edge and the Worker; edits Bicep + the canonical secret catalog; credential-lifecycle constraints apply (G21).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -128,8 +128,9 @@
       `KvSecretsPopulationOptions__PlatformVaultName` setting (a required boot option nothing reads is a failure mode).
     </constraint>
     <constraint source="plan G6 + INCOMING §5 Item 3">
-      Pairing after this task: `Model1` ↔ `spaarke-hosted-model2`; `Model2` ↔ `customer-owned-model2`. Every other pair,
-      including any pair using `spaarke-hosted-model1-trial`, is refused with the existing invalid-pair error code. Do NOT
+      Pairing after this task: `Model1` ↔ `spaarke-hosted-model2`; `Model2` ↔ `customer-owned-model2`. Every other pair is
+      refused with the existing invalid-pair error code; `spaarke-hosted-model1-trial` is retired from the known profile
+      set (refused as an unknown profile). Do NOT
       rename the profile vocabulary (out of scope — record a one-line follow-up for T235 if you think it should be).
       Record the change as an extension of the T245a ADR-020 row in spec.md ADR Tensions (same callers, same reasoning).
     </constraint>
@@ -180,7 +181,7 @@
   <acceptance-criteria>
     <criterion testable="true">Given a Model 1 run, H2b creates indexes on the AI Search endpoint H2a produced, through the same code path as Model 2; given that output is absent, it fails with the same rejection code Model 2 uses. No `HandleModel1BranchAsync`, `SharedPlatformSearchEndpoint` or tenant-filter template provisioner remains in code, DI, Worker config or Bicep.</criterion>
     <criterion testable="true">Given a Model 1 run, H12c's OpenAI runtime reference is the stamp's own endpoint; no `SharedPlatformOpenAiEndpoint` remains in code, Worker config, Bicep (incl. compiled JSON) or `Seed-PlatformKeyVault.ps1`.</criterion>
-    <criterion testable="true">`POST /api/runs` accepts `Model1`+`spaarke-hosted-model2` and `Model2`+`customer-owned-model2`; it refuses `Model1`+`spaarke-hosted-model1-trial`, `Model1`+`customer-owned-model2` and `Model2`+`spaarke-hosted-model2` with the existing invalid-pair code; `intake.schema.json` agrees (schema/endpoint parity test passes).</criterion>
+    <criterion testable="true">`POST /api/runs` accepts `Model1`+`spaarke-hosted-model2` and `Model2`+`customer-owned-model2`; it refuses `Model1`+`customer-owned-model2` and `Model2`+`spaarke-hosted-model2` with the existing invalid-pair code, and `spaarke-hosted-model1-trial` (retired from the known profile set) with the existing unknown-profile code; `intake.schema.json` agrees (schema/endpoint parity test passes).</criterion>
     <criterion testable="true">With default options, H4 writes neither `Dataverse-ClientSecret` nor `BFF-API-ClientSecret`; the Worker Bicep sets `KvSecretsPopulationOptions__RequireSecretFreeIdentity=true`; `PinnedManifestGaps` contains only the T246 and T227 pins; existing rollback tests pass unchanged.</criterion>
     <criterion testable="true">The canonical secret catalog has no `BingSearch-ApiKey` or `LlamaParse-ApiKey`; generated files match the generator (`-Verify` OK); either the `from-platform-vault` mechanism and `PlatformVaultName` are gone end to end, or (escalation 3) the option is optional and the reason is recorded.</criterion>
     <criterion testable="true">No file or type name in src/ contains `Model1Shared`.</criterion>
@@ -193,6 +194,75 @@
     Filed 2026-10-02 from plan §7 T225b + owner D18. Scope change vs the plan row: the ArmDeploymentRunner Model 1 → `customer`
     flip moved to T228 (flipping it before per-customer subscriptions exist would deploy a full stamp into a shared
     subscription — T225a adr-check F2 / ADR-027).
+
+    COMPLETION (2026-10-02). Verified: ControlPlane Api / Worker / Tests / LoadTests build 0 warnings 0 errors;
+    ControlPlane.Tests 2124 pass / 6 fail (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip;
+    ArchTests 340/340; bicep-e2e-dry-run.ps1 OVERALL PASS; prereqs validate.ps1 OK (34 prereqs, manifest v5); catalog
+    -Verify OK; customer.json + platform-controlplane.json = fresh compiles (`--outfile`); Seed-PlatformKeyVault.ps1
+    binds all 10 parameters (Get-Command).
+
+    DONE: H2b + H13's I2 probe + H12c run one path for both models on the stamp's own AI Search / OpenAI (deleted:
+    HandleModel1BranchAsync, AiSearchIndexOptions.SharedPlatformSearchEndpoint, the Cosmos tenant-filter template store
+    + provisioner + tests, RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint, its Worker Bicep KV ref +
+    azureOpenAiEndpointSecretName params, the Seed-PlatformKeyVault AzureOpenAI-Endpoint entry, 3 rejection codes:
+    shared-index-missing, tenant-filter-template-provision-failed, runtimerefs-missing-shared-platform-endpoint-
+    configuration — no documented consumer). G6 pairing (agent): Model1↔spaarke-hosted-model2, Model2↔customer-owned-
+    model2, trial profile retired (refused `tenancy-profile-invalid`); schema allOf pinned against the endpoint by a new
+    parity test. G13: TenancyModelDagParityTests. G21: KvSecretsPopulationOptions.RequireSecretFreeIdentity = true by
+    default + Worker Bicep sets it; SecretFreeIdentityOmitTargets = {BFF-API-ClientSecret, Dataverse-ClientSecret}
+    (owner-approved binding rule — resolution record decisions/adr-028-a4-integration-conflict-resolution.md lines
+    168/174: never CREATE either in a secret-free env; rule 2's hold protects the EXISTING copy from deletion only);
+    both PinnedManifestGaps removed; customer.bicep's dead requireSecretFreeIdentity param removed with its intake key,
+    H2a read, BicepDeployRequest field and runner payload entry (the param's own description said "removal paired with
+    the runner change (T225b)"). D18 (agent): BingSearch-ApiKey + LlamaParse-ApiKey + the from-platform-vault source
+    removed end to end (generator, C#, options, Worker Bicep `vendorKeysKeyVaultName`, tests; enum slot 9 tombstoned —
+    not persisted anywhere, adr-check verified); generated files regenerated.
+
+    ESCALATION TRIGGERS: (1) the tenant-filter template store had a 2nd consumer, H13's I2 probe — but it was the I2
+    probe's MODEL 1 branch, i.e. the same retired shared-tier logic, so the trigger (a consumer that is NOT the Model 1
+    branch) did not fire; converging it here instead of in T230 kept H13 from failing every Model 1 run (deviation:
+    pulled forward from T230; plan T230 row + G5 updated). (2) Secret-free default changes no live environment's runs:
+    H4 only ever writes NEW stamps' vaults; prong 3 is spaarkedev1 only. (3) from-platform-vault removal needed nothing
+    outside the control plane / catalog / Worker Bicep (BFF keeps its own Bing config — follow-up). (4) Profile values:
+    only the intake template carried the trial profile (updated); stored runs are never re-validated, and pre-T224 runs
+    carry "Model1Shared", already unparseable — so no resumable Model 1 run can hit the converged H2b path (adr-check W6).
+
+    QUALITY GATES (Step 9.5): code-review — C1 Critical FIXED (Seed-PlatformKeyVault.ps1: removing $AzureOpenAiEndpoint
+    left a stray [Parameter] attribute, the script would not bind; my earlier check only parsed it); W1 FIXED at source
+    (secret-free default ⇒ H4 always writes the A38a marker to registry column sprk_credentialmode, which does NOT exist
+    on spaarkedev1 — read-only check 2026-10-02: added to the idempotent Extend-DataverseEnvironmentSchema-v3.3.ps1 +
+    new prerequisite PRQ-E-14; LIVE creation awaits owner approval); W2 rollback scope documented on the option; W3/adr
+    W2 rollout order recorded below; W4 spec ADR-038 row renamed; W5 inventory/plan I2 rows; W6 pairing parity test
+    added; S1 replaced my H2a "removed field absent" test with a real check — every BuildParametersPayload key is
+    declared in customer.json (ArmTemplateInspectorTests); S2 explicit legacy options; S3 skill tenancy check case-
+    sensitive; S4 stale text (csproj, probe message, constraint); S5 no tenantFilterTemplates container exists in dev
+    Cosmos (read-only list: only `runs`); S7 test rename. adr-check — production code compliant; V1 = W4; skill now
+    hard-stops Model 1 until T228 (adr W1, ADR-027 path C); I2 probe header records it cannot see bleed between Model 1
+    customers (all carry Spaarke's tenantId — isolation is the per-stamp service); spec ADR-027 / B04 rows + a blank
+    line splitting the ADR Tensions table fixed; a new spec ADR-020 row (T225b extension of T245a) covers the intake
+    changes.
+
+    DEVIATIONS: ArmDeploymentRunnerTests T2 message pattern changed `*225b*228*` → `*task 228*` (the fail-closed message
+    now names only T228 — behaviour unchanged; criterion "T2 unchanged" met in substance). I2 probe convergence pulled
+    from T230. Deployment guide stale passages fixed in passing (H1 Lighthouse defect resolved, H3 T222 done, H2b uses
+    the SDK, Provision-Customer.ps1 example passed a -TenancyModel the script does not have).
+
+    ROLLOUT ORDER (W3): deploy a Worker built from this commit BEFORE the next publish of the `customer` ARM artifact —
+    an older Worker still sends `requireSecretFreeIdentity`, which the new template no longer declares (ARM rejects).
+    No run passes H0 today (G28), so nothing is exposed until then.
+
+    NOT APPLICABLE: BFF publish-size (no BFF binary change; H4b merely stops writing BingSearch__ApiKey /
+    LlamaParse__ApiKeySecretName — the BFF tolerates both absent).
+
+    FOLLOW-UPS (not done here): BFF dead Bing v7 code + appsettings.template.json BingSearch ref (BFF follow-up list);
+    design.md §4.1a still describes shared Model 1 (T235); intake.schema.json Model 1 example `tier: shared-trial` (T229);
+    requestedIndexes subset always quarantines because H2b verifies all 7 (pre-existing, code-review S8); AI Search
+    token sent to InterStepState.AiSearchEndpoint without a host check (pre-existing, S10 — candidate for T244);
+    TenancyModelDagParityTests' typeof(...).NotBeNull() assertion tests nothing (pre-existing — /test-diet at close).
+
+    Test-scope justification: H2b / I2 probe / H12c tests became theories over both models (happy path + missing
+    endpoint); Model 1 shared-branch tests deleted with the branch; G21/D18 test changes per the agents' reports; one
+    new parity test each for schema↔endpoint pairing and runner payload↔template parameters.
   </notes>
 
   <execution>

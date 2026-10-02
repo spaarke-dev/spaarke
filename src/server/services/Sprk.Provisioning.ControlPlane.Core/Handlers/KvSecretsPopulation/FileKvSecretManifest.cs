@@ -61,9 +61,9 @@
 //   On secret-free environments (KvSecretsPopulationOptions.
 //   RequireSecretFreeIdentity=true, mirroring the BFF's
 //   Graph__Credentials__RequireSecretFreeIdentity), the A38a credential
-//   slots (SecretFreeIdentityOmitTargets — since T226 only BFF-API-ClientSecret;
-//   the Service Bus connection string and AI Search admin key left the catalog
-//   for every stamp) are FILTERED from the
+//   slots (SecretFreeIdentityOmitTargets — BFF-API-ClientSecret + Dataverse-ClientSecret
+//   since task 225b; the Service Bus connection string and AI Search admin key left
+//   the catalog for every stamp in T226) are FILTERED from the
 //   SERVED entry list — DOWNSTREAM of the BINDING never-delete invariant
 //   check above, which runs against the RAW yaml document and is unaffected.
 //   The manifest.yaml rows themselves are NEVER deleted (the invariant
@@ -75,8 +75,10 @@
 //   the credential slots (KV resource tag + sprk_dataverseenvironment state
 //   field — see ISecretFreeMarkerApplier).
 //   Q3 Path A rollback (SecretFreeIdentityRollback=true) re-includes ONLY
-//   the A38a targets. Dataverse-ClientSecret is NEVER filtered (Q3
-//   Path A rollback copy, unconditional until 2026-11-23 sunset).
+//   the A38a targets. Task 225b (G21): Dataverse-ClientSecret is now an
+//   omit target too — the BINDING rule forbids CREATING either credential
+//   secret in a secret-free environment; the Q3 Path A hold (sunset
+//   2026-11-23) only protects the EXISTING live copy from deletion.
 // -----------------------------------------------------------------------------
 
 using System.Reflection;
@@ -108,17 +110,20 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
     /// environments (auth-v4 §10.1 Δ1/Δ2; §9.1 OMIT-is-the-signal). Originally three;
     /// T226 (owner 2026-09-30) removed <c>ServiceBus-ConnectionString</c> and
     /// <c>AiSearch--AdminKey</c> from the catalog for EVERY stamp (the BFF reaches both
-    /// with the stamp UAMI), so only <c>BFF-API-ClientSecret</c> remains to omit.
+    /// with the stamp UAMI), leaving <c>BFF-API-ClientSecret</c>; task 225b (G21) added
+    /// <c>Dataverse-ClientSecret</c> — neither credential secret is ever created in a
+    /// secret-free environment (the Q3 Path A hold, sunset 2026-11-23, protects only the
+    /// existing live copy from deletion).
     /// Shared with H4, which unions these into the task-126 FR-39
     /// <see cref="KvSecretWriteRequest.OmitCanonicalNames"/> seam as
     /// defense-in-depth (covers any manifest implementation that does not filter).
-    /// MUST NOT contain
-    /// <c>Dataverse-ClientSecret</c> (Q3 Path A rollback copy — §6.5 record
-    /// 2026-08-25, sunset 2026-11-23).
     /// </summary>
     public static readonly IReadOnlySet<string> SecretFreeIdentityOmitTargets = new HashSet<string>(StringComparer.Ordinal)
     {
         "BFF-API-ClientSecret",
+        // Task 225b (G21): the BINDING rule covers both credential secrets — never created in a
+        // secret-free environment. The Q3 hold protects the existing dev copy from deletion only.
+        "Dataverse-ClientSecret",
     };
 
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
@@ -248,8 +253,7 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 var diagnostic =
                     $"manifest.yaml entry '{secret.CanonicalName}' has unrecognized value_source " +
                     $"'{secret.ValueSource}' (expected one of: from-existing-kv, from-bicep-output, " +
-                    "from-run-parameter, generated, from-topology-constants, from-intake-parameter, written-by-h3, " +
-                    "from-platform-vault).";
+                    "from-run-parameter, generated, from-topology-constants, from-intake-parameter, written-by-h3).";
                 _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
                 return new KvSecretManifestReadResult.Failure(diagnostic);
             }
@@ -268,7 +272,7 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
         // validated the RAW yaml document — BFF-API-ClientSecret's yaml row
         // stays present + never_delete=true; only the SERVED list shrinks).
         // Q3 Path A rollback (SecretFreeIdentityRollback) re-includes the
-        // three targets; Dataverse-ClientSecret is never in the target set.
+        // targets (BFF-API-ClientSecret + Dataverse-ClientSecret).
         if (_options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback)
         {
             var beforeCount = entries.Count;
@@ -322,9 +326,6 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 return true;
             case "written-by-h3":
                 valueSource = KvSecretValueSource.WrittenByEntraAppReg;  // task 245a
-                return true;
-            case "from-platform-vault":
-                valueSource = KvSecretValueSource.FromPlatformVault;     // task 245b
                 return true;
             default:
                 valueSource = default;

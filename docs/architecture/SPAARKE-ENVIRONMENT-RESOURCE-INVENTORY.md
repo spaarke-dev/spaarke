@@ -117,10 +117,11 @@ Everything in this section is created by **H2a** deploying [`infrastructure/bice
 into the customer's own subscription (`targetScope = 'subscription'`), unless another handler is named.
 
 ✅ **T225a (2026-10-01) — the `model1-*` Bicep surfaces are deleted**, and H2a **fails closed** for Model 1
-(nothing deployed) instead of building a stamp in a non-dedicated subscription. 🔲 **T225b** converges the rest of the
-Model 1 code path (H2b's Model 1 branch, H12c's shared OpenAI endpoint, Worker config) and points H2a's Model 1 arm at
-`customer`; 🔲 **T228** gives every Model 1 run its own subscription. Every ✅ below means "`customer.bicep` does this",
-which becomes true for Model 1 once both land.
+(nothing deployed) instead of building a stamp in a non-dedicated subscription. ✅ **T225b (2026-10-02)** converged the
+rest of the Model 1 code path (H2b, H13's I2 probe and H12c use the stamp's own AI Search / OpenAI; the shared-platform
+options, Worker settings and seed entry are gone). 🔲 **T228** gives every Model 1 run its own subscription and points
+H2a's Model 1 arm at `customer`. Every ✅ below means "`customer.bicep` does this", which becomes true for Model 1 once
+T228 lands.
 
 | Area | Resource | Deployment | Naming (`{env}` = `prod`) | Created by | Status vs target |
 |---|---|---|---|---|---|
@@ -135,7 +136,7 @@ which becomes true for Model 1 once both land.
 | Data | Azure Cache for Redis — **Standard C1** (owner, INCOMING §9 Q3; D-12 §3: holds OBO tokens + the `uac-access` cache) | Dedicated | `sprk-{customerId}-prod-redis` (`:185`) | H2a | 🔲 **T225a** — Bicep default is still `Basic` / capacity `0` (`:114,117`) |
 | AI | Azure OpenAI (`kind=AIServices`, westus3) + 4 pinned deployments per design.md §7.4 | Dedicated | `sprk-{customerId}-prod-openai` (`:168`) | H2a | ✅ — check `az cognitiveservices model list` before the first deploy (pins deprecate within months) |
 | AI | Azure AI Search (Standard, semantic) | Dedicated | `sprk-{customerId}-prod-search` (`:171`) | H2a | ✅ |
-| AI | AI Search indexes — 7 canonical (`spaarke-files-index`, `spaarke-discovery-index`, `spaarke-records-index`, `spaarke-rag-references`, `spaarke-insights-index`, `spaarke-session-files`, `spaarke-invoices-index`) | Dedicated | Catalog = [`Deploy-AllIndexes.ps1`](../../scripts/ai-search/Deploy-AllIndexes.ps1) `$Catalog` | **H2b** | 🔲 **T225b** — H2b's Model 1 branch (`HandleModel1BranchAsync`) verifies indexes on a shared service and provisions a `tenantId`-filter template instead of creating the indexes |
+| AI | AI Search indexes — 7 canonical (`spaarke-files-index`, `spaarke-discovery-index`, `spaarke-records-index`, `spaarke-rag-references`, `spaarke-insights-index`, `spaarke-session-files`, `spaarke-invoices-index`) | Dedicated | Catalog = [`Deploy-AllIndexes.ps1`](../../scripts/ai-search/Deploy-AllIndexes.ps1) `$Catalog` (schemas embedded in the control plane) | **H2b** (SDK `SearchIndexClientProvisioner`, L2 identity) | ✅ **T225b** — one path for both models on the stamp's own service (the Model 1 shared-service branch and its `tenantId`-filter template are deleted) |
 | AI | Document Intelligence (S0, `prebuilt-layout`) | Dedicated | `sprk-{customerId}-prod-docintel` (`:180`) | H2a | ✅ |
 | Compute | App Service Plan (Linux, S1 default) — a dedicated plan is **forced** (an app cannot use a plan in another subscription; ADR-027 §1) | Dedicated | `sprk-{customerId}-prod-plan` (`:535`) | H2a | ✅ |
 | Compute | BFF App Service + `staging` slot (.NET 10, UAMI-only, `/health`) | Dedicated | `sprk-{customerId}-prod-api` (`:547`) | H2a; H4 PATCHes `keyVaultReferenceIdentity` on both slots (T1); **H9** zip-deploys | ✅ |
@@ -153,7 +154,7 @@ which becomes true for Model 1 once both land.
 | Identity and tenant | Dedicated | `TenantId`, `BFF-API-ClientId`, `BFF-API-Audience`, `Dataverse-ServiceUrl` | `TenantId`: **H4** from the intake `tenantId` (`from-intake-parameter`). `BFF-API-ClientId` / `-Audience`: **H3** writes them to the customer vault itself; H4 (which runs before H3) skips them (`written-by-h3`). `Dataverse-ServiceUrl`: nothing yet — it is H5's output and H5 runs after H4. | ✅ TenantId, ClientId, Audience (task 245a). 🔲 **T245b** — `Dataverse-ServiceUrl`. |
 | SPE | Dedicated (IDs of the customer's containers) + shared type ID | `SPE-ContainerTypeId` (`from-topology-constants` — same for every Model 1 customer), `SPE-DefaultContainerId`, `SPE-CommunicationArchiveContainerId` | **H4**; container IDs come from H8 at runtime | 🔲 **T227** — the manifest labels the two container IDs `from-bicep-output`, but no Bicep writes them (`customer.bicep`'s `kvSecretValues` omits them — they are H8 runtime outputs; plan G18, pinned in `RunContextContractTests`); the communication-archive container has no documented creating handler |
 | Communications | Dedicated | `Communication-DefaultMailbox`, `Communication-WebhookClientState`, `Communication-Webhook-SigningKey`, `Compose-Webhook-*`, `Email-Webhook*` | **H4** generates the webhook secrets and writes `Communication-DefaultMailbox` from the required intake value `communicationDefaultMailbox` | ✅ generated secrets. ✅ **T245c** — `Communication-DefaultMailbox` is operator intake, validated at `POST /api/runs` (mailbox configuration itself is out of scope, D2) |
-| Third-party vendor keys | **Shared** (Spaarke accounts, D5) | `BingSearch-ApiKey`, `LlamaParse-ApiKey` | **H4** copies Spaarke's key from the Spaarke platform vault (`from-platform-vault`, `KvSecretsPopulationOptions.PlatformVaultName`) into the customer vault | ✅ **T245b** — the keys must be seeded in the platform vault under their canonical names (H4 fails Resumable before any write otherwise) |
+| Third-party vendor keys | — | `BingSearch-ApiKey`, `LlamaParse-ApiKey` | not provisioned | ⛔ **Removed from customer stamps — owner D18 (2026-10-02), T225b.** Bing Search v7 was retired by Microsoft 2025-08-11 (the BFF's web-search tool uses it; dev/demo use keyless Grounding with Bing instead); LlamaParse has no production caller. No value existed in any vault. The BFF's dead Bing v7 code is on the BFF follow-up list. |
 | Content Safety key | Dedicated if the optional module is deployed | `ContentSafety-ApiKey` | H4 (`from-run-parameter` — a ref nothing writes); stamps have no Content Safety resource (plan G26) | 🔲 **T246** |
 | Retired credentials | — | `BFF-API-ClientSecret`, `Dataverse-ClientSecret` | **Never** created, seeded or restored on secret-free stamps; never delete the live `Dataverse-ClientSecret` or purge rollback copies before **2026-11-23** ([`.claude/constraints/provisioning.md`](../../.claude/constraints/provisioning.md) §KV credential lifecycle) | ✅ |
 | BFF app settings (~40 across 26 IOptions sections) | Dedicated | From [`Configure-AppServiceSettings.generated.ps1`](../../scripts/canonical-secret-catalog/generated/Configure-AppServiceSettings.generated.ps1) | **H4b**, one batch → one restart | ✅ once T226 lands (generated from the manifest) |
@@ -165,9 +166,9 @@ which becomes true for Model 1 once both land.
 
 | Resource | Deployment | Naming | Created by | Status vs target |
 |---|---|---|---|---|
-| L2 control plane: App Service API host + slotless Worker host (+ EXO PowerShell sidecar) | Shared | `spaarke-provisioning-controlplane-{env}` / `-worker-{env}` | `platform-controlplane.bicep` | ✅ — worker Bicep still carries `Model1Shared` config + `SharedPlatformOpenAiEndpoint` (🔲 **T225b**) |
+| L2 control plane: App Service API host + slotless Worker host (+ EXO PowerShell sidecar) | Shared | `spaarke-provisioning-controlplane-{env}` / `-worker-{env}` | `platform-controlplane.bicep` | ✅ — T225b removed the Model 1 shared-platform settings and the vendor-key vault setting; the Worker sets `KvSecretsPopulationOptions__RequireSecretFreeIdentity=true` (every new stamp secret-free, G21) |
 | L2 Cosmos (`spaarke-provisioning` / `runs`, partition `/customerId`) | Shared | per `cosmos-provisioning.bicep` | `platform-controlplane.bicep` | ✅ |
-| Platform Key Vault | Shared | `sprk-controlplane-{env}-kv` (dev) / `sprk-platform-prod-kv` (prod) | `platform-controlplane.bicep` | ✅ — `Seed-PlatformKeyVault.ps1:402-403` still seeds `SharedPlatformOpenAiEndpoint` (🔲 **T225b**) |
+| Platform Key Vault | Shared | `sprk-controlplane-{env}-kv` (dev) / `sprk-platform-prod-kv` (prod) | `platform-controlplane.bicep` | ✅ — `Seed-PlatformKeyVault.ps1` seeds 5 secrets; T225b retired the `AzureOpenAI-Endpoint` entry (a copy already in a vault is left alone) |
 | Provisioning job queue `sprk-provisioning-jobs` (sessions keyed by `customerId`) | Shared | on `spaarke-servicebus-{env}` | `platform-controlplane.bicep` | ✅ |
 | L2 fleet UAMI | Shared | `sprk-controlplane-{env}-uami` | `platform-controlplane.bicep` | ✅ — its role assignments on each **customer subscription** are a manual prerequisite (🔲 T228) |
 | BFF build artifacts + container registry | Shared | `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr` | `platform-controlplane.bicep` | ✅ |
@@ -227,7 +228,7 @@ they are defects, not options.
 | Shared BFF App Service `spaarke-bff-{env}` in `rg-spaarke-{env}` as a customer runtime | `spaarke-constants.yaml` `bffAppServiceRg` / `bffAppServiceName` → the skill's `{bffAppServiceId}` token (no prereq recipe uses it since T225a re-pointed PRQ-E-05 at the stamp) | T227 |
 | Shared BFF app registrations `Spaarke BFF - Trial 1` / `Spaarke BFF - Model 1` | `Register-EntraAppRegistrations.ps1:1243-1272`; `spaarke-constants.yaml:101-124` | T227 |
 | H0 `shared-trial` cost tier; `Model1MarginalEnvelopeUsd` (marginal-on-shared-platform) | `H0Options`, `H13AcceptanceOptions` | T229 |
-| H13 I2 probe against a shared AI Search `tenantId`-filter template | `AiSearchTenantFilterInvariantProbe` Model 1 branch | T230 |
+| H13 I2 probe against a shared AI Search `tenantId`-filter template | `AiSearchTenantFilterInvariantProbe` Model 1 branch | ✅ T225b (2026-10-02) — one path on the stamp's own service |
 | Prompt Flow secrets (`PromptFlow-Endpoint`, `PromptFlow-Key`) | `manifest.yaml:502-528` | T226 (D5 — BFF readers removed 2026-08-21) |
 
 **Out of scope for this project** (plan §6): Model 2; Model 1 with SPE containers in the customer's tenant;

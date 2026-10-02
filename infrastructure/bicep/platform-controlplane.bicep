@@ -165,8 +165,6 @@ param adminDataverseEnvironmentUrl string
 @description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
-@description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c\'s Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs).')
-param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
 
 @description('Principal ID of the GitHub Actions OIDC service principal for CI artifact publishing (Wave G-8 Batch 2). When provided, grants Storage Blob Data Contributor on the provisioning-artifacts storage account (tasks 116/117 upload compiled ARM JSON / BFF zips / solution zips) and AcrPush on the platform ACR (task 115 sidecar image push). Empty (default) skips BOTH grants -- supply once the CI OIDC app-reg principal is known for this environment.')
 param githubActionsOidcPrincipalId string = ''
@@ -468,7 +466,6 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     serviceBusQueueName: 'sprk-provisioning-jobs'
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     bffApiClientSecretName: bffApiClientSecretName
-    azureOpenAiEndpointSecretName: azureOpenAiEndpointSecretName
     // Wave G-8 Batch 2 (audit defect #11): sidecar image + pull-auth plumbed
     // from top-level params (previously the worker module's defaults were
     // unreachable from this stack). The sitecontainer's UserAssigned

@@ -56,8 +56,8 @@
 //     "staging"), MiResourceId (UAMI resource id — T1 PATCH target).
 //   - L2 configuration (KvSecretsPopulationOptions, validated at Worker startup — task 245b):
 //     ControlPlanePrincipalObjectId (the principal the KV RBAC bootstrap grants Secrets
-//     Officer — L2's own identity, never the stamp UAMI) and PlatformVaultName (source of
-//     the from-platform-vault vendor keys).
+//     Officer — L2's own identity, never the stamp UAMI). The platform-vault vendor-key
+//     source option was removed by task 225b (owner D18, 2026-10-02).
 //   - The vault resource id is always derived (BuildKvResourceId) from
 //     subscriptionId + ResourceGroupName + KeyVaultName.
 //
@@ -411,8 +411,8 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         // defense-in-depth BEHIND FileKvSecretManifest's served-entry filter:
         // it also protects against any manifest implementation that serves the
         // targets unfiltered. Q3 Path A rollback re-includes
-        // them; Dataverse-ClientSecret is never in the target set (§6.5
-        // record 2026-08-25, sunset 2026-11-23).
+        // them. Task 225b (G21): the target set is BFF-API-ClientSecret +
+        // Dataverse-ClientSecret — neither is created in a secret-free environment.
         var secretFreeOmitActive = _options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback;
         if (secretFreeOmitActive)
         {
@@ -573,8 +573,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 RotateExisting: rotateExisting,
                 SecretParameters: new Dictionary<string, KeyVaultSecretRef>(run.Parameters.Secrets, StringComparer.Ordinal),
                 OmitCanonicalNames: omitCanonicalNames,
-                IntakeValues: BuildIntakeValues(run.Parameters.NonSecret),
-                PlatformVaultName: _options.PlatformVaultName);
+                IntakeValues: BuildIntakeValues(run.Parameters.NonSecret));
             writeOutcome = await _writer.WriteAsync(writeRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

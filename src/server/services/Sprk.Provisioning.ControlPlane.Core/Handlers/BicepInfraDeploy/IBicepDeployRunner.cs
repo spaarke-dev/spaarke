@@ -83,14 +83,6 @@ public interface IBicepDeployRunner
 /// <param name="EnvironmentName">Target environment (<c>dev</c> / <c>staging</c> / <c>prod</c>) — feeds naming per §7.1.</param>
 /// <param name="Location">Azure region for all customer resources (default westus2 per <c>customer.bicep</c>).</param>
 /// <param name="SignalREnabled">Feature-gate for the SignalR resource (ADR-032 Null-Object kill-switch — see §7.2 #13).</param>
-/// <param name="RequireSecretFreeIdentity">
-/// Auth-v4 §9.1 secret-free gate (customer-provisioning-orchestration-r1 punch row A38b,
-/// 2026-08-25). Still passed to <c>customer.bicep</c>, but since T226 (2026-09-30) it has NO
-/// effect there: the two keys it used to omit (<c>AiSearch--AdminKey</c>,
-/// <c>ServiceBus-ConnectionString</c>) are no longer written for ANY stamp — the BFF reaches
-/// both services with the stamp UAMI. Retained only because ARM rejects undeclared template
-/// parameters; removing it is paired with the template change (plan T225b).
-/// </param>
 /// <param name="OpenAiLocation">
 /// ISH-08 (customer-provisioning-orchestration-r1 Wave 5 punchlist, 2026-08-27):
 /// Optional Azure OpenAI region override. When non-empty, overrides customer.bicep's
@@ -109,7 +101,6 @@ public sealed record BicepDeployRequest(
     string EnvironmentName,
     string Location,
     bool SignalREnabled,
-    bool RequireSecretFreeIdentity = false,
     string? OpenAiLocation = null)
 {
     /// <summary>The template's content version — the <c>bicepVer</c> of <c>infra-{customerId}-{bicepVer}</c>.</summary>

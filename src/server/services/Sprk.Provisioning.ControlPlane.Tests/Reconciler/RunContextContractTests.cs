@@ -498,15 +498,15 @@ public sealed class RunContextContractTests
     /// </summary>
     private static readonly string[] PinnedManifestGaps =
     [
-        // T245b: Dataverse-ServiceUrl moved to H4b per_env_settings (from-h5-output); BingSearch-ApiKey and
-        // LlamaParse-ApiKey are from-platform-vault (L2 configuration). ContentSafety-ApiKey is NOT a Spaarke
-        // vendor key — stamps have no Content Safety resource and D13 keeps Key Vault for keys with no MI
+        // T245b: Dataverse-ServiceUrl moved to H4b per_env_settings (from-h5-output). T225b (owner D18): the
+        // Spaarke-shared vendor keys (Bing Search, LlamaParse) left the catalog. ContentSafety-ApiKey is NOT a
+        // Spaarke vendor key — stamps have no Content Safety resource and D13 keeps Key Vault for keys with no MI
         // alternative (plan G26).
         "ContentSafety-ApiKey→T246",
         "SPE-DefaultContainerId→T227",                 // from-bicep-output, but containers are created at runtime (H8,
         "SPE-CommunicationArchiveContainerId→T227",    // after H4) — customer.bicep has no value to write (plan G18)
-        "Dataverse-ClientSecret→T225b",        // from-existing-kv; new stamps are not secret-free by default yet (G21)
-        "BFF-API-ClientSecret→T225b",
+        // T225b (G21): Dataverse-ClientSecret / BFF-API-ClientSecret are no longer gaps — new stamps are secret-free
+        // by default (KvSecretsPopulationOptions.RequireSecretFreeIdentity), so H4 omits both and never needs a value.
     ];
 
     [Fact]
@@ -575,7 +575,6 @@ public sealed class RunContextContractTests
             new("Generated-One", KvSecretOperation.Upsert, KvSecretValueSource.Generated),
             new("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter),
             new(GraphAppRegistrationProvisioner.ClientIdSecretName, KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg),
-            new("BingSearch-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromPlatformVault),       // L2 configuration (T245b)
             new("ContentSafety-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters),   // a pinned, owned gap
         ];
         var intakeMap = new Dictionary<string, string>(StringComparer.Ordinal) { ["TenantId"] = IntakeParameterCatalog.TenantId };
@@ -626,7 +625,6 @@ public sealed class RunContextContractTests
             {
                 case KvSecretValueSource.FromBicepOutput when bicepWrittenNames.Contains(entry.CanonicalName):
                 case KvSecretValueSource.Generated:
-                case KvSecretValueSource.FromPlatformVault:   // T245b: L2 configuration, validated at Worker startup
                     break;
                 case KvSecretValueSource.FromTopologyConstants:
                 case KvSecretValueSource.FromIntakeParameter:

@@ -104,7 +104,6 @@ public static class HandlerRunInputs
                 RunInput.Intake("location", required: false),
                 RunInput.Intake("openAiLocation", required: false),
                 RunInput.Intake("provisionedOn", required: false),
-                RunInput.Intake("requireSecretFreeIdentity", required: false),
                 RunInput.Intake("signalrEnabled", required: false),
             ],
             [HandlerIds.H2b] =

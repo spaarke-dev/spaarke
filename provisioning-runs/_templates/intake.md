@@ -16,7 +16,7 @@
 | `exchangePolicyScopeGroupId` | `{exchangePolicyScopeGroupId}` | operator (group created by the stamp tenant's Exchange admin — PRQ-C-08) | H14a ApplicationAccessPolicy scope. T245c. |
 | `communicationGraphResource` / `emailGraphResource` | `{communicationGraphResource}` / `{emailGraphResource}` | operator | H14b; at least one. T245c. |
 | `communicationDefaultMailbox` | `{communicationDefaultMailbox}` | operator | H4 → KV `Communication-DefaultMailbox`. T245c. Use a shared/service mailbox — this file is committed, so a personal mailbox (here or in the Graph resources above) would put an individual's address in git. |
-| `profile` | `spaarke-tenant-model1 \| customer-tenant-model2` | operator | L2 enum-validated (drift → 400). ⚠️ **Pending the enum migration** (D-12 §6 items 2–3) — the live L2 still validates the old three-value set; `spaarke-hosted-model1-trial` is retired, `spaarke-hosted-model2` → Model 1, `customer-owned-model2` → Model 2. |
+| `profile` | `spaarke-hosted-model2 \| customer-owned-model2` | operator | Follows from `tenancyModel`: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`. `POST /api/runs` refuses any other value or pair (`tenancy-profile-invalid`). The names predate the D-12 renumbering; `spaarke-hosted-model1-trial` is retired. |
 
 ## Optional inputs
 

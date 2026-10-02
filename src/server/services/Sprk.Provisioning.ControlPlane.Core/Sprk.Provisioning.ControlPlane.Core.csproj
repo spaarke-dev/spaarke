@@ -178,8 +178,8 @@
          the shared TokenCredential singleton — zero admin-key handling. -->
     <PackageReference Include="Azure.Search.Documents" Version="12.0.0" />
 
-    <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs +,
-         since task 124, the sibling tenantFilterTemplates container). -->
+    <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs). Task 225b deleted the
+         tenantFilterTemplates store task 124 had added. -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
 
     <!-- Azure.ResourceManager.CosmosDB — task 174 (Wave G-7) MANAGEMENT-plane

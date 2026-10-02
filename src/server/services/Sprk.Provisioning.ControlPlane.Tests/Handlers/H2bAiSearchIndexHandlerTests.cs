@@ -5,18 +5,15 @@
 //
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live AI Search / az CLI / REST /
-//   pwsh. Fakes replace the repository + all four collaborator seams
-//   (catalog, provisioner, verifier, tenant-filter template provisioner)
-//   so the handler orchestration logic is exercised in isolation. Live-
-//   Azure coverage belongs in env-guarded smoke tests (H2b's real
-//   provisioner runs Deploy-AllIndexes.ps1 against a real AI Search
-//   service — not exercised at CI time by design).
+//   pwsh. Fakes replace the repository + the three collaborator seams
+//   (catalog, provisioner, verifier) so the handler orchestration logic is
+//   exercised in isolation. Live-Azure coverage belongs in env-guarded smoke
+//   tests.
 //
-// COVERAGE (18 tests):
-//   T1  Model 2 happy path: catalog + provisioner + verifier called →
+// COVERAGE:
+//   T1  Happy path, both tenancy models (task 225b — one path): provisioner +
+//       verifier called against the stamp's own endpoint (H2a output) →
 //       Success + Cosmos state advances.
-//   T2  Model 1 happy path: catalog + verifier + template provisioner
-//       called → Success (provisioner NOT called — verify-only for shared).
 //   T3  Idempotent no-op: run already has H2b CompletedPhase with matching
 //       key → Success (no seam called, no state mutation).
 //   T4  Missing tenantId (§4D I1): Failure(Resumable, missing-tenant-id) +
@@ -26,32 +23,25 @@
 //   T6  Run not found: Failure(Resumable, run-not-found).
 //   T7  Retired index (spaarke-playbook-embeddings) in requested catalog:
 //       Failure(QuarantineRequired, retired-index-provisioning-forbidden)
-//       + Cosmos marked Quarantined (both branches).
+//       + Cosmos marked Quarantined.
 //   T8  Retired index (spaarke-knowledge-index-v2 lineage) — same.
-//   T9  Model 2 provisioner returns Failure: Failure(QuarantineRequired,
+//   T9  Provisioner returns Failure: Failure(QuarantineRequired,
 //       index-provisioning-failed).
-//   T10 Model 2 verifier reports InvariantViolation: Failure(QuarantineRequired,
+//   T10 Verifier reports InvariantViolation: Failure(QuarantineRequired,
 //       index-invariant-violation) + diagnostic cites failing index.field.
-//   T11 Model 2 verifier reports Missing (post-provisioner drift):
+//   T11 Verifier reports Missing (post-provisioner drift):
 //       Failure(QuarantineRequired, index-provisioning-failed).
-//   T12 Model 1 verifier reports Missing (shared under-provisioned):
-//       Failure(QuarantineRequired, shared-index-missing).
-//   T13 Model 1 verifier reports InvariantViolation: Failure(QuarantineRequired,
-//       index-invariant-violation).
-//   T14 Model 1 template provisioner returns Failure: Failure(Resumable,
-//       tenant-filter-template-provision-failed).
-//   T15 Model 2 missing AiSearchEndpoint (H2a InterStepState blank):
-//       Failure(Resumable, missing-search-endpoint).
-//   T16 Model 1 missing SharedPlatformSearchEndpoint (config blank):
-//       Failure(Resumable, missing-search-endpoint).
+//   T15 Missing AiSearchEndpoint (H2a InterStepState blank), both tenancy
+//       models: Failure(Resumable, missing-search-endpoint).
 //   T17 HandlerId mismatch: throws InvalidOperationException.
 //   T18 Idempotency key format determinism: aisearch-{customerId}-{indexVer}.
+//   (T2 / T12 / T13 / T14 / T16 covered the retired Model 1 shared-platform
+//   branch — deleted with it by task 225b.)
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
@@ -74,21 +64,21 @@ public sealed class H2bAiSearchIndexHandlerTests
         IndexSchemaSet.TryComputeVersion(names, out var version, out _).Should().BeTrue();
         return version;
     }
-    private const string Model2Endpoint = "https://sprk-acme-search.search.windows.net/";
-    private const string SharedPlatformEndpoint = "https://spaarke-search-prod.search.windows.net/";
+    private const string StampEndpoint = "https://sprk-acme-prod-search.search.windows.net/";
 
-    // ---------- T1 Model 2 happy path ----------
+    // ---------- T1 happy path (both tenancy models — task 225b) ----------
 
-    [Fact]
-    public async Task HappyPath_Model2Dedicated_ProvisionerAndVerifierCalled_Success()
+    [Theory]
+    [InlineData("Model1")]
+    [InlineData("Model2")]
+    public async Task HappyPath_ProvisionerAndVerifierCalledOnStampEndpoint_Success(string tenancyModel)
     {
-        var run = BuildRun(tenancyModel: "Model2");
+        var run = BuildRun(tenancyModel: tenancyModel);
         var repo = new FakeRepository(run, etag: "etag-1");
         var catalog = new FakeCanonicalIndexCatalog();
         var provisioner = FakeAiSearchIndexProvisioner.Success();
         var verifier = FakeAiSearchIndexVerifier.Ok();
-        var template = new FakeAiSearchTenantFilterTemplateProvisioner();
-        var handler = BuildHandler(repo, catalog, provisioner, verifier, template);
+        var handler = BuildHandler(repo, catalog, provisioner, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -103,37 +93,8 @@ public sealed class H2bAiSearchIndexHandlerTests
 
         provisioner.CallCount.Should().Be(1);
         verifier.CallCount.Should().Be(1, "post-deploy verifier runs after provisioner");
-        template.CallCount.Should().Be(0, "Model 2 does NOT provision tenant-filter template");
-        provisioner.LastRequest!.SearchEndpoint.Should().Be(Model2Endpoint);
+        provisioner.LastRequest!.SearchEndpoint.Should().Be(StampEndpoint, "every stamp indexes its own AI Search service");
         provisioner.LastRequest.TenantId.Should().Be(TenantId, "§4D I1 — tenant flows through explicitly");
-    }
-
-    // ---------- T2 Model 1 happy path ----------
-
-    [Fact]
-    public async Task HappyPath_Model1Shared_VerifierAndTemplateProvisionerCalled_Success()
-    {
-        var run = BuildRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run, etag: "etag-2");
-        var catalog = new FakeCanonicalIndexCatalog();
-        var provisioner = FakeAiSearchIndexProvisioner.Success();
-        var verifier = FakeAiSearchIndexVerifier.Ok();
-        var template = new FakeAiSearchTenantFilterTemplateProvisioner();
-        var handler = BuildHandler(repo, catalog, provisioner, verifier, template,
-            sharedPlatformEndpoint: SharedPlatformEndpoint);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        provisioner.CallCount.Should().Be(0, "Model 1 does NOT re-create indexes on shared platform");
-        verifier.CallCount.Should().Be(1, "verifier confirms presence on shared platform");
-        template.CallCount.Should().Be(1, "Model 1 provisions per-tenant filter template");
-
-        // Tenant-filter template MUST carry the tenant id verbatim (§4D I2 / FR-29).
-        template.LastRequest!.TenantId.Should().Be(TenantId);
-        template.LastRequest.CustomerId.Should().Be(CustomerId);
-        template.LastRequest.SearchEndpoint.Should().Be(SharedPlatformEndpoint);
-        template.LastRequest.IndexNames.Should().Equal(catalog.CanonicalIndexNames);
     }
 
     // ---------- T3 idempotency ----------
@@ -155,8 +116,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         var catalog = new FakeCanonicalIndexCatalog();
         var provisioner = FakeAiSearchIndexProvisioner.Success();
         var verifier = FakeAiSearchIndexVerifier.Ok();
-        var template = new FakeAiSearchTenantFilterTemplateProvisioner();
-        var handler = BuildHandler(repo, catalog, provisioner, verifier, template);
+        var handler = BuildHandler(repo, catalog, provisioner, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -164,7 +124,6 @@ public sealed class H2bAiSearchIndexHandlerTests
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
         provisioner.CallCount.Should().Be(0);
         verifier.CallCount.Should().Be(0);
-        template.CallCount.Should().Be(0);
     }
 
     // ---------- T4 missing tenantId (§4D I1) ----------
@@ -176,9 +135,8 @@ public sealed class H2bAiSearchIndexHandlerTests
         var repo = new FakeRepository(run, etag: "etag-4");
         var provisioner = FakeAiSearchIndexProvisioner.Success();
         var verifier = FakeAiSearchIndexVerifier.Ok();
-        var template = new FakeAiSearchTenantFilterTemplateProvisioner();
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            provisioner, verifier, template);
+            provisioner, verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -188,7 +146,6 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.Diagnostic.Should().Contain("§4D I1");
         provisioner.CallCount.Should().Be(0);
         verifier.CallCount.Should().Be(0);
-        template.CallCount.Should().Be(0);
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
@@ -204,8 +161,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         var provisioner = FakeAiSearchIndexProvisioner.Success();
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             provisioner,
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            FakeAiSearchIndexVerifier.Ok());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -236,8 +192,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         var repo = new FakeRepository(run: null, etag: null);
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             FakeAiSearchIndexProvisioner.Success(),
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            FakeAiSearchIndexVerifier.Ok());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -258,8 +213,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         var provisioner = FakeAiSearchIndexProvisioner.Success();
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             provisioner,
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            FakeAiSearchIndexVerifier.Ok());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -284,8 +238,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         var repo = new FakeRepository(run, etag: "etag-8");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             FakeAiSearchIndexProvisioner.Success(),
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            FakeAiSearchIndexVerifier.Ok());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -295,10 +248,10 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.Diagnostic.Should().Contain("spaarke-knowledge-index-v2");
     }
 
-    // ---------- T9 Model 2 provisioner failure ----------
+    // ---------- T9 provisioner failure ----------
 
     [Fact]
-    public async Task Model2_ProvisionerReturnsFailure_FailsQuarantineRequired()
+    public async Task ProvisionerReturnsFailure_FailsQuarantineRequired()
     {
         var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-9");
@@ -306,8 +259,7 @@ public sealed class H2bAiSearchIndexHandlerTests
             "Deploy-AllIndexes.ps1 exit 7: PUT spaarke-files-index HTTP 400: unknown field");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             provisioner,
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            FakeAiSearchIndexVerifier.Ok());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -318,10 +270,10 @@ public sealed class H2bAiSearchIndexHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
-    // ---------- T10 Model 2 verifier reports InvariantViolation ----------
+    // ---------- T10 verifier reports InvariantViolation ----------
 
     [Fact]
-    public async Task Model2_VerifierInvariantViolation_FailsQuarantineRequired()
+    public async Task VerifierInvariantViolation_FailsQuarantineRequired()
     {
         var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-10");
@@ -332,8 +284,7 @@ public sealed class H2bAiSearchIndexHandlerTests
                 "required filterable field 'tenantId' MISSING"));
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             FakeAiSearchIndexProvisioner.Success(),
-            verifier,
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -345,18 +296,17 @@ public sealed class H2bAiSearchIndexHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
-    // ---------- T11 Model 2 verifier reports Missing (post-provisioner drift) ----------
+    // ---------- T11 verifier reports Missing (post-provisioner drift) ----------
 
     [Fact]
-    public async Task Model2_VerifierMissing_FailsQuarantineRequired_AsProvisioningFailed()
+    public async Task VerifierMissing_FailsQuarantineRequired_AsProvisioningFailed()
     {
         var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-11");
         var verifier = FakeAiSearchIndexVerifier.Missing("spaarke-records-index");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             FakeAiSearchIndexProvisioner.Success(),
-            verifier,
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            verifier);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -367,91 +317,20 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.Diagnostic.Should().Contain("drift");
     }
 
-    // ---------- T12 Model 1 verifier reports Missing (shared under-provisioned) ----------
+    // ---------- T15 missing AiSearchEndpoint (H2a InterStepState blank), both models ----------
 
-    [Fact]
-    public async Task Model1_VerifierMissing_FailsQuarantineRequired_AsSharedIndexMissing()
+    [Theory]
+    [InlineData("Model1")]
+    [InlineData("Model2")]
+    public async Task MissingAiSearchEndpoint_FailsResumable(string tenancyModel)
     {
-        var run = BuildRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run, etag: "etag-12");
-        var verifier = FakeAiSearchIndexVerifier.Missing("spaarke-invoices-index");
-        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            FakeAiSearchIndexProvisioner.Success(),
-            verifier,
-            new FakeAiSearchTenantFilterTemplateProvisioner(),
-            sharedPlatformEndpoint: SharedPlatformEndpoint);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.QuarantineRequired);
-        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.SharedIndexMissing);
-        failure.Diagnostic.Should().Contain("spaarke-invoices-index");
-        failure.Diagnostic.Should().Contain("Deploy-AllIndexes.ps1");
-    }
-
-    // ---------- T13 Model 1 verifier reports InvariantViolation ----------
-
-    [Fact]
-    public async Task Model1_VerifierInvariantViolation_FailsQuarantineRequired()
-    {
-        var run = BuildRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run, etag: "etag-13");
-        var verifier = FakeAiSearchIndexVerifier.InvariantViolation(
-            new IndexInvariantIssue(
-                "spaarke-rag-references",
-                "domain",
-                "FORBIDDEN field 'domain' is present (renamed to 'documentType' per FR-17)"));
-        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            FakeAiSearchIndexProvisioner.Success(),
-            verifier,
-            new FakeAiSearchTenantFilterTemplateProvisioner(),
-            sharedPlatformEndpoint: SharedPlatformEndpoint);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.QuarantineRequired);
-        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.IndexInvariantViolation);
-        failure.Diagnostic.Should().Contain("spaarke-rag-references");
-        failure.Diagnostic.Should().Contain("domain");
-    }
-
-    // ---------- T14 Model 1 template provisioner failure ----------
-
-    [Fact]
-    public async Task Model1_TemplateProvisionerFailure_FailsResumable()
-    {
-        var run = BuildRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run, etag: "etag-14");
-        var template = FakeAiSearchTenantFilterTemplateProvisioner.Failure(
-            "PUT template store 429 Too Many Requests");
-        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            FakeAiSearchIndexProvisioner.Success(),
-            FakeAiSearchIndexVerifier.Ok(),
-            template,
-            sharedPlatformEndpoint: SharedPlatformEndpoint);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.TenantFilterTemplateProvisionFailed);
-        failure.Diagnostic.Should().Contain("429");
-    }
-
-    // ---------- T15 Model 2 missing AiSearchEndpoint (H2a InterStepState blank) ----------
-
-    [Fact]
-    public async Task Model2_MissingAiSearchEndpoint_FailsResumable()
-    {
-        var run = BuildRun(tenancyModel: "Model2");
+        var run = BuildRun(tenancyModel: tenancyModel);
         run.InterStepState.AiSearchEndpoint = null; // H2a didn't populate
         var repo = new FakeRepository(run, etag: "etag-15");
+        var provisioner = FakeAiSearchIndexProvisioner.Success();
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            FakeAiSearchIndexProvisioner.Success(),
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            provisioner,
+            FakeAiSearchIndexVerifier.Ok());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -459,27 +338,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.MissingSearchEndpoint);
         failure.Diagnostic.Should().Contain("H2a");
-    }
-
-    // ---------- T16 Model 1 missing SharedPlatformSearchEndpoint config ----------
-
-    [Fact]
-    public async Task Model1_MissingSharedPlatformSearchEndpointConfig_FailsResumable()
-    {
-        var run = BuildRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run, etag: "etag-16");
-        var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
-            FakeAiSearchIndexProvisioner.Success(),
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner(),
-            sharedPlatformEndpoint: null);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(AiSearchIndexRejectionCodes.MissingSearchEndpoint);
-        failure.Diagnostic.Should().Contain("AiSearchIndex:SharedPlatformSearchEndpoint");
+        provisioner.CallCount.Should().Be(0);
     }
 
     // ---------- T17 handler-id mismatch ----------
@@ -491,8 +350,7 @@ public sealed class H2bAiSearchIndexHandlerTests
         var repo = new FakeRepository(run, etag: "etag-17");
         var handler = BuildHandler(repo, new FakeCanonicalIndexCatalog(),
             FakeAiSearchIndexProvisioner.Success(),
-            FakeAiSearchIndexVerifier.Ok(),
-            new FakeAiSearchTenantFilterTemplateProvisioner());
+            FakeAiSearchIndexVerifier.Ok());
 
         var wrongEnvelope = new HandlerEnvelope
         {
@@ -525,16 +383,10 @@ public sealed class H2bAiSearchIndexHandlerTests
         FakeRepository repo,
         ICanonicalIndexCatalog catalog,
         IAiSearchIndexProvisioner provisioner,
-        IAiSearchIndexVerifier verifier,
-        IAiSearchTenantFilterTemplateProvisioner template,
-        string? sharedPlatformEndpoint = null)
+        IAiSearchIndexVerifier verifier)
     {
-        var options = Options.Create(new AiSearchIndexOptions
-        {
-            SharedPlatformSearchEndpoint = sharedPlatformEndpoint,
-        });
         return new H2bAiSearchIndexHandler(
-            repo, catalog, provisioner, verifier, template, options,
+            repo, catalog, provisioner, verifier,
             NullLogger<H2bAiSearchIndexHandler>.Instance);
     }
 
@@ -558,17 +410,14 @@ public sealed class H2bAiSearchIndexHandlerTests
             EnvironmentId = "env-guid",
             TenancyModel = tenancyModel,
             Status = RunStatus.Running,
-            Profile = tenancyModel == "Model1" ? "spaarke-hosted-model1-trial" : "spaarke-hosted-model2",
+            Profile = tenancyModel == "Model1" ? "spaarke-hosted-model2" : "customer-owned-model2",
         };
         if (includeTenantId)
         {
             run.Parameters.NonSecret[H2bAiSearchIndexHandler.TenantIdParameterKey] = TenantId;
         }
-        // Model 2 requires AiSearchEndpoint populated by H2a; Model 1 does not.
-        if (string.Equals(tenancyModel, "Model2", StringComparison.Ordinal))
-        {
-            run.InterStepState.AiSearchEndpoint = Model2Endpoint;
-        }
+        // H2a populates the stamp's AI Search endpoint for every tenancy model (task 225b).
+        run.InterStepState.AiSearchEndpoint = StampEndpoint;
         return run;
     }
 
@@ -676,31 +525,6 @@ public sealed class H2bAiSearchIndexHandlerTests
         {
             CallCount++;
             return Task.FromResult(_result);
-        }
-    }
-
-    /// <summary>Tenant-filter template provisioner fake — records call + last request.</summary>
-    private sealed class FakeAiSearchTenantFilterTemplateProvisioner : IAiSearchTenantFilterTemplateProvisioner
-    {
-        private readonly AiSearchTenantFilterTemplateOutcome _outcome;
-        public int CallCount { get; private set; }
-        public AiSearchTenantFilterTemplateRequest? LastRequest { get; private set; }
-
-        public FakeAiSearchTenantFilterTemplateProvisioner()
-            : this(new AiSearchTenantFilterTemplateOutcome.Success()) { }
-
-        private FakeAiSearchTenantFilterTemplateProvisioner(AiSearchTenantFilterTemplateOutcome outcome)
-            => _outcome = outcome;
-
-        public static FakeAiSearchTenantFilterTemplateProvisioner Failure(string diagnostic)
-            => new(new AiSearchTenantFilterTemplateOutcome.Failure(diagnostic));
-
-        public Task<AiSearchTenantFilterTemplateOutcome> ProvisionAsync(
-            AiSearchTenantFilterTemplateRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            LastRequest = request;
-            return Task.FromResult(_outcome);
         }
     }
 }

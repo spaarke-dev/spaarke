@@ -404,19 +404,14 @@ secrets:
       - 'DocumentIntelligence__AiSearchEndpoint'
     tags: ['ai', 'endpoint']
 
-  - canonical_name: 'BingSearch-ApiKey'
-    category: 'ai'
-    purpose: 'Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).'
-    consumers:
-      - 'BFF: BingSearch:ApiKey'
-    rotation_cadence: '90-days'
-    never_delete: false
-    exception_note: ''
-    aliases: []
-    value_source: 'from-platform-vault'
-    app_settings:
-      - 'BingSearch__ApiKey'
-    tags: ['ai', 'key']
+  # Task 225b (owner D18, 2026-10-02): the Spaarke-shared vendor keys are no
+  # longer part of a customer stamp; both entries were removed here.
+  #   - Bing Search key: Bing Search v7 was retired by Microsoft 2025-08-11 —
+  #     no valid key exists.
+  #   - LlamaParse key: no production caller; its KV reference sat on
+  #     LlamaParse__ApiKeySecretName (would surface the key in an exception
+  #     message); no value exists in any Spaarke vault.
+  # Their value source (copy from the Spaarke platform vault) went with them.
 
   - canonical_name: 'ContentSafety-ApiKey'
     category: 'ai'
@@ -434,21 +429,6 @@ secrets:
     value_source: 'from-run-parameter'
     app_settings:
       - 'AiSafety__ContentSafety__ApiKey'
-    tags: ['ai', 'key']
-
-  - canonical_name: 'LlamaParse-ApiKey'
-    category: 'ai'
-    purpose: 'LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).'
-    consumers:
-      - 'BFF: LlamaParse:ApiKeySecretName -> LlamaParseApiKey (grandfathered spelling — see aliases)'
-    rotation_cadence: '90-days'
-    never_delete: false
-    exception_note: ''
-    aliases:
-      - 'LlamaParseApiKey'
-    value_source: 'from-platform-vault'
-    app_settings:
-      - 'LlamaParse__ApiKeySecretName'
     tags: ['ai', 'key']
 
   # ==========================================================================

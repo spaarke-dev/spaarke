@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-02 SESSION 30 — T245b ✅ T245c ✅ T225a ✅; **owner items O1–O5 RESOLVED (D16–D19)**; SPE owning app + FIC created live. **Next: file + execute T225b**, then T249 → T248. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§2 D16–D19, §7 order).
+> **Last Updated**: 2026-10-02 SESSION 30 — T245b ✅ T245c ✅ T225a ✅ O1–O5 (D16–D19) ✅ **T225b ✅**. **Next: T249** (one customer-stamp template), then T248 (needs the owner's `Spaarke Model 1` container type). 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§2 D16–D19, §7 order).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,9 +40,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none in progress — between tasks. Last completed: **T225a** (`b9fd48bbe`). Next task: **T225b** (no POML yet — file via task-create from plan §7 T225b, which now includes D18). |
-| **Status** | O1–O5 decision records committed (plan §2 D16–D19, §4 G28, §7 T248/T249 + order; spec ADR-028 E-1 + ADR-020 registry rows → path C; matrix doc v2). |
-| **Next Action** | POMLs filed (225b, 249, 248). `task-execute` T225b (`tasks/225b-converge-model1-dedicated-code-path.poml`). **Owner action outstanding**: create the `Spaarke Model 1` container type (SharePoint admin center → Advanced → Containers → Container types → New; owning app `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`; standard billing on *Spaarke Model 1 Production*) and send its id — T248 needs it. |
+| **Task** | **249 — One customer-stamp template (D19)** (`tasks/249-one-customer-stamp-template.poml`) · **not started** · FULL · sonnet @ xhigh |
+| **Status** | T225b committed (see Completed table). Clean tree after commit; branch 0 behind master at T225b start. |
+| **Next Action** | `task-execute` T249. **Owner actions outstanding**: (1) create the `Spaarke Model 1` container type (SharePoint admin center; owning app `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`; standard billing on *Spaarke Model 1 Production*) and send its id — T248 needs it; (2) approve running `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 -EnvironmentDomain spaarkedev1.crm.dynamics.com` (adds the missing `sprk_credentialmode` registry column — PRQ-E-14; additive, idempotent). |
 | **Order** | T225b → T249 → T248 → T243 → T242 → T244 → T246 → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → 213.7/207/208/209 → T186 |
 
 ### Completed this session (SESSION 30)
@@ -51,7 +51,8 @@
 | T245b | `5e15c128a` | L2-owned values are config/computed (artifact versions, SPE owner-credential options, L2 KV principal, vendor-key vault, H9 → BffApiUrl/BffBuildId). |
 | T245c | `81c16bd07` | Operator intake required + validated at `POST /api/runs` (H11, H14, mailbox). Owner D14 + D15. G25 CLOSED. |
 | T225a | `b9fd48bbe` | Model 1 shared-tier Bicep deleted; Model 1 fails closed at H2a until T225b + T228. ci-cd-unit-test-remediation-r1 CLOSED (owner). |
-| O1–O5 | (this commit) | **D16** L2 signs in as the SPE owning app via MI-FIC — no certificate, no ADR-028 amendment. **D17** registry version columns = deployed build ids (ADR-020 complied with; matrix doc v2). **D18** Bing + LlamaParse keys removed from customer stamps (dead features) → T225b. **D19** `customer.bicep` the only stamp template; delete `model2-full` → T249. |
+| O1–O5 | `6240f41d8` / `c8bbc027b` | **D16** L2 signs in as the SPE owning app via MI-FIC — no certificate, no ADR-028 amendment. **D17** registry version columns = deployed build ids (ADR-020 complied with; matrix doc v2). **D18** Bing + LlamaParse keys removed from customer stamps (dead features) → T225b. **D19** `customer.bicep` the only stamp template; delete `model2-full` → T249. |
+| T225b | (this commit) | Model 1 on the dedicated code path: H2b, H13 I2 probe, H12c use the stamp's own services (shared options, template store, AzureOpenAI-Endpoint seed entry deleted); intake pairing `Model1`↔`spaarke-hosted-model2` / `Model2`↔`customer-owned-model2` (G6); secret-free H4 default, both credential secrets omitted (G21); Bing/LlamaParse + `from-platform-vault` removed (D18); `TenancyModelDagParityTests` (G13). Skill hard-stops Model 1 until T228. New PRQ-E-14 (registry `sprk_credentialmode`, missing live). |
 
 ### Live changes made 2026-10-02 (operator identity `ralph.schroeder@spaarke.com`, Global Admin — owner-approved D16)
 - Entra app **`Spaarke SPE Model 1 Owner`** — appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, object `b0f01a91-7836-4949-be96-4fcab69419c2`, SP `6c1165e2-2193-4f82-ba30-e0f64d5e767e`, single-tenant, no secret, no certificate.

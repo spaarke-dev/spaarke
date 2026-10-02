@@ -23,12 +23,9 @@
 //       (see H2bAiSearchIndexHandlerTests).
 //   Interface earns its keep — no NIH.
 //
-// MODEL 1 vs MODEL 2 SCOPE:
-//   This provisioner runs ONLY for Model 2 (dedicated). The Model 1 branch of
-//   H2b does NOT invoke a provisioner — it only VERIFIES presence (via
-//   <see cref="IAiSearchIndexVerifier"/>) and provisions a per-tenant filter
-//   template (via <see cref="IAiSearchTenantFilterTemplateProvisioner"/>) per
-//   design.md §4.1a.
+// TENANCY SCOPE:
+//   Runs for every customer stamp, Model 1 and Model 2 alike (task 225b, D-12 —
+//   each stamp has its own AI Search service deployed by H2a).
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
@@ -36,8 +33,8 @@ using System.Collections.Immutable;
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 
 /// <summary>
-/// Executes the 7-index deploy for Model 2 (dedicated) AI Search services.
-/// Production impl shells out to <c>scripts/ai-search/Deploy-AllIndexes.ps1</c>;
+/// Executes the 7-index deploy on a customer stamp's own AI Search service.
+/// Production impl is <see cref="SearchIndexClientProvisioner"/> (SDK, UAMI RBAC);
 /// test impls return canned <see cref="AiSearchIndexProvisionOutcome"/>s.
 /// </summary>
 public interface IAiSearchIndexProvisioner

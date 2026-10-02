@@ -111,7 +111,7 @@ Assertions:
 
 #### 0c. L2 API reachability + Operator role
 
-> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model1-trial` / `spaarke-hosted-model2` / `customer-owned-model2`). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
+> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model2` / `customer-owned-model2` since task 225b). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
 
 ```powershell
 # Acquire token — env is one of {dev, demo, prod}
@@ -686,7 +686,7 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
 {
   "customerId": "acme",
   "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
-  "tenancyModel": "Model2",
+  "tenancyModel": "Model1",
   "controlPlaneEnv": "dev",
   "profile": "spaarke-hosted-model2",
   "subscriptionId": "00000000-0000-0000-0000-000000000000",
@@ -825,16 +825,16 @@ Choice:
 > models** (D-13, BINDING).
 >
 > ⚠️ **Literals (T223/T224):** L2 and `intake.schema.json` accept exactly `Model1` | `Model2`
-> (case-sensitive). The old `Model1Shared` / `Model2Dedicated` spellings are a 400. L2 still pairs `Model1`
-> with the retired `spaarke-hosted-model1-trial` profile until the Model 1 dedicated remediation
-> (`notes/model1-dedicated-remediation-plan.md` §7) reshapes it.
+> (case-sensitive). The old `Model1Shared` / `Model2Dedicated` spellings are a 400. L2 pairs `Model1` ↔
+> `spaarke-hosted-model2` and `Model2` ↔ `customer-owned-model2` (task 225b); any other pair is a 400
+> `tenancy-profile-invalid`.
 
-- `Model1` — L2 pairs it ONLY with `spaarke-hosted-model1-trial`, which Step 1e rejects (retired). Do not
-  provision a Model 1 run until the remediation plan lands.
-- `Model2` — the **only** value to send today, and it covers **both** new models. 🔴 This is the
-  2:1 overload D-12 §5 (P-2) identifies as a live defect: `H1SubscriptionReadinessHandler` maps it to
-  `CustomerOwned` and therefore **demands Azure Lighthouse delegation even for subscriptions Spaarke already
-  owns**. Until the migration lands, expect that for a new **Model 1** customer.
+- `Model1` — Spaarke-hosted dedicated stamp (Spaarke's tenant); profile `spaarke-hosted-model2`. L2 accepts it
+  at intake, but H2a still **fails closed** for Model 1 (`ArmDeploymentRunner`: "Model 1 runs are not
+  deployable yet") until **T228** (one subscription per customer). Do not provision a Model 1 run until T228
+  lands.
+- `Model2` — customer-hosted dedicated stamp (customer's tenant); profile `customer-owned-model2`; Azure
+  Lighthouse required. Out of scope for the current project (owner, 2026-09-30).
 
 Explain the trade-off to the operator if they ask.
 
@@ -844,14 +844,14 @@ Choice: `dev` / `demo` / `prod` — determines which L2 API base + which Bicep p
 
 #### 1e. `profile` (required — L2 API enum, per punch list row A09 / DS-5 c6-1)
 
-Choice — MUST match one of these three literal strings exactly (any drift triggers an L2 400 response):
+Choice — MUST be the profile paired with the Step 1c `tenancyModel` (two literal strings; any drift → L2 400):
 
-- ~~`spaarke-hosted-model1-trial`~~ — 🔴 **RETIRED (D-12). Never select this.** It provisions the shared
-  trial tier, which no longer exists as a product and was never implemented in the engine.
-- `spaarke-hosted-model2` — 🔴 **this is the new MODEL 1**: a dedicated stamp in the customer's **own Azure
+- ~~`spaarke-hosted-model1-trial`~~ — 🔴 **RETIRED (D-12).** L2 refuses it as an unknown profile (400
+  `tenancy-profile-invalid`).
+- `spaarke-hosted-model2` — pair with **`Model1`**: a dedicated stamp in the customer's **own Azure
   subscription**, inside **Spaarke's** Azure tenant. Lighthouse: **not needed**. H0.5 consent: **not needed**.
-- `customer-owned-model2` — 🔴 **this is the new MODEL 2**: the same dedicated stamp in the **customer's own
-  Azure tenant**. Lighthouse: **required**. H0.5 consent: **required**.
+- `customer-owned-model2` — pair with **`Model2`**: the same dedicated stamp in the **customer's own Azure
+  tenant**. Lighthouse: **required**. H0.5 consent: **required**.
 
 ⚠️ **The profile names still encode the retired vocabulary.** They are the literals the live L2 API accepts,
 so they are correct to *send* until the enum migration (D-12 §6 items 2–3) renames them to
@@ -861,25 +861,43 @@ with a 400.
 **Reject any other value BEFORE POST /api/runs**. Do not silently substitute or ask the operator to "just try one" — surface the failure with the exact enum choices.
 
 ```powershell
-# NOTE (2026-09-28, D-12): 'spaarke-hosted-model1-trial' is RETIRED but is still accepted by the live L2
-# API, so it stays in $validProfiles until the enum migration. It is rejected SEPARATELY below so an
-# operator cannot select it by accident.
-$validProfiles = @('spaarke-hosted-model1-trial', 'spaarke-hosted-model2', 'customer-owned-model2')
+# The retired-profile stop runs FIRST so its specific message wins over the generic enum check.
+if ($profile -eq 'spaarke-hosted-model1-trial') {
+  Write-Error "❌ Profile 'spaarke-hosted-model1-trial' is RETIRED (owner decision D-12, 2026-09-28). The shared trial/SMB tier no longer exists and was never implemented in the engine. Use 'spaarke-hosted-model2' (pairs with Model1, Spaarke's Azure tenant) or 'customer-owned-model2' (pairs with Model2, customer's Azure tenant)."
+  # HARD STOP — do not proceed to Step 2
+  exit 1
+}
+$validProfiles = @('spaarke-hosted-model2', 'customer-owned-model2')
 if ($profile -notin $validProfiles) {
   Write-Error "❌ Invalid profile '$profile'. Must be one of: $($validProfiles -join ', '). Per DS-5 c6-1: L2 API rejects any other value with 400."
   # HARD STOP — do not proceed to Step 2
   exit 1
 }
-if ($profile -eq 'spaarke-hosted-model1-trial') {
-  Write-Error "❌ Profile 'spaarke-hosted-model1-trial' is RETIRED (owner decision D-12, 2026-09-28). The shared trial/SMB tier no longer exists and was never implemented in the engine. Use 'spaarke-hosted-model2' (= the new Model 1, Spaarke's Azure tenant) or 'customer-owned-model2' (= the new Model 2, customer's Azure tenant)."
+if ($tenancyModel -cnotin @('Model1', 'Model2')) {
+  Write-Error "❌ tenancyModel '$tenancyModel' must be exactly 'Model1' or 'Model2' (case-sensitive — L2 returns 400 otherwise)."
+  # HARD STOP — do not proceed to Step 2
+  exit 1
+}
+$requiredProfile = @{ 'Model1' = 'spaarke-hosted-model2'; 'Model2' = 'customer-owned-model2' }[$tenancyModel]
+if ($profile -ne $requiredProfile) {
+  Write-Error "❌ tenancyModel '$tenancyModel' pairs only with profile '$requiredProfile' (received '$profile'). L2 returns 400 tenancy-profile-invalid."
+  # HARD STOP — do not proceed to Step 2
+  exit 1
+}
+# TEMPORARY (T225b → removed by T228): L2 accepts Model1 at intake, but a Model 1 run has no per-customer
+# subscription yet (intake still exempts Model 1 from subscriptionId and Step 4.0 would fill in the operator's
+# current subscription) and H2a fails closed. Stop here so H0–H1 never act on a subscription that is not the
+# customer's own (ADR-027).
+if ($tenancyModel -ceq 'Model1') {
+  Write-Error "❌ Model 1 runs are blocked until task T228 (one subscription per customer, ADR-027). H2a would fail closed anyway; nothing has been sent to L2."
   # HARD STOP — do not proceed to Step 2
   exit 1
 }
 ```
 
-Cross-check: `tenancyModel` × `profile` MUST be consistent. **Currently**: `Model2` pairs with either `spaarke-hosted-model2` or `customer-owned-model2`; `Model1` pairs only with the retired trial profile rejected above. Mismatch → reject before POST (L2 returns 400 `tenancy-profile-invalid`).
+Cross-check: `tenancyModel` × `profile` MUST be consistent: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2` (enforced above). Mismatch → L2 400 `tenancy-profile-invalid`.
 
-⚠️ **This cross-check is the mechanism behind the P-2 defect** (D-12 §5): one `tenancyModel` value spanning two profiles with **opposite subscription ownership** is exactly why `H1SubscriptionReadinessHandler` cannot tell them apart and demands Lighthouse for Spaarke-owned subscriptions. After the enum migration the mapping becomes **1:1** — Model 1 ↔ Spaarke tenant, Model 2 ↔ customer tenant — and the defect closes.
+Since task 225b the pairing is **1:1** — H1 no longer sees a Spaarke-owned subscription under `Model2`, so the P-2 defect (D-12 §5: Lighthouse demanded for Spaarke-owned subscriptions) is closed at intake. H1 maps `Model1` to Spaarke-owned (no Lighthouse).
 
 #### 1e-bis. Users, Exchange scope group, Graph resources, default mailbox (required — T245c)
 
@@ -1082,7 +1100,7 @@ INTAKE SUMMARY
   tenantId:        12345678-...-...-...  (customer tenant)
   tenancyModel:    Model2
   controlPlaneEnv: dev
-  profile:         spaarke-hosted-model2
+  profile:         customer-owned-model2
   environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
   identityPreset:  B2BGuest
   users:           3 entries          (names/emails are NOT printed or written to intake.md)
@@ -1306,7 +1324,7 @@ RUN PLAN
   customerId:    acme
   tenantId:      12345678-...
   tenancyModel:  Model2
-  profile:       dev
+  profile:       customer-owned-model2
 
   Handlers to execute (17 — one handler set for both models; *amended 2026-09-28, D-12: the 13-handler
   Model1Shared set is retired*):
@@ -1412,7 +1430,7 @@ $body = @{
   customerId    = $customerId
   environmentId = $environmentId          # created at Step 1f
   tenancyModel  = $tenancyModel           # Model1 | Model2 (case-sensitive — T223/T224)
-  profile       = $profile                # one of 3 enum values per Step 1e
+  profile       = $profile                # paired with tenancyModel per Step 1e: Model1 → spaarke-hosted-model2, Model2 → customer-owned-model2
   nonSecretParameters = @{
     tenantId                    = $tenantId              # I1 invariant per Wave 0 Decision 1
     subscriptionId              = $resolvedSubscriptionId # ISH-02 — consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14

@@ -7,27 +7,20 @@
 // PURPOSE:
 //   Populates sprk_aimodeldeployment runtime-reference rows (the 3 ADR-020
 //   pinned models — see PinnedModelCatalog.cs) with the correct Azure OpenAI
-//   endpoint URI for this customer's tenancy tier: Model 2 (dedicated) reads
-//   the customer's own OpenAI endpoint from H2a's Bicep output
-//   (InterStepState.OpenAiEndpoint); Model 1 (shared) reads the shared
-//   platform OpenAI endpoint from RuntimeReferencesOptions + wires a
-//   per-tenant metering-attribution note (task 077 owns the queryable
-//   metering mechanism — see "Model 1 metering attribution" remark below).
-//   This is the last mile that makes the BFF's AzureOpenAI:Endpoint config +
+//   endpoint URI: the customer stamp's own OpenAI endpoint from H2a's Bicep
+//   output (InterStepState.OpenAiEndpoint), for both tenancy models (task 225b,
+//   D-12 — the retired Model 1 branch pointed rows at a shared platform OpenAI
+//   endpoint from RuntimeReferencesOptions). This is the last mile that makes the BFF's AzureOpenAI:Endpoint config +
 //   sprk_aimodeldeployment join resolve to the right endpoint per spec.md
 //   FR-17 acceptance.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-17 (H12c
 //     acceptance): "sprk_aimodeldeployment rows point at customer's OpenAI
-//     deployment (Model 2) or shared platform OpenAI (Model 1 with per-tenant
-//     metering attribution). BFF AzureOpenAIOptions.Endpoint resolves to
-//     correct endpoint via env-var lookup + sprk_aimodeldeployment join."
-//   - projects/customer-provisioning-orchestration-r1/design.md §4.1a Model 1
-//     vs Model 2 handler-differences table, H12c row: "sprk_aimodeldeployment
-//     rows point at customer's dedicated OpenAI deployment" (Model 2) vs
-//     "...shared platform OpenAI deployment with per-tenant metering
-//     attribution" (Model 1).
+//     deployment". BFF AzureOpenAIOptions.Endpoint resolves to the correct
+//     endpoint via env-var lookup + sprk_aimodeldeployment join. (The Model 1
+//     "shared platform OpenAI with per-tenant metering" half of FR-17 is retired
+//     by D-12 — every customer is a dedicated stamp.)
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 DAG:
 //     "H12c (runtime refs — needs both H12a + H12b + H2a OpenAI)".
 //   - ADR-004: idempotent handler contract.
@@ -42,21 +35,10 @@
 //
 // LIVE DATAVERSE SCHEMA (task 072 deviation note — see
 // projects/customer-provisioning-orchestration-r1/notes/task-072-h12c-deviations.md):
-//   The POML's literal step 4 asks for "a metering-attribution tenantId
-//   field" on Model 1 rows. The live sprk_aimodeldeployment schema (verified
-//   via mcp__dataverse__describe) carries NO tenantId column — the table's
-//   fields are sprk_name/sprk_modelid/sprk_provider/sprk_capability/
-//   sprk_endpoint/sprk_contextwindow/sprk_description/sprk_isactive/
-//   sprk_isdefault only. Per CLAUDE.md §6.5 Path C (pivot to comply): H12c
-//   does NOT invent a new Dataverse column (a schema change is its own task,
-//   out of scope for a handler-implementation task per CLAUDE.md §11 —
-//   "prefer extending existing" does not license adding columns to a live
-//   table from inside a handler task). Instead, Model 1 rows carry the
-//   tenantId attribution as a human-readable note in sprk_description; the
-//   QUERYABLE metering-attribution mechanism is task 077's scope (per-tenant
-//   token metering layer), which is expected to key off the run's tenantId
-//   parameter / BFF request context rather than a redundant column on this
-//   shared reference table.
+//   sprk_aimodeldeployment carries NO tenantId column. Task 072 put a per-tenant
+//   metering note in sprk_description on the (now retired) Model 1 shared-platform
+//   rows; since task 225b every row describes the customer's own dedicated
+//   deployment, so no tenant attribution is needed.
 //
 // ROLLBACK CLASSIFICATION (§4C mapping — declared at code level):
 //   EVERY H12c failure mode classifies Resumable — parity with H7's
@@ -79,9 +61,7 @@
 //   │                                     │ issue — operator fixes +   │
 //   │                                     │ resumes; does NOT upsert)  │
 //   │ Missing InterStepState.OpenAiEndpoint │ Resumable (H2a not run   │
-//   │ (Model 2)                           │ yet / didn't populate)     │
-//   │ Missing SharedPlatformOpenAiEndpoint │ Resumable (operator      │
-//   │ config (Model 1)                    │ configuration gap)        │
+//   │ (both tenancy models)               │ yet / didn't populate)     │
 //   │ Writer upsert failure (any row)     │ Resumable (upsert-safe —  │
 //   │                                     │ full retry re-drives)     │
 //   │ Concurrent Cosmos writer conflict   │ Resumable                 │
@@ -151,7 +131,6 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
     private readonly IProvisioningRunRepository _repository;
     private readonly IModelDeploymentReferenceWriter _writer;
     private readonly IHandlerEnqueuer _enqueuer;
-    private readonly RuntimeReferencesOptions _options;
     private readonly ILogger<H12cRuntimeReferencesHandler> _logger;
 
     /// <inheritdoc/>
@@ -166,19 +145,16 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         IProvisioningRunRepository repository,
         IModelDeploymentReferenceWriter writer,
         IHandlerEnqueuer enqueuer,
-        Microsoft.Extensions.Options.IOptions<RuntimeReferencesOptions> options,
         ILogger<H12cRuntimeReferencesHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(enqueuer);
-        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _writer = writer;
         _enqueuer = enqueuer;
-        _options = options.Value;
         _logger = logger;
     }
 
@@ -287,52 +263,20 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         // without a null-forgiving `!` at the call site.
         var tenancyModelString = run.TenancyModel;
 
-        string? meteringDescription = null;
-        switch (tenancyModel)
+        // Task 225b (D-12): both tenancy models are dedicated stamps — the endpoint is the stamp's own
+        // OpenAI account, deployed by H2a. The tenancy model still feeds the idempotency key below.
+        var stampEndpoint = run.InterStepState.OpenAiEndpoint;
+        if (string.IsNullOrWhiteSpace(stampEndpoint))
         {
-            case TenancyModel.Model2:
-                var dedicatedEndpoint = run.InterStepState.OpenAiEndpoint;
-                if (string.IsNullOrWhiteSpace(dedicatedEndpoint))
-                {
-                    var diagnostic =
-                        "Model2 tenancy but ProvisioningRun.interStepState.openAiEndpoint is null/blank. " +
-                        "H2a (task 044 — Bicep infra deploy) MUST complete + populate interStepState before H12c " +
-                        "dispatches on a dedicated-tier customer.";
-                    return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingOpenAiEndpoint, diagnostic, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                endpoint = dedicatedEndpoint;
-                meteringDescription = "Customer-dedicated Azure OpenAI deployment (Model2 tenancy).";
-                break;
-
-            case TenancyModel.Model1:
-                var sharedEndpoint = _options.SharedPlatformOpenAiEndpoint;
-                if (string.IsNullOrWhiteSpace(sharedEndpoint))
-                {
-                    var diagnostic =
-                        "Model1 tenancy but RuntimeReferencesOptions:SharedPlatformOpenAiEndpoint is not " +
-                        "configured. Operator must set this app-setting for this L2 environment before ANY " +
-                        "Model1 customer can complete H12c.";
-                    return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingSharedPlatformEndpointConfiguration, diagnostic, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                endpoint = sharedEndpoint;
-                // Metering attribution (task 077 owns the queryable mechanism —
-                // see file header "LIVE DATAVERSE SCHEMA" deviation note; this
-                // table has no dedicated tenantId column).
-                meteringDescription =
-                    $"Shared platform Azure OpenAI deployment (Model1 tenancy). Per-tenant metering " +
-                    $"attribution: tenantId={tenantId}, customerId={envelope.CustomerId} (task 077 owns the " +
-                    $"queryable metering-attribution mechanism).";
-                break;
-
-            default:
-                // Task 223 (D-12): parse guard above returned early on any unrecognized value; a
-                // future enum addition (Task 224) that reaches here means a switch arm is missing.
-                throw new InvalidOperationException(
-                    $"Unhandled TenancyModel '{tenancyModel}' in H12cRuntimeReferencesHandler switch. " +
-                    "Add a case arm here when the enum grows.");
+            var diagnostic =
+                $"{tenancyModel} tenancy but ProvisioningRun.interStepState.openAiEndpoint is null/blank. " +
+                "H2a (task 044 — Bicep infra deploy) MUST complete + populate interStepState before H12c " +
+                "dispatches.";
+            return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingOpenAiEndpoint, diagnostic, cancellationToken)
+                .ConfigureAwait(false);
         }
+        endpoint = stampEndpoint;
+        var meteringDescription = $"Customer-dedicated Azure OpenAI deployment ({tenancyModel} tenancy).";
 
         // (6) Idempotency key — per POML constraint:
         // h12c-{customerId}-{tenancyModel}-{endpointHash}.

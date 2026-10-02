@@ -312,8 +312,8 @@ public sealed class ReconcilerConcurrencyScenario
             RunId = runId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-recon",
-            TenancyModel = "Model2Dedicated",
-            Profile = "spaarke-hosted-model2",
+            TenancyModel = "Model2",            // T224 renamed Model2Dedicated → Model2
+            Profile = "customer-owned-model2",  // T225b pairing: Model2 ↔ customer-owned-model2
             Status = status,
         };
         var now = DateTimeOffset.UtcNow;

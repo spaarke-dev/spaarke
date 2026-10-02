@@ -46,7 +46,7 @@
 //                               references exactly ONE hop, so ANY secret
 //                               consumed via a customer-vault KV-ref app
 //                               setting (e.g. TenantId, Dataverse-ServiceUrl,
-//                               BingSearch-ApiKey) needs its REAL cleartext
+//                               ContentSafety-ApiKey) needs its REAL cleartext
 //                               landed in the target vault — a nested
 //                               "write the pointer, not the value" behavior
 //                               would silently break every such consumer,
@@ -58,11 +58,7 @@
 //                               mental model doesn't map 1:1 onto the real
 //                               4-member enum; this is the evidence-grounded
 //                               resolution, not an invented shortcut).
-//     - FromPlatformVault     -> COPY from the Spaarke platform vault
-//                               (KvSecretWriteRequest.PlatformVaultName),
-//                               secret = the canonical name (task 245b —
-//                               Spaarke-shared vendor keys, owner D5).
-//     - FromBicepOutput       -> NO REACHABLE SOURCE from H4's writer today.
+//     - FromBicepOutput      -> NO REACHABLE SOURCE from H4's writer today.
 //                               task 084's own kv-secrets.generated.bicep
 //                               module (not yet wired into customer.bicep —
 //                               that's a still-open follow-on beyond task
@@ -196,7 +192,6 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                     "without a slot for this entry). See notes/task-126-deviations.md 'FromBicepOutput gap'.")),
             KvSecretValueSource.FromTopologyConstants => Task.FromResult(ResolveTopologyConstant(entry, request)),
             KvSecretValueSource.FromIntakeParameter => Task.FromResult(ResolveIntakeParameter(entry, request)),
-            KvSecretValueSource.FromPlatformVault => ResolveFromPlatformVaultAsync(entry, request, cancellationToken),
             KvSecretValueSource.WrittenByEntraAppReg => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
                     $"'{entry.CanonicalName}' is written by H3 (EntraAppReg), which runs after H4 — H4 must skip " +
@@ -246,26 +241,6 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
             $"value_source=from-intake-parameter on '{entry.CanonicalName}' but the run carries no intake value for it " +
             "(H4KvSecretsPopulationHandler.IntakeValueParameterKeys names the intake key). Intake values are fixed at " +
             "POST /api/runs — start the run with the value supplied.");
-    }
-
-    /// <summary>
-    /// PLATFORM-VAULT branch (task 245b): a Spaarke-shared vendor key copied from the Spaarke platform
-    /// vault, where it is stored under its canonical name. The vault is L2 configuration
-    /// (<see cref="KvSecretsPopulationOptions.PlatformVaultName"/>, validated at Worker startup) that H4
-    /// passes on <see cref="KvSecretWriteRequest.PlatformVaultName"/>.
-    /// </summary>
-    private Task<KvSecretValueResolution> ResolveFromPlatformVaultAsync(
-        KvSecretEntry entry,
-        KvSecretWriteRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.PlatformVaultName))
-        {
-            return Task.FromResult<KvSecretValueResolution>(new KvSecretValueResolution.Failed(
-                $"value_source=from-platform-vault on '{entry.CanonicalName}' but no platform vault was supplied " +
-                "(KvSecretsPopulationOptions:PlatformVaultName). H4 will NOT fabricate a vendor key."));
-        }
-        return CopyFromVaultAsync(entry, new Models.KeyVaultSecretRef(request.PlatformVaultName, entry.CanonicalName), cancellationToken);
     }
 
     /// <summary>

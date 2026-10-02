@@ -280,59 +280,39 @@ builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams
 // (ICanonicalIndexCatalog is the retired-lineage guard; IAiSearchIndexProvisioner
 // = SearchIndexClientProvisioner (task 124, Wave G-2 — Azure.Search.Documents.
-// Indexes.SearchIndexClient under UAMI RBAC for Model 2, REPLACING the retired
-// script-shelling DeployAllIndexesScriptProvisioner); IAiSearchIndexVerifier
-// calls the AI Search REST API for presence + invariants on both branches;
-// ITenantFilterTemplateStore + IAiSearchTenantFilterTemplateProvisioner
-// (task 124 — Cosmos-backed AiSearchTenantFilterTemplateProvisioner, REPLACING
-// the wave-C4 logging-only StubAiSearchTenantFilterTemplateProvisioner) enforce
-// §4D I2 / FR-29 at Model 1 onboarding for REAL. All registrations
-// UNCONDITIONAL per ADR-032 — no feature-gate branches. The verifier is
-// registered via AddHttpClient (typed) so DefaultAzureCredential's token
-// cache is shared across handler invocations (ADR-028 UAMI-outbound MUST
+// Indexes.SearchIndexClient under UAMI RBAC); IAiSearchIndexVerifier calls the
+// AI Search REST API for presence + invariants. Task 225b (D-12): one path for
+// both tenancy models on the stamp's own AI Search service — the Model 1
+// shared-platform branch, its Cosmos tenant-filter template store and
+// provisioner are deleted. All registrations UNCONDITIONAL per ADR-032. The
+// verifier is registered via AddHttpClient (typed) so DefaultAzureCredential's
+// token cache is shared across handler invocations (ADR-028 UAMI-outbound MUST
 // rule); SearchIndexClientProvisioner reuses the SAME shared TokenCredential
 // singleton (registered by AddCosmosModule above) via constructor injection
-// — zero admin-key handling anywhere in H2b's collaborator graph. The
-// tenant-filter template store reuses the SAME shared CosmosClient singleton
-// against a NEW, TTL-less `tenantFilterTemplates` container (see
-// AiSearchTenantFilterTemplateProvisioner.cs's header for the container
-// design rationale).
+// — zero admin-key handling anywhere in H2b's collaborator graph.
 //
 // Placement Justification (CLAUDE.md §10): H2b lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013
 // forcing-function rule — no IActionResolver, IActionRunner, IOpenAiClient,
-// IPlaybookService injection). H2b owns the §4D I2 (FR-29) enforcement at
-// Model 1 tenant onboarding time — the per-tenant filter template is the
-// PROVISIONING-time half of the tenantId eq filter invariant; the runtime
-// half is enforced by BFF services + the Wave-C6 ArchTest (task 173's I2
-// acceptance probe closes the loop with a live sample-query check).
+// IPlaybookService injection). The §4D I2 (FR-29) `tenantId eq` filter is
+// enforced at query time by BFF services + the Wave-C6 ArchTest; H13's I2
+// acceptance probe checks it with a live sample query.
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-039 (compliance path C — pivot): retired `spaarke-playbook-embeddings`
 //     is rejected structurally by ICanonicalIndexCatalog.RetiredIndexNames +
 //     H2b's pre-check guard. Full retired lineage per task 002 audit § 2.
-//   - ADR-027 Path A: Model 1 shared-tier is documented exception —
-//     TenancyModel drives branch selection (Model1Shared → verifier +
-//     template; Model2Dedicated → provisioner + verifier). Full rationale:
-//     project spec.md § ADR Tensions.
-//   - ADR-028 UAMI outbound: REST verifier + SearchIndexClientProvisioner +
-//     the Cosmos-backed template store ALL use the shared UAMI-pinned
-//     TokenCredential/CosmosClient — zero admin-key, zero operator `az`
-//     chain anywhere in H2b's collaborator graph (task 124, Wave G-2).
+//   - ADR-028 UAMI outbound: REST verifier + SearchIndexClientProvisioner use
+//     the shared UAMI-pinned TokenCredential — zero admin-key, zero operator
+//     `az` chain anywhere in H2b's collaborator graph (task 124, Wave G-2).
 //   - §4C rollback: retired-index / provisioner-failure / invariant-violation
-//     / shared-index-missing are QuarantineRequired; parameter-missing /
-//     endpoint-missing / template-provisioner-failure are Resumable. Full
-//     mapping inline in H2bAiSearchIndexHandler file header.
+//     are QuarantineRequired; parameter-missing / endpoint-missing are
+//     Resumable. Full mapping inline in H2bAiSearchIndexHandler file header.
 builder.Services.Configure<AiSearchIndexOptions>(
     builder.Configuration.GetSection(nameof(AiSearchIndexOptions)));
 builder.Services.AddSingleton<ICanonicalIndexCatalog, CanonicalIndexCatalog>();
 builder.Services.AddSingleton<IAiSearchIndexProvisioner, SearchIndexClientProvisioner>();
 builder.Services.AddHttpClient<IAiSearchIndexVerifier, RestApiAiSearchIndexVerifier>();
-builder.Services.AddSingleton<ITenantFilterTemplateStore>(sp => new CosmosTenantFilterTemplateStore(
-    sp.GetRequiredService<Microsoft.Azure.Cosmos.CosmosClient>(),
-    builder.Configuration[$"{CosmosModule.ConfigSection}:DatabaseName"] ?? CosmosModule.DefaultDatabaseName,
-    sp.GetRequiredService<ILogger<CosmosTenantFilterTemplateStore>>()));
-builder.Services.AddSingleton<IAiSearchTenantFilterTemplateProvisioner, AiSearchTenantFilterTemplateProvisioner>();
 builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 
 // Task 046 / task 130: H3 Entra app-registration handler + two collaborator
@@ -481,8 +461,8 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // H1's Null-probe -> real-ARM-probe transition) — only the DI registration
 // target changed.
 // Task 245b: validated at startup — ControlPlanePrincipalObjectId (the principal H4 grants Key Vault
-// Secrets Officer on each customer vault: L2's own UAMI) and PlatformVaultName (source of the
-// Spaarke-shared vendor keys) are required.
+// Secrets Officer on each customer vault: L2's own UAMI) is required. (The platform-vault option — the
+// source of the Spaarke-shared vendor keys — was removed with those keys by task 225b, owner D18 2026-10-02.)
 builder.Services.AddOptions<KvSecretsPopulationOptions>()
     .Bind(builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)))
     .Validate(o =>
@@ -527,9 +507,9 @@ builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
 // GenericResource — no new package) + sprk_dataverseenvironment.
 // sprk_credentialmode (via the task-112 registry client's A38a
 // UpdateCredentialModeAsync extension). Consumed by H4 (per-customer
-// vault; dispatch fan-out = once per vault). Inert until
+// vault; dispatch fan-out = once per vault). Driven by
 // KvSecretsPopulationOptions.RequireSecretFreeIdentity
-// is set for an environment (default false). ADR-032: registered
+// (default true since task 225b / G21). ADR-032: registered
 // UNCONDITIONALLY — no feature-gate branch; the option gates behavior inside
 // the handlers, not the DI graph.
 builder.Services.AddSingleton<ISecretFreeMarkerApplier>(sp =>

@@ -349,17 +349,16 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         // surfaces as a loud InvalidOperationException rather than silently falling into a
         // `customer` template branch.
         // Task 225a (D-12): the `model1-shared` stack is retired and CI no longer publishes it. Model 1
-        // FAILS CLOSED here rather than resolving `customer`: until task 225b converges the rest of the
-        // Model 1 path (H2b / H12c still target shared services) and task 228 gives every Model 1 run its
-        // own subscription (intake still exempts Model 1 from subscriptionId), deploying `customer` for
-        // Model 1 would build a stamp in an arbitrary subscription half-wired to shared services (ADR-027).
-        // T225b replaces this arm with `customer`.
+        // FAILS CLOSED here rather than resolving `customer`. Task 225b converged H2b / H12c onto the
+        // stamp's own services, but until task 228 gives every Model 1 run its own subscription (intake
+        // still exempts Model 1 from subscriptionId), deploying `customer` for Model 1 would build a
+        // stamp in an arbitrary subscription (ADR-027). T228 replaces this arm with `customer`.
         var templateKey = tenancyModel switch
         {
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => throw new InvalidOperationException(
                 "Model 1 runs are not deployable yet: the shared Model 1 stack was retired (task 225a, D-12) and the " +
-                "dedicated Model 1 path lands with task 225b (code path) and task 228 (one subscription per customer, " +
-                "ADR-027). Nothing has been deployed."),
+                "dedicated Model 1 path is completed by task 228 (one subscription per customer, ADR-027). Nothing " +
+                "has been deployed."),
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => "customer",
             _ => throw new InvalidOperationException(
                 $"Unhandled TenancyModel '{tenancyModel}' in ArmDeploymentRunner.ResolveArmTemplateAsync. " +
@@ -416,7 +415,6 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             ["environmentName"] = new { value = request.EnvironmentName },
             ["location"] = new { value = request.Location },
             ["signalrEnabled"] = new { value = request.SignalREnabled },
-            ["requireSecretFreeIdentity"] = new { value = request.RequireSecretFreeIdentity },
         };
         // ISH-08 (Wave 5 punchlist, 2026-08-27): forward openAiLocation ONLY
         // when the caller populated it. Omitting the key lets customer.bicep's

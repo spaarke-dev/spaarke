@@ -101,8 +101,7 @@ public sealed record KvSecretWriteRequest(
     bool RotateExisting,
     IReadOnlyDictionary<string, Models.KeyVaultSecretRef>? SecretParameters = null,
     IReadOnlySet<string>? OmitCanonicalNames = null,
-    IReadOnlyDictionary<string, string>? IntakeValues = null,
-    string? PlatformVaultName = null)
+    IReadOnlyDictionary<string, string>? IntakeValues = null)
 {
     /// <summary>Effective secret-parameter map — never null (empty when the caller passes none).</summary>
     public IReadOnlyDictionary<string, Models.KeyVaultSecretRef> SecretParameters { get; init; } =

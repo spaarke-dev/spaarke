@@ -677,7 +677,7 @@ public sealed class H0PreflightHandlerTests
         // below.
         var run = BuildRunWithTenant();
         run.TenancyModel = "Model1";  // Bucket B HIGH#12 SESSION 18: warnAndProceed only permitted for Model1Shared
-        run.Profile = "spaarke-hosted-model1-trial";
+        run.Profile = "spaarke-hosted-model2";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
         run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] =
@@ -762,7 +762,7 @@ public sealed class H0PreflightHandlerTests
         // fail this test.
         var run = BuildRunWithTenant();
         run.TenancyModel = "Model1";
-        run.Profile = "spaarke-hosted-model1-trial";
+        run.Profile = "spaarke-hosted-model2";
         // Deliberately omit both tier + estimatedMonthlyUsd.
         var repo = new FakeRepository(run, etag: "etag-med4-model1-skip");
         var enqueuer = new FakeEnqueuer();
@@ -820,7 +820,7 @@ public sealed class H0PreflightHandlerTests
         // Model2Dedicated abort-override does not fire.
         var run = BuildRunWithTenant();
         run.TenancyModel = "Model1";
-        run.Profile = "spaarke-hosted-model1-trial";
+        run.Profile = "spaarke-hosted-model2";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
         run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] = policyValue;
@@ -930,7 +930,7 @@ public sealed class H0PreflightHandlerTests
         // explicit in the name.
         var run = BuildRunWithTenant();
         run.TenancyModel = "Model1";
-        run.Profile = "spaarke-hosted-model1-trial";
+        run.Profile = "spaarke-hosted-model2";
         // Override BuildRun()'s default tier (dedicated) — this test needs to
         // clear/replace it to exercise the missing/unknown-tier code path.
         run.Parameters.NonSecret.Remove(H0PreflightHandler.TierParameterKey);
@@ -960,7 +960,7 @@ public sealed class H0PreflightHandlerTests
         // covered by CostEnvelope_Model2Dedicated_FailsClosed_...
         var run = BuildRunWithTenant();
         run.TenancyModel = "Model1";
-        run.Profile = "spaarke-hosted-model1-trial";
+        run.Profile = "spaarke-hosted-model2";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         // Override BuildRun()'s default estimate — this test clears/replaces it.
         run.Parameters.NonSecret.Remove(H0PreflightHandler.EstimatedMonthlyUsdParameterKey);
@@ -1046,7 +1046,7 @@ public sealed class H0PreflightHandlerTests
             EnvironmentId = "env-guid",
             TenancyModel = "Model2",
             Status = RunStatus.NotStarted,
-            Profile = "spaarke-hosted-model2",
+            Profile = "customer-owned-model2",
         };
         run.Parameters.NonSecret["region"] = "eastus";
         run.Parameters.NonSecret["subscriptionId"] = "sub-1";

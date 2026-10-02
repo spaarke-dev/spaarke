@@ -21,8 +21,9 @@
 //       §4C rollback: H1 failures are Resumable class (operator resolves
 //       subscription config / Lighthouse offer + POST /api/runs/{id}/resume).
 //   - projects/customer-provisioning-orchestration-r1/design.md §3A A2:
-//       Tenancy models — Model 1 (SpaarkeOwned, shared) skips the Lighthouse
-//       branch; Model 2 (CustomerOwned, dedicated) requires it.
+//       Tenancy models — Model 1 (SpaarkeOwned — a dedicated stamp in Spaarke's
+//       tenant, D-12) skips the Lighthouse branch; Model 2 (CustomerOwned)
+//       requires it.
 //   - .claude/adr/ADR-004-job-contract.md: idempotent + at-least-once safe.
 //   - .claude/adr/ADR-010-di-minimalism.md: probe seam ≥2 impls (Null +
 //     test stubs; Wave C5 adds real ARM-backed impl).
@@ -484,8 +485,8 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
             return false;
         }
 
-        // Primary path: enum-parse. Model1Shared → Spaarke-owned tenancy;
-        // Model2Dedicated → customer-owned tenancy (Lighthouse required).
+        // Primary path: enum-parse. Model1 → Spaarke-owned tenancy;
+        // Model2 → customer-owned tenancy (Lighthouse required).
         if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(tenancyModel, out var parsedModel))
         {
             known = true;

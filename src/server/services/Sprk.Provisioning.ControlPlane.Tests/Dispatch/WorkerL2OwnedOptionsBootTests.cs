@@ -5,7 +5,8 @@
 // at startup (ValidateOnStart), not run parameters:
 //   - KvSecretsPopulationOptions.ControlPlanePrincipalObjectId — the principal
 //     H4 grants Key Vault Secrets Officer on each customer vault (L2's own UAMI,
-//     never the stamp's), and PlatformVaultName — the vendor-key source;
+//     never the stamp's). (The vendor-key platform-vault option went with the
+//     vendor keys — task 225b, owner D18 2026-10-02.)
 //   - SpeContainerOptions.ContainerTypeOwners — the SPE owning-app credential per
 //     container type (app id + the certificate's vault + secret), read by H0's
 //     SpeCertBootstrap probe, H8 and H13's T6 probe.
@@ -41,18 +42,6 @@ public sealed class WorkerL2OwnedOptionsBootTests
         var act = () => factory.Services;
 
         act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlanePrincipalObjectId*");
-    }
-
-    [Fact]
-    public void MissingVendorKeyVault_FailsHostStart()
-    {
-        using var factory = new L2OptionsWorkerTestFactory(b =>
-            b.UseSetting("KvSecretsPopulationOptions:PlatformVaultName", string.Empty));
-
-        // Host start alone (ValidateOnStart) must fail — nothing reads the options here.
-        var act = () => factory.Services;
-
-        act.Should().Throw<InvalidOperationException>().WithMessage("*PlatformVaultName*");
     }
 
     [Theory]

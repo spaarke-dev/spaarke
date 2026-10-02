@@ -149,26 +149,6 @@ resource kv_bFF_API_ClientId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if
 // (Seed-CustomerKeyVault.generated.ps1 -SkipExisting / H4 handler / operator). A re-deploy
 // of this module can therefore NEVER touch the live value.
 
-// BingSearch-ApiKey — Bing Search v7 API key. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
-resource kv_bingSearch_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'BingSearch-ApiKey')) {
-  parent: keyVault
-  name: 'BingSearch-ApiKey'
-  properties: {
-    value: secretValues['BingSearch-ApiKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-platform-vault'
-  }
-  tags: {
-    canonicalName: 'BingSearch-ApiKey'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // Communication-DefaultMailbox — Default mailbox address for Communication module (outbound + Approved-Senders default).
 resource kv_communication_DefaultMailbox 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Communication-DefaultMailbox')) {
   parent: keyVault
@@ -395,26 +375,6 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
-// LlamaParse-ApiKey — LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default. Spaarke-shared vendor account (owner D5, 2026-09-30) — the same Spaarke key is written into every customer vault, copied by H4 from the Spaarke platform vault (task 245b — KvSecretsPopulationOptions:PlatformVaultName, same secret name).
-resource kv_llamaParse_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'LlamaParse-ApiKey')) {
-  parent: keyVault
-  name: 'LlamaParse-ApiKey'
-  properties: {
-    value: secretValues['LlamaParse-ApiKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-platform-vault'
-  }
-  tags: {
-    canonicalName: 'LlamaParse-ApiKey'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // Redis-ConnectionString — Azure Cache for Redis connection string.
 resource kv_redis_ConnectionString 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'Redis-ConnectionString')) {
   parent: keyVault
@@ -526,7 +486,6 @@ output canonicalSecretNames array = [
   'BFF-API-Audience'
   'BFF-API-ClientId'
   'BFF-API-ClientSecret'
-  'BingSearch-ApiKey'
   'Communication-DefaultMailbox'
   'Communication-Webhook-SigningKey'
   'Communication-WebhookClientState'
@@ -539,7 +498,6 @@ output canonicalSecretNames array = [
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'
   'Email-WebhookSigningKey'
-  'LlamaParse-ApiKey'
   'Redis-ConnectionString'
   'SPE-CommunicationArchiveContainerId'
   'SPE-ContainerTypeId'

@@ -31,21 +31,28 @@
 //   the owner removed from the process must not be served.
 //
 //   A38a (task 205a, 2026-08-25 — secret-free served-entry filter; target set
-//   reduced to BFF-API-ClientSecret by T226):
-//   A38a-1  RequireSecretFreeIdentity=true EXCLUDES the omit target
-//           from served entries (count shrinks by exactly 1); manifest.yaml
-//           rows unchanged (the raw document still parses them — proven by
-//           the default-branch tests above against the SAME embedded yaml).
-//   A38a-2  Default options (false) INCLUDE the target.
-//   A38a-3  Q3 Path A rollback (both flags true) re-INCLUDES the target.
-//   A38a-4  Dataverse-ClientSecret served under BOTH branches (§6.5 record).
+//   reduced to BFF-API-ClientSecret by T226, then BFF-API-ClientSecret +
+//   Dataverse-ClientSecret by task 225b / G21, which also made secret-free the
+//   default — the BINDING rule: never create either credential secret in a
+//   secret-free environment):
+//   A38a-1  RequireSecretFreeIdentity=true EXCLUDES both omit targets
+//           from served entries (count shrinks by exactly 2) vs the explicit
+//           legacy client-secret path (false), which serves them; manifest.yaml
+//           rows unchanged.
+//   A38a-2  Default options are secret-free: both targets omitted.
+//   A38a-3  Q3 Path A rollback (both flags true) re-INCLUDES both targets.
+//   A38a-4  Dataverse-ClientSecret follows the omit-target rule on every branch.
 //   A38a-5  :151 BINDING invariant still fires on synthetic yaml MISSING
 //           BFF-API-ClientSecret / with never_delete=false — EVEN WITH the
 //           secret-free filter active (filter is DOWNSTREAM of the
 //           invariant; regression protection for the invariant's location).
 //   A38a-6  Filter + invariant ordering: synthetic yaml WITH the required
 //           rows + secret-free active → Success (invariant passed against
-//           raw yaml) with the target absent from SERVED entries.
+//           raw yaml) with the targets absent from SERVED entries.
+//
+//   Task 225b (owner D18, 2026-10-02): the Spaarke-shared vendor keys and their
+//   from-platform-vault source left the catalog — the keys are asserted absent and
+//   the source is refused as unrecognized.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -63,6 +70,13 @@ public sealed class FileKvSecretManifestTests
         NullLogger<FileKvSecretManifest>.Instance,
         Options.Create(options ?? new KvSecretsPopulationOptions()));
 
+    /// <summary>
+    /// The legacy client-secret path (task 225b made secret-free the default) — serves every
+    /// manifest row, including the two credential secrets the secret-free filter omits.
+    /// </summary>
+    private static FileKvSecretManifest NewLegacyClientSecretManifest() =>
+        NewManifest(new KvSecretsPopulationOptions { RequireSecretFreeIdentity = false });
+
     [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_ReturnsPopulatedSuccess()
     {
@@ -79,7 +93,8 @@ public sealed class FileKvSecretManifestTests
     [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_ContainsBothBindingNeverDeleteSecrets()
     {
-        var manifest = NewManifest();
+        // The rows are in the catalog; only the legacy client-secret path serves them.
+        var manifest = NewLegacyClientSecretManifest();
 
         var result = await manifest.ReadAsync(CancellationToken.None);
 
@@ -114,12 +129,10 @@ public sealed class FileKvSecretManifestTests
     // T226 / owner D13: interim key from the customer's own Document Intelligence (T243 removes it).
     [InlineData("DocumentIntelligence-ApiKey", KvSecretValueSource.FromBicepOutput)]
     [InlineData("Communication-Webhook-SigningKey", KvSecretValueSource.Generated)]
-    // T245b: Spaarke-shared vendor keys (owner D5) are copied from the Spaarke platform vault.
-    [InlineData("BingSearch-ApiKey", KvSecretValueSource.FromPlatformVault)]
-    [InlineData("LlamaParse-ApiKey", KvSecretValueSource.FromPlatformVault)]
     public async Task ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly(string canonicalName, KvSecretValueSource expected)
     {
-        var manifest = NewManifest();
+        // Legacy client-secret path so the Dataverse-ClientSecret row is served (task 225b default omits it).
+        var manifest = NewLegacyClientSecretManifest();
 
         var result = await manifest.ReadAsync(CancellationToken.None);
 
@@ -146,6 +159,8 @@ public sealed class FileKvSecretManifestTests
     // the Storage connection string, and Prompt Flow is retired
     // (D5). If one reappears in the catalog, H4b would emit a KV reference for it and
     // an unresolvable reference reaches the BFF as a literal "key".
+    // Task 225b (owner D18, 2026-10-02): the Spaarke-shared vendor keys left every stamp —
+    // Bing Search v7 was retired by Microsoft 2025-08-11; LlamaParse has no production caller.
     [Theory]
     [InlineData("AiSearch--AdminKey")]
     [InlineData("ServiceBus-ConnectionString")]
@@ -153,9 +168,12 @@ public sealed class FileKvSecretManifestTests
     [InlineData("AzureOpenAI-ApiKey")]
     [InlineData("PromptFlow-Endpoint")]
     [InlineData("PromptFlow-Key")]
+    [InlineData("BingSearch-ApiKey")]
+    [InlineData("LlamaParse-ApiKey")]
     public async Task ReadAsync_RealEmbeddedManifest_DoesNotServeKeyRemovedFromTheProcess(string canonicalName)
     {
-        var manifest = NewManifest();
+        // Legacy client-secret path = the widest served set; absent there means absent everywhere.
+        var manifest = NewLegacyClientSecretManifest();
 
         var result = await manifest.ReadAsync(CancellationToken.None);
 
@@ -182,12 +200,15 @@ public sealed class FileKvSecretManifestTests
             .Should().OnlyContain(key => IntakeParameterCatalog.IsKnown(key), "each maps to an accepted intake key");
     }
 
-    // T226: from-shared-service is no longer a value_source. A manifest that still
-    // carries one must be refused, not served with the entry silently skipped.
-    [Fact]
-    public void ParseYaml_UnrecognizedValueSource_IsRefusedNamingTheEntry()
+    // T226: from-shared-service is no longer a value_source; task 225b (owner D18) removed
+    // from-platform-vault. A manifest that still carries one must be refused, not served
+    // with the entry silently skipped.
+    [Theory]
+    [InlineData("from-shared-service")]
+    [InlineData("from-platform-vault")]
+    public void ParseYaml_UnrecognizedValueSource_IsRefusedNamingTheEntry(string retiredValueSource)
     {
-        const string yaml = """
+        var yaml = $"""
             secrets:
               - canonical_name: "Dataverse-ClientSecret"
                 never_delete: true
@@ -197,14 +218,14 @@ public sealed class FileKvSecretManifestTests
                 value_source: "from-existing-kv"
               - canonical_name: "Redis-ConnectionString"
                 never_delete: false
-                value_source: "from-shared-service"
+                value_source: "{retiredValueSource}"
             """;
 
         var result = NewManifest().ParseYamlForTest(yaml);
 
         var failure = result.Should().BeOfType<KvSecretManifestReadResult.Failure>().Subject;
         failure.Diagnostic.Should().Contain("Redis-ConnectionString");
-        failure.Diagnostic.Should().Contain("unrecognized value_source 'from-shared-service'");
+        failure.Diagnostic.Should().Contain($"unrecognized value_source '{retiredValueSource}'");
     }
 
     [Fact]
@@ -226,24 +247,23 @@ public sealed class FileKvSecretManifestTests
     private static readonly string[] A38aOmitTargets =
     {
         "BFF-API-ClientSecret",
+        "Dataverse-ClientSecret",   // task 225b (G21)
     };
 
     [Fact]
-    public void A38a_OmitTargetSet_ContainsExactlyBffApiClientSecret_AndNeverDataverseClientSecret()
+    public void A38a_OmitTargetSet_IsExactlyTheTwoCredentialSecrets()
     {
-        FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().HaveCount(1);
-        FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().Contain(A38aOmitTargets);
-        FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().NotContain("Dataverse-ClientSecret",
-            "Q3 Path A rollback copy stays unconditional until the 2026-11-23 sunset (§6.5 record 2026-08-25)");
+        FileKvSecretManifest.SecretFreeIdentityOmitTargets.Should().BeEquivalentTo(A38aOmitTargets,
+            "BINDING rule (task 225b): neither credential secret is ever created in a secret-free environment");
     }
 
     [Fact]
-    public async Task A38a_SecretFreeTrue_ExcludesTarget_CountShrinksByExactlyOne()
+    public async Task A38a_SecretFreeTrue_ExcludesTargets_CountShrinksByExactlyTwo()
     {
-        var baseline = await NewManifest().ReadAsync(CancellationToken.None);
+        var baseline = await NewLegacyClientSecretManifest().ReadAsync(CancellationToken.None);
         var baselineSuccess = baseline.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         baselineSuccess.Entries.Select(e => e.CanonicalName).Should().Contain(A38aOmitTargets,
-            "the manifest.yaml rows themselves are UNCHANGED — the default branch serves the target");
+            "the manifest.yaml rows themselves are UNCHANGED — the legacy client-secret path serves the targets");
 
         var filtered = await NewManifest(new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true })
             .ReadAsync(CancellationToken.None);
@@ -251,22 +271,22 @@ public sealed class FileKvSecretManifestTests
         var filteredSuccess = filtered.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         filteredSuccess.Entries.Select(e => e.CanonicalName).Should().NotContain(A38aOmitTargets,
             "auth-v4 §9.1 — OMIT is the signal on secret-free environments");
-        filteredSuccess.Entries.Count.Should().Be(baselineSuccess.Entries.Count - 1,
-            "exactly the A38a target is filtered — nothing else");
+        filteredSuccess.Entries.Count.Should().Be(baselineSuccess.Entries.Count - 2,
+            "exactly the two A38a targets are filtered — nothing else");
     }
 
     [Fact]
-    public async Task A38a_SecretFreeFalse_Default_IncludesTarget()
+    public async Task A38a_DefaultOptions_AreSecretFree_OmitBothTargets()
     {
         var result = await NewManifest().ReadAsync(CancellationToken.None);
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
-        success.Entries.Select(e => e.CanonicalName).Should().Contain(A38aOmitTargets,
-            "default (client-secret) environments are unchanged by A38a");
+        success.Entries.Select(e => e.CanonicalName).Should().NotContain(A38aOmitTargets,
+            "task 225b (G21): RequireSecretFreeIdentity defaults to true — every new stamp runs MI-FIC");
     }
 
     [Fact]
-    public async Task A38a_Q3PathARollback_ReIncludesTarget()
+    public async Task A38a_Q3PathARollback_ReIncludesTargets()
     {
         var result = await NewManifest(new KvSecretsPopulationOptions
         {
@@ -276,14 +296,14 @@ public sealed class FileKvSecretManifestTests
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         success.Entries.Select(e => e.CanonicalName).Should().Contain(A38aOmitTargets,
-            "Q3 Path A rollback re-includes the A38a target (regression path)");
+            "Q3 Path A rollback re-includes both A38a targets (regression path)");
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task A38a_DataverseClientSecret_ServedUnderEveryBranch(bool secretFree, bool rollback)
+    [InlineData(false, false, true)]
+    [InlineData(true, false, false)]
+    [InlineData(true, true, true)]
+    public async Task A38a_DataverseClientSecret_FollowsTheOmitTargetRule(bool secretFree, bool rollback, bool expectServed)
     {
         var result = await NewManifest(new KvSecretsPopulationOptions
         {
@@ -292,8 +312,8 @@ public sealed class FileKvSecretManifestTests
         }).ReadAsync(CancellationToken.None);
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
-        success.Entries.Should().Contain(e => e.CanonicalName == "Dataverse-ClientSecret",
-            "Dataverse-ClientSecret is the Q3 Path A rollback copy — unconditional until 2026-11-23 (§6.5 record)");
+        success.Entries.Any(e => e.CanonicalName == "Dataverse-ClientSecret").Should().Be(expectServed,
+            "task 225b: omitted when secret-free, served on the legacy path and under Q3 Path A rollback");
     }
 
     // ---- A38a-5/6: BINDING invariant + filter ordering on synthetic yaml ----
@@ -329,7 +349,7 @@ public sealed class FileKvSecretManifestTests
 
         foreach (var options in new[]
         {
-            new KvSecretsPopulationOptions(),
+            new KvSecretsPopulationOptions { RequireSecretFreeIdentity = false }, // legacy path (T225b: the default is now secret-free)
             new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true },
         })
         {
@@ -366,7 +386,7 @@ public sealed class FileKvSecretManifestTests
     public void A38a_FilterIsDownstreamOfInvariant_YamlRowsPresent_ServedEntriesFiltered()
     {
         // The invariant PASSES (both never-delete rows present in the raw
-        // yaml) and THEN the filter removes the target from the
+        // yaml) and THEN the filter removes the targets from the
         // SERVED list — the exact "omit is a served-entry filter, NOT a yaml
         // row deletion" contract from the peer escalation record.
         var result = NewManifest(new KvSecretsPopulationOptions { RequireSecretFreeIdentity = true })
@@ -374,8 +394,8 @@ public sealed class FileKvSecretManifestTests
 
         var success = result.Should().BeOfType<KvSecretManifestReadResult.Success>().Subject;
         success.Entries.Select(e => e.CanonicalName).Should().BeEquivalentTo(
-            new[] { "Dataverse-ClientSecret", "Some-Other-Secret" },
-            "BFF-API-ClientSecret is filtered from SERVED entries; Dataverse-ClientSecret + " +
+            new[] { "Some-Other-Secret" },
+            "BFF-API-ClientSecret + Dataverse-ClientSecret are filtered from SERVED entries (task 225b); " +
             "unrelated entries stay");
     }
 

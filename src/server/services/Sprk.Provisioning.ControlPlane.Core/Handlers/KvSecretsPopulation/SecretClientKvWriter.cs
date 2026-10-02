@@ -143,30 +143,6 @@ public sealed class SecretClientKvWriter : IKvSecretsWriter
                 "Verify the L2 UAMI has been granted a role on at least one subscription (DefaultAzureCredential chain).");
         }
 
-        // Task 245b: the Spaarke platform vault is a precondition, not a per-entry write. Resolve every
-        // from-platform-vault source (Spaarke-shared vendor keys) BEFORE the first write, so a vendor key missing
-        // from the platform vault fails the writer cleanly (Resumable — seed it and resume) instead of surfacing
-        // mid-loop as a partial write (QuarantineRequired). Values are not kept: each entry re-reads its source
-        // when it is written, so cleartext is held no longer than the existing per-entry path holds it.
-        foreach (var entry in request.Entries)
-        {
-            if (entry.Operation != KvSecretOperation.Upsert
-                || entry.ValueSource != KvSecretValueSource.FromPlatformVault
-                || request.OmitCanonicalNames.Contains(entry.CanonicalName))
-            {
-                continue;
-            }
-            cancellationToken.ThrowIfCancellationRequested();
-            var preflight = await _resolver.ResolveAsync(entry, request, cancellationToken).ConfigureAwait(false);
-            if (preflight is KvSecretValueResolution.Failed missing)
-            {
-                return new KvSecretsWriteOutcome.Failure(
-                    $"Platform-vault source for '{entry.CanonicalName}' is not readable BEFORE any KV write attempted: " +
-                    $"{missing.Diagnostic} Seed it under the same name in the Spaarke platform vault " +
-                    $"'{request.PlatformVaultName}' (KvSecretsPopulationOptions:PlatformVaultName) and resume.");
-            }
-        }
-
         var vaultUri = new Uri($"https://{request.TargetKeyVaultName}.vault.azure.net/");
         var client = _clientOptions is null
             ? new SecretClient(vaultUri, _credential)

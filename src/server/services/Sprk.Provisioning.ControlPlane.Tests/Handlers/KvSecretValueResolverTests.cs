@@ -124,20 +124,20 @@ public sealed class KvSecretValueResolverTests
     [Fact]
     public async Task ResolveAsync_FromRunParametersEntry_CopiesRealValueFromReferencedVault()
     {
-        const string knownValue = "bing-search-api-key-operator-supplied";
+        const string knownValue = "content-safety-api-key-operator-supplied";
         var handler = new FakeSourceVaultHandler { KnownValue = knownValue };
         var resolver = NewResolver(handler);
-        var entry = new KvSecretEntry("BingSearch-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters);
+        var entry = new KvSecretEntry("ContentSafety-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters);
         var request = NewRequest(new Dictionary<string, KeyVaultSecretRef>(StringComparer.Ordinal)
         {
-            ["BingSearch-ApiKey"] = new KeyVaultSecretRef(SourceVaultName, "operator-supplied-bing-key"),
+            ["ContentSafety-ApiKey"] = new KeyVaultSecretRef(SourceVaultName, "operator-supplied-content-safety-key"),
         });
 
         var resolution = await resolver.ResolveAsync(entry, request, CancellationToken.None);
 
         var resolved = resolution.Should().BeOfType<KvSecretValueResolution.Resolved>().Subject;
         resolved.Value.Should().Be(knownValue);
-        handler.RequestedSecretNames.Should().ContainSingle().Which.Should().Be("operator-supplied-bing-key");
+        handler.RequestedSecretNames.Should().ContainSingle().Which.Should().Be("operator-supplied-content-safety-key");
     }
 
     // ---------- T4 missing reference -> honest failure, no fabricated value ----------
@@ -299,48 +299,18 @@ public sealed class KvSecretValueResolverTests
             => new(GetToken(requestContext, cancellationToken));
     }
 
-    // ---------- Task 245b: FromPlatformVault — Spaarke-shared vendor keys ----------
-
-    [Fact]
-    public async Task ResolveAsync_FromPlatformVaultEntry_CopiesTheSameNamedSecretFromThePlatformVault()
-    {
-        var handler = new FakeSourceVaultHandler { KnownValue = "bing-vendor-key-value" };
-        var resolver = NewResolver(handler);
-        var entry = new KvSecretEntry("BingSearch-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromPlatformVault);
-
-        var resolution = await resolver.ResolveAsync(entry, NewRequest() with { PlatformVaultName = SourceVaultName }, CancellationToken.None);
-
-        resolution.Should().BeOfType<KvSecretValueResolution.Resolved>().Which.Value.Should().Be("bing-vendor-key-value");
-        handler.RequestedSecretNames.Should().ContainSingle().Which.Should().Be("BingSearch-ApiKey");
-        handler.RequestedHosts.Should().ContainSingle().Which.Should().StartWith(SourceVaultName + ".");
-    }
-
-    [Fact]
-    public async Task ResolveAsync_FromPlatformVaultEntry_WithoutAPlatformVault_FailsWithoutAnyVaultRead()
-    {
-        var handler = new FakeSourceVaultHandler();
-        var entry = new KvSecretEntry("LlamaParse-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromPlatformVault);
-
-        var resolution = await NewResolver(handler).ResolveAsync(entry, NewRequest(), CancellationToken.None);
-
-        resolution.Should().BeOfType<KvSecretValueResolution.Failed>().Which.Diagnostic.Should().Contain("PlatformVaultName");
-        handler.RequestedSecretNames.Should().BeEmpty();
-    }
-
     /// <summary>Fake transport standing in for the SOURCE vault's SecretClient.GetSecretAsync call.</summary>
     private sealed class FakeSourceVaultHandler : HttpMessageHandler
     {
         public string KnownValue { get; init; } = "default-fake-source-value";
         public bool SourceSecretMissing { get; init; }
         public List<string> RequestedSecretNames { get; } = new();
-        public List<string> RequestedHosts { get; } = new();
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var path = request.RequestUri!.AbsolutePath;
             var name = path.Trim('/').Split('/').Last();
             RequestedSecretNames.Add(name);
-            RequestedHosts.Add(request.RequestUri.Host);
 
             if (SourceSecretMissing)
             {

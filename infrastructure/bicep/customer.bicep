@@ -107,12 +107,6 @@ param signalrEnabled bool = false
 @allowed(['Free_F1', 'Standard_S1', 'Premium_P1'])
 param signalrSku string = 'Free_F1'
 
-// --- Secret-free identity gate (auth-v4 §9.1 / customer-provisioning-orchestration-r1 punch row A38b, 2026-08-25) ---
-
-@description('RETAINED FOR THE H2a PARAMETER CONTRACT ONLY - no effect in this template since T226 (2026-09-30). It used to omit `AiSearch--AdminKey` + `ServiceBus-ConnectionString` from kvSecretValues on secret-free stamps; both keys are now removed from the process for every stamp (the BFF reaches AI Search and Service Bus with the stamp UAMI). ArmDeploymentRunner still passes it and ARM rejects undeclared parameters, so its removal is paired with the runner change (T225b).')
-#disable-next-line no-unused-params
-param requireSecretFreeIdentity bool = false
-
 // --- ACS messaging options (messaging-communication-app-r1, task 012, FR-18) ---
 
 @description('Deploy the per-boundary ACS resource + Event Grid system topic/subscription (messaging). Default false — existing customer provisioning is unchanged until messaging is enabled for the boundary.')

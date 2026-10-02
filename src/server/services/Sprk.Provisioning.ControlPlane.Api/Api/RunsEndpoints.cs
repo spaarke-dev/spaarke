@@ -138,7 +138,7 @@ public static class RunsEndpoints
     /// remediation, 2026-08-27): centralised profile-enum constants + design
     /// call = REJECT unknown profile (mirrors intake.schema.json profile enum
     /// exactly). Rationale for the reject design (vs warn+accept):
-    ///   1. intake.schema.json declares profile as a strict enum of 3 values
+    ///   1. intake.schema.json declares profile as a strict enum
     ///      — batch mode already fails schema validation on any drift.
     ///   2. Interactive mode passes the operator-typed value straight through;
     ///      accepting an unknown profile silently produces cryptic downstream
@@ -153,22 +153,23 @@ public static class RunsEndpoints
     /// <c>scripts/provisioning-prereqs/intake.schema.json</c> at test time and
     /// asserts the enum values match this class's constants exactly (fails the
     /// build the moment either surface drifts).
+    ///
+    /// Task 225b (D-12, G6): <c>spaarke-hosted-model1-trial</c> (the retired shared
+    /// trial/SMB tier) is no longer a known profile — a request carrying it is
+    /// refused as an unknown profile. The profile names predate the D-12
+    /// renumbering: <c>spaarke-hosted-model2</c> is the Model 1 profile.
     /// </summary>
     public static class KnownProfiles
     {
-        /// <summary>Model 1 shared trial / SMB tenancy (spaarke-hosted, multi-tenant).</summary>
-        public const string SpaarkeHostedModel1Trial = "spaarke-hosted-model1-trial";
-
-        /// <summary>Model 2 dedicated stamp on Spaarke's Azure subscription.</summary>
+        /// <summary>Model 1 (D-12): dedicated stamp hosted in Spaarke's tenant and Azure subscription. Pairs only with tenancyModel <c>Model1</c>.</summary>
         public const string SpaarkeHostedModel2 = "spaarke-hosted-model2";
 
-        /// <summary>Model 2 dedicated stamp on the customer's own Azure subscription.</summary>
+        /// <summary>Model 2 (D-12): dedicated stamp in the customer's own tenant and Azure subscription. Pairs only with tenancyModel <c>Model2</c>.</summary>
         public const string CustomerOwnedModel2 = "customer-owned-model2";
 
-        /// <summary>All 3 legal profile values — the authoritative L2-side enum.</summary>
+        /// <summary>All legal profile values — the authoritative L2-side enum.</summary>
         public static readonly IReadOnlyList<string> All = new[]
         {
-            SpaarkeHostedModel1Trial,
             SpaarkeHostedModel2,
             CustomerOwnedModel2,
         };
@@ -421,17 +422,17 @@ public static class RunsEndpoints
         // 2026-08-27): enforce tenancyModel × profile cross-field invariant,
         // mirroring intake.schema.json's allOf logic. Without this check, a
         // direct-API caller (test harness, retry script) supplying an invalid
-        // pair (e.g., Model1Shared + customer-owned-model2) succeeds at
+        // pair (e.g., Model1 + customer-owned-model2) succeeds at
         // CreateRun; handlers that read tenancyModel then misbehave (H5 tier
         // derivation, H11 user provisioning gate). Downstream failures are
         // cryptic — surfacing "invalid tenancy/profile pair" at intake is
         // the only place the operator gets a clear signal.
         //
-        // Rules (mirrors intake.schema.json allOf):
-        //   Model1Shared    → profile MUST be 'spaarke-hosted-model1-trial'
-        //   Model2Dedicated → profile MUST be 'spaarke-hosted-model2' OR
-        //                     'customer-owned-model2'
-        //   Any other tenancyModel value → 400 (enum check).
+        // Rules (mirrors intake.schema.json allOf; task 225b / D-12 pairing):
+        //   Model1 → profile MUST be 'spaarke-hosted-model2' (Spaarke-hosted dedicated stamp)
+        //   Model2 → profile MUST be 'customer-owned-model2' (customer-hosted dedicated stamp)
+        //   Any other profile value (incl. the retired 'spaarke-hosted-model1-trial')
+        //   or tenancyModel value → 400 (enum check).
         if (!TryValidateTenancyProfilePair(request.TenancyModel, request.Profile, out var pairError))
         {
             return BadRequest(httpContext, ControlPlaneErrorCodes.TenancyProfileInvalid, pairError);
@@ -1122,9 +1123,9 @@ public static class RunsEndpoints
     /// 2026-08-27): mirrors the intake.schema.json allOf logic — validates
     /// the tenancyModel × profile pair. Exposed <c>internal</c> so unit tests
     /// can cover the matrix directly without going through the HTTP surface.
-    /// Returns true on a valid pair (or unrecognized tenancyModel value that
-    /// upstream validation already rejected); returns false with a filled
-    /// diagnostic string on a mis-paired combination.
+    /// Returns true on a valid pair; returns false with a filled diagnostic
+    /// string on an unknown profile, an unknown tenancyModel or a mis-paired
+    /// combination (all surfaced as <c>tenancy-profile-invalid</c>).
     /// </summary>
     internal static bool TryValidateTenancyProfilePair(
         string tenancyModel,
@@ -1159,42 +1160,30 @@ public static class RunsEndpoints
             return false;
         }
 
-        switch (parsedTenancyModel)
+        // Task 225b (D-12, G6): each tenancy model has exactly one legal profile —
+        // Model1 (Spaarke-hosted dedicated stamp) ↔ spaarke-hosted-model2,
+        // Model2 (customer-hosted dedicated stamp) ↔ customer-owned-model2.
+        var requiredProfile = parsedTenancyModel switch
         {
-            case Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1:
-                // Model 1 Shared: exactly one legal profile.
-                if (!string.Equals(profile, KnownProfiles.SpaarkeHostedModel1Trial, StringComparison.OrdinalIgnoreCase))
-                {
-                    error =
-                        $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model1}' MUST pair with " +
-                        $"'{KnownProfiles.SpaarkeHostedModel1Trial}' (received profile='{profile}'). Mirrors " +
-                        "intake.schema.json Model1 allOf invariant. Downstream handlers (H5 tier " +
-                        "derivation, H11 user provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
-                    return false;
-                }
-                error = string.Empty;
-                return true;
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => KnownProfiles.SpaarkeHostedModel2,
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => KnownProfiles.CustomerOwnedModel2,
+            _ => throw new InvalidOperationException(
+                $"Unhandled TenancyModel '{parsedTenancyModel}' in RunsEndpoints.ValidateTenancyProfilePair. " +
+                "Add a switch arm here when the enum grows (Task 224 / Item 3 territory)."),
+        };
 
-            case Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2:
-                // Model 2 Dedicated: two legal profiles.
-                var isSpaarkeHosted = string.Equals(profile, KnownProfiles.SpaarkeHostedModel2, StringComparison.OrdinalIgnoreCase);
-                var isCustomerOwned = string.Equals(profile, KnownProfiles.CustomerOwnedModel2, StringComparison.OrdinalIgnoreCase);
-                if (!isSpaarkeHosted && !isCustomerOwned)
-                {
-                    error =
-                        $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model2}' MUST pair with " +
-                        $"'{KnownProfiles.SpaarkeHostedModel2}' or '{KnownProfiles.CustomerOwnedModel2}' " +
-                        $"(received profile='{profile}'). Mirrors intake.schema.json Model2 allOf invariant.";
-                    return false;
-                }
-                error = string.Empty;
-                return true;
-
-            default:
-                throw new InvalidOperationException(
-                    $"Unhandled TenancyModel '{parsedTenancyModel}' in RunsEndpoints.ValidateTenancyProfilePair. " +
-                    "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).");
+        if (!string.Equals(profile, requiredProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            error =
+                $"Invalid tenancyModel × profile pair: '{parsedTenancyModel}' MUST pair with " +
+                $"'{requiredProfile}' (received profile='{profile}'). Mirrors the intake.schema.json " +
+                "tenancyModel × profile allOf invariant. Downstream handlers (H5 tier derivation, H11 user " +
+                "provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
+            return false;
         }
+
+        error = string.Empty;
+        return true;
     }
 
     /// <summary>
@@ -1310,7 +1299,7 @@ public static class RunsEndpoints
         [JsonPropertyName("tenancyModel")]
         public string TenancyModel { get; init; } = string.Empty;
 
-        /// <summary>Values: <c>spaarke-hosted-model2</c> | <c>customer-owned-model2</c> | <c>spaarke-hosted-model1-trial</c>.</summary>
+        /// <summary>Values: <c>spaarke-hosted-model2</c> (pairs with <c>Model1</c>) | <c>customer-owned-model2</c> (pairs with <c>Model2</c>).</summary>
         [JsonPropertyName("profile")]
         public string Profile { get; init; } = string.Empty;
 

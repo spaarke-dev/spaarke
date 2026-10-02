@@ -96,6 +96,36 @@ public sealed class ArmTemplateInspectorTests
         act.Should().Throw<JsonException>();
     }
 
+    /// <summary>
+    /// Task 225b: ARM rejects a deployment parameter the template does not declare. Every key
+    /// <see cref="ArmDeploymentRunner.BuildParametersPayload"/> can send (optional ones populated) must be a
+    /// parameter of the real compiled <c>customer.json</c> — the check that would have caught a runner still
+    /// sending a parameter the template dropped (e.g. the retired <c>requireSecretFreeIdentity</c>).
+    /// </summary>
+    [Fact]
+    public void RealCustomerTemplate_DeclaresEveryParameterTheRunnerSends()
+    {
+        using var template = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "infrastructure", "bicep", "customer.json")));
+        var declared = template.RootElement.GetProperty("parameters").EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
+
+        var request = new BicepDeployRequest(
+            CustomerId: "acme",
+            TenantId: "00000000-1111-2222-3333-444444444444",
+            SubscriptionId: "22222222-3333-4444-5555-666666666666",
+            TenancyModel: "Model2",
+            Template: new ResolvedArmTemplate("customer", "customer-arm.json", "{}", "v1"),
+            EnvironmentName: "prod",
+            Location: "westus2",
+            SignalREnabled: true,
+            OpenAiLocation: "westus3");
+        using var payload = JsonDocument.Parse(ArmDeploymentRunner.BuildParametersPayload(request).ToString());
+        var sent = payload.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+
+        sent.Should().NotBeEmpty();
+        sent.Should().OnlyContain(name => declared.Contains(name),
+            "every parameter the runner sends must be declared by customer.json, or ARM rejects the deployment");
+    }
+
     private static string RepoRoot()
     {
         // A worktree's .git is a FILE; a regular checkout's is a directory (parity with RunContextContractTests).

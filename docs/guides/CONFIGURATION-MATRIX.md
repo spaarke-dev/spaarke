@@ -359,7 +359,7 @@ Secrets stored in Azure Key Vault and referenced via `@Microsoft.KeyVault(Secret
 | `Email-WebhookSigningKey` | `EmailProcessing:WebhookSigningKey` | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 for Dataverse webhook signature |
 | `communication-webhook-secret` | `Communication:WebhookClientState` | Graph webhook validation secret (challenge-response) |
 | `communication-webhook-signing-key` | `Communication:WebhookSigningKey` | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 for Graph webhook signature |
-| `BingSearch-ApiKey` | `BingSearch:ApiKey` | Bing Search key |
+| `BingSearch-ApiKey` | `BingSearch:ApiKey` | Bing Search v7 key — **not provisioned on customer stamps** (owner D18, 2026-10-02: the v7 API was retired 2025-08-11) |
 
 ---
 

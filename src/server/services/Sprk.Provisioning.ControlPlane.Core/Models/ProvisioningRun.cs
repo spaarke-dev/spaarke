@@ -131,8 +131,9 @@ public sealed class ProvisioningRun
     public RunParameters Parameters { get; set; } = new RunParameters();
 
     /// <summary>
-    /// Environment profile used for the run (<c>spaarke-hosted-model2</c>,
-    /// <c>customer-owned-model2</c>, <c>spaarke-hosted-model1-trial</c>).
+    /// Environment profile used for the run: <c>spaarke-hosted-model2</c> (pairs with
+    /// tenancyModel <c>Model1</c>) or <c>customer-owned-model2</c> (pairs with <c>Model2</c>) —
+    /// the pairing POST /api/runs enforces (task 225b, D-12).
     /// </summary>
     [JsonPropertyName("profile")]
     public string Profile { get; set; } = default!;

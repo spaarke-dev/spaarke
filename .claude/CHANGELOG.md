@@ -7,6 +7,26 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-02 — provisioning: Model 1 on the dedicated code path; secret-free default (T225b)
+
+`customer-provisioning-orchestration-r1` T225b (owner decisions D-12, D18).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: Steps 0c / 1.0 / 1c / 1e / 1g / 3 / 4.0 describe the 1:1
+  pairing L2 now enforces — `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`;
+  `spaarke-hosted-model1-trial` is refused as an unknown profile. The Step 1e PowerShell checks the pair and runs
+  the retired-profile stop first and then hard-stops `Model1` until T228 (no per-customer subscription yet — ADR-027;
+  T228 removes the stop).
+- **`.claude/constraints/provisioning.md`** §KV credential lifecycle: secret-free is the H4 default; H4 omits
+  `BFF-API-ClientSecret` and `Dataverse-ClientSecret` on every new stamp (rule 2's hold covers the existing copy);
+  the run-context bullet no longer lists a platform vault among L2-owned values. New prerequisite `PRQ-E-14`
+  (registry `sprk_credentialmode` column — the H4 secret-free marker needs it).
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `from-platform-vault` retired with
+  `BingSearch-ApiKey` / `LlamaParse-ApiKey` (D18); `from-existing-kv` entries never reached on a new stamp.
+- The mechanism: H2b, H13's I2 probe and H12c use the stamp's own AI Search / OpenAI for both models (the shared
+  endpoints, the Cosmos tenant-filter template store and the `AzureOpenAI-Endpoint` seed entry are deleted);
+  customer.bicep's dead `requireSecretFreeIdentity` parameter chain is removed.
+
+---
 ###### 2026-10-02 — provisioning: Model 1 shared-tier Bicep retired (T225a, D-12)
 
 `customer-provisioning-orchestration-r1` T225a.

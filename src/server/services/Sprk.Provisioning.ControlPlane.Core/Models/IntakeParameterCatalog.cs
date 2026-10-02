@@ -129,7 +129,6 @@ public static class IntakeParameterCatalog
         new(EnvironmentName, "Customer stamp environment segment (dev | staging | prod). Absent → 'prod' stored at CreateRun. H2a, H2b, H4b."),
         new("location", "Primary Azure region for customer.bicep (H2a; default westus2)."),
         new("signalrEnabled", "Deploy SignalR (H2a; default false)."),
-        new("requireSecretFreeIdentity", "Secret-free BFF identity flag passed to customer.bicep (H2a)."),
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
         new("dataverseDisplayName", "Dataverse environment display name (H5)."),
         new("speContainerDisplayName", "SPE root container display name (H8)."),

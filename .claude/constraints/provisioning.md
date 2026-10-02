@@ -44,6 +44,10 @@ with `AADSTS7000215`; positive migration markers go in a provisioning-state fiel
 slot — auth-v4 §9.1). A `.WithClientSecret(...)` site on the BFF identity is a plain ADR-028 A4 violation — E-3
 is closed; there is no exception to cite. The FR-39 credential-type seam in H3/H4 stays in code (pluggability),
 but the secret path may only be selected for a prong-3 unmigrated environment — never for new provisioning.
+**Since task 225b (2026-10-02, G21) secret-free is the H4 default** (`KvSecretsPopulationOptions.RequireSecretFreeIdentity`
+= `true`, also set explicitly by the Worker Bicep) and H4 omits **both** `BFF-API-ClientSecret` and
+`Dataverse-ClientSecret` on every new stamp. Rule 2's hold protects the EXISTING live `Dataverse-ClientSecret`
+copy from deletion — it never required H4 to write a new one.
 
 **2. NEVER purge or delete the rollback copies before 2026-11-23** (Path A, time-boxed): do not purge the
 soft-deleted `BFF-API-ClientSecret` / `bff-api-client-secret` KV entries, and do not delete the still-live
@@ -118,7 +122,7 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 - `run.Parameters.NonSecret` holds **intake values only** — the closed set in `Models/IntakeParameterCatalog.cs`; `POST /api/runs` rejects any other key. **NEVER read a value another handler produces from `NonSecret`** — nothing writes it there.
 - An intake value a handler has rules for is validated at `POST /api/runs` with **the same rules** — shared code where the rule is non-trivial (T245c: `UserProvisioningIntake` is called by both H11 and the endpoint), and the handler's own rejection code where it has one (H14a / H14b; an API-owned code otherwise, e.g. the mailbox shape). There is no add-parameter endpoint, so a value the handler would refuse must be refused before the run guard / registry / Cosmos / enqueue — not after H0–H10 have built the stamp. The handler keeps its guard as defence in depth.
 - A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
-- A value L2 owns (its own principal, a platform vault, the SPE owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
+- A value L2 owns (its own principal, the SPE owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
 - Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
 - H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`.
 - **`run.Parameters.Secrets` has no writer.** No handler may write it; only H4 may read it, and only for the manifest entries pinned as gaps.

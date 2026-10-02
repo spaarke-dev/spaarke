@@ -15,20 +15,19 @@
 //     JsonDocument.Parse machinery runs unmodified against canned bytes.
 //   - Never Mock&lt;T&gt; for the collaborators: hand-rolled FakeRepository
 //     (parity with <see cref="H2bAiSearchIndexHandlerTests"/>'s FakeRepository),
-//     hand-rolled FakeStore (parity with
-//     <see cref="AiSearchTenantFilterTemplateProvisionerTests"/>'s FakeStore),
 //     hand-rolled FakeCanonicalIndexCatalog (parity with H2b's fake),
 //     hand-rolled FakeTokenCredential (parity with ArmSdkTestFakes).
 //
 // COVERAGE (per POML acceptance criteria):
 //   AC-1 replaces Placeholder: exercised implicitly (the probe class implements
 //        IInvariantProbe with Kind == I2AiSearchTenantFilter — asserted).
-//   AC-2 Fail outcome on real failing condition: cross-tenant leak / bad
-//        template / malformed template / missing template / HTTP 400 / HTTP 404
-//        / doc-missing-tenantId / doc-tenantId-wrong-type.
-//   AC-3 Pass outcome on real passing condition: Model 1 happy path with all-
-//        matching returned docs; Model 2 happy path with all-matching returned
-//        docs; empty-result Pass-eligible.
+//   AC-2 Fail outcome on real failing condition: cross-tenant leak / HTTP 400 /
+//        HTTP 404 / doc-missing-tenantId / doc-tenantId-wrong-type.
+//   AC-3 Pass outcome on real passing condition: happy path with all-matching
+//        returned docs for both tenancy models (task 225b — one path on the
+//        stamp's own endpoint); empty-result Pass-eligible.
+//   (The Model 1 template-artifact tests were deleted with the template store by
+//   task 225b.)
 //   AC-4 dotnet build / test green: covered by CI.
 // -----------------------------------------------------------------------------
 
@@ -55,7 +54,6 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     private const string RunId = "run-i2-probe-1";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string OtherTenantId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-    private const string SharedEndpoint = "https://spaarke-search-prod.search.windows.net";
     private const string DedicatedEndpoint = "https://acme-search.search.windows.net";
 
     // ------------------------------------------------------------------------
@@ -73,63 +71,44 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     // AC-3: Pass outcome on real passing condition
     // ------------------------------------------------------------------------
 
-    [Fact]
-    public async Task ProbeAsync_Model1_TemplateCurrent_EndpointReturnsMatchingDocs_ReturnsPassed()
+    [Theory]
+    [InlineData("Model1")]
+    [InlineData("Model2")]
+    public async Task ProbeAsync_EndpointFromRequest_MatchingDocs_ReturnsPassed(string tenancyModel)
     {
-        var run = NewRun(tenancyModel: "Model1");
+        // Task 225b (D-12): both tenancy models are dedicated stamps — the probe queries the
+        // stamp's own AI Search endpoint (H2a output) on every canonical index.
+        var run = NewRun(tenancyModel: tenancyModel);
         var repo = new FakeRepository(run);
-        var store = new FakeStore(NewTemplate(TenantId, SharedEndpoint));
-        var catalog = new FakeCanonicalIndexCatalog();
-        var handler = FakeHandler.SearchWithDocs(
-            expectedFilterFragment: $"tenantId eq '{TenantId}'",
-            docTenantIds: new[] { TenantId, TenantId, TenantId });
-
-        var probe = BuildProbe(repo, store, catalog, handler);
-
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
-        handler.RequestedUrls.Should().OnlyContain(u => u.Contains("/docs/search?", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task ProbeAsync_Model1_TemplateCurrent_EmptyResults_ReturnsPassed()
-    {
-        // Empty index (no data yet — brand-new customer) is Pass-eligible per
-        // the probe's honest can-vs-cannot-detect posture: the template shape
-        // is verified + the filter mechanic accepted (HTTP 200) + no foreign
-        // docs observed.
-        var run = NewRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run);
-        var store = new FakeStore(NewTemplate(TenantId, SharedEndpoint));
-        var catalog = new FakeCanonicalIndexCatalog();
-        var handler = FakeHandler.SearchEmpty();
-
-        var probe = BuildProbe(repo, store, catalog, handler);
-
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
-    }
-
-    [Fact]
-    public async Task ProbeAsync_Model2_EndpointFromRequest_ReturnsPassed()
-    {
-        var run = NewRun(tenancyModel: "Model2");
-        var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = FakeHandler.SearchWithDocs(
             expectedFilterFragment: $"tenantId eq '{TenantId}'",
             docTenantIds: new[] { TenantId });
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
-        // Model 2 hits ALL canonical indexes.
         handler.RequestedUrls.Should().HaveCount(catalog.CanonicalIndexNames.Length);
+        handler.RequestedUrls.Should().OnlyContain(u => u.StartsWith(DedicatedEndpoint, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ProbeAsync_EmptyResults_ReturnsPassed()
+    {
+        // Empty index (no data yet — brand-new customer) is Pass-eligible per the probe's honest
+        // can-vs-cannot-detect posture: the filter mechanic is accepted (HTTP 200) and no foreign
+        // docs are observed.
+        var run = NewRun(tenancyModel: "Model1");
+        var repo = new FakeRepository(run);
+        var handler = FakeHandler.SearchEmpty();
+
+        var probe = BuildProbe(repo, new FakeCanonicalIndexCatalog(), handler);
+
+        var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
+
+        outcome.Should().BeOfType<InvariantVerificationOutcome.Passed>();
     }
 
     [Fact]
@@ -141,11 +120,10 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         // and the pre-D-12 test that pinned the defaulting behaviour is retired.
         var run = NewRun(tenancyModel: string.Empty);
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = FakeHandler.SearchEmpty();
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -166,11 +144,10 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         // both fail here.
         var run = NewRun(tenancyModel: "model2dedicated"); // wrong case
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = FakeHandler.SearchEmpty();
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -189,7 +166,6 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         // Server returns a doc whose tenantId does NOT match — this is the
         // exact silent-fail I2 mandates catching. The probe must FAIL, not
@@ -198,7 +174,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
             expectedFilterFragment: null,
             docTenantIds: new[] { TenantId, OtherTenantId });
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -213,12 +189,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.OK, """{"value":[{"@search.score":1.0,"otherField":"x"}]}"""));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -232,93 +207,17 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.OK, """{"value":[{"tenantId":123}]}"""));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
             .Which.Diagnostic.Should().Contain("CATASTROPHIC")
             .And.Contain("not a JSON string");
-    }
-
-    // ------------------------------------------------------------------------
-    // AC-2: Fail outcome — Model 1 template-artifact defects.
-    // ------------------------------------------------------------------------
-
-    [Fact]
-    public async Task ProbeAsync_Model1_TemplateMissing_ReturnsFailed()
-    {
-        var run = NewRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
-        var catalog = new FakeCanonicalIndexCatalog();
-
-        var probe = BuildProbe(repo, store, catalog, FakeHandler.Unused());
-
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("MISSING");
-    }
-
-    [Fact]
-    public async Task ProbeAsync_Model1_TemplateWrongTenantId_ReturnsFailedSilentFailTrap()
-    {
-        var run = NewRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run);
-        var store = new FakeStore(NewTemplate(OtherTenantId, SharedEndpoint));
-        var catalog = new FakeCanonicalIndexCatalog();
-
-        var probe = BuildProbe(repo, store, catalog, FakeHandler.Unused());
-
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("mismatch")
-            .And.Contain("CATASTROPHIC");
-    }
-
-    [Fact]
-    public async Task ProbeAsync_Model1_TemplatePredicateMalformed_ReturnsFailed()
-    {
-        var run = NewRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run);
-        var badTemplate = NewTemplate(TenantId, SharedEndpoint);
-        // Corrupt one entry — a subtly-wrong predicate would silently bypass
-        // enforcement for that specific index.
-        badTemplate.Filters[0].FilterPredicate = "tenantId ne 'some-other'";
-        var store = new FakeStore(badTemplate);
-        var catalog = new FakeCanonicalIndexCatalog();
-
-        var probe = BuildProbe(repo, store, catalog, FakeHandler.Unused());
-
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("malformed");
-    }
-
-    [Fact]
-    public async Task ProbeAsync_Model1_TemplateEmptyFilters_ReturnsFailed()
-    {
-        var run = NewRun(tenancyModel: "Model1");
-        var repo = new FakeRepository(run);
-        var emptyTemplate = NewTemplate(TenantId, SharedEndpoint);
-        emptyTemplate.Filters.Clear();
-        var store = new FakeStore(emptyTemplate);
-        var catalog = new FakeCanonicalIndexCatalog();
-
-        var probe = BuildProbe(repo, store, catalog, FakeHandler.Unused());
-
-        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
-
-        outcome.Should().BeOfType<InvariantVerificationOutcome.Failed>()
-            .Which.Diagnostic.Should().Contain("ZERO");
     }
 
     // ------------------------------------------------------------------------
@@ -330,12 +229,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.BadRequest, """{"error":{"code":"InvalidRequestParameter","message":"Unknown field 'tenantId' in $filter"}}"""));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -349,12 +247,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.NotFound, """{"error":{"code":"NotFound","message":"index not found"}}"""));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -371,12 +268,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("") });
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -389,12 +285,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.InternalServerError, "boom"));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -407,11 +302,10 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ => throw new HttpRequestException("connection refused"));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -424,12 +318,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.OK, "{this-is-not-valid-json"));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -442,12 +335,11 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = new FakeAiSearchHttpMessageHandler(_ =>
             JsonResponse(HttpStatusCode.OK, """{"unexpected":"shape"}"""));
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: DedicatedEndpoint), CancellationToken.None);
 
@@ -463,8 +355,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     public async Task ProbeAsync_RunNotFoundInPartition_ReturnsInfraFault()
     {
         var repo = new FakeRepository(existing: null);
-        var store = new FakeStore(existing: null);
-        var probe = BuildProbe(repo, store, new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
+        var probe = BuildProbe(repo, new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
 
         var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
 
@@ -477,7 +368,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var probe = BuildProbe(repo, new FakeStore(existing: null), new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
+        var probe = BuildProbe(repo, new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
 
         var outcome = await probe.ProbeAsync(BuildRequest(tenantId: ""), CancellationToken.None);
 
@@ -485,17 +376,19 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
             .Which.Diagnostic.Should().Contain("TenantId is empty");
     }
 
-    [Fact]
-    public async Task ProbeAsync_Model2_MissingEndpoint_ReturnsInfraFault()
+    [Theory]
+    [InlineData("Model1")]
+    [InlineData("Model2")]
+    public async Task ProbeAsync_MissingEndpoint_ReturnsInfraFault(string tenancyModel)
     {
-        var run = NewRun(tenancyModel: "Model2");
+        var run = NewRun(tenancyModel: tenancyModel);
         var repo = new FakeRepository(run);
-        var probe = BuildProbe(repo, new FakeStore(existing: null), new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
+        var probe = BuildProbe(repo, new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
 
         var outcome = await probe.ProbeAsync(BuildRequest(aiSearchEndpoint: string.Empty), CancellationToken.None);
 
         outcome.Should().BeOfType<InvariantVerificationOutcome.InfraFault>()
-            .Which.Diagnostic.Should().Contain("Model 2 branch requires");
+            .Which.Diagnostic.Should().Contain("I2 probe requires request.AiSearchEndpoint");
     }
 
     [Fact]
@@ -508,7 +401,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         // TenancyModelParser.FormatExpectedValues output every other Task 223 site emits.
         var run = NewRun(tenancyModel: "SomethingElse");
         var repo = new FakeRepository(run);
-        var probe = BuildProbe(repo, new FakeStore(existing: null), new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
+        var probe = BuildProbe(repo, new FakeCanonicalIndexCatalog(), FakeHandler.Unused());
 
         var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
 
@@ -526,13 +419,12 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         var oddTenantId = "abc'def"; // Never a real tenant id, but the escape must not silently break.
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = FakeHandler.SearchWithDocs(
             expectedFilterFragment: "tenantId eq 'abc''def'",
             docTenantIds: new[] { oddTenantId });
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         var outcome = await probe.ProbeAsync(
             BuildRequest(aiSearchEndpoint: DedicatedEndpoint, tenantId: oddTenantId), CancellationToken.None);
@@ -550,11 +442,10 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
     {
         var run = NewRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run);
-        var store = new FakeStore(existing: null);
         var catalog = new FakeCanonicalIndexCatalog();
         var handler = FakeHandler.SearchEmpty();
 
-        var probe = BuildProbe(repo, store, catalog, handler);
+        var probe = BuildProbe(repo, catalog, handler);
 
         using var cts = new CancellationTokenSource();
         cts.Cancel();
@@ -570,12 +461,10 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
 
     private static AiSearchTenantFilterInvariantProbe BuildProbe(
         FakeRepository? repo = null,
-        FakeStore? store = null,
         FakeCanonicalIndexCatalog? catalog = null,
         FakeAiSearchHttpMessageHandler? handler = null)
     {
         repo ??= new FakeRepository(NewRun("Model2"));
-        store ??= new FakeStore(existing: null);
         catalog ??= new FakeCanonicalIndexCatalog();
         handler ??= FakeHandler.SearchEmpty();
 
@@ -586,7 +475,7 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         });
 
         return new AiSearchTenantFilterInvariantProbe(
-            repo, store, catalog,
+            repo, catalog,
             new FakeHttpClientFactory(handler),
             new FakeTokenCredential(),
             options,
@@ -621,23 +510,6 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
         return run;
     }
 
-    private static TenantFilterTemplateDocument NewTemplate(string tenantId, string endpoint)
-    {
-        var canonical = new FakeCanonicalIndexCatalog().CanonicalIndexNames;
-        var predicate = $"tenantId eq '{tenantId}'";
-        return new TenantFilterTemplateDocument
-        {
-            Id = CosmosTenantFilterTemplateStore.BuildDocumentId(CustomerId),
-            CustomerId = CustomerId,
-            TenantId = tenantId,
-            SearchEndpoint = endpoint,
-            Filters = canonical
-                .Select(name => new TenantIndexFilterEntry { IndexName = name, FilterPredicate = predicate })
-                .ToList(),
-            UpdatedOn = DateTimeOffset.UtcNow,
-        };
-    }
-
     private static HttpResponseMessage JsonResponse(HttpStatusCode status, string body)
         => new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
@@ -655,16 +527,6 @@ public sealed class AiSearchTenantFilterInvariantProbeTests
             => throw new NotImplementedException();
         public Task<ReplaceRunResult> ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken ct)
             => throw new NotImplementedException();
-    }
-
-    private sealed class FakeStore : ITenantFilterTemplateStore
-    {
-        private readonly TenantFilterTemplateDocument? _existing;
-        public FakeStore(TenantFilterTemplateDocument? existing) { _existing = existing; }
-        public Task<TenantFilterTemplateDocument?> TryReadAsync(string customerId, CancellationToken ct)
-            => Task.FromResult(_existing);
-        public Task WriteAsync(TenantFilterTemplateDocument document, CancellationToken ct)
-            => throw new NotSupportedException("probe never writes to the template store");
     }
 
     private sealed class FakeCanonicalIndexCatalog : ICanonicalIndexCatalog

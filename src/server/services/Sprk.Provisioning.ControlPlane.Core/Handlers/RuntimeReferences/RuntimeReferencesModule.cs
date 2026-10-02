@@ -5,8 +5,8 @@
 // (task 072 — wave Cp DAG-join point requiring H12a + H12b).
 //
 // SCOPE:
-//   - Bind RuntimeReferences:{SharedPlatformOpenAiEndpoint, DataverseRequestTimeout}
-//     options.
+//   - Bind RuntimeReferences:{DataverseRequestTimeout} options (task 225b removed
+//     SharedPlatformOpenAiEndpoint with H12c's retired Model 1 branch).
 //   - Register IModelDeploymentReferenceWriter as a typed HttpClient
 //     (DefaultAzureCredential token cache reused across invocations, parity
 //     with H10's Dataverse/Graph typed-HttpClient registrations).
@@ -31,9 +31,7 @@
 // call with AddOptions<T>().Bind().Validate().ValidateOnStart() — parity with
 // DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry (task 122)
 // — so a boot-time DataverseRequestTimeout misconfiguration fails loud instead
-// of only surfacing on H12c's first dispatch. See RuntimeReferencesOptions.Validate
-// doc comment for why SharedPlatformOpenAiEndpoint is NOT part of this
-// boot-time check. Program.cs's single AddH12cRuntimeReferencesHandler(...)
+// of only surfacing on H12c's first dispatch. Program.cs's single AddH12cRuntimeReferencesHandler(...)
 // call line is unchanged — the god-class-ratchet extension-method surface
 // this module exists for stays a one-line composition-root edit.
 // -----------------------------------------------------------------------------
