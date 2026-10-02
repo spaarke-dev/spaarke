@@ -11,7 +11,10 @@
  * CONTRACT EXTENDED 2026-10-01 (BFF task 133, C11). A creator-share failure no longer strands the project with a
  * memberless owner: the move is undone, or the record is left with the creator's share in place, and a project
  * owned by the secure team with no container recorded is RESUMED on the next call instead of refused. Six reason
- * codes were added, and the result now says whether the SAME caller can retry (`retryable`).
+ * codes were added, and the result now says whether the SAME caller can retry (`retryable`). Round b2 (2026-10-02)
+ * added two codes for a container ALREADY recorded on the project (kept when it is the project's own, refused when
+ * another record holds it, unreadable → retry), and reads `creatorState` so an unreadable creator is a retry, not an
+ * administrator's job.
  *
  * CONTRACT CHANGED 2026-08-25 (BFF task 021). The backend no longer creates a business unit per
  * project, no longer creates an External Access Account, and no longer supports umbrella BU
@@ -86,7 +89,9 @@ export interface IProvisionProjectResponse {
   additionalPrincipalsShared: number;
   /**
    * Task 133: true when this call FINISHED an earlier run that stopped after the owner move. The creator share then
-   * went to the record's `createdby` user. Optional because the server added it.
+   * went to the person who created the record — its `createdby` user, or, for a record the BFF created app-only (Office
+   * quick-create), the person the BFF recorded in `sprk_createdbyperson` (owner round 7 item 2). Optional because the
+   * server added it.
    */
   resumed?: boolean;
 }
@@ -112,9 +117,13 @@ export type ProvisioningFailureKind =
   /** The project carries a legacy per-project security BU; migrating it is a manual operation. */
   | 'legacy-provisioning'
   /**
-   * Refused before any change. Retryable only for `creator_unresolved` (the caller's identity could not be confirmed,
-   * which can be transient); an ownerless row (`record_owner_unreadable`) or a resume request naming colleagues from
-   * someone other than the creator (`resume_colleagues_not_permitted`) is refused again on the same call.
+   * Refused before any change. Retryable where a READ failed and the same call can succeed once it works:
+   * `creator_unresolved` (the caller's identity could not be confirmed), `container_ownership_unreadable` (whether the
+   * container already on the record is shared could not be checked — task 133 b2) and `resume_creator_unavailable` with
+   * `creatorState: unreadable` (the record's creator could not be looked up). Deterministic refusals are not retryable —
+   * an ownerless row (`record_owner_unreadable`), a resume request naming colleagues from someone other than the creator
+   * (`resume_colleagues_not_permitted`), and a container already recorded on another record
+   * (`container_shared_with_another_record`, an administrator decides which record it belongs to).
    */
   | 'not-started'
   /**
@@ -138,9 +147,10 @@ export type ProvisioningFailureKind =
   | 'interrupted'
   /**
    * Only an administrator can finish: the share AND the undo failed (the record may be owned by the memberless team
-   * with no share — its creator no longer passes the Write gate), or a resume found the record's creator unusable
-   * (absent, disabled, an application user, unreadable). For the latter an administrator re-enables the creator, or
-   * assigns the record to the person who should hold it, who then secures it (task 133 verifier round 2).
+   * with no share — its creator no longer passes the Write gate), or a resume found no usable person recorded as the
+   * record's creator (absent, disabled, an application user with no person recorded). For the latter an administrator
+   * re-enables the creator, or assigns the record to the person who should hold it, who then secures it (task 133
+   * verifier round 2). A creator that could not be READ is not this state: see 'not-started'.
    */
   | 'needs-administrator'
   /** Anything else — transport failure, unexpected 5xx, or an unrecognised or absent reason code. */
@@ -248,6 +258,23 @@ const REASON_STATES: Readonly<
       'Securing the project was not finished, because the request named people to share it with and only the person who created it can do that at this stage. Nothing about the project changed; people are added through Manage Access.',
     retryable: false,
   },
+  // Task 133 b2: the project already records a document container that another record also records. Keeping it would put
+  // a secure project's files where another record reaches them; replacing it would strand this project's files. Refused
+  // before any change; deterministic until an administrator decides which record the container belongs to.
+  'sdap.provision.container_shared_with_another_record': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Securing the project did not start, because the document container already linked to it is also linked to another record. Nothing about the project changed; an administrator needs to decide which record the container belongs to.',
+    retryable: false,
+  },
+  // Task 133 b2: whether the container already on the project is shared storage could not be checked (a read failed).
+  // Refused before any change; the server tells the same caller they may call again.
+  'sdap.provision.container_ownership_unreadable': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Securing the project did not start, because the document container already linked to it could not be checked. Nothing about the project changed.',
+    retryable: true,
+  },
   'sdap.provision.creator_share_failed': {
     failureKind: 'share-failed',
     errorMessage:
@@ -292,12 +319,27 @@ const REASON_STATES: Readonly<
       'Securing the project stopped partway, and you may not be able to open it. An administrator needs to finish securing it.',
     retryable: false,
   },
+  // The copy for this code follows the server's `creatorState` extension: the message here is for a creator that cannot
+  // be used (absent, disabled, an application user with no person recorded); classifyProvisioningFailure swaps in the
+  // transient state for `creatorState: unreadable`.
   'sdap.provision.resume_creator_unavailable': {
     failureKind: 'needs-administrator',
     errorMessage:
-      'Securing the project could not be finished, because the person who created it cannot be given access to it. An administrator needs to finish securing it.',
+      'Securing the project could not be finished, because no person who can be given access to it is recorded as its creator. An administrator needs to finish securing it.',
     retryable: false,
   },
+};
+
+/**
+ * `resume_creator_unavailable` with `creatorState: unreadable` (task 133 b2, verifier finding). The record's creator could
+ * not be LOOKED UP — a read failed — so nothing is known to be wrong with them: the server's detail and the setup guide
+ * (§7a) tell the same caller they may call again once the read works. Retryable, and the copy says only what happened.
+ */
+const RESUME_CREATOR_UNREADABLE = {
+  failureKind: 'not-started' as const,
+  errorMessage:
+    'Securing the project could not be finished yet, because the person who created it could not be looked up. Nothing about the project changed.',
+  retryable: true,
 };
 
 /**
@@ -313,6 +355,11 @@ const OWNER_UNVERIFIED_SHARE_CONFIRMED =
 export interface IProvisioningFailureExtensions {
   /** `owner_assignment_unverified` only: whether the creator's share was read back on the record. */
   creatorShareConfirmed?: boolean;
+  /**
+   * `resume_creator_unavailable` only (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
+   * `application-user` (deterministic: an administrator acts) or `unreadable` (a read failed: the same caller may retry).
+   */
+  creatorState?: string;
 }
 
 /**
@@ -341,6 +388,10 @@ export function classifyProvisioningFailure(
 
   if (reasonCode === 'sdap.provision.owner_assignment_unverified' && extensions?.creatorShareConfirmed === true) {
     return { ...REASON_STATES[reasonCode], errorMessage: OWNER_UNVERIFIED_SHARE_CONFIRMED };
+  }
+
+  if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'unreadable') {
+    return { ...RESUME_CREATOR_UNREADABLE };
   }
 
   if (reasonCode != null && Object.prototype.hasOwnProperty.call(REASON_STATES, reasonCode)) {
@@ -423,6 +474,9 @@ export async function provisionSecureProject(
         serverDetail = problem?.detail ?? problem?.title;
         if (typeof problem?.creatorShareConfirmed === 'boolean') {
           extensions.creatorShareConfirmed = problem.creatorShareConfirmed;
+        }
+        if (typeof problem?.creatorState === 'string') {
+          extensions.creatorState = problem.creatorState;
         }
       } catch {
         /* ignore JSON parse failure — classification falls through to 'error' */

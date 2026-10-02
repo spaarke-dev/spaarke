@@ -50,15 +50,17 @@ $tok = az account get-access-token --resource $EnvironmentUrl --query accessToke
 $H = @{ Authorization = "Bearer $tok"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; 'Content-Type' = 'application/json' }
 $Api = "$EnvironmentUrl/api/data/v9.2"
 # ProvisionProjectEndpoint.CreatorAccessRights, DERIVED from the source at run time (task 133 verifier round 1) rather
-# than hardcoded, because task 139 owns the value and may change Collaborate. If the constant changes SHAPE (it is no
-# longer "RecordShareLevels.CollaborateRights + ',ShareAccess'"), the script stops instead of replaying stale rights.
+# than hardcoded, because task 139 owns the value. Two shapes are recognised: since task 139 (merged 2026-10-02) the
+# constant IS "RecordShareLevels.CollaborateRights" (Share joined Collaborate); before it, it was
+# "RecordShareLevels.CollaborateRights + ',ShareAccess'". Any other shape stops the script instead of replaying stale
+# rights.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $levelsSrc = Get-Content (Join-Path $repoRoot 'src\server\api\Sprk.Bff.Api\Services\Access\RecordShareLevels.cs') -Raw
 $endpointSrc = Get-Content (Join-Path $repoRoot 'src\server\api\Sprk.Bff.Api\Api\ExternalAccess\ProvisionProjectEndpoint.cs') -Raw
 if ($levelsSrc -notmatch 'internal const string CollaborateRights = "([^"]+)";') { throw 'RecordShareLevels.CollaborateRights not found - update this script.' }
 $collaborate = $Matches[1]
-if ($endpointSrc -notmatch 'internal const string CreatorAccessRights = RecordShareLevels\.CollaborateRights \+ ",ShareAccess";') {
-  throw 'ProvisionProjectEndpoint.CreatorAccessRights changed shape (task 139?) - update this script before running.'
+if ($endpointSrc -notmatch 'internal const string CreatorAccessRights = RecordShareLevels\.CollaborateRights( \+ ",ShareAccess")?;') {
+  throw 'ProvisionProjectEndpoint.CreatorAccessRights changed shape - update this script before running.'
 }
 $CreatorRights = ((@($collaborate -split ',') + 'ShareAccess') | Select-Object -Unique) -join ','
 "CreatorAccessRights (from source) = $CreatorRights"
@@ -86,6 +88,11 @@ switch ($Step) {
     Show 'record' $RecordId
     $rpa = Invoke-RestMethod "$Api/systemusers($TestUserId)/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@t)?@t={'@odata.id':'sprk_projects($RecordId)'}" -Headers $H
     "RetrievePrincipalAccess(test user) = $($rpa.AccessRights)"
+    # Task 133 b2 (owner round 7 item 2): the BFF-stamped creator person, once Set-RecordCreatorPersonSchema.ps1 has run.
+    try {
+      $p = Invoke-RestMethod "$Api/sprk_projects($RecordId)?`$select=_sprk_createdbyperson_value" -Headers $H
+      "sprk_createdbyperson = $(S $p._sprk_createdbyperson_value)"
+    } catch { 'sprk_createdbyperson: not readable (has scripts/Set-RecordCreatorPersonSchema.ps1 -Apply run?)' }
   }
   'ShareFirstProof' {
     if (-not $Apply) { throw 'ShareFirstProof writes: pass -Apply.' }
@@ -107,6 +114,9 @@ switch ($Step) {
     if (-not $RecordId) { throw '-RecordId is required.' }
     if (-not $Apply) { Show 'would strand' $RecordId; 'Read-only: pass -Apply to strand it.'; break }
     Show 'before' $RecordId
+    # Clearing sprk_containerid below leaves the container provisioning created referenced by nothing (it is empty: the
+    # record was provisioned moments ago). Its id is printed so the operator deletes it after the gate.
+    "container being cleared (delete it after the gate): $((Owner $RecordId).sprk_containerid)"
     Assign $RecordId "/teams($teamId)"
     try { Revoke $RecordId $TestUserId } catch { "revoke: $($_.Exception.Message)" }
     Invoke-RestMethod "$Api/sprk_projects($RecordId)" -Method Patch -Headers $H -Body (@{ sprk_containerid = $null } | ConvertTo-Json)

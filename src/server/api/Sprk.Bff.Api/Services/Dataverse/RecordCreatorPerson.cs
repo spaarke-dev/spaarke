@@ -17,11 +17,13 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// This column is that person, persisted.</para>
 ///
 /// <para><b>Who writes it.</b> Only the BFF: every BFF create path of the three tables stamps it — the app-only paths
-/// in the create payload itself (the Office caller / the endpoint's caller), the user-OBO chat create
-/// (<c>dataverse.create_record</c>) by an app-only update right after the create, with the row's own
-/// <c>createdby</c> (the OBO caller). It is field-secured (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>): every
-/// user can READ it, only the BFF application user(s) can create or update it — so a client create cannot name
-/// someone else as its creator.</para>
+/// in the create payload itself (Office quick-create: the Office caller; <c>POST /api/v1/work-assignments</c>: the
+/// endpoint's caller, resolved by WhoAmI), and the user-OBO chat create (<c>dataverse.create_record</c>) by an app-only
+/// update right after the create, with the row's own <c>createdby</c> (the OBO caller). It is field-secured
+/// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>): every user can READ it (the reader profile sits on every
+/// business unit's default team), only the BFF application user(s) can create or update it — so a client create cannot
+/// name someone else as its creator. (Task 146, which moves the chat create to create-as-app per owner round 7 item 3,
+/// stamps it in that create's payload instead.)</para>
 ///
 /// <para><b>Who reads it.</b> <c>ProvisionProjectEndpoint</c>'s resume: <c>createdby</c> when that is a person,
 /// otherwise this column; it refuses when neither is a usable person. It is read in its OWN query, never in
@@ -33,7 +35,7 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// </remarks>
 public static class RecordCreatorPerson
 {
-    /// <summary>The lookup's logical name (also its navigation property name — set explicitly by the schema script).</summary>
+    /// <summary>The lookup's logical name. The SDK writes address it by this name; the schema script creates it.</summary>
     public const string Column = "sprk_createdbyperson";
 
     /// <summary>The Web API read form of the lookup.</summary>

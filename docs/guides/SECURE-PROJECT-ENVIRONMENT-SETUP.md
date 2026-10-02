@@ -515,13 +515,24 @@ Provisioning (`POST /api/v1/external-access/provision-project`) is the only thin
 team. The owner's rule (session 27, S5): **a secure record must always keep at least one person who can open it.** So
 the creator's share is issued BEFORE the owner move, proven after it, and if it cannot be proven the move is undone
 (read back). A record owned by the team with **no container recorded** is not refused — the next call **resumes** it:
-it shares to the record's `createdby` user (never to the caller instead), then creates and records the container. A
-record owned by the team **with** a container recorded is provisioned: 409, nothing written.
+it shares to the person who created the record — its `createdby` user when that is a usable person, otherwise the
+person the BFF recorded in `sprk_createdbyperson` (§7b; an Office quick-created record's `createdby` is the BFF app user)
+— never to the caller instead, then creates and records the container. A record owned by the team **with** a container
+recorded is provisioned: 409, nothing written.
+
+**A container already on a not-yet-secured record is never orphaned** (task 133 b2; live 2026-10-02 provisioning
+`65a3fab2` created a second container and left its own referenced by nothing). Before any write the recorded
+`sprk_containerid` is classified: a business unit's shared container, or one this BFF is configured to use for many
+records (`Communication:ArchiveContainerId`, `EmailProcessing:DefaultContainerId`, `Email:DefaultContainerId`,
+`SharePointEmbedded:StagingContainerId`), is **replaced** by the record's own — its owner keeps pointing at it; one that
+another project, matter or work assignment also records is **refused**; anything else is the record's **own** and is
+**kept** — no container is created and the value is not rewritten.
 
 A resume never widens the record's access list on the caller's say-so: named colleagues (`sharePrincipalIds`) are
 accepted only when the caller IS the record's creator — anyone else is refused before any write and adds people through
-Manage Access. And when `createdby` cannot be used (absent, disabled, an application user, unreadable), the resume is
-refused — no share, no container — whoever else may hold a share; the row below names the recoveries that work.
+Manage Access. And when neither `createdby` nor `sprk_createdbyperson` names a usable person (absent, disabled, an
+application user — or one of them cannot be read), the resume is refused — no share, no container — whoever else may hold
+a share; the row below names the recoveries that work.
 
 `sprk_issecure` is never written by provisioning. A secure-requested record that failed stays flagged, so uploads to it
 are refused until it has its own container (fail closed).
@@ -535,17 +546,45 @@ are refused until it has its own container (fail closed).
 | `creator_unresolved` | Unchanged — refused before any write | **The same caller** calls again (the wizard's "Try securing again") |
 | `record_owner_unreadable` | Unchanged — refused before any write. The row was read with no owning user or team, which is deterministic for that row | **An administrator** checks the record's owner in Dataverse; calling again before that repeats the refusal (not offered as a retry) |
 | `resume_colleagues_not_permitted` | Unchanged — refused before any write. A resume request named colleagues (`sharePrincipalIds`) and its caller is not the record's creator | The caller calls again **without** `sharePrincipalIds` (the resume then completes, sharing only to the creator), and adds people through Manage Access |
+| `container_shared_with_another_record` (HTTP 409; `otherRecordType` — the other record's id is in the `[PROVISION]` log line under the response's `traceId`, not in the response) | Unchanged — refused before any write. The container already recorded on the record is also recorded on another project, matter or work assignment, and is not shared storage | **An administrator** finds the other record (the log line, or a query on `sprk_containerid`), decides which record the container belongs to and clears `sprk_containerid` on the other one; then provisioning is called again (it keeps the container for this record). Calling again before that repeats the refusal |
+| `container_ownership_unreadable` (HTTP 500) | Unchanged — refused before any write. Whether the container already on the record is shared storage could not be read | **The same caller** calls again once Dataverse is reachable (the wizard's "Try securing again") |
 | `creator_share_failed` | The move was undone or never made: owner read back as before the call. Shares: `sharesRestored: true` — the creator's shares are as before the call (read back). `sharesRestored: false` with `creatorShareRemoved: false` — a share this call issued could not be confirmed removed (check Manage Access). `sharesRestored: false` with `creatorShareRemoved: true` — the shares could not be read before the call, so the creator's explicit share was removed entirely, **including one they held before the call** (an administrator re-adds it through Manage Access if it is still needed). On a resume: ownership unchanged by the call | **The same caller** calls again — they still pass the Write check |
 | `owner_assignment_failed`, `owner_assignment_not_applied` | Owner read back unchanged; nothing moved | Administrator checks the `Secure Record Owner` role (§5) and §7 item 6; calling again repeats the same refusal |
 | `owner_assignment_unverified` | Unknown whether the team owns it. A share to the creator was issued: `creatorShareConfirmed: true` — read back on the record; `false` — issued but not confirmed by a read | **The same caller** calls again: a record the team now owns is resumed, one it does not is provisioned from the start. If `creatorShareConfirmed` was false and the creator cannot open the record, **an administrator** calls provisioning again: it resumes and ensures the share for `createdby` (the wizard's message names the administrator whenever the share is not confirmed; the creator's own retry is then refused at the Write gate) |
 | `container_creation_failed` | Owned by the team, shared to its creator, no container | **The same caller** calls again: it resumes |
 | `container_not_recorded` | Owned by the team, shared to its creator, no container recorded; the error names a container that holds nothing | **The same caller** calls again: it resumes and records a NEW container. Delete the named empty container |
-| `creator_share_failed_resumable` | 🔴 Owned by the memberless team **without a confirmed creator share** — possibly nobody can open it (logged CRITICAL `[PROVISION]`). The creator no longer passes the Write check | **An administrator** (who holds Write through their role) calls provisioning again for the record: it resumes and shares to the record's `createdby` user |
-| `resume_creator_unavailable` (`creatorState`: `absent` / `disabled` / `application-user` — HTTP 409; `unreadable` — HTTP 500) | Unchanged — refused before any write: owned by the team, no container. The record's `createdby` cannot be shared to, and it is never shared to the caller or anyone else instead — a share another person already holds does not change that | `unreadable` (a read failed): **the same caller** calls again once Dataverse is reachable. `disabled`: **an administrator** re-enables that user, if they should keep the record, and calls again — the resume shares it to them. Any state: **an administrator** assigns the record (Dataverse Assign) to the person who should hold it — it leaves the owner team and is back in the state of a secure record never provisioned (flagged, no container, uploads refused, readable within that person's business unit as before provisioning) — and **that person** calls provisioning: it runs from the start and shares it to them. Sharing through Manage Access and calling again does NOT complete it (owner decision F8's interim default). App-created rows (Office quick-create: `createdby` is the BFF app user) always land here — the persisted human creator for them is an open owner decision (task 133 note) |
+| `creator_share_failed_resumable` | 🔴 Owned by the memberless team **without a confirmed creator share** — possibly nobody can open it (logged CRITICAL `[PROVISION]`). `ownershipVerified: false` when the move back could not be read back at all. The creator no longer passes the Write check | **An administrator** (who holds Write through their role) calls provisioning again for the record: it resumes and shares to the person who created it (`createdby`, or `sprk_createdbyperson`) |
+| `resume_creator_unavailable` (`creatorState`: `absent` / `disabled` / `application-user` — HTTP 409; `unreadable` — HTTP 500; `creatorColumn`: `createdby` or `sprk_createdbyperson` — which column the state describes; `createdByState` / `creatorPersonState` for the operator) | Unchanged — refused before any write: owned by the team, no container. Neither `createdby` nor `sprk_createdbyperson` names a usable person, and it is never shared to the caller or anyone else instead — a share another person already holds does not change that | `unreadable` (a read failed — `createdby`, the recorded person, or the column itself in an environment §7b has not reached): **the same caller** calls again once the read works (the wizard offers "Try securing again"). `disabled`: **an administrator** re-enables that user, if they should keep the record, and calls again — the resume shares it to them. Any state: **an administrator** assigns the record (Dataverse Assign) to the person who should hold it — it leaves the owner team and is back in the state of a secure record never provisioned (flagged, no container, uploads refused, readable within that person's business unit as before provisioning) — and **that person** calls provisioning: it runs from the start and shares it to them. Sharing through Manage Access and calling again does NOT complete it (owner decision F8). Rows that land here now: records created by an application BEFORE `sprk_createdbyperson` existed, or outside the BFF, with no person recorded |
 
 **Calling provisioning as an administrator** (the resume path): `POST {bff}/api/v1/external-access/provision-project`
 with body `{ "recordType": "project" | "matter" | "workassignment", "recordId": "<guid>" }` and a user token for the BFF
 API. The caller must hold Write on the record (the delegation filter); a System Administrator does through their role.
+
+---
+
+## 7b. The record's creator: `sprk_createdbyperson` (task 133, owner round 7 item 2)
+
+`createdby` names the identity that SENT a create. The BFF creates matters and projects (Office quick-create) and work
+assignments (`POST /api/v1/work-assignments`) **app-only**, so on those rows `createdby` is the BFF application user and
+`createdonbehalfby` is empty. The BFF therefore records the PERSON on every create path of the three tables in
+`sprk_createdbyperson` (lookup → `systemuser`), and the resume above shares to it when `createdby` is not a usable person.
+The column is **field-secured: only the BFF writes it** (writer profile = the BFF application user(s); every user reads it
+through the reader profile on each business unit's default team). Full spec:
+`src/solutions/SpaarkeCore/entities/sprk_project/created-by-person-schema.md`.
+
+⚠️ **Apply the schema BEFORE deploying a BFF that carries task 133** — that BFF writes the column on every Office
+quick-create and work-assignment create, and Dataverse refuses a create naming a column it does not have:
+
+```powershell
+.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
+```
+
+A business unit created later needs `-Apply` re-run (its default team joins the reader profile).
 
 ---
 

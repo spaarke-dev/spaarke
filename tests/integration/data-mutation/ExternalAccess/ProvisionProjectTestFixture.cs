@@ -173,6 +173,39 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>When false, a systemuser read by id throws (task 133: an unreadable createdby).</summary>
     public bool SystemUserByIdReadSucceeds { get; set; } = true;
 
+    /// <summary>A read of THIS systemuser by id throws; others answer (task 133 b2: an unreadable createdby only).</summary>
+    public Guid? SystemUserReadFailsFor { get; set; }
+
+    /// <summary>
+    /// Whether the environment carries <c>sprk_createdbyperson</c> (task 133 b2, owner round 7 item 2). When false, a
+    /// projection naming its read form 400s, as Dataverse answers before <c>Set-RecordCreatorPersonSchema.ps1</c> runs.
+    /// </summary>
+    public bool CreatorPersonColumnExists { get; set; } = true;
+
+    /// <summary>Business units' shared containers (<c>businessunit.sprk_containerid</c>), by business unit id (task 133 b2).</summary>
+    public Dictionary<Guid, string> BusinessUnitContainers { get; } = new();
+
+    /// <summary>When true, every query that looks a container up by <c>sprk_containerid</c> throws (task 133 b2).</summary>
+    public bool ContainerOwnershipReadFails { get; set; }
+
+    /// <summary>
+    /// A RevokeAccess for this principal is accepted but NOT applied — the share stays (task 133 b2: a restore that
+    /// writes but reads back wrong). Not recorded in <see cref="Revokes"/>, which lists shares actually removed.
+    /// </summary>
+    public Guid? RevokeNotAppliedFor { get; set; }
+
+    /// <summary>
+    /// After an <c>ownerid</c> PATCH binding to this principal, the NEXT owner read-back throws (task 133 b2: a
+    /// compensating move whose outcome cannot be verified). Unlike <see cref="OwnerReadBackFails"/>, the forward move's
+    /// read-back still works.
+    /// </summary>
+    public Guid? FailOwnerReadBackAfterBindTo { get; set; }
+
+    private bool _failNextOwnerReadBack;
+
+    /// <summary>A container this host is configured to use for many records (<c>Communication:ArchiveContainerId</c>).</summary>
+    public const string ConfiguredArchiveContainerId = "b!configured-communication-archive";
+
     /// <summary>The container type the host is configured with; <see cref="Reset"/> restores it.</summary>
     public const string ConfiguredContainerTypeId = "11111111-2222-3333-4444-555555555555";
 
@@ -275,7 +308,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private sealed record SeededRecord(
         string EntitySet, Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
-        Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null, Guid? CreatedBy = null);
+        Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null, Guid? CreatedBy = null, Guid? CreatedByPerson = null);
 
     /// <summary>
     /// Seeds a project row. Every Dataverse row has an owner and a creator, so a row seeded without an owning team is
@@ -290,26 +323,33 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         bool isSecure = true,
         Guid? owningBusinessUnitId = null,
         Guid? owningUserId = null,
-        Guid? createdBy = null)
+        Guid? createdBy = null,
+        Guid? createdByPerson = null)
         => Seed(ProjectEntitySet, projectId, owningTeamId, containerId, legacySecurityBuId, isSecure, owningBusinessUnitId,
-            owningUserId, createdBy);
+            owningUserId, createdBy, createdByPerson);
 
-    /// <summary>Seeds a matter row (task 144).</summary>
-    public void SeedMatter(Guid matterId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true)
-        => Seed(MatterEntitySet, matterId, owningTeamId, containerId, null, isSecure, null, null, null);
+    /// <summary>Seeds a matter row (task 144; creator columns task 133 b2).</summary>
+    public void SeedMatter(
+        Guid matterId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true,
+        Guid? createdBy = null, Guid? createdByPerson = null)
+        => Seed(MatterEntitySet, matterId, owningTeamId, containerId, null, isSecure, null, null, createdBy, createdByPerson);
 
-    /// <summary>Seeds a work-assignment row (task 144).</summary>
-    public void SeedWorkAssignment(Guid workAssignmentId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true)
-        => Seed(WorkAssignmentEntitySet, workAssignmentId, owningTeamId, containerId, null, isSecure, null, null, null);
+    /// <summary>Seeds a work-assignment row (task 144; creator columns task 133 b2).</summary>
+    public void SeedWorkAssignment(
+        Guid workAssignmentId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true,
+        Guid? createdBy = null, Guid? createdByPerson = null)
+        => Seed(WorkAssignmentEntitySet, workAssignmentId, owningTeamId, containerId, null, isSecure, null, null,
+            createdBy, createdByPerson);
 
     private void Seed(
         string entitySet, Guid id, Guid? owningTeamId, string? containerId, Guid? legacySecurityBuId, bool isSecure,
-        Guid? owningBusinessUnitId, Guid? owningUserId, Guid? createdBy)
+        Guid? owningBusinessUnitId, Guid? owningUserId, Guid? createdBy, Guid? createdByPerson)
         => _records[id] = new SeededRecord(
             entitySet, id, owningTeamId, containerId, legacySecurityBuId, isSecure,
             OwningUserId: owningTeamId is null ? owningUserId ?? CallerSystemUserId : null,
             OwningBusinessUnitId: owningBusinessUnitId ?? BusinessUnitOf(owningTeamId),
-            CreatedBy: createdBy ?? CallerSystemUserId);
+            CreatedBy: createdBy ?? CallerSystemUserId,
+            CreatedByPerson: createdByPerson);
 
     /// <summary>The BU a team owner places a record in — what Dataverse derives <c>owningbusinessunit</c> from.</summary>
     private static Guid? BusinessUnitOf(Guid? owningTeamId) =>
@@ -370,6 +410,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SystemUsers.Clear();
         SystemUsers[CallerSystemUserId] = (false, false);
         SystemUserByIdReadSucceeds = true;
+        SystemUserReadFailsFor = null;
+        CreatorPersonColumnExists = true;
+        BusinessUnitContainers.Clear();
+        ContainerOwnershipReadFails = false;
+        RevokeNotAppliedFor = null;
+        FailOwnerReadBackAfterBindTo = null;
+        _failNextOwnerReadBack = false;
         if (_containerTypeChanged)
             SetContainerTypeId(ConfiguredContainerTypeId);
         _containerTypeChanged = false;
@@ -394,7 +441,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 // names are honoured.
                 ["SecureRecord:BusinessUnitName"] = SecureBuName,
                 ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
-                ["SharePointEmbedded:ContainerTypeId"] = ConfiguredContainerTypeId
+                ["SharePointEmbedded:ContainerTypeId"] = ConfiguredContainerTypeId,
+                // Task 133 b2: a container this host uses for many records — a record carrying it is not its own.
+                ["Communication:ArchiveContainerId"] = ConfiguredArchiveContainerId
             });
         });
 
@@ -482,6 +531,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             && ParseIdFromBind(refusedBind) == refusedOwner)
         {
             throw new InvalidOperationException("Dataverse 403: simulated refusal of the ownership assignment.");
+        }
+
+        if (FailOwnerReadBackAfterBindTo is { } unverifiableOwner
+            && flat.TryGetValue("ownerid@odata.bind", out var unverifiableBind)
+            && unverifiableBind is not null
+            && ParseIdFromBind(unverifiableBind) == unverifiableOwner)
+        {
+            _failNextOwnerReadBack = true;
         }
 
         if (flat.ContainsKey("sprk_containerid") && !ContainerStampSucceeds)
@@ -592,11 +649,18 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     };
 
     /// <summary>
+    /// The read form of <c>sprk_createdbyperson</c> — on all three roots once <c>scripts/Set-RecordCreatorPersonSchema.ps1</c>
+    /// has run (task 133 b2, owner round 7 item 2; NOT yet live in dev — the schema is a pending manual gate). Kept out of
+    /// the live sets above, which are verified metadata, and admitted only while <see cref="CreatorPersonColumnExists"/>.
+    /// </summary>
+    internal const string CreatorPersonReadColumn = "_sprk_createdbyperson_value";
+
+    /// <summary>
     /// Dataverse's own behaviour: a projection naming a column the table lacks is a 400. THE GUARD that task 016 built
     /// for the closure cascade and this fixture once lacked — a fake that ignores the projection goes green on code
     /// that 400s in production.
     /// </summary>
-    private static void RejectUnknownColumns(string entitySet, string? select)
+    private void RejectUnknownColumns(string entitySet, string? select)
     {
         var live = entitySet switch
         {
@@ -610,6 +674,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
         foreach (var column in select.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
+            if (CreatorPersonColumnExists && string.Equals(column, CreatorPersonReadColumn, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             if (!live.Contains(column))
             {
                 throw new InvalidOperationException(
@@ -647,6 +714,28 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             case ProjectEntitySet:
             case MatterEntitySet:
             case WorkAssignmentEntitySet:
+                // Task 133 b2: "which roots record this container?" — honours the container literal and the record the
+                // query excludes, so a classification that forgot either would go red.
+                if (filter is not null && ExtractQuoted(filter, "sprk_containerid eq ") is { } holderContainer)
+                {
+                    if (ContainerOwnershipReadFails)
+                        throw new InvalidOperationException("Dataverse 503: simulated failure reading container holders.");
+
+                    var excluded = ExtractGuidAfter(filter, " ne ");
+                    var holderIdColumn = entitySet switch
+                    {
+                        ProjectEntitySet => "sprk_projectid",
+                        MatterEntitySet => "sprk_matterid",
+                        _ => "sprk_workassignmentid"
+                    };
+                    payload.AddRange(_records.Values
+                        .Where(r => r.EntitySet == entitySet
+                                    && string.Equals(r.ContainerId, holderContainer, StringComparison.Ordinal)
+                                    && r.Id != excluded)
+                        .Select(r => new Dictionary<string, object?> { [holderIdColumn] = r.Id }));
+                    break;
+                }
+
                 var seeded = _records.Values.FirstOrDefault(
                     r => r.EntitySet == entitySet
                          && filter is not null
@@ -656,6 +745,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     && !(select ?? string.Empty).Contains("sprk_issecure", StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException("Dataverse 503: simulated failure reading the owner back.");
+                }
+
+                if (seeded is not null && _failNextOwnerReadBack
+                    && (select ?? string.Empty).Contains("_owningteam_value", StringComparison.OrdinalIgnoreCase)
+                    && !(select ?? string.Empty).Contains("sprk_issecure", StringComparison.OrdinalIgnoreCase))
+                {
+                    _failNextOwnerReadBack = false;
+                    throw new InvalidOperationException("Dataverse 503: simulated failure reading the owner back after the undo.");
                 }
 
                 if (seeded is not null)
@@ -692,8 +789,24 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     if (seeded.CreatedBy is { } createdBy && createdBy != Guid.Empty)
                         row["_createdby_value"] = createdBy;
 
+                    if (seeded.CreatedByPerson is { } createdByPerson
+                        && (select ?? string.Empty).Contains(CreatorPersonReadColumn, StringComparison.OrdinalIgnoreCase))
+                    {
+                        row[CreatorPersonReadColumn] = createdByPerson;
+                    }
+
                     payload.Add(row);
                 }
+                break;
+
+            case "businessunits" when filter is not null && ExtractQuoted(filter, "sprk_containerid eq ") is { } buContainer:
+                // Task 133 b2: which business unit's shared container is this?
+                if (ContainerOwnershipReadFails)
+                    throw new InvalidOperationException("Dataverse 503: simulated failure reading business-unit containers.");
+
+                payload.AddRange(BusinessUnitContainers
+                    .Where(b => string.Equals(b.Value, buContainer, StringComparison.Ordinal))
+                    .Select(b => new Dictionary<string, object?> { ["businessunitid"] = b.Key }));
                 break;
 
             case "businessunits":
@@ -769,6 +882,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 if (!SystemUserByIdReadSucceeds)
                     throw new InvalidOperationException("Dataverse 503: simulated systemuser read failure.");
 
+                if (SystemUserReadFailsFor is { } unreadableUser
+                    && filter.Contains(unreadableUser.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException($"Dataverse 503: simulated read failure for systemuser {unreadableUser}.");
+                }
+
                 foreach (var (userId, (isDisabled, isApplicationUser)) in SystemUsers)
                 {
                     if (!filter.Contains(userId.ToString(), StringComparison.OrdinalIgnoreCase)) continue;
@@ -803,6 +922,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             payload = payload.Take(limit).ToList();
 
         return JsonSerializer.Serialize(payload);
+    }
+
+    /// <summary>The GUID following <paramref name="prefix"/> in an OData filter (e.g. <c>" ne "</c>), or null.</summary>
+    private static Guid? ExtractGuidAfter(string filter, string prefix)
+    {
+        var at = filter.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return null;
+        var start = at + prefix.Length;
+        var length = Math.Min(36, filter.Length - start);
+        return Guid.TryParse(filter.AsSpan(start, length), out var id) ? id : null;
     }
 
     /// <summary>The single-quoted literal following <paramref name="prefix"/> in an OData filter, or null.</summary>
@@ -934,6 +1063,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // Checked BEFORE recording: `Revokes` means "shares that were actually removed".
             if (_fixture.FailRevokeForPrincipal == principal.Id)
                 throw new InvalidOperationException($"Seeded revoke failure for {principal.Id}.");
+
+            // Task 133 b2: accepted, not applied — the share stays, and only a read-back can tell.
+            if (_fixture.RevokeNotAppliedFor == principal.Id)
+                return Task.CompletedTask;
 
             _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence()));
             _fixture._shares.TryRemove((recordId, principal), out _);

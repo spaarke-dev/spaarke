@@ -44,8 +44,11 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// application user(s) may write that column, so after a successful run-as-user create of one of those tables this
 /// handler stamps it APP-ONLY with the row's own <c>createdby</c> — the calling user, as Dataverse recorded them. That
 /// write sets one column to a value the user-scoped create already established; it never creates, never reads a record
-/// the user could not, and a failure of it is logged, not surfaced (the row's <c>createdby</c> is that same person).
-/// An item that names the column is refused before any Dataverse call: a caller never chooses who created a record.
+/// the user could not, and a failure of it is logged, not surfaced (the row's <c>createdby</c> is that same person, and
+/// a resume reads <c>createdby</c> first). An item that names the column is refused before any Dataverse call: a caller
+/// never chooses who created a record. Authority for the app-only write in this otherwise user-OBO handler: owner round
+/// 7 items 2 and 3 (2026-10-02 — the column is BFF-written only; these handlers' "User-OBO ONLY" rule is superseded,
+/// §6.5 path B). Task 146 moves the create itself to the app and then stamps the column in that payload instead.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, column COUNT, outcome,

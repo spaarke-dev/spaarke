@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -44,7 +45,8 @@ internal sealed record SecureRecordRoot(
     /// </summary>
     /// <remarks>
     /// Task 133 added <c>_owninguser_value</c> (with <c>_owningteam_value</c>, the owner a failed provisioning moves the
-    /// record back to) and <c>_createdby_value</c> (the person a resumed provisioning shares to).
+    /// record back to) and <c>_createdby_value</c> (the person a resumed provisioning shares to when it is a usable person;
+    /// otherwise <see cref="CreatorPersonSelect"/>'s column).
     /// </remarks>
     public string ProvisioningSelect =>
         $"{IdColumn},{NameColumn},sprk_issecure,sprk_containerid," +
@@ -55,26 +57,7 @@ internal sealed record SecureRecordRoot(
     /// <see cref="ProvisioningSelect"/>: the column is created by <c>scripts/Set-RecordCreatorPersonSchema.ps1</c>, and a
     /// Step-1 select naming it would 400 every provisioning in an environment where that script has not run yet.
     /// </summary>
-    public string CreatorPersonSelect => $"{IdColumn},{Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.ValueColumn}";
-
-    /// <summary>
-    /// The 1:N relationships of this table whose <c>Assign</c> cascades to rows that HAVE an owner — the rows an owner
-    /// move re-owns as a side effect (task 133). Live metadata 2026-10-02 (spaarkedev1): project and matter cascade
-    /// Assign to <c>team</c>, <c>sharepointdocumentlocation</c> and <c>sharepointdocument</c>; work assignment to
-    /// nothing. Only <c>sharepointdocumentlocation</c> is listed: <c>team</c> is business-unit-owned (an Assign cannot
-    /// re-own it), and <c>sharepointdocument</c> rows are not stored in Dataverse — they are read from SharePoint through a
-    /// document location, so they have no owner of their own to put back.
-    /// </summary>
-    public IReadOnlyList<AssignCascadeChild> AssignCascadeChildren => Type switch
-    {
-        ExternalGrantRootType.WorkAssignment => Array.Empty<AssignCascadeChild>(),
-        _ => SharePointDocumentLocations
-    };
-
-    private static readonly AssignCascadeChild[] SharePointDocumentLocations =
-    {
-        new("sharepointdocumentlocation", "sharepointdocumentlocations", "sharepointdocumentlocationid", "_regardingobjectid_value")
-    };
+    public string CreatorPersonSelect => $"{IdColumn},{RecordCreatorPerson.ValueColumn}";
 
     /// <summary>The SPE container display name for a record of this type.</summary>
     public string ContainerDisplayName(string recordName) => $"Secure {DisplayLabel} — {recordName}";
@@ -88,7 +71,10 @@ internal sealed record SecureRecordRoot(
     public static readonly SecureRecordRoot WorkAssignment =
         new(ExternalGrantRootType.WorkAssignment, "sprk_name", "Work Assignment");
 
-    /// <summary>The three roots, in a fixed order (task 133: a container recorded on one is checked against all).</summary>
+    /// <summary>
+    /// The three roots, in a fixed order (task 133: a container already recorded on one is checked against all three
+    /// before provisioning keeps it).
+    /// </summary>
     public static readonly IReadOnlyList<SecureRecordRoot> All = new[] { Project, Matter, WorkAssignment };
 
     /// <summary>The descriptor for a root type. Exhaustive; an unknown type throws rather than guessing.</summary>
@@ -119,8 +105,3 @@ internal sealed record SecureRecordRoot(
             RecordId: recordId));
 }
 
-/// <summary>
-/// One table an owner move of a secure root re-owns through an <c>Assign</c> cascade (task 133): its logical name, entity
-/// set, primary key, and the read form of the lookup that points at the root.
-/// </summary>
-internal sealed record AssignCascadeChild(string LogicalName, string EntitySet, string IdColumn, string ParentValueColumn);

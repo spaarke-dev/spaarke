@@ -379,3 +379,220 @@ DelegationRule*, SecureNamedOwnerTeam*) 153/153; Spaarke.UI.Components jest Crea
   path for those rows; the owner's explicit acceptance of the (e) replay method; `sharetopreviousowneronassign` False.
 - **Items 13 / 19 — MANUAL LIVE GATE (a)–(f)**: pending — read-only run; needs task 144's cutover and a BFF deploy (§9).
 - **Item 18 — publish size**: the main session measures by instruction. CVE: no package changed in round 2.
+
+---
+
+## 13. Round b2 (2026-10-02, branch `task/uac-r2-133-b2`) — owner round 7 item 2, the orphaned-container defect, verifier round 3
+
+Base: `task/uac-r2-133-b1` (the WIP commit `b38756ba6`, cut off by a usage limit, "UNVERIFIED, do not merge") with
+`work/unified-access-control-r2` merged in (origin/master `93634db58` + batch 3: tasks 138, 139, 141, 152, 155 and the
+Office save fix). **baseSha `43bcd3abe`** (HEAD right after that merge).
+
+**Merge.** One conflict, `Services/Access/RecordShareLevels.cs`: both sides only ADDED members (task 139: `CanRead`,
+`WouldRemoveRights`; task 133: `MaskForRightsCsv`, `RightsCsvForMask`) — both kept. The doc of task 133's
+`AllShareRights` table said "the three rights no level carries (Create, Share, Assign)"; since task 139 Share IS in the
+levels, so it now says "the two (Create, Assign)" and uses the `Share` constant. **Semantic fallout of task 139**, found by
+running the resolved file's tests: Collaborate is now EXACTLY the creator rights (mask 262167), so
+`Provisioning_WhenCompensatedWithoutAPreCallRead_SaysThePreExistingShareWasRemovedToo`, which seeded a pre-existing
+Collaborate share as "a share with other rights", no longer reached compensation (the share was already exact). Its seed
+is now View Only — the contract is unchanged (reason in the test's remarks). The live-gate script derived
+`CreatorAccessRights` only from the pre-139 shape (`CollaborateRights + ",ShareAccess"`) and would have refused to run;
+it now accepts both shapes.
+
+**What b1 left, judged.** Kept: `RecordCreatorPerson` (one holder of the column's name and write shapes), the Office,
+work-assignment and chat-create stamps, the AI refusal of an item naming the column, the resume reading
+`sprk_createdbyperson` in its own query, the container-classification skeleton, and the `creator_unresolved` answer for a
+resume naming colleagues whose caller cannot be identified. **Removed: the Assign-cascade child-owner snapshot/restore**
+(`AssignCascadeChildren`, `SnapshotCascadeChildOwnersAsync`, `RestoreCascadeChildOwnersAsync`, the `childOwnersRestored`
+extension). b1 had implemented option (a) of an escalation the owner has NOT answered (§13.6); its methods did not even
+exist (the commit did not compile). Fixed: the resume's person rule (below), the classification (configured shared
+containers; an exhaustive switch), the docs b1 left claiming a navigation-property name the script never set.
+
+### 13.1 Owner round 7 item 2 — `sprk_createdbyperson`
+
+| Piece | What |
+|---|---|
+| Column | `sprk_createdbyperson` (schema `sprk_CreatedByPerson`), lookup → `systemuser`, on `sprk_project`, `sprk_matter`, `sprk_workassignment`; relationship `sprk_systemuser_<table>_createdbyperson`, no Assign/Share/Unshare/Reparent/Merge cascade, Delete RemoveLink |
+| Lock | Field-secured. "Spaarke BFF-Managed Field Writers" (read/create/update) = the BFF application user(s), explicitly; "Spaarke BFF-Managed Field Readers" (read) = every business unit's default team. Any other writer profile = `FAIL` in `-Verify`. Named for the class of column: task 150 adds `sprk_issecure` to the same two profiles |
+| Schema | `scripts/Set-RecordCreatorPersonSchema.ps1` — dry run by default, `-Apply`, `-Verify` (exit 1 names each gap); idempotent; publishes; adds everything to SpaarkeCore; reports (never writes) how many app-created rows have no person. **Not run** (no live writes). Doc: `src/solutions/SpaarkeCore/entities/sprk_project/created-by-person-schema.md`; guide `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7b; `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §6.5.2 |
+| Writers (every BFF create path of the three tables — grep: `new Entity("sprk_…")` and every `CreateAsync`) | `RecordCreationService` matter + project: the Office caller, in the app-only payload, set last and protected from field mapping. `POST /api/v1/work-assignments`: the caller by WhoAmI (OBO; never the body), in the payload; an unresolvable caller is refused **403 `sdap.workassignment.creator_unresolved` before the create**. `dataverse.create_record` (user-OBO): an app-only update right after the create with the row's OWN `createdby`; non-fatal. An AI item naming the column (any casing, read form, bind) is refused pre-suspend and on execute |
+| Reader | The resume (below) — in its own query, never the Step 1 select, so a BFF ahead of the schema still provisions forward |
+
+**The resume's person** (owner: "shares to createdby when it is a human, else to this column; still refuses when neither
+is a usable human"): `createdby` when it is a usable person (enabled, not an application user) → else the column's person
+when usable → else `resume_creator_unavailable` (409; nothing written; never the caller — F8). An **unreadable**
+`createdby` stops there (500, `creatorColumn: createdby`) rather than falling through to the column — it may well be the
+usable person the rule names first. A column that cannot be read (including an environment the schema has not reached)
+is 500 `unreadable`, `creatorColumn: sprk_createdbyperson`. Extensions: `creatorState` (the deciding state),
+`creatorColumn`, `createdByState`, `creatorPersonState`.
+
+⚠️ **Deploy order (stated in the script, both guides and the schema doc): schema BEFORE the BFF.** A BFF carrying this
+round writes the column on every Office quick-create and work-assignment create; Dataverse refuses a create naming a
+column it lacks. Peers deploy master to dev — so the schema must be applied to dev **before task 133 merges to master**.
+
+### 13.2 The orphaned container (live 2026-10-02, task 144 note §13.4)
+
+Provisioning `65a3fab2`, which already recorded its OWN container, created a second one and overwrote
+`sprk_containerid`; `b!HBRbo…` is now referenced by no record. Now, before any write, a recorded value on a record not
+owned by the team is classified:
+
+| Recorded container is… | Outcome |
+|---|---|
+| a business unit's (`businessunit.sprk_containerid`) — checked FIRST, because many records share it legitimately | replaced by the record's own; the business unit keeps it |
+| configured for many records (`Communication:ArchiveContainerId`, `EmailProcessing:DefaultContainerId`, `Email:DefaultContainerId`, `SharePointEmbedded:StagingContainerId`) | replaced; the configuration keeps it |
+| also recorded on another project / matter / work assignment | **refused 409 `sdap.provision.container_shared_with_another_record`** (`otherRecordType`; the other id goes to the log only), zero writes |
+| unreadable (any read failed) | **refused 500 `sdap.provision.container_ownership_unreadable`**, zero writes; the same caller may retry |
+| anything else — the record's own | **KEPT**: owner move + creator share as usual, no container created, `sprk_containerid` never rewritten; the next call is the ordinary 409 |
+
+Residuals, stated: a kept container is not checked against the SPE container type or for existence in SPE (the request
+named the BU / other-root checks); `b!HBRbo…` itself stays orphaned (its deletion is an operator decision — it held
+nothing). The live gate's `StrandForResume` step clears a just-provisioned record's container by hand; it now prints that
+container's id so the operator deletes it.
+
+### 13.3 Verifier round 3 (findings on `task/uac-r2-133-r1-r2`) — each item
+
+| # | Finding | Closed by |
+|---|---|---|
+| S19 | An unverifiable COMPENSATION reported as reverted survived (fixture could not produce it) | Fixture `FailOwnerReadBackAfterBindTo` (fails only the read-back after a bind to that principal). Test `Provisioning_WhenTheCompensatingMoveCannotBeReadBack_IsTheAdministratorOnlyState`: `creator_share_failed_resumable`, `ownershipRestored: false`, `ownershipVerified: false`, CRITICAL log, no "nothing"/"retry". Seed S19 now BITES |
+| S10 | The unverified-move + no-share branch (code and CRITICAL) untested | Test `Provisioning_WhenTheMoveIsUnverifiedAndNoShareExistsOrCanBeIssued_IsTheAdministratorOnlyState` (existing switches). Seeds S10 (code) and S10b (CRITICAL→Error) BITE. Its detail no longer says "it resumes" unconditionally: if the move did not land, the creator calls again |
+| S22b | A restore that writes but reads back wrong never exercised | Fixture `RevokeNotAppliedFor` (accepted, not applied). Test `Provisioning_WhenTheShareRestoreReadsBackWrong_SaysTheSharesAreNotRestored` (`sharesRestored: false`). Seed BITES |
+| client | `resume_creator_unavailable` + `creatorState: unreadable` shown as administrator-only | `provisionSecureProject` reads `creatorState`; `unreadable` → `not-started`, `retryable: true`, copy "could not be looked up … Nothing about the project changed"; other states stay `needs-administrator`. Jest: the five states pinned, and the wizard component renders "Try securing again" for it |
+| cascade | Assign cascade under COMPENSATION | **NOT CLOSED — owner escalation, §13.6** |
+| (ii) | F8 follow-up: persisted human creator | **Closed by owner round 7 item 2** (§13.1) |
+| (iii) | Owner acceptance of the (e) replay method | Open owner item (live-gate method), unchanged |
+| (iv) | Publish size | Main session |
+| minor | Resume naming colleagues + unresolvable caller told "not the record's creator" | Already answered `creator_unresolved` in b1; now pinned by `Resume_NamingColleagues_WhenTheCallerCannotBeIdentified_SaysSoRatherThanNotTheCreator` |
+
+### 13.4 Tests
+
+New classes: `ProvisionRecordedContainerTests` (9), `ProvisionResumeCreatorPersonTests` (14),
+`CreatorPerson/RecordCreatorPersonStampTests` (7), `CreatorPerson/RecordCreatorPersonSchemaAgreementTests` (6 — the script
+and `RecordCreatorPerson` agree on name, schema name, target, tables and field security; the parser is itself seeded).
+Added to existing: `SecureProjectShareTests` +3 (S19, S10, S22b), `DataverseCreateRecordHandlerTests` +10 (stamp on the
+three roots from the row's own `createdby`, no app-only write for other tables, stamp failure non-fatal ×2, the column
+refused ×4). Client: `provisioningService.test.ts` +7 (five `creatorState` cases; the two new codes in the emitted-code table, now
+25 codes); `CreateProjectWizard.provisioningRetry.test.tsx` +3. Package jest for the two wizard folders: 84 → 94.
+Rewritten setup (never deleted), one line each: `…WizardCascadedContainerId_StillProvisions` now records the cascaded
+value on a business unit (it IS the user's business-unit container; without that it reads as the record's own and is
+kept); `…CompensatedWithoutAPreCallRead…` seeds View Only (task 139 made Collaborate exact). `P2LoopInjectionEvalSuiteTests`
+passes a Strict app-only seam to the handler's new constructor (an `sprk_event` create stamps nothing).
+
+**Perturbation sweep (round b2)** — seed → build → run the affected classes → restore the original bytes + touch
+(`Environment.TickCount64 < 0` where a constant would be unreachable code under warnings-as-errors):
+
+| # | Seeded violation | Result |
+|---|---|---|
+| K1 | business unit's shared container not recognised | BITES (2) |
+| K2 | a container another root records treated as the record's own | BITES (3) |
+| K3 | an unreadable classification treated as "its own" | BITES (1) |
+| K4 | the kept container ignored (a new one created) | BITES (4) |
+| K5 | configured shared containers not recognised | BITES (1) |
+| K6 | the record itself not excluded from the other-roots check | BITES (6) |
+| K7 | the other record's id returned to the caller | BITES (3) |
+| P1 | `sprk_createdbyperson` never consulted | BITES (10) |
+| P2 | the column wins over a usable `createdby` | BITES (7) |
+| P3 | an unreadable `createdby` falls through to the column | BITES (1) |
+| P4 | a disabled person accepted | BITES (5) |
+| P5 | an unreadable column read as "nobody recorded" | BITES (1) |
+| S19 | an unverifiable compensation reported as reverted (`== Moved` → `!= NotMoved`) | BITES (1) |
+| S10 | unverified move + no share given the retryable code | BITES (1) |
+| S10b | that branch not logged CRITICAL | BITES (1) |
+| S22b | a restore that reads back wrong reported as restored | BITES (1) |
+| W1 | work-assignment create not stamped | BITES (1) |
+| W2 | work-assignment WhoAmI failure treated as someone | BITES (1) |
+| O1 | Office matter create not stamped | BITES (2) |
+| O1b | Office project create not stamped | BITES (2) |
+| O2 | column removed from the matter mapping protection ONLY | **SURVIVES — by design**: the stamp is also set after field mapping, so either guard alone holds |
+| O2b | protection removed AND the stamp moved before field mapping | BITES (1) |
+| H1 | chat create of a secure root not stamped | BITES (4) |
+| H2 | chat stamp names the wrong person | BITES (3) |
+| H3 | pre-suspend refusal of an item naming the column removed | BITES (4) |
+| H4 | execute-path refusal removed | BITES (4) |
+| H5 | a failed stamp fails the user's create | BITES (1) |
+| C1 | client: `creatorState: unreadable` mapped to the administrator state | BITES (2) |
+| C2 | client: `creatorState` not read from the problem body | BITES (1) |
+| C3 | client: `container_ownership_unreadable` not retryable | BITES (2) |
+| C4 | client: `container_shared_with_another_record` offered as a retry | BITES (2) |
+
+**30/31 bite; the one survivor (O2) is a deliberately redundant guard, and removing both halves (O2b) bites.** The schema
+agreement test seeds its own parser (four drifts: field security off, a table dropped, wrong target, wrong column name).
+
+**Runs (round b2)**: full BFF unit suite **14,309 passed / 0 failed / 54 skipped (14,363)**; NetArchTest **345/345**;
+affected classes (ProvisionProject*, SecureProjectShare, ProvisionRecordedContainer, ProvisionResumeCreatorPerson,
+SecureNamedOwnerTeam*, CreatorPerson/*, DataverseCreateRecordHandler, RecordShareRightsMask, DelegationRule*,
+InternalUserShare, P2LoopInjection) **350/350** after the final whitespace pass; the Office/AI neighbours (RecordCreation*,
+DataverseToolNameFreeze, BusinessSliceDeterminism, OfficeQuickCreate*, OfficeRecordOwnership, InlineNotification) green in
+the 444-test affected run. Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard **94/94 (8 suites)**;
+`tsc` build clean; prettier + eslint clean on the changed TS. `dotnet build` 0 warnings; `dotnet format whitespace
+--verify-no-changes` clean on every changed C# file (one pre-existing flag in `P2LoopInjectionEvalSuiteTests.cs:1204`, not
+this round's). No package changed (no CVE delta). Publish size: not measured (main session).
+
+### 13.5 Placement and component justification (CLAUDE.md §10 / §11)
+
+**Placement**: all server code stays in existing types (`ProvisionProjectEndpoint`, `RecordCreationService`,
+`WorkAssignmentEndpoints`, `DataverseCreateRecordHandler`) plus one static holder; no new endpoint, service, interface,
+option, job or package; **no new DI registration** (the work-assignment handler now asks for `CallerRecordAccessProbe`,
+and the chat handler for `IGenericEntityService` — both registered unconditionally already, so no asymmetric
+registration, §10 F.1).
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| Column `sprk_createdbyperson` (+ relationship) on 3 tables — owner-mandated (round 7 item 2, option a) | `createdby` (the app user on app-only creates); `createdonbehalfby` (empty, live 2026-10-01); `sprk_assignedtointernal` (a CONTACT lookup, user-editable, means "for", task 152) | No existing column records the person who asked for an app-only create and cannot be edited by a user | A stranded secure record created by Office or `POST /work-assignments` can only be refused at resume — the S5 risk the owner closed |
+| FLS profiles "Spaarke BFF-Managed Field Readers/Writers" | "Spaarke Identity Link Readers/Writers" (task 141), same membership | Not reused: those are named and described for the identity binding; putting an unrelated column in them makes an administrator's view of "who can write identity links" wrong. The new pair is generic — task 150 puts `sprk_issecure` in it, so one pair serves the class | Without FLS any user with Write could name someone else as a record's creator, and the resume would share the record to them |
+| `RecordCreatorPerson` (static class) | none for this column | — | One column name, two write shapes and the AI refusal duplicated across four writers and a reader, free to drift |
+| Reason codes `container_shared_with_another_record`, `container_ownership_unreadable` | the `sdap.provision.*` set | Extends it; each names a state with a different recovery (administrator vs same caller) | Orphaning (the live defect) or an untruthful refusal |
+| Reason code `sdap.workassignment.creator_unresolved` | the endpoint had no 403 | New refusal on an existing endpoint | A work assignment created with nobody recorded |
+| `SharedContainerConfigKeys` (internal constant list, not an option) | the four existing config keys | Reads existing configuration | A record carrying a configured shared container would be "kept" as its own — secure files into shared storage |
+| Fixture switches (`CreatorPersonColumnExists`, `BusinessUnitContainers`, `ContainerOwnershipReadFails`, `RevokeNotAppliedFor`, `FailOwnerReadBackAfterBindTo`, `SystemUserReadFailsFor`) | the fixture's existing switches | Extends the fixture | Seeds S19 / S22b / K* / P3 could not be made to bite |
+
+### 13.6 🔔 STOP — Assign cascade under COMPENSATION (still unanswered)
+
+Owner round 4 item 3 accepted the Assign cascade (team, sharepointdocumentlocation, sharepointdocument) for task 144's
+migration and forward assignment. Rounds 5–7 and the #1081 peer report do not mention compensation. The compensating move
+is the same Assign in reverse, so a child whose own owner differed from the root's before the forward move ends with the
+root's PRE-CALL owner afterwards. Per the binding rule ("an escalation trigger NOT answered is a first-class stop"), this
+round did NOT pick an option; b1's half-built option (a) was removed. Options (POML trigger): **(a)** snapshot each
+re-owned child's owner before the forward move and restore it after compensation; **(b)** no compensation for cascading
+roots (project, matter) — resume only; **(c)** coordinate with task 148, which owns child ownership at provisioning.
+Recommendation: (c) then (a). Exposure today: 0 such rows in dev; work assignments have no Assign cascade.
+
+### 13.7 Pending manual gates (main session; nothing here was written live)
+
+1. **Schema (owner round 7 item 2 approves it as part of this gate), BEFORE merging/deploying a BFF carrying this round**:
+   `.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
+   (dry run) → same with `-Apply` → same with `-Verify` (exit 0).
+2. Live gate (a)–(f) as §9 (needs a BFF deploy carrying task 133; (e) still needs the owner's acceptance of replay).
+3. (g) creator person: as a non-admin test user, quick-create a project from the Office add-in → `task-133-live-gate.ps1 -Step Inspect -TestUserId <user> -RecordId <id>` shows `sprk_createdbyperson` = that user; mark it secure, `-Step StrandForResume -Apply`, call provisioning as an administrator → 200, `resumed: true`, `sharedToCreatorSystemUserId` = the test user; `-Step Inspect` → their RetrievePrincipalAccess.
+4. (h) own container kept: provision a secure record that already records a container no business unit / other record
+   holds → 200 with `speContainerId` = that container; read back: `sprk_containerid` unchanged, no new container.
+5. The orphan from 2026-10-02 (`b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm`, empty, referenced
+   by no record): deletion is an owner/operator decision.
+
+### 13.8 Handoffs to sibling tasks
+
+- **Task 146** (G5 for the AI create handlers): when `dataverse.create_record` creates AS THE APP, stamp
+  `sprk_createdbyperson` in that create's payload with the OBO caller and drop this round's follow-up update; keep the
+  refusal of an item naming the column. Expect a merge conflict in `DataverseCreateRecordHandler` (constructor + execute).
+- **Task 150** (lock `sprk_issecure`): add it to "Spaarke BFF-Managed Field Readers/Writers" (same script pattern).
+- **Task 143** (No Access): the resume now shares to `sprk_createdbyperson` too — the No Access check before that share
+  covers whichever person `ResolveResumeCreatorAsync` returns.
+
+### 13.9 Quality gates (round b2)
+
+**code-review** (all severities):
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| `ProvisionProjectEndpoint.cs` grows to ~2,200 lines | Warning (size) | Accepted per COMPONENT-COMPLEXITY (as §9.5): one reason to change. The container classification (`ClassifyRecordedContainerAsync` + its two types) and the resume's person rule are the next natural seams if it grows again |
+| The work-assignment endpoint now refuses (403) when WhoAmI cannot resolve the caller — a new failure mode on an existing route | Warning | Intended (fail closed; same posture as Office quick-create's `owner_unresolved`). The route has no client caller in `src/` today (grep) |
+| The chat handler gains an app-only write in an otherwise user-OBO class | Warning | Authorised by owner round 7 items 2 + 3 (§6.5 path B); one column, the row's own `createdby`, non-fatal; cited in the class remarks. Task 146 replaces it |
+| A kept container is not checked against the SPE container type or for existence | Suggestion | Residual, stated (§13.2); the request named the BU / other-root checks |
+| The other record's id was returned to the caller | Fixed | Log only (the TopologyRefusal precedent); seed K7 bites |
+| AI-smell scan: no new interface, no catch-log-rethrow, no null-check on a non-nullable, exhaustive switch with a fail-closed default | — | Clean |
+
+**adr-check**: ADR-001 (no new endpoint), ADR-002 (no plugin — the lock is field-level security, the stamp server-side
+in every BFF writer, WP-1/WP-3), ADR-003 (every new branch fails closed with a stable code; unreadable ≠ usable / own /
+shared), ADR-008 (delegation filter unchanged), ADR-010 (no new interface or registration), ADR-019 (ProblemDetails +
+`reasonCode`), ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; the schema-agreement source
+guard follows `ContactIdentitySchemaAgreementTests`): **compliant, 0 violations**. The §6.5 path-B citation for the chat
+handler's app-only write is owner round 7 item 3.

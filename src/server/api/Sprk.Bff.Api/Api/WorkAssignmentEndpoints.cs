@@ -61,8 +61,10 @@ public static class WorkAssignmentEndpoints
     /// body) and stamped on <c>sprk_createdbyperson</c>. A caller who cannot be resolved is refused before the create:
     /// a work assignment can be made secure, and secure provisioning's resume shares to this person — an app-created
     /// row with nobody recorded could only be refused there.</para>
+    /// <para>Internal (not private) so <c>RecordCreatorPersonStampTests</c> can drive the handler with its seams
+    /// substituted.</para>
     /// </remarks>
-    private static async Task<IResult> CreateWorkAssignmentAsync(
+    internal static async Task<IResult> CreateWorkAssignmentAsync(
         [FromBody] CreateWorkAssignmentRequest request,
         IGenericEntityService entityService,
         NotificationService notificationService,

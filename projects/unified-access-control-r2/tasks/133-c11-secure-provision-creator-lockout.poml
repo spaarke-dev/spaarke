@@ -352,6 +352,65 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       acceptance of the (e) replay method. (13/19) Manual live gate (a)-(f): pending 144 cutover + BFF deploy.
       (18) Publish size: main session.
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-b2" round="b2 (owner round 7 item 2; live orphan defect; verifier round 3)">
+      COMPLETED-WITH-ESCALATION (unchanged): owner round 7 item 2 implemented, the live orphaned-container defect closed,
+      every verifier-3 code/test item closed. Still open: the Assign-cascade-under-COMPENSATION owner decision (STOP),
+      the live gate (schema apply first), the (e) replay acceptance, publish size. Full record:
+      notes/task-133-provision-creator-lockout.md section 13.
+
+      BASE. task/uac-r2-133-b1 (WIP b38756ba6, unverified, did not compile) + work/unified-access-control-r2 merged
+      (baseSha 43bcd3abe). Conflict RecordShareLevels.cs: both sides added members, both kept. Task 139 made Collaborate
+      exactly the creator rights: one test seed (View Only now) and the live-gate script's CreatorAccessRights derivation
+      updated. b1's Assign-cascade child-owner snapshot/restore REMOVED (an unanswered escalation, see below).
+
+      (1) OWNER ROUND 7 ITEM 2 (option a). NEW column sprk_createdbyperson (lookup systemuser) on sprk_project, sprk_matter,
+          sprk_workassignment; FIELD-SECURED (writers = BFF application user(s); readers = every BU default team).
+          scripts/Set-RecordCreatorPersonSchema.ps1 (dry run / -Apply / -Verify; NOT run - no live writes) + schema doc
+          src/solutions/SpaarkeCore/entities/sprk_project/created-by-person-schema.md + guide 7b + customer deployment
+          guide 6.5.2. Stamped on EVERY BFF create path: Office quick-create matter/project (the Office caller, app-only
+          payload, set last, protected from field mapping); POST /api/v1/work-assignments (the caller by WhoAmI; an
+          unresolvable caller is refused 403 sdap.workassignment.creator_unresolved before the create);
+          dataverse.create_record (an app-only update with the row's own createdby, non-fatal). An AI item naming the
+          column is refused. RESUME: createdby when a usable person, else the column's person when usable, else
+          resume_creator_unavailable (never the caller - F8); an unreadable createdby stops there (500); an unreadable
+          column is 500 naming it. DEPLOY ORDER: schema BEFORE a BFF carrying this round (creates fail otherwise).
+      (2) ORPHANED CONTAINER (live 2026-10-02, 65a3fab2). Before any write a container already recorded on a record not
+          owned by the team is classified: a business unit's or a configured shared container is replaced; one another
+          root also records is refused 409 sdap.provision.container_shared_with_another_record; an unreadable check is
+          refused 500 sdap.provision.container_ownership_unreadable; otherwise it is the record's own and is KEPT (no
+          container created, sprk_containerid never rewritten). Both outcomes tested for all three roots.
+      (3) VERIFIER 3. S19 (unverifiable compensation), S10 (unverified move + no share) and S22b (restore reads back
+          wrong) each have a test and their seeds bite; client reads creatorState (unreadable = retryable, transient
+          copy; the wizard renders "Try securing again" for it); the resume-colleague refusal with an unidentifiable
+          caller is pinned as creator_unresolved.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11). No new endpoint, service, interface, option, job, package or DI
+      registration (the two handlers' new parameters are already registered unconditionally). New: the owner-mandated
+      column + relationship on three tables (existing createdby = the app user, createdonbehalfby empty live,
+      sprk_assignedtointernal is an editable contact "for" column - none records the person; without it an app-created
+      stranded secure record can only be refused); FLS profiles "Spaarke BFF-Managed Field Readers/Writers" (task 141's
+      identity-link pair has the same members but is named and described for the identity binding; this pair is generic
+      and task 150 reuses it for sprk_issecure; without FLS any Write holder could name another person as creator and
+      the resume would share to them); RecordCreatorPerson static holder (one name, five call sites); reason codes
+      container_shared_with_another_record, container_ownership_unreadable (distinct recoveries), and
+      sdap.workassignment.creator_unresolved; SharedContainerConfigKeys (reads four existing config keys). Publish size:
+      not measured (main session). No package changed.
+
+      TESTS. Full BFF unit suite 14,309 passed / 0 failed / 54 skipped (14,363); NetArchTest 345/345;
+      affected classes 350/350; Spaarke.UI.Components jest (CreateProjectWizard + SummarizeFilesWizard) 94/94, tsc
+      clean. Perturbation sweep 30/31 bite; the survivor (O2, mapping protection alone) is a deliberately redundant guard
+      and O2b (both halves removed) bites. Tests whose setup changed (never deleted): the cascaded-container test (its
+      value now recorded on a business unit) and the no-pre-call-read compensation test (View Only seed: task 139 made
+      Collaborate exact).
+
+      NOT CLOSED. (1) STOP - Assign cascade under COMPENSATION: owner round 4 item 3 accepted the cascade for task 144's
+      migration and forward assignment; rounds 5-7 do not cover compensation's reverse assign. Options (a) snapshot and
+      restore each re-owned child / (b) no compensation for project and matter / (c) coordinate with task 148;
+      recommendation (c) then (a). No option implemented. (2) PENDING MANUAL GATES: schema apply in dev BEFORE this
+      round reaches master (peers deploy master); live gate (a)-(f) after a deploy; (g) Office-created record resumes to
+      its recorded person; (h) a record's own container kept. (3) Owner acceptance of the (e) replay method.
+      (4) Publish size (main session).
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>

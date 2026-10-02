@@ -78,11 +78,18 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     ///
     /// <para>A guard against double-provisioning had become a guard against provisioning. The root
     /// error was choosing a marker without checking who else writes the field.</para>
+    ///
+    /// <para><b>Setup made explicit by task 133 b2.</b> The cascaded value IS the creating user's business unit's
+    /// container, so the fixture now records it on that business unit. Since b2 provisioning classifies a recorded
+    /// container before replacing it — a business unit's shared container is replaced, the record's OWN is kept (live
+    /// 2026-10-02, 65a3fab2) — so without the business unit holding it, this value would read as the record's own. The
+    /// contract pinned here is unchanged: the shared cascade value is replaced by the record's own container.</para>
     /// </remarks>
     [Fact]
     public async Task ProvisionProject_WhenTheProjectCarriesAWizardCascadedContainerId_StillProvisions()
     {
         var projectId = Guid.NewGuid();
+        _fixture.BusinessUnitContainers[Guid.NewGuid()] = "b!cascaded-from-users-bu";
         _fixture.SeedProject(projectId, owningTeamId: null, containerId: "b!cascaded-from-users-bu");
         using var client = _fixture.CreateEntitledClient();
 

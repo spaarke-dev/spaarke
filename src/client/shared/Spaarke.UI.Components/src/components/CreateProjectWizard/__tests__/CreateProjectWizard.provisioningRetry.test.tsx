@@ -13,15 +13,19 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SecureProvisioningOutcome } from '../SecureProvisioningOutcome';
-import { classifyProvisioningFailure, type IProvisionProjectResult } from '../provisioningService';
+import {
+  classifyProvisioningFailure,
+  type IProvisionProjectResult,
+  type IProvisioningFailureExtensions,
+} from '../provisioningService';
 
 const BFF = 'https://bff.example.test';
 const PROJECT_ID = '11111111-1111-1111-1111-111111111111';
 
-const failure = (reasonCode: string): IProvisionProjectResult => ({
+const failure = (reasonCode: string, extensions?: IProvisioningFailureExtensions): IProvisionProjectResult => ({
   success: false,
   reasonCode,
-  ...classifyProvisioningFailure(reasonCode),
+  ...classifyProvisioningFailure(reasonCode, extensions),
 });
 
 const okResponse = {
@@ -59,15 +63,19 @@ describe('SecureProvisioningOutcome — the wizard provisioning-failure state', 
     'sdap.provision.container_not_recorded',
     'sdap.provision.owner_assignment_unverified',
     'sdap.provision.creator_unresolved',
+    // Task 133 b2: a read failed before any change — the same caller may call again.
+    'sdap.provision.container_ownership_unreadable',
+    'sdap.provision.resume_creator_unavailable#unreadable',
   ])(
     'renders "Try securing again" for the retryable state %s, which re-calls for the SAME project and then shows success',
-    async reasonCode => {
+    async state => {
+      const [reasonCode, creatorState] = state.split('#');
       const authFetch = jest.fn().mockResolvedValue(okResponse);
       renderWithProviders(
         <SecureProvisioningOutcome
           projectId={PROJECT_ID}
           projectRef="Acme"
-          initialResult={failure(reasonCode)}
+          initialResult={failure(reasonCode, creatorState ? { creatorState } : undefined)}
           authenticatedFetch={authFetch as never}
           bffBaseUrl={BFF}
         />
@@ -91,6 +99,8 @@ describe('SecureProvisioningOutcome — the wizard provisioning-failure state', 
     'sdap.provision.resume_creator_unavailable',
     'sdap.provision.owner_assignment_failed',
     'sdap.provision.secure_bu_not_found',
+    // Task 133 b2: another record holds the container already on the project — an administrator decides.
+    'sdap.provision.container_shared_with_another_record',
   ])('offers no retry — neither the button nor the advice — for the non-retryable state %s', reasonCode => {
     const authFetch = jest.fn();
     renderWithProviders(

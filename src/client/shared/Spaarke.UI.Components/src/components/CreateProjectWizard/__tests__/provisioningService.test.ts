@@ -169,6 +169,38 @@ describe('provisionSecureProject — failure classification', () => {
     }
   );
 
+  // Task 133 b2 (verifier finding): `resume_creator_unavailable` follows the server's `creatorState`. `unreadable` is a
+  // failed READ — the server's detail and guide §7a tell the same caller they may call again — so it is retryable with
+  // copy that says only that the creator could not be looked up. Every other state is the administrator's.
+  it.each([
+    ['unreadable', 'not-started', true, /could not be looked up/i],
+    ['disabled', 'needs-administrator', false, /administrator needs to finish/i],
+    ['application-user', 'needs-administrator', false, /administrator needs to finish/i],
+    ['absent', 'needs-administrator', false, /administrator needs to finish/i],
+    [undefined, 'needs-administrator', false, /administrator needs to finish/i],
+  ])(
+    'reads creatorState=%s from the problem body for resume_creator_unavailable',
+    async (creatorState, kind, retryable, says) => {
+      const authFetch = jest.fn().mockResolvedValue(
+        problemResponse(creatorState === 'unreadable' ? 500 : 409, {
+          detail: 'operator text',
+          reasonCode: 'sdap.provision.resume_creator_unavailable',
+          ...(creatorState === undefined ? {} : { creatorState }),
+        })
+      );
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe(kind);
+      expect(result.retryable).toBe(retryable);
+      expect(result.errorMessage).toMatch(says);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+      if (retryable) {
+        expect(result.errorMessage).not.toMatch(/administrator/i);
+      }
+    }
+  );
+
   it('does not leak the server ProblemDetails detail or status into what the user is shown', async () => {
     const authFetch = jest.fn().mockResolvedValue(
       problemResponse(500, {
@@ -217,6 +249,10 @@ describe('provisionSecureProject — failure classification', () => {
     // ownerless row; a resume naming colleagues from someone other than the creator), so no retry is offered.
     ['sdap.provision.record_owner_unreadable', 'not-started', false],
     ['sdap.provision.resume_colleagues_not_permitted', 'not-started', false],
+    // Task 133 b2: a container already on the project. Recorded on ANOTHER record too — deterministic, an administrator
+    // decides; could not be checked — a read failed, the same caller may call again. Both refused before any change.
+    ['sdap.provision.container_shared_with_another_record', 'not-started', false],
+    ['sdap.provision.container_ownership_unreadable', 'not-started', true],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -263,7 +299,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(23);
+    expect(EMITTED).toHaveLength(25);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

@@ -314,6 +314,12 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
     /// (task 133 verifier round 1): <c>sharesRestored: false</c>, <c>creatorShareRemoved: true</c>, and never "the share
     /// this call issued was removed", which would hide that a pre-existing share is gone.
     /// </summary>
+    /// <remarks>
+    /// Setup corrected by task 133 b2 (merge of task 139): the pre-existing share is View Only. It was Collaborate, which
+    /// task 139 made EXACTLY the creator rights (Share joined Collaborate) — so the post-move proof now found the share
+    /// already exact, wrote nothing, and the run succeeded: the scenario under test ("a share with other rights the call
+    /// must overwrite") no longer arose. The contract is unchanged.
+    /// </remarks>
     [Fact]
     public async Task Provisioning_WhenCompensatedWithoutAPreCallRead_SaysThePreExistingShareWasRemovedToo()
     {
@@ -321,7 +327,7 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         var businessUnitTeam = Guid.NewGuid();
         _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
         _fixture.SeedShare(projectId, DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId),
-            ProvisionProjectEndpoint.CollaboratorAccessRights);
+            Sprk.Bff.Api.Services.Access.RecordShareLevels.ViewOnlyRights);
         _fixture.FailNextStrictShareReads = 1; // the pre-call read
         _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId; // the post-move write
         var client = _fixture.CreateAuthenticatedClient();
@@ -471,6 +477,101 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
         _fixture.Logs.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(projectId.ToString()));
+    }
+
+    /// <summary>
+    /// The compensating move is SENT but its outcome cannot be read back (task 133 b2, verifier seed S19). ADR-003: an
+    /// unverifiable compensation is a failure, never "reverted" — so this is the administrator-only state, with
+    /// <c>ownershipRestored: false</c> and <c>ownershipVerified: false</c>, a CRITICAL log line, and a detail that never
+    /// says "nothing moved" or offers the creator a retry.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheCompensatingMoveCannotBeReadBack_IsTheAdministratorOnlyState()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;    // the post-move proof fails → compensate
+        _fixture.FailOwnerReadBackAfterBindTo = businessUnitTeam; // the undo is sent, then its read-back throws
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.RootElement.GetProperty("ownershipRestored").GetBoolean().Should().BeFalse();
+        problem.RootElement.GetProperty("ownershipVerified").GetBoolean().Should().BeFalse(
+            "the undo's outcome is unknown, which is not the same claim as 'it did not take effect'");
+        var detail = problem.RootElement.GetProperty("detail").GetString();
+        detail.Should().Contain("could not be verified").And.Contain("calls provisioning again");
+        detail.Should().NotContainEquivalentOf("nothing").And.NotContainEquivalentOf("retry");
+        _fixture.Logs.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(projectId.ToString()));
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The FORWARD owner move is unverified AND no creator share can be issued or was proven before it (task 133 b2,
+    /// verifier seed S10). If the move landed, nobody can open the record (S5) — so it is the administrator-only state
+    /// with a CRITICAL log line, never <c>owner_assignment_unverified</c>'s "the same caller may retry".
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheMoveIsUnverifiedAndNoShareExistsOrCanBeIssued_IsTheAdministratorOnlyState()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.FailNextStrictShareReads = 1;                                     // no share-first: pre-call read fails
+        _fixture.OwnerReadBackFails = true;                                        // the move lands, unverifiably
+        _fixture.FailStrictShareReadWhileSecureOwned = true;                       // no read after it
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId; // no grant after it
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.RootElement.GetProperty("ownerTeamId").GetGuid().Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        var detail = problem.RootElement.GetProperty("detail").GetString();
+        detail.Should().Contain("no share to its creator could be issued").And.Contain("administrator");
+        detail.Should().NotContainEquivalentOf("retry").And.NotContain("Nothing has been provisioned");
+        _fixture.Logs.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(projectId.ToString()));
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.SomeoneCanOpen(projectId).Should().BeFalse(
+            "this IS the state the code calls CRITICAL — the move landed in the fixture and no share exists");
+    }
+
+    /// <summary>
+    /// Compensation's share restore WRITES but reads back wrong (task 133 b2, verifier seed S22b): the revoke is accepted
+    /// and not applied. The response must say the share is not confirmed removed — <c>sharesRestored: false</c> — never
+    /// that the creator's shares are "as they were".
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheShareRestoreReadsBackWrong_SaysTheSharesAreNotRestored()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;                 // the post-move proof fails → compensate
+        _fixture.RevokeNotAppliedFor = ProvisionProjectTestFixture.CallerSystemUserId; // the restore does not take
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("ownershipRestored").GetBoolean().Should().BeTrue();
+        problem.RootElement.GetProperty("sharesRestored").GetBoolean().Should().BeFalse(
+            "the read-back after the restore still shows the share this call issued");
+        problem.RootElement.GetProperty("creatorShareRemoved").GetBoolean().Should().BeFalse();
+        problem.RootElement.GetProperty("detail").GetString()
+            .Should().Contain("could not be confirmed removed").And.NotContain("as it was before the call (read back)");
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask, "the fixture kept it — the claim must match");
     }
 
     /// <summary>
