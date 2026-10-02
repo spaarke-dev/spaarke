@@ -148,17 +148,25 @@ public class RecordContainerResolverTests
         decision.ContainerId.Should().Be(SharedBuContainer);
     }
 
-    [Fact(DisplayName = "Task 075: a non-securable entity never reads the record at all")]
+    [Fact(DisplayName = "Task 075: a non-securable entity with no ancestor concept never reads the record when given a fallback")]
     public async Task NonSecurableEntity_ShortCircuits_WithoutReadingTheRecord()
     {
         // Both a correctness and a cost assertion: an entity that cannot carry sprk_issecure cannot be
         // secure, so the fallback is right AND no Dataverse round trip should be spent proving it. That is
         // what keeps this seam cheap enough to sit on every upload path.
+        //
+        // Task 155: the entity under test moved from sprk_invoice to contact. An invoice is a CHILD record —
+        // owner C10 part 2 makes every child of a secure record secure — so it can no longer be decided without
+        // reading its root link (ChildRecordContainerResolutionTests). The zero-read guarantee now belongs to
+        // entities with no ancestor concept, which is what this asserts, unchanged.
+        //
+        // Task 155 f3: moved again, contact → account. The f3 live sweep found contact's own sprk_invoice lookup,
+        // whose target can belong to a matter, so a contact must now be read. account names no root by any column.
         var entityService = Substitute.For<IGenericEntityService>();
         var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
 
         var decision = await resolver.ResolveForRecordAsync(
-            NonSecurableEntity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+            "account", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
 
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         decision.ContainerId.Should().Be(SharedBuContainer);
@@ -351,25 +359,61 @@ public class RecordContainerResolverTests
         aliasDecision.ContainerId.Should().Be(SharedBuContainer);
     }
 
-    [Theory(DisplayName = "Task 151: a real non-securable logical name resolves exactly as before (no record read)")]
-    [InlineData("sprk_invoice")]
-    [InlineData("contact")]
+    [Theory(DisplayName = "Task 151: a real non-securable logical name resolves exactly as before with an explicit fallback (no record read)")]
     [InlineData("account")]
     public async Task RealNonSecurableEntity_ResolvesAsBefore(string logicalName)
     {
         // `account` is in NO alias table: a real logical name the shared map does not know must still resolve,
         // because the refusal is for names that are not ENTITIES, not for names that are not ALIASES.
+        //
+        // Task 155 f3 removed the `contact` row: the live sweep found contact's own sprk_invoice lookup, whose target
+        // can belong to a matter, so a contact is now READ (and held when that lookup is set) even with a fallback —
+        // ChildRecordContainerResolutionTests.Child_UnderARootOwnedNonCoreRecord_WithNoStamp_IsRefused.
+        //
+        // Task 155 changed TWO things this theory used to pin, both deliberately:
+        //   * sprk_invoice left the data set — it is a CHILD record whose root must be read (owner C10 part 2);
+        //     ChildRecordContainerResolutionTests covers it.
+        //   * the NO-fallback leg used to assert Unresolved with no read. That was the defect: the two-argument
+        //     overload's documented contract is the RECORD's own business unit, and Unresolved is the misleading
+        //     "No storage container is configured" 409. It now reads the record —
+        //     RecordContainerResolverTests.NonSecurableEntity_WithoutFallback_DerivesTheRecordsBusinessUnit.
+        // The explicit-fallback leg below is the four-argument path, and its assertions are unchanged.
         var entityService = Substitute.For<IGenericEntityService>();
         var resolver = Build(securable: SecurableRoots, entityService: entityService);
 
         var withFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, SharedBuContainer);
-        var withoutFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, null);
 
         withFallback.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         withFallback.ContainerId.Should().Be(SharedBuContainer);
-        withoutFallback.Outcome.Should().Be(ContainerDecisionOutcome.Unresolved);
 
         await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+    }
+
+    [Theory(DisplayName = "Task 155: with NO fallback, a non-securable entity derives the RECORD's own business-unit container (no misleading Unresolved)")]
+    [InlineData("contact")]
+    [InlineData("account")]
+    public async Task NonSecurableEntity_WithoutFallback_DerivesTheRecordsBusinessUnit(string logicalName)
+    {
+        var buId = Guid.Parse("12121212-1212-1212-1212-121212121212");
+        var entityService = Substitute.For<IGenericEntityService>();
+        entityService.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity(logicalName, RecordId)
+            {
+                ["owningbusinessunit"] = new EntityReference("businessunit", buId)
+            }));
+        entityService.RetrieveAsync("businessunit", buId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("businessunit", buId) { ["sprk_containerid"] = SharedBuContainer }));
+
+        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+
+        var twoArg = await resolver.ResolveForRecordAsync(logicalName, RecordId);
+        var nullFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, null);
+
+        foreach (var decision in new[] { twoArg, nullFallback })
+        {
+            decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+            decision.ContainerId.Should().Be(SharedBuContainer);
+        }
     }
 
     [Theory(DisplayName = "Task 151: a name that is NOT an entity is REFUSED (400 container_entity_unknown) by both overloads — never a decision")]

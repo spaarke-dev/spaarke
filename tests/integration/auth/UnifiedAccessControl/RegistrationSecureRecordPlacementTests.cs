@@ -4,6 +4,7 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Registration;
 using Xunit;
 
@@ -177,7 +178,12 @@ public class RegistrationSecureRecordPlacementTests
             new TrackingIdGenerator(),
             new StaticToken(),
             new SingleHandlerFactory(_dataverse),
-            NullLogger<RegistrationDataverseService>.Instance);
+            NullLogger<RegistrationDataverseService>.Instance,
+            // Task 141's contact link runs only after a systemuser is created; nothing here creates one.
+            new ContactIdentityBinderFactory(
+                new SingleHandlerFactory(_dataverse), NullLoggerFactory.Instance,
+                IdentityBinding.IdentityBindingTestKit.Tenants(IdentityBinding.IdentityBindingTestKit.CustomerTenant),
+                TimeProvider.System));
 
     private sealed class StaticToken : TokenCredential
     {

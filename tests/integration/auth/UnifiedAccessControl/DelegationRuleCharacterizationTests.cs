@@ -139,7 +139,8 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
     /// <summary>
     /// Read is not licence to grant. A caller holding every Dataverse right EXCEPT Write is still
     /// refused — this fails if the rule is ever weakened to "has some access" or "rights string is
-    /// non-empty", which would readmit exactly the read-only caller A-6 is about.
+    /// non-empty", which would readmit exactly the read-only caller A-6 is about. Still true after task 139
+    /// (owner 2026-09-30): Collaborate now CARRIES Share, but Write — not Share — is what lets a person grant.
     /// </summary>
     [Fact]
     public async Task PostGrant_ForCallerHoldingEveryRightExceptWrite_IsStillDenied()
@@ -152,6 +153,77 @@ public class DelegationRuleCharacterizationTests : IClassFixture<DelegationRuleT
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(DelegationRuleFilter.DenyWriteRequired,
             "Write is the delegation right (B-14) — Share, Append and the rest do not substitute for it");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 139 (C4, owner 2026-09-30) — the gate still means "Write on this record"
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The new Collaborate level, exactly: Read, Write, Append, AppendTo and Share. A colleague shared at Collaborate
+    /// may grant (owner: "if the user has write access, then they can share … and grant access").
+    /// </summary>
+    private const string NewCollaborateRights =
+        "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
+
+    /// <summary>
+    /// Criterion 10, positive twin: a caller holding exactly the new Collaborate rights passes the gate on every grant
+    /// route — each request reaches the handler's own validation (400), which only happens after authorization.
+    /// Write is what admits them; the Share right they now hold is not consulted (the pins above stay true).
+    /// </summary>
+    [Theory]
+    [InlineData("grant")]
+    [InlineData("invite-and-grant")]
+    [InlineData("share-user")]
+    public async Task GrantRoutes_ForACallerHoldingExactlyTheNewCollaborateRights_PassTheGate(string route)
+    {
+        using var client = _fixture.CreateClientWithRights(NewCollaborateRights);
+        var (path, body) = RequestWithHandlerInvalidBody(route, Guid.NewGuid());
+
+        var response = await client.PostAsJsonAsync(path, body);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "a Collaborate holder may grant (C4) — {0} must reach its own validation", route);
+    }
+
+    [Fact]
+    public async Task CanManageAccess_ForACallerHoldingExactlyTheNewCollaborateRights_Is200()
+    {
+        using var client = _fixture.CreateClientWithRights(NewCollaborateRights);
+
+        var response = await client.GetAsync(
+            $"/api/v1/external-access/can-manage-access?recordType=matter&recordId={Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// Criterion 10: the Manage Access gate answers the delegation question alone — 200 for a Write-holder on a
+    /// Restricted, a Limited and a Secure record alike (those flags govern WHICH grant types apply, at write time,
+    /// task 138), and 403 without Write on the same record.
+    /// </summary>
+    [Theory]
+    [InlineData("restricted")]
+    [InlineData("limited")]
+    [InlineData("secure")]
+    public async Task CanManageAccess_IgnoresTheRecordsFlags_200WithWrite_403Without(string flag)
+    {
+        var matterId = Guid.NewGuid();
+        _fixture.RootFlags.Flags[matterId] = flag switch
+        {
+            "restricted" => new RootRecordFlags(IsSecure: false, IsRestricted: true),
+            "limited" => new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true),
+            _ => new RootRecordFlags(IsSecure: true, IsRestricted: false),
+        };
+        var path = $"/api/v1/external-access/can-manage-access?recordType=matter&recordId={matterId}";
+
+        using var writer = _fixture.CreateClientWithRights(ReadWrite);
+        using var reader = _fixture.CreateClientWithRights(ReadOnly);
+
+        (await writer.GetAsync(path)).StatusCode.Should().Be(HttpStatusCode.OK);
+        var denied = await reader.GetAsync(path);
+        denied.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(denied)).Should().Be(DelegationRuleFilter.DenyWriteRequired);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

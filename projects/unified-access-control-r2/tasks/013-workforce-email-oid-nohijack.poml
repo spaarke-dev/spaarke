@@ -145,5 +145,19 @@ status was changed on the index alone.</status-note>
       <criterion testable="true">MANUAL LIVE GATE (dev): an existing unlicensed home-tenant MEMBER test identity with no systemuser resolves after first sign-in and no longer gets 403 principal_not_resolved, and one of the live collision identities recorded by task 141 is refused and flagged. Recorded in notes (task 141 carries the escalation if no such member test account exists).</criterion>
       <criterion testable="true">Only then are this task's status and its TASK-INDEX marker set back to completed, and scripts/check-task-status-drift.ps1 is clean for id 013.</criterion>
     </acceptance-criteria-amended>
+    <a18-closure date="2026-10-01" closed-by="task 141 (branch task/uac-r2-141)">
+    The A-18 closure is task 141. The "do not mark A-18 closed" residual comment was removed from
+    IIdentityNormalizationService.cs, and the inert GuardInertNoBindingColumn and the email-by-contact.azureactivedirectoryobjectid
+    path it guarded were deleted. Every workforce, systemuser, CIAM and invite binding now runs one pure decision
+    (Infrastructure/ExternalAccess/ContactBindingDecision.cs). The amended criteria map to task 141 evidence as follows:
+    (1) first-sign-in bind: WorkforceEmailNoHijackTests.FirstSignIn_OfAMember_BindsTheOneUnboundMatch_InDFormat_PlaneWorkforce;
+    (2) second identity refused and flagged: AnEmailMatchBoundToAnotherOid_Denies_FlagsOnce_AndWritesNothingElse;
+    (3) guest or ambiguous never binds: ANonMember_GetsNoEmailBind_AndNoCreation_AndAnOwnDenyCode and TwoActiveContactsCarryingTheEmail_Deny_AndBothAreFlagged;
+    (4) oid only after binding: TheNextSignIn_ResolvesByOid_EvenWhenTheEmailClaimDiffers;
+    (5) no contact query names azureactivedirectoryobjectid: ContactAadObjectIdColumnGuardTests (shown to bite by seeding one);
+    (6) the MANUAL LIVE GATE is PENDING (task 141 notes §8, gates G-1 to G-5, live identity test.user@demo.spaarke.com per owner T2).
+    So criterion 7 holds this task at pending: its status and TASK-INDEX marker go back to completed only after
+    task 141's live gate passes. The main session owns that status change.
+    </a18-closure>
   </amendments>
 </task>

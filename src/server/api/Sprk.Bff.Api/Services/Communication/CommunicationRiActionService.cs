@@ -207,6 +207,8 @@ public sealed class CommunicationRiActionService
                     RegardingObjectId = signal.CommunicationId,
                     RegardingObjectType = CommunicationEntity,
                     OwnerId = recipientSystemUserId,
+                    // Task 152: the task is FOR the recipient the signal was raised for — their linked contact names it.
+                    ActingUserId = recipientSystemUserId,
                 },
                 ct).ConfigureAwait(false);
 
