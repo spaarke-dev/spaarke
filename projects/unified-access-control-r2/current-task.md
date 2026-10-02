@@ -4,6 +4,14 @@
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
 >
+> **LATEST (2026-10-02 ~05:00Z) — READ FIRST (supersedes the block below):**
+> - ✅ **#1083 MERGED** as `65e6db71f` (merge commit). #1053, #1055, #1057 and #1068 are closed. The main repo's master is synced.
+> - The work branch was fast-forwarded to integ and then merged with master: **HEAD `bca0941f6`**. **PR #1093** (batch 2: 109/135/136/144/145) is OPEN. Size: 45.49 → 45.54 MB (+0.045), 212/212 files, no CVEs. Its `Router` result is still pending; **merge it as a merge commit when pending = 0.** Close #998/#1058 on merge (they auto-close); close #967 after the 144 live gates pass. #1059 stays open (136 live gate).
+> - ✅ **DEPLOYED `bca0941f6` to spaarke-bff-dev** from the fresh worktree `C:\wt28b` (45.54 MB, 4 files SHA-verified, healthz/ping 200, CORS OK).
+> - **Live steps RUNNING:** workflow `wnpqthvp8` (run `wf_691266a4-fc0`). It covers 144 (team create, migrate, provision 65a3fab2, default-team role removal, verify, impersonated probe) and 145 G1, followed by an independent read-only verifier. Results go to branch `live/uac-r2-batch2-gates` (worktree `C:\wtlive`), which must be merged into the work branch.
+> - Batch 3 DAG is RUNNING (`wgqgt6cu7`). 155 fix-3 verify is RUNNING (`wd2pia0jm`); when it is ready, launch **156**.
+> - The integ branch `integ/uac-r2-batch2` has been consumed and can be deleted with its worktree `C:\wt27i`. `C:\wt28m` and `C:\wt28b` are the measurement and deploy worktrees.
+>
 > **LATEST (2026-10-02 ~03:30Z) — READ FIRST:**
 > - **Owner round 4 answered all 7 questions.** They are recorded in `notes/session27-owner-decisions-and-research.md` § round 4 and include 141 B2, 155 option (b) → task 156, live steps approved for 141/144/145, and 134 D1 → task 157.
 > - **PR #1083** (130/131/134/151, head `cf70ac417`; master merged in, green at unit 13,364/0 and arch 340) has `Router` ✅. The last legacy check, "Code Quality", was pending. **Merge it as a merge commit when pending = 0.** Then fast-forward the work branch to `integ/uac-r2-batch2` (worktree `C:\wt27i`), measure publish size vs the new master, push, and open PR #2.
