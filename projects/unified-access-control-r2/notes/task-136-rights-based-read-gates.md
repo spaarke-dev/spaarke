@@ -107,6 +107,18 @@ plane-parity test now compares unfiltered), `StandingGrantRuntimeUnionSeamTests`
 `GrantCacheRoundTripSeamTests` (the null-level criterion reversed: confers nothing on miss AND hit — the cache
 property "a null level restores as null" is still what it checks).
 
+**Verifier round 1 (2026-10-01, branch `task/uac-r2-136-f1`)** — criterion 8 had one missed site:
+`GrantCacheRoundTripSeamTests.ComposeAsync_OrgInheritedOnlyGrantOnSecureRoot_ComposesNoneOnMissAndOnHit` (3 roots)
+asserted only `RightsFor == None` on a Secure-suppressed, organization-only record, and stayed green with both
+`RemoveEntriesWithoutRead` calls disabled. It now also asserts `Contains == false` and `Rights` has no key for the
+record on the miss AND the hit, and is renamed `..._IsAbsentOnMissAndOnHit`. Seeded the same violation (both
+pruning calls commented out): 3 of 3 cases red at the miss `NotContainKey` line (`Contains` alone stays green,
+because it is a Read-gated view — the key assertion is the one that bites); restored, 19 / 19. Re-swept every
+`RightsFor(...).Should().Be(AccessRights.None` in `tests/` (16 sites in 4 files: 8 evaluator unit, 5 evaluator seam, 1 standing-grant seam, 2 grant-cache seam): all now carry an absence
+assertion. The remaining `AccessRights.None` assertions (`CallerPrincipalTests` on random unknown ids, standing-grant
+reader state, delegation probes, access-cache snapshots) are not composed-set records, so criterion 8 does not
+reach them.
+
 Fixture seams (test-only, at existing extension points): a header-selected workforce plane
 (`HeaderWorkforcePrincipalResolver` at `IWorkforcePrincipalResolver`, `NoStandingGrantReader` at
 `ISubjectStandingGrantReader`), Secure flags / direct level / null-level rows on the stub participation service,

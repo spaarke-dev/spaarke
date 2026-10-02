@@ -112,12 +112,15 @@ public sealed class GrantCacheRoundTripSeamTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // Criterion 2 — NO OVER-GRANT: an org-inherited-only grant on a secure root is None on both.
+    // Criterion 2 — NO OVER-GRANT: an org-inherited-only grant on a secure root is ABSENT on both.
+    //
+    // Task 136 (C2): a record whose rights compose to None leaves the answer — RightsFor == None alone is not
+    // enough, because a None-rights KEY is what every presence-gated read used to admit. Assert absence.
     // ═════════════════════════════════════════════════════════════════════════════════════════════
 
     [Theory]
     [MemberData(nameof(RootEntityTypes))]
-    public async Task ComposeAsync_OrgInheritedOnlyGrantOnSecureRoot_ComposesNoneOnMissAndOnHit(string entityType)
+    public async Task ComposeAsync_OrgInheritedOnlyGrantOnSecureRoot_IsAbsentOnMissAndOnHit(string entityType)
     {
         var world = new CacheWorld(
             Grant(entityType, RecordId, level: ExternalAccessLevel.Collaborate, direct: null),
@@ -127,9 +130,14 @@ public sealed class GrantCacheRoundTripSeamTests
 
         miss.RightsFor(RecordId).Should().Be(AccessRights.None,
             $"Secure suppression removes the org-inherited contribution on a secure {entityType}");
+        miss.Contains(RecordId).Should().BeFalse("task 136: a record with no rights is not in the answer");
+        miss.Rights.Should().NotContainKey(RecordId, "absent, not present with no rights");
         hit.RightsFor(RecordId).Should().Be(AccessRights.None,
             "a null DirectAccessLevel must restore from the cache AS null — defaulting it to AccessLevel " +
             "would grant Read|Create|Write on a secure record reached only through an organization");
+        hit.Contains(RecordId).Should().BeFalse();
+        hit.Rights.Should().NotContainKey(RecordId,
+            "task 136: the hit must leave the Secure-suppressed record out of the answer exactly as the miss does");
         hit.Rights.Should().BeEquivalentTo(miss.Rights);
     }
 
