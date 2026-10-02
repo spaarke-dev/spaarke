@@ -410,6 +410,17 @@ public sealed class Phase2EndToEndFixture : WebApplicationFactory<Program>
                 return Task.CompletedTask;
             });
 
+        // RetrieveAsync("systemuser") — the recon job's per-owner "is this a person?" read
+        // (task 152, ApplicationUserCheck). Unseeded ids throw "not found", as Dataverse does.
+        DataverseMock
+            .Setup(d => d.RetrieveAsync(
+                It.Is<string>(s => s == "systemuser"),
+                It.IsAny<Guid>(),
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<string, Guid, string[], CancellationToken>((_, id, _, _) =>
+                Task.FromResult(DataverseState.RetrieveSystemUser(id)));
+
         // RetrieveMultipleAsync(QueryExpression) — used by:
         //   (a) MembershipEndpoints for the AAD oid → systemuserid lookup
         //   (b) MembershipReconciliationJob.ScanParentsAndDispatchAsync
@@ -476,6 +487,7 @@ public sealed class InMemoryDataverseState
     private readonly ConcurrentDictionary<Guid, JunctionRow> _junctionById = new();
     private readonly ConcurrentDictionary<Guid, Guid> _aadOidToSystemUser = new();
     private readonly ConcurrentDictionary<(string EntityType, Guid Id), Entity> _parents = new();
+    private readonly ConcurrentDictionary<Guid, Guid?> _systemUserRows = new();
 
     /// <summary>Public read-only snapshot of the in-memory junction rows.</summary>
     public IReadOnlyCollection<JunctionRow> Junction => _junctionById.Values.ToArray();
@@ -483,6 +495,28 @@ public sealed class InMemoryDataverseState
     /// <summary>Seed an AAD oid → systemuserid mapping for the membership endpoint.</summary>
     public void SeedSystemUser(Guid aadOid, Guid systemUserId)
         => _aadOidToSystemUser[aadOid] = systemUserId;
+
+    /// <summary>
+    /// Seed a systemuser ROW for the single-row read the recon job makes per owner (task 152,
+    /// ADR-034 A3: an application user gets no junction row, and an owner whose row cannot be read is
+    /// left as it is). <paramref name="applicationId"/> null = a human; a value = an application user.
+    /// An unseeded id reads as not found, which the job treats as "unknown".
+    /// </summary>
+    public void SeedSystemUserRow(Guid systemUserId, Guid? applicationId = null)
+        => _systemUserRows[systemUserId] = applicationId;
+
+    /// <summary>Single-row systemuser read; throws "not found" for an unseeded id, as Dataverse does.</summary>
+    public Entity RetrieveSystemUser(Guid systemUserId)
+    {
+        if (!_systemUserRows.TryGetValue(systemUserId, out var applicationId))
+        {
+            throw new InvalidOperationException($"systemuser With Id = {systemUserId} Does Not Exist");
+        }
+
+        var entity = new Entity("systemuser", systemUserId);
+        entity["applicationid"] = applicationId;
+        return entity;
+    }
 
     /// <summary>
     /// Seed a parent entity row (e.g., a sprk_matter with an ownerid Lookup)
@@ -537,6 +571,7 @@ public sealed class InMemoryDataverseState
         _junctionById.Clear();
         _aadOidToSystemUser.Clear();
         _parents.Clear();
+        _systemUserRows.Clear();
     }
 
     // ─── Read paths used by the Moq mock setups ─────────────────────────
