@@ -300,6 +300,117 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
+    /// The pre-call share set could not be read, the post-move share write fails, and compensation's only safe target is
+    /// "no share" — which also removes the share the creator held BEFORE the call. The response must say exactly that
+    /// (task 133 verifier round 1): <c>sharesRestored: false</c>, <c>creatorShareRemoved: true</c>, and never "the share
+    /// this call issued was removed", which would hide that a pre-existing share is gone.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenCompensatedWithoutAPreCallRead_SaysThePreExistingShareWasRemovedToo()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.SeedShare(projectId, DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId),
+            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        _fixture.FailNextStrictShareReads = 1; // the pre-call read
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId; // the post-move write
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("sharesRestored").GetBoolean().Should().BeFalse(
+            "the creator's pre-call share is gone, so the shares are NOT as they were");
+        problem.RootElement.GetProperty("creatorShareRemoved").GetBoolean().Should().BeTrue();
+        var detail = problem.RootElement.GetProperty("detail").GetString();
+        detail.Should().Contain("including any share the creator held before this call")
+            .And.NotContain("The share this call issued to the creator was removed");
+    }
+
+    /// <summary>
+    /// The pre-call read AND the post-move read fail, so this call wrote no share at all before compensating. The
+    /// response says the creator's shares are as they were — and they are: the pre-existing share is untouched.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenCompensatedHavingWrittenNoShare_SaysTheSharesAreAsTheyWere()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.SeedShare(projectId, DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId),
+            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        var before = _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.FailNextStrictShareReads = 1;               // the pre-call read
+        _fixture.FailStrictShareReadWhileSecureOwned = true; // the post-move proof
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(before);
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.Revokes.Should().BeEmpty();
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("sharesRestored").GetBoolean().Should().BeTrue();
+        problem.RootElement.GetProperty("creatorShareRemoved").GetBoolean().Should().BeFalse();
+        problem.RootElement.GetProperty("detail").GetString().Should().Contain("wrote no share for the creator");
+    }
+
+    /// <summary>
+    /// The owner read-back throws AND the shares cannot be read on the moved record: the creator's share is issued
+    /// without a read to confirm it (S5), and the response says it is NOT confirmed rather than "in place" (task 133
+    /// verifier round 1) — <c>creatorShareConfirmed: false</c>.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheOwnerMoveIsUnverifiedAndTheShareCannotBeReadBack_SaysTheShareIsNotConfirmed()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.FailNextStrictShareReads = 1;               // no share-first: the pre-call read fails
+        _fixture.OwnerReadBackFails = true;                  // the move lands but cannot be read back
+        _fixture.FailStrictShareReadWhileSecureOwned = true; // nor can the shares on the moved record
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("creatorShareConfirmed").GetBoolean().Should().BeFalse();
+        var detail = problem.RootElement.GetProperty("detail").GetString();
+        detail.Should().Contain("NOT confirmed").And.NotContain("is in place");
+        _fixture.Grants.Should().ContainSingle(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The owner read-back throws but the shares CAN be read: the creator's share is proven on the record by a read
+    /// (not assumed from the share-first step), and the response says so — <c>creatorShareConfirmed: true</c>.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheOwnerMoveIsUnverified_ProvesTheCreatorsShareByARead()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.OwnerReadBackFails = true;
+        _fixture.AssignDropsShareOf = ProvisionProjectTestFixture.CallerSystemUserId; // the move drops share-first's grant
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("creatorShareConfirmed").GetBoolean().Should().BeTrue();
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask,
+                "a share proven before the move is re-proven after it, and re-issued when the move dropped it");
+        _fixture.Grants.Where(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId).Should().HaveCount(2);
+    }
+
+    /// <summary>
     /// The share AND the compensating move both fail: the record is owned by the memberless team without a creator
     /// share. A distinct reason code, a detail that names that state, never "nothing moved" and never "retry" (the
     /// creator no longer passes the Write gate), and a CRITICAL log line for the operator.

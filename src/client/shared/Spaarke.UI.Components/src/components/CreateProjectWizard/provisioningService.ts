@@ -89,6 +89,12 @@ export interface IProvisionProjectResponse {
    * went to the record's `createdby` user. Optional because the server added it.
    */
   resumed?: boolean;
+  /**
+   * Task 133 (verifier round 1): true on a resume whose `createdby` could not be used and which completed because a
+   * person already held a share (an administrator's, via Manage Access). `sharedToCreatorSystemUserId` is then that
+   * person and the call issued no share. Optional because the server added it.
+   */
+  creatorUnavailable?: boolean;
 }
 
 /**
@@ -111,7 +117,11 @@ export type ProvisioningFailureKind =
   | 'already-provisioned'
   /** The project carries a legacy per-project security BU; migrating it is a manual operation. */
   | 'legacy-provisioning'
-  /** Refused before any change — the caller's identity or the project's owner could not be read. Retryable. */
+  /**
+   * Refused before any change. Retryable only for `creator_unresolved` (the caller's identity could not be confirmed,
+   * which can be transient); an ownerless row (`record_owner_unreadable`) or a resume request naming colleagues from
+   * someone other than the creator (`resume_colleagues_not_permitted`) is refused again on the same call.
+   */
   | 'not-started'
   /**
    * The creator share could not be issued, and the attempt was undone (ownership read back as it was), or a resume
@@ -125,11 +135,15 @@ export type ProvisioningFailureKind =
    * here (task 133). Retryable.
    */
   | 'storage-incomplete'
-  /** The owner move could not be read back; the caller's share is in place. The next call resumes or restarts. Retryable. */
+  /**
+   * The owner move could not be read back; a share to the caller was issued (read back when the read works —
+   * `creatorShareConfirmed` on the server's response). The next call resumes or restarts. Retryable.
+   */
   | 'interrupted'
   /**
    * Only an administrator can finish: the share AND the undo failed (the record may be owned by the memberless team
-   * with no share — its creator no longer passes the Write gate), or a resume found the record's creator unusable.
+   * with no share — its creator no longer passes the Write gate), or a resume found the record's creator unusable and
+   * nobody else holding a share (an administrator shares it through Manage Access, then calls again).
    */
   | 'needs-administrator'
   /** Anything else — transport failure, unexpected 5xx, or an unrecognised or absent reason code. */
@@ -221,11 +235,21 @@ const REASON_STATES: Readonly<
       'Securing the project did not start, because your account could not be confirmed. Nothing about the project changed.',
     retryable: true,
   },
+  // Not retryable (task 133 verifier round 1): the row was read without an owner, which is deterministic for that row —
+  // calling again repeats the refusal, and the server's detail says an administrator checks the owner first.
   'sdap.provision.record_owner_unreadable': {
     failureKind: 'not-started',
     errorMessage:
-      'Securing the project did not start, because its current owner could not be read. Nothing about the project changed.',
-    retryable: true,
+      'Securing the project did not start, because its current owner could not be read. Nothing about the project changed; an administrator needs to check its owner.',
+    retryable: false,
+  },
+  // Task 133 verifier round 1: a resume request naming colleagues, from someone other than the project's creator. The
+  // wizard never sends colleagues, so it never meets this; a host that does must drop them, not repeat the same call.
+  'sdap.provision.resume_colleagues_not_permitted': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Securing the project was not finished, because the request named people to share it with and only the person who created it can do that at this stage. Nothing about the project changed; people are added through Manage Access.',
+    retryable: false,
   },
   'sdap.provision.creator_share_failed': {
     failureKind: 'share-failed',
@@ -248,7 +272,7 @@ const REASON_STATES: Readonly<
   'sdap.provision.owner_assignment_unverified': {
     failureKind: 'interrupted',
     errorMessage:
-      'Securing the project was interrupted: it could not be confirmed whether its ownership changed. Your access to it is in place.',
+      'Securing the project was interrupted: it could not be confirmed whether its ownership changed. A share to you was issued so that you can open it either way.',
     retryable: true,
   },
   'sdap.provision.container_creation_failed': {

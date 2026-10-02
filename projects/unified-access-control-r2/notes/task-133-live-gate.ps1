@@ -15,6 +15,13 @@
                                  of the share this run issued, POA re-read (must equal the pre-call snapshot), and
                                  sprk_issecure still true (e). No fault-injection switch exists in production code; the
                                  compensation path is proven by replaying its calls, as recorded in the note.
+                                 METHOD CAVEAT for (e) (task 133 verifier round 1): this REPLAYS the Web API calls the
+                                 endpoint's compensation issues, from this script. It does NOT execute the endpoint's
+                                 compensation code (MoveWithCreatorShareAsync -> MoveOwnerAsync back +
+                                 RestoreCreatorShareAsync), which no live state reaches without a fault. The code path is
+                                 covered by the fixture tests; the replay proves the PLATFORM accepts the calls and
+                                 restores the pre-call state. Criterion (e) names "the compensation code path", so the
+                                 owner must accept replay as the recorded method, explicitly, when the gate is run.
     StrandForResume   (c)        -Apply. Takes -RecordId (a secure project the TEST USER created in the wizard, so its
                                  createdby is that user) into the stranded state by hand: owner -> named team, the test
                                  user's share revoked, sprk_containerid cleared. Then call provisioning as an
@@ -42,8 +49,19 @@ $ErrorActionPreference = 'Stop'
 $tok = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv
 $H = @{ Authorization = "Bearer $tok"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'; 'Content-Type' = 'application/json' }
 $Api = "$EnvironmentUrl/api/data/v9.2"
-# Mirrors ProvisionProjectEndpoint.CreatorAccessRights (task 139 owns the value; re-check before running).
-$CreatorRights = 'ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess'
+# ProvisionProjectEndpoint.CreatorAccessRights, DERIVED from the source at run time (task 133 verifier round 1) rather
+# than hardcoded, because task 139 owns the value and may change Collaborate. If the constant changes SHAPE (it is no
+# longer "RecordShareLevels.CollaborateRights + ',ShareAccess'"), the script stops instead of replaying stale rights.
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+$levelsSrc = Get-Content (Join-Path $repoRoot 'src\server\api\Sprk.Bff.Api\Services\Access\RecordShareLevels.cs') -Raw
+$endpointSrc = Get-Content (Join-Path $repoRoot 'src\server\api\Sprk.Bff.Api\Api\ExternalAccess\ProvisionProjectEndpoint.cs') -Raw
+if ($levelsSrc -notmatch 'internal const string CollaborateRights = "([^"]+)";') { throw 'RecordShareLevels.CollaborateRights not found - update this script.' }
+$collaborate = $Matches[1]
+if ($endpointSrc -notmatch 'internal const string CreatorAccessRights = RecordShareLevels\.CollaborateRights \+ ",ShareAccess";') {
+  throw 'ProvisionProjectEndpoint.CreatorAccessRights changed shape (task 139?) - update this script before running.'
+}
+$CreatorRights = ((@($collaborate -split ',') + 'ShareAccess') | Select-Object -Unique) -join ','
+"CreatorAccessRights (from source) = $CreatorRights"
 function S($g) { if ($g) { "$g".Substring(0, 8) } else { '-' } }
 function Owner($id) { Invoke-RestMethod "$Api/sprk_projects($id)?`$select=_owningteam_value,_owninguser_value,sprk_containerid,sprk_issecure,modifiedon,_createdby_value" -Headers $H }
 function Shares($id) { (Invoke-RestMethod "$Api/principalobjectaccessset?`$filter=objectid eq $id and objecttypecode eq 'sprk_project'&`$select=principalid,principaltypecode,accessrightsmask" -Headers $H).value }

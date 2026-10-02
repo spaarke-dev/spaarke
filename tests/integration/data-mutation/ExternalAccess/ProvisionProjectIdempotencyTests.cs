@@ -518,6 +518,87 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     }
 
     /// <summary>
+    /// The recovery that <c>resume_creator_unavailable</c> states is real (task 133 verifier round 1): an administrator
+    /// shares the record to a person through Manage Access, then calls again — and the resume completes WITHOUT
+    /// sharing to anyone. A share held only by a person who could not open the record anyway (disabled) does not count.
+    /// Before the fix the second call was refused the same way forever.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheCreatorIsUnusable_TheAdministratorsManageAccessShareLetsTheResumeComplete()
+    {
+        var projectId = Guid.NewGuid();
+        var appCreator = Guid.NewGuid();
+        var disabledSharee = Guid.NewGuid();
+        var intendedHolder = Guid.NewGuid();
+        _fixture.SystemUsers[appCreator] = (false, true);
+        _fixture.SystemUsers[disabledSharee] = (true, false);
+        _fixture.SystemUsers[intendedHolder] = (false, false);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: appCreator);
+        using var client = _fixture.CreateEntitledClient(); // an administrator: Write through their role
+
+        (await ReasonCodeOf(await ProvisionAsync(client, projectId)))
+            .Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+
+        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(disabledSharee),
+            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        (await ReasonCodeOf(await ProvisionAsync(client, projectId)))
+            .Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable,
+                "a disabled sharee cannot open the record, so it does not satisfy S5");
+
+        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(intendedHolder),
+            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().BeEmpty("a resume whose creator is unusable shares to nobody — least of all the caller");
+        _fixture.Modifies.Should().BeEmpty();
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0);
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("creatorUnavailable").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("sharedToCreatorSystemUserId").GetGuid().Should().Be(intendedHolder);
+    }
+
+    /// <summary>
+    /// A resume caller who is NOT the record's creator cannot add people — themselves included — through
+    /// <c>sharePrincipalIds</c> (task 133 verifier round 1). Refused before any write; the same call without the list
+    /// completes the resume, sharing only to the creator.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenANonCreatorResumesWithSharePrincipalIds_RefusesBeforeAnyWrite()
+    {
+        var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (false, false);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
+        using var client = _fixture.CreateEntitledClient(); // the caller is NOT the creator
+
+        var refused = await client.PostAsJsonAsync(Route, new
+        {
+            projectId,
+            sharePrincipalIds = new[] { ProvisionProjectTestFixture.CallerSystemUserId }
+        });
+
+        refused.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(refused)).Should().Be(ProvisionProjectEndpoint.ReasonResumeColleaguesNotPermitted);
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.Modifies.Should().BeEmpty();
+        _fixture.Updates.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0,
+            "the resume caller receives no share unless they are the creator");
+
+        var completed = await ProvisionAsync(client, projectId);
+
+        completed.StatusCode.Should().Be(HttpStatusCode.OK, await completed.Content.ReadAsStringAsync());
+        _fixture.Grants.Select(g => g.Principal.Id).Should().BeEquivalentTo(new[] { creator });
+    }
+
+    /// <summary>
     /// A resume runs every ensure step the forward path runs: the creator share, the named colleagues, the container
     /// and its record — everything but the owner move it no longer needs.
     /// </summary>

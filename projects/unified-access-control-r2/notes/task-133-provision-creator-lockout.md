@@ -62,7 +62,7 @@ Script: session scratchpad `task133/census.ps1` (GET only, operator `az` token, 
 | `sharetopreviousowneronassign` true | **Did not fire** (False) |
 | App-created provisionable roots (`createdby` = application user) | **Fires literally** (1 app-created matter; Office quick-create creates matters/projects app-only). **Answered by owner decision F8** (round 3, accepted as recommended): ship the interim default — `createdby` for human-created rows, refusal with its own code (`resume_creator_unavailable`, `creatorState: application-user`) for app-created rows, never share to whoever calls. **Verified live as F8 asked**: `createdonbehalfby` is EMPTY on the app-created matter, so option (b) is unusable and **(a) a new server-stamped creator column is the remaining option** — 🔔 an open owner decision, recommended before app-created rows are routinely made secure (task 150's ribbon will let a user secure an Office-created matter; its resume then needs an administrator) |
 | Team-owned row with a non-provisioning container, or a create-time `sprk_containerid` writer | **Did not fire** (0 team-owned rows; 0 rules; no code writer) |
-| Assign cascade on a root | **Fires literally** (6 platform-managed relationships). **Treated as answered by owner round 4 item 3**: the cascade to `team`, `sharepointdocumentlocation` and `sharepointdocument` is accepted for secure-root assignments; compensation is the same assign in reverse. Residual, stated: a child of one of those three types whose own owner differed from the root's before the forward move ends with the root's pre-call owner after compensation. 0 such rows exist for secure roots in dev; work assignments have no cascade. 🔔 Flagged for owner awareness, not a stop |
+| Assign cascade on a root | **Fires literally** (6 platform-managed relationships). **Treated as answered by owner round 4 item 3**: the cascade to `team`, `sharepointdocumentlocation` and `sharepointdocument` is accepted for secure-root assignments; compensation is the same assign in reverse. Residual, stated: a child of one of those three types whose own owner differed from the root's before the forward move ends with the root's pre-call owner after compensation. 0 such rows exist for secure roots in dev; work assignments have no cascade. 🔔 **OPEN owner confirmation (verifier round 1)**: round 4 item 3 accepted the cascade for task 144's migration and assignment; it did not say it covers COMPENSATION, which can re-own a child whose prior owner differed from the root's to the root's pre-call owner. The POML trigger said STOP and present (a) snapshot+restore each re-owned child / (b) no compensation for cascading roots (resume only) / (c) coordinate with task 148. The shipped code compensates (the executor's reading); the owner must confirm that extension explicitly or pick (a)/(b)/(c). No code changed for this in round 1 |
 | Neither share-first nor post-move can be made reliable | **Not evaluable** without live writes — the live gate decides; the code does not depend on either (§1) |
 
 ---
@@ -77,12 +77,16 @@ call issued is removed when the move is undone; `sprk_issecure` is never cleared
 (comply)** — the reviewer confirms in the PR.
 
 Two residuals, stated rather than hidden (both favour S5 — someone can open the record — over exact share parity):
-- **Unverified owner move without a proven share-first share**: the creator share is issued blind. If the move had in
-  fact NOT landed, the creator now holds a share (with `ShareAccess`) they did not hold before, on a record they already
-  had Write on. Leaving no share would risk a record nobody can open if the move DID land.
+- **Unverified owner move**: the creator share is first ENSURED by the complete read (verifier round 1 — it is no longer
+  assumed from share-first); only if that read or write fails is it issued without a read, and the response then says
+  `creatorShareConfirmed: false` ("issued but NOT confirmed"). If the move had in fact NOT landed, the creator now holds a
+  share (with `ShareAccess`) they did not hold before, on a record they already had Write on. Leaving no share would risk
+  a record nobody can open if the move DID land.
 - **Pre-call share set unreadable + compensation**: the only safe restore target is "no share", so a pre-existing explicit
   creator share is removed with the one this call issued (narrowing, never widening; ownership is restored, so the
-  creator keeps whatever their role/ownership gives).
+  creator keeps whatever their role/ownership gives). Since verifier round 1 the response SAYS so: `sharesRestored:
+  false`, `creatorShareRemoved: true`, and a detail naming the removed pre-call share — on this branch the criterion
+  "share set equals the pre-call set" does not hold, and the response no longer claims it does.
 
 ---
 
@@ -130,9 +134,12 @@ Task 143's census cites `:726` / `:754`, which this task moved. Every POA write 
 | Site (method in `ProvisionProjectEndpoint`) | Writes | When |
 |---|---|---|
 | `EnsureCreatorShareAsync` | GrantAccess / ModifyAccess to the creator | pre-move (share-first), post-move proof, resume (to `createdby`) |
-| `MoveWithCreatorShareAsync` (unverified-move branch) | GrantAccess to the creator | owner read-back threw and share-first had not proven the share |
+| `MoveWithCreatorShareAsync` (unverified-move branch) | `EnsureCreatorShareAsync` (read, Grant/Modify, read back); if that fails, GrantAccess to the creator without a read | owner read-back threw |
 | `RestoreCreatorShareAsync` | RevokeAccess / GrantAccess / ModifyAccess back to the PRE-CALL mask | compensation only — never widens beyond the pre-call state |
-| `ShareToColleaguesAsync` | GrantAccess (Collaborate) to named colleagues | after the creator share is proven |
+| `ShareToColleaguesAsync` | GrantAccess (Collaborate) to named colleagues | after the creator share is proven; on a RESUME only when the caller is the record's `createdby` (verifier round 1) |
+
+A resume whose `createdby` is unusable but where a person already holds a share (verifier round 1) issues NO share — it
+reads the shares and the sharee's systemuser only.
 
 On RESUME, a `createdby` on the record's No Access list must be refused before `EnsureCreatorShareAsync` (comment
 marks the spot in `EnsureResumeCreatorShareAsync`). N6 (refuse provisioning with a message when the creator is walled)
@@ -207,7 +214,7 @@ re-seeded with a runtime-false `Environment.TickCount64 < 0`.
 
 Prerequisites: task 144's live cutover (named team created, role moved) and a BFF deploy carrying task 133.
 
-1. `.\projects\unified-access-control-r2\notes\task-133-live-gate.ps1 -Step ShareFirstProof -TestUserId <existing non-admin test user> -Apply` → records (a), (b) and the compensation replay (e). The compensating path is proven by replaying the endpoint's exact call sequence; production code has no fault-injection switch.
+1. `.\projects\unified-access-control-r2\notes\task-133-live-gate.ps1 -Step ShareFirstProof -TestUserId <existing non-admin test user> -Apply` → records (a), (b) and the compensation replay (e). The compensating path is proven by replaying the endpoint's exact call sequence; production code has no fault-injection switch. **Method caveat (verifier round 1):** this replays the Web API calls from the script — it does NOT execute the endpoint's compensation code (`MoveWithCreatorShareAsync` → `MoveOwnerAsync` back + `RestoreCreatorShareAsync`), which no live state reaches without a fault. Criterion (e) names "the compensation code path", so 🔔 **the owner must explicitly accept replay as the recorded method when the gate is run** (the code path itself is covered by the fixture tests). The script now derives `CreatorAccessRights` from the source at run time and stops if the constant changes shape (task 139 has not landed; re-checked 2026-10-02: the value is `ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess`).
 2. As the test user, create a secure project in the wizard → `-Step Inspect -RecordId <id>`: team-owned, `RetrievePrincipalAccess` = the creator rights, own container recorded (b).
 3. Strand a second wizard-created secure project: `-Step StrandForResume -RecordId <id> -Apply`; call provisioning as an administrator (printed command); `-Step Inspect` → the test user (createdby) has access, container recorded (c).
 4. Call provisioning again on the completed project → 409 `already_provisioned`; `-Step Inspect` before and after: `modifiedon` and shares unchanged (d).
@@ -251,3 +258,61 @@ prettier applied; eslint on changed TS files: 0 errors (1 pre-existing `tenantId
 - **SummarizeFilesDialog** gained the same retry action (second host that provisions; scope found during execution).
 - **Six** reason codes, not "up to two": the container failures and the two new pre-mutation refusals had no code, and the constraint requires one on every new branch.
 - **TASK-INDEX.md / current-task.md** not edited (main session). Publish size not measured (main session).
+
+---
+
+## 11. Verifier round 1 (2026-10-02, branch `task/uac-r2-133-r1`)
+
+An adversarial verifier found nine items. Each, and what closed it:
+
+| # | Finding | Closed by |
+|---|---|---|
+| 1 | RESUME shared to whatever `sharePrincipalIds` held, caller included (probe: a non-creator Write holder named themselves → Collaborate share, 200). Broke "the resume caller receives no share unless they are the creator" | `RefuseResumeColleaguesUnlessCreatorAsync`: on a resume, a request naming colleagues (other than `createdby`) is accepted only when the caller (WhoAmI) IS `createdby`; otherwise **403 `sdap.provision.resume_colleagues_not_permitted`, before any write**. Refused rather than ignored: a silent drop would answer 200 with `additionalPrincipalsShared: 0` to a caller who asked for shares. The wizard never sends colleagues, so it never meets this. Test `ProvisionProject_WhenANonCreatorResumesWithSharePrincipalIds_RefusesBeforeAnyWrite` (the probe, then the same call without the list completes, sharing only to the creator) |
+| 2 | `resume_creator_unavailable`'s stated recovery ("share through Manage Access, then call again") was impossible: the second call was refused the same way forever | Made the stated recovery TRUE rather than documenting a worse one (reassigning the record out of isolation): when `createdby` cannot be used, the resume completes ONLY if a person — an enabled, non-application systemuser — already holds a share carrying Read (an administrator's deliberate Manage Access share), and then shares to nobody (S5 holds; F8 holds: never the caller). Response: 200, `resumed: true`, `creatorUnavailable: true` (additive), `sharedToCreatorSystemUserId` = that person. A share held only by a disabled or application user does not count. Refusal detail and guide §7a rewritten. Test `ProvisionProject_WhenTheCreatorIsUnusable_TheAdministratorsManageAccessShareLetsTheResumeComplete` (409 → 409 with a disabled sharee → 200 with a real one, zero grants) |
+| 3 | Pre-call share set unreadable + compensation revoked a pre-existing creator share, while saying "the share this call issued was removed" and `sharesRestored: true` | The compensation response now tells four states apart: wrote no share ("as they were", true); restore unconfirmed (false); **pre-call unknown → `sharesRestored: false`, `creatorShareRemoved: true`, and a detail naming the removed pre-existing share**; pre-call known and restored (true). The behaviour (a narrowing) is unchanged — it is the §4 residual — but the response no longer claims parity. Tests `Provisioning_WhenCompensatedWithoutAPreCallRead_SaysThePreExistingShareWasRemovedToo` (the verifier's probe) and `Provisioning_WhenCompensatedHavingWrittenNoShare_SaysTheSharesAreAsTheyWere` (the old text was false there too: nothing had been issued) |
+| 4 | No test rendered either host; dropping `<SecureProvisioningOutcome>` or inverting the retryable branch would have swallowed a retryable failure silently | `CreateProjectWizard.provisioningHost.test.tsx` (runs the wizard's own `onFinish` through a stub `CreateRecordWizard` that hands over its config) and `SummarizeFilesWizard/__tests__/SummarizeFilesDialog.provisioningHost.test.tsx` (stub shell, follow-on grid and project step drive the dialog's own state). Each: retryable → "Try securing again" rendered, no warning, the action re-calls for the SAME id and shows success; non-retryable → warning, no action, no advice |
+| 5 | The unverified owner move issued the creator share with a bare GrantAccess (never read back) and claimed "The creator's share is in place" | The branch now runs `EnsureCreatorShareAsync` (complete read, Grant/Modify, read back) — a share proven before the move is no longer assumed to have survived it. Only if that fails is a share issued without a read, and the response then says "issued but NOT confirmed" with `creatorShareConfirmed: false`, naming the administrator resume if the creator cannot open the record. Client copy for `owner_assignment_unverified` no longer asserts access ("A share to you was issued so that you can open it either way"). Tests `Provisioning_WhenTheOwnerMoveIsUnverified_ProvesTheCreatorsShareByARead` (the move drops share-first's grant: re-proven, re-issued) and `…AndTheShareCannotBeReadBack_SaysTheShareIsNotConfirmed` |
+| 6 | `MaskForRightsCsv` / `RightsCsvForMask` had no direct tests; the fixture computes masks with the same function (a tautology) | `tests/integration/auth/UnifiedAccessControl/RecordShareRightsMaskTests.cs`: every right against Dataverse's LITERAL bit and back; the creator/colleague masks computed from those literals over the constants' names (survives task 139); round trip; an unknown name and inexpressible masks refused. Sweep S8b proves the point: moving ShareAccess's bit fails ONLY these tests — every provisioning test stays green |
+| 7 | `record_owner_unreadable` classified retryable although deterministic | Client: `retryable: false`, copy names the administrator; the server detail now says calling again repeats the refusal; guide §7a row split out |
+| 8 | Stale "wizard's business-unit cascade writes that column today" in `SecureContainerDecision.cs:34` | Rewritten to the current contract (the cascade wrote it until task 076; only provisioning writes it on a provisionable root now) |
+| 9 | Live gate (e) replays Web API calls rather than running the endpoint's compensation code; the script hardcoded `CreatorRights` | Script header and §9 state the caveat; 🔔 the owner must explicitly accept replay as the recorded method when the gate runs. The script now derives `CreatorAccessRights` from the source and stops if the constant changes shape. Task 139 has not landed (re-checked: `ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess`) |
+
+**Not closed here, and why**
+- **Publish size** (criterion): measured by the main session by instruction — still outstanding. The CVE half is done:
+  `dotnet list package --vulnerable --include-transitive` on Sprk.Bff.Api reports no vulnerable packages; no package
+  was added or changed in round 1.
+
+**Runs (round 1)**: BFF unit suite 13,606 passed / 0 failed / 54 skipped (13,660; +20 new); NetArchTest 341/341;
+affected classes 153/153; Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 81/81 (8 suites);
+`tsc --noEmit` clean; eslint 0 errors on the changed files; `dotnet format whitespace --verify-no-changes` clean.
+- **Manual live gate (a)–(f)**: pending — read-only run; it needs task 144's live cutover and a BFF deploy. (e) additionally needs the owner's explicit acceptance of the replay method (item 9).
+- **Owner decisions** (not defects): (i) F8 follow-up — a persisted human creator for app-created rows (`createdonbehalfby` is empty; option (a), a server-stamped column), urgent before task 150; round 1 makes the administrator recovery for those rows real (item 2) but does not decide the column. (ii) Assign cascade under COMPENSATION — §3; the owner must confirm the round-4 acceptance extends to it, or choose (a)/(b)/(c).
+
+**New surface (CLAUDE.md §10/§11)** — all inside the existing endpoint; no new endpoint, service, DI registration, option, job, package or column.
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| Reason code `resume_colleagues_not_permitted` | the `sdap.provision.*` set | Extends it; no existing code means "this request asked for something only the creator may do" | Either the widening stays (finding 1) or the colleagues are dropped silently behind a 200 |
+| `ProvisionProjectResponse.CreatorUnavailable` (additive bool) + its TS mirror | `Resumed` | Additive member beside it; `Resumed` alone cannot say that `sharedToCreatorSystemUserId` is NOT the creator | The response would name a person as "the creator shared to" when the call shared to nobody |
+| Private helpers `RefuseResumeColleaguesUnlessCreatorAsync`, `UnusablePersonStateAsync` (extracted from the existing `createdby` check, now reused for sharees), `FindPersonHoldingAShareAsync` | `EnsureResumeCreatorShareAsync` | Private methods of the same endpoint | — (methods, not components) |
+| ProblemDetails extensions `creatorShareRemoved`, `creatorShareConfirmed` | `sharesRestored`, `ownershipRestored` | Same convention | The two false claims (findings 3, 5) stay |
+
+**Perturbation sweep (round 1)** — seed → build → run → restore + touch:
+
+| # | Seeded violation | Result |
+|---|---|---|
+| S1 | resume colleague refusal off | BITES (1) |
+| S2 | holder fallback off | BITES (1) |
+| S3 | the holder's usability not checked (disabled sharee accepted) | BITES (1) |
+| S4 | pre-call-unknown compensation reported as restored | BITES (1) |
+| S5 | "wrote no share" branch skipped | BITES (1) |
+| S6 | unverified branch trusts share-first (no read) | BITES (1) |
+| S7 | an unconfirmed grant reported as confirmed | BITES (1) |
+| S8b | ShareAccess bit moved in the mask table | BITES (3, all in `RecordShareRightsMaskTests`; provisioning tests stay green — the tautology the finding named) |
+| C6 | CreateProjectWizard: outcome render removed | BITES (1) |
+| C7 | CreateProjectWizard: retryable branch inverted | BITES (2) |
+| C8 | SummarizeFilesDialog: outcome render removed | BITES (1) |
+| C9 | SummarizeFilesDialog: retryable branch inverted | BITES (2) |
+| C10 | `record_owner_unreadable` retryable again | BITES (1) |
+
+**13/13 bite.**

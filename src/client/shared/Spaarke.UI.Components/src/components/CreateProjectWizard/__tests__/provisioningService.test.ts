@@ -185,7 +185,10 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.legacy_per_project_bu', 'legacy-provisioning', false],
     // Task 133: refused before any change — nothing moved, the caller still passes the Write gate.
     ['sdap.provision.creator_unresolved', 'not-started', true],
-    ['sdap.provision.record_owner_unreadable', 'not-started', true],
+    // Task 133 verifier round 1: refused before any change, but DETERMINISTIC — the same call is refused again (an
+    // ownerless row; a resume naming colleagues from someone other than the creator), so no retry is offered.
+    ['sdap.provision.record_owner_unreadable', 'not-started', false],
+    ['sdap.provision.resume_colleagues_not_permitted', 'not-started', false],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -231,7 +234,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(22);
+    expect(EMITTED).toHaveLength(23);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

@@ -271,6 +271,46 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       provision call + Inspect (c); second provision call -> 409 with modifiedon/shares unchanged (d); the retry call on a
       container-less stranded record (f). Task 143: the four share-writer sites are listed in note section 7.
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-r1" round="verifier-1">
+      COMPLETED-WITH-ESCALATION (unchanged): all nine verifier findings closed in code/tests/docs; the live gate and two
+      owner decisions remain open. Full record: notes/task-133-provision-creator-lockout.md section 11.
+
+      (1) RESUME colleagues: a resume request naming colleagues (other than createdby) is accepted only when the caller
+          (WhoAmI) IS createdby; otherwise 403 sdap.provision.resume_colleagues_not_permitted before any write (refused,
+          not silently dropped). Closes "the resume caller receives no share unless they are the creator".
+      (2) resume_creator_unavailable recovery made TRUE: with createdby unusable, the resume completes only when an
+          enabled, non-application person already holds a Read share (an administrator's Manage Access share) and then
+          shares to nobody (S5 + F8); response creatorUnavailable=true (additive), sharedToCreatorSystemUserId = that
+          person. Disabled/application sharees do not count. Detail + guide 7a rewritten.
+      (3) Compensation with an unreadable pre-call set: sharesRestored=false, creatorShareRemoved=true, detail names the
+          removed pre-existing share; "wrote no share" told apart. Behaviour (narrowing) unchanged, claim corrected.
+      (4) Host wiring tests: CreateProjectWizard.provisioningHost.test.tsx + SummarizeFilesDialog.provisioningHost.test.tsx.
+      (5) Unverified owner move: the creator share is ENSURED by the complete read (not assumed from share-first); a
+          share issued without a read is reported as NOT confirmed (creatorShareConfirmed=false); client copy no longer
+          asserts access.
+      (6) RecordShareRightsMaskTests pins every Dataverse bit as a literal (sweep S8b: only these tests catch a moved bit).
+      (7) record_owner_unreadable: client retryable=false; server detail and guide name the administrator.
+      (8) SecureContainerDecision.cs stale cascade comment rewritten.
+      (9) Live-gate script: replay caveat for (e) stated (owner must accept replay explicitly); CreatorAccessRights
+          derived from source at run time, stops if its shape changes (task 139 not landed).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11): all in the existing endpoint. New: reason code
+      resume_colleagues_not_permitted (no existing code means "only the creator may ask this"); additive response member
+      CreatorUnavailable (+ TS mirror; Resumed alone cannot say the reported person is not the creator); ProblemDetails
+      extensions creatorShareRemoved / creatorShareConfirmed (same convention as sharesRestored); private helpers only.
+      No new endpoint, service, DI registration, option, job, package or column.
+
+      TESTS: affected BFF classes 153/153 (ProvisionProjectIdempotency + SecureProjectShare + RecordShareRightsMask +
+      InternalUserShare); full BFF unit suite 13,606 passed / 0 failed / 54 skipped (13,660); NetArchTest 341/341;
+      Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 81/81 (8 suites); tsc --noEmit clean; eslint
+      0 errors on changed files; dotnet format whitespace clean. Perturbation sweep 13/13 bite. CVE: dotnet list package
+      --vulnerable --include-transitive on Sprk.Bff.Api reports no vulnerable packages (no package changed).
+
+      NOT CLOSED: publish size (main session measures by instruction); manual live gate (a)-(f) pending (144 cutover +
+      deploy; (e) needs the owner's explicit acceptance of replay); OWNER DECISIONS: F8 follow-up (persisted human
+      creator column for app-created rows, before task 150) and whether the round-4 Assign-cascade acceptance extends to
+      COMPENSATION (POML trigger options a/b/c) - recorded, not decided here.
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>
