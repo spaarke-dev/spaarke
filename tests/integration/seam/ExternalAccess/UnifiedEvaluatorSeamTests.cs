@@ -47,6 +47,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.ExternalAccess;
@@ -750,7 +751,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.SetGrants(GrantsOn(entityType, Direct(restricted, ExternalAccessLevel.FullAccess), Direct(open, ExternalAccessLevel.FullAccess)));
         participations.Flags[restricted] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
 
-        var principal = await ResolveCiamAsync(GrantOnlySut(participations), participations);
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
         var scope = ScopeOf(principal, entityType);
 
         scope.Should().NotContainKey(restricted,
@@ -786,7 +787,7 @@ public sealed class UnifiedEvaluatorSeamTests
         };
         denyReader.AddEntry(subject, row);
 
-        var principal = await ResolveCiamAsync(GrantOnlySut(participations, denyReader), participations);
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations, denyReader));
 
         principal.HasProjectAccess(denied).Should().BeFalse(
             $"FR-23 on CIAM: a {shape} No Access entry vetoes the record after the max, FullAccess grant included");
@@ -809,12 +810,10 @@ public sealed class UnifiedEvaluatorSeamTests
         denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), record));
         var evaluator = GrantOnlySut(participations, denyReader);
 
-        var named = await ResolveCiamAsync(evaluator, participations);
+        var named = await ResolveCiamAsync(evaluator);
         named.HasProjectAccess(record).Should().BeFalse("precondition: the entry denies the contact it names");
 
-        participations.ResolveContactId = colleague;
-        var strategy = new CiamContactPrincipalStrategy(
-            participations, evaluator, NullLogger<CiamContactPrincipalStrategy>.Instance);
+        var strategy = CiamStrategy(evaluator, colleague);
         var resolution = await strategy.ResolveAsync(CiamRequest(), CancellationToken.None);
 
         resolution.Principal!.ContactId.Should().Be(colleague);
@@ -838,7 +837,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.Flags[orgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
         participations.Flags[mixed] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
 
-        var principal = await ResolveCiamAsync(GrantOnlySut(participations), participations);
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
         var scope = ScopeOf(principal, entityType);
 
         RightsIn(scope, orgOnly).Should().Be(AccessRights.None,
@@ -860,7 +859,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.SetGrants(GrantsOn(entityType, Direct(secure, ExternalAccessLevel.Collaborate)));
         participations.Flags[secure] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
 
-        var principal = await ResolveCiamAsync(GrantOnlySut(participations), participations);
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
 
         RightsIn(ScopeOf(principal, entityType), secure).Should().Be(Rights(ExternalAccessLevel.Collaborate),
             "a named DIRECT grant is the one thing Secure keeps for a contact (owner round 2 item 3)");
@@ -892,7 +891,7 @@ public sealed class UnifiedEvaluatorSeamTests
 
         var evaluator = BuildSut(dataverse, membership.Object, participations);
 
-        var ciam = await ResolveCiamAsync(evaluator, participations);
+        var ciam = await ResolveCiamAsync(evaluator);
 
         ciam.GetAccessibleProjectIds().Should().BeEquivalentTo(new[] { granted },
             "owner model (C9): a CIAM contact gets ONLY what it is granted — no standing-grant or " +
@@ -992,7 +991,7 @@ public sealed class UnifiedEvaluatorSeamTests
             orgs: new Dictionary<Guid, (bool Held, ExternalAccessLevel? Baseline)> { [OrgA] = (false, null) });
         var evaluator = BuildSut(dataverse, membership.Object, participations, denyReader);
 
-        var ciam = await ResolveCiamAsync(evaluator, participations);
+        var ciam = await ResolveCiamAsync(evaluator);
         var workforce = await ResolveWorkforceContactAsync(evaluator);
 
         foreach (var entityType in new[] { ProjectEntity, MatterEntity, WorkAssignmentEntity })
@@ -1028,7 +1027,7 @@ public sealed class UnifiedEvaluatorSeamTests
         var denyReader = new SeamNoAccessListReader();
         var evaluator = GrantOnlySut(participations, denyReader);
 
-        var healthy = await ResolveCiamAsync(evaluator, participations);
+        var healthy = await ResolveCiamAsync(evaluator);
         healthy.ProjectAccess.Should().NotBeEmpty("control: the healthy world grants a project");
         healthy.MatterAccess.Should().NotBeEmpty("control: …a matter");
         healthy.WorkAssignmentAccess.Should().NotBeEmpty("control: …and a work assignment");
@@ -1044,7 +1043,7 @@ public sealed class UnifiedEvaluatorSeamTests
             default: throw new ArgumentOutOfRangeException(nameof(fault), fault, "Unknown fault.");
         }
 
-        var faulted = await ResolveCiamAsync(evaluator, participations);
+        var faulted = await ResolveCiamAsync(evaluator);
 
         faulted.ProjectAccess.Should().BeEmpty($"{fault}: fail closed on the CIAM plane — never the grants-only answer");
         faulted.MatterAccess.Should().BeEmpty($"{fault}: fail closed on matters too");
@@ -1054,11 +1053,10 @@ public sealed class UnifiedEvaluatorSeamTests
     [Fact]
     public async Task Ciam_FailClosed_RootFlagReadThrows_TheCallerIsNotResolved_NeverTheGrantsOnlyAnswer()
     {
-        var participations = new ParticipationWorld { ThrowOnFlagRead = true, ResolveContactId = ContactId };
+        var participations = new ParticipationWorld { ThrowOnFlagRead = true };
         participations.SetGrants(GrantsOn(ProjectEntity, Direct(RootId(ProjectEntity, 52), ExternalAccessLevel.FullAccess)));
 
-        var strategy = new CiamContactPrincipalStrategy(
-            participations, GrantOnlySut(participations), NullLogger<CiamContactPrincipalStrategy>.Instance);
+        var strategy = CiamStrategy(GrantOnlySut(participations), ContactId);
 
         var act = () => strategy.ResolveAsync(CiamRequest(), CancellationToken.None);
 
@@ -1082,7 +1080,7 @@ public sealed class UnifiedEvaluatorSeamTests
             Direct(collaborate, ExternalAccessLevel.Collaborate),
             Direct(fullAccess, ExternalAccessLevel.FullAccess)));
 
-        var principal = await ResolveCiamAsync(GrantOnlySut(participations), participations);
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
 
         ScopeOf(principal, entityType).Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
         {
@@ -1123,7 +1121,7 @@ public sealed class UnifiedEvaluatorSeamTests
         set.Contains(openDirect).Should().BeTrue("control: the open record's direct ViewOnly grant still reads");
 
         var workforce = await ResolveWorkforceContactAsync(evaluator);
-        var ciam = await ResolveCiamAsync(evaluator, participations);
+        var ciam = await ResolveCiamAsync(evaluator);
         foreach (var (plane, principal) in new[] { ("workforce", workforce), ("CIAM", ciam) })
         {
             ScopeOf(principal, entityType).Should().Equal(
@@ -1150,7 +1148,7 @@ public sealed class UnifiedEvaluatorSeamTests
         set.Contains(noLevel).Should().BeFalse();
 
         var workforce = await ResolveWorkforceContactAsync(evaluator);
-        var ciam = await ResolveCiamAsync(evaluator, participations);
+        var ciam = await ResolveCiamAsync(evaluator);
         foreach (var (plane, principal) in new[] { ("workforce", workforce), ("CIAM", ciam) })
         {
             ScopeOf(principal, entityType).Should().Equal(
@@ -1315,7 +1313,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.Flags[orgOnly] = Limited;
         participations.Flags[both] = Limited;
 
-        var principal = await ResolveCiamAsync(GrantOnlySut(participations), participations);
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
         var scope = ScopeOf(principal, entityType);
 
         RightsIn(scope, directOnly).Should().Be(Rights(ExternalAccessLevel.Collaborate));
@@ -1351,7 +1349,7 @@ public sealed class UnifiedEvaluatorSeamTests
 
         var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
 
-        var ciam = await ResolveCiamAsync(evaluator, participations);
+        var ciam = await ResolveCiamAsync(evaluator);
         var workforceContact = await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
         var systemUser = await evaluator.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
 
@@ -1431,12 +1429,22 @@ public sealed class UnifiedEvaluatorSeamTests
             "Ciam")),
     };
 
-    private static async Task<CallerPrincipal> ResolveCiamAsync(
-        AccessibleRecordSetService evaluator, ParticipationWorld participations)
+    /// <summary>
+    /// The REAL CIAM strategy over a world where <see cref="CiamOid"/> is bound to <paramref name="contactId"/>.
+    /// Task 141 moved identity resolution to the shared <see cref="ContactIdentityBinder"/>, so the contact is
+    /// named by the identity store, not by the participation service.
+    /// </summary>
+    private static CiamContactPrincipalStrategy CiamStrategy(AccessibleRecordSetService evaluator, Guid contactId)
     {
-        participations.ResolveContactId = ContactId;
-        var strategy = new CiamContactPrincipalStrategy(
-            participations, evaluator, NullLogger<CiamContactPrincipalStrategy>.Instance);
+        var identities = new InMemoryContactIdentityStore();
+        identities.AddContact(contactId, oid: CiamOid, plane: IdentityPlaneMarker.External);
+        return new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(identities), evaluator, NullLogger<CiamContactPrincipalStrategy>.Instance);
+    }
+
+    private static async Task<CallerPrincipal> ResolveCiamAsync(AccessibleRecordSetService evaluator)
+    {
+        var strategy = CiamStrategy(evaluator, ContactId);
 
         var resolution = await strategy.ResolveAsync(CiamRequest(), CancellationToken.None);
 
@@ -1637,7 +1645,6 @@ public sealed class UnifiedEvaluatorSeamTests
         public bool JunctionUnreadable { get; set; }
         public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
         public HashSet<Guid> UnreadableOrgReferences { get; } = new();
-        public Guid? ResolveContactId { get; set; }
 
         public ParticipationWorld()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
@@ -1650,9 +1657,8 @@ public sealed class UnifiedEvaluatorSeamTests
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_grantSet);
 
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult(ResolveContactId);
+        // (Task 141 removed the participation service's contact resolution — there is no email fallback left
+        // in the evaluator for this world to stub.)
 
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

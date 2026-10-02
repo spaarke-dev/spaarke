@@ -1239,8 +1239,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         var composed = new Dictionary<Guid, AccessRights>();
 
         // Resolve the caller's contact + grants FIRST, so the candidate id set is complete before the
-        // single batched flag read. Prefer the derived contact (sprk_primarycontact); fall back to a
-        // verified-email match when the systemuser has no linked contact.
+        // single batched flag read.
+        //
+        // ⚠️ The contact comes ONLY from the systemuser↔contact link (task 141). There used to be an EMAIL
+        // fallback here — ResolveExternalContactAsync(oid: null, email) — that returned an UNBOUND contact on
+        // an email match with $top=1, no ambiguity check and no binding, so a licensed user inherited the
+        // grants of any unbound contact that carried their email. A user with no link gets their link from
+        // ContactIdentityBinder (inline at first resolution, or the identity-link reconciliation job); until
+        // then they have membership only — less access, never someone else's.
         var contactGrantsApplied = false;
         ExternalGrantSet? grants = null;
         // Hoisted out of the `if` below (task 039) so the SAME resolved contact identity that fed the
@@ -1251,13 +1257,6 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         {
             grantContactId =
                 principal.ContactId is { } cid && cid != Guid.Empty ? cid : null;
-
-            if (grantContactId is null && !string.IsNullOrWhiteSpace(principal.Email))
-            {
-                grantContactId = await _participations
-                    .ResolveExternalContactAsync(oid: null, email: principal.Email, ct)
-                    .ConfigureAwait(false);
-            }
 
             if (grantContactId is { } resolved && resolved != Guid.Empty)
             {

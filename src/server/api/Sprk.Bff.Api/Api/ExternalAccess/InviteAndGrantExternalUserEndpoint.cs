@@ -39,11 +39,12 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             // 403: the delegation gate, or (task 139) the caller's own rights allow granting nothing.
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            // 409 (task 139): the request was capped at the caller's level and the EXISTING contact already holds more.
+            // 409: the request was capped at the caller's level and the EXISTING contact already holds more (task 139);
+            // or the onboarding refused the email as an identity collision (task 141).
             .ProducesProblem(StatusCodes.Status409Conflict)
             // 422/503: the record's access policy refused the grant, or could not be read (task 138); or the grantee
             // is on the record's No Access list (task 139). All checked BEFORE onboarding, so a refusal leaves no
-            // Contact, CIAM account or email behind.
+            // Contact, CIAM account or email behind. 503 also: the onboarding's contact lookup could not be read (141).
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -60,6 +61,7 @@ public static class InviteAndGrantExternalUserEndpoint
         CallerRecordAccessProbe callerAccessProbe,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
+        ContactIdentityBinder binder,
         ITenantCache cache,
         IConfiguration configuration,
         HttpContext httpContext,
@@ -126,10 +128,28 @@ public static class InviteAndGrantExternalUserEndpoint
         // never-lower and No Access checks exactly as /grant judges it; a person with no contact yet holds no grant,
         // so only the ceiling and the No Access check on the request's firm apply. Creating the contact first to get
         // an id is forbidden: a refused request must leave no Contact and no CIAM account behind.
-        (Guid ContactId, string? ExistingOid)? existingContact;
+        // Task 141: the match is the binder's ACTIVE-contact invite decision, READ-ONLY (PeekInviteContactAsync — the
+        // same lookup and decision onboarding resolves through, minus the flag writes). An email onboarding would
+        // refuse (ambiguous, workforce-bound, internal-user-linked) reads as "no existing contact" here, so the refusal
+        // — and its durable collision flag — stays owned by onboarding below. An unreadable lookup is the 503 with
+        // the decision's reason code, exactly as onboarding would answer it.
+        Guid? existingContact;
         try
         {
-            existingContact = await InviteExternalUserEndpoint.FindContactByEmailAsync(dataverseClient, request.Email, ct);
+            var peek = await binder.PeekInviteContactAsync(request.Email, ct);
+            if (peek.Action == InviteContactAction.Fail)
+            {
+                var code = peek.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed;
+                return InviteExternalUserEndpoint.LookupFailureResult(
+                    new InviteExternalUserEndpoint.InviteLookupFailure(code,
+                        peek.Message ?? ContactIdentityBinder.InviteMessage(code)
+                        ?? "The invite could not be completed. Nothing was created; try again."),
+                    httpContext);
+            }
+
+            existingContact = peek.Action is InviteContactAction.ProvisionExisting or InviteContactAction.AlreadyProvisioned
+                ? peek.ContactId
+                : null;
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -144,7 +164,7 @@ public static class InviteAndGrantExternalUserEndpoint
         }
 
         var requestedLevel = (ExternalAccessLevel)request.AccessLevel;
-        var preGrantee = existingContact is { ContactId: var foundId } && foundId != Guid.Empty
+        var preGrantee = existingContact is { } foundId && foundId != Guid.Empty
             ? GrantGrantee.ForKey(
                 ExternalGrantKey.ForContact(grantRoot.Type, grantRoot.Id, foundId), request.OrganizationId)
             : GrantGrantee.ProspectiveContact(request.OrganizationId);
@@ -188,8 +208,24 @@ public static class InviteAndGrantExternalUserEndpoint
         string onboardStatus;
         try
         {
-            (contactId, onboardStatus) = await InviteExternalUserEndpoint.ProvisionAsync(
-                request, dataverseClient, ciamProvisioner, emailService, portalUrl, logger, ct);
+            var outcome = await InviteExternalUserEndpoint.ProvisionAsync(
+                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger, ct);
+
+            // Task 141: a refused onboarding writes NO grant. Granting a contact an employee's work identity
+            // owns would hand the employee's contact a CIAM grant it can never use — or worse, one it can.
+            if (outcome.Refusal is { } refusal)
+            {
+                return InviteExternalUserEndpoint.RefusalResult(refusal, httpContext);
+            }
+
+            // Task 141 (verifier finding 5): an unreadable contact lookup is its own answer (503 + reason code),
+            // and — like a refusal — writes no grant.
+            if (outcome.Failure is { } failure)
+            {
+                return InviteExternalUserEndpoint.LookupFailureResult(failure, httpContext);
+            }
+
+            (contactId, onboardStatus) = (outcome.ContactId, outcome.Status);
         }
         catch (Exception ex)
         {

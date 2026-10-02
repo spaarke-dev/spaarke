@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -59,6 +60,13 @@ public class GrantorCeilingTests
     private readonly GrantTableClient _dataverse = new();
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _participations = new(RootRecordFlags.None);
     private readonly GrantPolicyTestDoubles.SeamNoAccessListReader _denyReader = new();
+
+    /// <summary>
+    /// The contact rows the invite resolves against. Since task 141 the onboarding seam reads contacts through
+    /// <see cref="ContactIdentityBinder"/> (ACTIVE rows, two) and the pre-onboarding check reads the SAME decision
+    /// read-only (<see cref="ContactIdentityBinder.PeekInviteContactAsync"/>) - so contacts live in the binder's store.
+    /// </summary>
+    private readonly InMemoryContactIdentityStore _identity = new();
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 4 — the ONE ceiling table
@@ -128,7 +136,7 @@ public class GrantorCeilingTests
     [Fact]
     public async Task InviteAndGrant_FullAccessByACallerWithoutDelete_IsWrittenAtCollaborate_AndSaysSo()
     {
-        _dataverse.SeedContact(ContactId, InviteeEmail, oid: "already-bound");
+        SeedContact(ContactId, InviteeEmail, alreadyProvisioned: true);
 
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.FullAccess), CollaborateCaller);
 
@@ -142,7 +150,7 @@ public class GrantorCeilingTests
     [Fact]
     public async Task InviteAndGrant_FullAccessByACallerWithDelete_IsWrittenAtFullAccess_NotNarrowed()
     {
-        _dataverse.SeedContact(ContactId, InviteeEmail, oid: "already-bound");
+        SeedContact(ContactId, InviteeEmail, alreadyProvisioned: true);
 
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.FullAccess), FullAccessCaller);
 
@@ -243,7 +251,7 @@ public class GrantorCeilingTests
     [Fact]
     public async Task InviteAndGrant_ForAnExistingContactHoldingMore_Is409BeforeOnboarding()
     {
-        _dataverse.SeedContact(ContactId, InviteeEmail, oid: null);
+        SeedContact(ContactId, InviteeEmail, alreadyProvisioned: false);
         _dataverse.Seed(ContactId, null, FullAccess);
 
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.FullAccess), CollaborateCaller);
@@ -284,7 +292,7 @@ public class GrantorCeilingTests
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), callerRights: null);
 
         Problem(result).Should().Be((500, ExternalGrantLifecycle.CallerRightsUnreadableReasonCode));
-        _dataverse.QueriedSets.Should().NotContain("contacts", "the onboarding seam's first step is never reached");
+        _identity.Reads.Should().BeEmpty("the onboarding seam's first step is never reached");
         AssertNothingOnboardedOrWritten();
     }
 
@@ -418,7 +426,7 @@ public class GrantorCeilingTests
     [Fact]
     public async Task InviteAndGrant_WhenTheNoAccessCheckThrowsATimeout_Is422BeforeOnboarding()
     {
-        _dataverse.SeedContact(ContactId, InviteeEmail, oid: null);
+        SeedContact(ContactId, InviteeEmail, alreadyProvisioned: false);
         _participations.ReferencedOrganizationsThrow =
             new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
 
@@ -431,7 +439,7 @@ public class GrantorCeilingTests
     [Fact]
     public async Task InviteAndGrant_ForAnExistingContactOnTheList_Is422BeforeOnboarding()
     {
-        _dataverse.SeedContact(ContactId, InviteeEmail, oid: null);
+        SeedContact(ContactId, InviteeEmail, alreadyProvisioned: false);
         _denyReader.DenyContactOnRecord(ContactId, ProjectId);
 
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
@@ -459,13 +467,50 @@ public class GrantorCeilingTests
     [Fact]
     public async Task InviteAndGrant_ForAnExistingContactNotOnTheList_IsGranted()
     {
-        _dataverse.SeedContact(ContactId, InviteeEmail, oid: "already-bound");
+        SeedContact(ContactId, InviteeEmail, alreadyProvisioned: true);
         _denyReader.DenyContactOnRecord(OtherContactId, ProjectId);
 
         var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
 
         OkBody<InviteAndGrantResponse>(result).OnboardStatus.Should().Be("AlreadyProvisioned");
         _dataverse.ActiveRows.Should().ContainSingle().Which.ContactId.Should().Be(ContactId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Merge of 139 with 141 — the pre-onboarding read is the binder's decision, read-only
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A workforce-bound contact: the pre-check reads it read-only and leaves the refusal to onboarding, which answers
+    /// 409 with its own reason code and raises its durable collision flag exactly once — the pre-check neither
+    /// pre-empts the refusal nor writes a flag of its own.
+    /// </summary>
+    [Fact]
+    public async Task InviteAndGrant_ForAWorkforceBoundContact_Is409FromOnboarding_WithItsFlag_AndNoGrant()
+    {
+        _identity.AddContact(ContactId, InviteeEmail, oid: "0b0b0b0b-0000-0000-0000-0000000001f1",
+            plane: IdentityPlaneMarker.Workforce);
+        // Also on the No Access list: a pre-check that judged the refused contact itself would answer 422 here and
+        // the collision would never be flagged.
+        _denyReader.DenyContactOnRecord(ContactId, ProjectId);
+
+        var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        Problem(result).Should().Be((409, ContactBindingDecision.InviteWorkforceBoundContact));
+        _identity.Contacts[ContactId].Flag.Should().NotBeNull("onboarding still owns the refusal and its flag");
+        _dataverse.Creates.Should().BeEmpty("no grant row and no Contact");
+    }
+
+    /// <summary>An unreadable contact lookup: the pre-check answers 503 with the binder's reason code, never a bare 500.</summary>
+    [Fact]
+    public async Task InviteAndGrant_WhenTheContactLookupCannotBeRead_Is503WithTheReasonCode_AndOnboardsNothing()
+    {
+        _identity.EmailLookupStatus = LookupStatus.Failed;
+
+        var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        Problem(result).Should().Be((503, ContactBindingDecision.InviteContactLookupFailed));
+        AssertNothingOnboardedOrWritten();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -549,8 +594,8 @@ public class GrantorCeilingTests
     private Task<IResult> InviteAndGrant(InviteExternalUserRequest request, AccessRights? callerRights) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            ciamProvisioner: null!, emailService: null!, Mock.Of<ITenantCache>(), PortalConfig(), Context(),
-            NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
+            ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identity), Mock.Of<ITenantCache>(),
+            PortalConfig(), Context(), NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
 
     private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(GrantAccessRequest request, GrantCeiling ceiling) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
@@ -562,7 +607,17 @@ public class GrantorCeilingTests
     {
         _dataverse.Creates.Should().BeEmpty("no Contact and no grant row is created");
         _dataverse.Updates.Should().BeEmpty("no oid is bound and no grant level moves");
+        _identity.Writes.Should().BeEmpty("no contact, binding or collision flag is written");
     }
+
+    /// <summary>
+    /// An active contact carrying the invite email. <paramref name="alreadyProvisioned"/>: bound on the CIAM plane, so
+    /// onboarding is idempotent ("AlreadyProvisioned") and touches neither the CIAM provisioner nor the email service.
+    /// </summary>
+    private void SeedContact(Guid id, string email, bool alreadyProvisioned) =>
+        _identity.AddContact(id, email,
+            oid: alreadyProvisioned ? "0b0b0b0b-0000-0000-0000-000000000139" : null,
+            plane: alreadyProvisioned ? IdentityPlaneMarker.External : null);
 
     private static IConfiguration PortalConfig() => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?> { ["ExternalAccess:PortalUrl"] = "https://portal.test" })
@@ -608,7 +663,7 @@ public class GrantorCeilingTests
     }
 
     /// <summary>
-    /// An in-memory <c>sprk_externalrecordaccess</c> table plus a <c>contacts</c> table, behind the real client's
+    /// An in-memory <c>sprk_externalrecordaccess</c> table (contacts live in the binder's store), behind the real client's
     /// <c>virtual</c> seams. Grant queries are answered by INTERPRETING the production <c>$filter</c>, so a wrong
     /// predicate fails here rather than passing against canned rows.
     /// </summary>
@@ -617,7 +672,6 @@ public class GrantorCeilingTests
         public const string GrantSet = "sprk_externalrecordaccesses";
 
         private readonly List<ExternalGrantRow> _rows = new();
-        private readonly List<(Guid Id, string Email, string? Oid)> _contacts = new();
         private int _seq;
 
         public GrantTableClient()
@@ -651,8 +705,6 @@ public class GrantorCeilingTests
             return row;
         }
 
-        public void SeedContact(Guid id, string email, string? oid) => _contacts.Add((id, email, oid));
-
         private Guid NextId() => Guid.Parse($"bbbbbbbb-0000-0000-0000-{++_seq:D12}");
 
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
@@ -662,10 +714,6 @@ public class GrantorCeilingTests
             object rows = entitySetName switch
             {
                 GrantSet => MatchGrants(filter),
-                "contacts" => _contacts
-                    .Where(c => filter is not null && filter.Contains($"'{c.Email}'", StringComparison.Ordinal))
-                    .Select(c => new Dictionary<string, object?> { ["contactid"] = c.Id, ["sprk_externalobjectid"] = c.Oid })
-                    .ToList(),
                 _ => Array.Empty<object>(),
             };
 

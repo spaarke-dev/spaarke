@@ -873,8 +873,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
                     else
                     {
                         // R4 spec FR-11 / AC-11: Contact-typed membership descriptor whose
-                        // user has no Contact cross-ref via azureactivedirectoryobjectid
-                        // (per ADR-028 canonical mapping) is silently skipped today. Emit a
+                        // user has no linked contact (systemuser.sprk_primarycontact, or the contact
+                        // bound to the user's oid via contact.sprk_externalobjectid — maintained by
+                        // ContactIdentityBinder + the identity-link reconciliation job, task 141).
+                        // The descriptor is skipped (fail closed). Emit a
                         // structured `member_skipped` warning so Application Insights can
                         // pivot on it (traces | where message contains "member_skipped").
                         //

@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -357,8 +358,10 @@ public class OrganizationMembershipReadTests
     /// </summary>
     /// <remarks>
     /// Driven over the real transport for the reason this file's header gives: a double that returned
-    /// <c>Failed</c> would assert the double. The contact is resolved by the REAL oid lookup (the fake serves
-    /// <c>contacts</c>), so identity resolution is the production path, unchanged by task 135.
+    /// <c>Failed</c> would assert the double. The contact is resolved through the shared identity binder
+    /// (task 141) over an in-memory identity store binding <see cref="CiamOid"/> to <see cref="ContactId"/>;
+    /// identity resolution has its own suite (tests/integration/auth/UnifiedAccessControl/IdentityBinding), so
+    /// the transport under test here is the junction read alone.
     /// </remarks>
     [Theory]
     [InlineData("500")]
@@ -369,8 +372,10 @@ public class OrganizationMembershipReadTests
         SeedWorld(dataverse);
         var denyList = new OrgKeyedDenyList();
         var participations = RealParticipationService(dataverse);
+        var identities = new InMemoryContactIdentityStore();
+        identities.AddContact(ContactId, oid: CiamOid, plane: IdentityPlaneMarker.External);
         var strategy = new CiamContactPrincipalStrategy(
-            participations,
+            IdentityBindingTestKit.Binder(identities),
             RealEvaluator(participations, denyList, StandingReader().Object),
             NullLogger<CiamContactPrincipalStrategy>.Instance);
 
@@ -404,11 +409,11 @@ public class OrganizationMembershipReadTests
         };
 
         var resolution = await strategy.ResolveAsync(context, CancellationToken.None);
-        resolution.IsResolved.Should().BeTrue("precondition: the CIAM contact resolves by oid through the real lookup");
+        resolution.IsResolved.Should().BeTrue("precondition: the CIAM contact resolves by its bound oid");
         return resolution.Principal!;
     }
 
-    /// <summary>The CIAM caller's stable oid, bound to <see cref="ContactId"/> by the fake's <c>contacts</c> collection.</summary>
+    /// <summary>The CIAM caller's stable oid, bound to <see cref="ContactId"/> in the test's identity store.</summary>
     private const string CiamOid = "c1a00000-0000-0000-0000-0000000000c1";
 
     /// <summary>
@@ -921,14 +926,6 @@ public class OrganizationMembershipReadTests
                         ["_sprk_assignedlawfirm1_value"] = null,
                         ["_sprk_assignedlawfirm2_value"] = null,
                     }));
-                    return;
-
-                case "contacts":
-                    // Task 135: the CIAM strategy resolves its caller by oid (sprk_externalobjectid). Answer
-                    // only that lookup, and only for the bound oid, so identity resolution stays real.
-                    await WriteValueAsync(context, filter.Contains($"sprk_externalobjectid eq '{CiamOid}'", StringComparison.Ordinal)
-                        ? new[] { new Dictionary<string, object?> { ["contactid"] = ContactId } }
-                        : Array.Empty<Dictionary<string, object?>>());
                     return;
 
                 default:
