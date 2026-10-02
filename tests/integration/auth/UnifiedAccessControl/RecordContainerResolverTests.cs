@@ -159,11 +159,14 @@ public class RecordContainerResolverTests
         // owner C10 part 2 makes every child of a secure record secure — so it can no longer be decided without
         // reading its root link (ChildRecordContainerResolutionTests). The zero-read guarantee now belongs to
         // entities with no ancestor concept, which is what this asserts, unchanged.
+        //
+        // Task 155 f3: moved again, contact → account. The f3 live sweep found contact's own sprk_invoice lookup,
+        // whose target can belong to a matter, so a contact must now be read. account names no root by any column.
         var entityService = Substitute.For<IGenericEntityService>();
         var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
 
         var decision = await resolver.ResolveForRecordAsync(
-            "contact", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+            "account", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
 
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         decision.ContainerId.Should().Be(SharedBuContainer);
@@ -357,12 +360,15 @@ public class RecordContainerResolverTests
     }
 
     [Theory(DisplayName = "Task 151: a real non-securable logical name resolves exactly as before with an explicit fallback (no record read)")]
-    [InlineData("contact")]
     [InlineData("account")]
     public async Task RealNonSecurableEntity_ResolvesAsBefore(string logicalName)
     {
         // `account` is in NO alias table: a real logical name the shared map does not know must still resolve,
         // because the refusal is for names that are not ENTITIES, not for names that are not ALIASES.
+        //
+        // Task 155 f3 removed the `contact` row: the live sweep found contact's own sprk_invoice lookup, whose target
+        // can belong to a matter, so a contact is now READ (and held when that lookup is set) even with a fallback —
+        // ChildRecordContainerResolutionTests.Child_UnderARootOwnedNonCoreRecord_WithNoStamp_IsRefused.
         //
         // Task 155 changed TWO things this theory used to pin, both deliberately:
         //   * sprk_invoice left the data set — it is a CHILD record whose root must be read (owner C10 part 2);

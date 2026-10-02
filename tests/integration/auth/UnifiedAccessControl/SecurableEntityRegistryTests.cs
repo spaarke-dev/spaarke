@@ -100,6 +100,9 @@ public class SecurableEntityRegistryTests
         // the resolve completes on the fallback; what is under test is still only the metadata cost.
         records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)));
+        // Task 155 f3: the same for a contact — its own sprk_invoice lookup (live sweep) means its row is read too.
+        records.RetrieveAsync("contact", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("contact", RecordId)));
 
         var resolver = new RecordContainerResolver(
             harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);

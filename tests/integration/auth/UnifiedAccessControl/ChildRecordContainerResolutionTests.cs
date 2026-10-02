@@ -43,6 +43,17 @@ public class ChildRecordContainerResolutionTests
     private static readonly Guid ServiceRequestId = Guid.Parse("88888888-8888-8888-8888-888888888888");
     private static readonly Guid CommunicationId = Guid.Parse("99999999-9999-9999-9999-999999999999");
     private static readonly Guid BusinessUnitId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static readonly Guid WorkAssignmentId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static readonly Guid AgreementId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid ContactId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+    // sprk_recordtype_ref ids — the LIVE spaarkedev1 ids (read-only, 2026-10-01), so a reader can match a row to dev.
+    private static readonly Guid MatterTypeRef = Guid.Parse("e8547bb4-8600-f111-8407-7c1e520aa4df");
+    private static readonly Guid ProjectTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+    private static readonly Guid CommunicationTypeRef = Guid.Parse("0c0c0c0c-0000-0000-0000-00000000000c");
+    private static readonly Guid ServiceRequestTypeRef = Guid.Parse("144c6790-d58a-f111-8076-7ced8d174eb8");
+    private static readonly Guid ContactTypeRef = Guid.Parse("ca6d46d0-8600-f111-8406-7c1e525abd8b");
+    private static readonly Guid UnclassifiedTypeRef = Guid.Parse("0f0f0f0f-0000-0000-0000-00000000000f");
 
     // ============================================================================================
     // The positive cases — the acceptance criteria
@@ -139,19 +150,21 @@ public class ChildRecordContainerResolutionTests
             "the shared container is a disclosure; the secure one is merely conservative");
     }
 
-    [Fact(DisplayName = "Task 155: a root whose entity CANNOT be secure (service request) is never read")]
-    public async Task Todo_UnderAServiceRequest_DoesNotReadIt_AndResolvesTheBusinessUnit()
+    [Fact(DisplayName = "Task 155: a root whose entity CANNOT be secure in this org is never read")]
+    public async Task Todo_UnderARootTypeThatCannotBeSecure_DoesNotReadIt_AndResolvesTheBusinessUnit()
     {
-        // Live dev: sprk_servicerequest carries no sprk_issecure, so reading the flag would FAULT. Derived from
-        // metadata, so the day it gains the flag it is read without a code change.
-        var world = new World()
-            .WithChild("sprk_todo", regardingServiceRequest: ServiceRequestId)
+        // A root type whose metadata lacks sprk_issecure cannot be secure, and reading the flag would FAULT. Derived
+        // from metadata, so the day it gains the flag it is read without a code change. (f3: until f3 this was pinned
+        // with sprk_servicerequest, which is no longer a root link — it hangs off a matter / project / work
+        // assignment, so it is refused as an intermediate; see Child_FiledUnderAnotherChild_IsRefusedAsUnverifiable.)
+        var world = new World(securable: ["sprk_project", "sprk_matter"])
+            .WithChild("sprk_todo", regardingWorkAssignment: WorkAssignmentId)
             .WithBusinessUnit(BusinessUnitContainer);
 
         var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
 
         decision.ContainerId.Should().Be(BusinessUnitContainer);
-        world.Reads("sprk_servicerequest").Should().Be(0);
+        world.Reads("sprk_workassignment").Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 155: an invoice (securable, own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
@@ -226,12 +239,15 @@ public class ChildRecordContainerResolutionTests
         decision.ContainerId.Should().Be(RootContainer);
     }
 
-    [Fact(DisplayName = "Task 155: with an explicit fallback, an entity with no ancestor concept still costs ZERO record reads")]
+    [Fact(DisplayName = "Task 155: with an explicit fallback, an entity whose row names no root still costs ZERO record reads")]
     public async Task ExplicitFallback_EntityWithNoAncestorConcept_CostsNoRecordRead()
     {
+        // f3: moved from contact to account. A contact's own sprk_invoice lookup names a record that can belong to a
+        // matter (live sweep), so a contact must now be read; account names no root by any column, so it keeps the
+        // zero-read guarantee this pins.
         var world = new World();
 
-        var decision = await world.Resolver().ResolveForRecordAsync("contact", ChildId, ArchiveContainer);
+        var decision = await world.Resolver().ResolveForRecordAsync("account", ChildId, ArchiveContainer);
 
         decision.ContainerId.Should().Be(ArchiveContainer);
         world.TotalReads().Should().Be(0);
@@ -450,6 +466,15 @@ public class ChildRecordContainerResolutionTests
     [InlineData("sprk_event", "sprk_regardingagreement")]
     [InlineData("sprk_event", "sprk_regardingbudget")]
     [InlineData("sprk_event", "sprk_regardingreportcard")]
+    // Task 155 f3: a service request hangs off a matter / project / work assignment (live: its own
+    // sprk_regarding{matter,project,workassignment}) and cannot carry sprk_issecure — an intermediate, not a root.
+    [InlineData("sprk_todo", "sprk_regardingservicerequest")]
+    [InlineData("sprk_event", "sprk_regardingservicerequest")]
+    // Task 155 f3: a work assignment (a ROOT that is itself filed regarding something) under a communication / event /
+    // invoice (live: 1 of 22 work assignments regards an invoice).
+    [InlineData("sprk_workassignment", "sprk_regardingcommunication")]
+    [InlineData("sprk_workassignment", "sprk_regardingevent")]
+    [InlineData("sprk_workassignment", "sprk_regardinginvoice")]
     public async Task Child_FiledUnderAnotherChild_IsRefusedAsUnverifiable(string entity, string intermediateColumn)
     {
         // The stamp says "non-secure project". Nothing re-stamps this record when its communication is re-filed
@@ -479,6 +504,14 @@ public class ChildRecordContainerResolutionTests
     [InlineData("sprk_event", "sprk_regardingreportcard")]
     [InlineData("sprk_event", "sprk_regardingagreement")]
     [InlineData("sprk_event", "sprk_regardingbudget")]
+    // Task 155 f3: the same shape through a service request (core, so CoreAncestorResolver stamps nothing above it),
+    // and the f3 BLOCKING fail-open — an INVOICE regarding an agreement (live lookup sprk_regardingagreement), which
+    // the f2 table gave no intermediate column at all.
+    [InlineData("sprk_todo", "sprk_regardingservicerequest")]
+    [InlineData("sprk_event", "sprk_regardingservicerequest")]
+    [InlineData("sprk_invoice", "sprk_regardingagreement")]
+    // Task 155 f3: a CONTACT's own sprk_invoice lookup (live: 0 contacts set it) — read and held, not trusted.
+    [InlineData("contact", "sprk_invoice")]
     public async Task Child_UnderARootOwnedNonCoreRecord_WithNoStamp_IsRefused(string entity, string column)
     {
         // The live dev shape (to-do a01477e8-… → report card 9d1477e8-… → matter b68299c6-…): CoreAncestorResolver
@@ -501,27 +534,139 @@ public class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0, "a shared container must never be in scope");
     }
 
-    [Theory(DisplayName = "Task 155 f2: the ONE record read requests every root link AND every intermediate column — Dataverse returns nothing it was not asked for")]
-    [InlineData("sprk_todo",
-        "sprk_regardingproject,sprk_regardingmatter,sprk_regardingworkassignment,sprk_regardingservicerequest,"
-        + "sprk_regardinganalysis,sprk_regardingcommunication,sprk_regardingdocument,sprk_regardingevent,"
-        + "sprk_regardinginvoice,sprk_regardingagreement,sprk_regardingbudget,sprk_regardingreportcard")]
-    [InlineData("sprk_event",
-        "sprk_regardingproject,sprk_regardingmatter,sprk_regardingworkassignment,sprk_regardingservicerequest,"
-        + "sprk_regardinganalysis,sprk_regardingcommunication,sprk_regardingevent,sprk_regardinginvoice,"
-        + "sprk_regardingagreement,sprk_regardingbudget,sprk_regardingreportcard")]
-    [InlineData("sprk_invoice", "sprk_matter,sprk_project")]
-    public async Task ChildRecordRead_RequestsEveryLinkAndIntermediateColumn(string entity, string expectedCsv)
+    /// <summary>
+    /// Targets that are NOT ownership and are never followed: security principals, currency, reference / lookup-value
+    /// tables, the AI search index and OOB service entities. Every one was swept for its own lookups (f3): none has a
+    /// lookup to a project, matter or work assignment.
+    /// </summary>
+    private static readonly HashSet<string> NonOwnerTargets = new(StringComparer.Ordinal)
     {
-        // Pinned against a LITERAL list verified on live spaarkedev1 (2026-10-01), not against ChildAncestorLinks
-        // itself, so both "dropped from the table" and "dropped from the read" go red.
-        var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
-            .WithChild(entity, isSecure: entity == "sprk_invoice" ? false : null)
+        "systemuser", "team", "businessunit", "transactioncurrency", "externalparty", "sla",
+        "sprk_recordtype_ref", "sprk_eventtype_ref", "sprk_mattertype_ref", "sprk_practicearea_ref",
+        "sprk_projecttype_ref", "sprk_contacttype_ref", "sprk_eventset", "sprk_aisearchindex", "sprk_chartdefinition",
+    };
+
+    [Theory(DisplayName = "Task 155 f3: the ONE record read requests EXACTLY every column whose target is or can hang off a root, plus the polymorphic pair — pinned against the live lookup sweep")]
+    [InlineData("sprk_todo", true,
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_assignedto>contact;sprk_regardingagreement>sprk_agreement;sprk_regardinganalysis>sprk_analysis;"
+        + "sprk_regardingbudget>sprk_budget;sprk_regardingcommunication>sprk_communication;"
+        + "sprk_regardingcontact>contact;sprk_regardingdocument>sprk_document;sprk_regardingevent>sprk_event;"
+        + "sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;"
+        + "sprk_regardingorganization>sprk_organization;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
+        + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
+        + "sprk_relatedrecordtype>sprk_recordtype_ref")]
+    [InlineData("sprk_event", true,
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_ai_search_index>sprk_aisearchindex;sprk_approvedby>contact;sprk_assignedattorney1>contact;"
+        + "sprk_assignedattorney2>contact;sprk_assignedlawfirm1>sprk_organization;"
+        + "sprk_assignedlawfirm2>sprk_organization;sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;"
+        + "sprk_assignedto>contact;sprk_assignedto1>contact;sprk_assignedto2>contact;"
+        + "sprk_assignedtoexternal>contact;sprk_assignedtointernal>contact;sprk_completedby>contact;"
+        + "sprk_eventset>sprk_eventset;sprk_eventtype_ref>sprk_eventtype_ref;sprk_reassignedby>contact;"
+        + "sprk_regardingaccount>account;sprk_regardingagreement>sprk_agreement;"
+        + "sprk_regardinganalysis>sprk_analysis;sprk_regardingbudget>sprk_budget;"
+        + "sprk_regardingcommunication>sprk_communication;sprk_regardingcontact>contact;"
+        + "sprk_regardingevent>sprk_event;sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;"
+        + "sprk_regardingorganization>sprk_organization;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
+        + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
+        + "sprk_rescheduledby>contact;sprk_todoassigned>contact")]
+    [InlineData("sprk_invoice", true,
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedto1>contact;sprk_assignedto2>contact;"
+        + "sprk_assignedtoattorney1>contact;sprk_assignedtoattorney2>contact;sprk_assignedtoparalegal1>contact;"
+        + "sprk_assignedtoparalegal2>contact;sprk_matter>sprk_matter;sprk_project>sprk_project;"
+        + "sprk_regardingagreement>sprk_agreement;sprk_regardingrecordtype>sprk_recordtype_ref;"
+        + "sprk_securitybu>businessunit;sprk_vendororg>sprk_organization;transactioncurrencyid>transactioncurrency")]
+    [InlineData("sprk_workassignment", true,
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;"
+        + "sprk_assignedlawfirm1>sprk_organization;sprk_assignedlawfirm2>sprk_organization;"
+        + "sprk_assignedlawfirmattorney1>contact;sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;"
+        + "sprk_assignedto>contact;sprk_assignedtoexternal>contact;sprk_assignedtointernal>contact;"
+        + "sprk_mattertype>sprk_mattertype_ref;sprk_practicearea>sprk_practicearea_ref;"
+        + "sprk_regardingcommunication>sprk_communication;sprk_regardingevent>sprk_event;"
+        + "sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_securitybu>businessunit")]
+    [InlineData("sprk_project", true,
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;"
+        + "sprk_assignedlawfirm1>sprk_organization;sprk_assignedlawfirm2>sprk_organization;"
+        + "sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;sprk_assignedtoexternal>contact;"
+        + "sprk_assignedtointernal>contact;sprk_externalaccount>account;sprk_mattertype>sprk_mattertype_ref;"
+        + "sprk_practicearea>sprk_practicearea_ref;sprk_projecttype_ref>sprk_projecttype_ref;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_securitybu>businessunit;"
+        + "transactioncurrencyid>transactioncurrency")]
+    // sprk_matter: a sprk_regardingrecordtype lookup but NO sprk_regardingrecordid column (live), so its row can name
+    // no record — no pair, no links.
+    [InlineData("sprk_matter", false,
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;"
+        + "sprk_assignedlawfirm1>sprk_organization;sprk_assignedlawfirm2>sprk_organization;"
+        + "sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;sprk_assignedtoexternal>contact;"
+        + "sprk_assignedtointernal>contact;sprk_chartdefinition>sprk_chartdefinition;"
+        + "sprk_externalaccount>account;sprk_mattertype>sprk_mattertype_ref;"
+        + "sprk_practicearea>sprk_practicearea_ref;sprk_regardingrecordtype>sprk_recordtype_ref;"
+        + "sprk_securitybu>businessunit;transactioncurrencyid>transactioncurrency")]
+    [InlineData("contact", false,
+        "accountid>account;createdby>systemuser;createdbyexternalparty>externalparty;createdonbehalfby>systemuser;"
+        + "masterid>contact;modifiedby>systemuser;modifiedbyexternalparty>externalparty;"
+        + "modifiedonbehalfby>systemuser;msa_managingpartnerid>account;ownerid>systemuser|team;"
+        + "owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;parentcontactid>contact;"
+        + "parentcustomerid>account|contact;preferredsystemuserid>systemuser;slaid>sla;slainvokedid>sla;"
+        + "sprk_contacttype>sprk_contacttype_ref;sprk_invoice>sprk_invoice;sprk_organization>sprk_organization;"
+        + "sprk_systemuser>systemuser;transactioncurrencyid>transactioncurrency")]
+    public async Task ChildRecordRead_RequestsEveryLinkAndIntermediateColumn(
+        string entity, bool hasPolymorphicPair, string sweptLookups)
+    {
+        // The data is a LITERAL snapshot of the f3 live sweep — spaarkedev1, read-only, 2026-10-01: EVERY
+        // Lookup / Customer / Owner column of the entity with its targets, from
+        // EntityDefinitions(LogicalName='x')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata — and the pair
+        // flag is whether the entity has a sprk_regardingrecordid column (same sweep). The f2 version of this test
+        // claimed "verified on live" for a hand-picked list that missed sprk_invoice.sprk_regardingagreement; here the
+        // expected read is DERIVED from the whole snapshot by target kind, so leaving out a column whose target is or
+        // can hang off a root — from the table OR from the read — goes red, and so does reading anything else.
+        var swept = sweptLookups.Split(';')
+            .Select(item => item.Split('>'))
+            .Select(parts => (Column: parts[0], Targets: parts[1].Split('|')))
+            .ToList();
+
+        foreach (var target in swept.SelectMany(c => c.Targets))
+        {
+            (RecordContainerResolver.ChildAncestorLinks.KindOf(target) is not null || NonOwnerTargets.Contains(target))
+                .Should().BeTrue($"'{target}' must be classified (root / intermediate / party, or a non-owner reference) "
+                                 + "before a re-sweep that contains it can pass");
+        }
+
+        var ownershipColumns = swept
+            .Where(c => c.Targets.Any(t => RecordContainerResolver.ChildAncestorLinks.KindOf(t) is
+                RecordContainerResolver.ChildAncestorLinks.RecordKind.Root
+                or RecordContainerResolver.ChildAncestorLinks.RecordKind.Intermediate))
+            .Select(c => c.Column);
+
+        var securable = SecurableWithInvoice.Contains(entity);
+        var expected = ownershipColumns
+            .Concat(hasPolymorphicPair ? ["sprk_regardingrecordid", "sprk_regardingrecordtype"] : Array.Empty<string>())
+            .Concat(securable ? ["sprk_issecure", "sprk_containerid"] : Array.Empty<string>())
+            .Append("owningbusinessunit")
+            .ToList();
+
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild(entity, isSecure: securable ? false : null)
             .WithBusinessUnit(BusinessUnitContainer);
 
         await world.Resolver().ResolveForRecordAsync(entity, ChildId);
 
-        world.ColumnsRead(entity).Should().Contain(expectedCsv.Split(','));
+        world.Reads(entity).Should().Be(1);
+        world.ColumnsRead(entity).Should().BeEquivalentTo(expected);
     }
 
     [Fact(DisplayName = "Task 155 (escalation trigger 1): a CHILD type whose root link is not known is refused without a read")]
@@ -679,6 +824,375 @@ public class ChildRecordContainerResolutionTests
     }
 
     // ============================================================================================
+    // Task 155 f3, item 1 (BLOCKING) — an invoice regarding an AGREEMENT
+    // ============================================================================================
+
+    [Theory(DisplayName = "Task 155 f3: an invoice regarding an agreement is refused (container_ancestor_unverifiable) — with no typed root, or with a typed link to a different NON-secure root — never the BU container")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Invoice_RegardingAnAgreement_IsRefused(bool withTypedNonSecureProject)
+    {
+        // Live spaarkedev1: sprk_invoice.sprk_regardingagreement → sprk_agreement, and an agreement belongs to a matter /
+        // project through its own sprk_regardingmatter / sprk_regardingproject. The f2 table gave the invoice NO
+        // intermediate column, so an invoice regarding an agreement of a SECURE matter read "no secure root" and resolved
+        // the shared business-unit container. The invoice is securable here, as it is live; its own flag is false.
+        var world = new World(securable: SecurableWithInvoice)
+            .WithChild("sprk_invoice",
+                typedProject: withTypedNonSecureProject ? ProjectId : null,
+                isSecure: false,
+                intermediate: ("sprk_regardingagreement", AgreementId))
+            .WithRoot("sprk_project", ProjectId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("invoice", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0, "a shared container must never be in scope");
+        world.RootReads().Should().Be(0, "the typed non-secure root is not consulted — consulting it is the fail-open");
+    }
+
+    [Fact(DisplayName = "Task 155 f3: an email regarding an invoice that regards an agreement is refused (unverifiable, PERMANENT) — never the archive container")]
+    public async Task Communication_RegardingAnInvoiceThatRegardsAnAgreement_IsAPermanentRefusal()
+    {
+        // The communication path's fail-open: CommunicationContainerResolver asks about the securable invoice, which
+        // read "no secure root", so the attachment went to the shared ARCHIVE container.
+        var world = new World(securable: SecurableWithInvoice)
+            .WithCommunicationRegardingInvoice()
+            .WithChild("sprk_invoice", isSecure: false, intermediate: ("sprk_regardingagreement", AgreementId))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue();
+    }
+
+    // ============================================================================================
+    // Task 155 f3, item 3 — the POLYMORPHIC regarding pair (sprk_regardingrecordid + sprk_regardingrecordtype)
+    // ============================================================================================
+
+    [Fact(DisplayName = "Task 155 f3: an event linked to a SECURE matter ONLY through the polymorphic pair resolves the MATTER's own container — never the BU")]
+    public async Task Event_LinkedOnlyByThePair_ToASecureMatter_ResolvesTheMattersContainer()
+    {
+        // Live: 10 events have every typed regarding NULL and the pair naming a sprk_matter. Ignoring the pair read
+        // "no root" and resolved the business-unit container even if that matter is secure.
+        var world = new World()
+            .WithChild("sprk_event", pairId: MatterId.ToString("D").ToUpperInvariant(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var decision = await world.Resolver().ResolveForRecordAsync("event", ChildId, fallback);
+
+            decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+            decision.ContainerId.Should().Be(RootContainer);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair-only link to a NON-secure matter resolves the BU container — at the cost of one type read and one root read")]
+    public async Task Event_LinkedOnlyByThePair_ToANonSecureMatter_ResolvesItsBusinessUnit()
+    {
+        var world = new World()
+            .WithChild("sprk_event", pairId: MatterId.ToString(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_event", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_event").Should().Be(1);
+        world.Reads("sprk_recordtype_ref").Should().Be(1);
+        world.Reads("sprk_matter").Should().Be(1);
+        world.Reads("businessunit").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair naming a matter that does NOT EXIST is refused (container_ancestor_unresolved 409) — the 10 live dangling events")]
+    public async Task Event_LinkedOnlyByThePair_ToAMatterThatDoesNotExist_IsRefused()
+    {
+        // The pair is a STRING with no referential integrity: deleting the matter leaves the id behind (all 10 live
+        // pair-only events name matters that no longer exist). Unknown is not "no root".
+        var world = new World()
+            .WithChild("sprk_event", pairId: MatterId.ToString(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRootFault("sprk_matter", MatterId, new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist")))
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_event", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 155 f3: a pair naming an INTERMEDIATE type (a record that itself hangs off a root) takes the held path — container_ancestor_unverifiable")]
+    [InlineData("sprk_communication")]
+    [InlineData("sprk_servicerequest")]
+    public async Task Pair_NamingAnIntermediate_IsRefusedAsUnverifiable(string intermediateType)
+    {
+        var typeRef = intermediateType == "sprk_servicerequest" ? ServiceRequestTypeRef : CommunicationTypeRef;
+        var namedId = intermediateType == "sprk_servicerequest" ? ServiceRequestId : CommunicationId;
+
+        var world = new World()
+            .WithChild("sprk_todo", pairId: namedId.ToString(), pairType: typeRef)
+            .WithRecordType(typeRef, intermediateType)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+        world.RootReads().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair naming a PARTY (contact) adds no root — the same as the typed party columns — and resolves the BU container")]
+    public async Task Pair_NamingAParty_AddsNoRoot()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", pairId: ContactId.ToString(), pairType: ContactTypeRef)
+            .WithRecordType(ContactTypeRef, "contact")
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("contact").Should().Be(0, "a party is referenced, never followed");
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair with a record id but NO type is refused (container_ancestor_unresolved 409) — the live to-do 4ff4dc1f shape")]
+    public async Task Pair_WithAnIdButNoType_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", pairId: MatterId.ToString())
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair with a TYPE but no record id names no record — no type read, and the typed links decide (21 live events)")]
+    public async Task Pair_WithATypeButNoId_NamesNoRecord()
+    {
+        var world = new World()
+            .WithChild("sprk_event", pairType: MatterTypeRef)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_event", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_recordtype_ref").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair whose record id is not a GUID is refused (container_ancestor_unresolved 409)")]
+    public async Task Pair_WithAnUnparseableId_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", pairId: "MAT-2026-01234", pairType: MatterTypeRef)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Theory(DisplayName = "Task 155 f3: a pair whose TYPE is unclassified, blank or missing is refused (409); an unreadable type row is 503 — never 'no root'")]
+    [InlineData("sprk_memo", 409)]
+    [InlineData(null, 409)]
+    [InlineData("<not-found>", 409)]
+    [InlineData("<timeout>", 503)]
+    public async Task Pair_WhoseTypeCannotBeClassified_IsRefused(string? typeRow, int expectedStatus)
+    {
+        var world = new World()
+            .WithChild("sprk_todo", pairId: MatterId.ToString(), pairType: UnclassifiedTypeRef)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        _ = typeRow switch
+        {
+            "<not-found>" => world.WithRecordTypeFault(UnclassifiedTypeRef, new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist"))),
+            "<timeout>" => world.WithRecordTypeFault(UnclassifiedTypeRef, new TimeoutException("Dataverse timed out")),
+            _ => world.WithRecordType(UnclassifiedTypeRef, typeRow),
+        };
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+            ex.StatusCode.Should().Be(expectedStatus);
+        }
+
+        world.Reads("businessunit").Should().Be(0);
+        world.RootReads().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a pair naming the SAME record as the typed root agrees by identity — no type read, and the secure root decides")]
+    public async Task Pair_AgreeingWithTheTypedRoot_CostsNoTypeRead()
+    {
+        // The common live shape (the regarding builders stamp both): typed sprk_regardingproject = P, pair = P. The
+        // pair's id is the typed link's id, so it names THAT record — upper-case, as live rows store it.
+        var world = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId,
+                pairId: ProjectId.ToString("D").ToUpperInvariant(), pairType: ProjectTypeRef)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("sprk_recordtype_ref").Should().Be(0);
+        world.TotalReads().Should().Be(2, "the child and its one root — the pair adds no read when it agrees");
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a typed root and a pair naming a DIFFERENT record DISAGREE — refused as ambiguous; neither is picked, nothing more is read")]
+    public async Task Pair_DisagreeingWithTheTypedRoot_IsRefusedAsAmbiguous()
+    {
+        // Both secure, with different containers: picking either would put content where the other's members read it.
+        var world = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId, pairId: MatterId.ToString(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, OtherRootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorAmbiguousCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.RootReads().Should().Be(0);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    // ============================================================================================
+    // Task 155 f3, item 2 — roots and a party whose OWN rows can name a root (live sweep)
+    // ============================================================================================
+
+    [Fact(DisplayName = "Task 155 f3: a NON-secure work assignment filed regarding a SECURE matter resolves the MATTER's own container")]
+    public async Task WorkAssignment_NotSecure_RegardingASecureMatter_ResolvesTheMattersContainer()
+    {
+        // Live: 9 of 22 work assignments carry sprk_regardingmatter / sprk_regardingproject. A work assignment is a
+        // root with its own flag, but one that is not secure and is filed under a secure matter is that matter's child
+        // (owner C10 part 2) — the same rule as a non-secure invoice under a secure matter.
+        var world = new World()
+            .WithChild("sprk_workassignment", regardingMatter: MatterId, isSecure: false)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("workassignment", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a SECURE work assignment keeps its OWN container and never consults the matter it regards")]
+    public async Task WorkAssignment_ItselfSecure_KeepsItsOwnContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_workassignment", regardingMatter: MatterId, isSecure: true, ownContainer: OtherRootContainer)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        decision.ContainerId.Should().Be(OtherRootContainer);
+        world.RootReads().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a work assignment with a NULL flag under a NON-secure matter resolves its BU container (live: most rows)")]
+    public async Task WorkAssignment_NullFlag_UnderANonSecureMatter_ResolvesItsBusinessUnit()
+    {
+        var world = new World()
+            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_matter").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 155 f3: a NON-secure project whose polymorphic pair names a SECURE matter resolves the matter's container (live: 0 projects carry the pair)")]
+    public async Task Project_NotSecure_WhosePairNamesASecureMatter_ResolvesTheMattersContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_project", isSecure: false, pairId: MatterId.ToString(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("project", ChildId);
+
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    // ============================================================================================
+    // Task 155 f3, item 4 — a classification outside the registry's contract is REFUSED
+    // ============================================================================================
+
+    [Theory(DisplayName = "Task 155 f3: an undefined EntitySecurability value is refused (securable_entities_unknown 409) on both overloads, with no read — never the not-securable path")]
+    [InlineData("contact", 3)]
+    [InlineData("account", 99)]
+    [InlineData("sprk_todo", -1)]
+    [InlineData("sprk_project", 7)]
+    public async Task UndefinedClassification_IsRefused(string entity, int undefinedValue)
+    {
+        // Before f3 the code computed isSecurable = (value == Securable), so an undefined value on an entity with no
+        // ancestor links took the NOT-securable branch to a shared container — while the comment claimed the secure
+        // path. account is the sharpest case: with a fallback it would have resolved it with zero reads.
+        var world = new World()
+            .WithClassification(entity, (EntitySecurability)undefinedValue)
+            .WithChild(entity)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync(entity, ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be("securable_entities_unknown");
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.TotalReads().Should().Be(0);
+    }
+
+    // ============================================================================================
     // MACHINERY — an in-memory org
     // ============================================================================================
 
@@ -691,8 +1205,12 @@ public class ChildRecordContainerResolutionTests
         private readonly HashSet<string> _known = new(StringComparer.Ordinal)
         {
             "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_invoice",
-            "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit"
+            "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit",
+            "account", "sprk_organization", "sprk_agreement", "sprk_budget", "sprk_reportcard", "sprk_analysis",
+            "sprk_recordtype_ref",
         };
+
+        private readonly Dictionary<string, EntitySecurability> _classificationOverrides = new(StringComparer.Ordinal);
 
         /// <param name="securable">Entities carrying sprk_issecure in this world.</param>
         /// <param name="unknown">Entities this world's org does NOT know (classified NotAnEntity).</param>
@@ -738,12 +1256,14 @@ public class ChildRecordContainerResolutionTests
             string entity,
             Guid? regardingProject = null,
             Guid? regardingMatter = null,
-            Guid? regardingServiceRequest = null,
+            Guid? regardingWorkAssignment = null,
             Guid? typedMatter = null,
             Guid? typedProject = null,
             bool? isSecure = null,
             string? ownContainer = null,
-            (string Column, Guid Id)? intermediate = null)
+            (string Column, Guid Id)? intermediate = null,
+            string? pairId = null,
+            Guid? pairType = null)
         {
             var row = new Entity(entity, ChildId)
             {
@@ -752,17 +1272,49 @@ public class ChildRecordContainerResolutionTests
 
             if (regardingProject is { } p) row["sprk_regardingproject"] = new EntityReference("sprk_project", p);
             if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
-            if (regardingServiceRequest is { } s)
-                row["sprk_regardingservicerequest"] = new EntityReference("sprk_servicerequest", s);
+            if (regardingWorkAssignment is { } w)
+                row["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", w);
             if (typedMatter is { } tm) row["sprk_matter"] = new EntityReference("sprk_matter", tm);
             if (typedProject is { } tp) row["sprk_project"] = new EntityReference("sprk_project", tp);
             if (isSecure is { } secure) row["sprk_issecure"] = secure;
             if (ownContainer is not null) row["sprk_containerid"] = ownContainer;
-            // sprk_regarding{x} targets sprk_{x} for every intermediate column on to-do and event (live metadata).
+            // Live metadata: sprk_regarding{x} targets sprk_{x}; contact's typed sprk_invoice targets sprk_invoice.
             if (intermediate is { } i)
-                row[i.Column] = new EntityReference("sprk_" + i.Column["sprk_regarding".Length..], i.Id);
+            {
+                var target = i.Column.StartsWith("sprk_regarding", StringComparison.Ordinal)
+                    ? "sprk_" + i.Column["sprk_regarding".Length..]
+                    : i.Column;
+                row[i.Column] = new EntityReference(target, i.Id);
+            }
+
+            // The polymorphic regarding pair: a STRING id and a lookup to sprk_recordtype_ref (live metadata).
+            if (pairId is not null) row["sprk_regardingrecordid"] = pairId;
+            if (pairType is { } t) row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", t);
 
             _rows[(entity, ChildId)] = () => row;
+            return this;
+        }
+
+        /// <summary>A <c>sprk_recordtype_ref</c> row: the pair's type id → the entity logical name it stands for.</summary>
+        public World WithRecordType(Guid typeRefId, string? logicalName)
+        {
+            var row = new Entity("sprk_recordtype_ref", typeRefId);
+            if (logicalName is not null) row["sprk_recordlogicalname"] = logicalName;
+
+            _rows[("sprk_recordtype_ref", typeRefId)] = () => row;
+            return this;
+        }
+
+        public World WithRecordTypeFault(Guid typeRefId, Exception fault)
+        {
+            _rows[("sprk_recordtype_ref", typeRefId)] = () => throw fault;
+            return this;
+        }
+
+        /// <summary>The registry answers <paramref name="value"/> for <paramref name="entity"/> — any value, defined or not.</summary>
+        public World WithClassification(string entity, EntitySecurability value)
+        {
+            _classificationOverrides[entity] = value;
             return this;
         }
 
@@ -837,7 +1389,10 @@ public class ChildRecordContainerResolutionTests
         {
             var registry = Substitute.For<ISecurableEntityRegistry>();
             registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-                .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), _securable, _known)));
+                .Returns(call => Task.FromResult(
+                    _classificationOverrides.TryGetValue(call.Arg<string>(), out var overridden)
+                        ? overridden
+                        : TestEntityCatalog.Classify(call.Arg<string>(), _securable, _known)));
             registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult<IReadOnlySet<string>>(_securable));
             return registry;
@@ -850,8 +1405,10 @@ public class ChildRecordContainerResolutionTests
 
         public int TotalReads() => ReadCalls().Count();
 
+        /// <summary>Reads of a project / matter / work assignment / service request OTHER than the record being resolved.</summary>
         public int RootReads() => ReadCalls().Count(c =>
-            CoreAncestorResolver.IsCoreRecordEntity((string)c.GetArguments()[0]!));
+            CoreAncestorResolver.IsCoreRecordEntity((string)c.GetArguments()[0]!)
+            && (Guid)c.GetArguments()[1]! != ChildId);
 
         public IEnumerable<string> ColumnsRead(string entity) => ReadCalls()
             .Where(c => (string)c.GetArguments()[0]! == entity)

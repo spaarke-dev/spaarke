@@ -604,6 +604,31 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.Uploads.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "Task 155 f3: PUT for a to-do linked to a SECURE project ONLY through the polymorphic regarding pair stores the file in the PROJECT's own container")]
+    public async Task Put_TodoLinkedOnlyByThePolymorphicPair_ToASecureProject_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoLinkedOnlyByPairToSecureProject}/files/pair.docx",
+            new ByteArrayContent([11]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "a row whose only link is the polymorphic pair is still that project's child");
+    }
+
+    [Fact(DisplayName = "Task 155 f3: PUT for an invoice regarding an AGREEMENT is refused (409 container_ancestor_unverifiable) and NOTHING reaches SPE")]
+    public async Task Put_InvoiceRegardingAnAgreement_IsRefused_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/invoice/{RecordKeyedUploadRouteFixture.InvoiceRegardingAgreement}/files/inv.pdf",
+            new ByteArrayContent([12]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await response.Content.ReadAsStringAsync()).Should().Contain(RecordContainerResolver.AncestorUnverifiableCode);
+        _fixture.Uploads.Should().BeEmpty("before f3 this resolved the shared business-unit container");
+    }
+
     [Fact(DisplayName = "Task 155: an event with no ancestor whose business unit has NO container answers the documented 409 with precise copy, and NOTHING reaches SPE")]
     public async Task Put_EventWithNoAncestor_AndABusinessUnitWithoutContainer_AnswersTheDocumented409()
     {
@@ -631,6 +656,11 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     public static readonly Guid TodoUnderUnprovisionedSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000004");
     public static readonly Guid TodoWhoseRowCannotBeRead = Guid.Parse("15500000-0000-0000-0000-000000000005");
     public static readonly Guid EventInBusinessUnitWithoutContainer = Guid.Parse("15500000-0000-0000-0000-000000000006");
+    public static readonly Guid TodoLinkedOnlyByPairToSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000007");
+    public static readonly Guid InvoiceRegardingAgreement = Guid.Parse("15500000-0000-0000-0000-000000000008");
+
+    private static readonly Guid ProjectTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+    private static readonly Guid Agreement = Guid.Parse("15500000-0000-0000-0000-000000000010");
 
     public const string UnreadableRowFaultText = "Dataverse timed out reading the to-do";
 
@@ -681,7 +711,7 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
         var known = new HashSet<string>(StringComparer.Ordinal)
         {
             "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_todo", "sprk_event",
-            "sprk_invoice", "sprk_communication", "contact", "businessunit"
+            "sprk_invoice", "sprk_communication", "contact", "businessunit", "sprk_agreement", "sprk_recordtype_ref"
         };
 
         var registry = Substitute.For<ISecurableEntityRegistry>();
@@ -737,6 +767,24 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
                 ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitWithoutContainer)
             },
             [("businessunit", BusinessUnitWithoutContainer)] = new("businessunit", BusinessUnitWithoutContainer),
+            // Task 155 f3: every typed regarding NULL, the polymorphic pair naming the SECURE project (live shape:
+            // a STRING id, upper-case, plus a sprk_recordtype_ref lookup).
+            [("sprk_todo", TodoLinkedOnlyByPairToSecureProject)] = new("sprk_todo", TodoLinkedOnlyByPairToSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingrecordid"] = SecureProject.ToString("D").ToUpperInvariant(),
+                ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectTypeRef)
+            },
+            [("sprk_recordtype_ref", ProjectTypeRef)] = new("sprk_recordtype_ref", ProjectTypeRef)
+            {
+                ["sprk_recordlogicalname"] = "sprk_project"
+            },
+            // Task 155 f3 item 1: an invoice regarding an agreement, typed matter/project NULL.
+            [("sprk_invoice", InvoiceRegardingAgreement)] = new("sprk_invoice", InvoiceRegardingAgreement)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingagreement"] = new EntityReference("sprk_agreement", Agreement)
+            },
         };
 
         var service = Substitute.For<IGenericEntityService>();

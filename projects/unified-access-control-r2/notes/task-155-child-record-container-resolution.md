@@ -50,6 +50,10 @@ is never consulted.
 
 ## Live metadata verified (read-only, spaarkedev1, 2026-10-01)
 
+> **Superseded by "Round f3" below.** The table here was hand-picked and incomplete: it missed
+> `sprk_invoice.sprk_regardingagreement` and the polymorphic regarding pair, and it treated
+> `sprk_regardingservicerequest` as a root link. The f3 section holds the full column-by-column sweep.
+
 **Child link columns:**
 
 | Entity | Root links | Intermediate (child) regarding columns |
@@ -253,3 +257,278 @@ they get stamped; option (a) reads the intermediate's root live); the AC7 live g
 filed under a report card must answer 409 `container_ancestor_unverifiable`); the read-budget note (a child
 carrying two root stamps costs two root reads — needed to detect the two-secure-roots ambiguity, documented as
 "one in practice"); the SPE-membership 403 observation.
+
+## Round f3: third adversarial-verifier findings (branch `task/uac-r2-155-f3`)
+
+The f2 verifier judged NEEDS-FIXES. Every item below is closed in code; the owner decisions that remain are listed
+at the end.
+
+### Item 1 (BLOCKING fail-open): an invoice regarding an agreement
+
+`sprk_invoice` has a live lookup `sprk_regardingagreement → sprk_agreement`, and an agreement belongs to a matter or
+project (its own `sprk_regardingmatter` / `sprk_regardingproject`). The f2 table gave the invoice **no** intermediate
+column. An invoice regarding an agreement of a SECURE matter therefore read "no secure root":
+
+- with no typed `sprk_matter` / `sprk_project`, or a typed link to a different non-secure root, it resolved the
+  shared business-unit container;
+- on the communication path, it resolved the shared archive container.
+
+**Fix:** `sprk_regardingagreement` is an intermediate on the invoice, so the invoice takes the same held path as every
+other child-under-a-child: `container_ancestor_unverifiable` (409). On the inbound path that refusal is classified as
+permanent. Options (a) and (b) of escalation trigger 2 are NOT implemented.
+
+**Live:** 0 of 10 invoices set it today.
+
+### Item 2: the systematic live sweep
+
+**Method.** Read-only, against spaarkedev1, 2026-10-01:
+
+- `GET EntityDefinitions(LogicalName='x')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata?$select=LogicalName,Targets,AttributeType`
+  for every Lookup, Customer and Owner column;
+- `GET EntityDefinitions(LogicalName='x')/Attributes` filtered client-side, to find the polymorphic pair columns.
+
+**Which entities were swept.** Every entity in `ChildAncestorLinks`, plus every entity the resolver can be asked
+about:
+
+- the OBO record-keyed routes (`EntityAccessFilter.EntitySetByType`): contact, project, matter, work assignment,
+  invoice, event, to-do;
+- the Office save path (`DocumentAssociationMap`): the same set;
+- Compose: `sprk_matter`;
+- the external project endpoint: `sprk_project`;
+- the communication adapter: the securable regardings (project, matter, work assignment, invoice).
+
+**How each target was classified.** Every target was then swept for its OWN lookups:
+
+- **root**: project, matter, work assignment;
+- **intermediate**: a record that has, or can have, a root;
+- **party**: a person or organization, which is not ownership;
+- **reference / principal**: not ownership, never followed.
+
+Total: 188 lookup columns across 7 entities, plus 24 target entities swept for their own lookups: the 18 Spaarke and
+OOB record or reference targets, and the 6 principal and system targets (systemuser, team, businessunit,
+transactioncurrency, externalparty, sla).
+
+| Entity (lookups) | Root links (READ, flag + container checked) | Intermediate (HELD: `container_ancestor_unverifiable`) | Party (not ownership, not read) | Reference / principal / system (not read) | Polymorphic pair |
+|---|---|---|---|---|---|
+| `sprk_todo` (25) | `sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment` | `sprk_regarding{analysis, communication, document, event, invoice, agreement, budget, reportcard, servicerequest}` | `sprk_assignedto`, `sprk_regardingcontact` → contact; `sprk_regardingorganization` → sprk_organization | `sprk_regardingrecordtype` (the pair's type), `sprk_relatedrecordtype` → sprk_recordtype_ref (a type with no id column, so it names no record); createdby / createdonbehalfby / modifiedby / modifiedonbehalfby / owninguser → systemuser; ownerid → systemuser\|team; owningteam → team; owningbusinessunit → businessunit (the BU-container source) | YES — `sprk_regardingrecordid` (String) + `sprk_regardingrecordtype` |
+| `sprk_event` (42) | the same three | `sprk_regarding{analysis, communication, event, invoice, agreement, budget, reportcard, servicerequest}` | `sprk_approvedby`, `sprk_assignedattorney1/2`, `sprk_assignedparalegal1/2`, `sprk_assignedto`, `sprk_assignedto1/2`, `sprk_assignedtoexternal/internal`, `sprk_completedby`, `sprk_reassignedby`, `sprk_rescheduledby`, `sprk_todoassigned`, `sprk_regardingcontact` → contact; `sprk_assignedlawfirm1/2`, `sprk_regardingorganization` → sprk_organization; `sprk_regardingaccount` → account | `sprk_ai_search_index` → sprk_aisearchindex; `sprk_eventset` → sprk_eventset; `sprk_eventtype_ref`; `sprk_regardingrecordtype`; the 8 system columns | YES (it also has a `sprk_regardingrecordtypelogicalname` String, NULL on every live row, so it is not used) |
+| `sprk_invoice` (22) | typed `sprk_project`, `sprk_matter` | **`sprk_regardingagreement`** → sprk_agreement (item 1) | `sprk_assignedto1/2`, `sprk_assignedtoattorney1/2`, `sprk_assignedtoparalegal1/2` → contact; `sprk_vendororg` → sprk_organization | `sprk_ai_search_index`; `sprk_regardingrecordtype`; `sprk_securitybu` → businessunit (a security BU, not a root); `transactioncurrencyid`; the 8 system columns | YES |
+| `sprk_workassignment` (28) | `sprk_regardingproject`, `sprk_regardingmatter` | `sprk_regardingcommunication`, `sprk_regardingevent`, `sprk_regardinginvoice` | `sprk_assignedattorney1/2`, `sprk_assignedlawfirmattorney1`, `sprk_assignedparalegal1/2`, `sprk_assignedto`, `sprk_assignedtoexternal/internal` → contact; `sprk_assignedlawfirm1/2` → sprk_organization | `sprk_ai_search_index`; `sprk_mattertype` → sprk_mattertype_ref; `sprk_practicearea` → sprk_practicearea_ref; `sprk_regardingrecordtype`; `sprk_securitybu`; the 8 system columns | YES |
+| `sprk_project` (24) | — | — | `sprk_assignedattorney1/2`, `sprk_assignedparalegal1/2`, `sprk_assignedtoexternal/internal` → contact; `sprk_assignedlawfirm1/2` → sprk_organization; `sprk_externalaccount` → account | `sprk_ai_search_index`; `sprk_mattertype`; `sprk_practicearea`; `sprk_projecttype_ref`; `sprk_regardingrecordtype`; `sprk_securitybu`; `transactioncurrencyid`; the 8 system columns | YES (0 live projects set it) |
+| `sprk_matter` (24) | — | — | as project | as project, plus `sprk_chartdefinition` → sprk_chartdefinition; `sprk_regardingrecordtype` exists but there is **no** `sprk_regardingrecordid` column, so the row can name no record | NO |
+| `contact` (23) | — | **`sprk_invoice`** → sprk_invoice (0 live contacts set it) | `accountid`, `msa_managingpartnerid` → account; `masterid`, `parentcontactid` → contact; `parentcustomerid` → account\|contact; `sprk_organization` → sprk_organization | `sprk_systemuser`, `preferredsystemuserid` → systemuser; `createdbyexternalparty` / `modifiedbyexternalparty` → externalparty; `slaid` / `slainvokedid` → sla; `sprk_contacttype` → sprk_contacttype_ref; `transactioncurrencyid`; the 8 system columns | NO (`contact_regardingrecordnumber` is a display string only) |
+
+**How each target entity was classified, from its own lookups (live):**
+
+| Target | Its own lookups that matter | Kind |
+|---|---|---|
+| sprk_project, sprk_matter, sprk_workassignment | carry `sprk_issecure` and `sprk_containerid` | **Root** |
+| sprk_agreement | `sprk_regardingmatter`, `sprk_regardingproject`, `sprk_regardingdocument` | Intermediate |
+| sprk_budget | typed `sprk_matter`, `sprk_project` | Intermediate |
+| sprk_reportcard | `sprk_regardingmatter`, `sprk_regardingproject` | Intermediate |
+| sprk_servicerequest | `sprk_regarding{matter, project, workassignment, communication, invoice, todo, …}`; carries **no** `sprk_issecure` | Intermediate (**reclassified in f3**, see below) |
+| sprk_analysis, sprk_communication, sprk_document, sprk_event, sprk_invoice, sprk_todo | the child taxonomy: a root stamp written once and never refreshed | Intermediate (trigger 2) |
+| contact, account, sprk_organization | no lookup to a root (contact and organization carry `sprk_invoice`, a reference) | Party |
+| systemuser, businessunit, transactioncurrency, externalparty, sla, sprk_recordtype_ref, sprk_eventtype_ref, sprk_mattertype_ref, sprk_practicearea_ref, sprk_projecttype_ref, sprk_contacttype_ref, sprk_eventset, sprk_aisearchindex, sprk_chartdefinition | no lookup to a root or an intermediate | Reference / principal |
+| team | `regardingobjectid` CAN target sprk_matter / sprk_project / sprk_document / sprk_event / sprk_invoice. That column belongs to ACCESS teams. An access team cannot own a record (only owner teams can), so `ownerid` / `owningteam` never names a record-regarding team. Live: 0 teams carry a `regardingobjectid`. | Principal |
+
+**What the sweep changed in code** (`RecordContainerResolver.ChildAncestorLinks`). The table is now one literal
+`column → target` list per entity. Root links and intermediate columns are derived from it through a single
+`KindByEntity` table.
+
+- **`sprk_invoice`**: + `sprk_regardingagreement` (intermediate); + the pair.
+- **`sprk_todo` / `sprk_event`**:
+  - `sprk_regardingservicerequest` moved from root link to **intermediate**. A service request cannot carry
+    `sprk_issecure`, but it hangs off a matter, project or work assignment. Because it is a CORE record,
+    `CoreAncestorResolver` stamps nothing above it on the child, so a to-do under a service request of a SECURE
+    matter resolved the business-unit container. This is the same fail-open as the f2 agreement shape, and the f2
+    test pinned it as correct.
+  - Live: 0 to-dos and 0 events regard a service request, and there are 0 service requests.
+  - Both entities also gain the pair.
+- **`sprk_workassignment`** (NEW entry). Root links `sprk_regardingproject` / `sprk_regardingmatter`; intermediates
+  `sprk_regarding{communication, event, invoice}`; and the pair.
+  - Its OWN `sprk_issecure` still decides first: a secure work assignment keeps its own container.
+  - A NON-secure work assignment filed regarding a SECURE matter now resolves the matter's container. This is the
+    same rule as a non-secure invoice under a secure matter.
+  - Live: 9 of 22 work assignments regard a matter or project, none secure, so the outcome is unchanged at +1 read.
+    1 regards an invoice (`b10b7dab-…`) and is now held.
+- **`sprk_project`** (NEW entry): the pair only. Live: 0 projects carry it.
+- **`contact`** (NEW entry): `sprk_invoice` as an intermediate. Live: 0 contacts set it.
+  - f2 judged this a party → invoice reference and flagged the reading for the owner.
+  - The f3 brief's rule ("any column whose target can be or can hang off a root MUST be read and checked, or
+    refused") makes it read-and-held.
+  - Consequence: the four-argument overload now READS a contact (it used to read nothing). No production caller
+    passes an explicit fallback, so this costs nothing live. The zero-read pins moved from contact to `account`.
+- **`sprk_matter`**: no entry. Its row can name no record.
+
+`ChildRecordRead_RequestsEveryLinkAndIntermediateColumn` now pins the swept table as data:
+
+- It carries the LITERAL `column>target` snapshot for all 7 entities, plus the pair flag.
+- It derives the expected read from that snapshot by target kind, and asserts the one record read equals it EXACTLY.
+- It fails if a re-sweep brings a target nobody has classified.
+
+The f2 wording "verified on live" was wrong: it described a hand-picked list that missed
+`sprk_invoice.sprk_regardingagreement`. The test now names its source (the f3 sweep) and its method.
+
+### Item 3: the polymorphic regarding pair (`sprk_regardingrecordid` + `sprk_regardingrecordtype`)
+
+**The pair.**
+
+- `sprk_regardingrecordid` is a STRING with no referential integrity. Live rows store it in mixed case.
+- `sprk_regardingrecordtype` is a lookup to `sprk_recordtype_ref`, whose `sprk_recordlogicalname` names the entity.
+
+**What changed.** The pair is now read for every entity in the table that has it: to-do, event, invoice, work
+assignment and project. The rules, in order (`RecordContainerResolver.ResolvePolymorphicRegardingAsync`):
+
+1. **No record id**: the pair names no record and adds nothing. A type with no id, which is 21 live events and 1
+   live to-do, names no record either.
+2. **An id that is not a GUID**: refused, `container_ancestor_unresolved` 409.
+3. **The id equals a typed root link's id on the same row**: the pair names that same record. This is agreement by
+   identity: nothing new, and no read.
+4. **A typed root link is set and the pair names a DIFFERENT record**: refused as ambiguous,
+   `container_ancestor_ambiguous` 409. Neither link is picked, and nothing more is read.
+5. **The pair is the only thing naming a record**: its type decides. The type is read from `sprk_recordtype_ref`,
+   which costs one read.
+   - A **root** joins the same list as the typed roots, so it is flag-checked, container-checked and counted in the
+     two-secure-roots ambiguity check.
+   - A root that does **not exist** refuses, `container_ancestor_unresolved` 409.
+   - An **intermediate** takes the held path: `container_ancestor_unverifiable`.
+   - A **party** (contact, account, organization) adds nothing, exactly like the typed party columns.
+   - A missing type (`container_ancestor_unresolved` 409), an unreadable type row (503), or a type the table does
+     not classify (409) is refused.
+
+**Live consequences:**
+
+- **The verifier's 10 pair-only events** all name one of 4 matter ids (`C4EF17ED-…`, `050995F1-…`, `97962160-…`,
+  `D57BC02F-…`). None of the 4 exists any more: the matters were deleted, and the string id stayed behind. These
+  events now refuse uploads with `container_ancestor_unresolved` 409. Before f3 they resolved the business-unit
+  container. Cleaning the dangling ids is a data fix, not done here because no live writes were allowed.
+- **To-do `4ff4dc1f-…`** has a pair id with no type and no typed link. It is now refused with 409.
+- **Event `a6d00177-…`** has typed `sprk_regardingproject = b12496d1` and a pair with the same id but type "Matter".
+  By rule 3 it resolves through its typed project, so it is unchanged. The typed lookup is referentially enforced, so
+  a mislabelled type cannot hide a second record. Owner flag 2 below covers this.
+- **Typed links that disagree with the pair by id:** 0 live.
+
+**Why rule 3 does not read the type.** A type read on rule 3 would add one Dataverse read to the commonest live shape
+(the regarding builders stamp the typed column and the pair together). The only thing it could detect is a
+mislabelled type, and the content goes to the right root either way. Item 5 allows extra reads only where they make
+the answer fail closed.
+
+### Item 4: comment vs code on an undefined `EntitySecurability`
+
+**Before.** The comment said an undefined value "takes the secure path". The code computed
+`isSecurable = securability == Securable`, so for an entity with no links an undefined value took the NOT-securable
+branch: zero reads with a fallback, else the business-unit container.
+
+**Now.** Any value other than `NotSecurable` / `Securable` (`NotAnEntity` was already refused) is refused with
+`securable_entities_unknown` 409 before any read. That is the existing code for "securability could not be
+determined". The comment states what the code does.
+
+`UndefinedClassification_IsRefused` covers contact, account, to-do and project on both overloads, and asserts that no
+read happens.
+
+### Item 5: the read budget after f3 (two-argument overload; the four-argument overload skips the BU read)
+
+| Shape | Before f3 | After f3 |
+|---|---|---|
+| To-do / event / invoice, no link set | 2 (row + BU) | 2 |
+| Typed root, plus an agreeing pair (the commonest live shape), root not secure | 3 (row + root + BU) | **3**: the pair costs nothing |
+| The same, root secure | 2 | 2 |
+| Two typed roots | 2 root reads (needed for the ambiguity check) | unchanged |
+| Pair is the only link, naming a root | 2 (row + BU: **the leak**) | 4 (row + type + root + BU); 3 if the root is secure |
+| Pair is the only link, naming a party | 2 | 3 (row + type + BU) |
+| Pair is the only link, naming an intermediate | 2 (**leak**) | 2 (row + type; refused) |
+| Filed under a typed intermediate (now incl. service request, invoice → agreement, contact → invoice) | 1, or 2 (**leak**) for the shapes new in f3 | 1 (refused) |
+| Work assignment, secure | 1 | 1 |
+| Work assignment, not secure, regarding a root (+ agreeing pair) | 2 (row + BU) | 3 (row + root + BU); 2 if the root is secure |
+| Project / matter, not secure, no pair | 2 | 2 |
+| Contact (two-argument) | 2 | 2 |
+| Contact (four-argument; no production caller) | 0 | 1 |
+| Undefined classification | 0 to 2 | 0 (refused) |
+
+Each new read is one that decides whether a secure root is involved. No extra metadata round trip is added: the root
+classification still comes from the scope-memoized catalog.
+
+### Unchanged contract, deliberately
+
+- A read fault on the row of a ROOT or a CONTACT still propagates raw (fail-closed: nothing below runs). Only a CHILD
+  row fault becomes the typed 503, as in f1.
+- Giving the new entries the 503 wrap would change the pinned task 075 contract (`RecordReadFailure_Propagates`) for
+  no isolation gain.
+
+### Tests (f3)
+
+**`ChildRecordContainerResolutionTests`:**
+
+- The pin theory was rewritten as the live-sweep snapshot (7 rows).
+- The trigger-2 theory gained 5 rows: service request ×2, and work assignment → communication / event / invoice.
+- The no-stamp theory gained 4 rows: service request ×2, invoice → agreement, contact → invoice.
+- New item 1 tests: a 2-row theory and the communication-path test.
+- New item 3 tests: 11 tests and theories. Pair → secure matter, pair → non-secure matter (with the cost), dangling
+  pair, pair → intermediate ×2, pair → party, id without a type, type without an id, unparseable id, unclassifiable
+  or unreadable type ×4, agreement by identity (with the cost), disagreement.
+- New work-assignment tests ×3, and a project-pair test.
+- New item 4 theory ×4.
+- `Todo_UnderAServiceRequest_DoesNotReadIt…` pinned the f3 fail-open as correct. It was rewritten to pin the
+  surviving branch (a root type the org cannot make secure is never read), using a world where the work assignment
+  is not securable.
+
+**Other suites:**
+
+- `RecordKeyedUploadRouteChildRecordTests`: two new REAL-route cases. A to-do linked to the secure project ONLY by the
+  pair stores in the project's container. An invoice regarding an agreement is refused with 409 and nothing is
+  uploaded.
+- `RecordContainerResolverTests`: the two zero-read pins moved from contact to account. The assertions are unchanged.
+- `SecurableEntityRegistryTests`: the cache-down cost theory's double now answers the contact read (§F.2). The
+  assertion is unchanged.
+
+**Counts:**
+
+| Suite | Result |
+|---|---|
+| `ChildRecordContainerResolutionTests` | 102 cases |
+| Affected suites (resolver, route, registry, Office no-target, communication adapter, document-list, acting-user, SPE upload paths) | 255 / 255 |
+| Full BFF unit suite | Passed 13303, Failed 0, Skipped 54 (Total 13357) |
+| `Spaarke.ArchTests` | 337 / 337 |
+
+### Mutation proof (f3)
+
+**How the seeds were run.** Each seed was applied to `RecordContainerResolver.cs` from a backup by a harness script.
+For each seed the harness rebuilt, ran the resolver / route / registry / Office no-target suites (206 tests), and
+restored the backup. The file was touched after every restore. The final restore was byte-identical (`diff -q`).
+
+| Seed | Tests that failed |
+|---|---|
+| S1 (item 1): invoice's `sprk_regardingagreement` dropped from the table | 6, including the route PUT, the communication path and the pin |
+| S2 (item 2): `sprk_servicerequest` reclassified back to Root | 5 |
+| S3 (item 2): `sprk_workassignment` entry removed | 6 |
+| S4 (item 2): `contact` entry removed | 2 |
+| S5 (item 2): project's pair switched off | 2 |
+| S6 (item 3): the pair ignored entirely | 14, including the route PUT |
+| S7 (item 3): agreement by identity removed, so the type is always read | 1 |
+| S8 (item 3): disagreement picks the typed root | 1 |
+| S9 (item 3): an id with no type read as "no pair" | 1 |
+| S10 (item 3): an unparseable id read as "no pair" | 1 |
+| S11 (item 3): an unclassified type read as "no root" | 1 |
+| S12 (item 3): a pair naming an intermediate read as "no root" | 2 |
+| S13 (item 3): an unreadable type row read as a party | 1 |
+| S14 (item 4): the undefined-securability refusal removed | 4 |
+| S15 (item 2/3): the pair columns left out of the read (`AllColumns`) | 18 |
+
+### Still open after f3 — owner decisions, not deferrals
+
+1. **Escalation trigger 2, (a)/(b)/(c).** This is unchanged, but the held path now also covers a service request, an
+   invoice → agreement, a work assignment → communication / event / invoice, a contact → invoice, and a pair naming
+   any intermediate.
+2. **Interpretations the owner may reverse** (each is one line in `KindByEntity` or `ByEntity`):
+   - **(i)** A pair naming a PARTY adds nothing, rather than being held. This matches the typed party columns. The
+     brief's literal "non-root → intermediate" would refuse every to-do whose pair names a person.
+   - **(ii)** Agreement by identity does not read the pair's type (event `a6d00177` above).
+   - **(iii)** A non-secure WORK ASSIGNMENT / PROJECT whose row names a secure root stores its content in that root's
+     container. This is C10 part 2 read as "filed regarding = child". The ACCESS taxonomy (`CoreAncestorResolver`
+     rule 1: a core record does not inherit from another) is untouched.
+   - **(iv)** A contact's `sprk_invoice` is held. This reverses the f2 reading, per the f3 brief.
+   - **(v)** `sprk_servicerequest` is an intermediate for CONTAINER purposes only. It stays CORE for access.
+3. **AC7 live gate.** It now also covers: an upload to event `80164675-0311-f111-8342-7c1e520aa4df` (pair-only,
+   dangling matter) must answer 409 `container_ancestor_unresolved` with nothing written.
+4. **The SPE-membership 403 observation** (unchanged).
