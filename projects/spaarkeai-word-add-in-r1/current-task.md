@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-02 (079 reconciled and pushed `d0aa1b901`; waiting on the owner for FR-10 / FR-15 / FR-18 sign-off)
+> **Last Updated**: 2026-10-02 (079 ✅ closed; next: task 076 — MAT-/PRJ- sequential numbering; then 086)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,18 +18,22 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: task 079 (record integrity reconciliation) — IN PROGRESS (started 2026-10-02)
+### 🔄 ACTIVE: task 076 (numbering — no blank primary name) — not started
 
 | Field | Value |
 |---|---|
-| **Task** | 079, `tasks/079-record-integrity-reconciliation.poml`. FULL · opus/xhigh · directional. Owner: "yes proceed with next tasks" |
-| **Dependency deviation** | 079 deps 076/077/078; **076 is 🔲 awaiting the owner's three numbering answers**. Proceeding anyway (owner's go); FR-13 is recorded as *pending 076, owner-held* rather than reconciled |
-| **Progress** | **All reconciliation done and pushed** (`d0aa1b901`; full record `notes/079-record-integrity.md`): validator **10 → 0 errors**; drift resolved (fixed parser `233ff9341`, unmerged, reads 86/86); 15 claims adjudicated, none reopened; SC-6 corrected, SC-8 → FAIL; **FR-12 + FR-16 amended (owner-signed)**; 040 AC1 reworded; defer-issues register; TodoSourceAccessFilter comment; board #945 = **81 / 86**. **Remaining (owner)**: FR-15 — owner asked the work scope to add Send Email in Word (Outlook web link vs Spaarke email composer); FR-10 — owner asked for the UX and options explained; FR-18/SC-12 'CI gates' wording (raised by 079). On answers: write those amendments, then 079 → ✅ |
-| **Next Action** | Wait for the owner's FR-10 / FR-15 / FR-18 answers (asked in the 2026-10-02 report); then amend spec.md, update notes/079 §5/§10, mark 079 ✅ (POML + index `✅ [done]`), sync board, commit, open the PR. Then 090 is gated on 042 UAT (owner) and 076 |
-| **Branch** | `work/spaarkeai-word-add-in-r1` = master `5e39f2bea` (clean). Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` passes and nothing is pending |
-| **Scope (from TASK-INDEX)** | SC-6 / SC-8 cite contradictory test assertions; FR-12's §6.5 path-A deviation has no ADR-Tensions row; 14 ✅ tasks with claims the review found unsupported; 7 POMLs `not-started` while ✅; **10 POMLs do not parse** (`Validate-TaskPoml.ps1` lists 005, 009, 010, 017, 018, 019, 028, 043, 044, 053) |
-| **Queue after 079** | 090 (wrap-up, `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
-| **For the owner** | #1088, #1089, #1090 filed. Nothing else open from 2026-10-02: **#1081 closed** (owner: root-BU users are a dev artifact; production users and the BFF app user sit in the customer BU; comment posted, ISS-016 Done; the UAC-r2 message EXPIRED UNAPPROVED — relay pending, uac-r2-findings §11); **`JobStatusSequence` approved** (recorded in `SystemCacheKeys.cs`); **hard-kill live checks run** (owner: "if we need to produce it live then we should do it"); probe documents and their analysis rows **deleted** |
+| **Task** | 076, `tasks/076-record-numbering-no-blank-primary-name.poml`. Start via `task-execute`. **Owner answers 2026-10-02 (in the POML)**: Matter `MAT-######`, Project `PRJ-######`, both **sequential**; owner checks production uniqueness manually; interim until a numbering-schema component — **not a spike** |
+| **Branch** | `work/spaarkeai-word-add-in-r1`, ahead of master by the 079 + restart-check records (not yet PR'd). Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` and `Build & Test (Debug)` pass and nothing is pending |
+| **Queue after 076** | **086** (Word Send Email choice A+B, focused record open — client-only); 042 UAT (owner, live Word/Outlook); 090 wrap-up (`/test-diet`). 083 waits on UAC-r2 141 |
+| **For the owner** | (1) 080 backfill `-Apply` (sample first). (2) Upload `C:\tmp\spaarke-addin-package\spaarke-addin-1.1.0-TEST.zip` (078 §6). (3) Post the #1081 relay to UAC-r2 (uac-r2-findings §11). (4) 042 UAT list (`defer-issues.md` register) |
+
+### ✅ Closed 2026-10-02: task 079 (record integrity) — `notes/079-record-integrity.md`
+
+- Validator 10 → 0 errors; drift resolved; tokens on every status cell; 15 claims adjudicated, none reopened; SC-6
+  corrected, SC-8 → FAIL (until 076); `defer-issues.md` register; 040 AC1 reworded; TodoSourceAccessFilter comment.
+- Owner signed every amendment: FR-12, FR-16, FR-15 (A+B in Word → 086), FR-10 (Spaarke in a browser tab,
+  focused → 086), FR-18/SC-12 ("reports"), FR-13 interim format (076). Board: 87 tasks, 82 closed.
+- The drift checker on master still cannot read this index (fix `233ff9341` on customer-provisioning, unmerged).
 
 ### ✅ Deployed 2026-10-02: master `5e39f2bea` → `spaarke-bff-dev` (owner: "yes deploy and then restart")
 

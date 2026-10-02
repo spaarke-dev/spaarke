@@ -2,8 +2,7 @@
 
 > **Task**: `tasks/079-record-integrity-reconciliation.poml` · FULL · opus / xhigh · directional
 > **Started**: 2026-10-02 · owner: *"yes proceed with next tasks"*
-> **Status**: 🔄 — everything is reconciled except three spec amendments the owner asked questions about
-> instead of signing (FR-10, FR-15, and FR-18/SC-12, raised by this task). See §9.
+> **Status**: ✅ **DONE 2026-10-02** — every acceptance criterion met; every spec amendment owner-signed (§5).
 
 **Dependency deviation, stated.** 079 depends on 076, 077 and 078. 077 and 078 are closed (⚠️). **076 is 🔲**,
 waiting on the owner's three numbering answers. The owner asked for the next tasks, so 079 ran anyway: FR-13 is
@@ -124,9 +123,10 @@ live). All three are now explicit items with owners (`defer-issues.md` register)
 |---|---|---|
 | **FR-12** (+ SC-6, the Assumptions line, a new ADR Tensions row) | *"Approve as drafted"* | ✅ Describes what shipped: `Fail` on create, `OFFICE_020` before any row, **Keep both / Save as new version** (the latter only for a readable document filed to the same record — #1005), orphaned-name reclaim; the false *"fixed at the shared client upload path"* struck; the path-A row cites the owner's 2026-09-17 *"BUILD IT"* |
 | **FR-16** | *"make the amendment so that it's accurate to what exists and how it works"* | ✅ Documents = content similarity (KNN, ≤50, per-row trim); **records = matched by topic, not similarity** (`/api/ai/search/records` seeded by profile keywords → TL;DR → summary; no seed ⇒ no query); Outlook noun from `canGetSender`; a same-session save is found at once; Run Index's route named. Owner Clarification and the Run Index unresolved question updated |
-| **FR-15** | Asked instead: *"how much work to add outlook (or open the Spaarke email)? what's the work scope"* | ⏳ Not written. Scope answered in the turn report |
-| **FR-10** (+ its ADR-050 row) | Asked instead: *"explain in more detail the user experience and options"* | ⏳ Not written. Explanation in the turn report |
-| **FR-18 / SC-12** "CI gates" | Raised by this task (056 adjudication) | ⏳ To ask |
+| **FR-15** | First asked the scope; then *"yes option A; but can we have also option B (user can choose which to open?)"* | ✅ Outlook unchanged (native compose); **Word offers a choice** — (A) Spaarke's composer (`sprk_communicationpage`, compose mode, associated to the record) or (B) Outlook on the web. Supersedes the 09-15 "hidden in Word". **Build: new task 086** |
+| **FR-10** (+ its ADR-050 row) | First asked for the UX; then *"yes open Spaarke (question is if this can/should be a headerless browser session or is it just full browser?)"* | ✅ Opens **in Spaarke in a browser tab**. Answer recorded in the FR: `openBrowserWindow` always opens a normal browser tab/window — Office offers no address-bar-free option (only the dialog this FR moved away from). Chosen on the owner's delegation: a **focused record page** — app navigation hidden (`navbar=off`), command bar kept for Save. ADR-050 row: no modal involved; Spike-2 question resolved. **`navbar=off` build: task 086** |
+| **FR-18 / SC-12** "CI gates" | *"yes follow recommendation"* | ✅ "CI **reports**" (not a merge gate); promotion is #996, and why it is not a settings toggle (path-filtered workflow) |
+| **FR-13** | *"for now just use PRJ-###### sequential; for matters MAT-######; we will manually check it — don't make it a project spike"* | ✅ Interim format added to FR-13; build is task 076 (its POML records the answers) |
 | FR-05 | — | Delivered by 078 (one unified package), not amended |
 | FR-13 | — | Open, task 076, owner-held |
 
@@ -181,18 +181,15 @@ merge while `sdap-ci.yml` exists; the review's §1 and this project's handoffs s
 
 Portfolio board #945 synced to Tasks Completed = 81, Task Count = 86.
 
-## 10. What closes 079
-
-The owner's answers on FR-10, FR-15 and FR-18/SC-12, then those amendments written (or the deviations recorded, if
-the owner says not to amend). Everything else in the acceptance set is met:
+## 10. Acceptance — all met (closed 2026-10-02)
 
 | AC | State |
 |---|---|
 | Validator 0 errors, before/after recorded | ✅ 10 → 0 |
 | Seven POML statuses match the index | ✅ (and 5 more) |
 | SC-6 / SC-8 corrected | ✅ |
-| ADR Tensions row for FR-12; FR-12/15/16 + FR-10's row amended with sign-off | ⏳ FR-12 ✅, FR-16 ✅; FR-15, FR-10 waiting |
+| ADR Tensions row for FR-12; FR-12/15/16 + FR-10's row amended with sign-off | ✅ all owner-signed 2026-10-02 (plus FR-18/SC-12 and FR-13's interim format) |
 | 15 claims adjudicated in a table | ✅ §3 |
 | 040 AC1 reconciled | ✅ |
 | `defer-issues.md` owners | ✅ register |
-| Counts from task rows; board synced | ✅ |
+| Counts from task rows; board synced | ✅ — after closing 079 and adding 086: **87 tasks, 82 closed** (73 ✅ + 4 ➡️ + 5 ⚠️); open 042 🔄, 076, 083, 086, 090 |

@@ -15,7 +15,7 @@ requirement of THIS project's `spec.md` unfinished?
 | ISS-001 | `sprk_event` written to `sprk_document`, column absent | Routed out-of-band | `unified-access-control-r2` | No (UAC-r2's filter) | not filed (operator) |
 | ISS-002 | CI shadow window false green | ✅ Resolved 2026-09-10 | — | No | not filed (operator) |
 | ISS-003 | Global handler serves `application/json` | ✅ Closed | — | No | #975 closed |
-| ISS-004 | office-addins typecheck job reports but does not block | **Open** — job built (056), not merge-blocking | **Project owner** (#996 promotion; FR-18/SC-12 wording sign-off) | **Yes — FR-18 "CI gates"** until amended or promoted | #996 open |
+| ISS-004 | office-addins typecheck job reports but does not block | **Open** — job built (056), not merge-blocking; FR-18/SC-12 amended 2026-10-02 to "CI reports" (owner) | **Project owner** (#996, promotion to blocking) | **No** — FR-18 now says "reports"; promotion is an improvement, not a spec gap | #996 open |
 | ISS-005 | New Word documents 503 on identity | ✅ Closed 2026-09-18 | — | No | #997 closed |
 | ISS-006 | Collision "Save as new version" wrote into an unrelated document | **Fixed in code (055), deployed; live re-check pending** | **This project — task 042 UAT** | FR-12 behaviour, pending the live re-check | #1005 open |
 | ISS-007 | I-6 not applied by ~20 writers outside the Office surface | Open | The projects that own those writers (Communication, Compose, Finance, Events, Playbook) | No (outside this spec) | #1034 open |
@@ -38,10 +38,10 @@ requirement of THIS project's `spec.md` unfinished?
 
 | Item | Owner | Spec link |
 |---|---|---|
-| **Task 076** — pane-created Matter/Project has a **blank name** (no number written) | **Project owner** — three numbering answers outstanding | **FR-13 / SC-8 (FAIL)** |
+| **Task 076** — pane-created Matter/Project has a **blank name** (no number written) | This project — owner answered 2026-10-02: `MAT-######` / `PRJ-######`, sequential; owner checks uniqueness manually | **FR-13 / SC-8 (FAIL until 076 ships)** |
 | **Task 083** — Office To Do names its person | Blocked on UAC-r2 task 141's link contract | FR-14 (completeness) |
 | **Task 042 UAT** — the live list: SC-1/3/7/9 manual halves, SC-11 parity rows; the `<ui-tests>` of 010, 013, 021, 026, 027, 033, 034, 036, 037, 040, 077; #1005 live re-check; 037's ribbon Quick Save/Share (only live attempt, 09-30, failed — blamed on the environment, never re-run); the unexplained 09-30 Create To Do failure; 084's latency check | **Project owner** (needs live Word/Outlook) | Several |
-| **Task 079 sign-offs** — FR-10 (record open) and FR-15 (Send Email in Word) amendments; FR-18/SC-12 "CI gates" wording | **Project owner** | FR-10, FR-15, FR-18 |
+| ~~Task 079 sign-offs~~ ✅ all signed 2026-10-02. **Task 086** builds two of them: Word Send Email choice (Spaarke email / Outlook on the web) and the focused record page (`navbar=off`) | This project (task 086) | FR-15, FR-10 |
 | Owner actions: 080 backfill `-Apply`; 078's observed install (`notes/078-manifest-decision.md` §6) | **Project owner** | FR-05 (078), I-6 data |
 | Drift checker cannot read this index's layout on master | `customer-provisioning-orchestration-r1` — fix `233ff9341` unmerged (verified: reads 86/86, no drift) | None (tooling) |
 | Handed off, tracked there: ADR-038 KEEP-path amendment (057) | `unified-access-control-r2` | #1014 open |

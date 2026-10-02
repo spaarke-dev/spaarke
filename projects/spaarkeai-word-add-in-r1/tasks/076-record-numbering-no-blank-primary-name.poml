@@ -67,6 +67,15 @@
       (a) the PROJECT number format - projects have no number from any path today; (b) random 6 digits (current
       convention, 53 of 59 live matters) or a per-type sequence; (c) who verifies production matter numbers are
       unique before the alternate key is added (dev verified: 0 duplicates). Evidence: notes/030-numbering-handoff.md.
+
+      ✅ OWNER ANSWERS 2026-10-02 — the scope is CONFIRMED, so escalation trigger 1 is satisfied; implement:
+      (a) Project: PRJ-###### , SEQUENTIAL. (b) Matter: MAT-###### , SEQUENTIAL (not typeCode-random6). (c) "we will
+      manually check it" — the owner verifies production uniqueness. Owner's framing, verbatim: "we need to build a
+      numbering schema component ; for now just use PRJ-###### sequential; for matters MAT-###### ; we will manually
+      check it--don't make it a project spike". So: an interim, server-side sequential number in the pane's creation
+      path — NOT a numbering component, NOT a spike. A real per-environment sequence is required (sequential, not
+      random), so trigger 2's "server-side sequence" is the owner's chosen answer, not an escalation. Spec FR-13 now
+      states the interim format (amended 2026-10-02 by task 079). Wizards (Create*Wizard) are still not modified.
     </background>
   </context>
 
