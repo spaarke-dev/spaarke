@@ -1,6 +1,6 @@
 # Spaarke Legal Operations Intelligence — Ontology Platform R1 · Design
 
-> **Status**: **DRAFT for review — rev 9**, 2026-10-02. **All open decisions are now settled**; schema draft at [`notes/schema-draft.md`](notes/schema-draft.md). Not yet through `/design-to-spec`.
+> **Status**: **DRAFT for review — rev 10**, 2026-10-02. **All open decisions are now settled**; schema draft at [`notes/schema-draft.md`](notes/schema-draft.md). Not yet through `/design-to-spec`.
 > **Evidence base**: [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) (~800 lines — field-level
 > detail, live-verified schema, defect forensics). **This document holds the decisions; the spec holds the
 > evidence.** Where they disagree, this document is newer.
@@ -419,7 +419,7 @@ rows below are **configuration or deletion**, which is why this broadens the MVP
 | **First Know-promotion rule** | one policy row | *New matter with no budget after 5 days* — `Absence` shape over Spaarke-held data. *"A new matter was opened"* is news; *"a new matter has no budget"* is work. **That difference is the ontology**: membership by rule evaluation, not by recency |
 | **Retire *Critical Today* as a list** | configuration | `sprk_highpriority` becomes a **rank input**; `sprk_monitor` becomes a **subscription** to Know. Neither is a reason in the ontology sense — a flag says *someone cares*, not *what is wrong*. Nothing it meant is lost |
 | **Remove the LLM-chosen "Top action"** | deletion | The first row *is* the top action, because rank is deterministic. A model choosing priority breaks row-contract requirement 2 and decision 15 |
-| **Email awaiting a matter match** | ⚠️ **REVERSED rev 7 — NOT a Work Item.** One widget registration instead | **It is a separate surface, and the surface already exists** — see §5.1. Earlier revisions put this in the Do lane; that was wrong on three counts (§5.1). R1's work here is **one `SectionRegistration`** so the shipped reconciliation code page can mount as a Console tab, plus **one aggregate Work Item** that links to it |
+| **Email awaiting a matter match** | A **separate surface** (one widget registration) over the **shared** Signal + Decision Record mechanism | **The surface already exists** — §5.1. It is separate because bulk triage is a different interaction from a gated single decision and its volume would bury the Decide lane; it is **not excluded from the mechanism** (corrected rev 10 — suppression is controlled by `sprk_countstowardsuppression`, not by opting out). R1's work: **one `SectionRegistration`** + **one aggregate Work Item** linking to it |
 
 ⚠️ **§0 still applies to all six.** Overdue tasks and new matters are **not differentiated** — every
 matter-management system shows them. They join for completeness and adoption (*"this is where I start my day"*),
@@ -498,11 +498,15 @@ I think 'no' — we should make the email reconciliation a separate surface/tab 
 1. **Different interaction shape.** Reconciliation is **bulk triage**: work through N items fast, same action
    each time. A Work Item is a **single decision** with evidence, a gate and a record. Merging them forces one
    component to be both, which breaks §1.3 rule 4.
-2. 🔴 **The semantics actually conflict.** Prototype finding 7: *misresolution dismissals must not count toward
-   suppression.* Dismissing *"this email was matched to the wrong matter"* is a judgement about **our
-   resolution**, not about the customer's rule — yet in the worklist every dismissal feeds suppression
-   (criterion 4). So fixing our own bad match would teach the system **to stop asking**. Separating the surface
-   removes the conflict by construction rather than by a special case.
+2. **A semantic conflict that is handled by a switch, not by exclusion** `[corrected rev 10]`. Prototype
+   finding 7: *misresolution dismissals must not count toward suppression* — dismissing *"this email was matched
+   to the wrong matter"* judges **our resolution**, not the customer's rule, yet in the worklist every dismissal
+   feeds suppression (criterion 4). Rev 7 used this to argue for **excluding** reconciliation from the Signal
+   mechanism. ⚠️ **That was the same error as BR-1**: the right fix is
+   **`sprk_policy.sprk_countstowardsuppression = No`** on that rule. The dismissals are still **recorded, still
+   queryable, still clustered** — *"forty misresolutions on this sender"* is a tokenizer bug worth seeing — they
+   simply do not feed the three-dismissal counter. **Segregate on presentation and volume; never fork the
+   mechanism** (owner principle, 2026-10-02).
 3. **It is not a Signal.** *"This email's match is uncertain"* is a **confidence state of a resolution**, not a
    rule evaluation over a declared policy. Forcing it into `sprk_signal` would make the association engine a
    policy producer, which it is not — and would be the `sprk_spendsignal` mistake again, in a third costume.
@@ -613,7 +617,7 @@ per §5.0 (nothing merely listed).
 
 | ID | Decision | Recommendation | Blocks |
 |---|---|---|---|
-| **BR-1** | Does acting on one's **own assigned work** write a Decision Record? | **No** — full rationale in [`notes/schema-draft.md`](notes/schema-draft.md) §6, rewritten 2026-10-02 after the owner asked *why it matters*. The reason is **information content, not volume**: a Decision Record records a **judgement**, a task completion records **work**, and the task's own history already holds the latter with better fidelity. The generalizing test: *does the action say something about the RULE, or just execute the work the rule surfaced?* That is why **dismissing** a Do item **does** write a record. ⚠️ The challenge surfaced a real dependency — *action rate* for Do rules must be computed from **`sprk_signal.sprk_resolutiontype`**, not the Decision Record, which makes that column **mandatory**; built the other way it would have reported ~0% action rate on every Do rule, making a noisy policy and a perfect one look identical. **No.** Close the flag `Acted` with a **null decision reference**; the object's own history is the record. **Dismissal still writes one**, with a reason, and still counts toward suppression. Amends row-contract requirement 5 to *"acting through a gate writes a Decision Record; acting on one's own assigned work is recorded on the object."* Rationale: 11 overdue tasks against 5 decisions would fill the record with housekeeping, and the Decision Record is what becomes the Matter Report Card | D-2 · `sprk_signal` shape |
+| **BR-1** | Does acting on one's **own assigned work** write a Decision Record? | 🔴 **REVERSED 2026-10-02 (owner) — YES. Every human resolution writes one.** Rationale in [`notes/schema-draft.md`](notes/schema-draft.md) §6. My "no" was drawn at the wrong granularity: resolving a Do item is rarely a bare "mark complete" — it also **sends email, creates a follow-on, closes a record**, and those are acts with side effects, one of them outward-facing. **The lane is not a safe proxy for whether a judgement occurred.** Replaced by a **`sprk_recordclass`** choice (`Judgement` / `Routine` / `Dismissal`) so the Report Card and the action-rate metric **filter on read** instead of the rows being absent — which is the rule I had already stated two revisions earlier (*"too many rows argues for filtering a query, never for discarding data"*) and then broke. `sprk_signal.sprk_decisionrecord` stays nullable for **system** closures only (`ConditionCleared` / `Superseded` / `PolicyRetired`), where nobody decided anything. ~~**No**~~ — full rationale in [`notes/schema-draft.md`](notes/schema-draft.md) §6, rewritten 2026-10-02 after the owner asked *why it matters*. The reason is **information content, not volume**: a Decision Record records a **judgement**, a task completion records **work**, and the task's own history already holds the latter with better fidelity. The generalizing test: *does the action say something about the RULE, or just execute the work the rule surfaced?* That is why **dismissing** a Do item **does** write a record. ⚠️ The challenge surfaced a real dependency — *action rate* for Do rules must be computed from **`sprk_signal.sprk_resolutiontype`**, not the Decision Record, which makes that column **mandatory**; built the other way it would have reported ~0% action rate on every Do rule, making a noisy policy and a perfect one look identical. **No.** Close the flag `Acted` with a **null decision reference**; the object's own history is the record. **Dismissal still writes one**, with a reason, and still counts toward suppression. Amends row-contract requirement 5 to *"acting through a gate writes a Decision Record; acting on one's own assigned work is recorded on the object."* Rationale: 11 overdue tasks against 5 decisions would fill the record with housekeeping, and the Decision Record is what becomes the Matter Report Card | D-2 · `sprk_signal` shape |
 | **BR-2** | Which Do rules ship first | Overdue task · due within 3 days · work assignment past `sprk_responseduedate`. All `Temporal`, all over data Spaarke already holds — and live counts confirm there is data to fire on (`sprk_todo` **50** · `sprk_workassignment` **22** · `sprk_event` **73**; spec §10.7). ⓘ **The framing that keeps this small (rev 6): a predicate migration, not a collector rewrite.** `DailyBriefingCollector`'s query *shape* — entities, columns, joins — is reused verbatim; only its hardcoded predicates move into policy rows: the task-type GUID (`:101`), `statuscode = Open` (`:104`), the **`TaskOverdueDaysPast = 5` C# constant** (`:116`), and `highpriority OR monitor` (`:500-502`). ⚠️ `QueryTodosAsync` (`:999`) is hardcoded to `owninguser = systemUserId` with **no resolver call at all**, because `sprk_todo` carries no membership-bearing fields — so a To Do rule is per-user by construction | Do lane |
 | **BR-3** | `sprk_highpriority` / `sprk_monitor` semantics | Rank input (and optional rule input) · subscription to Know. Retire the separate *Critical Today* list | Rank function · narrative |
 | **BR-4** | When does the Briefing widget get replaced? | Replace the Workspace's *Daily Briefing* tab with the worklist (narrative on) **once Decide and Do lanes both exist**; keep the old widget until then | Console hosting · widget registry |
@@ -793,6 +797,12 @@ Carried from `current-task.md`; full rationale in the notes.
     matter grouping Work Items** (owner clarification 2026-10-03). The Signal's **subject** — `sprk_event`,
     `sprk_todo`, `sprk_workassignment`, `sprk_matter`, `sprk_communication`, `sprk_servicerequest` — is the
     target of a Work Item and **never a Work Item itself**. Full chain: component model §3.1
+28b. **One mechanism, uniformly applied** (owner, 2026-10-02) — *"the underlying intelligence tracking and
+    decisions should be the same."* **Segregate on presentation and volume; never fork the mechanism.** Every
+    human resolution of a Work Item writes a Decision Record, typed by `sprk_recordclass`; separate surfaces (a
+    Task List, a Docket, email reconciliation) are layout choices over one Signal + Decision Record spine, with
+    per-policy switches (`sprk_countstowardsuppression`) where semantics differ. This retired **two** carve-outs
+    I had proposed — BR-1's and §5.1's
 29. **Email→record reconciliation is a separate Console tab, not a worklist lane** (§5.1, owner 2026-10-02).
     The surface is **already built** (`ReconciliationGrid` + 4 grid configs + `ReconcileTabs` +
     `EmailConnectionsReview` + its own code page); R1 adds **one widget registration** plus **one aggregate Work

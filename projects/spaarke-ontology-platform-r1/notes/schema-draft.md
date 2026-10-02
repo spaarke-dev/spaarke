@@ -13,34 +13,57 @@
 
 ---
 
-## 0. Read this before creating anything — three things to verify or decide
+## 0. The three questions from the first draft — all answered
 
-**(a) `sprk_signaltype` / `sprk_signalvalue` — the "collision" needs one check.** `design.md` §5 warns these are
-*"already taken"* on `sprk_affinity`. **In Dataverse, attribute logical names are unique per ENTITY, not
-globally**, so `sprk_signal.sprk_signaltype` would be legal. The real risk is narrower: **if `sprk_affinity`'s
-`sprk_signaltype` is a GLOBAL choice set**, the option-set name collides. Check that before reusing the name.
-Either way I have **avoided both names below** — not because they are illegal, but because two different meanings
-under one name is how the `MetricCard` and `getXrm` confusion in the component audit happened.
+*(Rewritten 2026-10-02 after owner review. None of these is an open issue; two were my error.)*
 
-**(b) The subject pattern — one decision.** `sprk_servicerequest` uses **thirteen typed `sprk_regarding*`
-lookups plus a generic trio** (`recordid` / `recordtype` / `recordname`). That is the established pattern, and
-consistency matters since CM-5 puts Inquiry on that table.
+**(a) The `sprk_signaltype` "collision" is a non-issue, and raising it was noise.**
 
-For `sprk_signal` I recommend **the generic trio + one typed matter lookup**, not thirteen lookups:
+- In Dataverse, **attribute logical names are unique per ENTITY, not globally.** `sprk_affinity.sprk_signaltype`
+  therefore does **not** prevent a `sprk_signal.sprk_signaltype`. The only globally-unique names are entity
+  logical names and **global choice-set** names.
+- **And it is moot anyway: this draft has no `sprk_signaltype` column.** What kind of thing a Signal is comes
+  from **which policy fired** (`sprk_policy` / `sprk_policycode`), not from a type column — so the concept has no
+  home to collide over.
+- `design.md` §5's warning was inherited from the earlier `sprk_spendsignal` analysis and I carried it forward
+  without checking it. **Disregard it.** If a future column genuinely wants the name, it is legal; just make the
+  choice **local** to the entity rather than global.
 
-| Option | Pros | Cons |
-|---|---|---|
-| **Trio + matter lookup (recommended)** | 4 columns; the matter lookup gives the grouping join and security trim that actually matter (D-3); extensible to any subject with no schema change | No referential integrity or cascade on the non-matter subject; a subject deleted out from under a Signal leaves a dangling id |
-| Thirteen typed lookups | Full RI; consistent with `sprk_servicerequest` | 13 columns on every row for a set we expect to grow; a new subject type becomes a schema change, which undercuts the zero-deployment property |
+**(b) Use the full regarding resolver. My "trio instead of typed lookups" recommendation was wrong.**
 
-The dangling-id risk is mitigated by the **resolution sweep** (CM-9), which already has to run: a Signal whose
-subject no longer resolves closes as `Superseded`. Typed lookups can be added later for a specific entity if a
-query needs them — additive, not a migration.
+The owner asked why we would not want the full resolver functionality, and the answer is that we should — my
+framing was a **false dichotomy**. `PolymorphicResolverService.applyResolverFields` writes the **typed lookup AND
+the denormalized trio** in one call; they are not alternatives. Verified: the service already handles
+`sprk_regardingmatter`, `sprk_regardingcommunication`, `sprk_regardingproject`, `sprk_regardingservicerequest`,
+`sprk_regardingworkassignment`, … **plus** `sprk_regardingrecordid` / `recordtype` / `recordname` / `recordnumber`
+/ `recordurl`.
 
-**(c) Append-only and immutable are enforced by PRIVILEGES, not columns.** `sprk_decisionrecord` must have
-**no Update and no Delete** privilege for any security role (component model §4.13); `sprk_policyversion` must
-have **no Update** after create. Easy to forget when creating tables by hand, and the whole defensibility
-argument rests on it.
+Three things the typed lookups buy that a text GUID cannot, and the first is the one I should have led with:
+
+1. 🔴 **Security trim.** Dataverse trims **lookups** by the user's access to the target record. A denormalized
+   **text GUID is not trimmed** — so a user could see a Signal about a record they cannot open. The Dataverse
+   write-path architecture requires security to **fail closed** (WP-6); a text subject id breaks that.
+2. **Subgrids and referential integrity.** "Signals on this To Do" as a subgrid needs a real lookup. So do
+   cascade behaviours when the subject is deleted — which also retires the dangling-id problem I had proposed to
+   patch with the sweep.
+3. **Advanced Find, views, reporting, Power BI** all join on lookups, not on text ids. The Report Card is a
+   reporting surface.
+
+And the cost I worried about does not hold up: *"a new subject type becomes a schema change"* is true but
+irrelevant — the **zero-deployment property was always about taxonomy rows and policy rules**, never about
+adding a whole new entity to the ontology. Adding a subject type already means new predicates, new fact
+resolution and new rule bodies; one more column is the least of it. **Also** it is CLAUDE.md §11 behaviour:
+`PolymorphicResolverService` is the one utility the component audit found **genuinely canonical with zero
+reimplementations** (§8.5), so reusing it is the default and declining it needed a much better reason than I had.
+
+⚠️ **Note the two matter lookups, which are not redundant**: `sprk_regardingmatter` is *"the subject is this
+matter"*; **`sprk_matter` is the always-populated grouping key** derived from the subject (D-3). For a Signal
+about a communication on Matter X, the subject is the communication and the grouping matter is X. Both are needed,
+and conflating them breaks the worklist's grouping.
+
+**(c) Permissions — managed as appropriate, not a design question.** Owner, 2026-10-02. Recorded once so it is not
+forgotten at create time: `sprk_decisionrecord` append-only, `sprk_policyversion` no-update-after-create. That is
+all this needs to say.
 
 ---
 
@@ -55,9 +78,8 @@ One row per unresolved condition. Replaces `sprk_spendsignal` (0 rows live, so f
 |---|---|---|---|
 | `sprk_name` | Text (200) | ✅ | Primary name. The **short headline** — prototype finding 14: the list cannot show a full sentence |
 | `sprk_signalnumber` | Autonumber | | `SIG-{SEQNUM:00000}` |
-| `sprk_subjecttype` | Choice | ✅ | The subject's entity logical name: `sprk_matter` · `sprk_communication` · `sprk_event` · `sprk_todo` · `sprk_workassignment` · `sprk_servicerequest` · `sprk_invoice` · `sprk_document` |
-| `sprk_subjectid` | Text (50) | ✅ | Subject GUID. ⚠️ Store **lowercase, braces stripped** — see the `cleanGuid` finding (audit §8.3 U1); two regexes are in circulation today |
-| `sprk_subjectname` | Text (400) | | Denormalized display name so the list renders with no join |
+| **`sprk_regarding*` typed lookups** | Lookups | ✅ (one of) | **The subject, via `PolymorphicResolverService.applyResolverFields`** — the same ADR-024 pattern as `sprk_servicerequest` and `sprk_todo`: `sprk_regardingmatter` · `sprk_regardingcommunication` · `sprk_regardingproject` · `sprk_regardingservicerequest` · `sprk_regardingworkassignment` · `sprk_regardingtodo` · `sprk_regardingevent` · `sprk_regardinginvoice` · `sprk_regardingdocument`. 🔴 **Lookups, not a text id — this is what gives Dataverse security trim** (§0(b)) |
+| `sprk_regardingrecordtype` · `recordid` · `recordname` · `recordnumber` · `recordurl` | Text | ✅ | The denormalized trio+, written by the **same** resolver call. Renders the list with no join. ⚠️ Store ids **lowercase, braces stripped** — audit §8.3 U1 found two regexes in circulation |
 | **`sprk_matter`** | **Lookup → `sprk_matter`** | ✅ | **The grouping key — ALWAYS populated, derived from the subject** (D-3). This is what makes "rows are matters, grouping Signals" a query rather than client-side work |
 | `sprk_tenant` | Text (100) | | Scope, matching `sprk_communicationrule`'s pattern |
 
@@ -94,7 +116,7 @@ One row per unresolved condition. Replaces `sprk_spendsignal` (0 rows live, so f
 | `sprk_resolutionnotes` | Multiline (2000) | | The dismissal reason. Clustered over time, these are the input to *"'already approved offline' forty times is a missing fact, not a bad rule"* |
 | `sprk_resolvedon` | Date/Time | | |
 | `sprk_resolvedby` | Lookup → `systemuser` | | **Keyed on `systemuserid`** so humans and agent users share one model when Authority arrives (component model §11, item 1) |
-| **`sprk_decisionrecord`** | **Lookup → `sprk_decisionrecord`** | | 🔴 **NULLABLE — this is BR-1.** A Decide item resolved through the gate points at its record; a **Do** item completed as one's own work closes `Acted` with this **null**. See §6 for the rationale |
+| **`sprk_decisionrecord`** | **Lookup → `sprk_decisionrecord`** | | **Nullable — but for a narrower reason than BR-1 originally gave** (reversed 2026-10-02, §6). **Every HUMAN resolution now writes a Decision Record and populates this**, Do lane included. It is null only for **system** closures, where nobody decided anything: `ConditionCleared` · `Superseded` · `PolicyRetired` |
 
 ### Dedupe + the sweep
 
@@ -131,6 +153,7 @@ One row per unresolved condition. Replaces `sprk_spendsignal` (0 rows live, so f
 | **`sprk_factsnapshot`** | **Multiline (JSON)** | ✅ **MANDATORY** | **What the data said at DECISION time.** D-2's binding constraint and the compensating control for ruling out bitemporality (`design.md` §8.2). 🔴 **Do not make this optional** — the gap it closes is invisible until the first time someone audits an old decision |
 | `sprk_proposedaction` | Text (400) | ✅ | What was put to the human |
 | `sprk_decisionoutcome` | Choice | ✅ | `Authorized` · `Denied` · `Dismissed`. ⚠️ **Distinct from `sprk_disposition`** — see the note below |
+| **`sprk_recordclass`** | **Choice** | ✅ | 🔴 **New 2026-10-02 — this is what replaces BR-1's carve-out.** `Judgement` (a choice under uncertainty — the Decide lane, and any Do resolution that sends mail, creates a follow-on or closes a record) · `Routine` (a bare completion or reschedule of one's own assigned work) · `Dismissal`. **Every resolution writes a row; the class is how the Report Card and the action-rate metric filter.** Filtering is reversible; absent data is not |
 | `sprk_reason` | Multiline (2000) | | Required by the UI on `Denied`/`Dismissed`; nullable at the schema level |
 | **`sprk_action`** | Lookup (or Text) | | 🔴 **NULLABLE — D-2 constraint.** A **deny path has no action**. Equally, an action taken outside a Signal has no decision |
 | `sprk_confirmedby` | Lookup → `systemuser` | ✅ | The human. Keyed on `systemuserid` for the Authority model later |
@@ -164,6 +187,7 @@ these two columns are what that costs.
 | `sprk_lane` | Choice | ✅ | `Decide` · `Do` |
 | `sprk_subjecttype` | Choice | ✅ | Same option set as `sprk_signal.sprk_subjecttype` |
 | `sprk_currentversion` | Lookup → `sprk_policyversion` | | Convenience pointer |
+| **`sprk_countstowardsuppression`** | **Yes/No** | ✅ | **New 2026-10-02.** Default **Yes**. Set **No** for rules whose dismissals are a judgement about *our own resolution* rather than about the rule — the email→record match being the known case. 🔴 **This is what lets a segregated surface keep the SHARED mechanism** instead of being excluded from it (§6, and it supersedes `design.md` §5.1's exclusion) |
 
 ## 4. `sprk_policyversion` — immutable
 
@@ -203,57 +227,67 @@ would read as *"the budget was revised"* and **suppress a true signal** (a false
 
 ---
 
-## 6. BR-1 — why a Do-lane completion writes no Decision Record
+## 6. BR-1 — REVERSED. Every human resolution writes a Decision Record
 
-The owner asked: *"why does it matter if the decision was completed by one's own assigned work?"* Fair question.
-**My first answer led with the weaker argument**, so here is the real one.
+*Rewritten 2026-10-02. The owner's challenge was correct and my rule was drawn at the wrong granularity.*
 
-### The rationale: a Decision Record records a JUDGEMENT; a task completion records WORK
+### First, the thing we already agreed on
 
-| | Decide item | Do item, completed |
-|---|---|---|
-| The system says | *"A commitment was raised and the budget has not moved"* | *"Your task is 7 days overdue"* |
-| The human does | **Chooses among options under uncertainty** — send inquiry / revise budget / approve variance / dismiss | **Does the work** |
-| What new information exists afterwards | The human's judgement about an ambiguous situation — **which existed nowhere before** | None. The work is done |
-| Who already records it | Nothing — hence the Decision Record | **The task itself**: its status, its owner, when it changed, the reschedule reason. With better fidelity than a copy would have |
+**Tasks, To Dos, new matters and new documents ARE in the worklist.** That was never in question — it is the
+**Do lane** (BR-2) plus the Know-promotion rules (BR-6), and `design.md` §5 In carries them. The Briefing's items
+are *enhanced into* Work Items, not excluded. My earlier wording made this sound contested; it was not.
 
-So the record is not withheld for tidiness — **there is no judgement to record.** Writing one would duplicate
-what `sprk_event`/`sprk_todo` already hold, with fewer fields.
+The narrow question was only whether a **completion** writes a `sprk_decisionrecord` row. I said no. **That was
+wrong.**
 
-### The test, stated so it generalizes
+### Why it was wrong
 
-> **Does the action say something about the RULE, or does it just execute the work the rule surfaced?**
+My distinction was *judgement vs work*: a Decide item is a choice under uncertainty, a Do item is just executing
+assigned work, and the task's own history already records the latter. That holds for a **bare** "mark complete."
 
-That is why the asymmetry falls where it does: **dismissing a Do item *is* a judgement** — *"not mine"*, *"no
-longer needed"* is a statement about the rule having fired wrongly — so a dismissal **does** write a Decision
-Record and **does** count toward suppression. Completing it says nothing about the rule at all.
+**It does not survive what resolving a Do item actually involves.** The owner's point: *"there will also be notes
+and other add-ons such as send an email, create another task/to do, close a record."* Those are not
+record-keeping — they are **acts with side effects, and sending mail is outward-facing.** A rule that says "Do
+items write no record" would silently drop the record of an email sent to outside counsel because it happened to
+be triggered from the Do lane rather than the Decide lane. **The lane is not a safe proxy for whether a judgement
+occurred.**
 
-### What I got wrong the first time
+### And I violated my own rule
 
-I led with **volume** — 11 overdue tasks against 5 decisions would swamp the record. That is a *consequence*, not
-a reason. "Too many rows" argues for filtering a query, never for discarding data; if the Decision Record is the
-asset, losing entries because there are many of them is backwards. Volume only matters once you have established
-that the entries carry no information, which is the argument above.
+Two messages earlier I wrote that volume *"argues for filtering a query, never for discarding data — if the
+Decision Record is the asset, losing entries because there are many of them is backwards."* Then I used Report
+Card dilution as a reason to not write the rows. **Same error, one message apart.** The fix is the one I had
+already named: **write everything, type it, filter on read.**
 
-### What your challenge actually surfaced — one real dependency
+### The resolution
 
-If Do completions write no Decision Record, **where does *action rate = acted ÷ surfaced* come from for a Do
-rule?** From **`sprk_signal.sprk_resolutiontype`**, not from the Decision Record.
+| | What happens |
+|---|---|
+| **Every human resolution** — Decide or Do, complete / reschedule / reassign / send email / create follow-on / close record / dismiss | **Writes a `sprk_decisionrecord`** and populates `sprk_signal.sprk_decisionrecord` |
+| **`sprk_recordclass`** distinguishes them | `Judgement` · `Routine` · `Dismissal` — so the Report Card shows judgements, the audit trail shows everything, and *action rate* can be computed either way |
+| **System closures** — `ConditionCleared`, `Superseded`, `PolicyRetired` | **No** Decision Record, and `sprk_signal.sprk_decisionrecord` stays **null**. Nobody decided anything; the sweep closed it. **This is the only remaining reason the column is nullable** — and it is a real one, which is why D-2's nullable constraint still stands |
 
-That makes `sprk_resolutiontype` **mandatory rather than nice-to-have** (§1), and it is now recorded there. Had
-we not asked this, the metric could have been built against the Decision Record and silently reported ~0% action
-rate on every Do rule — a policy generating noise and a policy working perfectly would look identical.
+**One mechanism, uniformly applied**, which is the owner's stated principle: *"the underlying intelligence
+tracking and decisions should be the same."*
 
-### When to reverse this
+### The same principle corrects §5.1 (email reconciliation)
 
-Two conditions, either of which flips it:
+`design.md` §5.1 kept email→record reconciliation as a separate surface — **right** — but justified it partly by
+**excluding** it from the Signal/suppression mechanism, because a misresolution dismissal must not teach the
+system to stop asking. **That exclusion is the same mistake in a different place.**
 
-1. **If the Report Card needs completed work in the same place as judgements.** The cheaper fix is for the Report
-   Card to read task history for work and Decision Records for judgements. But if "one auditable table" is a
-   product requirement, write the records and accept the dilution.
-2. **If a completion ever becomes gated** — e.g. closing a task with an unmet obligation requires confirmation.
-   Then it *is* a judgement, *"no gate, no entry"* applies in the affirmative, and it writes a record.
+Better: keep the **surface** separate (bulk triage is a different interaction from a gated single decision, and
+volume would bury the Decide lane) and keep the **mechanism shared**, with the semantic conflict handled by
+**`sprk_policy.sprk_countstowardsuppression = No`** on that rule. The dismissals are still recorded, still
+queryable, still clustered for *"forty misresolutions on this sender is a tokenizer bug"* — they simply do not
+feed the three-dismissal suppression counter.
 
-Reversing is **additive** — start writing records for completions — so this is a safe default rather than a
-one-way door. The field that would have to change (`sprk_signal.sprk_decisionrecord` nullable) stays nullable
-either way, which is why D-2 required that constraint.
+So the rule generalizes: **segregate on presentation and volume; never fork the mechanism.** A separate Task List
+or Docket is fine for the same reason — a presentation choice over one Signal + Decision Record spine.
+
+### What this costs, stated honestly
+
+More rows, and a Report Card that must filter by `sprk_recordclass` instead of getting a pre-filtered table for
+free. That is the correct trade: the filter is one clause, and it is reversible. Had we gone the other way, the
+missing rows would only have surfaced the first time someone asked *"who closed this, and what else did they do
+at the time?"* — and the answer would have been nowhere.
