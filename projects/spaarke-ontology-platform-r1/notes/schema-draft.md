@@ -1,6 +1,59 @@
 # Schema draft — the five new tables
 
-> ## 🟡 STATUS: DRAFT for owner validation — 2026-10-02
+> ## ✅ STATUS: CREATED IN DEV — 2026-10-02
+>
+> All five tables exist in `spaarkedev1`, in solution **`OntologyPlatformSolution`** ("Ontology Platform
+> Solution" v1.0.0.0) under publisher **Spaarke** (prefix `sprk`). **130 `sprk_` columns · 24 lookups ·
+> 2 alternate keys.** Verified: **zero** logical names with an underscore between words.
+>
+> | Table | OTC | `sprk_` columns |
+> |---|---|---|
+> | `sprk_signal` | 11003 | 59 |
+> | `sprk_decisionrecord` | 11002 | 22 |
+> | `sprk_policy` | 11000 | 17 |
+> | `sprk_policyversion` | 11001 | 17 |
+> | `sprk_budgetrevision` | 10999 | 15 |
+>
+> Alternate keys (`EntityKeyIndexStatus: Pending` → activates asynchronously): `sprk_signal.sprk_dedupekey`
+> (the idempotent-upsert key, CM-9) and `sprk_policy.sprk_policycode`.
+
+> ## 🔴 The MCP `create_table` tool could NOT be used — and why that mattered
+>
+> The owner asked for creation **via MCP**. It is not safe for this, and the reason is worth keeping:
+>
+> 1. **`mcp__dataverse__create_table` has no publisher or solution parameter.** It derives the logical name from
+>    a display name and uses the environment's **default** solution.
+> 2. **This environment's default publisher is `new`**, not `sprk` — verified: `Default Solution` → *Default
+>    Publisher for spaarkedev1* → prefix **`new`**; `Common Data Services Default Solution` → **`cr140`**. All
+>    Spaarke work lives in ~30 named solutions under the **Spaarke** publisher. So the tool would have produced
+>    **`new_signal`** or **`cr140_signal`**.
+> 3. 🔴 **Dataverse logical names are immutable.** A wrong prefix is not a rename — it is **delete and recreate**,
+>    after every code reference is already written against it.
+> 4. `mcp__dataverse__invoke_api` only invokes **Custom APIs**, so it cannot POST metadata either.
+>
+> **The method that works** (and what to reuse): Dataverse Web API `POST /api/data/v9.2/EntityDefinitions` with
+> an explicit **PascalCase `SchemaName`** (`sprk_BudgetRevision` → logical `sprk_budgetrevision`, which is exactly
+> how you get no underscores between words), plus the **`MSCRM.SolutionUniqueName`** header to target the
+> solution. Lookups are separate `POST RelationshipDefinitions` calls; alternate keys are
+> `POST EntityDefinitions(LogicalName='x')/Keys`. Token via
+> `az account get-access-token --resource https://spaarkedev1.crm.dynamics.com`.
+>
+> **Three traps hit while doing it, recorded so the next person does not:**
+>
+> - 🔴 **Every `DateTimeAttributeMetadata` MUST carry `DateTimeBehavior`.** Omit it and the attribute is created
+>   with behavior `None`, which breaks filtered-view generation — and then **every later relationship on that
+>   entity fails** with the misleading `Failure in generation Filtered<Entity> for attribute <x>`. The error
+>   names the datetime column, not the lookup you were creating.
+> - The **solution-create POST must not carry `MSCRM.SolutionUniqueName`** (it validates the header against a
+>   solution that does not exist yet → `404 not valid`).
+> - **Money columns auto-create `_base` twins** (`sprk_newamount_base`). Those are the only logical names with a
+>   second underscore, they are Dataverse's own, and they match the existing `sprk_budget.sprk_totalbudget_base`.
+>
+> **Still to do by hand** (deliberately not scripted): the **privileges** that make
+> `sprk_decisionrecord` append-only (no Update, no Delete) and `sprk_policyversion` no-update-after-create —
+> owner said permissions are managed as appropriate, and they are a security-role change, not metadata.
+
+> ## Original draft notes
 >
 > Requested so the tables can be **created manually in Dataverse before the project starts**. Five new tables:
 > `sprk_signal` · `sprk_decisionrecord` · `sprk_policy` · `sprk_policyversion` · `sprk_budgetrevision`.
