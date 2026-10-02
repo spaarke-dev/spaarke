@@ -4,7 +4,7 @@
     <title>C10 part 1 — secure records are owned by a NAMED, NON-DEFAULT, memberless owner team in a no-user Secure Record BU, for projects AND matters AND work assignments; provisioning refuses otherwise; existing secure rows migrated</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 1; GitHub #967)</phase>
     <gate>startable. The RecordOwnershipResolver step waits for PR #1045 (word-add-in-r1) to merge to master and for master to be merged into this branch — that PR rewrites the same file.</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-boundary .cs change (tags bff-api, auth, security) plus an irreversible live-data migration of record ownership.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -303,5 +303,6 @@ What does NOT change here: the child re-own itself and the owner role's child pr
       (publish size: the main session, fresh master). TASK-INDEX and #967 (main session). Hand-off to word-add-in-r1
       (main session).
     </outcome>
+    <outcome date="2026-10-02" status="completed">Live gate run 2026-10-02 (notes §13): named team created, role moved off the default team, migration -Verify PASS, 65a3fab2 provisioned into isolation, census clauses 2-5 PASS. NFR-05 clause 1 findings are the root-BU dev artifact accepted by the owner (rounds 4 and 5). Escalations a/b/c answered in round 4.</outcome>
   </execution>
 </task>

@@ -118,6 +118,21 @@ These answer the seven questions raised after batch 2 (tasks 141, 144, 145, 155,
    Each step runs its dry run and its verify mode.
 7. **External grids (134 open item D1).** Yes: set `showViewSelector=false` on the external SPA grids, so the column allow-lists can shrink to what the grids show.
 
+## Owner answers, round 5 (2026-10-02). BINDING.
+
+1. **Root-BU reach is a dev data artifact, not designed behaviour.** Owner, verbatim in substance: "In production we will NOT assign new users to the root Spaarke business unit; we will assign them to the customer's named child business unit. BUT the key is that when new records are created they have to be assigned to the creating user's business unit/team, including if created server side by the BFF API (whose Dataverse app registration will be assigned to the customer business unit)."
+   - **How to apply.** In dev, take no action on the root default team's "Spaarke Basic User" link, the root-BU users, or the root-BU BFF application users. The census and NFR-05 clause-1 findings they cause are accepted dev findings. No census exception is coded: in production the census must flag any of them.
+   - **Production invariants this rests on** (routed to customer-provisioning-orchestration-r1 in `handoffs/INCOMING-145-secure-setup-handler.md` §6):
+     - users live in the customer's child BU;
+     - the Secure Record BU is a direct child of the root and a sibling of the customer BU, never beneath it;
+     - the BFF application user lives in the customer BU. **Gap today:** `DataverseWebApiAppUserCreator` creates it in the ROOT BU;
+     - the root default team holds no Deep or Global read role.
+   - **Ownership rule as implemented** (`RecordOwnershipResolver`, task 080 / write-path I-6):
+     - **record-first:** a record filed under a parent is owned by the parent's business-unit default team;
+     - otherwise it is owned by the caller's business-unit default team (for the BFF's app-only creates, the app user's BU);
+     - a secure parent → the named "Secure Record Owners" team (C10 part 2).
+     - With one customer BU per environment, "the creating user's BU" and "the parent's BU" are the same unit.
+
 ## Live facts verified this session
 
 - `sprk_accesspermission` is **Standard 100000000 / Limited 100000001 / Restricted 100000002** on sprk_project, and identical on sprk_matter and sprk_workassignment.
