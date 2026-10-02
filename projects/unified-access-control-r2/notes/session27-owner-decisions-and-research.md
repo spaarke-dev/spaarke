@@ -168,6 +168,13 @@ These answer the seven questions raised after batch 2 (tasks 141, 144, 145, 155,
    - **Contacts:** the external data plane scopes child rows through their root's accessible set. A contact's rights on a secure root, which come from direct named grants only (FR-22), extend to that root's children and no further. Task 136 makes the gate rights-based, and task 156 keeps the child→root link fresh.
    - Task 149 has not run yet; it is blocked on 146.
 
+## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
+
+- **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
+- **For the census:** at the root, Basic User's read reaches the whole org, Secure Record included, for every root-team member (171 members per the peer's note). Under round 5 this is an accepted dev finding, not a production exposure. The census keeps reporting it; no exception is coded.
+- **Also observed by the peer:** the "Spaarke Demo" BU's team holds **System Administrator**, so every member of that team bypasses all record security, secure isolation included. This is another dev artifact under round 5. No action is taken in dev; the census must flag any team holding System Administrator in production.
+- **Dev BFF state, checked 2026-10-02 (Kudu deployment list):** the peer deployed master `5e39f2bea` at 03:35Z. Our `bca0941f6` (batches 1+2) followed at 03:41Z and is the active deployment. `bca0941f6` contains `5e39f2bea`, so neither deploy undid the other. The peer's 12:23Z work was restarts, not a deploy.
+
 ## Live facts verified this session
 
 - `sprk_accesspermission` is **Standard 100000000 / Limited 100000001 / Restricted 100000002** on sprk_project, and identical on sprk_matter and sprk_workassignment.
