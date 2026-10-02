@@ -399,6 +399,98 @@ internal static class ExternalGrantLifecycle
         return null;
     }
 
+    // ── Write-time grant policy (task 138 · owner round 2 item 3) ────────────────────────────────
+
+    /// <summary>Stable reason code: a contact or organization grantee (or an invitation) on a Restricted record.</summary>
+    internal const string RecordRestrictedReasonCode = "sdap.access.grant.record_restricted";
+
+    /// <summary>Stable reason code: an organization-wide grant on a Secure or Limited (direct-only) record.</summary>
+    internal const string OrgGrantDirectOnlyReasonCode = "sdap.access.grant.org_grant_direct_only_record";
+
+    /// <summary>Stable reason code: the record's access flags could not be read, so nothing was granted.</summary>
+    internal const string PolicyUnreadableReasonCode = "sdap.access.grant.policy_unreadable";
+
+    /// <summary>
+    /// The ONE write-time grant-policy decision (task 138), shared by <c>/grant</c>, <c>/invite-and-grant</c>,
+    /// <c>/invite</c> and the grant core <c>GrantExternalAccessEndpoint.CreateGrantAsync</c> — so every future
+    /// writer that goes through the core (task 140's contact-side route, task 142's Assigned-To auto-grants)
+    /// inherits it and cannot bypass it.
+    /// </summary>
+    /// <param name="flags">The batched flag read for the root (<c>ExternalParticipationService.GetRootRecordFlagsAsync</c>).</param>
+    /// <param name="rootId">The root the grant targets.</param>
+    /// <param name="granteeKind">Who would receive access.</param>
+    /// <remarks>
+    /// <para><b>The owner's model (round 2, 2026-09-30, binding).</b> Restricted = no contact-based access at
+    /// all, internal users unaffected. Secure and Limited = contacts get access only through named, direct
+    /// grants (Secure implies Limited). Standard = every grant type. Where Restricted and Secure/Limited are
+    /// both present, Restricted wins.</para>
+    /// <para><b>Order, and why it is load-bearing.</b> (1) Unreadable FIRST, so a fault is never reported as
+    /// Restricted: <see cref="RootRecordFlags.Unreadable"/> also carries every restriction, and testing
+    /// <c>IsRestricted</c> first would tell the operator a falsehood. (2) Restricted, for both grantee kinds.
+    /// (3) Organization-wide grants on a direct-only record.</para>
+    /// <para><b>⚠️ An ABSENT key is UNREADABLE here</b>, the opposite of the read path's "no veto". The flag
+    /// read returns an empty map for any entity type that is not a flag-bearing root, so a wrong logical name
+    /// would otherwise silently allow everything. This function never uses the read path's
+    /// <c>TryGetValue(...) &amp;&amp; f.Is…</c> shape.</para>
+    /// <para>Not a replacement for the read-time evaluator: rows written directly in Dataverse bypass this
+    /// check, and <c>AccessibleRecordSetService</c> stays authoritative (D-1 / ADR-002 WP-5).</para>
+    /// </remarks>
+    internal static GrantPolicyDecision DecideGrantPolicy(
+        IReadOnlyDictionary<Guid, RootRecordFlags> flags, Guid rootId, GrantGranteeKind granteeKind)
+    {
+        if (!flags.TryGetValue(rootId, out var f) || f.IsUnreadable)
+            return GrantPolicyDecision.Unreadable;
+
+        if (f.IsRestricted)
+            return GrantPolicyDecision.Restricted;
+
+        if (granteeKind == GrantGranteeKind.Organization && f.IsDirectOnly)
+            return GrantPolicyDecision.OrgGrantOnDirectOnly(f.IsSecure);
+
+        return GrantPolicyDecision.Allowed;
+    }
+
+    /// <summary>
+    /// Reads the root's flags through the ONE existing flag reader and applies <see cref="DecideGrantPolicy"/>.
+    /// Never throws: a fault of any kind is <see cref="GrantPolicyDecision.Unreadable"/> (fail closed, and a
+    /// readable 503 rather than an unhandled 500).
+    /// </summary>
+    internal static async Task<GrantPolicyDecision> EvaluateGrantPolicyAsync(
+        ExternalParticipationService participations,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        GrantGranteeKind granteeKind,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        IReadOnlyDictionary<Guid, RootRecordFlags> flags;
+        try
+        {
+            // LOGICAL name (sprk_project), the key shape GetRootRecordFlagsAsync's sources use — an entity-set
+            // name here would return an empty map, which DecideGrantPolicy treats as unreadable (never as "open").
+            flags = await participations
+                .GetRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "[EXT-GRANT-POLICY] Flag read threw for {RootType} {RootId}. Refusing (policy unreadable); " +
+                "nothing will be granted.", rootType, rootId);
+            return GrantPolicyDecision.Unreadable;
+        }
+
+        var decision = DecideGrantPolicy(flags, rootId, granteeKind);
+        if (!decision.IsAllowed)
+        {
+            logger.LogWarning(
+                "[EXT-GRANT-POLICY] Refused a {GranteeKind} grant on {RootType} {RootId}: {ReasonCode}.",
+                granteeKind, rootType, rootId, decision.ReasonCode);
+        }
+
+        return decision;
+    }
+
     /// <summary>
     /// Deactivates rows (statecode=1, statuscode=2). Exceptions propagate: a partial sweep must surface
     /// as a failure, never as a success with rows still active.
@@ -420,4 +512,55 @@ internal static class ExternalGrantLifecycle
 
         return deactivated;
     }
+}
+
+/// <summary>Who a grant would give access to — the input the write-time policy needs (task 138).</summary>
+internal enum GrantGranteeKind
+{
+    /// <summary>One named contact (a <c>/grant</c> with a ContactId, <c>/invite-and-grant</c>, <c>/invite</c>).
+    /// A row that also names an organization is still a contact grant — the organization is the firm.</summary>
+    Contact,
+
+    /// <summary>An organization-wide grant: no ContactId, every active member inherits at check time.</summary>
+    Organization,
+}
+
+/// <summary>
+/// The outcome of <see cref="ExternalGrantLifecycle.DecideGrantPolicy"/> — a typed value, never an exception,
+/// so a refusal can never become the grant routes' catch-all 500 (task 138).
+/// </summary>
+/// <param name="IsAllowed">The grant may be written.</param>
+/// <param name="ReasonCode">The binding reason code for a refusal; <c>null</c> when allowed.</param>
+/// <param name="StatusCode">422 for a policy refusal, 503 for an unreadable policy; 200 when allowed.</param>
+/// <param name="Detail">A human-readable sentence for the operator; <c>null</c> when allowed.</param>
+internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, int StatusCode, string? Detail)
+{
+    /// <summary>The grant may be written.</summary>
+    public static GrantPolicyDecision Allowed { get; } = new(true, null, StatusCodes.Status200OK, null);
+
+    /// <summary>The record is Restricted: no contact or organization may be granted (or invited).</summary>
+    public static GrantPolicyDecision Restricted { get; } = new(
+        false,
+        ExternalGrantLifecycle.RecordRestrictedReasonCode,
+        StatusCodes.Status422UnprocessableEntity,
+        "This record's Access Permission is Restricted, so only internal users can be given access. Contacts and " +
+        "organizations cannot be granted access to it or invited to it. Nothing was granted. To share it with a " +
+        "colleague, use + User; to give a contact access, change Access Permission first.");
+
+    /// <summary>The flags could not be read: refuse truthfully, without claiming the record is Restricted.</summary>
+    public static GrantPolicyDecision Unreadable { get; } = new(
+        false,
+        ExternalGrantLifecycle.PolicyUnreadableReasonCode,
+        StatusCodes.Status503ServiceUnavailable,
+        "The record's access settings could not be read; nothing was granted. Try again in a moment.");
+
+    /// <summary>An organization-wide grant on a Secure or Limited record.</summary>
+    /// <param name="isSecure">Names the flag that made the record direct-only, so the message is exact.</param>
+    public static GrantPolicyDecision OrgGrantOnDirectOnly(bool isSecure) => new(
+        false,
+        ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode,
+        StatusCodes.Status422UnprocessableEntity,
+        (isSecure ? "This record is Secure" : "This record's Access Permission is Limited") +
+        ", so contacts get access only through grants made to them by name. A whole organization cannot be " +
+        "granted access. Nothing was granted. Grant the people who need access individually with + Contact.");
 }

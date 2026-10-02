@@ -57,7 +57,11 @@ public static class GrantExternalAccessEndpoint
             .ProducesProblem(StatusCodes.Status403Forbidden)
             // 409: the upsert matched an EXPIRED row and the request supplied no new expiry (task 023).
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
+            // org_grant_direct_only_record). 503: the policy could not be read (policy_unreadable).
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -69,6 +73,7 @@ public static class GrantExternalAccessEndpoint
     private static async Task<IResult> GrantAccessAsync(
         GrantAccessRequest request,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -113,7 +118,7 @@ public static class GrantExternalAccessEndpoint
         GrantUpsertOutcome outcome;
         try
         {
-            outcome = await CreateGrantAsync(request, root.Type, root.Id, today, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+            outcome = await CreateGrantAsync(request, root.Type, root.Id, today, callerSystemUserId, dataverseClient, participations, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
@@ -126,6 +131,11 @@ public static class GrantExternalAccessEndpoint
                 detail: "Failed to create external access record in Dataverse.",
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
+
+        // Task 138: the record's access policy refused this grantee. The core returned the refusal as a VALUE,
+        // before writing anything, so it reaches here instead of the catch-all 500 above.
+        if (outcome.Refusal is { } refusal)
+            return PolicyRefusalProblem(refusal, httpContext);
 
         // ADR-003 (task 023): the upsert may have matched an EXPIRED row that this request did not
         // resolve. The row exists, so this is not a server fault — but reporting a bare 200 would tell
@@ -175,6 +185,14 @@ public static class GrantExternalAccessEndpoint
     /// existing id; a match at a different level updates that row IN PLACE. Any surplus active rows on
     /// the same key (pre-existing duplicates, or a lost create race) are collapsed onto the survivor.</para>
     ///
+    /// <para><b>The record's access policy runs FIRST (task 138).</b> Before any query or write, the root's flags
+    /// are read and <see cref="ExternalGrantLifecycle.DecideGrantPolicy"/> decides whether this grantee kind is
+    /// admitted: contact and organization grants are refused on a Restricted record, organization-wide grants
+    /// on a Secure or Limited one, and an unreadable policy refuses everything. A refusal is RETURNED in
+    /// <see cref="GrantUpsertOutcome.Refusal"/>, never thrown — every caller wraps this method in a catch-all
+    /// that would turn an exception into a bare 500. Because the check lives in this shared core, any future
+    /// writer that calls it (task 140's contact-side route, task 142's auto-grants) cannot bypass it.</para>
+    ///
     /// <para><b>Which row survives (task 106, ISS-008).</b> The survivor is elected by
     /// <see cref="ExternalGrantLifecycle.ElectSurvivor"/> — the row that will confer access longest after
     /// this request, ties broken by ascending id — not the lowest id outright. That single change makes two
@@ -190,6 +208,7 @@ public static class GrantExternalAccessEndpoint
         DateOnly today,
         string? callerOid,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger logger,
@@ -197,6 +216,19 @@ public static class GrantExternalAccessEndpoint
     {
         var key = ResolveGrantKey(request, rootType, rootId);
         var requestedLevel = (int)request.AccessLevel;
+
+        // ── Task 138: the record's access policy, BEFORE any side effect ─────
+        // The grantee kind comes from the SAME key the upsert writes, so the policy judges exactly the row
+        // that would be written (an OrganizationId beside a ContactId is the contact's firm, not the grantee).
+        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            participations,
+            rootType,
+            rootId,
+            key.IsOrganizationGrant ? GrantGranteeKind.Organization : GrantGranteeKind.Contact,
+            logger,
+            ct);
+        if (!policy.IsAllowed)
+            return GrantUpsertOutcome.Refused(policy);
 
         // ── UPSERT: does this logical grant already exist? ───────────────────
         // Failures propagate deliberately. Falling back to a blind create on a failed pre-existence
@@ -391,7 +423,43 @@ public static class GrantExternalAccessEndpoint
     /// one case where a caller most needs to be told something — "this matched an EXPIRED row and you
     /// supplied no new expiry, so the grantee still has nothing" — was indistinguishable from success.
     /// </remarks>
-    internal sealed record GrantUpsertOutcome(Guid AccessRecordId, string? Warning);
+    internal sealed record GrantUpsertOutcome(Guid AccessRecordId, string? Warning, GrantPolicyDecision? Refusal = null)
+    {
+        /// <summary>
+        /// The record's access policy refused the grant (task 138): nothing was queried or written, and there is
+        /// no row id. A typed value, never an exception — see <see cref="CreateGrantAsync"/>.
+        /// </summary>
+        public static GrantUpsertOutcome Refused(GrantPolicyDecision refusal) => new(Guid.Empty, null, refusal);
+    }
+
+    /// <summary>
+    /// The ProblemDetails for a write-time policy refusal (task 138), shared by <c>/grant</c>,
+    /// <c>/invite-and-grant</c> and <c>/invite</c>: 422 (record_restricted / org_grant_direct_only_record) or
+    /// 503 (policy_unreadable), each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the
+    /// Manage Access dialog shows verbatim, and the <c>traceId</c>.
+    /// </summary>
+    internal static IResult PolicyRefusalProblem(
+        GrantPolicyDecision refusal, HttpContext httpContext, IDictionary<string, object?>? extra = null)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["traceId"] = httpContext.TraceIdentifier,
+            ["reasonCode"] = refusal.ReasonCode,
+        };
+        if (extra is not null)
+        {
+            foreach (var (k, v) in extra)
+                extensions[k] = v;
+        }
+
+        return Results.Problem(
+            statusCode: refusal.StatusCode,
+            title: refusal.StatusCode == StatusCodes.Status503ServiceUnavailable
+                ? "Access settings unavailable"
+                : "Grant not allowed on this record",
+            detail: refusal.Detail,
+            extensions: extensions);
+    }
 
     /// <summary>Stable reason code for a requested expiry before today (spec FR-33, task 097).</summary>
     internal const string ExpiryInPastReasonCode = "sdap.access.grant.expiry_in_past";

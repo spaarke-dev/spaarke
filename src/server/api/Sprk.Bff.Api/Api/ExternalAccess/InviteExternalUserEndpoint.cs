@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Registration;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -48,7 +49,11 @@ public static class InviteExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            // 422: the named record is Restricted, so no contact may be invited to it (task 138).
+            // 503: the record's access settings could not be read. Both before any Contact or CIAM write.
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -60,6 +65,7 @@ public static class InviteExternalUserEndpoint
     private static async Task<IResult> InviteExternalUserAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         IConfiguration configuration,
@@ -71,9 +77,30 @@ public static class InviteExternalUserEndpoint
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
 
-        // Note (task 070): ProjectId is NOT required — /invite only onboards (resolve-or-create Contact +
-        // CIAM account); it writes NO grant. The grant (and its root) is created separately by /grant or
-        // /invite-and-grant. The field is retained on the DTO for back-compat but no longer gates /invite.
+        // Note (task 070): /invite only onboards (resolve-or-create Contact + CIAM account); it writes NO grant.
+        // The grant is created separately by /grant or /invite-and-grant.
+        //
+        // Task 138: the request still names a record — DelegationRuleFilter refuses one that does not, before
+        // this handler runs — and inviting someone TO a Restricted record provisions an identity and emails a
+        // person who can never get access to it. So the record's access policy is checked here, before the
+        // Contact or the CIAM account is touched, with the same decision function the grant routes use. The
+        // invitee is a named contact, so only Restricted (or an unreadable policy) refuses; Secure and Limited
+        // admit named contacts.
+        var root = GrantExternalAccessEndpoint.ResolveGrantRoot(new GrantAccessRequest(
+            ContactId: Guid.Empty,      // irrelevant to root resolution
+            ProjectId: request.ProjectId,
+            AccessLevel: default,
+            ExpiryDate: null,
+            OrganizationId: null,
+            RecordType: request.RecordType,
+            RecordId: request.RecordId));
+        if (!root.Ok)
+            return ProblemDetailsHelper.ValidationError(root.Error!);
+
+        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            participations, root.Type, root.Id, GrantGranteeKind.Contact, logger, ct);
+        if (!policy.IsAllowed)
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
         logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
 

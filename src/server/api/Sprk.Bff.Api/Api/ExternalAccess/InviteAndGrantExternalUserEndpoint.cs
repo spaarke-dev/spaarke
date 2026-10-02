@@ -38,7 +38,11 @@ public static class InviteAndGrantExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            // 422/503: the record's access policy refused the grant, or could not be read (task 138) —
+            // checked BEFORE onboarding, so a refusal leaves no Contact, CIAM account or email behind.
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -46,6 +50,7 @@ public static class InviteAndGrantExternalUserEndpoint
     private static async Task<IResult> InviteAndGrantAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ITenantCache cache,
@@ -81,6 +86,15 @@ public static class InviteAndGrantExternalUserEndpoint
         var today = ExternalGrantLifecycle.TodayUtc(timeProvider);
         if (GrantExternalAccessEndpoint.ValidateRequestedExpiry(request.ExpiryDate, today, httpContext) is { } expiryProblem)
             return expiryProblem;
+
+        // Task 138: the record's access policy, BEFORE onboarding. The grantee is a named Contact, so this is
+        // refused only on a Restricted record (or when the policy cannot be read). The grant core checks again
+        // below — that second read is the core's own guarantee for every writer, and catches a record that
+        // became Restricted while the account was being provisioned.
+        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            participations, grantRoot.Type, grantRoot.Id, GrantGranteeKind.Contact, logger, ct);
+        if (!policy.IsAllowed)
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
@@ -125,7 +139,18 @@ public static class InviteAndGrantExternalUserEndpoint
         try
         {
             var grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
-                grantRequest, grantRoot.Type, grantRoot.Id, today, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+                grantRequest, grantRoot.Type, grantRoot.Id, today, callerSystemUserId, dataverseClient, participations, cache, httpContext, logger, ct);
+
+            // Task 138: the core's own policy check refused (the record changed after the pre-check above).
+            // The Contact was onboarded; the refusal is reported as itself, with the contact id, never as a 500.
+            if (grantOutcome.Refusal is { } refusal)
+            {
+                logger.LogWarning(
+                    "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} but the grant was refused by the record's " +
+                    "access policy: {ReasonCode}.", contactId, refusal.ReasonCode);
+                return GrantExternalAccessEndpoint.PolicyRefusalProblem(
+                    refusal, httpContext, new Dictionary<string, object?> { ["contactId"] = contactId });
+            }
 
             accessRecordId = grantOutcome.AccessRecordId;
 

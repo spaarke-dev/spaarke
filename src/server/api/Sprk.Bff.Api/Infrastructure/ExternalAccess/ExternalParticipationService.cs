@@ -676,15 +676,21 @@ public class ExternalParticipationService
     /// <summary>
     /// The <c>sprk_accesspermission</c> option value meaning RESTRICTED.
     /// <b>Verified live 2026-09-04</b> on all three root entities (Standard 100000000 / Limited 100000001 /
-    /// Restricted 100000002).
+    /// Restricted 100000002), and again 2026-09-30 (session 27).
     /// </summary>
     /// <remarks>
-    /// The task brief cited <c>TrackingFieldTrio/index.ts</c> for this number, but that file documents the
-    /// <c>sprk_communication</c> option set and says so explicitly ("entity-specific: lives ONLY here …").
-    /// The value happens to match on all three roots — established by querying metadata, not by trusting
-    /// the citation.
+    /// These are the ROOT tables' values, read from root metadata — not from any communication option set.
+    /// <c>sprk_communication.sprk_accesspermission</c> is retired (task 138, owner Q6): a communication
+    /// inherits its parent's permission, and nothing reads its own copy.
     /// </remarks>
     internal const int AccessPermissionRestricted = 100000002;
+
+    /// <summary>
+    /// The <c>sprk_accesspermission</c> option value meaning LIMITED (task 138): named, direct contact grants
+    /// only. Same live verification as <see cref="AccessPermissionRestricted"/>. A null or Standard
+    /// (100000000) value is Standard — today's behaviour, unchanged.
+    /// </summary>
+    internal const int AccessPermissionLimited = 100000001;
 
     /// <summary>Ids per flag query. Bounded so a large candidate set cannot produce an over-length URL.</summary>
     private const int FlagQueryChunkSize = 50;
@@ -695,9 +701,10 @@ public class ExternalParticipationService
     /// <remarks>
     /// <b>Fail-closed, per NFR-01.</b> Every id the caller asked about is present in the returned map. An id
     /// the query did not return — deleted, filtered, or invisible to the app-only identity — is
-    /// indistinguishable from a read that failed, so it comes back as <b>secure AND restricted</b>. That is
-    /// the deny direction: unknown flags suppress derived terms and veto contact-sourced rights, rather than
-    /// defaulting a record to open. A transport fault or non-success status does the same for the whole chunk.
+    /// indistinguishable from a read that failed, so it comes back as <see cref="RootRecordFlags.Unreadable"/>:
+    /// <b>secure, limited AND restricted</b>, with the explicit unreadable marker (task 138). That is the deny
+    /// direction: unknown flags suppress derived terms and veto contact-sourced rights, rather than defaulting a
+    /// record to open. A transport fault or non-success status does the same for the whole chunk.
     /// <para>
     /// An entity type with no flag columns returns an empty map, meaning "no vetoes apply" — that is a
     /// STATIC fact about the schema (verified above), not a failed read, so it is not a fail-closed case.
@@ -767,9 +774,7 @@ public class ExternalParticipationService
                 foreach (var id in chunk)
                 {
                     flags[id] = byId.TryGetValue(id, out var row)
-                        ? new RootRecordFlags(
-                            IsSecure: row.sprk_issecure == true,
-                            IsRestricted: row.sprk_accesspermission == AccessPermissionRestricted)
+                        ? FlagsFrom(row.sprk_issecure, row.sprk_accesspermission)
                         // Asked about, not returned. Cannot be distinguished from an unreadable row.
                         : RootRecordFlags.Unreadable;
                 }
@@ -788,6 +793,34 @@ public class ExternalParticipationService
 
         return flags;
     }
+
+    /// <summary>
+    /// The flags one SUCCESSFULLY read row carries (task 138 — extracted so the column-to-flag mapping is
+    /// asserted directly, without an HTTP stack).
+    /// </summary>
+    /// <remarks>
+    /// A null <c>sprk_issecure</c> is not secure, and a null <c>sprk_accesspermission</c> is Standard: both are
+    /// today's behaviour, unchanged (task 138 constraint; the NULL-<c>sprk_issecure</c> cleanup is task 153's
+    /// Q1 decision). <see cref="RootRecordFlags.IsUnreadable"/> is never set here — this row WAS read.
+    /// </remarks>
+    internal static RootRecordFlags FlagsFrom(bool? isSecure, int? accessPermission)
+        => new(
+            IsSecure: isSecure == true,
+            IsRestricted: accessPermission == AccessPermissionRestricted,
+            IsLimited: accessPermission == AccessPermissionLimited);
+
+    /// <summary>
+    /// Whether <paramref name="entityType"/> (a LOGICAL name, e.g. <c>sprk_project</c>) is a key of the flag
+    /// sources — i.e. whether <see cref="GetRootRecordFlagsAsync"/> reads anything for it at all.
+    /// </summary>
+    /// <remarks>
+    /// Exists for the write-time grant policy (task 138). For any other type the flag read returns an EMPTY
+    /// map, which the read path treats as "no veto"; at write time an absent id must instead mean
+    /// "unreadable". A test pins that every grant root type's logical name answers <c>true</c> here, so a
+    /// renamed key or a wrong name cannot silently turn the policy off.
+    /// </remarks>
+    internal static bool IsFlagBearingRootType(string? entityType)
+        => entityType is not null && RootFlagSources.ContainsKey(entityType);
 
     /// <summary>Projection of the flag columns. Ids arrive as strings over OData.</summary>
     private sealed class RootFlagRow

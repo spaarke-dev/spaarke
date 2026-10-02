@@ -283,6 +283,70 @@ public class CallerPrincipalResolverTests
             "the strategy must not read grant rows itself — doing so is how the CIAM plane skipped every veto (C1)");
     }
 
+    /// <summary>
+    /// Task 138 criterion 2, on task 135's pipeline: the CIAM strategy over the REAL evaluator. A Limited root
+    /// gives the same answer whether the contact holds a direct grant, an org-inherited grant, or both — only the
+    /// direct grant counts — and there is no CIAM-specific Limited code: the strategy maps what the shared
+    /// contact-plane composition returns.
+    /// </summary>
+    [Fact]
+    public async Task CiamStrategy_OnALimitedRoot_OnlyTheDirectGrantCounts_DirectOrgOrBoth()
+    {
+        var contactId = Guid.NewGuid();
+        var directOnly = Guid.NewGuid();
+        var orgOnly = Guid.NewGuid();
+        var both = Guid.NewGuid();
+        var limited = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true);
+
+        var participations = CreateParticipationServiceMock();
+        participations.Setup(s => s.ResolveExternalContactAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contactId);
+        participations.Setup(s => s.GetGrantSetAsync(contactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalGrantSet
+            {
+                Projects = new[]
+                {
+                    new ExternalParticipation { ProjectId = directOnly, AccessLevel = ExternalAccessLevel.Collaborate, DirectAccessLevel = ExternalAccessLevel.Collaborate },
+                    new ExternalParticipation { ProjectId = orgOnly, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = null },
+                    new ExternalParticipation { ProjectId = both, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = ExternalAccessLevel.ViewOnly },
+                },
+                MatterGrants = Array.Empty<ExternalRootGrant>(),
+                WorkAssignmentGrants = Array.Empty<ExternalRootGrant>(),
+            });
+        participations.Setup(s => s.GetRootRecordFlagsAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyCollection<Guid> ids, CancellationToken _) =>
+                (IReadOnlyDictionary<Guid, RootRecordFlags>)ids.Distinct().ToDictionary(id => id, _ => limited));
+        participations.Setup(s => s.ReadOrganizationMembershipsAsync(contactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ActiveOrgMemberships.None);
+        participations.Setup(s => s.GetReferencedOrganizationIdsAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, IReadOnlyCollection<Guid> ids, CancellationToken _) =>
+                (IReadOnlyDictionary<Guid, ReferencedOrganizations>)ids.Distinct().ToDictionary(id => id, _ => ReferencedOrganizations.None));
+
+        // The REAL evaluator. CIAM composes no derived-member term, so membership and the standing reader must
+        // never be reached (Strict, no setups).
+        var evaluator = new AccessibleRecordSetService(
+            new Mock<Sprk.Bff.Api.Services.Ai.Membership.IMembershipResolverService>(MockBehavior.Strict).Object,
+            participations.Object,
+            new Mock<ISubjectStandingGrantReader>(MockBehavior.Strict).Object,
+            NeverDeniesReader(),
+            Mock.Of<ILogger<AccessibleRecordSetService>>());
+
+        var strategy = new CiamContactPrincipalStrategy(
+            participations.Object, evaluator, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+        var result = await strategy.ResolveAsync(
+            new DefaultHttpContext { User = Principal(("oid", Guid.NewGuid().ToString())) }, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        result.Principal!.GetEffectiveRights(directOnly).Should().Be(ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate));
+        result.Principal.HasProjectAccess(orgOnly).Should().BeFalse("an org-inherited grant confers nothing on a Limited root");
+        result.Principal.GetEffectiveRights(both).Should().Be(AccessRights.Read,
+            "direct ViewOnly under org FullAccess is EXACTLY Read — the same answer as a direct grant alone");
+        result.Principal.GetAccessibleProjectIds().Should().BeEquivalentTo(new[] { directOnly, both });
+    }
+
     [Fact]
     public async Task CiamStrategy_MissingOidAndEmail_Returns401()
     {

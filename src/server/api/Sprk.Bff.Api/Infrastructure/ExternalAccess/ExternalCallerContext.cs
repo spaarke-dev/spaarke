@@ -140,29 +140,56 @@ public sealed class ExternalRootGrant
 }
 
 /// <summary>
-/// The two veto-bearing flags on a root record (task 037 · FR-21 / FR-22).
+/// The access-policy flags on a root record (task 037 · FR-21 / FR-22; task 138 · Limited).
 /// </summary>
-/// <param name="IsSecure"><c>sprk_issecure</c> — suppresses derived-member and org-expansion terms
-/// BEFORE the max, for every principal kind.</param>
+/// <param name="IsSecure"><c>sprk_issecure</c> — makes the record DIRECT-ONLY for contacts (see
+/// <see cref="IsDirectOnly"/>).</param>
 /// <param name="IsRestricted"><c>sprk_accesspermission == Restricted</c> — removes every
 /// contact-sourced contribution AFTER the max.</param>
+/// <param name="IsLimited"><c>sprk_accesspermission == Limited</c> — makes the record DIRECT-ONLY for
+/// contacts, exactly as Secure does (task 138; teams-app-r1 FR-14 "Option A": named grants only).</param>
+/// <param name="IsUnreadable">
+/// <c>true</c> only when the flags could NOT be read (a fault, a non-success status, or an id the query did
+/// not return). The read path never needs it — the other three fields already carry the most restrictive
+/// combination — but the WRITE-time grant policy does: it must tell an operator "the record's settings could
+/// not be read" rather than "the record is Restricted", which would be false (task 138).
+/// </param>
 /// <remarks>
-/// The two are independent, so a record can be neither, either, or both. They are carried together
-/// because they come from the same row and the same read.
+/// The flags are independent, so a record can carry any combination. They are carried together because they
+/// come from the same row and the same read. <see cref="IsLimited"/> and <see cref="IsUnreadable"/> are
+/// optional so a value built with only the first two (every pre-138 call site) means what it always meant.
 /// </remarks>
-public readonly record struct RootRecordFlags(bool IsSecure, bool IsRestricted)
+public readonly record struct RootRecordFlags(
+    bool IsSecure, bool IsRestricted, bool IsLimited = false, bool IsUnreadable = false)
 {
     /// <summary>
-    /// What an unreadable or unreturned record resolves to: <b>both vetoes active</b> (spec NFR-01).
+    /// The ONE pre-max suppression predicate (ADR-003 item 8 as amended by task 138 · FR-22): on a
+    /// direct-only record a contact's access comes ONLY from its own named grant rows. Organization-inherited
+    /// grants, standing-grant membership and organization expansion contribute nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Secure OR Limited.</b> The owner's model (round 2, 2026-09-30): Limited means named, direct
+    /// grants only, which is exactly what FR-22 Secure suppression already does — and a Secure record is
+    /// Limited for contacts. So this is the same predicate widened, not a second one. Every term that used to
+    /// ask "is it Secure?" asks this instead.</para>
+    /// <para><b>Restricted is not part of it.</b> Restricted is a POST-max veto that removes every
+    /// contact-sourced contribution, direct grants included (<c>AccessibleRecordSetService.ApplyVetoPipeline</c>).
+    /// Where Restricted and direct-only are both present, Restricted wins because it runs last.</para>
+    /// </remarks>
+    public bool IsDirectOnly => IsSecure || IsLimited;
+
+    /// <summary>
+    /// What an unreadable or unreturned record resolves to: <b>every restriction active</b> (spec NFR-01),
+    /// plus the <see cref="IsUnreadable"/> marker.
     /// <para>
     /// This is the fail-closed direction, and it is deliberately the MOST restrictive combination — not
     /// merely "restricted". Treating an unknown record as non-secure would let a derived-member or
     /// org-expansion term contribute access to a record nobody could confirm is safe to share.
     /// </para>
     /// </summary>
-    public static RootRecordFlags Unreadable => new(IsSecure: true, IsRestricted: true);
+    public static RootRecordFlags Unreadable => new(IsSecure: true, IsRestricted: true, IsLimited: true, IsUnreadable: true);
 
-    /// <summary>No veto applies. Only ever produced by a SUCCESSFUL read of a row carrying neither flag.</summary>
+    /// <summary>No restriction applies. Only ever produced by a SUCCESSFUL read of a Standard, non-secure row.</summary>
     public static RootRecordFlags None => new(IsSecure: false, IsRestricted: false);
 }
 
