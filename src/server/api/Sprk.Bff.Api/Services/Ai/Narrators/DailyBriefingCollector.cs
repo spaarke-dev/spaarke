@@ -37,7 +37,8 @@
 //   - if EVERY channel fails, CollectAsync throws (mirrors word-add-in-r1 task 062's impersonated search fan-out:
 //     an impersonation privilege that is not configured must not look like an empty briefing).
 //   Candidate id lists are chunked (MaxIdsPerImpersonatedRequest) so each impersonated GET stays far below the URL
-//   limit; a failed chunk fails its channel, never shrinks it.
+//   limit; a failed chunk fails its channel, never shrinks it. Each candidate set is read to completion
+//   (PeopleTargetedSet: up to the resolver's 5,000-row ceiling); a set larger than that fails its channels too.
 //
 // PRESERVES: BriefingItem projection shape (downstream narrator depends on it). Each
 // channel's items[] populates RegardingMatterName/RegardingMatterId for entity-link
@@ -609,17 +610,26 @@ public class DailyBriefingCollector : ICodedWorkflow
 
     /// <summary>
     /// Resolves the records of <paramref name="entityType"/> FOR the caller through the canonical resolver's
-    /// people-targeting surface. A resolver failure becomes a FAILED set — the channels that depend on it report
-    /// failure instead of silently shrinking.
+    /// people-targeting surface, read to completion (<see cref="PeopleTargetedSet"/>). A resolver failure, or a set
+    /// larger than the resolver's ceiling, becomes a FAILED set — the channels that depend on it report failure
+    /// instead of silently shrinking to an arbitrary subset.
     /// </summary>
     private async Task<PeopleSet> ResolvePeopleSetAsync(Guid systemUserId, string entityType, CancellationToken ct)
     {
         try
         {
-            var response = await _membershipResolver
-                .ResolveAsync(systemUserId, entityType, MembershipResolveOptions.People, ct)
+            var set = await PeopleTargetedSet
+                .ResolveAsync(_membershipResolver, systemUserId, entityType, _logger, ct)
                 .ConfigureAwait(false);
-            return new PeopleSet(response.Ids, Failed: false);
+            if (!set.Complete)
+            {
+                _logger.LogWarning(
+                    "DailyBriefingCollector people-targeted set for entity={EntityType} exceeds the resolver ceiling; "
+                    + "dependent channels are reported FAILED (never a truncated list)",
+                    entityType);
+                return PeopleSet.FailedSet;
+            }
+            return new PeopleSet(set.Ids, Failed: false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

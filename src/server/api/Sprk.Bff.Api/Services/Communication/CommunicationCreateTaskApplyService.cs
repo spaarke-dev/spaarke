@@ -334,8 +334,10 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 RegardingObjectId = regardingRecordId,
                 RegardingObjectType = targetEntity,
                 OwnerId = request?.AssignedTo,
-                // Task 152: the confirming user is the triggering person — their linked contact names the task.
-                ActingUserId = callerSystemUserId,
+                // Task 152: the person the task is FOR names it (sprk_assignedto = their linked contact) — the user the
+                // confirmer assigned it to when one was chosen, else the confirming user. (Verifier round 1 item 8:
+                // naming the CONFIRMER here made a task assigned to someone else "for" the confirmer too.)
+                ActingUserId = request?.AssignedTo ?? callerSystemUserId,
             },
             ct).ConfigureAwait(false);
 
@@ -479,8 +481,9 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
                 RegardingObjectId = regardingRecordId,
                 RegardingObjectType = regardingEntity,
                 OwnerId = request.AssignedTo,
-                // Task 152: the confirming user is the triggering person — their linked contact names the task.
-                ActingUserId = callerSystemUserId,
+                // Task 152: the person the task is FOR names it — the chosen assignee when one was given, else the
+                // confirming user (verifier round 1 item 8).
+                ActingUserId = request.AssignedTo ?? callerSystemUserId,
             },
             ct).ConfigureAwait(false);
 

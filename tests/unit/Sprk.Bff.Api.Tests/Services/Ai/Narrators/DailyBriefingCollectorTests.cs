@@ -112,6 +112,40 @@ public sealed class DailyBriefingCollectorTests
         return mock;
     }
 
+    /// <summary>
+    /// Like <see cref="PeopleResolver"/>, but <paramref name="pagedEntity"/>'s first page comes back FULL (with a
+    /// continuation token) and the follow-up page returns <paramref name="confirmationIds"/> and no further token.
+    /// </summary>
+    private static Mock<IMembershipResolverService> PagingResolver(
+        IReadOnlyDictionary<string, Guid[]> idsByEntity, string pagedEntity, Guid[] confirmationIds)
+    {
+        const string NextPage = "page-2";
+        var mock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        mock.Setup(r => r.ResolveAsync(
+                It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .Returns<Guid, string, MembershipResolveOptions?, CancellationToken>((_, entity, options, _) =>
+            {
+                var ids = idsByEntity.TryGetValue(entity, out var found) ? found : Array.Empty<Guid>();
+                string? token = null;
+                if (entity == pagedEntity)
+                {
+                    if (options?.ContinuationToken == NextPage)
+                    {
+                        ids = confirmationIds;
+                    }
+                    else
+                    {
+                        token = NextPage;
+                    }
+                }
+                return Task.FromResult(new MembershipResponse(
+                    entity, new PersonIdentity(SystemUserId), ids,
+                    new Dictionary<string, IReadOnlyList<Guid>>(), ids.Length, DateTimeOffset.UtcNow.AddMinutes(5),
+                    ContinuationToken: token));
+            });
+        return mock;
+    }
+
     private static DailyBriefingCollector Sut(FakeCallerQuery query, Mock<IMembershipResolverService> resolver) =>
         new(query, resolver.Object, NullLogger<DailyBriefingCollector>.Instance);
 
@@ -433,6 +467,43 @@ public sealed class DailyBriefingCollectorTests
         matterCalls.Should().HaveCount(3);
         matterCalls.Should().OnlyContain(c =>
             CountOf(c.Query, "sprk_matterid eq") <= DailyBriefingCollector.MaxIdsPerImpersonatedRequest);
+    }
+
+    // Verifier round 1 item 4: a people-targeted set is read to completion (up to the resolver's ceiling); a set
+    // LARGER than the ceiling fails its channels instead of serving an arbitrary GUID-ordered subset.
+
+    [Fact]
+    public async Task CollectAsync_PeopleSetLargerThanTheResolverCeiling_FailsItsChannel_NeverATruncatedList()
+    {
+        var beyondTheCeiling = Guid.Parse("66666666-6666-6666-6666-6666666666ff");
+        var resolver = PagingResolver(AllSets, pagedEntity: "sprk_todo", confirmationIds: new[] { beyondTheCeiling });
+
+        var request = await Sut(AllChannelsQuery(), resolver)
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        request.FailedChannels.Should().Contain("to-dos",
+            "more to-dos are FOR the caller than one read carries — 'could not be loaded', never a silent subset");
+        request.Channels.Should().NotContain(c => c.Category == "to-dos");
+        request.Channels.Should().Contain(c => c.Category == "matters", "other channels are unaffected");
+        resolver.Verify(r => r.ResolveAsync(
+                SystemUserId, "sprk_todo",
+                It.Is<MembershipResolveOptions?>(o => o != null && o.PeopleTargeting
+                    && o.Limit == MembershipResolveOptions.MaxLimit && o.ContinuationToken == null),
+                It.IsAny<CancellationToken>()),
+            Times.Once, "the candidate set is read at the resolver's ceiling, not the 500-row default page");
+    }
+
+    [Fact]
+    public async Task CollectAsync_PeopleSetEndingExactlyAtTheCeiling_IsComplete_NotFailed()
+    {
+        // The resolver emits a token whenever a page comes back full; the confirmation read finds nothing more.
+        var resolver = PagingResolver(AllSets, pagedEntity: "sprk_todo", confirmationIds: Array.Empty<Guid>());
+
+        var request = await Sut(AllChannelsQuery(), resolver)
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        request.FailedChannels.Should().BeEmpty();
+        request.Channels.Single(c => c.Category == "to-dos").Items.Select(i => i.Id).Should().Equal(TodoId1.ToString());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

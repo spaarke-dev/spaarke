@@ -327,7 +327,12 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>201 Created with event details on success, or 400 ProblemDetails if validation fails.</returns>
-    private static async Task<IResult> CreateEventAsync(
+    /// <remarks>
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler: the S1 Assigned-To
+    /// default and the owner-event publish are pinned by executing this site, not by reading its source (task 152
+    /// verifier round 1, items 2 and 7).
+    /// </remarks>
+    internal static async Task<IResult> CreateEventAsync(
         [FromBody] ApiCreateEventRequest request,
         IEventDataverseService dataverseService,
         IMembershipEventPublisher membershipEventPublisher,

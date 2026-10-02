@@ -126,8 +126,8 @@ public sealed record CreateTaskRequest
     public Guid? OwnerId { get; init; }
 
     /// <summary>
-    /// unified-access-control-r2 task 152: the systemuser the task is created on behalf of (the confirming user, the
-    /// recipient a signal is for). Their linked contact becomes <c>sprk_event.sprk_assignedto</c> when no
+    /// unified-access-control-r2 task 152: the systemuser the task is FOR (the assignee the confirming user chose, else
+    /// the confirming user; the recipient a signal is for). Their linked contact becomes <c>sprk_event.sprk_assignedto</c> when no
     /// <see cref="AssignedToContactId"/> is supplied. Null → the regarding parent's responsible internal contact.
     /// </summary>
     public Guid? ActingUserId { get; init; }

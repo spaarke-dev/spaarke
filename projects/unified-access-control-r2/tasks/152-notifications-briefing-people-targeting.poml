@@ -405,6 +405,38 @@ TESTS: full BFF unit suite 13,858 passed / 0 failed / 54 skipped (13,912); NetAr
 
 PENDING MANUAL GATES (exact commands in notes §7): G1 deploy the BFF after merge approval; G2 switch the four live notification playbook nodes to targeting "people" (Deploy-Playbook.ps1 -DryRun then apply, or MCP update of sprk_playbooknode configjson for nodes 99f9ee9c…, b1d94997…, 4bd19f94…, e7b7e6a0…; re-query shows zero on the default); G3 task 141's gates (link coverage); G4 criterion 18 seven-case live gate with dev test users. Main session: apply notes §8 to .claude/adr/ADR-034-user-record-membership.md after owner approval (renumber if 142 lands first) and comment on #1044.
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-152-r1" round="verifier-1">
+VERIFIER ROUND 1 CLOSED; status unchanged (code-complete-live-gates-pending). Full record: notes/task-152-people-targeting.md §12.
+
+ITEMS:
+- 2/14 S1 untested: CLOSED. EventEndpoints.CreateEventAsync is internal and the tests RUN it (linked contact written; no link and unresolved caller both leave it blank). DataverseWebApiService.BuildCreateEventPayload was extracted (internal), and the sprk_AssignedTo@odata.bind is asserted.
+- 3/13 markers untested past the collector: CLOSED. Five DailyBriefingCompositeServiceTests cover the render response and the ledger, the EmptyResponse on both legs, and the email failure line (and its absence when nothing failed).
+- 4/13 500-row silent shrink: CLOSED. New internal static PeopleTargetedSet reads at MaxLimit (5,000) plus one confirmation read when that page is full. An oversize set is FAILED in the collector and Unavailable in the portfolio and top matter, never truncated.
+- 5/17 PortfolioService deferred: CLOSED IN THIS TASK. Matters FOR the user come from the people surface (PeopleTargetedSet). They are read as the caller (IImpersonatedCommunicationQuery, chunked) using the live columns sprk_mattername, sprk_totalspendtodate and sprk_totalbudget; overdue Task events are counted from sprk_event. The ad-hoc ownerid filter and the app-only client are gone. The read is shared with BriefingService through internal ReadMattersForSystemUserAsync. A failed read keeps the pre-existing graceful empty portfolio; whether to add a marker is an owner observation.
+- 6/16 doc row: CLOSED. The membership-resolution-pattern.md row is now 4 cells and current; a PortfolioService row and a read-the-whole-set rule were added. docs/adr A3 gains the read-to-completion MUST, and the notes §8 concise text was updated.
+- 7/15 sites not run: CLOSED for documents, events and quick-create. The documents handler was extracted to internal CreateDocumentAsync; EventEndpoints.CreateEventAsync and OfficeEndpoints.QuickCreateAsync are internal; the tests run each real handler. NARROWED for Office save: SaveAsync has no unit harness (a dozen concrete collaborators). Its owner decision was extracted to internal static OfficeService.PublishSavedDocumentOwnerAsync, which the tests run. One whitespace-insensitive guard pins the (documentId, owningTeamId) call. The whitespace-exact grep was removed.
+- 8 create-task names the confirmer: CLOSED. ActingUserId = request.AssignedTo ?? caller on both the apply and ad-hoc paths; seam tests cover both cases on both paths.
+- 9 no sprk_todo resolver test: CLOSED. A resolver test on sprk_todo descriptors asserts the creator/assignee gets both team-owned to-dos and another member of the same BU default team gets none, with FetchXML assertions.
+- 10 observations: no change. Raise in the PR: (1) a 403 on an entity shows a permanent "could not be loaded"; (2) and (3) failed or unknown results are cached; (4) the ADR-052 AddScheduledJob migration (ratchet 14 -&gt; 13) MUST be called out; (5) NEW: a failed portfolio read still returns the cached zero portfolio.
+- 1, 11: acknowledged. 12/18/19/20: still pending gates, unchanged.
+
+PLACEMENT (CLAUDE.md §10): this round adds no new endpoint, DI registration, package, option, job, interface or Dataverse column.
+- Three existing handlers changed from private/lambda to internal static; routes, filters and authorization are unchanged.
+- Existing auto-wired constructors changed: PortfolioService swaps IGenericEntityService for IMembershipResolverService + IImpersonatedCommunicationQuery; BriefingService drops both.
+
+JUSTIFICATION (CLAUDE.md §11):
+- PeopleTargetedSet. Existing: AccessibleRecordSetService.WalkMembershipPagesAsync is private to the authorization composer and tied to its options and capped policy. Extension: reusing it would couple the attention surfaces to authorization infrastructure, which A3 keeps apart. Cost: an arbitrary 500-row subset is served silently.
+- PortfolioMatterRead (internal record). Cost: without it, "could not be determined" and "no matters" are indistinguishable.
+- BuildCreateEventPayload and PublishSavedDocumentOwnerAsync are extractions of existing code. Cost: without them these paths are testable only via HttpMessageHandler (ADR-038 B1) or via text.
+
+PERTURBATIONS: 17 seeded (S1, S2, S3a-c, S4a-c, S5a-c, S7a-d, S8, S9). All went RED, and every source was restored and touched (table in notes §12).
+
+TESTS (2026-10-02, after the round-1 changes):
+- Full BFF unit suite: 13,887 passed / 0 failed / 54 skipped (13,941). That is +29 against round 0's 13,858 / 0 / 54.
+- NetArchTest: 341 passed / 0 failed / 0 skipped.
+- Affected classes, run before the perturbations: 324 / 0.
+- No client change. No package change, so no CVE delta. Publish size not measured (the main session measures it).
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(A7 REVERSED) Office quick-create defaults the internal Assigned-To field to the maker's contact (editable), so the record is "for" the maker in the briefing; coordinate with 142 and word-add-in-r1. (D1) "Created By" (when human) decides who a record is FOR — never who can open it; the briefing only lists records the user can access in Dataverse.</amendment>

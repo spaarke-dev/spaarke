@@ -1621,8 +1621,10 @@ public static class OfficeEndpoints
     /// for sprk_matter per event-source-inventory §3A). Fire-and-forget
     /// per FR-2P2.6 + Q2: publisher never throws; mutation succeeds even
     /// if publish fails (nightly recon job task 085 is the backstop).
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler and observes the owner
+    /// event it publishes (UAC-r2 task 152 verifier round 1, item 7).
     /// </remarks>
-    private static async Task<IResult> QuickCreateAsync(
+    internal static async Task<IResult> QuickCreateAsync(
         string entityType,
         QuickCreateRequest request,
         IOfficeService officeService,

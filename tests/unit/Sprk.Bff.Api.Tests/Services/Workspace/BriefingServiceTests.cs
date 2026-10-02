@@ -49,7 +49,6 @@ public class BriefingServiceTests
     private readonly IDistributedCache _cache = new MemoryDistributedCache(
         Options.Create(new MemoryDistributedCacheOptions()));
     private readonly Mock<IDistributedCache> _portfolioCacheMock = new(MockBehavior.Loose);
-    private readonly Mock<IGenericEntityService> _portfolioEntityServiceMock = new(MockBehavior.Loose);
 
     // -------------------------------------------------------------------------
     // Happy path — people-targeted candidates, read as the caller, heuristic applied
@@ -143,7 +142,7 @@ public class BriefingServiceTests
     [Fact]
     public async Task GetBriefing_LargeCandidateSet_IsChunked_EveryChunkReadAsTheCaller()
     {
-        var ids = Enumerable.Range(1, BriefingService.MaxIdsPerImpersonatedRequest + 10)
+        var ids = Enumerable.Range(1, PortfolioService.MaxIdsPerImpersonatedRequest + 10)
             .Select(i => Guid.Parse($"55555555-5555-5555-5555-{i:D12}"))
             .ToArray();
         SetupAadOidLookup(returnUserId: TestSystemUserId);
@@ -155,7 +154,7 @@ public class BriefingServiceTests
         _callerReads.Count(r => r.EntitySet == "sprk_matters").Should().Be(2);
         _callerReads.Count(r => r.EntitySet == "sprk_events").Should().Be(2);
         _callerReads.Where(r => r.EntitySet == "sprk_matters")
-            .Should().OnlyContain(r => CountOf(r.Query, "sprk_matterid eq") <= BriefingService.MaxIdsPerImpersonatedRequest);
+            .Should().OnlyContain(r => CountOf(r.Query, "sprk_matterid eq") <= PortfolioService.MaxIdsPerImpersonatedRequest);
         result.TopPriorityMatter!.MatterId.Should().Be(ids[^1]);
     }
 
@@ -240,6 +239,34 @@ public class BriefingServiceTests
     }
 
     [Fact]
+    public async Task GetBriefing_PeopleSetLargerThanTheResolverCeiling_TopMatterUnavailable_NeverAnArbitrarySubset()
+    {
+        // Verifier round 1 item 4: the candidate set is read to completion; a first FULL page (continuation token)
+        // whose follow-up still names new matters is "could not be determined", never the GUID-ordered first page.
+        SetupAadOidLookup(returnUserId: TestSystemUserId);
+        _resolverMock
+            .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string _, MembershipResolveOptions? o, CancellationToken _) =>
+            {
+                var ids = o?.ContinuationToken == "page-2" ? new[] { MatterIdLowOverdue } : new[] { MatterIdHighOverdue };
+                return new MembershipResponse(
+                    EntityType: "sprk_matter",
+                    PersonIdentity: new PersonIdentity(TestSystemUserId),
+                    Ids: ids,
+                    ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+                    Count: ids.Length,
+                    CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5),
+                    ContinuationToken: o?.ContinuationToken == "page-2" ? null : "page-2");
+            });
+
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
+
+        result.TopPriorityMatter.Should().BeNull();
+        result.TopPriorityMatterUnavailable.Should().BeTrue();
+        _callerReads.Should().BeEmpty("an incomplete candidate set is never read or ranked");
+    }
+
+    [Fact]
     public async Task GetBriefing_CancellationDuringResolver_PropagatesCancellation()
     {
         SetupAadOidLookup(returnUserId: TestSystemUserId);
@@ -260,28 +287,27 @@ public class BriefingServiceTests
 
     private BriefingService CreateSut()
     {
+        // The portfolio METRICS are a cache hit here, so these tests observe only the top-priority-matter read. That
+        // read is PortfolioService.ReadMattersForSystemUserAsync (task 152 verifier round 1 item 5: one shared,
+        // people-targeted, caller-context read for the metrics and the top matter), driven by the resolver and
+        // caller-query fakes below. PortfolioServiceTests pins the metrics side.
         _portfolioCacheMock
             .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-        _portfolioCacheMock
-            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _portfolioEntityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
+            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new PortfolioSummaryResponse(
+                TotalSpend: 0m, TotalBudget: 0m, UtilizationPercent: 0m, MattersAtRisk: 0, OverdueEvents: 0,
+                ActiveMatters: 0, CachedAt: DateTimeOffset.UtcNow))));
 
         var portfolio = new PortfolioService(
             _portfolioCacheMock.Object,
-            _portfolioEntityServiceMock.Object,
+            _resolverMock.Object,
+            _callerQueryMock.Object,
             StubSystemUserIdentityResolver.Instance,
             NullLogger<PortfolioService>.Instance);
 
         return new BriefingService(
             portfolioService: portfolio,
             cache: _cache,
-            membershipResolver: _resolverMock.Object,
             dataverse: _dataverseMock.Object,
-            callerQuery: _callerQueryMock.Object,
             logger: NullLogger<BriefingService>.Instance,
             briefingAi: null);
     }

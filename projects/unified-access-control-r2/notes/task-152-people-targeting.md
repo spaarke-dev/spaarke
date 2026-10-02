@@ -204,7 +204,7 @@ Sub-agents cannot write `.claude/` (root CLAUDE.md §3). Apply after owner appro
 **(iii) MUST — add after the A1 rules (after line 77):**
 
 ```markdown
-- **MUST** (**A3**, task 152) select records for a person's briefing, notifications and attention surfaces through the **people-targeting surface** (`MembershipResolveOptions.PeopleTargeting` / `.People`): human `createdby` + user-valued owner + registry Contact-typed "Assigned *" columns via the linked contact (`PersonIdentity.ContactId`). It **MUST NOT** bind `owningteam`, `owningbusinessunit`, a team-valued `ownerid`, or any Team/BusinessUnit/Organization/Account-typed descriptor; a team-owned record never fans out to the team. **MUST NOT** fall back to email/UPN/name matching. **MUST** be rejected together with `AccessConferringOnly`, and **MUST** be part of the options hash. Consumers **MUST** read the rows they show under the caller's Dataverse security — selecting is not authorizing.
+- **MUST** (**A3**, task 152) select records for a person's briefing, notifications and attention surfaces through the **people-targeting surface** (`MembershipResolveOptions.PeopleTargeting` / `.People`): human `createdby` + user-valued owner + registry Contact-typed "Assigned *" columns via the linked contact (`PersonIdentity.ContactId`). It **MUST NOT** bind `owningteam`, `owningbusinessunit`, a team-valued `ownerid`, or any Team/BusinessUnit/Organization/Account-typed descriptor; a team-owned record never fans out to the team. **MUST NOT** fall back to email/UPN/name matching. **MUST** be rejected together with `AccessConferringOnly`, and **MUST** be part of the options hash. Consumers **MUST** read the rows they show under the caller's Dataverse security — selecting is not authorizing — and **MUST** read the people-targeted set to completion (`PeopleTargetedSet`); a set larger than the resolver's ceiling is reported failed, never silently truncated.
 - **MUST** (**A3**) make each `MembershipChangedEvent` describe the row's **actual owner after the write** (`Team`/teamid or `User`/systemuserid), typed from `EntityReference.LogicalName`, in the same identity space as `MembershipReconciliationJob`; both writers skip an application-user owner. No `createdby` events.
 ```
 
@@ -231,12 +231,83 @@ Sub-agents cannot write `.claude/` (root CLAUDE.md §3). Apply after owner appro
 
 ## 10. Read-only findings (not fixed here — outside this task's surfaces)
 
-- `PortfolioService.GetPortfolioSummaryAsync` (the Workspace briefing's metrics) selects the same non-existent
+- ~~`PortfolioService.GetPortfolioSummaryAsync` (the Workspace briefing's metrics) selects the same non-existent
   `sprk_matter` columns (`sprk_name`, `sprk_totalspend`, `sprk_overdueeventcount`) and filters app-only by
-  `ownerid`; its metrics are therefore likely always zero, and it never counts team-owned matters. Suggest a follow-up.
+  `ownerid`; its metrics are therefore likely always zero, and it never counts team-owned matters. Suggest a follow-up.~~
+  **Withdrawn — fixed in this task** (verifier round 1 item 5; the no-deferral constraint puts discovered scope in this
+  task, and the `ownerid` condition was the ad-hoc owner condition ADR-034 A3 forbids on an attention surface). See §12.
 - The live "Tasks Due Soon" LookupUserMembership node has no `entityType` (config `{"__canvasNodeId": …}`) and fails
   validation on every run; gate G2 redeploys it from source.
 
 ## 11. Live gate results
 
 _Not run — live writes are the main session's (§7)._
+
+## 12. Verifier round 1 (2026-10-02, branch `task/uac-r2-152-r1`)
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | Reproduction of counts | Acknowledged. No change needed. |
+| 2 / 14 | S1 (`POST /api/v1/events` → `sprk_assignedto`) untested; the Web API bind line was untested | **Closed.** `EventEndpoints.CreateEventAsync` is now `internal`; `EventEndpointsMembershipPublishingTests` RUNS the handler and covers three cases: linked contact → written, no link → blank, caller unresolved → blank and still created. The payload builder was extracted as `DataverseWebApiService.BuildCreateEventPayload` (internal, InternalsVisibleTo). The tests assert the `sprk_AssignedTo@odata.bind` = `/contacts(id)` bind, and that it is absent for null or an empty Guid. No `Mock<HttpMessageHandler>` is used. Seeds S1 and S2 both went red. |
+| 3 / 13 | Failure markers untested past the collector | **Closed.** Five new `DailyBriefingCompositeServiceTests` cover the render response plus the ledger `sections.failedChannels` / `highPriorityFailedEntityTypes`, the render `EmptyResponse`, the email "Some sections could not be loaded" line (and its absence when nothing failed), and the email-leg `EmptyResponse`. Seeds S3a (ExecuteAsync blanked), S3b (EmptyResponse blanked) and S3c (email line suppressed) all went red. |
+| 4 / 13 | 500-row candidate cap silently shrinks sets | **Closed.** New `Services/Ai/Membership/PeopleTargetedSet` (internal static) does one read at `MembershipResolveOptions.MaxLimit` (5,000). When that page comes back full, one confirmation read follows, following the `AccessibleRecordSetService.WalkMembershipPagesAsync` precedent. A set larger than the ceiling returns `Complete=false` and a `people_targeting_set_incomplete` warning. `DailyBriefingCollector` reports it as a FAILED set: its channels go into `failedChannels` and its High Priority entity into `highPriorityFailedEntityTypes`. `PortfolioService` (and through it the top-priority matter) reports it as Unavailable. Seeds S4a (incomplete treated as complete), S4b (default 500 page) and S4c/S5b (consumer ignores `Complete`) all went red. |
+| 5 / 17 | PortfolioService deferred (non-existent columns, app-only ad-hoc `ownerid` filter) | **Closed in this task** (no-deferral). Details follow this table. |
+| 6 / 16 | Malformed `membership-resolution-pattern.md` BriefingService row; stale text | **Closed.** The row is rewritten to 4 cells with the people-surface and `topPriorityMatterUnavailable` semantics. A `PortfolioService` consumer row was added, and so was a "Read the whole set" rule. The surfaces table names `PortfolioService`. `docs/adr` A3 gains a MUST to read the people-targeted set to completion, plus a `PortfolioService` row in its live-consumer table. §8 (iii) concise text was updated to match. |
+| 7 / 15 | Publishing tests do not run the sites | **Closed for three sites, narrowed for the fourth.** Documents: the inline lambda was extracted to `internal static DataverseDocumentsEndpoints.CreateDocumentAsync`, and the tests run it (team resolved → Team event with that id and no read-back; no team → refused and nothing published). Events: the tests run `CreateEventAsync` with an app-user owner (nothing published), a team owner (Team event for the created id, read back), a human owner (systemuserid) and a throwing publisher (still 201). Quick-create: `OfficeEndpoints.QuickCreateAsync` is now `internal`, and the tests run it for a matter with a team owner (read back), a matter with an app-user owner (nothing) and a project (nothing). **Office save:** `SaveAsync` has a dozen concrete collaborators (SPE upload, job store, persistence) and no unit harness anywhere in the repo. The site's own decisions (table, team reference, read-back fallback) were extracted to `internal static OfficeService.PublishSavedDocumentOwnerAsync`, which the tests run. One whitespace-INSENSITIVE guard pins that `SaveAsync` calls it with `(documentId, owningTeamId)`. That one argument binding is the only part still pinned by text. The whitespace-exact grep is gone. Seeds S7a–S7d all went red. |
+| 8 | Create-task apply names the CONFIRMER even when another assignee was chosen | **Closed.** `ActingUserId = request.AssignedTo ?? callerSystemUserId` on both the applied-proposal and ad-hoc paths. The chosen assignee's linked contact now names the task, and the confirmer is used only when no assignee was chosen. `CreateTaskApplySeamTests` asserts both cases on both paths. Seed S8 went red. |
+| 9 | No resolver-level `sprk_todo` test | **Closed.** `People_Todo_TeamOwnedToDo_IsForItsHumanCreatorAndItsAssignee_NotForAnotherTeamMember` runs the resolver on `sprk_todo` descriptors. The FetchXML binds `createdby`, `ownerid` and `sprk_assignedto` (the linked contact) and never `owningteam` or the team id. The creator/assignee gets both team-owned to-dos. Another member of the same BU default team gets nothing. The harness gained optional `entity` / `callerId`. Seed S9 (the registry ignored for `sprk_todo`) went red. |
+| 10 | Observations | No change (see "Owner observations" below). (4) The ADR-052 `TodoGenerationService` migration (AddHostedService → AddScheduledJob, ratchet 14 → 13) **must be called out in the PR**. |
+| 11 | Verified correct | Acknowledged. |
+| 12, 18, 19, 20 | Pending gates (A3 approval, escalations (a)/(b), G2, G3, G4, publish size, CVE) | Still pending. Unchanged by this round. This round adds no package. |
+
+**Item 5 in detail.** `PortfolioService` now selects the matters FOR the user through the people surface (`PeopleTargetedSet`). It reads them AS THE CALLER through the existing `IImpersonatedCommunicationQuery`, chunked at 50 ids, using the live-verified columns `sprk_mattername`, `sprk_totalspendtodate` and `sprk_totalbudget`. Overdue open Task events are counted from `sprk_event`. The ad-hoc `ownerid` condition and the app-only `IGenericEntityService` are gone. The read is exposed as `internal ReadMattersForSystemUserAsync` and shared with `BriefingService`: its top-priority matter now ranks the same matter set the metrics aggregate. `BriefingService` lost its duplicate detail query and its resolver / caller-query constructor arguments.
+
+A failed read keeps the endpoint's PRE-EXISTING graceful empty portfolio (logged, never app-only). Making a failed portfolio distinguishable would change the `/portfolio` and `/health` contracts, so it is left as an owner observation. Seeds S5a (old column names), S5b (incomplete set aggregated) and S5c (overdue counts dropped) all went red. The `WorkspaceTestFixture` serves the same three matters through the two seams.
+
+### Placement and justification (CLAUDE.md §10 / §11), this round
+
+Everything stays in existing BFF components. There is **no new endpoint, DI registration, package, option, job, interface or Dataverse column**. Three existing endpoint handlers changed from `private` (or an inline lambda) to `internal static` so tests can run them; the routes, filters and authorization are unchanged. Constructors changed on existing auto-wired registrations:
+- `PortfolioService`: `IGenericEntityService` → `IMembershipResolverService` + `IImpersonatedCommunicationQuery`.
+- `BriefingService`: loses `IMembershipResolverService` + `IImpersonatedCommunicationQuery`.
+
+New surface:
+- **`PeopleTargetedSet`** (internal static helper).
+  - Existing: `AccessibleRecordSetService.WalkMembershipPagesAsync`, which is private to the authorization composer in `Infrastructure/ExternalAccess`, coupled to its `AccessConferringOnly` / org-id page options and its `[WF-AUTHZ]` capped policy.
+  - Extension: reusing it would make `Services/Workspace` and `Services/Ai/Narrators` depend on the authorization composer and would merge the authorization and attention surfaces that ADR-034 A3 keeps apart. A ~20-line people-surface helper beside the resolver is the smaller change.
+  - Cost of doing nothing: the briefing, the portfolio and the top matter silently serve an arbitrary GUID-ordered 500-row subset to anyone with more than 500 people-targeted rows (item 4).
+- **`PortfolioMatterRead`** (internal record in `PortfolioService.cs`): the "unavailable vs empty" result of the shared read. Without it, the top matter cannot distinguish "could not be determined" from "no matters".
+- **`DataverseWebApiService.BuildCreateEventPayload`** and **`OfficeService.PublishSavedDocumentOwnerAsync`** (internal static extractions of existing code): without them, the S1 bind and the save site's owner decision are testable only by intercepting HTTP (banned by ADR-038 B1) or by text.
+
+### Owner observations (item 10). No change made; raise in the PR.
+
+1. A caller with no Read privilege on an entity (e.g. `sprk_invoice`) whose people set names rows there will see a permanent "High priority (invoices) could not be loaded", because a 403 is classed as FAILED.
+2. A failed top-priority-matter determination (`TopPriorityMatterUnavailable`) is cached for the 10-minute briefing TTL.
+3. A people-surface result built while the application-user check was "unknown" (createdby dropped) is cached for 5 minutes.
+4. The ADR-052 migration of `TodoGenerationService` exceeds the POML's "no DI registration change" placement statement. It is justified by ADR-052 §1 (ratchet 14 → 13) and must be called out in the PR.
+5. NEW this round: a failed portfolio read still returns the pre-existing zero portfolio (and caches it for 5 minutes), indistinguishable from "no matters". A marker would be an additive contract change to `/portfolio` and `/health`; this is owner's call.
+
+**Test runs this round (2026-10-02):**
+- Full BFF unit suite: **13,887 passed / 0 failed / 54 skipped (13,941)**.
+- NetArchTest: **341 / 0 / 0**.
+
+### Perturbations this round. 17 seeded, all RED, all restored and touched.
+
+| # | Seed | Red test(s) |
+|---|---|---|
+| S1 | `CreateEventAsync` passes `(Guid?)null` for the contact | `CreateEvent_ActingUserWithALinkedContact_WritesThatContactToAssignedTo` |
+| S2 | payload binds the wrong key | `CreateEventPayload_WithAnAssignee_BindsSprkAssignedToTheContact` |
+| S3a | composite `ExecuteAsync` blanks both markers | `RenderAsync_FailureMarkers_ReachTheResponse_AndTheLedgerEntry`, `EmailAsync_FailureMarkers_…` |
+| S3b | `EmptyResponse` blanks both markers | `RenderAsync_NothingToNarrateButSectionsFailed_…`, `EmailAsync_NothingToSendButSectionsFailed_…` |
+| S3c | email failure line suppressed | `EmailAsync_FailureMarkers_TheEmailSaysWhichSectionsCouldNotBeLoaded` |
+| S4a | incomplete set reported complete | collector `…LargerThanTheResolverCeiling…`, portfolio `…LargerThanTheResolverCeiling_Unavailable` |
+| S4b | default 500-row page | collector `…LargerThanTheResolverCeiling…` (Limit verify), portfolio `…ReadAsTheCaller_WithRealColumns` |
+| S4c | collector ignores `Complete` | collector `…LargerThanTheResolverCeiling_FailsItsChannel…` |
+| S5a | portfolio selects `sprk_name` / `sprk_totalspend` | `GetPortfolioSummaryAsync_MattersComeFromThePeopleSurface_ReadAsTheCaller_WithRealColumns` |
+| S5b | portfolio ignores `Complete` | `ReadMattersForSystemUserAsync_PeopleSetLargerThanTheResolverCeiling_Unavailable` |
+| S5c | overdue counts dropped | `…ReadAsTheCaller_WithRealColumns` |
+| S7a | documents site passes no owner | `DocumentCreate_PublishesTheTeamItResolvedAndWrote_NotTheCallersOid` |
+| S7b | events site publishes for the wrong record | `CreateEvent_TeamOwnedRow_PublishesTheTeam_ReadBackFromTheRowItCreated` |
+| S7c | quick-create publishes for non-matters | `QuickCreateMatter_ReadsTheOwnerBack…`, `QuickCreateProject_PublishesNoOwnerEvent` |
+| S7d | Office save drops the resolved team | `OfficeSave_PublishesTheTeamTheSaveResolved_WithoutAReadBack` |
+| S8 | create-task apply names the confirmer again | `ApplyAsync_WhenConfirmedCreateTaskProposal_…` |
+| S9 | registry ignored for `sprk_todo` | `People_Todo_TeamOwnedToDo_IsForItsHumanCreatorAndItsAssignee_NotForAnotherTeamMember` |

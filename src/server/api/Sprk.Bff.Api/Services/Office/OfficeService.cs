@@ -129,6 +129,38 @@ public class OfficeService : IOfficeService
         _logger = logger;
     }
 
+    /// <summary>
+    /// The Office save's owner-event publish (POST /office/save; R3 task 082, UAC-r2 task 152 / ADR-034 A3): the saved
+    /// <c>sprk_document</c> is owned by the business-unit default owner TEAM the save resolved (task 080), so the event
+    /// names that team — <c>PersonIdType = Team</c>, <c>PersonId = owningTeamId</c>, the key
+    /// <c>MembershipReconciliationJob</c> builds for the same row — never the caller's AAD oid. Should the save ever
+    /// hold no team, the owner is read back from the row. Fire-and-forget (ADR-034 Q2): never throws.
+    /// </summary>
+    /// <remarks>
+    /// Extracted from <see cref="SaveAsync"/> (task 152 verifier round 1, item 7) so the site's own decisions — which
+    /// table, which owner, the read-back fallback — run in a test. <see cref="SaveAsync"/> depends on a dozen concrete
+    /// collaborators (SPE upload, job store, persistence) and has no unit harness; it passes exactly
+    /// (<c>documentId</c>, <c>owningTeamId</c>) here.
+    /// </remarks>
+    internal static Task<MembershipChangedEvent?> PublishSavedDocumentOwnerAsync(
+        IMembershipEventPublisher publisher,
+        IGenericEntityService dataverse,
+        Guid documentId,
+        Guid? owningTeamId,
+        string correlationId,
+        ILogger logger,
+        CancellationToken cancellationToken)
+        => MembershipOwnerEvents.PublishOwnerAddedAsync(
+            publisher,
+            dataverse,
+            "sprk_document",
+            documentId,
+            // The team this save resolved; should it ever be absent, the owner is read back from the row.
+            owningTeamId is { } savedTeamId ? new Microsoft.Xrm.Sdk.EntityReference("team", savedTeamId) : null,
+            correlationId,
+            logger,
+            cancellationToken);
+
     /// <inheritdoc />
     public Task<GenerateProfileResult> GenerateProfileAsync(
         Guid documentId,
@@ -966,13 +998,11 @@ public class OfficeService : IOfficeService
                 // MembershipReconciliationJob builds for this row, instead of the caller's AAD oid as a User.
                 // When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns
                 // (ADR-032 P2). The Task is discarded explicitly: fire-and-forget, never throws.
-                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                _ = PublishSavedDocumentOwnerAsync(
                     _membershipEventPublisher,
                     _genericEntityService,
-                    "sprk_document",
                     documentId,
-                    // The team this save resolved; should it ever be absent, the owner is read back from the row.
-                    owningTeamId is { } savedTeamId ? new Microsoft.Xrm.Sdk.EntityReference("team", savedTeamId) : null,
+                    owningTeamId,
                     correlationId,
                     _logger,
                     cancellationToken);

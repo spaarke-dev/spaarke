@@ -8,7 +8,6 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
-using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -32,26 +31,23 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// directly. The facade preserves AI-internal flexibility (model swaps, streaming
 /// policy changes) without rippling through CRUD code.
 ///
-/// The top-priority matter is selected as the active matter with the most overdue events
-/// (deterministic rule — highest urgency indicator). When overdue event counts are equal,
+/// The top-priority matter is selected as the active matter with the most overdue tasks
+/// (deterministic rule — highest urgency indicator). When overdue counts are equal,
 /// the matter with the highest individual utilization is chosen. The candidate matter set
-/// is derived from <see cref="IMembershipResolverService"/> per ADR-034 (canonical
-/// user-record membership mechanism): the caller's AAD <c>oid</c> is cross-referenced to
-/// the Dataverse <c>systemuserid</c> (mirroring <c>MembershipEndpoints.ResolveSystemUserIdAsync</c>
-/// per ADR-028), and the resolver returns the <c>sprk_matter</c> rows the user is a member
-/// of (across all roles: owner, owningTeam, assignedAttorney, assignedLawFirm, etc.). The
-/// "top-priority" heuristic is then applied to the resolved candidate set. When the user
-/// has zero memberships, no AAD-oid is resolvable, or any membership/Dataverse failure
-/// occurs, the service returns <c>null</c> for <see cref="TopMatterSummary"/> — the
-/// briefing degrades gracefully rather than failing the response.
+/// is the matters FOR the user — <see cref="PortfolioService.ReadMattersForSystemUserAsync"/>, which
+/// selects through <see cref="IMembershipResolverService"/>'s people-targeting surface (ADR-034 A3, task 152)
+/// and reads every row AS THE USER — the same read the portfolio metrics use. The caller's AAD
+/// <c>oid</c> is cross-referenced to the Dataverse <c>systemuserid</c> (mirroring
+/// <c>MembershipEndpoints.ResolveSystemUserIdAsync</c> per ADR-028). When the user has no matters
+/// for them, or no AAD-oid is resolvable, <see cref="TopMatterSummary"/> is <c>null</c>; when the
+/// matters could not be DETERMINED (a failed read), the response says so with
+/// <c>TopPriorityMatterUnavailable</c> — never an app-only answer.
 /// </remarks>
 public class BriefingService
 {
     private readonly PortfolioService _portfolioService;
     private readonly IDistributedCache _cache;
-    private readonly IMembershipResolverService _membershipResolver;
     private readonly IDataverseService _dataverse;
-    private readonly IImpersonatedCommunicationQuery _callerQuery;
     private readonly IBriefingAi? _briefingAi;
     private readonly ILogger<BriefingService> _logger;
 
@@ -75,10 +71,6 @@ public class BriefingService
     /// </summary>
     private const string CurrentUserCacheKeyPrefix = "membership:briefing-currentuser:";
 
-    /// <summary>The Dataverse logical name of the entity whose membership drives the
-    /// top-priority-matter selection. ADR-034 canonical name.</summary>
-    private const string MatterEntityLogicalName = "sprk_matter";
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -87,21 +79,14 @@ public class BriefingService
     /// <summary>
     /// Initializes a new instance of <see cref="BriefingService"/>.
     /// </summary>
-    /// <param name="portfolioService">Portfolio aggregation service providing Dataverse data.</param>
+    /// <param name="portfolioService">
+    /// Portfolio aggregation service: the metrics, and (task 152) the matters FOR the user read as the user, from
+    /// which the top-priority matter is chosen.
+    /// </param>
     /// <param name="cache">Distributed cache (Redis) for briefing data + AAD-oid lookup.</param>
-    /// <param name="membershipResolver">
-    /// Canonical user-record membership resolver (ADR-034). Used to enumerate the
-    /// <c>sprk_matter</c> rows the caller is a member of as the candidate set for the
-    /// top-priority-matter heuristic.
-    /// </param>
     /// <param name="dataverse">
-    /// Dataverse service used for (a) the AAD-oid → systemuserid cross-reference (per
-    /// ADR-028) and (b) retrieving matter details (overdue event count, utilization,
-    /// deadline) for the resolved candidate set.
-    /// </param>
-    /// <param name="callerQuery">
-    /// unified-access-control-r2 task 152: the existing caller-context read seam (MSCRMCallerID = the caller). The
-    /// top-priority matter's detail row is read AS THE CALLER so Dataverse trims a matter the caller cannot open.
+    /// Dataverse service used for the AAD-oid → systemuserid cross-reference (per ADR-028). No matter or event row is
+    /// read through it.
     /// </param>
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="briefingAi">
@@ -111,17 +96,13 @@ public class BriefingService
     public BriefingService(
         PortfolioService portfolioService,
         IDistributedCache cache,
-        IMembershipResolverService membershipResolver,
         IDataverseService dataverse,
-        IImpersonatedCommunicationQuery callerQuery,
         ILogger<BriefingService> logger,
         IBriefingAi? briefingAi = null)
     {
         _portfolioService = portfolioService ?? throw new ArgumentNullException(nameof(portfolioService));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _membershipResolver = membershipResolver ?? throw new ArgumentNullException(nameof(membershipResolver));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
-        _callerQuery = callerQuery ?? throw new ArgumentNullException(nameof(callerQuery));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _briefingAi = briefingAi; // Nullable: AI is optional enhancement
     }
@@ -234,29 +215,28 @@ public class BriefingService
     ///   2. Cross-reference AAD-oid → Dataverse <c>systemuserid</c> via the
     ///      <c>systemuser.azureactivedirectoryobjectid</c> column (ADR-028), cached
     ///      <see cref="CurrentUserCacheTtl"/>. Unprovisioned users return null.
-    ///   3. <see cref="IMembershipResolverService.ResolveAsync"/> for <see cref="MatterEntityLogicalName"/> with
-    ///      <see cref="MembershipResolveOptions.People"/> (task 152): the matters the user CREATED (human Created By),
-    ///      is NAMED on ("Assigned *", through the linked contact) or personally OWNS. A team- or BU-owned matter
-    ///      that names nobody is NOT a candidate — before task 152 the default surface made every same-BU user a
-    ///      candidate for it through the BU default team. Zero candidates → null.
-    ///   4. Read the candidates' detail rows AND their overdue open tasks AS THE CALLER
-    ///      (<see cref="IImpersonatedCommunicationQuery"/>), chunked, so Dataverse drops any matter the caller cannot
-    ///      open (owner D1). No app-only fallback.
+    ///   3-4. <see cref="PortfolioService.ReadMattersForSystemUserAsync"/> (task 152): the matters the user CREATED
+    ///      (human Created By), is NAMED on ("Assigned *", through the linked contact) or personally OWNS — the
+    ///      <see cref="MembershipResolveOptions.People"/> surface, read to completion — with their detail rows AND
+    ///      overdue open tasks read AS THE CALLER, chunked, so Dataverse drops any matter the caller cannot open
+    ///      (owner D1). A team- or BU-owned matter that names nobody is NOT a candidate — before task 152 the default
+    ///      surface made every same-BU user a candidate for it through the BU default team. No app-only fallback.
     ///   5. Apply the deterministic heuristic: max overdue tasks; tie-break on highest utilization
     ///      (<c>spend / budget</c>); final tie-break on matter name (alphabetical).
     /// </para>
     /// <para>
-    /// Failure semantics (task 152, ADR-003): a failed people resolution or caller-context read returns
-    /// <c>Unavailable = true</c> — the response carries <c>TopPriorityMatterUnavailable</c>, so "could not be
-    /// determined" is distinguishable from "you have no matters". Cancellation is always propagated.
+    /// Failure semantics (task 152, ADR-003): a failed people resolution, a people set larger than the resolver's
+    /// ceiling, or a failed caller-context read returns <c>Unavailable = true</c> — the response carries
+    /// <c>TopPriorityMatterUnavailable</c>, so "could not be determined" is distinguishable from "you have no
+    /// matters". Cancellation is always propagated.
     /// </para>
     /// <para>
     /// ⚠️ Corrected by task 152 (verified against live <c>sprk_matter</c> metadata, 2026-10-02): the detail query used
     /// to select <c>sprk_name</c>, <c>sprk_overdueeventcount</c>, <c>sprk_totalspend</c> and <c>sprk_duedate</c> —
-    /// none of which exist on <c>sprk_matter</c> — so it always threw and the top matter was always null. It now
-    /// reads <c>sprk_mattername</c>, <c>sprk_totalspendtodate</c> and <c>sprk_totalbudget</c>, and COUNTS overdue
-    /// open tasks from <c>sprk_event</c> (there is no stored count). <c>sprk_matter</c> has no deadline column, so
-    /// <see cref="TopMatterSummary.Deadline"/> is null.
+    /// none of which exist on <c>sprk_matter</c> — so it always threw and the top matter was always null. The shared
+    /// read now uses <c>sprk_mattername</c>, <c>sprk_totalspendtodate</c> and <c>sprk_totalbudget</c>, and COUNTS
+    /// overdue open tasks from <c>sprk_event</c> (there is no stored count). <c>sprk_matter</c> has no deadline column,
+    /// so <see cref="TopMatterSummary.Deadline"/> is null.
     /// </para>
     /// </remarks>
     private async Task<(TopMatterSummary? Matter, bool Unavailable)> GetTopPriorityMatterAsync(string userId, CancellationToken ct)
@@ -298,57 +278,26 @@ public class BriefingService
             return (null, true);
         }
 
-        // Step 3 — the matters FOR the user (ADR-034 A3 people-targeting surface).
-        Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipResponse memberships;
-        try
+        // Steps 3-4 — the matters FOR the user (ADR-034 A3 people-targeting surface, read to completion), their detail
+        // rows and overdue-task counts read AS THE CALLER. The SAME read the portfolio aggregate uses, so the metrics
+        // and the top matter can never be computed over different matter sets.
+        var read = await _portfolioService.ReadMattersForSystemUserAsync(systemUserId, ct).ConfigureAwait(false);
+        if (read.Unavailable)
         {
-            memberships = await _membershipResolver
-                .ResolveAsync(systemUserId, MatterEntityLogicalName, MembershipResolveOptions.People, ct)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Top-priority matter resolution: people-targeting resolution failed for SystemUserId={SystemUserId}. " +
-                "TopPriorityMatterUnavailable (fail closed, no app-only fallback).",
+            _logger.LogWarning(
+                "Top-priority matter resolution: the matters for SystemUserId={SystemUserId} could not be determined. "
+                + "TopPriorityMatterUnavailable (fail closed, no app-only fallback).",
                 systemUserId);
             return (null, true);
         }
 
-        if (memberships.Count == 0)
-        {
-            _logger.LogDebug(
-                "Top-priority matter resolution: SystemUserId={SystemUserId} has no matters targeted to them. " +
-                "Returning null TopMatterSummary.",
-                systemUserId);
-            return (null, false);
-        }
-
-        // Step 4 — detail rows + overdue counts, read AS THE CALLER.
-        IReadOnlyList<MatterDetailRow> matters;
-        try
-        {
-            matters = await QueryMatterDetailsAsync(memberships.Ids, systemUserId, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Top-priority matter resolution: the caller-context read of matter details failed for " +
-                "SystemUserId={SystemUserId} (candidate count={Count}). TopPriorityMatterUnavailable — never answered app-only.",
-                systemUserId, memberships.Count);
-            return (null, true);
-        }
-
+        var matters = read.Matters;
         if (matters.Count == 0)
         {
+            _logger.LogDebug(
+                "Top-priority matter resolution: SystemUserId={SystemUserId} has no readable matters targeted to them. " +
+                "Returning null TopMatterSummary.",
+                systemUserId);
             return (null, false);
         }
 
@@ -370,10 +319,11 @@ public class BriefingService
             systemUserId,
             matters.Count);
 
+        // sprk_matter carries no deadline column (live metadata, 2026-10-02), so Deadline is null.
         return (new TopMatterSummary(
             MatterId: winner.Id,
             Name: winner.Name,
-            Deadline: winner.Deadline,
+            Deadline: null,
             Reason: reason), false);
     }
 
@@ -470,107 +420,11 @@ public class BriefingService
     }
 
     /// <summary>
-    /// The most candidate ids bound into ONE caller-context GET (task 152) — keeps each query near 4 KB, far under the
-    /// Web API URL limit. A failed chunk fails the whole read (it never shrinks the candidate set).
-    /// </summary>
-    internal const int MaxIdsPerImpersonatedRequest = 50;
-
-    /// <summary>sprk_event type id for Task — same constant the Daily Briefing collector and TaskActionCore use.</summary>
-    private const string EventTypeTask = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
-
-    /// <summary>
-    /// Reads the candidate matters' detail rows and their overdue open-task counts AS THE CALLER, chunked. Matters the
-    /// caller cannot read are absent from the result (Dataverse trims them). Throws on any failed read — the caller
-    /// reports TopPriorityMatterUnavailable; there is no app-only path.
-    /// </summary>
-    private async Task<IReadOnlyList<MatterDetailRow>> QueryMatterDetailsAsync(
-        IReadOnlyList<Guid> matterIds,
-        Guid callerSystemUserId,
-        CancellationToken ct)
-    {
-        if (matterIds.Count == 0)
-        {
-            return Array.Empty<MatterDetailRow>();
-        }
-
-        var details = new Dictionary<Guid, Dictionary<string, JsonElement>>();
-        var overdue = new Dictionary<Guid, int>();
-        // "Overdue" = due before today (on or before yesterday), UTC.
-        var yesterday = DateTime.UtcNow.Date.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-
-        foreach (var chunk in matterIds.Distinct().Chunk(MaxIdsPerImpersonatedRequest))
-        {
-            // Active candidate matters, as the caller.
-            var matterClause = string.Join(" or ", chunk.Select(id => $"sprk_matterid eq {id:D}"));
-            var matterRows = await _callerQuery.QueryAsync(
-                "sprk_matters",
-                "$select=sprk_matterid,sprk_mattername,sprk_totalspendtodate,sprk_totalbudget"
-                + $"&$filter=statecode eq 0 and ({matterClause})",
-                callerSystemUserId,
-                ct).ConfigureAwait(false);
-
-            foreach (var row in matterRows)
-            {
-                if (ReadGuid(row, "sprk_matterid") is { } id)
-                {
-                    details.TryAdd(id, row);
-                }
-            }
-
-            // Open Task events on those matters whose due date has passed, as the caller. Counted here — sprk_matter
-            // has no stored overdue count.
-            var regardingClause = string.Join(" or ", chunk.Select(id => $"_sprk_regardingmatter_value eq {id:D}"));
-            var eventRows = await _callerQuery.QueryAsync(
-                "sprk_events",
-                "$select=sprk_eventid,_sprk_regardingmatter_value"
-                + $"&$filter=_sprk_eventtype_ref_value eq {EventTypeTask} and statecode eq 0"
-                + $" and Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_duedate',PropertyValue='{yesterday}')"
-                + $" and ({regardingClause})",
-                callerSystemUserId,
-                ct).ConfigureAwait(false);
-
-            foreach (var row in eventRows)
-            {
-                if (ReadGuid(row, "_sprk_regardingmatter_value") is { } matterId)
-                {
-                    overdue[matterId] = overdue.TryGetValue(matterId, out var n) ? n + 1 : 1;
-                }
-            }
-        }
-
-        var rows = new List<MatterDetailRow>(details.Count);
-        foreach (var (id, row) in details)
-        {
-            rows.Add(new MatterDetailRow
-            {
-                Id = id,
-                Name = ReadString(row, "sprk_mattername") ?? string.Empty,
-                OverdueEventCount = overdue.TryGetValue(id, out var count) ? count : 0,
-                InvoicedAmount = ReadDecimal(row, "sprk_totalspendtodate"),
-                BudgetAmount = ReadDecimal(row, "sprk_totalbudget"),
-                // sprk_matter carries no deadline column (live metadata, 2026-10-02).
-                Deadline = null,
-            });
-        }
-
-        return rows;
-    }
-
-    private static string? ReadString(Dictionary<string, JsonElement> row, string key) =>
-        row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
-
-    private static Guid? ReadGuid(Dictionary<string, JsonElement> row, string key) =>
-        Guid.TryParse(ReadString(row, key), out var g) && g != Guid.Empty ? g : null;
-
-    private static decimal ReadDecimal(Dictionary<string, JsonElement> row, string key) =>
-        row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var d) ? d : 0m;
-
-    /// <summary>
     /// Builds a human-readable reason string for the selected top-priority matter.
     /// Mirrors the prior STUB phrasing so downstream UI / narrative consumers see a
     /// consistent shape; the data is now real.
     /// </summary>
-    private static string BuildTopMatterReason(MatterDetailRow winner)
+    private static string BuildTopMatterReason(MatterRecord winner)
     {
         if (winner.OverdueEventCount > 0)
         {
@@ -584,20 +438,6 @@ public class BriefingService
         }
 
         return "Top matter from your membership set.";
-    }
-
-    /// <summary>
-    /// Internal projection of a Dataverse <c>sprk_matter</c> row carrying just the
-    /// fields needed to apply the top-priority heuristic.
-    /// </summary>
-    private sealed class MatterDetailRow
-    {
-        public Guid Id { get; init; }
-        public string Name { get; init; } = string.Empty;
-        public int OverdueEventCount { get; init; }
-        public decimal InvoicedAmount { get; init; }
-        public decimal BudgetAmount { get; init; }
-        public DateTimeOffset? Deadline { get; init; }
     }
 
     /// <summary>

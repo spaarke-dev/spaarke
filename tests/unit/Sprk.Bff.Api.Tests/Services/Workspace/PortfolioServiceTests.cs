@@ -9,6 +9,9 @@ using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Contracts;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 using Sprk.Bff.Api.Services.Identity;
@@ -63,7 +66,10 @@ public class PortfolioServiceTests
 
     // ── Strict mocks (boundary-only, per testing.md MUST rules) ──────────────
     private readonly Mock<IDistributedCache> _cacheMock = new(MockBehavior.Strict);
-    private readonly Mock<IGenericEntityService> _entityServiceMock = new(MockBehavior.Strict);
+    // Task 152 verifier round 1 item 5: the portfolio's matters come from the people-targeting surface and are read AS
+    // THE CALLER — there is no app-only Dataverse client on PortfolioService any more.
+    private readonly Mock<IMembershipResolverService> _resolverMock = new(MockBehavior.Strict);
+    private readonly RecordingCallerQuery _callerQuery = new();
     private readonly FixedTimeProvider _timeProvider = new(FixedNow);
     private readonly FakeGuidProvider _guidProvider = new(SeededId1, SeededId2, SeededId3);
 
@@ -81,9 +87,9 @@ public class PortfolioServiceTests
             .Setup(c => c.GetAsync(cacheKey, It.IsAny<CancellationToken>()))
             .ReturnsAsync((byte[]?)null);
 
-        _entityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(MakeOneActiveMatter());
+        var matterId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        SetupPeopleMatters(matterId);
+        _callerQuery.Matters.Add(MatterRow(matterId, "Test Matter", spend: 500m, budget: 1000m));
 
         // The Set call uses the entry-options form — verify it's invoked once with the cache key.
         _cacheMock
@@ -104,7 +110,7 @@ public class PortfolioServiceTests
         result.CachedAt.Should().Be(FixedNow);
         result.ActiveMatters.Should().Be(1);
         _cacheMock.VerifyAll();
-        _entityServiceMock.VerifyAll();
+        _resolverMock.VerifyAll();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -118,7 +124,7 @@ public class PortfolioServiceTests
         const string healthKey = $"workspace:{TestUserId}:health";
         const string portfolioKey = $"workspace:{TestUserId}:portfolio";
 
-        // Pre-baked portfolio response (cache hit avoids touching IGenericEntityService).
+        // Pre-baked portfolio response (cache hit avoids touching the resolver and the caller-context reads).
         var prebakedPortfolio = new PortfolioSummaryResponse(
             TotalSpend: 1000m,
             TotalBudget: 2000m,
@@ -155,6 +161,134 @@ public class PortfolioServiceTests
         result.MattersAtRisk.Should().Be(0);
         result.PortfolioBudget.Should().Be(2000m);
         _cacheMock.VerifyAll();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Which matters, read how (unified-access-control-r2 task 152, verifier round 1 item 5; ADR-034 A3)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid CallerSystemUserId = StubSystemUserIdentityResolver.SystemUserId;
+    private static readonly Guid MatterA = Guid.Parse("a0000000-0000-0000-0000-00000000000a");
+    private static readonly Guid MatterB = Guid.Parse("b0000000-0000-0000-0000-00000000000b");
+
+    [Fact]
+    public async Task GetPortfolioSummaryAsync_MattersComeFromThePeopleSurface_ReadAsTheCaller_WithRealColumns()
+    {
+        SetupCacheMiss();
+        SetupPeopleMatters(MatterA, MatterB);
+        _callerQuery.Matters.Add(MatterRow(MatterA, "Alpha", spend: 90m, budget: 100m)); // 90% → at risk
+        _callerQuery.Matters.Add(MatterRow(MatterB, "Bravo", spend: 10m, budget: 100m));
+        _callerQuery.OverdueTasks.Add(OverdueTask(MatterB));
+        _callerQuery.OverdueTasks.Add(OverdueTask(MatterB));
+
+        var result = await CreateSut().GetPortfolioSummaryAsync(TestUserId, CancellationToken.None);
+
+        result.ActiveMatters.Should().Be(2);
+        result.TotalSpend.Should().Be(100m);
+        result.TotalBudget.Should().Be(200m);
+        result.OverdueEvents.Should().Be(2, "overdue open tasks are COUNTED from sprk_event — sprk_matter stores no count");
+        result.MattersAtRisk.Should().Be(2, "Alpha is over 85% utilized; Bravo has overdue tasks");
+
+        _resolverMock.Verify(r => r.ResolveAsync(
+                CallerSystemUserId, "sprk_matter",
+                It.Is<MembershipResolveOptions?>(o => o != null && o.PeopleTargeting && !o.AccessConferringOnly
+                    && o.Limit == MembershipResolveOptions.MaxLimit),
+                It.IsAny<CancellationToken>()),
+            Times.Once, "the portfolio is the matters FOR the user, read to completion — never an ownerid filter");
+        _callerQuery.Calls.Should().NotBeEmpty().And.OnlyContain(c => c.Caller == CallerSystemUserId,
+            "every row is read AS THE CALLER (MSCRMCallerID)");
+
+        var matterQuery = _callerQuery.Calls.First(c => c.EntitySet == "sprk_matters").Query;
+        matterQuery.Should().Contain("sprk_mattername").And.Contain("sprk_totalspendtodate").And.Contain("sprk_totalbudget");
+        foreach (var absent in new[] { "sprk_name,", "sprk_totalspend,", "sprk_overdueeventcount", "ownerid", "owninguser" })
+        {
+            matterQuery.Should().NotContain(absent, $"'{absent.TrimEnd(',')}' does not exist on sprk_matter / is an ad-hoc owner condition");
+        }
+    }
+
+    [Fact]
+    public async Task ReadMattersForSystemUserAsync_MatterTheCallerCannotRead_IsAbsent()
+    {
+        SetupPeopleMatters(MatterA, MatterB);
+        // Dataverse trims MatterB from the impersonated read: it names the caller, but the caller cannot open it.
+        _callerQuery.Matters.Add(MatterRow(MatterA, "Alpha", 0m, 0m));
+
+        var read = await CreateSut().ReadMattersForSystemUserAsync(CallerSystemUserId, CancellationToken.None);
+
+        read.Unavailable.Should().BeFalse();
+        read.Matters.Select(m => m.Id).Should().Equal(MatterA);
+    }
+
+    [Fact]
+    public async Task ReadMattersForSystemUserAsync_NoMattersForTheUser_IsEmpty_NotUnavailable_AndReadsNothing()
+    {
+        SetupPeopleMatters();
+
+        var read = await CreateSut().ReadMattersForSystemUserAsync(CallerSystemUserId, CancellationToken.None);
+
+        read.Unavailable.Should().BeFalse("no matters for you is not a failure");
+        read.Matters.Should().BeEmpty();
+        _callerQuery.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReadMattersForSystemUserAsync_CallerReadFails_Unavailable_NeverAShrunkList()
+    {
+        var ids = Enumerable.Range(1, PortfolioService.MaxIdsPerImpersonatedRequest + 5)
+            .Select(i => Guid.Parse($"c0000000-0000-0000-0000-{i:D12}")).ToArray();
+        SetupPeopleMatters(ids);
+        foreach (var id in ids)
+        {
+            _callerQuery.Matters.Add(MatterRow(id, $"Matter {id}", 0m, 0m));
+        }
+        _callerQuery.FailOnMatterCallNumber = 2; // the SECOND chunk fails; the first chunk's rows must not be served
+
+        var read = await CreateSut().ReadMattersForSystemUserAsync(CallerSystemUserId, CancellationToken.None);
+
+        read.Unavailable.Should().BeTrue();
+        read.Matters.Should().BeEmpty();
+        _callerQuery.Calls.Count(c => c.EntitySet == "sprk_matters").Should().Be(2, "ids are chunked at 50 per caller-context read");
+    }
+
+    [Fact]
+    public async Task ReadMattersForSystemUserAsync_PeopleSetLargerThanTheResolverCeiling_Unavailable()
+    {
+        const string NextPage = "page-2";
+        _resolverMock
+            .Setup(r => r.ResolveAsync(CallerSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string _, MembershipResolveOptions? o, CancellationToken _) => o?.ContinuationToken == NextPage
+                ? Response(new[] { MatterB })               // more rows exist past the first full page
+                : Response(new[] { MatterA }, NextPage));
+
+        var read = await CreateSut().ReadMattersForSystemUserAsync(CallerSystemUserId, CancellationToken.None);
+
+        read.Unavailable.Should().BeTrue("an arbitrary subset of the user's matters is never aggregated");
+        _callerQuery.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ReadMattersForSystemUserAsync_ResolverThrows_Unavailable()
+    {
+        _resolverMock
+            .Setup(r => r.ResolveAsync(CallerSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("resolver down"));
+
+        var read = await CreateSut().ReadMattersForSystemUserAsync(CallerSystemUserId, CancellationToken.None);
+
+        read.Unavailable.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetPortfolioSummaryAsync_ReadFails_KeepsThePreExistingEmptyPortfolio()
+    {
+        SetupCacheMiss();
+        SetupPeopleMatters(MatterA);
+        _callerQuery.FailOnMatterCallNumber = 1;
+
+        var result = await CreateSut().GetPortfolioSummaryAsync(TestUserId, CancellationToken.None);
+
+        result.ActiveMatters.Should().Be(0, "the endpoint's graceful empty state on failure is unchanged");
+        _callerQuery.Calls.Should().OnlyContain(c => c.Caller == CallerSystemUserId, "and nothing is read app-only");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -212,22 +346,86 @@ public class PortfolioServiceTests
 
     private PortfolioService CreateSut() => new(
         _cacheMock.Object,
-        _entityServiceMock.Object,
+        _resolverMock.Object,
+        _callerQuery,
         StubSystemUserIdentityResolver.Instance,
         NullLogger<PortfolioService>.Instance,
         _timeProvider);
 
-    private static EntityCollection MakeOneActiveMatter()
+    private void SetupCacheMiss()
     {
-        var entity = new Entity("sprk_matter", Guid.NewGuid());
-        entity["sprk_name"] = "Test Matter";
-        entity["sprk_totalspend"] = new Money(500m);
-        entity["sprk_totalbudget"] = new Money(1000m);
-        entity["sprk_overdueeventcount"] = 0;
-        entity["statecode"] = new OptionSetValue(0); // Active
+        _cacheMock
+            .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((byte[]?)null);
+        _cacheMock
+            .Setup(c => c.SetAsync(It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+    }
 
-        var collection = new EntityCollection(new List<Entity> { entity });
-        return collection;
+    private void SetupPeopleMatters(params Guid[] ids)
+    {
+        _resolverMock
+            .Setup(r => r.ResolveAsync(CallerSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ids));
+    }
+
+    private static MembershipResponse Response(Guid[] ids, string? continuationToken = null) => new(
+        EntityType: "sprk_matter",
+        PersonIdentity: new PersonIdentity(CallerSystemUserId),
+        Ids: ids,
+        ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+        Count: ids.Length,
+        CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5),
+        ContinuationToken: continuationToken);
+
+    private static Dictionary<string, JsonElement> MatterRow(Guid id, string name, decimal spend, decimal budget) =>
+        Row(new Dictionary<string, object?>
+        {
+            ["sprk_matterid"] = id.ToString("D"),
+            ["sprk_mattername"] = name,
+            ["sprk_totalspendtodate"] = spend,
+            ["sprk_totalbudget"] = budget,
+        });
+
+    private static Dictionary<string, JsonElement> OverdueTask(Guid matterId) =>
+        Row(new Dictionary<string, object?>
+        {
+            ["sprk_eventid"] = Guid.NewGuid().ToString("D"),
+            ["_sprk_regardingmatter_value"] = matterId.ToString("D"),
+        });
+
+    private static Dictionary<string, JsonElement> Row(Dictionary<string, object?> values) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(values))!;
+
+    /// <summary>
+    /// Dataverse-under-impersonation stand-in: answers a matter or overdue-task read with the rows whose id the query
+    /// names (so chunking and trimming are observable), and records every call.
+    /// </summary>
+    private sealed class RecordingCallerQuery : IImpersonatedCommunicationQuery
+    {
+        public List<Dictionary<string, JsonElement>> Matters { get; } = new();
+        public List<Dictionary<string, JsonElement>> OverdueTasks { get; } = new();
+        public List<(string EntitySet, string Query, Guid Caller)> Calls { get; } = new();
+        public int FailOnMatterCallNumber { get; set; } = -1;
+
+        public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
+        {
+            var query = odataQuery ?? string.Empty;
+            Calls.Add((entitySetName, query, callerSystemUserId));
+            if (entitySetName == "sprk_matters" && Calls.Count(c => c.EntitySet == "sprk_matters") == FailOnMatterCallNumber)
+            {
+                throw new HttpRequestException("Dataverse refused the impersonated read");
+            }
+
+            var (source, key) = entitySetName == "sprk_matters"
+                ? (Matters, "sprk_matterid")
+                : (OverdueTasks, "_sprk_regardingmatter_value");
+            IReadOnlyList<Dictionary<string, JsonElement>> rows = source
+                .Where(r => query.Contains(r[key].GetString()!, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            return Task.FromResult(rows);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

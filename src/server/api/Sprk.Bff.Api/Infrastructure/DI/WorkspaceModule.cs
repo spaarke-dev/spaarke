@@ -64,6 +64,9 @@ public static class WorkspaceModule
         // PortfolioService: Scoped because it accesses IDistributedCache per-request
         // and will eventually hold per-request Dataverse query context.
         // Concrete registration per ADR-010 (no interface seam needed).
+        // Task 152 (UAC-r2, verifier round 1 item 5): the matters come from the PEOPLE-TARGETING surface
+        // (IMembershipResolverService, Singleton) and are read AS THE CALLER through the existing
+        // IImpersonatedCommunicationQuery (CommunicationModule, unconditional) — ctor arguments, no new registration.
         services.AddScoped<PortfolioService>();
 
         // PriorityScoringService: Singleton — stateless, table-driven, thread-safe.
@@ -81,11 +84,10 @@ public static class WorkspaceModule
         // Concrete registration per ADR-010 (no interface seam needed).
         services.AddScoped<WorkspaceAiService>();
 
-        // BriefingService: Scoped because it depends on PortfolioService (also scoped),
+        // BriefingService: Scoped because it depends on PortfolioService (also scoped) and
         // IDataverseService (Scoped — used for the AAD-oid → systemuserid cross-reference per
-        // ADR-028 and for the membership-resolved matter detail query), and
-        // IMembershipResolverService (Singleton — registered by MembershipModule; safe to
-        // inject into Scoped consumers, no captive-dependency issue). The IBriefingAi
+        // ADR-028). The top-priority matter's candidates and detail rows come from
+        // PortfolioService.ReadMattersForSystemUserAsync (task 152 verifier round 1). The IBriefingAi
         // facade is resolved as optional (null-safe) — when not registered
         // (DocumentIntelligence:Enabled = false), the service falls back to template narrative.
         // Concrete registration per ADR-010 (no interface seam needed).
@@ -97,8 +99,7 @@ public static class WorkspaceModule
         //   binding is required here. See docs/architecture/membership-resolution-pattern.md
         //   "Wiring + Consumer Inventory (AS-BUILT)" for the updated consumer list.
         //   Task 152 (UAC-r2): the candidates come from the PEOPLE-TARGETING surface and the detail rows are read AS
-        //   THE CALLER through the existing IImpersonatedCommunicationQuery (CommunicationModule, unconditional) — a
-        //   ctor argument, no new registration.
+        //   THE CALLER — both through PortfolioService (see above); no new registration.
         services.AddScoped<BriefingService>();
 
         // MatterPreFillService: Scoped to match HttpContext lifetime used for OBO file uploads.

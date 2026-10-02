@@ -400,6 +400,10 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 - **MUST** read every row a people-targeted consumer SHOWS under the caller's Dataverse security
   (`IImpersonatedCommunicationQuery`, MSCRMCallerID = the caller). Selecting is not authorizing (owner D1). A failed
   caller-context read is reported as failed — never answered app-only, never shown as "nothing to report".
+- **MUST** read the people-targeted set to completion (`PeopleTargetedSet`: the resolver's 5,000-row ceiling plus one
+  confirmation read). The resolver pages in primary-id order, so a default 500-row page is an arbitrary subset; a set
+  larger than the ceiling is reported failed / unavailable — never a silently truncated list (task 152 verifier
+  round 1).
 - **MUST** make server-created records name a person in an "Assigned *" column, because their Created By is the
   application user: the to-do and task writers fill `sprk_assignedto` (a supplied assignee is kept; else the
   triggering person's linked contact; else the regarding parent's `sprk_assignedtointernal`, then
@@ -443,7 +447,7 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 | Consumer | Surface after A3 |
 |---|---|
 | `DailyBriefingCollector` (render + email + High Priority) | People targeting |
-| `BriefingService.GetTopPriorityMatterAsync` | People targeting |
+| `PortfolioService` (Workspace portfolio / health metrics) and, through it, `BriefingService.GetTopPriorityMatterAsync` | People targeting (was an app-only ad-hoc `ownerid` = caller filter; fixed in task 152 verifier round 1) |
 | `LookupUserMembershipNodeExecutor` with `"targeting": "people"` (every notification playbook) | People targeting |
 | `LookupUserMembershipNodeExecutor` without `targeting` | AI scoping (unchanged) |
 | `MembershipEndpoints` (`/api/users/me/memberships/*`) | AI scoping (unchanged) |

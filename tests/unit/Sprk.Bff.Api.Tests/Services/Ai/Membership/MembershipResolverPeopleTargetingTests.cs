@@ -124,6 +124,73 @@ public class MembershipResolverPeopleTargetingTests
             "a record owned by the caller's BU default team is an ACCESS fact, not an attention fact");
     }
 
+    // ── Criterion 7 at the resolver (verifier round 1 item 9): sprk_todo, whose registry column is sprk_assignedto ──
+
+    private const string Todo = "sprk_todo";
+    private static readonly Guid OtherMemberId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+    private static readonly Guid OtherMemberContactId = Guid.Parse("99999999-0000-0000-0000-000000000099");
+
+    /// <summary>The descriptor shapes discovery hands the resolver for a to-do.</summary>
+    private static readonly MembershipDescriptor[] TodoShapes =
+    {
+        D("ownerid", "owner", "SystemUser"),
+        D("owninguser", "owningUser", "SystemUser"),
+        D("owningteam", "owningTeam", "Team"),
+        D("owningbusinessunit", "owningBusinessUnit", "BusinessUnit"),
+        D("sprk_assignedto", "assignedTo", "Contact"),
+    };
+
+    [Fact]
+    public async Task People_Todo_TeamOwnedToDo_IsForItsHumanCreatorAndItsAssignee_NotForAnotherTeamMember()
+    {
+        var createdByCaller = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001");
+        var assignedToCaller = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+        var teamOwnedOnly = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000003");
+        var team = new EntityReference("team", BuDefaultTeamId);
+
+        // Dataverse stand-in: each team-owned to-do comes back only when the query ASKS for the term that names it.
+        Harness Build(Guid caller, PersonIdentity identity)
+        {
+            var h = new Harness(TodoShapes, identity, human: true, cache: null, logger: null, entity: Todo, callerId: caller);
+            h.AnswerWhenQueryContains(CallerId, TodoRow(createdByCaller, ("createdby", new EntityReference("systemuser", CallerId)), ("ownerid", team)));
+            h.AnswerWhenQueryContains(CallerContactId, TodoRow(assignedToCaller, ("sprk_assignedto", new EntityReference("contact", CallerContactId)), ("ownerid", team)));
+            h.AnswerWhenQueryContains(BuDefaultTeamId, TodoRow(teamOwnedOnly, ("ownerid", team)));
+            return h;
+        }
+
+        // The creator / assignee (the same person here): both to-dos, never the one only the team links.
+        var forCaller = Build(CallerId, FullIdentity());
+        var callerResult = await forCaller.Sut.ResolveAsync(CallerId, Todo, MembershipResolveOptions.People, CancellationToken.None);
+
+        var fetch = forCaller.CapturedFetch.Should().ContainSingle().Subject;
+        fetch.Should().Contain(Condition("createdby", CallerId));
+        fetch.Should().Contain(Condition("sprk_assignedto", CallerContactId), "sprk_todo's registry Contact column binds the linked contact");
+        fetch.Should().Contain(Condition("ownerid", CallerId));
+        fetch.Should().NotContain("'owningteam'").And.NotContain(BuDefaultTeamId.ToString("D"));
+        callerResult.Ids.Should().BeEquivalentTo(new[] { createdByCaller, assignedToCaller });
+        callerResult.ByRole["assignedTo"].Should().Equal(assignedToCaller);
+
+        // Another member of the SAME BU default team, named on neither to-do: nothing.
+        var otherIdentity = new PersonIdentity(
+            SystemUserId: OtherMemberId, ContactId: OtherMemberContactId, TeamIds: new[] { BuDefaultTeamId },
+            BusinessUnitId: BusinessUnitId);
+        var forOther = Build(OtherMemberId, otherIdentity);
+        var otherResult = await forOther.Sut.ResolveAsync(OtherMemberId, Todo, MembershipResolveOptions.People, CancellationToken.None);
+
+        otherResult.Ids.Should().BeEmpty("a team-owned to-do never fans out to the team's members");
+        forOther.CapturedFetch.Single().Should().NotContain(BuDefaultTeamId.ToString("D"));
+    }
+
+    private static Entity TodoRow(Guid id, params (string Attr, object Value)[] attributes)
+    {
+        var entity = new Entity(Todo) { Id = id };
+        foreach (var (attr, value) in attributes)
+        {
+            entity[attr] = value;
+        }
+        return entity;
+    }
+
     // ── Criterion 3: the cache key separates the surfaces ──────────────────────────────────────────────
 
     [Fact]
@@ -276,7 +343,7 @@ public class MembershipResolverPeopleTargetingTests
             PersonIdentity identity,
             bool human,
             params Entity[] rows)
-            : this(descriptors, identity, human, cache: null, logger: null, rows)
+            : this(descriptors, identity, human, cache: null, logger: null, entity: Matter, callerId: null, rows)
         {
         }
 
@@ -286,25 +353,28 @@ public class MembershipResolverPeopleTargetingTests
             bool human,
             ITenantCache? cache = null,
             ILogger<MembershipResolverService>? logger = null,
+            string entity = Matter,
+            Guid? callerId = null,
             params Entity[] rows)
         {
+            var caller = callerId ?? CallerId;
             Discovery = new Mock<IMembershipFieldDiscoveryService>();
             Discovery
                 .Setup(d => d.DiscoverAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new DiscoveryResult(Matter, DateTimeOffset.UtcNow, descriptors,
+                .ReturnsAsync(new DiscoveryResult(entity, DateTimeOffset.UtcNow, descriptors,
                     Array.Empty<IgnoredField>(), Array.Empty<IgnoredField>()));
 
             var identityMock = new Mock<IIdentityNormalizationService>();
             identityMock.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(identity);
 
             Dataverse = new Mock<IDataverseService>();
-            var systemUser = new Entity("systemuser") { Id = CallerId };
+            var systemUser = new Entity("systemuser") { Id = caller };
             if (!human)
             {
                 systemUser["applicationid"] = Guid.Parse("99999999-9999-9999-9999-999999999999");
             }
             Dataverse
-                .Setup(x => x.RetrieveAsync("systemuser", CallerId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .Setup(x => x.RetrieveAsync("systemuser", caller, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(systemUser);
             Dataverse
                 .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
