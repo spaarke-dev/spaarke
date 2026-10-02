@@ -664,11 +664,11 @@ because 084 also changes which predicted record the ribbon may auto-file to.
 
 | Field | Value |
 |---|---|
-| **Status** | Open. **🔔 Owner decision** (security configuration, CLAUDE.md §6) |
-| **Urgency** | now: before the next BFF deploy from master (080 is on master via #1045, not deployed) |
+| **Status** | **Done 2026-10-02 (owner).** The owner assigned **Spaarke Basic User** to the dev root team "Spaarke". Verified live: probe rows owned by it on all six tables, and a real unfiled save through the deployed BFF (master `5e39f2bea`) produced a document owned by it. **Owner's ruling:** the root BU holding users is a **dev data artifact**; production users sit in the customer's named child BU, and the BFF's application user is placed in the customer BU. So the role's organization-wide read (Deep at the root) reaches no production user, and no root-team role is codified for production. Residual, stated on #1081: a production root-BU account that creates from the add-in with no target would be refused |
+| **Urgency** | closed |
 | **Filed** | 2026-10-01 |
 | **Source** | Task 085's live real-Dataverse probe (push-to-github Step 1.7) |
-| **GitHub Issue** | [#1081](https://github.com/spaarke-dev/spaarke/issues/1081) |
+| **GitHub Issue** | [#1081](https://github.com/spaarke-dev/spaarke/issues/1081) (closed 2026-10-02) |
 
 **Description**
 
