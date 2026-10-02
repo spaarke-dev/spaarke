@@ -284,7 +284,10 @@ public class SpeFileStore : ISpeFileOperations
 
     // unified-access-control-r2: explicit-collision overload. See ISpeFileOperations for why callers
     // that have not yet asked the user what to do must pass ConflictBehavior.Fail.
-    public Task<FileHandleDto?> UploadSmallAsUserAsync(
+    // `virtual` (task 155) for the same module-boundary-test-double reason as UploadSmallAsync: the record-keyed
+    // OBO upload route's whole contract is WHICH drive the bytes reach, and only a double at this facade can
+    // observe that without transport-shaped Graph mocking (ADR-038 B1). No behaviour change.
+    public virtual Task<FileHandleDto?> UploadSmallAsUserAsync(
         HttpContext ctx,
         string containerId,
         string path,

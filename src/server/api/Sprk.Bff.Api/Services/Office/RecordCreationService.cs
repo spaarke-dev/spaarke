@@ -190,21 +190,77 @@ public sealed class RecordCreationService
 
     internal const string TeamEntity = "team";
 
+    /// <summary>
+    /// The core record's internal Assigned-To contact column (matter and project). Owner decision A7 (round 3,
+    /// reversed; unified-access-control-r2 task 152): a quick-created record names its MAKER here, editable.
+    /// </summary>
+    internal const string AssignedToInternalAttribute = "sprk_assignedtointernal";
+
     private readonly IGenericEntityService _entities;
     private readonly IFieldMappingDataverseService _fieldMappings;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+    private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
     private readonly ILogger<RecordCreationService> _logger;
 
     public RecordCreationService(
         IGenericEntityService entities,
         IFieldMappingDataverseService fieldMappings,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         ILogger<RecordCreationService> logger)
     {
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
         _fieldMappings = fieldMappings ?? throw new ArgumentNullException(nameof(fieldMappings));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _identity = identity ?? throw new ArgumentNullException(nameof(identity));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Owner decision A7 (round 3, REVERSED; unified-access-control-r2 task 152, coordinated with 142 and
+    /// word-add-in-r1): the quick-created matter/project names its MAKER in <c>sprk_assignedtointernal</c>. The create
+    /// is app-only, so Created By is the BFF application user and cannot make the record "for" the maker in the Daily
+    /// Briefing; this column does (ADR-034 A3 people-targeting surface). The maker already has ACCESS through the
+    /// business-unit team; under task 142 this column also issues the Assigned-To share.
+    /// </summary>
+    /// <remarks>
+    /// A value a field-mapping rule already wrote is kept (the column stays editable; a supplied value is never
+    /// overwritten). The maker's contact comes only from task 141's link (<c>PersonIdentity.ContactId</c>) — never an
+    /// email match. No link → the column stays blank and <c>assigned_internal_unset</c> is logged; the create proceeds.
+    /// </remarks>
+    private async Task ApplyMakerAssignedInternalAsync(Entity entity, Guid makerSystemUserId, CancellationToken ct)
+    {
+        if (entity.Attributes.TryGetValue(AssignedToInternalAttribute, out var existing)
+            && existing is EntityReference supplied
+            && supplied.Id != Guid.Empty)
+        {
+            return;
+        }
+
+        Guid? contactId = null;
+        try
+        {
+            contactId = (await _identity.ResolveAsync(makerSystemUserId, ct).ConfigureAwait(false)).ContactId;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[RECORD-CREATE] The maker's linked contact could not be resolved for {MakerId}", makerSystemUserId);
+        }
+
+        if (contactId is { } makerContact && makerContact != Guid.Empty)
+        {
+            entity[AssignedToInternalAttribute] = new EntityReference("contact", makerContact);
+            return;
+        }
+
+        _logger.LogWarning(
+            "assigned_internal_unset: entity={Entity} maker={MakerId} reason={Reason} — the maker has no linked contact, so "
+            + "{Column} is left blank (never an email match); the record is still owned by the business-unit team",
+            entity.LogicalName, makerSystemUserId, "maker_has_no_linked_contact", AssignedToInternalAttribute);
     }
 
     /// <summary>
@@ -325,6 +381,9 @@ public sealed class RecordCreationService
             warnings.Add("No matter type was supplied. Open the matter and set its type.");
         }
 
+        // Owner A7 (task 152): the matter is FOR its maker — after field mapping, so a mapped value is kept.
+        await ApplyMakerAssignedInternalAsync(entity, ownerId, ct).ConfigureAwait(false);
+
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing (task 030 step 4).
         // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
         if (await ResolveOwnerTeamAsync(ownerId, ct).ConfigureAwait(false) is not { } ownerTeamId)
@@ -411,6 +470,9 @@ public sealed class RecordCreationService
 
             KeepRequestedNameIfMappingBlankedIt(entity, ProjectNameAttribute, name, "project", warnings);
         }
+
+        // Owner A7 (task 152): the project is FOR its maker — after field mapping, so a mapped value is kept.
+        await ApplyMakerAssignedInternalAsync(entity, ownerId, ct).ConfigureAwait(false);
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing.
         // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.

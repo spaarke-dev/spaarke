@@ -118,12 +118,33 @@ public sealed record CreateTaskRequest
     public required string Subject { get; init; }
     public string? Description { get; init; }
 
-    /// <summary>Due date; converted to UTC (matching the node's <c>ToUniversalTime()</c>).</summary>
+    /// <summary>Due date (<c>sprk_duedate</c>); converted to UTC (matching the node's <c>ToUniversalTime()</c>).</summary>
     public DateTime? DueDate { get; init; }
+
+    /// <summary>
+    /// Final/outer due date (<c>sprk_event.sprk_finalduedate</c>) — the later "must be done by" bound where
+    /// <see cref="DueDate"/> is the target. Optional; null leaves the column unset.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-29 (<c>spaarke-ontology-platform-r1</c>). <c>DailyBriefingCollector</c>'s task channels
+    /// read <c>sprk_finalduedate</c> FIRST and fall back to <c>sprk_duedate</c>, and they filter by date — so a
+    /// task with neither set cannot appear in the briefing at all, however correctly it was created.
+    /// </remarks>
+    public DateTime? FinalDueDate { get; init; }
 
     public Guid? RegardingObjectId { get; init; }
     public string? RegardingObjectType { get; init; }
     public Guid? OwnerId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 152: the systemuser the task is FOR (the assignee the confirming user chose, else
+    /// the confirming user; the recipient a signal is for). Their linked contact becomes <c>sprk_event.sprk_assignedto</c> when no
+    /// <see cref="AssignedToContactId"/> is supplied. Null → the regarding parent's responsible internal contact.
+    /// </summary>
+    public Guid? ActingUserId { get; init; }
+
+    /// <summary>A supplied assignee (contact) for <c>sprk_event.sprk_assignedto</c>. Never overwritten.</summary>
+    public Guid? AssignedToContactId { get; init; }
 }
 
 /// <summary>Result of a <see cref="IActionSeam.CreateTaskAsync"/> call. <see cref="TaskId"/> is

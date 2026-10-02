@@ -1,4 +1,7 @@
-export { AccessGrantModal } from './AccessGrantModal';
+export { AccessGrantModal, describeAccessPermission } from './AccessGrantModal';
+// Task 138: the host's fail-closed Access Permission + Secure → state mapping (pure, host supplies the integers).
+export { resolveAccessPermissionState } from './accessPermissionState';
+export type { IAccessPermissionValues } from './accessPermissionState';
 export type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,

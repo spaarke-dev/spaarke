@@ -21,7 +21,6 @@ import type {
   IDataService,
   INavigationService,
   AuthenticatedFetchFn,
-  IAccessPermissionOption,
   RecordTypeCatalogEntry,
   IPolymorphicPickerWebApi,
   ILookupItem,
@@ -77,14 +76,6 @@ export interface EmailWorkspaceProps {
   authenticatedFetch: AuthenticatedFetchFn;
   /** BFF base URL (no `/api` suffix) — composer + attachments preview/open-link resolution. */
   bffBaseUrl: string;
-  /**
-   * `sprk_communication` Access Permission OptionSet metadata (value + label +
-   * optional color; FR-14). Entity-specific — supplied by the host, mirroring
-   * the `TrackingFieldTrio` PCF caller's own `getAccessPermissionOptions()`
-   * convention (task 023). Defaults to the same Standard/Limited/Restricted
-   * fallback triple the PCF uses when live OptionSet metadata is unavailable.
-   */
-  accessPermissionOptions?: IAccessPermissionOption[];
   /** Recipient directory typeahead for the composer (optional; forwarded to `RecipientField`). */
   onSearchRecipients?: (query: string) => Promise<ILookupItem[]>;
   /**

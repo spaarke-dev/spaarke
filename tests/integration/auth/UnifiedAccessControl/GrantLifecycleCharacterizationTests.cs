@@ -244,9 +244,31 @@ public class GrantLifecycleCharacterizationTests
     private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Grant(
         Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
-            request, ExternalGrantRootType.Project, ProjectId, Today,
-            callerOid: null, client.Object, Mock.Of<ITenantCache>(),
+            request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
+            callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear, Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
+
+    /// <summary>
+    /// Task 139: the grant core takes the grantor's ceiling as a REQUIRED input. The upsert behaviour this class pins
+    /// predates the ceiling, so its grantor holds Read + Write + Delete — a Full Access ceiling, which never narrows.
+    /// The ceiling itself is pinned in the "Task 139" section below.
+    /// </summary>
+    private static readonly GrantCeiling FullAccessGrantor =
+        GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete);
+
+    /// <summary>Task 139: the write-time No Access check, answering "not denied" for every grantee in this class.</summary>
+    private static readonly IAccessibleRecordSetService NoAccessListClear =
+        GrantPolicyTestDoubles.DenyListAnswering(denied: false);
+
+    /// <summary>
+    /// Task 138: the grant core now reads the root's access flags before writing. Every root in this class is a
+    /// Standard, non-secure record, so the policy admits both grantee kinds and the upsert behaviour under test
+    /// is unchanged. The policy itself is pinned in <c>PolymorphicGrantWriteTests</c> (the
+    /// <c>DecideGrantPolicy_*</c> matrix), <c>GrantPolicyContractTests</c> (the routes) and
+    /// <c>GrantPolicyOrderingTests</c> (403 before 422).
+    /// </summary>
+    private static readonly GrantPolicyTestDoubles.FlagStubParticipationService OpenRecordPolicy =
+        new(defaultFlags: RootRecordFlags.None);
 
     /// <summary>The surviving row id — most tests care only about this half of the outcome.</summary>
     private static async Task<Guid> GrantId(Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
@@ -327,8 +349,10 @@ public class GrantLifecycleCharacterizationTests
         var table = new FakeGrantTable();
         var client = table.BuildMock();
 
-        var viewOnlyId = await Grant(client, Request(ExternalAccessLevel.ViewOnly));
-        var fullAccessId = await Grant(client, Request(ExternalAccessLevel.FullAccess));
+        // Compared by ROW ID (GrantId), not by the whole outcome record: since task 139 the outcome also carries the
+        // level written, which legitimately differs between the two calls.
+        var viewOnlyId = await GrantId(client, Request(ExternalAccessLevel.ViewOnly));
+        var fullAccessId = await GrantId(client, Request(ExternalAccessLevel.FullAccess));
 
         fullAccessId.Should().Be(viewOnlyId, "the level change updates the existing row");
         table.ActiveRows.Should().ContainSingle();
@@ -1178,5 +1202,111 @@ public class GrantLifecycleCharacterizationTests
         table.ActiveRows.Should().NotContain(r => r.Id == unbounded.Id,
             "and FR-33 still holds — no unbounded row survives the collapse");
         table.ExpiryUpdateCount.Should().Be(0, "the surviving row already carried its date");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 138 (#1061) — the grant core enforces the record's access policy itself
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>Calls the SHARED core directly — the path a future writer (tasks 140, 142) would take.</summary>
+    private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> GrantUnder(
+        Mock<DataverseWebApiClient> client, GrantAccessRequest request, RootRecordFlags flags)
+        => GrantExternalAccessEndpoint.CreateGrantAsync(
+            request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
+            callerOid: null, client.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(flags),
+            NoAccessListClear, Mock.Of<ITenantCache>(), new DefaultHttpContext(), NullLogger.Instance,
+            CancellationToken.None);
+
+    /// <summary>
+    /// Criterion 8: called DIRECTLY, the core writes nothing on a Restricted root and RETURNS the refusal — it does
+    /// not throw, so neither route's catch-all can turn it into a bare 500, and no writer can bypass it.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CreateGrantAsync_OnARestrictedRoot_WritesNothingAndReturnsTheTypedRefusal(bool organizationGrant)
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var request = organizationGrant
+            ? Request(contactId: Guid.Empty, organizationId: OrganizationId)
+            : Request();
+
+        var act = () => GrantUnder(client, request, new RootRecordFlags(IsSecure: false, IsRestricted: true));
+
+        var outcome = (await act.Should().NotThrowAsync()).Subject;
+        outcome.Refusal.Should().NotBeNull();
+        outcome.Refusal!.ReasonCode.Should().Be(ExternalGrantLifecycle.RecordRestrictedReasonCode);
+        outcome.Refusal.StatusCode.Should().Be(422);
+        outcome.AccessRecordId.Should().Be(Guid.Empty, "no row exists to name");
+        table.CreateCount.Should().Be(0);
+        table.ActiveRows.Should().BeEmpty();
+        client.Verify(
+            c => c.QueryAsync<ExternalGrantRow>(
+                GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the policy runs before the upsert touches the table at all");
+    }
+
+    /// <summary>A refused re-grant must not move an EXISTING row's level either — the refusal precedes the match path.</summary>
+    [Fact]
+    public async Task CreateGrantAsync_OnARestrictedRoot_LeavesAnExistingGrantRowUntouched()
+    {
+        var table = new FakeGrantTable();
+        table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30));
+        var client = table.BuildMock();
+
+        var outcome = await GrantUnder(
+            client, Request(ExternalAccessLevel.FullAccess), new RootRecordFlags(IsSecure: false, IsRestricted: true));
+
+        outcome.Refusal.Should().NotBeNull();
+        table.LevelUpdateCount.Should().Be(0);
+        table.ActiveRows.Should().ContainSingle().Which.AccessLevel.Should().Be((int)ExternalAccessLevel.ViewOnly);
+    }
+
+    /// <summary>
+    /// Criterion 7 at the core: on a Secure root and on a Limited root, an organization-wide grant is refused with
+    /// org_grant_direct_only_record and writes nothing; the NAMED contact grant on the same root is written.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task CreateGrantAsync_OnADirectOnlyRoot_RefusesTheOrganizationGrant_AndWritesTheNamedContactGrant(
+        bool secure, bool limited)
+    {
+        var flags = new RootRecordFlags(IsSecure: secure, IsRestricted: false, IsLimited: limited);
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+
+        var orgOutcome = await GrantUnder(client, Request(contactId: Guid.Empty, organizationId: OrganizationId), flags);
+        var contactOutcome = await GrantUnder(client, Request(), flags);
+
+        orgOutcome.Refusal!.ReasonCode.Should().Be(ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode);
+        contactOutcome.Refusal.Should().BeNull("a named, direct contact grant is exactly what a direct-only record admits");
+        table.ActiveRows.Should().ContainSingle().Which.ContactId.Should().Be(ContactId);
+    }
+
+    /// <summary>
+    /// Criterion 9 at the core: a flag-read fault is policy_unreadable (503), distinguishable from a real
+    /// Secure + Restricted record (record_restricted, 422) — never a throw, never a row.
+    /// </summary>
+    [Fact]
+    public async Task CreateGrantAsync_WhenTheFlagReadThrows_RefusesAsUnreadable_DistinctFromARealRestrictedRecord()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var throwing = new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None) { ThrowOnRead = true };
+
+        var faulted = await GrantExternalAccessEndpoint.CreateGrantAsync(
+            Request(), ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor, callerOid: null,
+            client.Object, throwing, NoAccessListClear, Mock.Of<ITenantCache>(), new DefaultHttpContext(),
+            NullLogger.Instance, CancellationToken.None);
+        var realRestricted = await GrantUnder(
+            client, Request(), new RootRecordFlags(IsSecure: true, IsRestricted: true));
+
+        faulted.Refusal!.ReasonCode.Should().Be(ExternalGrantLifecycle.PolicyUnreadableReasonCode);
+        faulted.Refusal.StatusCode.Should().Be(503);
+        realRestricted.Refusal!.ReasonCode.Should().Be(ExternalGrantLifecycle.RecordRestrictedReasonCode);
+        table.CreateCount.Should().Be(0);
     }
 }

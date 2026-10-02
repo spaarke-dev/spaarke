@@ -130,3 +130,24 @@ narrowing roles is an owner decision.
 §5.3 `-Verify` (exit 0) → §5.5 (assign to the named team; remove System Administrator) → §7 checks 1–11. The live
 NFR-05 run needs `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` on a workstation where only `az login` is available
 (plain `DefaultAzureCredential` resolved only `EnvironmentCredential` there).
+
+## 6. Production business-unit topology (owner, 2026-10-02): binding, with one gap in the control plane today
+
+The owner stated the production model on 2026-10-02 (`notes/session27-owner-decisions-and-research.md`, round 5):
+- **Users** are assigned to the customer's NAMED CHILD business unit, never to the root BU.
+- **New records** are assigned to the creating user's business unit/team. That includes records created server-side by the BFF, whose Dataverse application user is assigned to the CUSTOMER business unit.
+- `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §6 "Fix A" is the same design and was validated in dev on 2026-08-25.
+
+**Why it matters.** `Deep` read held at a business unit reaches every unit beneath it. If any person, or any team they belong to, holds `Deep`/`Global` read at the root BU or at any ancestor of the Secure Record BU, secure isolation is silently void. Dev showed this on 2026-10-02: the root BU's default team was given the full "Spaarke Basic User" role, which exposed every secure record to all 171 root-BU members. Server-side creates also break when the BFF application user sits in the root BU: `RecordOwnershipResolver` falls back to the caller's BU default team, and the ROOT default team holds no privileges, so Dataverse refuses it as an owner (#1081).
+
+**Requested handler behaviour** (H7b, or wherever the owner places it):
+
+| Step | Rule |
+|---|---|
+| T1 customer BU | Create the customer's named business unit as a child of the ROOT BU if it is absent. Its name comes from the run (for example the customer display name). Refuse if more than one unit matches. |
+| T2 Secure BU parent | The Secure Record BU (S1) is a **direct child of the ROOT BU**, a sibling of the customer BU. **Refuse** if an existing Secure Record BU has any other parent, especially the customer BU, because users there would reach it at `Deep`. |
+| T3 BFF application user | ⚠️ **Gap today:** `DataverseWebApiAppUserCreator` (`src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/DataverseWebApiAppUserCreator.cs`, step "(2) Resolve root business unit") creates the BFF application user in the **ROOT** BU. It must be created in, or moved to, the **customer BU**. Re-runs must be idempotent and must verify the application user's `businessunitid`. |
+| T4 root default team | Verify that the ROOT BU's default team holds **no role with `Deep` or `Global` read** on `sprk_project` / `sprk_matter` / `sprk_workassignment` (or on any `config/secure-record-owner-role.json` table). Refuse (or at least report CRITICAL) otherwise. |
+| T5 humans | Operator runbook: assign people to the customer BU, never the root BU. The UAC census job (`secure-record-isolation-census`, task 144) already reports any human who reaches the Secure BU. |
+
+**Dev differs today, and that is accepted:** all four BFF application users and the test users sit in the root BU, and the root default team holds "Spaarke Basic User". The owner classed this as a dev data artifact (round 5).

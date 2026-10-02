@@ -263,3 +263,69 @@ the file and the live role must change in lockstep (every entry → the §4 proc
 
 Publish size (CLAUDE.md §10 item 4) was not measured, by orchestrator instruction; the change is ~6 KB of embedded
 JSON plus code — the main session measures after merge.
+
+## 11. Gate G1, live run 2026-10-02 (spaarkedev1)
+
+- **Run as** part of the task-144/145 live gate run (task-144 note §13).
+- **Operator:** the `az` login `ralph.schroeder@spaarke.com`.
+- **Scripts:** from `C:\wt28b` @ `bca0941f6`.
+- **The probe team** is the **named team `Secure Record Owners` (`6eabc7f9-13be-f111-a05b-0022482913fc`)**, not the default team named in §4's snippet. The task-144 cutover ran first (task-144 note §13.2–13.6), so at G1 time the named team was the role's sole holder.
+
+### 11.1 Step 1: negative control (3 polls, ~25 s apart)
+
+`POST sprk_invoices` with `ownerid@odata.bind → /teams(6eabc7f9…)`. **REFUSED 3/3** (03:52:35Z, 03:53:00Z, 03:53:25Z), HTTP 403, code `0x80040299`. Verbatim, identical on all three polls:
+
+> Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=8, MetadataCachePrivilegesCount=7264, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Invoice privilege (Id=315f05b2-7417-43fa-8b47-8d0722bfbaf2) on OTC=10732 for entity 'sprk_invoice' (LocalizedName='Invoice'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.
+
+What the refusal establishes:
+- **It names only a Read privilege**, so escalation trigger 3 did not fire.
+- **`privilegeCount=8` matches the role's 8 privileges**, so the reading was current, not cached.
+- **The premise held** (POML AC 3).
+- **The evidence was recorded first:** the text above REPLACED the `VERBATIM REFUSAL PENDING` evidence of the `sprk_invoice` entry in `config/secure-record-owner-role.json`, committed as `ed579766c` BEFORE step 2. The file's `howToExtend` rule is now satisfied.
+
+### 11.2 Step 2: dry run → `-Apply` → §5.4 strip → `-Verify`
+
+| Stage | Result |
+|---|---|
+| Before | 8 privileges, all Basic: `prvReadsprk_Communication`, `prvReadsprk_Document`, `prvReadsprk_Event`, `prvReadsprk_Matter`, `prvReadsprk_Memo`, `prvReadsprk_Project`, `prvReadsprk_Todo`, `prvReadsprk_WorkAssignment` |
+| Dry run (exit 0) | `Present : 8 of 9` · `MISSING : sprk_invoice (prvReadsprk_Invoice)` · `DRY RUN: would add 1 privilege(s) at Basic: prvReadsprk_Invoice` |
+| `-Apply` (exit 0) | `ADDED at Basic and read back: prvReadsprk_Invoice` · `Held now : 13 privileges (was 8)` · `WARNING: the platform also added 4 privilege(s) that were not requested: prvReadSharePointData, prvWriteSharePointData, prvCreateSharePointData, prvReadSharePointDocument` |
+| §5.4 strip | `$keep` = the file's 9 `privilegeName`s. Strip candidates = exactly those four (guarded: anything else would have stopped the run). `RemovePrivilegeRole` → 204 ×4 |
+| After | 9 privileges, all Basic: the 8 above plus `prvReadsprk_Invoice`. **Diff +1, nothing removed** |
+| `-Verify` (exit 0) | `Held now : 9 privileges` · `Present : 9 of 9` · no "Outside the file" list · `VERIFY PASS: the role holds Read at Basic on all 9 tables.` |
+
+### 11.3 Step 3: positive probes (3 consecutive polls, ~25 s apart)
+
+Each poll:
+- created `sprk_invoice` owned by the named team (`Prefer: return=representation`);
+- read back `owningteam`;
+- deleted the probe;
+- ran a control create of `sprk_analysis` (not in the file) owned by the same team.
+
+| Poll | Invoice id | Create | `owningteam` / BU | Delete / GET | Control `sprk_analysis` |
+|---|---|---|---|---|---|
+| 1 03:55:12Z | `db6ecf10-15be-f111-a05b-0022482913fc` | 201 | `6eabc7f9` / `d9ec0b6f` ✅ | 204 / 404 | REFUSED 403, `privilegeCount=9`, missing `prvReadsprk_analysis` |
+| 2 03:55:38Z | `5959bb20-15be-f111-a05b-0022482913fc` | 201 | `6eabc7f9` / `d9ec0b6f` ✅ | 204 / 404 | REFUSED 403, `privilegeCount=9` |
+| 3 03:56:05Z | `76e58e2f-15be-f111-a05b-3833c5e9614d` | 201 | `6eabc7f9` / `d9ec0b6f` ✅ | 204 / 404 | REFUSED 403, `privilegeCount=9` |
+
+The control's `privilegeCount=9` proves that the probes saw the new role.
+
+### 11.4 Step 4: NFR-05 live run
+
+From task-144 note §13.8:
+- **Clause 5 PASS live:** `1 owner role(s) in it covering 9 of 9 codified table(s) at Basic`, and no `SecureOwnerRoleLacksCodifiedPrivilege` finding.
+- **Clauses 2, 2b, 3 and 4 also pass.** This meets the AUTHORIZATION criterion live: the named team is the sole holder, with 0 members.
+- **The test as a whole FAILED on clause 1.** Clause 1 has 42 findings, 27 of them via the root BU default team `Spaarke` now holding `Spaarke Basic User`. That is an exposure outside this task and outside the owner's round-4 acceptance; see task-144 §13.8. Steps 9 and 10 of the run were stopped there.
+
+### 11.5 Acceptance-criteria status after G1
+
+This supersedes the §10 rows it names.
+
+| Criterion | Status |
+|---|---|
+| Negative control (live) | **Met** (11.1) |
+| Positive probes (live) | **Met** (11.3) |
+| Basic-only + before/after lists | **Met**: 8 → 9, +`prvReadsprk_Invoice`, nothing removed (11.2) |
+| AUTHORIZATION (named team sole holder; clauses 2/3 live) | **Met live** (task-144 §13.5–13.6, 13.8) |
+| NEGATIVE census clause, live PASS | **Met for clause 5.** The test run fails on clause 1 for an unrelated exposure |
+| Peer exchange (§8a) and #1046 comment | Unchanged: main session |

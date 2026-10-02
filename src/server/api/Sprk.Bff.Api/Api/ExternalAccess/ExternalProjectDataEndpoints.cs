@@ -458,7 +458,14 @@ public static class ExternalProjectDataEndpoints
         // The parent flows from the ROUTE — the owner's "flows from the creation context". The
         // caller cannot name a parent in the body: CreateExternalTodoRequest is a closed DTO with no
         // regarding member, so the root gated above is necessarily the root written.
-        var created = await dataService.CreateTodoAsync(rootKind, rootId, request, ct);
+        // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
+        // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
+        var created = await dataService.CreateTodoAsync(
+            rootKind,
+            rootId,
+            request,
+            callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
+            ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
 

@@ -112,6 +112,82 @@ public class IdentityNormalizationServiceTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Task 141 — the fallback is the oid BINDING, read-only and fail-closed
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveAsync_TwoContactsBoundToTheUsersOid_DerivesNoContact()
+    {
+        // An ambiguous binding is an identity collision for ContactIdentityBinder to flag — never a pick.
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        SetupSystemUserRow(dataverse, TestSystemUserId,
+            email: EmailAddress, businessUnitId: TestBusinessUnitId, aadOid: TestAadObjectId);
+        SetupContactCrossRefRow(dataverse, TestAadObjectId, TestContactId, TestAccountId);
+        SetupTeamMembershipRows(dataverse, TestSystemUserId);
+
+        var result = await CreateSut(dataverse.Object).ResolveAsync(TestSystemUserId, CancellationToken.None);
+
+        result.ContactId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AnActiveAndAnInactiveContactOnTheUsersOid_DerivesNoContact()
+    {
+        // Verifier finding 6: the binder reads the oid over every state and denies + flags this data as
+        // OidOnMultipleContacts. The read-only fallback must give the same answer — not the active row.
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        SetupSystemUserRow(dataverse, TestSystemUserId,
+            email: EmailAddress, businessUnitId: TestBusinessUnitId, aadOid: TestAadObjectId);
+        SetupContactCrossRefRow(dataverse, TestAadObjectId, (TestContactId, 0), (TestAccountId, 1));
+        SetupTeamMembershipRows(dataverse, TestSystemUserId);
+
+        var result = await CreateSut(dataverse.Object).ResolveAsync(TestSystemUserId, CancellationToken.None);
+
+        result.ContactId.Should().BeNull("an active and an inactive contact on one oid is ambiguous, never 'the active one'");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_TheOnlyContactOnTheUsersOidIsInactive_DerivesNoContact()
+    {
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        SetupSystemUserRow(dataverse, TestSystemUserId,
+            email: EmailAddress, businessUnitId: TestBusinessUnitId, aadOid: TestAadObjectId);
+        SetupContactCrossRefRow(dataverse, TestAadObjectId, (TestContactId, 1));
+        SetupTeamMembershipRows(dataverse, TestSystemUserId);
+
+        var result = await CreateSut(dataverse.Object).ResolveAsync(TestSystemUserId, CancellationToken.None);
+
+        result.ContactId.Should().BeNull("deactivating a contact is how an operator removes a person (ADR-003)");
+    }
+
+    [Fact]
+    public async Task InvalidateAsync_DropsTheCachedIdentity_SoTheNextResolveSeesANewLink()
+    {
+        // A link written during a request takes effect on that request (task 141's cache constraint): the
+        // writer invalidates, and the next ResolveAsync re-reads instead of serving the 10-minute entry.
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+        SetupSystemUserRow(dataverse, TestSystemUserId,
+            email: EmailAddress, businessUnitId: TestBusinessUnitId, aadOid: TestAadObjectId);
+        SetupContactCrossRefRow(dataverse, TestAadObjectId, contactId: null);
+        SetupTeamMembershipRows(dataverse, TestSystemUserId);
+        var cache = new FakeDistributedCache();
+        var sut = CreateSut(dataverse.Object, cache: cache);
+
+        (await sut.ResolveAsync(TestSystemUserId, CancellationToken.None)).ContactId.Should().BeNull();
+
+        // The link lands in Dataverse…
+        SetupSystemUserRow(dataverse, TestSystemUserId,
+            email: EmailAddress, businessUnitId: TestBusinessUnitId, aadOid: TestAadObjectId,
+            primaryContactId: TestContactId);
+        SetupContactWithAccountParent(dataverse, TestContactId, TestAccountId);
+
+        // …without invalidation the cache answers; with it, the new link is read.
+        (await sut.ResolveAsync(TestSystemUserId, CancellationToken.None)).ContactId.Should().BeNull("still cached");
+        await sut.InvalidateAsync(TestSystemUserId, CancellationToken.None);
+        (await sut.ResolveAsync(TestSystemUserId, CancellationToken.None)).ContactId.Should().Be(TestContactId);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // Edge cases — user without contact, contact without account, etc.
     // ─────────────────────────────────────────────────────────────────────
 
@@ -404,15 +480,27 @@ public class IdentityNormalizationServiceTests
             .ReturnsAsync(entity);
     }
 
+    /// <summary>
+    /// The contacts BOUND to the user's oid (task 141): <c>contact.sprk_externalobjectid</c> = the oid in "D"
+    /// format, in ANY state — the binder's own question (verifier finding 6). Replaces the
+    /// <c>contact.azureactivedirectoryobjectid</c> cross-reference, a column that does not exist in dev. The
+    /// strict double answers only a query WITHOUT a statecode filter, so a regression to an active-only read
+    /// (which hides an inactive second contact on the oid) fails these tests.
+    /// </summary>
     private static void SetupContactCrossRefRow(
         Mock<IDataverseService> dataverse,
         Guid aadOid,
-        Guid? contactId)
+        params (Guid Id, int State)[] contacts)
     {
         var collection = new EntityCollection();
-        if (contactId is { } cid)
+        foreach (var (cid, state) in contacts)
         {
-            collection.Entities.Add(new Entity("contact") { Id = cid });
+            collection.Entities.Add(new Entity("contact")
+            {
+                Id = cid,
+                ["statecode"] = new OptionSetValue(state),
+                ["sprk_externalobjectid"] = aadOid.ToString("D"),
+            });
         }
 
         dataverse
@@ -420,12 +508,19 @@ public class IdentityNormalizationServiceTests
                 It.Is<QueryExpression>(q =>
                     q.EntityName == "contact" &&
                     q.Criteria.Conditions.Any(c =>
-                        c.AttributeName == "azureactivedirectoryobjectid" &&
+                        c.AttributeName == "sprk_externalobjectid" &&
                         c.Values.Count == 1 &&
-                        Equals(c.Values[0], aadOid))),
+                        Equals(c.Values[0], aadOid.ToString("D"))) &&
+                    q.Criteria.Conditions.All(c => c.AttributeName != "statecode")),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(collection);
     }
+
+    private static void SetupContactCrossRefRow(Mock<IDataverseService> dataverse, Guid aadOid, params Guid[] activeContactIds)
+        => SetupContactCrossRefRow(dataverse, aadOid, activeContactIds.Select(id => (id, 0)).ToArray());
+
+    private static void SetupContactCrossRefRow(Mock<IDataverseService> dataverse, Guid aadOid, Guid? contactId)
+        => SetupContactCrossRefRow(dataverse, aadOid, contactId is { } c ? new[] { c } : Array.Empty<Guid>());
 
     private static void SetupTeamMembershipRows(
         Mock<IDataverseService> dataverse,

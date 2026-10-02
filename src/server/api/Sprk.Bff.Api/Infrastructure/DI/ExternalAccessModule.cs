@@ -1,5 +1,7 @@
+using Azure.Core;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -49,8 +51,8 @@ public static class ExternalAccessModule
         // Registered HERE so the grant routes do not depend on an unrelated module having been added.
         services.TryAddSingleton(TimeProvider.System);
 
-        // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL).
-        // Resolves Contact by email and loads their project access grants.
+        // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL): the
+        // grant-DATA reader. (Contact resolution moved to ContactIdentityBinder below — task 141.)
         services.AddHttpClient<ExternalParticipationService>((sp, client) =>
         {
             var config = sp.GetRequiredService<IConfiguration>();
@@ -122,13 +124,43 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // ── Identity binding (unified-access-control-r2 task 141, defect C7) ──────────────────────────
+        // Placement: in the BFF (bff-extensions.md §A) — it runs inside the authorization path of every
+        // Teams/SPA request (B4, latency-coupled), over BFF-owned identity data, under the BFF identity.
+        //
+        // The customer-workforce-tenant list (owner decision I1 = (b)): EMPTY = DENY every email bind and
+        // creation; never defaults to AzureAd:TenantId. Malformed entries fail startup (ADR-010 ValidateOnStart).
+        services.AddOptions<WorkforceIdentityOptions>()
+            .BindConfiguration(WorkforceIdentityOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<WorkforceIdentityOptions>, WorkforceIdentityOptionsValidator>();
+
+        // The one binding store for THIS environment (Dataverse:ServiceUrl), app-only under the BFF's managed
+        // identity. Named client from IHttpClientFactory (pooled; safe in a singleton). The interface is the
+        // testing seam (ADR-010): HTTP doubles are banned (ADR-038 B1), so tests run the binder over an
+        // in-memory store.
+        services.AddHttpClient(DataverseContactIdentityStore.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddSingleton<IContactIdentityStore>(sp => DataverseContactIdentityStore.ForDefaultEnvironment(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<TokenCredential>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<DataverseContactIdentityStore>>()));
+
+        // The one binding writer, shared by the workforce resolver, the CIAM strategy, the invite endpoints and
+        // the reconciliation job. Concrete (ADR-010). Its factory builds a binder over ANOTHER environment for
+        // RegistrationDataverseService (a new systemuser's link goes to the environment it was created in).
+        services.AddSingleton<ContactIdentityBinder>();
+        services.AddSingleton<ContactIdentityBinderFactory>();
+
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
         // Composes the existing AAD-oid→systemuser conversion (MembershipEndpoints.ResolveSystemUserIdAsync)
-        // with the AAD-oid/verified-email→contact conversion (IIdentityNormalizationService) into one
-        // principal (systemuser / contact-only / deny). Singleton is safe: all deps
-        // (IIdentityNormalizationService, IDataverseService, ITenantCache) are singletons. The interface
-        // is the testing seam (ADR-010, matching the IIdentityNormalizationService precedent). No Graph
-        // SDK / AI-internal types are injected (broker-only, NFR-02).
+        // with the oid BINDING (ContactIdentityBinder, task 141) into one principal (systemuser / contact-only
+        // / deny). Singleton is safe: all deps (IIdentityNormalizationService, IDataverseService, ITenantCache,
+        // ContactIdentityBinder) are singletons. The interface is the testing seam (ADR-010). No Graph SDK /
+        // AI-internal types are injected (broker-only, NFR-02).
         services.AddSingleton<IWorkforcePrincipalResolver, WorkforcePrincipalResolver>();
 
         // Standing-grant flag reader (teams-app-r1 task 022 — the task-051 composition seam). Reads the
@@ -449,6 +481,19 @@ public static class ExternalAccessModule
         // exactly what § F.1's asymmetric-registration anti-pattern asks for.
         services.AddScheduledJob<ExternalAccessReconciliationJob>(
             ExternalAccessReconciliationJob.DefaultCronSchedule, enabled: false);
+
+        // Task 141 — the identity-link reconciliation (every licensed systemuser linked to its contact, or
+        // flagged). Systemusers are created outside the product (Entra / PPAC sync), so this is the safety net
+        // behind the inline link (WP-5). Same host and seam as the two jobs above (ADR-036 A1 rule 6; ADR-052
+        // places it in the BFF). ENABLED but REPORT-ONLY: writes need IdentityLink:Reconciliation:WritesEnabled
+        // = true — absent, empty or unparseable writes nothing. The switch is a rollout guard, not a deferral:
+        // the dev live gate runs report-only, the report is reviewed, then writes are enabled.
+        // It reconciles this BFF's own environment AND every environment it provisions users into (DATAVERSE_URL
+        // and the active sprk_dataverseenvironment rows, through RegistrationDataverseService's per-environment
+        // token path), so a registration link that did not land in a target is retried (task 141, third fix round).
+        // UNCONDITIONAL (ADR-032): every dependency is registered unconditionally above; the registration services
+        // (RegistrationModule) are resolved per run and only when DATAVERSE_URL is configured.
+        services.AddScheduledJob<IdentityLinkReconciliationJob>(IdentityLinkReconciliationJob.DefaultCronSchedule);
 
         // unified-access-control-r2 task 144 (C10 part 1, #967; owner decision F2 = a) — the read-only Secure Record
         // isolation census: no role reaches the Secure Record BU by depth, the BU holds no users, its named owner team

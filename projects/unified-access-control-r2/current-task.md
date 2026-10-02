@@ -1,8 +1,104 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-02 ~19:30Z (by context-handoff). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 HANDOFF #2 (READ FIRST)
+>
+> | Field | Value |
+> |---|---|
+> | **Standing instruction** | Owner: "continue autonomous as each of these steps are completed". Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5). |
+> | **Branch** | `work/unified-access-control-r2` @ `0ecbf09fa` + this checkpoint commit, fast-forwarded to the green integration tree and pushed. Master = `93634db58`; nothing on master is missing from the branch. |
+> | **Tests on `0ecbf09fa`** | ArchTests **345/0**; BFF unit **14,211 / 0 / 54** (clean single run); `Sprk.Bff.Api.IntegrationTests` builds. Run 2 suites concurrently and you get flaky timing failures (e.g. `AnalysisToolDtoTests.MapJsonSchema_SemanticInvalid_LogsWarning`). **Never launch a background suite with `&`**: use `run_in_background`. |
+> | **Merged to master** | **#1083** (130/131/134/151) and **#1093** (109/135/136/144/145). Issues closed: #998, #1053, #1055, #1057, #1058, #1068, #967. |
+> | **Dev BFF** | `bca0941f6` (batches 1+2), deployed 2026-10-02. |
+> | **🛑 Subagents** | **Weekly usage limit: unavailable until Oct 5, 9pm ET.** The main session still works. |
+> | **NEXT ACTION** | 1. Publish size: fresh short-path worktrees for master `93634db58` and the branch head; `dotnet publish -c Release`; Compress-Archive Optimal; equal file counts; plus `dotnet list package --vulnerable --include-transitive`. 2. Fill `__ARCH__`=345/0, `__UNIT__`=14,211/0/54, `__SIZE__`, `__CVE__` in `scratchpad/pr-batch3-body.md`, then `gh pr create --base master` (title: "fix(uac-r2): batch 3 -- access-permission levels (138), grant model + grantor cap (139), workforce identity binding B2 (141), briefing targets people (152), child-record upload containers (155)"). 3. Merge when `Router` passes and pending = 0 (merge commit; keep the branch). The Tier 2 full-unit job is always cancelled at 30 min (advisory). 4. Deploy from a FRESH worktree (`dotnet publish` there, then `scripts/Deploy-BffApi.ps1 -SkipBuild`). 5. 141 live **G-5** (trigger `identity-link-reconciliation` report-only; review `[ID-LINK-RECON]` logs; expected: 1 bind, 7 creates, Ralph's link kept and flagged, 3 collisions flagged, 0 writes) → **G-6** (`IdentityLink__Reconciliation__WritesEnabled=true`, run twice, the second changes nothing) → **G-7/G-8** manual (`test.user@demo.spaarke.com`). Exact commands: `notes/task-141-identity-binding.md` §8. |
+>
+> ### What happened since handoff #1 (2026-10-01)
+> - **Owner rounds 4–7 + clarifications** are recorded in `notes/session27-owner-decisions-and-research.md`:
+>   - **R4:** root-BU test users are an accepted dev finding; provision 65a3fab2; assign cascade accepted; 141 = B2; 155 = option (b) → task 156; live steps approved for 141/144/145; 134 D1 → task 157.
+>   - **R5:** root-BU reach is a dev artifact. Production = users plus the BFF app user in the customer's child BU. The cpo-r1 design §9.3 puts app users in Root, which is a design change, filed as **#1094**.
+>   - **R6:** a work assignment/project filed under a secure root is secure → **task 158**. It stays secure when the parent is unsecured, but the user can unsecure any related record. Record-first ownership kept.
+>   - **R7:** 137 = report-only first; 133 = new server-stamped creator column; 146 = G5 pattern for the AI create handlers; **146 role extension 9→26 tables APPROVED (apply BEFORE deploying 146)**; child access inheritance confirmed (149 users / root-scoped contacts).
+>   - **G-1b:** "Demo 1" registry row **deactivated** (`5762061b…`, `sprk_isactive=false`, 2026-10-02, owner-approved; the dev BFF could not use it).
+> - **Live on dev, done:**
+>   - **144** cutover: the team "Secure Record Owners" 6eabc7f9 holds the role (removed from the default team); migration Verify PASS; 65a3fab2 provisioned.
+>   - **145** G1: role = 9 × Read Basic.
+>   - **141 G-1** (schema `VERIFY PASS`: mirror key Active, FLS on binding + primarycontact, all in SpaarkeCore), **G-2** (`acct` claim on 1e40baad), **G-3** (`WorkforceIdentity__CustomerTenantIds__0` on spaarke-bff-dev).
+>   - Re-provisioning 65a3fab2 created a NEW container and orphaned the old empty one `b!HBRbo…`; routed to task 133.
+> - **Batch 3 (DAG `wgqgt6cu7`):** 138, 139, 141, 152 ready. 155 ready after f5. They are integrated into `0ecbf09fa` with these resolutions:
+>   - 139×141 invite endpoints: the resolver's merge, reviewed and seed-checked by the main session;
+>   - master #1032 × 152 briefing collector: kept 152's people targeting plus #1032's event column; a new pin test;
+>   - the Office save refusal fix `0ecbf09fa` (155 × task 075);
+>   - schema-script fixes `8e9f85c5e` (MetadataId bind + propagation waits) and `f39402410` (FLS grant retry).
+>   - Index: 138, 139, 141, 152 and 155 are ✅. The drift check is clean.
+> - **Peer messaging is unreliable** (sessions hold messages for user approval and they expire). Hand off through **GitHub issues/comments**: #1046 (145 role note to word-add-in-r1), #1094 (provisioning topology to cpo-r1). The 141 link contract for the peer's 083 is in `notes/141-link-contract.md`: post it as a comment on the peer's tracking issue after PR #3.
+>
+> ### Open work — needs subagents (after Oct 5) unless done by hand
+> | Item | State | Where |
+> |---|---|---|
+> | **Fix round B** 133 / 146 / 157 / 137 (verifier findings + owner R7) | Fixers were cut off. Partial work is saved as **UNVERIFIED WIP commits** | `task/uac-r2-133-b1` `b38756ba6`, `146-b1` `6edf97c58`, `157-b1` `70d89eeb3`, `137-b1` `33108909e`; findings in `scratchpad/batch3-fixargs.json`; re-run the script `workflows/scripts/uac-batch3-fix-round-b-*.js`, starting from the b1 branches |
+> | **156** (stamp freshness, option b) | Executed, plus 2 fix rounds; **final verify not run** | `task/uac-r2-156-r1-r2` `57e0bfca0` (built on 155-f5) |
+> | **Dependents** | Not started | 150 (after 133), 149→148→147 (after 146), 132 (after 137), 143→142→140 (after 133/137), **158** (after 146/148/149/155) |
+> | **146 live role extension** | Approved, not run | Apply 9→26 with 145's procedure BEFORE deploying 146's code |
+> | Housekeeping | — | Remove the consumed worktrees `C:\wt29i`, `C:\wt28b`, `C:\wt141`, `C:\wtl141`, the `wf_*` worktrees under `C:\code_files\spaarke\.claude\worktrees\`, and the branch `integ/uac-r2-batch3` once PR #3 merges |
+>
+
 > ## 🚨 SESSION 27 HANDOFF (2026-10-01) — READ FIRST
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
+>
+> ## 🛑 STATE AT THE WEEKLY USAGE LIMIT (2026-10-02 ~16:30Z) — READ FIRST
+> **Subagents are unavailable until Oct 5, 9pm ET** ("weekly limit"). Every workflow agent running at the time failed. The main session continued alone. Resume plan:
+>
+> | Item | State | Branch / location | Next |
+> |---|---|---|---|
+> | **Integration for PR #3** (138, 139, 141 B2, 152) | 139-r1 is merged. 152-r1-r2 (contains 141-f3) was merged with the 139×141 conflicts in the invite endpoints RESOLVED: by the resolver agent, then reviewed by the main session (one binder resolution passed through; 138 policy and 139 ceiling run before onboarding; all of 409/422/503 kept). Staged; full suites were running in shell `bog6c3tig` → `scratchpad/integ3-tests.txt` | worktree `C:\wt29i`, branch `integ/uac-r2-batch3` (mid-merge until committed) | If green: commit the merge, merge `work/unified-access-control-r2` into it, measure publish size, open PR #3. **No adversarial verifier ran on the merge** (limit). Do a seeded check or run one after reset. |
+> | **141 G-1 (live, dev)** | PARTIALLY APPLIED. It created the mirror column `contact.sprk_externalobjectidkey` and global choices `sprk_identityplane` / `sprk_identitycollisionreason` (Default solution). No key, FLS, view, data or publish was applied. **Script defect:** it binds `GlobalOptionSet@odata.bind` by `Name='...'` and needs the MetadataId GUID; it also has a mirror-propagation delay. No runtime effect, because the dev BFF does not read these yet. G-2 and G-3 NOT run. | script on `task/uac-r2-141-f3` (and integ); record on branch `live/uac-r2-141-g1g3` @ `9fbdd4509` (worktree `C:\wtl141`, notes `task-141-live-gates-2026-10-02.md`) | Fix the script (bind by MetadataId; poll the mirror re-read), then re-run G-1 (dry run, -Apply, -Verify), then G-2, then G-3. Merge the live branch. |
+> | **Fix round B** (133, 146, 157, 137 + owner round 7) | The fixers were cut off mid-work. Partial work is preserved as **WIP commits (UNVERIFIED, do not merge)** | `task/uac-r2-133-b1` `b38756ba6`, `146-b1` `6edf97c58`, `157-b1` `70d89eeb3`, `137-b1` `33108909e`; verifier findings in `scratchpad/batch3-fixargs.json` | After reset: re-run the fix + adversarial verify from each WIP commit (workflow script `uac-batch3-fix-round-b-*.js`, with `from` = the b1 branch). |
+> | **155** | ✅ READY (f5 verified) | `task/uac-r2-155-f5` `e74541920` | Integrate it (next PR). |
+> | **156** (option b) | Executed, plus 2 fix rounds; the FINAL VERIFY FAILED (limit) → UNVERIFIED | `task/uac-r2-156-r1-r2` `57e0bfca0` | After reset: re-verify, then integrate. |
+> | Dependents | not started | — | 150, 149→148→147, 132, 143→142→140, 158 once the fixes land |
+> | Owner open | **G-1b**: deactivate the stale "Demo 1" registry row? (rec yes) | — | Ask again if unanswered |
+>
+> **LATEST (2026-10-02 ~17:00Z) — READ FIRST (supersedes everything below):**
+> - **Owner rounds 6 and 7 are recorded:**
+>   - 158 stays secure when the parent is unsecured, but the user may unsecure related records;
+>   - 137 is report-only;
+>   - 133 gets the server-stamped creator column;
+>   - 146 uses the G5 pattern for the AI create handlers;
+>   - **146's role extension 9→26 is APPROVED (apply BEFORE deploying 146);**
+>   - child access inheritance is confirmed (149 users / root-scoped contacts).
+> - **Batch 3 DAG (`wgqgt6cu7`) result:**
+>   - READY: 141 `task/uac-r2-141-f3`, 138→139 `task/uac-r2-139-r1`, 152 `task/uac-r2-152-r1-r2` (contains 141).
+>   - NEEDS-FIXES: 133, 146, 157, 137.
+>   - SKIPPED: 150, 149, 148, 147, 132, 143, 142, 140.
+> - **Integration branch `integ/uac-r2-batch3`** (worktree `C:\wt29i`, from `6cd02997d`) has merged 139-r1. The merge of 152-r1-r2 hit 139×141 conflicts in the invite endpoints; workflow `wqsym4mj4` is resolving and verifying them. After that, merge `work/unified-access-control-r2` (`ee2be9213`, docs) into it, run the suites, measure publish size, open PR #3, deploy, then run 141 G-1..G-8 (approved).
+> - **Fix round B is RUNNING:** `wwpnme1b4` (run `wf_52a9841d-812`) for 133/146/157/137, on branches `task/uac-r2-{id}-b1/-b2`, with findings in `scratchpad/batch3-fixargs.json`. When it finishes, integrate the ready ones, apply the 146 role extension live BEFORE deploying 146, then run the dependents DAG (150; 149→148→147; 132; 143→142→140; 158) on top of the merged work.
+> - **155 f4 → 156 is RUNNING:** `wbwgbkzzb`.
+>
+> **LATEST (2026-10-02 ~14:00Z) — READ FIRST (supersedes everything below):**
+> - ✅ **#1083 and #1093 are both MERGED** (`65e6db71f`, `c726acd65`; merge commits). Closed: #998, #1053, #1055, #1057, #1058, #1068, #967. The main repo's master is synced. The work branch is at `1019cdfb7` (master merged back in, docs pushed). **There is no open PR.**
+> - ✅ **Dev BFF = `bca0941f6`** (batches 1+2), deployed 2026-10-02.
+> - ✅ **Live gates 144/145 done:** named team 6eabc7f9, migration Verify PASS, 65a3fab2 provisioned, role 9×Read Basic. NFR-05 clause 1 = accepted dev artifact (owner rounds 4/5).
+> - **Owner rounds 4, 5 and 6 are recorded** in the decisions note.
+>   - Round 5: root-BU reach is a dev artifact. Production = users plus the BFF app user in the customer child BU. Provisioning gap filed as **#1094** (cpo design §9.3 puts app users in Root).
+>   - Round 6: a work assignment or project filed under a secure root becomes secure → **task 158** (deps 146/148/149/155). **OPEN QUESTION to the owner: on parent unsecure, do the children stay secure (recommended)?**
+> - **RUNNING:**
+>   - batch 3 DAG `wgqgt6cu7` (141 B2, 138→139, 133→150, 146→149→148→147, 157, 137→132, 152, 143→142→140);
+>   - 155 fix-4 → 156 `wbwgbkzzb` (run `wf_882e8431-d34`).
+>   - When they finish, integrate the ready branches onto the work branch (in dependency order), run the suites, measure publish size, then open the next PR and deploy.
+>   - Route to **133**: provisioning an already-secure record creates a NEW container and orphans the old one (seen live on 65a3fab2; the old container was empty).
+>   - Then run 141's live G-1..G-8 (approved).
+> - **Peer messaging is unreliable** (sessions hold messages until their users approve them). Use GitHub issues and comments as the hand-off channel (#1046, #1094).
+>
+> **LATEST (2026-10-02 ~05:00Z) — READ FIRST (supersedes the block below):**
+> - ✅ **#1083 MERGED** as `65e6db71f` (merge commit). #1053, #1055, #1057 and #1068 are closed. The main repo's master is synced.
+> - The work branch was fast-forwarded to integ and then merged with master: **HEAD `bca0941f6`**. **PR #1093** (batch 2: 109/135/136/144/145) is OPEN. Size: 45.49 → 45.54 MB (+0.045), 212/212 files, no CVEs. Its `Router` result is still pending; **merge it as a merge commit when pending = 0.** Close #998/#1058 on merge (they auto-close); close #967 after the 144 live gates pass. #1059 stays open (136 live gate).
+> - ✅ **DEPLOYED `bca0941f6` to spaarke-bff-dev** from the fresh worktree `C:\wt28b` (45.54 MB, 4 files SHA-verified, healthz/ping 200, CORS OK).
+> - **Live steps RUNNING:** workflow `wnpqthvp8` (run `wf_691266a4-fc0`). It covers 144 (team create, migrate, provision 65a3fab2, default-team role removal, verify, impersonated probe) and 145 G1, followed by an independent read-only verifier. Results go to branch `live/uac-r2-batch2-gates` (worktree `C:\wtlive`), which must be merged into the work branch.
+> - Batch 3 DAG is RUNNING (`wgqgt6cu7`). 155 fix-3 verify is RUNNING (`wd2pia0jm`); when it is ready, launch **156**.
+> - The integ branch `integ/uac-r2-batch2` has been consumed and can be deleted with its worktree `C:\wt27i`. `C:\wt28m` and `C:\wt28b` are the measurement and deploy worktrees.
 >
 > **LATEST (2026-10-02 ~03:30Z) — READ FIRST:**
 > - **Owner round 4 answered all 7 questions.** They are recorded in `notes/session27-owner-decisions-and-research.md` § round 4 and include 141 B2, 155 option (b) → task 156, live steps approved for 141/144/145, and 134 D1 → task 157.
