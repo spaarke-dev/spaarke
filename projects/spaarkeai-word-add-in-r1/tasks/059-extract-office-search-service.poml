@@ -4,7 +4,8 @@
     <title>Extract the search cluster out of OfficeService into OfficeSearchService</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>blocked until 058 AND 068 merge — 058 deletes SearchDocumentsAsync from this same cluster, and 068 removes the three dispatcher ctor params. RE-SCOPED 2026-09-21: the primary work is now the six optional ctor params, not the search extraction. See the RE-SCOPE block in background.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-01, `913dafa2f`. Ctor 21 → 20 (5 optional deps made required; the dispatcher's 3 left to 068, which deletes it). Dead null branches deleted, including the stub search. `OfficeSearchService` extracted (entity search + matter types + the To Do's `sprk_recordtype_ref` lookup); `IOfficeService` has no member change. Mapping tests: qualifier-only changes. Full suite 13,040/0/54 (identical to the previous run); ArchTests 337/337; publish −1,917 B (212 files each side). Record: `notes/059-extract-office-search-service.md`.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.cs` on the deployed Office spine; tags include bff-api. A pure move with no behaviour change is still a change to a hot-path file shared with another active worktree.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -71,6 +72,13 @@
       **The search extraction is now OPTIONAL** and comes last, only if it still looks worthwhile after the
       above. **The `line count drops by at least 250` criterion is DELETED** — it is exactly the metric
       CLAUDE.md §11.5 forbids, and the God-class LOC ratchet was retired 2026-08-20 for this reason.
+    
+      UPDATE 2026-09-30 (pre-compact handoff): the six OfficeService.cs source-scan text dependencies that UAC-r2
+      once warned could fail a behaviour-preserving move are GONE - they deleted
+      OfficeEntitySearchSecurityTrimmingTests. QuerySearchEntityAsync may be moved freely. Still binding, in
+      CommunicationsEndpoints.cs (their task-127 code): no code line may contain entityService or
+      IGenericEntityService (doc lines starting with three slashes are exempt). UAC-r2's merge kept OUR 062 search
+      (impersonation) over their 126 (OBO). Blocked on PR 1029; runs after 080 and 058.
     </background>
     <notes>
       **ORDER MATTERS.** 058 deletes `SearchDocumentsAsync` + `GenerateStubDocumentResults`, which live in this

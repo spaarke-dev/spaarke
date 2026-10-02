@@ -9,6 +9,7 @@
 - [Power Pages vs Entra External ID portal (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice; licensing + SPE-external story
 
 ## Word add-in / Office
+- [Word unified manifest GA status (2026-09-30)](word-unified-manifest-ga-status-2026-09-30.md) — GA Win 2501+/Mac 16.103+/web; schema 1.30; upload as "Teams app" zip; one-extension multi-host OK; hide bug #6938 for Word
 - [Word add-in save collision path (2026-09-08)](word-addin-save-collision-path-2026-09-08.md) — /api/office/save uses Replace (silent overwrite) vs OBO Fail/409
 - [Word desktop document.url for SPE (2026-09-08)](word-desktop-document-url-spe-2026-09-08.md) — AMBER; docs silent on SPE desktop; needs live probe
 - [Office Dialog for MDA record (2026-09-08)](office-dialog-mda-record-open-2026-09-08.md) — no evidence MDA works in dialog; REC read-only pane + openBrowserWindow
@@ -37,6 +38,7 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [MDA red clickable form banner options (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification = only documented action banner but app-wide + persists across nav, no unload event; setFormNotification text-only; PCF MessageBar recommended
 - [Dataverse impersonation for async/Functions (2026-09-14)](dataverse-impersonation-async-functions-2026-09-14.md) — MS documents impersonation for services/workflows, async plug-ins default to initiating user; only trust rule = "S2S app controls access"; prv must be direct-assigned; SB module has SAS ON → forgeable caller id. +09-15: both-headers/disabled/unlicensed/cross-tenant NOT documented; error-catalog codes listed.
 - [POA Grant/Modify/Revoke semantics (2026-09-15)](dataverse-poa-grant-modify-revoke-semantics-2026-09-15.md) — ModifyAccess REPLACES (documented); Grant OR-vs-replace, Modify/Revoke-with-no-share, CreateAccess-on-share, disabled/app-user target ALL undocumented; role gate documented; Revoke ref has copy-paste "Replaces" doc bug.
 - [Background/scheduled/queue work hosting best practice (2026-09-12)](background-work-hosting-best-practice-2026-09-12.md) — Arch Center: separate compute (Functions Flex/ACA Jobs) for independent scale; in-proc cron duplicates on scale-out → Functions timer blob-lease; WebJobs "not recommended for new"; Durable Task Scheduler GA + SDKs run on App Service → blanket Durable ban unsupported.

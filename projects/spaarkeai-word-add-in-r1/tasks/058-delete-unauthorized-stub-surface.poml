@@ -4,7 +4,7 @@
     <title>Live Office endpoints serve fabricated data with NO per-document authorization — delete the unused stub surface</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>startable — no dependencies; findings confirmed against the deployed build 2026-09-19. RE-SCOPED 2026-09-21 per notes/fable-review-2026-09-21.md §2 — see the RE-SCOPE block in background.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security: removes an authorization gap on a LIVE deployed route. Also a breaking contract change to `IOfficeService` (9 consumers). Tags include bff-api + security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -98,6 +98,20 @@
 
       All are tagged `TRACKED: GitHub #229`, which is **OPEN and last updated 2026-03-13** — six months stale,
       labelled `tech-debt`, while guarding a live authorization gap.
+    
+      UPDATE 2026-09-30 (pre-compact handoff; source: notes/uac-r2-findings-2026-09-30.md and current-task.md).
+      1. RouteAuthorizationGuardTests now GOVERNS Api/Office/*. It carries four Pending waivers for exactly the routes
+         this task deletes: /office/search/documents and /office/recent (GitHub 1023), /office/share/links and
+         /office/share/attach (GitHub 1024). The guard's delete-case gap is CLOSED, so deleting a route without
+         deleting its waiver turns NoWaiverIsStale red in a way that looks unrelated to the diff. Delete all four
+         waiver entries in the SAME change.
+      2. NAMING NEAR-MISS: GenerateStubResults belongs to SearchEntitiesAsync (KEEP - UAC-r2 depends on it).
+         GenerateStubDocumentResults belongs to SearchDocumentsAsync (DELETE). UAC-r2 verified zero shared helpers.
+      3. Standing rule: a new Office-route filter whose name lacks the word Authorization must be added to
+         ExplicitlyCreditedFilterTypeNames, or Rule A reports the route ungated.
+      4. SEQUENCING: blocked on UAC-r2 PR 1029 (OfficeService.cs). After it merges, run 080 first, then this task.
+      5. Severity was already downgraded by this POML's own re-scope block: the routes read nothing, so this is
+         removal of a LATENT hazard, not a live disclosure.
     </background>
 
     <notes>
@@ -204,4 +218,34 @@
     <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
     <file>projects/spaarkeai-word-add-in-r1/notes/058-delete-unauthorized-stub-surface.md</file>
   </outputs>
+  <status-note>
+    COMPLETED 2026-09-30. Commit 8d56d47eb (+ close commit). This removed a LATENT hazard, not a live disclosure; the
+    live gaps are tasks 062-067.
+
+    Reproduce-first, live on spaarke-bff-dev: POST /api/office/share/links returned 200 with an identical fabricated
+    shape for a RANDOM GUID and for a real 697,393-byte PDF, which it reported as a 245,678-byte .docx. The route
+    reads nothing.
+
+    Deleted:
+    - 14 OfficeService members (-775 lines) and 4 IOfficeService members.
+    - From OfficeEndpoints (-623 lines): the routes, the share group and the recent group.
+    - 7 model files. AssociationType was MOVED verbatim to Models/Office/AssociationType.cs; ordinal 3 is still
+      burned.
+    - The rate-limit Share/Recent categories and options.
+    - useShareFlow.ts.
+    - The 4 Pending waivers, the contract-test regions, share-flow.spec.ts, the route mocks, 18 inert
+      mockRecentApi calls, and the k6 endpoint tests.
+    The 401 auth test was repointed to /search/matter-types.
+
+    Gates:
+    - Full suite 13,040 / 0 / 54, which reconciles exactly (-8 passed, -2 skipped). ArchTests 337/337.
+    - Publish 45.49 -> 45.46 MB (-0.028 MB, 212 files on each side, fresh master).
+    - CVE clean. Code review 0 critical. ADR check 0 violations.
+    - office-addins tsc 68 (baseline); lint 0.
+    - Zero route references in tracked src/ and tests/.
+    - Three docs corrected.
+    Deviation: the "caller cannot access" probe used an admin token, so a real document stood in.
+    External callers: none in the repo; telemetry has about 1 hour of history, so it is inconclusive.
+    Note: notes/058-delete-unauthorized-stub-surface.md.
+  </status-note>
 </task>

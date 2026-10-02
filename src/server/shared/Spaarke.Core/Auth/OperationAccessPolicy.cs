@@ -162,16 +162,43 @@ public static class OperationAccessPolicy
         // DataverseDocumentsEndpoints.cs:443, ChatDocumentEndpoints.cs:915. Resource = the document.
         ["read"] = AccessRights.Read,
 
-        // "finance.read" — FinanceAuthorizationFilter on the /api/finance group and its GET routes
-        // (FinanceEndpoints.cs:18, :51, :65). Resource = matter / document / invoice id.
+        // "finance.read" — Read on the PARENT record (sprk_matters / sprk_projects) named by the route or
+        // the query, evaluated through the entity-generic path (GetCallerRecordAccessAsync). Used by
+        // FinanceAuthorizationFilter on: GET /api/finance/matters/{matterId}/summary, GET
+        // /api/finance/invoices/search (query matterId, REQUIRED), and the four recalculate routes —
+        // POST /api/finance/{matters|projects}/{id}/recalculate and POST /api/{matters|projects}/{id}/
+        // recalculate-grades. Resource = the matter or project. (Corrected by task 130, defect C8: this
+        // comment used to say "matter / document / invoice id", describing a route→query fallback chain
+        // that evaluated every one of those ids against sprk_documents — which is why the summary route
+        // denied every caller. That chain is deleted; each route now names its one resource.)
         ["finance.read"] = AccessRights.Read,
 
-        // "finance.confirm" — FinanceEndpoints.cs:23 (confirm) and :37 (reject). Both MUTATE the
-        // authorized resource's own state (document status → Confirmed / RejectedNotInvoice), so
-        // Write is the requirement. Deliberately NOT Create: confirm also creates an sprk_invoice,
-        // but that is a DIFFERENT entity than the one being authorized — requiring Create on the
-        // document would over-restrict.
+        // "finance.confirm" — Write on the request-BODY DocumentId of POST /api/finance/invoice-review/
+        // confirm and /reject, through the document path (AuthorizeAsync). Both MUTATE the document's own
+        // state (review status → Confirmed / RejectedNotInvoice), so Write is the requirement. NOT Create
+        // on the document: confirm creates an sprk_invoice, which is a DIFFERENT entity. The caller's
+        // Create privilege on sprk_invoice IS consulted for confirm (owner decision G5, 2026-10-01), but as
+        // a table privilege, not through this key — see FinanceAuthorizationFilter's Privilege path.
         ["finance.confirm"] = AccessRights.Write,
+
+        // "finance.attach_invoice" — AppendTo on each PARENT record the new sprk_invoice's own lookups point
+        // at: the body MatterId (sprk_matters, sprk_invoice.sprk_matter) and VendorOrgId
+        // (sprk_organizations, sprk_invoice.sprk_vendororg). Added by task 130 (defect C8). AppendTo, not
+        // Write: attaching a child to a parent is the right Dataverse itself demands of the parent ("other
+        // records can be attached to this record"), and Write does not imply it — the same reasoning as
+        // "entity.associate_document" below. A separate key rather than reusing that one because it names an
+        // OFFICE document being associated to an entity; reusing it here would misdescribe the operation in
+        // every deny log. (Until 2026-10-01 this key was also asked of the DOCUMENT; the live schema puts the
+        // lookup on the document instead — see "finance.link_invoice".)
+        ["finance.attach_invoice"] = AccessRights.AppendTo,
+
+        // "finance.link_invoice" — Write AND Append on the body DocumentId of POST /api/finance/invoice-review/
+        // confirm, through the entity-generic record path. Added by task 130 (owner decision G5, 2026-10-01).
+        // The live schema has NO sprk_invoice → sprk_document lookup; the link is sprk_document.sprk_invoice,
+        // so confirm WRITES the document's own lookup column. In Dataverse the record that HOLDS the lookup
+        // needs Append ("this record can be attached to another"), not AppendTo, and Write for the column
+        // update itself — the owner's "Write+Append on the document". Append is not implied by Write.
+        ["finance.link_invoice"] = AccessRights.Write | AccessRights.Append,
 
         // "entity.associate_document" — EntityAccessFilter.cs:64, attached at OfficeEndpoints.cs:173
         // (POST /api/office/save). The authorized resource is the TARGET entity

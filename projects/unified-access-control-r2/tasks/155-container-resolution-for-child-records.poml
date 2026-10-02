@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="155" project="unified-access-control-r2">
+  <metadata>
+    <title>Uploads filed to a CHILD record (to-do, event, contact, …) resolve the right container — the secure ancestor's own container when the parent is secure, else the record's business-unit container — instead of a misleading 409</title>
+    <phase>Session 27 — UAC defect remediation (residual found by the task 151 verifier, 2026-10-01)</phase>
+    <gate>startable after 151 (merged) — coordinate with 146 (child ownership) and 144 (named secure team)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes where file BYTES are stored for every upload filed to a non-securable record — an isolation surface (the #1038 class: a secure record's content landing in a shared container).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security isolation of file content; fail-closed decisions on an upload path; interacts with C10 child ownership.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits RecordContainerResolver.cs and the OBO record-keyed upload routes, which 151 just changed and 146 will consume.</parallel-reason>
+    <deps>151</deps>
+    <tags>bff-api, security, spe, dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Task 151 adversarial verifier, 2026-10-01: "the misleading 409 'No storage container is configured' remains on the OBO record-keyed routes for any NON-securable entity". Owner directives: nothing deferred; "a secure record MUST always have at least one user who can see it"; C10 part 2 — children of a secure record are secure.</origin>
+  </metadata>
+
+  <prompt>Make an upload filed to a child record land in the correct storage container: the secure ancestor's own container when the record hangs off a secure project, matter or work assignment, otherwise the record's business-unit container — and never a misleading 409 for a record whose container is derivable.</prompt>
+
+  <role>SPAARKE platform developer — SPE container resolution and the OBO record-keyed upload routes.</role>
+
+  <goal>For PUT /api/obo/records/{entityLogicalName}/{recordId}/files/{*path} and POST …/upload-session, a record of a NON-securable entity (sprk_todo, sprk_event, contact, sprk_communication, sprk_invoice where not securable, …) resolves its container from data, never from the caller: if the record's core ancestor (project / matter / work assignment) is SECURE, the ancestor's own container (fail closed if that container is missing); otherwise the record's own owningbusinessunit container (the behaviour the two-argument overload already documents). An unresolvable ancestor or business unit refuses with a specific reason code; nothing ever falls back to a shared container for a record that might be under a secure root.</goal>
+
+  <context>
+    <background>THE DEFECT. `RecordContainerResolver.ResolveForRecordAsync` (src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs:176-183) returns `SecureContainerDecision.Decide(isSecure: false, ownContainerId: null, fallbackContainerId: nonSecureFallbackContainerId)` for every NON-securable entity WITHOUT reading the record. The OBO record-keyed routes call the two-argument overload, which passes a null fallback and whose own documentation says the non-secure default is derived "from the RECORD's own owningbusinessunit" — but that derivation only happens on the SECURABLE path. So every upload to a to-do, event or contact through those routes resolves Unresolved and the route answers 409 "No storage container is configured" (OBOEndpoints.cs record-keyed handlers, ~:94-180 and ~:337-400), even when the record's business unit has a container.
+
+THE ISOLATION HALF (why this is not just a usability fix). Owner C10 part 2 (BINDING): children of a secure record are secure. A to-do, event or communication filed under a SECURE project must have its file bytes in the secure project's OWN container — the #1038 class of leak (a secure record's content in a shared container) would otherwise reappear through the child record the moment the 409 is "fixed" naively by reading the child's business unit. The child's link to its root is the core-ancestor stamp (`CoreAncestorResolver`, tasks 050/052; `sprk_regarding{project|matter|workassignment}` columns, `CoreAncestorResolver.cs:56-92`); sprk_document has typed lookups instead (sprk_project / sprk_matter / sprk_workassignment).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureContainerDecision.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/CommunicationContainerResolver.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/RecordKeyedUploadAuthorizationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Fail closed (ADR-003): an unreadable ancestor link, an unreadable ancestor flag, or a secure ancestor with no container REFUSES (secure_record_container_missing / a new container_ancestor_unresolved code) — never a shared container.</constraint>
+    <constraint source="owner">The container is derived from data only; the caller never names it (task 076's rule, "no client can name where bytes go").</constraint>
+    <constraint source="project">The two-argument overload keeps its documented meaning (non-secure default from the record's own owningbusinessunit); the four-argument overload with an explicit fallback (server ingest, e.g. Communication:ArchiveContainerId) is unchanged in behaviour for records with NO secure ancestor. CommunicationContainerResolver's securable-regarding loop must keep working — run its tests.</constraint>
+    <constraint source="project">One record read for the child (owningbusinessunit + its ancestor link columns) and at most one read of the ancestor (flag + container) — no per-upload metadata round trips beyond 151's single classification.</constraint>
+    <constraint source="project">ADR-038 test bans; prove each new branch bites by seeding.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory which non-securable entities reach the OBO record-keyed routes (EntityAccessFilter.EntitySetByType keys: contact, event, todo, invoice, …) and, per entity, how it links to its core ancestor (sprk_regarding{core} columns vs typed lookups); verify the columns read-only against live metadata.</step>
+    <step order="2">Extend the NotSecurable branch of the TWO-argument path: read the record's owningbusinessunit + ancestor link(s); if an ancestor is secure → that ancestor's own container (refuse if absent); if the record links to MORE than one secure root, refuse (ambiguous) — consistent with CommunicationContainerResolver's ambiguity refusal; else the record's business-unit container; Unresolved only when genuinely no container exists (and say so precisely).</step>
+    <step order="3">Tests: a to-do under a SECURE project resolves the project's container; a to-do under a non-secure project resolves its own BU container; an event with no ancestor resolves its BU container; an unreadable ancestor refuses; a secure ancestor without a container refuses; two secure ancestors refuse; the four-argument ingest path is unchanged; drive at least one REAL route end-to-end (not the filter and resolver composed by hand — the 151 verifier's test-shape gap).</step>
+    <step order="4">Update the resolver's comments (the NotSecurable branch currently says "nothing to read") and the route comments; record in notes.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A file uploaded through the real PUT /api/obo/records/sprk_todo/{id}/files/… route for a to-do whose core ancestor is a SECURE project is stored in that project's own container (asserted on the drive the route resolves).</criterion>
+    <criterion testable="true">The same for a to-do under a NON-secure project resolves the to-do's own business-unit container; no 409.</criterion>
+    <criterion testable="true">A record with no ancestor resolves its business-unit container; a business unit with no container still answers the documented 409 with precise copy.</criterion>
+    <criterion testable="true">Negative: unreadable ancestor link or flag → refusal with a reason code; secure ancestor without a container → secure_record_container_missing; two secure ancestors → ambiguity refusal. None resolves a shared container.</criterion>
+    <criterion testable="true">The four-argument (explicit fallback) path and CommunicationContainerResolver behave as before for records without a secure ancestor (existing tests green, unmodified assertions).</criterion>
+    <criterion testable="true">Each new branch is proven to bite by seeding its removal; BFF unit + NetArchTest green.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev, existing non-admin test user, no relocation): upload a file to a to-do under the secure test project and confirm (read-only) the item lands in the project's container; upload to a to-do under an ordinary project and confirm its BU container.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a child entity reaching these routes has NO reliable link to its core ancestor (no sprk_regarding{core} stamp and no typed lookup), STOP and report the entity — do not guess an ancestor. Recommendation: refuse uploads for that entity until 146/147 give it a link.</trigger>
+    <trigger>If CoreAncestorResolver's stamp can be stale (ancestor re-parented) in a way that would send bytes to the wrong root, STOP and report; do not paper over it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Upload to a to-do under a secure project">
+      <steps>
+        <step>As a non-admin test user shared on the secure test project, open a to-do filed under it and upload a file through the to-do's document control.</step>
+      </steps>
+      <expected>The upload succeeds (no "No storage container is configured" error) and the file is stored in the secure project's container, not a business-unit container.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Residual of task 151 (#1038 hardening), found by its adversarial verifier on 2026-10-01; owner directives forbid deferral. Relates to C10 part 2 (tasks 144-149): 146 makes child OWNERSHIP follow the secure root; this task makes child CONTENT follow it. Session notes: notes/session27-owner-decisions-and-research.md.</notes>
+</task>

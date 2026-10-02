@@ -50,8 +50,9 @@ A missing / mismatched `brk-multihub://<host>` → **AADSTS7000471** ("reply add
 
 ```
 src/client/office-addins/
-├── outlook/                         # Outlook host entry
-│   ├── OutlookHostAdapter.ts        # mailbox item/attachment access
+├── outlook/                         # Outlook host entry; no host adapter here either: task 075 deleted the
+│   │                                # dead outlook/OutlookHostAdapter.ts; the pane registers
+│   │                                # shared/adapters/OutlookAdapter.ts (mailbox item/attachment access)
 │   ├── outlook-manifest.xml         # XML manifest (M365 Admin Center)
 │   ├── manifest.json                # Unified manifest (icons.color/outline)
 │   ├── taskpane/index.tsx           # mounts <App> with the Outlook adapter
@@ -108,6 +109,11 @@ Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'
 
 ### Save flow + "Related to" filing
 - `SaveFlow` / `RelatedToPicker` present auto-matched Matter/Project/Invoice candidates (with confidence) + inline "create new record" (`POST /api/office/quickcreate/{type}`) + green-check select; the chosen record becomes the `sprk_document` regarding.
+- **Pickable equals savable** (task 084, #1037). The search lists every record the caller can READ, but the save files only to a record they hold **AppendTo** on.
+  - Each record the pane offers carries `canFile`, decided by the save's own check: `EntityAccessFilter.TryResolveEntitySet` → `CallerRecordAccessProbe` (OBO `RetrievePrincipalAccess`) → `OperationAccessPolicy` `entity.associate_document`.
+  - A `canFile: false` record is shown **disabled, with the reason** ("You can view this record but can't file to it…"). It is never selected or pre-selected.
+  - The Outlook ribbon quick-save does not auto-file to a non-fileable prediction; it says why and opens the pane.
+  - A refused save (rights changed in between) is still enforced by the save itself.
 
 ### Outlook linked-to-dos banner
 - `LinkedTodosBanner` (Outlook only) queries `GET /api/office/communications/{commId}/linked-todos` and pins a "N linked to-dos" indicator when the email's saved communication has them.
@@ -116,18 +122,19 @@ Navigation renders **only for Outlook** (`showNavigation={hostType === 'outlook'
 
 ## BFF surface (`/api/office/*`)
 
-Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`; logic in `Services/Office/OfficeService.cs`. As-built routes:
+Endpoints live in `src/server/api/Sprk.Bff.Api/Api/Office/*.cs`. The logic is in `Services/Office/OfficeService.cs` (save, quick-create, To Do), `Services/Office/OfficeSearchService.cs` (every Dataverse READ the add-in makes: entity search, matter types, the To Do's record-type lookup, and per-record filing access; extracted by task 059) and `Services/Office/OfficeJobStatusService.cs` (the save's job record and its SSE stream; task 060). As-built routes:
 
 | Method + route | Purpose |
 |---|---|
 | `POST /api/office/save` (+ `/save-debug`) | Save the current email/document → queues async processing, returns a job id |
-| `GET /api/office/{jobId}` · `GET /api/office/{jobId}/stream` | Job status (poll + **SSE** progress) |
-| `GET /api/office/search/entities` | Entity search (Matter/Project/Invoice/Contact) — powers RelatedToPicker + Contact assignee |
-| `GET /api/office/documents` · `GET /api/office/recent` | Document/recent lookups |
+| `GET /api/office/jobs/{jobId}` · `GET /api/office/jobs/{jobId}/stream` | Job status (poll + **SSE** progress). Read from the job's `sprk_processingjob` row, so every instance and a restarted one answer the same. The save's own view of its job is kept in `sprk_result`, because the finalization workers rewrite the row's status columns afterwards (task 060, #1084). On the stream, only worker-published events carry an id: one Redis counter per job numbers them on every instance, so `Last-Event-ID` resumes after exactly that event. The connection, snapshot and heartbeats are unnumbered, and the stream subscribes before it reads the snapshot (task 068, #1086) |
+| `POST /api/office/documents/{documentId}/generate-profile` | The pane's **Generate Profile** (FR-08). Authorized `write` on the document, then ONE `AppOnlyDocumentAnalysis` job is queued (`OfficeProfileQueue`) and the route answers 202, so a restart cannot lose the request. Its key carries the request's own id (task 029's discriminator), so every click runs, even on a profiled document. 503 when the AI gate is off (task 068, #1086) |
+| `GET /api/office/search/entities` | Entity search (Matter/Project/Invoice/Contact) — powers RelatedToPicker + Contact assignee. Impersonated as the caller, so only records they can read are returned (task 062). **`access=file`** (Save picker only) adds a per-row **`canFile`**: whether the save would accept the row (task 084). One OBO exchange and one `WhoAmI` per request, then one `RetrievePrincipalAccess` per row, at most 4 at once and at most 50 rows. Without it, `canFile` is absent and the route costs what it did |
+| `GET /api/office/documents` | Document lookups (`/api/office/recent`, `/share/*` and `/search/documents` were deleted 2026-09-30 by spaarkeai-word-add-in-r1 task 058: fabricated data, no client) |
 | `POST /api/office/quickcreate/{entityType}` | Inline "create new record" for filing |
 | `POST /api/office/todo` | **Create first-class `sprk_todo`** (r2) |
 | `POST /api/office/links` · `POST /api/office/attach` | Sharing links / attach flows |
-| `GET /api/office/communications/by-message-id/{id}` (+ `/suggestions`) | Resolve the saved communication + AI association suggestions |
+| `GET /api/office/communications/by-message-id/{id}` (+ `/suggestions`) | Resolve the saved communication + AI association suggestions. `/suggestions` returns `names` (only candidates the caller can read) and **`filingAccess`** (`targetId` → whether the save would accept it, task 084), which the pane cards and the ribbon quick-save honour |
 | `GET /api/office/communications/{commId}/linked-todos` | Linked `sprk_todo` records for the banner |
 | `GET /api/office/health` | Add-in-facing health probe |
 
@@ -139,21 +146,34 @@ Auth: the caller's bearer token → BFF **OBO** → Graph/SPE + Dataverse (ADR-0
 
 | Item | As-built |
 |---|---|
-| **XML manifests** | `outlook/outlook-manifest.xml`, `word/word-manifest.xml` — for M365 Admin Center upload |
-| **Unified manifest** | `outlook/manifest.json` — carries `icons.color` (128px) + `icons.outline` (32px) |
-| **Names** | "Spaarke Outlook" / "Spaarke Word" |
-| **Icons** | white-on-black brand marks generated into `shared/assets` (`icon-color.png` 128, `icon-outline.png` 32, plus `icon-16/32/64/80/128`) via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep, not in `package.json`) |
+| **LIVE registrations (production)** | **XML for both hosts**: Outlook `outlook/outlook-manifest.xml` (`5e4d66d0-…`), Word `word/word-manifest.xml` (`b3965ea0-…`). ⚠️ Outlook's is `/outlook/outlook-manifest.xml` — `/outlook/manifest.xml` 404s (a known trap) |
+| **Unified app package (the migration target, task 078)** | ONE Microsoft 365 unified-manifest app (schema **1.30**) for **Outlook AND Word**, built by `packaging/mergeUnifiedManifest.js` into `dist/spaarke/` and zipped by `scripts/Package-OfficeAddinUnified.ps1` (CI artifact `spaarke-addin-unified-package`). Own package id `e68f3cb1-…`; `alternates.hide` names both XML add-ins. Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md` §6 |
+| **Per-host unified manifests** | `outlook/manifest.json`, `word/manifest.json` — the SOURCES of each host's half of the package. Not uploaded on their own |
+| **Names** | XML: "Spaarke Outlook" / "Spaarke Word". Unified package: "Spaarke" |
+| **Icons** | white-on-black brand marks generated into `shared/assets` via `generate-icons.mjs` from `spaarke-logo.svg` (`sharp` is a manual dev dep: `npm install --no-save sharp`; pass target names to render only those). `icon-16/32/64/80/128`, `icon-color.png` (128, XML era), **`icon-color-192.png` (the package's color icon — app packages require 192×192)**, `icon-outline.png` (32) |
 
-### Manifest rules (validated against M365 Admin Center — still binding)
+### Manifest rules — XML manifests (the live registrations; validated against M365 Admin Center)
 
 | Rule | Reason |
 |---|---|
-| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part |
-| **No** `<FunctionFile>` in the Outlook manifest | Causes validation failure |
+| 4-part version `X.X.X.X` (not `X.X.X`) | Admin Center rejects 3-part **for XML** |
+| **No** `<FunctionFile>` in the **Outlook** XML | Causes validation failure (the Word XML has one since task 037 — Word accepts it) |
 | Single `VersionOverridesV1_0` (do not nest V1.1) | Validation failure |
 | `RuleCollection Mode="Or"` + `DisableEntityHighlighting` present | Required for Outlook read surface |
 | All icon URLs return HTTP 200 | Manifest validation fails otherwise |
 | Bump the manifest version on any change | M365 requires re-register at the new version |
+
+### Manifest rules — the unified app package (task 078)
+
+| Rule | Reason / where enforced |
+|---|---|
+| **3-part** version `X.Y.Z` — bump `UNIFIED_PACKAGE.VERSION` in `webpack.config.js` on every change | The unified manifest rejects 4-part; the admin center rejects a same-version update. The merge throws on 4-part |
+| ONE extension; every runtime and ribbon scoped to exactly ONE host; host capabilities on those nodes, not the extension | An extension-level `WordApi` requirement stops it installing in Outlook. The merge asserts it |
+| The package id is its OWN GUID — never the Entra client id, never an XML add-in id | Microsoft requires a new GUID for the unified version; the merge refuses the other two |
+| A Word `executeFunction` id that collides with an Outlook one is renamed ONLY via `WORD_FUNCTION_RENAMES` + an `Office.actions.associate` alias in `word/commands/index.ts` | The id is the registered function name — a manifest-only rename ships a dead button. A test checks every Word action is registered |
+| Every icon URL resolves; color icon 192×192, outline 32×32 | Admin-center validation. The merge repairs/refuses missing icons; the packaging script exits 1 on wrong sizes |
+| Upload as App type **"Teams app"** (a zip), not "Office Add-in" | Microsoft 365 admin deploy doc |
+| Keep BOTH XML add-ins deployed | Outlook on Mac and Word < 2501 cannot run the unified package; `hide` does not yet work in Word (office-js #6938) |
 
 ---
 
@@ -169,7 +189,7 @@ npm run typecheck          # production code is clean (0 errors); 284 errors rem
 ```
 
 - **Hosting**: Azure **Static Web App**. **Deploy runs in CI** — GitHub Actions **`deploy-office-addins.yml`** (holds the SWA secrets); it is **not** an agent-run script. Push the branch → confirm the run is green (`gh run list --workflow=deploy-office-addins.yml`).
-- **Version bumps**: `outlook/manifest.json` + `outlook/taskpane/index.tsx` (and the Word equivalents), then **M365 re-register** at the new version.
+- **Version bumps**: XML era — `outlook/outlook-manifest.xml` / `word/word-manifest.xml` (4-part) + the taskpane `index.tsx` version, then **M365 re-register**. Unified package — `UNIFIED_PACKAGE.VERSION` in `webpack.config.js` (3-part), then re-upload the CI artifact zip.
 - **Config (env-driven, not hardcoded)**: `BFF_API_BASE_URL` (defaults to `spaarke-bff-dev`), `ORG_URL` (Quick-Create Dataverse deep-link; unset → Quick Create is a safe no-op). Never pin the add-in to the dev org.
 
 ---

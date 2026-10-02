@@ -1,5 +1,75 @@
 # Current Task State — `unified-access-control-r2`
 
+> ## 🚨 SESSION 27 HANDOFF (2026-10-01) — READ FIRST
+>
+> **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
+>
+> **PROGRESS after the handoff (2026-10-01, post-compact):**
+> - **Step 1 done.** On the merged branch, ArchTests are 337/0 and the unit suite is 13,189 passed, 0 failed, 54 skipped. Integration projects build clean.
+> - **Step 7 done.** The peer confirmed it has no doubles; the Office contract test was already migrated by 151.
+> - **Master publish baseline** (the size step): `C:\wt27m` @ `c08ef6013` is **45.46 MB / 212 files** (Compress-Archive Optimal, incl. PDBs, zip at `C:\tmp\pubsize\master.zip`). The branch side is still pending (after the 130b merge).
+> - **Housekeeping done:** `25eee2074` makes all 152 POMLs valid XML (0 errors).
+> - **Worktrees:** `wf_921a992b-425-1/2` were removed. `wf_921a992b-425-3` and `wf_aa385556-714-*` are still locked by another process.
+> - **Step 8 LAUNCHED early:** workflow `wd4apuq7r`, run `wf_fe3801ba-d23` (script under `workflows/scripts/uac-batch2-execute-*.js`). It runs four lanes, `109→135→136`, `141`, `144→145` and `155`. Each task gets an executor, a verifier and up to 2 fix rounds, on branches `task/uac-r2-{id}[-fN]`. There are **no live writes**: 144's team creation and migration and 145's role change come back as manual gates. Handoff notes land in `notes/handoffs/INCOMING-141-*` and `INCOMING-145-*`, plus `notes/141-link-contract.md`, which goes to the peer for their 083. Merge the batch-2 branches into the work branch **after** the batch-1 PR merges.
+> - **Owner answers passed to batch 2:**
+>   - **I1:** (b).
+>   - **I2:** (1).
+>   - **A2 reversed:** for 135, there are no derived terms on CIAM and nothing is retired.
+>   - **F2:** (a).
+>   - **F8:** the interim default.
+>   - **F9:** "Secure Record Owners".
+>   - **F10:** (a), handed to customer-provisioning-orchestration-r1.
+> - 🔴 **New cross-project risk #1081 (peer ISS-016).** Dev's ROOT BU default team "Spaarke" holds 0 privileges, so Dataverse refuses it as an owner. **Task 130's invoice owner comes from `RecordOwnershipResolver`**, so a root-owned matter or a root-BU caller gets a 5xx on confirm. 146 is exposed the same way. Owner decision is pending in the peer project; we do NOT fork a fix. When it is decided, map any new resolver refusal to a clean 4xx on the 130 route. Record it as a live-gate risk in the PR body.
+> - **PR #1083 opened as a DRAFT** (batch 1: 131/134/151) on 2026-10-01. It leaves draft once 130 is merged in, the suites are re-run, and branch publish size + CVE scan are done.
+> - **130 status:**
+>   - Fix round 2 (`task/uac-r2-130b` @ `29f07a4d2`) **PASSED** adversarial verification (unit 13,176/0, ArchTests 340).
+>   - Fix round 3 is running: workflow `woqdms6sw` (run `wf_5fa8277b-fee`) on `task/uac-r2-130c`. It closes the residuals: no second extraction job (dup detection is OFF on `sdap-jobs`, verified live, and the property is immutable), a bounded retry instead of a spurious 409, the confirm/reject race (conditional status writes; reject refuses a linked document), orphan over-report, and the regarding id/name convention.
+>   - **MERGE `task/uac-r2-130c` (not 130b) when verified.**
+> - **130 DONE:** merged `task/uac-r2-130c`, then commit `7275472d9` (decision-identity fix, note §11.9). Filed #1087 and commented on #984. Branch publish size 45.49 MB vs master 45.46 MB, 212/212 files, +0.03. No CVEs. **PR #1083 marked READY.** `Router` was green on `7275472d9`; Tier 2 was cancelled at its 30-min limit (advisory).
+> - **Master moved 17 commits** (peer #1082/#1085/#1091/#1092). It was merged into the work branch locally as a merge commit, with no textual conflicts; that merge is NOT pushed yet. Suites on the combined tree are running (shell `b571yvjq2`, output `scratchpad/postmaster-tests.txt`). When green → push → `Router` → merge #1083 (merge commit).
+> - **BATCH 2 RESULTS** (workflow `wf_fe3801ba-d23`; full output in task `wd4apuq7r`):
+>   - ✅ ready to merge: **136** `task/uac-r2-136-f2` (contains 109-f1 and 135), and **145** `task/uac-r2-145-f1` (contains 144-f1). Merge both into the work branch **AFTER #1083 merges**, run the suites, measure publish size, then open PR #2.
+>   - ❌ **141** `task/uac-r2-141-f2`: BLOCKED on an owner decision (notes §9). An alternate key and FLS cannot share `contact.sprk_externalobjectid`. Recommended **B2**: a mirror key column `sprk_externalobjectidkey`.
+>   - ❌ **155** `task/uac-r2-155-f2`: fix round 3 RUNNING (workflow `wd2pia0jm`, run `wf_865d57e2-c95`, branch `task/uac-r2-155-f3`). It covers the invoice→agreement fail-open, a full live lookup sweep, the polymorphic regarding pair, and the undefined-enum fail-closed. Escalation trigger 2 (a/b/c) is held at (c) pending the owner; rec (b).
+> - **OWNER DECISIONS PENDING** (asked 2026-10-01):
+>   - **144(a):** accept the assign-cascade list (rec: accept).
+>   - **144(b):** structural Deep reach from the root BU (Chelsea Friez and Lori Witkin, Entra-synced 2026-10-01, plus the hotmail guest). Options: (a) remove the roles, or (b) narrow Core User / Office Add In User Read on project/matter/WA from Deep to Local. My lean is (b).
+>   - **144(c):** project `65a3fab2` is not isolated (rec: provision it).
+>   - **141 live-gate approval** (schema/FLS/acct claim/app setting/reconciliation job).
+>   - **141 §9:** B2.
+>   - **155 trigger 2:** (b), plus the Office to-do carrier shape.
+> - **Peer:** the 145 plan message (asks about pending role changes, plus the 144 backfill-script note) **EXPIRED UNDELIVERED**: the peer's user did not approve it. **RESEND it before running 145's G1**; the text is in the 145 note §8a, plus the backfill note. Not yet delivered: INCOMING-141 and INCOMING-145 to cpo-r1 (after merge), and the 141 link contract to the peer (after B2 is decided; the contract §1.1 changes).
+> - **Peer PR #1085 (060)** also touches `OfficeEndpointsContractTests.cs`, on different hunks from ours.
+> - **Peer PR #1082 (084+085)** touches `CallerRecordAccessProbe.cs` (new `GetCallerRightsForRecordsAsync`; protected virtual seams) and `EntityAccessFilter.cs`. Our 130 also touches `CallerRecordAccessProbe`. Whoever lands second rebases.
+>
+> | | |
+> |---|---|
+> | **Branch state** | `work/unified-access-control-r2` HEAD `4b3661852`, **NOT pushed**. Local commits since origin: `b84cf525c` (origin/master merge, incl. #1052 + #1076), merges of task branches **131** (`bb4dd61aa`), **134** (`92d82b3d8`) and **151** (`4eabdb776`), then index/155 docs. Builds of the BFF and the unit project are clean. |
+> | **Background, at handoff** | (1) Shell `bderyag9w`: ArchTests + the full BFF unit suite on the merged branch. Output goes to `scratchpad/batch1-tests.txt` and the task output file. (2) Workflow `w9agnvjfw` (run `wf_fadbfa65-ec5`): **task 130 fix round 2** on branch **`task/uac-r2-130b`** (from `task/uac-r2-130` @ `dbe203f44`), then re-verify. It covers the concurrent-confirm orphan, unproven guards (no-probe → deny, reject deleted → 404 + reasonCode, compensation CancellationToken.None), the invoice-id disclosure in the 409, NoCallerToken test isolation, the note on Create depth, and sprk_regardingrecordtype. If the session was lost, read `subagents/workflows/wf_fadbfa65-ec5/journal.jsonl`, or re-run via its scriptPath with `resumeFromRunId`. |
+> | **NEXT (in order)** | 1. Read the suite results; fix any red. 2. When 130b is verified ready-to-merge, `git merge task/uac-r2-130b`, then re-run ArchTests and the full unit suite. Mark **130** ✅ in TASK-INDEX (the POML is already completed), and close #1053/#1055/#1057/#1068 when the PR merges. 3. **Publish size** per CLAUDE.md §10: fresh worktrees at SHORT paths (e.g. `C:\wt27m` = origin/master, `C:\wt27b` = branch HEAD), `dotnet publish -c Release`, `Compress-Archive -Optimal`, the zip OUTSIDE the `C:\` root. Compare FILE COUNTS. Report both sizes and the delta (60 MB ceiling). Also `dotnet list package --vulnerable --include-transitive` (no csproj changes in the batch). 4. Run `check-task-status-drift.ps1` → push → open the PR (body: 130/131/134/151 + 155 filed; placement: all existing BFF routes/services; live gates pending). 5. Merge when `Router` passes and `grep -c pending` = 0 (merge commit, not squash; keep the branch). 6. **Deploy the BFF to dev** (`scripts/Deploy-BffApi.ps1`); it also ships #1038/#1043 from master. Run the read-only live checks in each task's live-gate list where possible. 7. Notify word-add-in-r1: **151 changed `ISecurableEntityRegistry`** (`IsSecurableAsync`/`IsKnownEntityAsync` → a single `ClassifyEntityAsync`), so their doubles may need an update. 8. Next batch: **135 → 136** (C1/C2, serial after 131 + 109), **141** (identity; I1 answered (b): an explicit per-deployment tenant list, empty = deny; T2 test user `test.user@demo.spaarke.com`), **144 → 145**, **155**, **132** (after 131/109/135/136/137 per the serial order). Use the same pattern: one workflow, isolated worktrees, `task/uac-r2-{id}` branches, executor + adversarial verifier, merge into the work branch. |
+> | **Decisions** | `notes/session27-owner-decisions-and-research.md`: rounds 1, 2, 3 and 3b are BINDING (all 52 consolidated decisions accepted with the stated exceptions; A1 cap stays for manual grants; G5 = check as the user, create as the app, team-owned; N2/N5/N6/F3; S5 = the visibility invariant; R3/R4 = minutes, plus an Update Access ribbon button). `notes/session27-ux-research-ethical-wall-secure.md`: **O1 FINAL** (text-only `setFormNotification` banner; no PCF or app-level banner; the pill shows "Secure"; the modal shows "Secure – Restricted"), **O2** (No Access readable only by an access-administrator role), **Q1** (one-time cleanup of NULL sprk_issecure → No, default No; live counts 9/18/11), **Q2** (organization banner gate option A). |
+> | **Tasks/issues** | Tasks **130–155** exist (153/154 = the UX asks; 155 = the child-record upload container). Issues #1053–#1074, #1077, #1078, #1080. Re-opened 003/013/037/039. Amended 034/036 (D1 rewrite: flag-off unchanged)/056/064/066/067/070/133/139/140/142/143/145/146/150/152/153. **Open owner item:** 134's D1 (set `showViewSelector=false` on the external grids so the allow-lists can shrink; recommended). |
+> | **Peer (word-add-in-r1)** | 082 is live: the Secure Record Owner role went 40 → 8 privileges, all Read at Basic; the codified set is `config/secure-record-owner-role.json` (PR #1051); `AddPrivilegesRole` re-injects the SharePoint four, so re-run the §5.4 strip. F11: the owner fixes their own hotmail account. #1037 → their 084. #1079 = the `sprk_invoicename` bug (theirs, plus DataverseIndexSyncService routed). 083 waits on 141's link contract. #1052 and #1076 are merged to master (already in our branch). |
+> | **Housekeeping** | Leftover undeletable folders `C:\code_files\spaarke\.claude\worktrees\wf_aa385556-714-{1..4}` (deregistered from git; Permission denied on delete). Remove them when possible. 19 older POMLs fail `Validate-TaskPoml.ps1` (unescaped `<` in text). Fix them in a small housekeeping step. |
+>
+> ## SESSION 27 CHECKPOINT (2026-09-30 late) — superseded by the handoff above
+> | | |
+> |---|---|
+> | **Tasks** | 130–152 authored (commit `622fbc1dc`); issues #1053–#1074. |
+> | **Master** | Dev BFF still runs `2682e8225`; redeploy after the batch. |
+>
+> ## SESSION 26 FINAL CHECKPOINT (2026-09-30; updated after merge + deploy)
+> **Next action**: merge PR #1033 when `Router` passes. Then **wait on the owner**: 4 decisions (C4, C7, C9-interim, C10) + approval to file issues/author tasks for the 12 defects. Do NOT file or author until answered.
+> | | |
+> |---|---|
+> | **Merge** | ✅ `ee5b82147` committed + PUSHED (origin/master merged in; resolution owner-approved). Merged tree: ArchTests 337/337, unit 13,018/0, drift 126/126. |
+> | **PR #1029** | ✅ **MERGED 2026-09-30** as merge commit `2682e8225` (merge commit, not squash, matching #950, so the branch continues without replaying history). CI: `Router` pass, all Tier 1 green. The one red, Tier 2 "Full Unit Tests", was **cancelled at its 30-min job limit**, not a test failure; local run 13,018/0. Main repo master synced. word-add-in-r1 session notified. |
+> | **Deploy** | ✅ **BFF deployed to `spaarke-bff-dev`** from the merged tree (identical to `ee5b82147`). Package **45.48 MB** (Compress-Archive, incl. PDBs); 4 critical files SHA-256 verified; `/healthz` + `/ping` 200; CORS 2/2; `Customer__Id=spaarke` intact. |
+> | **Checkpoint PR** | Research notes (`73504f67c`) pushed → **PR #1033** (docs only). Merge when its `Router` passes. |
+> | **Research** | `notes/session26-uac-defects-and-synopsis.md` — 12 confirmed UAC defects (5 HIGH: C1 CIAM no vetoes, C2 presence-only reads, C4 Write mints access, C8 finance IDOR, C9 BU over-grant) + verified six-case synopsis. Raw: `notes/raw/session26-*`. |
+> | **Awaiting owner** | 4 decisions (C4, C7, C9-interim, C10) + approval to file issues/author tasks + re-open mis-marked tasks 037/039/A-20/A-18. See the note's top section. |
+> | **Peer (word-add-in-r1)** | Notified of merge + 4 findings in their code; they routed (a)/(b)→060, (c)→080, (d)→079. `dynamic`-on-internal-anon-type bug class: only 2 sites, both theirs. |
+>
 > **Last Updated**: **2026-09-30, session 26 — MERGE OF origin/master STAGED (resolution complete, all tests green), NOT YET COMMITTED.**
 > Branch `work/unified-access-control-r2`. PR #1029 open.
 >

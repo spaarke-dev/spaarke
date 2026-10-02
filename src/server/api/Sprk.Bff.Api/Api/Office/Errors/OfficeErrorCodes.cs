@@ -110,6 +110,31 @@ public static class OfficeErrorCodes
     public const string CorruptDocumentPackage = "OFFICE_021";
 
     /// <summary>
+    /// OFFICE_022 (403): no owner could be determined for the record this request would create, so it was
+    /// refused BEFORE anything was written (task 080, spaarkeai-word-add-in-r1 — write-path invariant I-6).
+    /// </summary>
+    /// <remarks>
+    /// <para>Every record the Office surface creates is owned by a business unit's default owner team: the team
+    /// of the record it is filed against, or the acting user's when it is filed against nothing. This fires when
+    /// that chain breaks — a named target whose business unit cannot be read, or a caller who maps to no (or more
+    /// than one) Dataverse user, or a business unit with no default owner team.</para>
+    /// <para>Refusing is deliberate: the alternative is an app-owned row in the ROOT business unit, invisible to the
+    /// very user who saved it. A named-but-unreadable target in particular must never fall back to the caller's
+    /// own business unit — for a secure record that would place its child outside the secure business unit.</para>
+    /// <para>Same 403 as <c>RecordCreationFailureKind.OwnerUnresolved</c>, the quick-create's equivalent refusal.</para>
+    /// </remarks>
+    public const string RecordOwnerUnresolved = "OFFICE_022";
+
+    /// <summary>
+    /// The save failed in a way no other code describes: an exception the server did not expect.
+    /// </summary>
+    /// <remarks>
+    /// A server fault, so a 500, never the 400 it used to fall through to (task 075). The message on the wire is
+    /// generic; the exception is logged with the request's correlation id, and never sent to the caller.
+    /// </remarks>
+    public const string InternalError = "OFFICE_INTERNAL";
+
+    /// <summary>
     /// Base URI for Office error types.
     /// </summary>
     public const string TypeBaseUri = "https://spaarke.com/errors/office/";
@@ -136,6 +161,7 @@ public static class OfficeErrorCodes
             VersionTargetNotFound => "not-found",
             AccessDenied => "forbidden",
             CannotCreateEntity => "forbidden",
+            RecordOwnerUnresolved => "forbidden",
             DocumentAlreadyExists => "conflict",
             VersionTargetHasNoFile => "conflict",
             NameCollision => "conflict",
@@ -144,6 +170,7 @@ public static class OfficeErrorCodes
             GraphApiError => "service-error",
             DataverseError => "service-error",
             ProcessingUnavailable => "unavailable",
+            InternalError => "internal-error",
             _ => "error"
         };
 
@@ -180,6 +207,8 @@ public static class OfficeErrorCodes
             VersionTargetLocked => "Version Target Locked",
             NameCollision => "File Already Exists",
             CorruptDocumentPackage => "Document File Unreadable",
+            RecordOwnerUnresolved => "Record Owner Unresolved",
+            InternalError => "Save Failed",
             _ => "Error"
         };
     }
@@ -206,6 +235,7 @@ public static class OfficeErrorCodes
             VersionTargetNotFound => 404,
             AccessDenied => 403,
             CannotCreateEntity => 403,
+            RecordOwnerUnresolved => 403,
             DocumentAlreadyExists => 409,
             VersionTargetHasNoFile => 409,
             NameCollision => 409,
@@ -214,6 +244,7 @@ public static class OfficeErrorCodes
             GraphApiError => 502,
             DataverseError => 502,
             ProcessingUnavailable => 503,
+            InternalError => 500,
             _ => 500
         };
     }

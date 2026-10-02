@@ -170,6 +170,15 @@ model) and the `from-shared-service` value source. The procedure surface still d
   ordering and `subscriptionId` consumers no longer list H4-shared.
 
 ---
+###### 2026-09-30 — `office-addins-deploy`: two manifest eras (spaarkeai-word-add-in-r1 task 078)
+
+The skill's "Manifest Upload After Deploy" told operators to download `outlook/manifest.xml` — a path that
+**404s**; Outlook's live XML is `/outlook/outlook-manifest.xml` (a trap this project had recorded, and still fell
+into once). Rewritten into two eras: the LIVE XML add-ins (both hosts) and the new **unified app package** (Outlook
++ Word in ONE app, CI artifact `spaarke-addin-unified-package`, uploaded as App type "Teams app", tested first as a
+`-TEST` zip assigned to "Just me"). Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md`.
+
+---
 ###### 2026-09-28 — five ADRs amended for D-12: no shared Model 1 tier (owner-approved)
 
 Owner chose "amend all five" after the D-12 doc sweep found 51 BLOCKING files (recorded: 13). CLAUDE.md

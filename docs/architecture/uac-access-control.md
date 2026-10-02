@@ -64,7 +64,7 @@ Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs:17-19, 65, 153
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 
-The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 3 (`Infrastructure/ExternalAccess/ExternalParticipationService.cs:28-34`), 60s TTL — invalidated by the grant/revoke endpoints.
+The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
 
 ---
 
@@ -81,7 +81,7 @@ The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant
 | `FinanceAuthorizationFilter` | Finance module |
 | + 18 more | Various domains |
 
-NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter:85`, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
+NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter` — for its document checks; since unified-access-control-r2 task 130 its matter/project/vendor-organization checks use the entity-generic `AuthorizationService.GetCallerRecordAccessAsync` + `OperationAccessPolicy.HasRequiredRights`, invoice confirm also asks the caller's Create privilege on `sprk_invoice` through `CallerRecordAccessProbe` (OBO), and each finance/scorecard route declares exactly which id it authorizes, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
 
 ---
 

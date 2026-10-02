@@ -56,6 +56,17 @@
       Reference for the client-side shape: `matterService.ts:255-273` generates `{typeCode}-{random6}`;
       live values are `PAT-191111`, `CMRCL-285858`. `projectService.ts` generates nothing at all — Matter and
       Project are **not symmetric**, and the task must state each one's semantics separately.
+    
+      UPDATE 2026-09-30 (pre-compact handoff): explained to the owner; AWAITING three answers before implementing.
+      Recommended option B: make numbering write-path invariant I-10 in docs/architecture/
+      DATAVERSE-WRITE-PATH-ARCHITECTURE.md section 5 (the registry lists I-1 to I-9 and has NO numbering row), owned
+      server-side by RecordCreationService per ADR-002 WP-1, format typeCode-6digits as the wizards produce today,
+      uniqueness via a Dataverse ALTERNATE KEY on sprk_matternumber (collision becomes a retryable failure, not a
+      silent duplicate); the wizard migration (WP-3) and a fill-only fix-up for non-product creates (WP-5) are
+      assigned in the registry row to the proposed write-path consolidation project. Questions for the owner:
+      (a) the PROJECT number format - projects have no number from any path today; (b) random 6 digits (current
+      convention, 53 of 59 live matters) or a per-type sequence; (c) who verifies production matter numbers are
+      unique before the alternate key is added (dev verified: 0 duplicates). Evidence: notes/030-numbering-handoff.md.
     </background>
   </context>
 

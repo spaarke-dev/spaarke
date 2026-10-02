@@ -4,7 +4,7 @@
     <title>Give the BFF a runtime handle on WHICH CUSTOMER it is serving — customerId names every Azure resource a customer owns and is readable by none of the code</title>
     <phase>Register-driven (authored 2026-09-29, session 25; D-14, owner-raised)</phase>
     <gate>startable</gate>
-    <gate-history>Was `blocked-on-owner` on the identifier FORM (D-14 §6). UNBLOCKED 2026-09-29 by the owner's decision in D-14 §6, implemented by task 124: the standard is `^[a-z][a-z0-9]{2,7}$` and assignment authority is Dataverse `sprk_dataverseenvironment.sprk_customerid`. The first `<escalation><trigger>` below is therefore SPENT — do not re-raise it.</gate-history>
+    <gate-history>Was `blocked-on-owner` on the identifier FORM (D-14 §6). UNBLOCKED 2026-09-29 by the owner's decision in D-14 §6, implemented by task 124: the standard is `^[a-z][a-z0-9]{2,7}$` and assignment authority is Dataverse `sprk_dataverseenvironment.sprk_customerid`. The first `&lt;escalation>&lt;trigger>` below is therefore SPENT — do not re-raise it.</gate-history>
     <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds configuration bound with [Required] on a fail-closed path and changes provisioning Bicep. A wrong default silently reinstates a shared identity.</rigor-reason>

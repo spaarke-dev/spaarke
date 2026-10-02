@@ -13,14 +13,14 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list) + ExternalAccessModule.cs.</parallel-reason>
-    <deps>032, 034, 035, 104</deps>
+    <deps>032, 034, 035, 104, 142, 143</deps>
     <tags>bff-api, auth, security, dataverse, testing</tags>
-    <estimated-effort>3-4 hours</estimated-effort>
+    <estimated-effort>2-3 days (was 3-4 hours; scope extended 2026-09-30 by the owner C9 rule)</estimated-effort>
   </metadata>
 
   <prompt>Swap the SOURCE of systemuser root sets inside AccessibleRecordSetService.ComposeForSystemUserAsync from MembershipResolverService pattern-matching to ImpersonatedRootSetSource (task 035), behind a config flag whose DEFAULT is the existing membership path (fail-safe rollout). KEEP THE CONTACT-GRANTS UNION unchanged — grants live in sprk_externalrecordaccess, not POA; Dataverse cannot see them (register B-17). Surface truncation honestly per NFR-03. This task's PR MUST NOT merge until the task-034 negative canary is green in the gate — equality between impersonated and app-only row counts means impersonation is inert.</prompt>
   <role>SPAARKE platform developer, C#/.NET authorization internals + feature-flag rollout discipline. Follow ADRs strictly.</role>
-  <goal>ComposeForSystemUserAsync consults ImpersonatedRootSetSource when ExternalAccess:ImpersonatedRootSets:Enabled = true (default false), contributing the Dataverse-answer term at the rights level task 032 assigned to the systemuser plane; contact-grants union preserved verbatim on both flag states; AccessibleRecordSet carries a Truncated flag surfaced on the module data response; runbook records the prvActOnBehalfOfAnotherUser prerequisite.</goal>
+  <goal>(SCOPE EXTENDED 2026-09-30: the SECOND amendments block at the end of this file binds on top of this goal. Per-record rights come from Dataverse, never the MembershipTermRights constant; owningbusinessunit stops conferring; the flag is not enabled until 142 and 143 are complete. Where this goal says "at the rights level task 032 assigned", read "at the per-record rights Dataverse returns".) ComposeForSystemUserAsync consults ImpersonatedRootSetSource when ExternalAccess:ImpersonatedRootSets:Enabled = true (default false), contributing the Dataverse-answer term at the rights level task 032 assigned to the systemuser plane; contact-grants union preserved verbatim on both flag states; AccessibleRecordSet carries a Truncated flag surfaced on the module data response; runbook records the prvActOnBehalfOfAnotherUser prerequisite.</goal>
 
   <context>
     <background>Design §4.4: Dataverse applies ownership, role depth, BU, teams, POA shares, hierarchy — both pattern-matching defects (BU over-grant, POA under-grant) disappear. Investigation 08 §4: everything downstream consumes only the id set/rights map, so the swap is contained in ComposeForSystemUserAsync; watch items — keep the contact-grants union (§4-2), copy CommunicationThreadReadService's no-app-only-fallback refusal (§3a-2), decide truncation semantics for broad-role users whose REAL set can vastly exceed 5000 where pattern-matching structurally could not (§2). NFR-03: caps must never be silent — "Only 5,000 records displayed".</background>
@@ -38,6 +38,8 @@
       <dependency task="034" status="blocked-shipped">NFR-04 negative canary — BLOCKING MERGE GATE for this PR; cite the green run in the PR description.</dependency>
       <dependency task="035" status="completed">ImpersonatedRootSetSource (the new source being swapped in).</dependency>
       <dependency task="104" status="completed">Added 2026-09-15 (register ISS-013 / #990): the shared impersonation helper must fail closed before this task turns impersonated root sets on — otherwise a call site that bypasses RetrieveMultipleImpersonatedAsync silently runs an app-only, unscoped query. Re-derive the status from 104's own POML (these attributes drift).</dependency>
+      <dependency task="142" status="pending">Added 2026-09-30 (owner C9 rule, amendments block below). "Assigned To *" access for internal users must first be materialized as Dataverse shares. Once this swap omits the BFF membership term for systemusers, a Dataverse share is the only way that access survives.</dependency>
+      <dependency task="143" status="pending">Added 2026-09-30 (owner C9 rule plus Q4). The No Access List must first apply to internal users on secure records in Dataverse terms, so the internal half of the No Access feature is not lost when Dataverse becomes the decider for systemusers.</dependency>
     </dependencies>
   </context>
 
@@ -131,5 +133,107 @@
     not leaking). The live state will likely be discovered by the add-in before this task's canary runs — a small
     de-risking of the canary, not a substitute for it. Step 6's docs obligation (auth-deployment-setup.md §6)
     currently has ZERO hits for the privilege on master.</amendment>
+  </amendments>
+
+  <amendments date="2026-09-30" source="owner C9 rule, session 27 round 2 BINDING (notes/session27-owner-decisions-and-research.md; defect C9 in notes/session26-uac-defects-and-synopsis.md)">
+    <verdict>SCOPE EXTENDED. The owner rule on 2026-09-30 is that a systemuser's Teams/SPA access EQUALS their
+    Dataverse access, for both the set of records AND the rights on each record ("if a systemuser has access
+    in dataverse then they have access in Teams/SPA ... do the full fix however that needs to be done").
+    Swapping only the SET source (the original goal) leaves the flat Read|Write|Create stamp. That is defect
+    C9's second half, and it is now this task's work too. Two more dependencies (142, 143) are added so that
+    no internal feature is lost when the BFF-side derived membership stops applying to systemusers. Nothing
+    in this block narrows the original obligations (flag, contact-grants union, NFR-01 no-fallback, NFR-03
+    Truncated, NFR-04 manual canary).</verdict>
+    <amendment n="1" title="Per-record rights from Dataverse, not a constant">
+    Under flag ON, each root id's rights on the systemuser plane come from Dataverse's answer for THAT caller
+    and THAT record. Today every hit is stamped with MembershipTermRights = Read|Write|Create
+    (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:288-289, applied
+    at :1048-1051). The impersonated read in ImpersonatedRootSetSource proves Read only, so Write, Create,
+    Append, AppendTo and Delete need a Dataverse rights answer. RetrievePrincipalAccess is the reference
+    primitive. Reuse candidates, which must be considered BEFORE any new component (CLAUDE.md section 11):
+    Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs (task 008: OBO, entity-set parameterised,
+    fail-closed) and Spaarke.Core AuthorizationService.GetCallerRecordAccessAsync
+    (src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs:255, task 070). Choose between up-front
+    batched RPA over the impersonated set and a Read map plus an RPA confirmation at the rights-gated route
+    for the single record in hand. Record the round-trip count (NFR-02). Never re-introduce the constant
+    for the systemuser Dataverse term.</amendment>
+    <amendment n="2" title="SUPERSEDED 2026-09-30 by owner D1 — Dataverse's answer replaces the BU guess; nothing is removed flag-off">
+    OWNER D1 (2026-09-30, binding): "a user with access in dataverse model driven app should have access to
+    teams/SPA app". The earlier version of this amendment removed "owningbusinessunit" from
+    PlatformOwnershipColumns in BOTH flag states. That would UNDER-grant flag-off every user whose Dataverse
+    Read depth reaches the record through their BU/role (dev "Basic User" holds Deep Read on sprk_project),
+    contradicting the owner's rule, so it is withdrawn.
+    The rule now is:
+    (1) FLAG ON (the end state): for the systemuser plane, Dataverse's own answer (impersonated root sets +
+    per-record rights, amendment 1) IS the access. A user who reaches a record in MDA through ANY Dataverse
+    path (ownership, team, BU/role depth, share) sees it in Teams/SPA with exactly the Dataverse rights; a
+    user Dataverse does not admit does not see it. The BFF's membership pattern-matching (including the
+    owningbusinessunit and owningteam terms and the MembershipTermRights constant) is NOT consulted for
+    systemuser ACCESS. Nothing needs a grant to be visible.
+    (2) FLAG OFF (transitional only): unchanged legacy behaviour. Do NOT edit PlatformOwnershipColumns and do
+    NOT flip the MembershipResolverServiceTests BU pin; flag-off must never under-grant.
+    (3) Rollout: the flag is the end state, not an option. Enable it in dev in the same rollout as this task
+    once 034's manual canary, 142 and 143 permit; flag-off is transitional.
+    The ADR-034 amendment (section 6.5 path B) is therefore REWORDED: not "owningbusinessunit stops
+    conferring", but "for systemuser ACCESS on the SPA/Teams plane, Dataverse's answer replaces the
+    membership rules; the membership walk remains for non-access scoping (briefing, AI scope) and for the
+    contact plane".</amendment>
+    <amendment n="3" title="New dependencies 142 and 143: no internal feature lost">
+    Under flag ON, step 2 omits the membership term on the systemuser plane. Today that term is the only
+    carrier of two owner-protected internal features:
+    (a) "Assigned To *" access. Registry assignment columns naming the caller's linked contact confer
+    access through the ADR-034 walk. The owner (C9, round 2 item 5) says "one of the core reasons for the
+    UAC -- this needs to continue being a feature". Task 142 materializes it as Dataverse shares, so the
+    Dataverse answer carries it.
+    (b) The No Access List for internal users on secure records (owner Q4). Task 143 makes Dataverse, the
+    decider for systemusers after this swap, honour it.
+    The flag MUST NOT be enabled in any environment until 142 and 143 are complete. The deny-veto and
+    Restricted pipeline (ApplyVetoPipeline, AccessibleRecordSetService.cs:357, invoked at :1090) stays in
+    force on the systemuser plane on BOTH flag states; this task does not remove it. Note its fourth
+    argument: today the call at :1090-1094 passes the MEMBERSHIP term (constant Read|Write|Create) as the
+    set that survives the Restricted veto, and a Restricted record is re-stamped with that surviving value
+    (:397-400). Under flag ON that argument MUST be the Dataverse term with its per-record rights. Otherwise
+    the constant creeps back through the Restricted path while every other path looks correct. If 143's design makes
+    the BFF-side deny veto on the Dataverse term disagree with Dataverse's answer for the same user and
+    record, that is an escalation (below), never a silent choice.</amendment>
+    <amendment n="4" title="Live facts that change the prerequisites">
+    prvActOnBehalfOfAnotherUser is held in dev through the System Administrator role on the BFF application
+    users "# mi-bff-api-dev", "SDAP-BFF-SPE-API" and "# Spaarke DMS-SPE Dev 1". This was verified by role on
+    2026-09-30, not by a live call, and no Spaarke role holds it. Step 6's doc must state the actual source
+    of the privilege (a role, not a direct grant) and that it is unproven live until the task-034 manual run.
+    Task 034's two open decisions are resolved: the canary is a MANUAL gate, and it runs as an existing
+    non-admin test user in the correct BU with no relocation. The NFR-04 constraint above stands unchanged.
+    Equal sets are a failure.</amendment>
+    <amendment n="5" title="Files added to scope by this block (relevant-files and outputs above predate it)">
+    read only (NOT modified, per owner D1 — flag-off must not change): src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs PlatformOwnershipColumns;
+    do NOT flip tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs BU pin (flag-off unchanged);
+    modify: .claude/adr/ADR-034-user-record-membership.md (A1.1) and docs/adr/ADR-034-user-record-membership.md. The .claude/ file is
+    inside the sub-agent write boundary (root CLAUDE.md section 3): if this task runs as a sub-agent, it drafts the text and the
+    MAIN SESSION applies it.
+    reuse (read first, extend before adding): src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs,
+    src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs (GetCallerRecordAccessAsync :255).
+    Any NEW rights-source type or interface needs the CLAUDE.md section 11 three-question justification (with grep evidence
+    that CallerRecordAccessProbe and GetCallerRecordAccessAsync cannot be extended) in the PR before it is written.</amendment>
+    <adr-tensions>
+      <tension adr="ADR-034" rule="Amendment A1.1 makes owningbusinessunit an access-conferring platform ownership column (.claude/adr/ADR-034-user-record-membership.md:73)" path="B">Reworded per owner D1 (2026-09-30): for systemuser ACCESS on the SPA/Teams plane, Dataverse's own answer replaces the membership rules (so BU/role-depth access is honoured exactly as in MDA, and BU-ownership matching no longer over-grants); the membership walk stays for non-access scoping and the contact plane. Concise and full ADR-034 versions merge alongside this change. Path A rejected (the BU guess is wrong in general); path C rejected (no compliant shape makes a pattern match equal Dataverse's answer).</tension>
+    </adr-tensions>
+    <acceptance-criteria-amended>
+      <criterion testable="true">Flag ON: a record the caller can Read but not Write in Dataverse composes to exactly Read. Write and Create are absent from its rights, and a rights-gated write route (for example external to-do create or document upload) on that record returns 403. Asserted by test with a substituted rights source.</criterion>
+      <criterion testable="true">Flag ON: a record where Dataverse grants the caller Write carries Write in the composed rights. Rights are never broader than the Dataverse answer for any record. Asserted by test.</criterion>
+      <criterion testable="true">Flag ON parity (owner D1): a record the caller reaches in Dataverse ONLY through BU/role depth (no ownership, team or share) APPEARS with exactly the Dataverse rights; a record matched only by owningbusinessunit that Dataverse does NOT admit does NOT appear. Flag OFF: PlatformOwnershipColumns and the MembershipResolverServiceTests BU pin are unchanged (no flag-off under-grant). Asserted by test.</criterion>
+      <criterion testable="true">Negative: a failed Dataverse rights lookup (RPA throw or non-2xx) denies the affected record or fails the composition. It never falls back to MembershipTermRights or any constant. Asserted by test.</criterion>
+      <criterion testable="true">Flag ON, Restricted root: a systemuser whose Dataverse rights on a Restricted record are Read only composes to exactly Read on it (the Restricted survivor set is the Dataverse term, not MembershipTermRights), and a contact-sourced grant on the same record is still removed. Asserted by test.</criterion>
+      <criterion testable="true">Flag ON, BU default owner team: a record owned by the caller's BU default team and absent from the substituted Dataverse answer does NOT appear (the owningteam route of the over-grant is closed flag-on). Asserted by test.</criterion>
+      <criterion testable="true">Negative (no constant left): with the flag ON, no code path assigns MembershipTermRights to a systemuser-plane record. A test fails if the constant is reintroduced for the Dataverse term (assert rights equal the substituted per-record answer across at least three records with three different rights sets).</criterion>
+      <criterion testable="true">The ADR-034 amendment (reworded per owner D1: Dataverse's answer replaces the membership rules for systemuser ACCESS on the SPA/Teams plane) — concise .claude/adr/ADR-034-user-record-membership.md plus the full docs/adr version — is merged with or before this task's PR, and the PR cites it (section 6.5 path B).</criterion>
+      <criterion testable="true">The PR rollout plan names the date the flag is enabled in dev and states that flag-off is transitional (amendment 2); it does not claim the flag-off BU over-grant is closed.</criterion>
+      <criterion testable="true">MANUAL LIVE GATE (dev, existing non-admin test user in the correct BU; flag ON; 142 and 143 complete and deployed): (i) the task-034 canary passes strictly fewer; (ii) for one record that user can Read but not Write in MDA, SPA/Teams lists it and refuses a write with 403; (iii) for one record owned in the user's BU (or by the BU default team) but outside their role depth, SPA/Teams does not list it; (iv) for one record where the user's linked contact is named in an "Assigned To *" field, SPA/Teams lists it through the Dataverse share task 142 created; (v) for one secure record with the user on its No Access List, both MDA and SPA/Teams deny it. Every observation, with the record ids, is recorded in notes.</criterion>
+    </acceptance-criteria-amended>
+    <escalation-amended>
+      <trigger>If deriving per-record rights from Dataverse cannot meet the NFR-02 round-trip budget in any shape (batched RPA, or a lazy per-route RPA), STOP and report the measured cost with the options. Do not ship a constant as a stop-gap.</trigger>
+      <trigger>If the BFF deny veto and Dataverse's answer after task 143 would disagree for the same systemuser and record, STOP and escalate (CLAUDE.md section 6.5). The owner rule is plane parity.</trigger>
+      <trigger>Before the ADR-034 A1.1 amendment merges, present it in the CLAUDE.md section 6.5 "ADR Conflict — Resolution Required" format and obtain the owner's explicit acceptance of path B. The owner's C9 answer ("do the full fix however that needs to be done") is the recommendation's basis, not the sign-off.</trigger>
+      <trigger>If task 142 or 143 is not complete when this task is otherwise ready, STOP. Do not enable the flag in any environment, and do not merge a default of true.</trigger>
+    </escalation-amended>
   </amendments>
 </task>

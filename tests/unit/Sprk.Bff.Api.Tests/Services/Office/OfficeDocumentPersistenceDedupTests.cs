@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Office;
@@ -37,10 +38,10 @@ public class OfficeDocumentPersistenceDedupTests
         var canonical = Guid.NewGuid();
         var detector = DetectorReturning(new DedupDecision("hash1", IsDuplicate: true, CanonicalDocumentId: canonical));
         var docSvc = new Mock<IDocumentDataverseService>(MockBehavior.Strict); // strict → fails if ANY create/update happens
-        var sut = new OfficeDocumentPersistence(docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
+        var sut = new OfficeDocumentPersistence(docSvc.Object, detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
 
         var result = await sut.CreateDocumentWithSpePointersAsync(
-            AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None);
+            AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         result.DocumentId.Should().Be(canonical, "a byte-identical upload resolves to the existing canonical document");
         result.WasContentDuplicate.Should().BeTrue("the caller must skip finalization + clean up the transient blob (R-3)");
@@ -61,10 +62,10 @@ public class OfficeDocumentPersistenceDedupTests
             .Callback<string, UpdateDocumentRequest, CancellationToken>((_, u, _) => update = u)
             .Returns(Task.CompletedTask);
 
-        var sut = new OfficeDocumentPersistence(docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
+        var sut = new OfficeDocumentPersistence(docSvc.Object, detector.Object, NullLogger<OfficeDocumentPersistence>.Instance);
 
         var result = await sut.CreateDocumentWithSpePointersAsync(
-            AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None);
+            AttachmentSave(), "drive1", "item2", "https://spe/web", "invoice.pdf", 1024, "owner-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         result.DocumentId.Should().Be(newDocId);
         result.WasContentDuplicate.Should().BeFalse("a first upload is not a duplicate — finalization proceeds normally");
@@ -102,7 +103,7 @@ public class OfficeDocumentPersistenceDedupTests
             .Returns(Task.CompletedTask);
 
         var sut = new OfficeDocumentPersistence(
-            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            docSvc.Object, detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
 
         var request = new SaveRequest
@@ -112,7 +113,7 @@ public class OfficeDocumentPersistenceDedupTests
         };
 
         await sut.CreateDocumentWithSpePointersAsync(
-            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid-42", CancellationToken.None);
+            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid-42", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         written.Should().NotBeNull("an email save whose message was captured inbound records the saver on the canonical communication (FR-C2)");
         written![DeliveryContextMerge.SavedByUsersAttribute].Should().Be("user-oid-42");
@@ -149,7 +150,7 @@ public class OfficeDocumentPersistenceDedupTests
             .Returns(Task.CompletedTask);
 
         var sut = new OfficeDocumentPersistence(
-            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            docSvc.Object, detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
 
         var request = new SaveRequest
@@ -159,7 +160,7 @@ public class OfficeDocumentPersistenceDedupTests
         };
 
         await sut.CreateDocumentWithSpePointersAsync(
-            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None);
+            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         docWrite.Should().NotBeNull("the new archive document is cross-path-linked to its captured communication (FR-C4)");
         ((Microsoft.Xrm.Sdk.EntityReference)docWrite![CrossPathLink.LinkedCommunicationAttribute]).Id.Should().Be(canonicalCommId);
@@ -187,7 +188,7 @@ public class OfficeDocumentPersistenceDedupTests
         var generic = new Mock<IGenericEntityService>(MockBehavior.Strict); // strict → any sprk_document link call fails the test
 
         var sut = new OfficeDocumentPersistence(
-            docSvc.Object, Mock.Of<IProcessingJobService>(), detector.Object,
+            docSvc.Object, detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance, comm.Object, generic.Object);
 
         var request = new SaveRequest
@@ -197,7 +198,7 @@ public class OfficeDocumentPersistenceDedupTests
         };
 
         var act = async () => await sut.CreateDocumentWithSpePointersAsync(
-            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None);
+            request, "drive1", "item2", "https://spe/web", "email.eml", 100, "user-oid", CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         await act.Should().NotThrowAsync("no canonical communication → no cross-path link attempted (and the save still succeeds)");
     }

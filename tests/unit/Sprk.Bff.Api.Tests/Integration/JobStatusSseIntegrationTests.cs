@@ -29,7 +29,7 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// Channel naming: "sdap:job:{jobId}:status"
 /// </para>
 /// </remarks>
-public class JobStatusSseIntegrationTests : IDisposable
+public class JobStatusSseIntegrationTests
 {
     private readonly Mock<IConnectionMultiplexer> _mockRedis;
     private readonly Mock<ISubscriber> _mockSubscriber;
@@ -53,6 +53,10 @@ public class JobStatusSseIntegrationTests : IDisposable
         // default for IsConnected is false; tests for the "connected" path
         // require it to be true.
         _mockRedis.Setup(r => r.IsConnected).Returns(true);
+        // Task 068 (#1086): sequence numbers come from Redis INCR on one key per job.
+        var sequences = new System.Collections.Concurrent.ConcurrentDictionary<string, long>();
+        _mockDatabase.Setup(d => d.StringIncrementAsync(It.IsAny<RedisKey>(), It.IsAny<long>(), It.IsAny<CommandFlags>()))
+            .ReturnsAsync((RedisKey key, long by, CommandFlags _) => sequences.AddOrUpdate(key.ToString(), by, (_, n) => n + by));
 
         _service = new JobStatusService(_mockRedis.Object, _mockLogger.Object);
     }
@@ -912,9 +916,4 @@ public class JobStatusSseIntegrationTests : IDisposable
     }
 
     #endregion
-
-    public void Dispose()
-    {
-        _service.Dispose();
-    }
 }

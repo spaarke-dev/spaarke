@@ -175,6 +175,16 @@ const ERROR_CODE_MAP: Record<string, ErrorMessage> = {
     recoverable: false,
     action: 'Ask an administrator to check that your user is provisioned in this environment.',
   },
+  // Task 080: no business-unit team could be found to own what this action would create, so NOTHING was created
+  // (save, To Do, or quick-create — one code for all). Not retryable: the cause is the record's or the user's
+  // business-unit setup, which a same-click retry cannot change. The server's detail says which link broke.
+  OFFICE_022: {
+    title: 'No Owner Available',
+    message: 'This item could not be assigned an owner, so it was not saved.',
+    type: 'error',
+    recoverable: false,
+    action: 'Ask an administrator to check the business unit of your user record (or of the record you filed to).',
+  },
 
   // Conflict errors (409)
   OFFICE_011: {

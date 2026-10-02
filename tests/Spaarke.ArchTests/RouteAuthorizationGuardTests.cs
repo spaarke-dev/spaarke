@@ -210,8 +210,8 @@ public class RouteAuthorizationGuardTests
             + "AddJobOwnershipFilter; POST /todo carries AddTodoSourceAccessFilter; POST /quickcreate carries "
             + "AddQuickCreateSourceAccessFilter; generate-profile carries a document authorization filter. "
             + "/search/entities is gated INSIDE its query (impersonated read) and /search/matter-types is "
-            + "reference data — both Permanent-waived; /search/documents, /recent and /share/* are latent "
-            + "stubs, Pending. None of the named gates was visible to this guard before task 120 widened "
+            + "reference data — both Permanent-waived. The document-search, recent-items and share stub routes "
+            + "were DELETED by task 058. None of the named gates was visible to this guard before task 120 widened "
             + "FilterMarker. CAVEATS Rule A cannot express, stated so 'gated' is not read as 'gated in every "
             + "case': (1) EntityAccessFilter passes through when a /save carries no TargetEntity "
             + "(EntityAccessFilter.cs ExtractTargetEntity), so a new-document save with no related record "
@@ -244,6 +244,37 @@ public class RouteAuthorizationGuardTests
             + "kept itself out of the guard. Both routes now publish VisualizationAuthorization and both "
             + "handlers refuse (500) without it; rows are authorized per document in the endpoint, the "
             + "filter/endpoint PAIR shape Rule B was widened for in task 077."),
+
+        // ---- Finance + scorecard: added 2026-09-30 by unified-access-control-r2 task 130 (defect C8) ----
+        //
+        // All three files were ABSENT from this census, so they were NotGoverned by omission while serving
+        // Dataverse content: four recalculate routes that read a matter's/project's invoices, budgets or KPI
+        // assessments APP-ONLY, wrote derived fields back APP-ONLY, and returned the numbers to any signed-in
+        // caller (bare RequireAuthorization() — there is no default/fallback policy in the BFF); and four
+        // /api/finance routes gated by ONE group-level filter that authorized whatever id a route→query
+        // fallback chain found first, always against sprk_documents. RouteLevelGate, not GroupGated: the gate
+        // that matters is the per-route declaration of WHICH id is authorized, so it has to be visible in each
+        // route's own fluent chain. No route in these files carries a waiver.
+        new GovernedFile("Api/Finance/FinanceEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/* — summary (Read on sprk_matters(route matterId)), invoice search (query matterId "
+            + "REQUIRED, Read on that matter — an unscoped search was tenant-wide), and invoice-review confirm / "
+            + "reject (Write on the BODY DocumentId; confirm also Write+Append on that document, which holds the "
+            + "invoice lookup, AppendTo on the matter and vendor organization, and the caller's Create privilege "
+            + "on sprk_invoice — owner G5). Each route carries its own "
+            + "AddFinanceAuthorizationFilter declaring the id it authorizes from the SAME source its handler "
+            + "binds; the group-level 'finance.read' filter and its id-fallback chain were deleted by task 130."),
+
+        new GovernedFile("Api/Finance/FinanceRollupEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/{matters|projects}/{id}/recalculate — reads invoices/budgets app-only, writes "
+            + "nine rollup fields app-only, returns spend/budget/utilization/12-month timeline. Gated by task 130 "
+            + "with Read on the parent as the caller, denied with a 404 identical for absent and unreadable ids. "
+            + "The check is at the endpoint because SpendSnapshotGenerationJobHandler calls the service with no "
+            + "caller."),
+
+        new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/{matters|projects}/{id}/recalculate-grades — reads KPI assessments app-only and writes six "
+            + "grade fields app-only. The finance rollup routes were copied from this file, defect included. Gated "
+            + "by task 130 exactly as FinanceRollupEndpoints: Read on the parent as the caller, uniform 404."),
 
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
@@ -637,23 +668,10 @@ public class RouteAuthorizationGuardTests
             + "takes no id, so a per-resource filter has no subject. If this route ever takes a record id or "
             + "returns customer rows, this waiver is WRONG and the route needs a gate."),
 
-        new Waiver("GET /api/office/search/documents", WaiverKind.Pending, "#1023",
-            "Authentication filter only. Returns STUB data today (GenerateStubDocumentResults), so the "
-            + "exposure is latent — the gate must land in the same change that makes it return real data."),
-
-        new Waiver("GET /api/office/recent", WaiverKind.Pending, "#1023",
-            "Authentication filter only. Stub data today; the service's own TODO says 'Validate user still "
-            + "has access to each item'. Same latent-until-implemented shape as /search/documents."),
-
-        new Waiver("POST /api/office/share/links", WaiverKind.Pending, "#1024",
-            "Authentication filter only. Mints links for caller-supplied document ids; the per-document "
-            + "check is a hard-coded `return Task.FromResult(true)' (OfficeService.SimulateSharePermissionCheckAsync "
-            + "— cited by name, not line, so the next merge cannot outdate it). Data is fabricated today, so the "
-            + "exposure is latent, not live."),
-
-        new Waiver("POST /api/office/share/attach", WaiverKind.Pending, "#1024",
-            "Authentication filter only, and no IdempotencyFilter either (unlike /share/links). "
-            + "GetAttachmentsAsync is an explicit TODO returning stub attachments."),
+        // The four Pending waivers for the Office STUB routes (document search and recent items, #1023; share
+        // links and share attach, #1024) were DELETED 2026-09-30 WITH THE ROUTES by spaarkeai-word-add-in-r1
+        // task 058. All four served fabricated data behind the authentication filter only, and no client called
+        // them, so the routes were removed rather than gated.
 
         // POST /api/office/quickcreate/{entityType} — waiver DELETED at the 2026-09-30 merge. It read
         // "CREATE. There is no pre-existing resource to authorize", which stopped being true when

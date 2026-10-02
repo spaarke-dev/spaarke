@@ -29,6 +29,7 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.Services.Compose;
 using Sprk.Bff.Api.Tests.Shared.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
@@ -244,37 +245,6 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #endregion
 
-    #region Document Search Endpoint Tests
-
-    [Fact(Skip = "Requires fully mocked Dataverse search services")]
-    public async Task Get_OfficeSearchDocuments_ReturnsResults()
-    {
-        // Act
-        var response = await _client.GetAsync("/api/office/search/documents?query=Contract");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<DocumentSearchResponse>();
-        result.Should().NotBeNull();
-        result!.Results.Should().NotBeEmpty();
-    }
-
-    [Fact(Skip = "Requires fully mocked Dataverse search services")]
-    public async Task Get_OfficeSearchDocuments_WithContentTypeFilter_FiltersResults()
-    {
-        // Act
-        var response = await _client.GetAsync("/api/office/search/documents?query=Report&contentType=pdf");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<DocumentSearchResponse>();
-        result.Should().NotBeNull();
-    }
-
-    #endregion
-
     #region Quick Create Endpoint Tests
 
     [Fact(Skip = "Requires fully mocked Dataverse services for quick create")]
@@ -415,135 +385,6 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #endregion
 
-    #region Share Links Endpoint Tests
-
-    [Fact]
-    public async Task Post_OfficeShareLinks_ReturnsLinks()
-    {
-        // Arrange
-        var request = new ShareLinksRequest
-        {
-            DocumentIds = new List<Guid> { Guid.NewGuid(), Guid.NewGuid() }
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/office/share/links", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<ShareLinksResponse>();
-        result.Should().NotBeNull();
-        result!.Links.Should().HaveCount(2);
-        result.Links.Should().OnlyContain(link => link.Url.Contains("https://"));
-    }
-
-    [Fact]
-    public async Task Post_OfficeShareLinks_WithGrantAccess_ProcessesInvitations()
-    {
-        // Arrange
-        var request = new ShareLinksRequest
-        {
-            DocumentIds = new List<Guid> { Guid.NewGuid() },
-            GrantAccess = true,
-            Recipients = new List<string> { "external@partner.com" },
-            Role = ShareLinkRole.ViewOnly
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/office/share/links", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<ShareLinksResponse>();
-        result.Should().NotBeNull();
-        result!.Invitations.Should().NotBeNull();
-        result.Invitations!.Count.Should().BeGreaterThan(0);
-    }
-
-    #endregion
-
-    #region Share Attach Endpoint Tests
-
-    [Fact]
-    public async Task Post_OfficeShareAttach_ReturnsAttachments()
-    {
-        // Arrange
-        var request = new ShareAttachRequest
-        {
-            DocumentIds = new[] { Guid.NewGuid(), Guid.NewGuid() },
-            DeliveryMode = AttachmentDeliveryMode.Url
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/office/share/attach", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<ShareAttachResponse>();
-        result.Should().NotBeNull();
-        result!.Attachments.Should().HaveCount(2);
-        result.TotalSize.Should().BeGreaterThan(0);
-    }
-
-    [Fact]
-    public async Task Post_OfficeShareAttach_Base64Mode_IncludesContent()
-    {
-        // Arrange
-        var request = new ShareAttachRequest
-        {
-            DocumentIds = new[] { Guid.NewGuid() },
-            DeliveryMode = AttachmentDeliveryMode.Base64
-        };
-
-        // Act
-        var response = await _client.PostAsJsonAsync("/api/office/share/attach", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<ShareAttachResponse>();
-        result.Should().NotBeNull();
-        result!.Attachments.First().ContentBase64.Should().NotBeNullOrEmpty();
-    }
-
-    #endregion
-
-    #region Recent Endpoint Tests
-
-    [Fact]
-    public async Task Get_OfficeRecent_ReturnsRecentItems()
-    {
-        // Act
-        var response = await _client.GetAsync("/api/office/recent");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<RecentDocumentsResponse>();
-        result.Should().NotBeNull();
-        result!.RecentAssociations.Should().NotBeEmpty();
-        result.RecentDocuments.Should().NotBeEmpty();
-    }
-
-    [Fact]
-    public async Task Get_OfficeRecent_WithTopParameter_LimitsResults()
-    {
-        // Act
-        var response = await _client.GetAsync("/api/office/recent?top=2");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var result = await response.Content.ReadFromJsonAsync<RecentDocumentsResponse>();
-        result.Should().NotBeNull();
-        result!.RecentAssociations.Count.Should().BeLessOrEqualTo(2);
-    }
-
-    #endregion
-
     #region Health Endpoint Tests
 
     [Fact]
@@ -633,6 +474,24 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 /// </summary>
 public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// Task 080: the owner-team resolver every Office create consults. Registered in place of the real one (which
+    /// would read the doubled <see cref="IDataverseService"/>, get nothing back, and correctly refuse every create).
+    /// Tests about ownership set <see cref="RecordOwnershipResolverDouble.TeamId"/> and read its requests.
+    /// </summary>
+    public RecordOwnershipResolverDouble Ownership { get; } = new();
+
+    /// <summary>
+    /// Task 151: the registry double's answer to "is this a real entity?" — true for the LOGICAL name of an
+    /// association type, false for its friendly alias or anything else. That is the shape of the real registry's
+    /// answer (built from metadata logical names), restricted to the entities an Office save can name. Reuses the
+    /// production alias table rather than restating it.
+    /// </summary>
+    internal static bool IsAssociationLogicalName(string name)
+        => !string.IsNullOrWhiteSpace(name)
+           && string.Equals(
+               DocumentAssociationMap.ToLogicalName(name), name.Trim().ToLowerInvariant(), StringComparison.Ordinal);
+
     protected override IHost CreateHost(IHostBuilder builder)
     {
         builder.ConfigureHostConfiguration(config =>
@@ -743,6 +602,9 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // Test hosts must not authenticate for real — see TestTokenCredential.
             services.UseStubTokenCredential();
 
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
+
             // Add test authentication
             services.AddAuthentication("Test")
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>("Test", options => { });
@@ -795,11 +657,16 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // under RecordContainerResolver's and SecureContainerDecision's own unit tests).
             var securableEntitiesMock = new Mock<ISecurableEntityRegistry>();
             securableEntitiesMock
-                .Setup(r => r.IsSecurableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(false);
-            securableEntitiesMock
                 .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new HashSet<string>(StringComparer.Ordinal));
+            // task 151: the resolver asks ONE question — "is this an entity, and can it be secure?" — and
+            // REFUSES a name that is not an entity. Answered as the real registry would for the association
+            // types: nothing is securable here, and their LOGICAL names exist (OfficeService maps the wire's
+            // friendly name to one first); an alias does not.
+            securableEntitiesMock
+                .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) =>
+                    TestEntityCatalog.Classify(name, isSecurable: _ => false, isKnown: IsAssociationLogicalName));
             services.RemoveAll<ISecurableEntityRegistry>();
             services.AddSingleton(securableEntitiesMock.Object);
 
@@ -1376,6 +1243,26 @@ public sealed class OfficeVersionSaveWorld
     /// </summary>
     public List<string?> CreatedDocumentDescriptions { get; } = new();
 
+    /// <summary>
+    /// The <c>ownerid</c> team each <c>CreateDocumentAsync</c> was given, in order (task 080). <c>null</c> would mean an
+    /// app-owned row in the ROOT business unit — the defect task 080 removes — so no Office create should record one.
+    /// </summary>
+    public List<Guid?> CreatedDocumentOwningTeams { get; } = new();
+
+    /// <summary>
+    /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
+    /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
+    /// factory's <see cref="ISecurableEntityRegistry"/> double reports those LOGICAL names securable — and only the
+    /// logical names, as the production registry does — so a writer that passes a friendly name ("project") is seen
+    /// to miss the secure branch.
+    /// </summary>
+    public Dictionary<(string Entity, Guid Id), string> SecureRecords { get; } = new();
+
+    internal Microsoft.Xrm.Sdk.Entity? RetrieveRecord(string entity, Guid id) =>
+        SecureRecords.TryGetValue((entity, id), out var container)
+            ? new Microsoft.Xrm.Sdk.Entity(entity, id) { ["sprk_issecure"] = true, ["sprk_containerid"] = container }
+            : null;
+
     internal string CreateDocument(CreateDocumentRequest request)
     {
         lock (_gate)
@@ -1389,6 +1276,7 @@ public sealed class OfficeVersionSaveWorld
             DocumentCreates++;
             CreatedDocumentNames.Add(request.Name);
             CreatedDocumentDescriptions.Add(request.Description);
+            CreatedDocumentOwningTeams.Add(request.OwningTeamId);
             // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
             // document-create path now supplies one so the row's id matches the id stamped into the bytes it
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare
@@ -1462,6 +1350,25 @@ public sealed class OfficeVersionSaveWorld
         }
     }
 
+    /// <summary>
+    /// Every <c>sprk_processingjob</c> column a create or update wrote, keyed by the request property name
+    /// (<c>Status</c>, <c>Result</c>, <c>CurrentStage</c>, …), exactly as <c>DataverseServiceClientImpl</c> maps
+    /// them to <c>sprk_{name}</c> (task 060). The row is what a job read returns, so it must hold what was written.
+    /// </summary>
+    public Dictionary<Guid, Dictionary<string, object?>> JobRows { get; } = new();
+
+    /// <summary><c>createdon</c> per job row; the effective-state rule's abandoned-save check reads it (task 060).</summary>
+    public Dictionary<Guid, DateTime> JobCreatedOn { get; } = new();
+
+    /// <summary>When set, the NEXT job-row create fails, as it does when Dataverse is unavailable (task 060).</summary>
+    public bool FailNextJobCreate { get; set; }
+
+    /// <summary>
+    /// <c>sprk_payload</c>'s maximum length in Dataverse. A longer value makes the CREATE fail, the production
+    /// failure task 060 found: 27 of 40 saves in 60 days, because the payload carried the document's bytes.
+    /// </summary>
+    public const int PayloadMaxLength = 50_000;
+
     internal Guid RecordJob(object job)
     {
         lock (_gate)
@@ -1470,14 +1377,90 @@ public sealed class OfficeVersionSaveWorld
             var name = (string?)type.GetProperty("Name")?.GetValue(job) ?? string.Empty;
             var key = (string?)type.GetProperty("IdempotencyKey")?.GetValue(job) ?? string.Empty;
             var status = type.GetProperty("Status")?.GetValue(job) as int? ?? 0;
+            if (FailNextJobCreate)
+            {
+                FailNextJobCreate = false;
+                throw new InvalidOperationException("Dataverse unavailable (test)");
+            }
+
+            var payload = type.GetProperty("Payload")?.GetValue(job) as string;
+            if (payload is { Length: > PayloadMaxLength })
+            {
+                // Dataverse's own validation message (App Insights, 2026-09-30), so the save path sees what it sees live.
+                throw new InvalidOperationException(
+                    "A validation error occurred.  The length of the 'sprk_payload' attribute of the 'sprk_processingjob' "
+                    + $"entity exceeded the maximum allowed length of '{PayloadMaxLength}'.");
+            }
+
             var id = Guid.NewGuid();
             Jobs.Add((name, key));
             JobStatuses[id] = status;
+            JobRows[id] = type.GetProperties().ToDictionary(p => p.Name, p => p.GetValue(job));
+            JobCreatedOn[id] = DateTime.UtcNow;
             // Last write wins, so a key maps to its NEWEST job — the row the real query returns first
             // (DataverseServiceClientImpl.GetProcessingJobByIdempotencyKeyAsync orders by createdon desc, task 039).
             _jobIdsByKey[key] = id;
             return id;
         }
+    }
+
+    /// <summary>
+    /// Copies a job row to a NEW id that this process never created (task 060). A process that restarts, or a second
+    /// instance, holds no in-memory copy of a job it did not create itself, and reading that id is exactly that
+    /// situation, with the row byte-identical to the one the real save wrote.
+    /// </summary>
+    public Guid CloneJobRowAsAnotherProcessWouldSeeIt(Guid jobId)
+    {
+        lock (_gate)
+        {
+            var clone = Guid.NewGuid();
+            JobRows[clone] = new Dictionary<string, object?>(JobRows[jobId]);
+            JobStatuses[clone] = JobStatuses[jobId];
+            JobCreatedOn[clone] = JobCreatedOn[jobId];
+            return clone;
+        }
+    }
+
+    /// <summary>
+    /// The job read, as <c>DataverseServiceClientImpl.GetProcessingJobAsync</c> returns it: a typed
+    /// <see cref="ProcessingJobRecord"/> built from what the save wrote (task 060).
+    /// </summary>
+    /// <remarks>
+    /// Before task 060 production returned an ANONYMOUS type that the BFF read through <c>dynamic</c>, and this double
+    /// returned the same shape, so the reproduce-first tests went red exactly as production failed: a 404 on the status
+    /// poll, and an undetected duplicate (notes/060 §6). With no creator systemuser resolved here,
+    /// <c>InitiatedByOid</c> is null, as it is for any caller the resolver cannot map.
+    /// </remarks>
+    internal ProcessingJobRecord? ReadJob(Guid id)
+    {
+        lock (_gate)
+        {
+            return JobRows.ContainsKey(id) ? ToRecord(id) : null;
+        }
+    }
+
+    /// <summary>A stored row as the production reads return it. Callers hold <c>_gate</c>.</summary>
+    private ProcessingJobRecord ToRecord(Guid id)
+    {
+        var row = JobRows[id];
+        return new ProcessingJobRecord
+        {
+            Id = id,
+            Name = row.GetValueOrDefault("Name") as string,
+            JobType = row.GetValueOrDefault("JobType") as int?,
+            Status = JobStatuses.TryGetValue(id, out var status) ? status : 0,
+            Progress = row.GetValueOrDefault("Progress") as int?,
+            CurrentStage = row.GetValueOrDefault("CurrentStage") as string,
+            IdempotencyKey = row.GetValueOrDefault("IdempotencyKey") as string,
+            CorrelationId = row.GetValueOrDefault("CorrelationId") as string,
+            InitiatedBy = row.GetValueOrDefault("InitiatedBy") as Guid?,
+            InitiatedByOid = null,
+            Result = row.GetValueOrDefault("Result") as string,
+            ErrorCode = row.GetValueOrDefault("ErrorCode") as string,
+            ErrorMessage = row.GetValueOrDefault("ErrorMessage") as string,
+            CreatedOn = JobCreatedOn.TryGetValue(id, out var createdOn) ? createdOn : null,
+            CompletedDate = row.GetValueOrDefault("CompletedDate") as DateTime?,
+        };
     }
 
     /// <summary>
@@ -1492,24 +1475,36 @@ public sealed class OfficeVersionSaveWorld
         {
             if (update.GetType().GetProperty("Status")?.GetValue(update) is int status)
                 JobStatuses[id] = status;
+            // Task 060: every non-null column the update wrote (the real mapper skips nulls, so they leave the column
+            // unchanged). An update to a row that was never created is what Dataverse refuses: "Does Not Exist".
+            if (JobRows.TryGetValue(id, out var row))
+            {
+                foreach (var property in update.GetType().GetProperties())
+                {
+                    if (property.GetValue(update) is { } value)
+                        row[property.Name] = value;
+                }
+            }
         }
     }
 
-    internal object? FindJobByIdempotencyKey(string key)
+    internal ProcessingJobRecord? FindJobByIdempotencyKey(string key)
     {
         lock (_gate)
         {
             if (!_jobIdsByKey.TryGetValue(key, out var id))
                 return null;
-            dynamic existing = new System.Dynamic.ExpandoObject();
-            existing.Id = id;
-            // The row's REAL status (task 039, finding 2). This fixture used to answer Completed for every key,
-            // which hid the failed-job replay: a same-key retry after a failure was answered from a row the
-            // fixture claimed had succeeded.
-            existing.Status = JobStatuses.TryGetValue(id, out var status) ? status : 0;
-            existing.JobType = 0;
-            existing.Progress = 100;
-            return (object)existing;
+            // Task 060: the production shape. This used to return an ExpandoObject, which is public and fully dynamic, so
+            // the `dynamic` read succeeded here and failed in production (RuntimeBinderException, 2026-08-25). The row's
+            // REAL status (task 039, finding 2) and everything else the save wrote.
+            return JobRows.ContainsKey(id)
+                ? ToRecord(id)
+                : new ProcessingJobRecord
+                {
+                    Id = id,
+                    IdempotencyKey = key,
+                    Status = JobStatuses.TryGetValue(id, out var status) ? status : 0,
+                };
         }
     }
 
@@ -1944,6 +1939,11 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.GetProcessingJobByIdempotencyKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string key, CancellationToken _) => world.FindJobByIdempotencyKey(key));
+            // Task 060: the job read the status endpoint makes when it has no copy of its own. Unset before, so the loose
+            // mock answered null and the read was never exercised against a row the save had written.
+            dataverse
+                .Setup(d => d.GetProcessingJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, CancellationToken _) => world.ReadJob(id));
             // Task 039: the job's status is state the save path WRITES (Failed / Completed) and later READS back
             // through the idempotency lookup, so the world records it rather than letting the loose mock drop it.
             dataverse
@@ -1964,8 +1964,28 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken _) => world.RetrieveMultiple(query));
+            // Task 080 review (F1): the secure-record read RecordContainerResolver makes. Null for anything the world
+            // has not registered as secure — the loose mock's previous answer, so no other test changes.
+            dataverse
+                .Setup(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => world.RetrieveRecord(entity, id)!);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverse.Object);
+
+            var securable = new Mock<ISecurableEntityRegistry>();
+            securable
+                .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+                .ReturnsAsync(() => world.SecureRecords.Keys.Select(k => k.Entity).ToHashSet(StringComparer.OrdinalIgnoreCase));
+            // task 151: ONE question — securable if the world holds a secure record of that entity; otherwise a
+            // real entity only by LOGICAL name, as the real registry answers.
+            securable
+                .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(
+                    name,
+                    isSecurable: n => world.SecureRecords.Keys.Any(k => k.Entity == n),
+                    isKnown: OfficeTestWebAppFactory.IsAssociationLogicalName));
+            services.RemoveAll<ISecurableEntityRegistry>();
+            services.AddSingleton(securable.Object);
 
             // Task 025: the collision-target lookup (OfficeDocumentPersistence.FindDocumentIdByLocationAsync)
             // reads through IGenericEntityService, not IDataverseService — but per GraphModule.cs,

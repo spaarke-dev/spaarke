@@ -4,6 +4,8 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const webpack = require('webpack');
 const devCerts = require('office-addin-dev-certs');
+const fs = require('fs');
+const { mergeUnifiedManifest, deriveTestVariant, PACKAGE_ICONS } = require('./packaging/mergeUnifiedManifest');
 require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const isProduction = process.env.NODE_ENV === 'production';
@@ -53,6 +55,106 @@ const ENV_CONFIG = {
     process.env.ADDIN_BASE_URL ||
     (isProduction ? 'https://icy-desert-0bfdbb61e.6.azurestaticapps.net' : 'https://localhost:3000'),
 };
+
+/**
+ * The COMBINED Outlook + Word app package (spaarkeai-word-add-in-r1 task 078, FR-05) —
+ * see packaging/mergeUnifiedManifest.js and projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md.
+ *
+ * Two ids that the standalone JSON manifests used to CONFLATE are kept apart here:
+ *   - ADDIN_CLIENT_ID  → the Entra app registration. Goes in `webApplicationInfo.id` ONLY.
+ *   - ADDIN_APP_ID     → the app PACKAGE id. Its own GUID. The admin center identifies the app by it, so it
+ *                        must stay STABLE for the life of the package — every release is an update of it.
+ * Both live add-ins today are XML (Outlook 5e4d66d0-…, Word b3965ea0-…), so the package is a NEW app; the XML
+ * ids are read from the XML files below so the `alternates.hide` entries can never drift from what is registered.
+ *
+ * Bump UNIFIED_PACKAGE_VERSION (3-part) on every package change — the admin center rejects a same-version update.
+ */
+const UNIFIED_PACKAGE = {
+  APP_ID: process.env.ADDIN_APP_ID || 'e68f3cb1-3702-4a58-8c02-972e7d1667eb',
+  TEST_APP_ID: process.env.ADDIN_TEST_APP_ID || 'b490de25-d155-44cd-8825-6e125102dd84',
+  VERSION: '1.1.0',
+};
+
+/** Reads the `<Id>` of a live XML add-in manifest — the id its `alternates.hide` entry must name. */
+function readXmlAddinId(relativePath) {
+  const xml = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8');
+  const match = /<Id>\s*([0-9a-fA-F-]{36})\s*<\/Id>/.exec(xml);
+  if (!match) {
+    throw new Error(`[Office Add-in Webpack] No <Id> found in ${relativePath}; cannot build the unified package.`);
+  }
+  return match[1];
+}
+
+/** Reads the `<Permissions>` of a live XML add-in manifest — the access the package must not fall below. */
+function readXmlAddinPermissions(relativePath) {
+  const xml = fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8');
+  const match = /<Permissions>\s*([A-Za-z]+)\s*<\/Permissions>/.exec(xml);
+  if (!match) {
+    throw new Error(`[Office Add-in Webpack] No <Permissions> found in ${relativePath}; cannot build the unified package.`);
+  }
+  return match[1];
+}
+
+/** Applies the same placeholder substitution the standalone manifests get (base URL + BFF resource). */
+function substituteManifestPlaceholders(text) {
+  return text
+    .split('https://localhost:3000')
+    .join(ENV_CONFIG.ADDIN_BASE_URL)
+    .replace(/"resource":\s*"api:\/\/[a-f0-9-]+"/g, `"resource": "api://${ENV_CONFIG.BFF_API_CLIENT_ID}"`);
+}
+
+/**
+ * Emits the unified package into dist/spaarke/: manifest.json (production), manifest.test.json (a TEST copy with
+ * its own id and a "(TEST)" name for a "Just me" admin-center upload), color.png (192×192) and outline.png (32×32).
+ * scripts/Package-SpaarkeAddin.ps1 zips them. The merge throws — failing the build — on a duplicate id, an action
+ * no runtime declares, or an icon file that does not exist.
+ */
+class SpaarkeUnifiedPackagePlugin {
+  apply(compiler) {
+    compiler.hooks.thisCompilation.tap('SpaarkeUnifiedPackagePlugin', compilation => {
+      compilation.hooks.processAssets.tap(
+        { name: 'SpaarkeUnifiedPackagePlugin', stage: webpack.Compilation.PROCESS_ASSETS_STAGE_ADDITIONAL },
+        () => {
+          const readManifest = relativePath =>
+            JSON.parse(substituteManifestPlaceholders(fs.readFileSync(path.resolve(__dirname, relativePath), 'utf8')));
+          const assetsDir = path.resolve(__dirname, 'shared/assets');
+          const assetExists = url => {
+            const match = /\/assets\/([^/?#]+)$/.exec(url || '');
+            return Boolean(match) && fs.existsSync(path.join(assetsDir, match[1]));
+          };
+
+          const production = mergeUnifiedManifest(readManifest('./outlook/manifest.json'), readManifest('./word/manifest.json'), {
+            appId: UNIFIED_PACKAGE.APP_ID,
+            clientId: ENV_CONFIG.ADDIN_CLIENT_ID,
+            version: UNIFIED_PACKAGE.VERSION,
+            legacyXmlIds: {
+              mail: readXmlAddinId('./outlook/outlook-manifest.xml'),
+              document: readXmlAddinId('./word/word-manifest.xml'),
+            },
+            legacyXmlPermissions: {
+              mail: readXmlAddinPermissions('./outlook/outlook-manifest.xml'),
+              document: readXmlAddinPermissions('./word/word-manifest.xml'),
+            },
+            assetExists,
+          });
+          const test = deriveTestVariant(production, { appId: UNIFIED_PACKAGE.TEST_APP_ID });
+
+          const { RawSource } = webpack.sources;
+          compilation.emitAsset('spaarke/manifest.json', new RawSource(JSON.stringify(production, null, 2)));
+          compilation.emitAsset('spaarke/manifest.test.json', new RawSource(JSON.stringify(test, null, 2)));
+          compilation.emitAsset(
+            `spaarke/${PACKAGE_ICONS.color}`,
+            new RawSource(fs.readFileSync(path.join(assetsDir, 'icon-color-192.png')))
+          );
+          compilation.emitAsset(
+            `spaarke/${PACKAGE_ICONS.outline}`,
+            new RawSource(fs.readFileSync(path.join(assetsDir, 'icon-outline.png')))
+          );
+        }
+      );
+    });
+  }
+}
 
 async function getHttpsOptions() {
   if (isProduction) {
@@ -227,39 +329,11 @@ module.exports = async (env, options) => {
             to: 'word/manifest.xml',
             transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
           },
-          {
-            // Unified JSON manifest for Word (task 011 / FR-05) — mirrors the
-            // Outlook unified-manifest handling above: same client-id/resource/
-            // base-URL substitution mechanism, applied to Word's own placeholder
-            // GUID (`b3965ea0-6942-4f17-81b3-2c645bd05ebf`, shared by both the
-            // top-level `id` and `webApplicationInfo.id`) and Word's own
-            // `webApplicationInfo.resource`. Reuses the SAME `ADDIN_CLIENT_ID` /
-            // `BFF_API_CLIENT_ID` env vars as Outlook — one Azure AD app
-            // registration + one BFF API app registration cover the whole add-in
-            // package (both hosts), confirmed via `.env.example` and
-            // `word/taskpane/index.tsx`'s config defaults.
-            from: './word/manifest.json',
-            to: 'word/manifest.json',
-            transform: (content) => {
-              let manifest = content.toString();
-              // Replace the placeholder app ID in top-level "id" and
-              // "webApplicationInfo.id" (both share the same literal value, so
-              // the global regex substitutes both in one pass).
-              manifest = manifest.replace(
-                /"id":\s*"b3965ea0-6942-4f17-81b3-2c645bd05ebf"/g,
-                `"id": "${ENV_CONFIG.ADDIN_CLIENT_ID}"`
-              );
-              // Replace the placeholder resource URI (api://{BFF_API_CLIENT_ID}).
-              manifest = manifest.replace(
-                /"resource":\s*"api:\/\/[a-f0-9-]+"/,
-                `"resource": "api://${ENV_CONFIG.BFF_API_CLIENT_ID}"`
-              );
-              // Replace the manifest's dev-authored base URL with the resolved
-              // per-mode ADDIN_BASE_URL (localhost for dev, deployed SWA for prod).
-              manifest = manifest.split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL);
-              return manifest;
-            },
-          },
+          // (Task 078) The standalone `word/manifest.json` output was RETIRED here. It was a dev-sideload copy
+          // whose top-level `id` webpack rewrote to ADDIN_CLIENT_ID — the same package id as the Outlook JSON —
+          // so the two could never be installed side by side. Word's unified manifest now ships ONLY inside the
+          // combined package (dist/spaarke/, SpaarkeUnifiedPackagePlugin below); word/manifest.json remains the
+          // SOURCE of Word's half. The Word XML above is unchanged — it is the live registration.
           {
             // Legacy XML (OfficeApp/MailApp) manifest for Outlook — the format the M365 admin
             // center "Integrated apps" accepts directly (the unified manifest.json is dev-sideload
@@ -288,6 +362,8 @@ module.exports = async (env, options) => {
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
       }),
+      // Task 078: the combined Outlook + Word app package → dist/spaarke/.
+      new SpaarkeUnifiedPackagePlugin(),
       ...(mode === 'production'
         ? [
             new MiniCssExtractPlugin({

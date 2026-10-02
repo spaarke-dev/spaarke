@@ -1,0 +1,242 @@
+[
+  {
+    "name": "prvAppendsprk_Document",
+    "depth": "Basic",
+    "privilegeId": "d112be0f-ddd5-4716-8883-c5ad4f43d564",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendsprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "949245a1-8aeb-49dd-bc7d-e646f59cdec4",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendsprk_Project",
+    "depth": "Basic",
+    "privilegeId": "378153b5-ca5b-4cfe-9411-afcedb933b60",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendsprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "612d404e-861d-46ce-9203-d6e68baf54f9",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendTosprk_Document",
+    "depth": "Basic",
+    "privilegeId": "637152db-1a8b-4ef5-8ab5-8eb22da7de57",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendTosprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "6f09ed69-2b74-4bd8-824e-bd546c44aeca",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendTosprk_Project",
+    "depth": "Basic",
+    "privilegeId": "373c631d-5b4a-4f14-8367-f9090921139c",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAppendTosprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "37debc9e-6186-4b6e-9960-e31fe08fffaa",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAssignsprk_Document",
+    "depth": "Basic",
+    "privilegeId": "3bd7cb2c-9f7a-4372-a845-f8760c684b93",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAssignsprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "12338f2b-18a0-42b7-80e1-76919c3a6ccc",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAssignsprk_Project",
+    "depth": "Basic",
+    "privilegeId": "481f576e-92b8-4f02-bcd0-3cab94385836",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvAssignsprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "f91de320-aea3-4740-9062-73d052e78977",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvCreateSharePointData",
+    "depth": "Global",
+    "privilegeId": "5eb85025-363b-46ea-a77e-ce24159cd231",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvCreatesprk_Document",
+    "depth": "Basic",
+    "privilegeId": "45d7fadb-f2d6-4b99-8f74-7640e15eccf4",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvCreatesprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "c36cb486-99fd-464b-b9cc-3256a6fb360e",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvCreatesprk_Project",
+    "depth": "Basic",
+    "privilegeId": "b3db8aff-b440-4475-9b0d-c6500d1e5e94",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvCreatesprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "e28c3249-40e1-4564-b43d-8e5abe077471",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvDeletesprk_Document",
+    "depth": "Basic",
+    "privilegeId": "1206ec42-2483-46d1-8a6f-26aaf0607f4f",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvDeletesprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "96ced1fa-8a69-4999-a4ab-2ca8dc14e1ee",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvDeletesprk_Project",
+    "depth": "Basic",
+    "privilegeId": "98248472-d464-4189-90be-95b559b097bb",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvDeletesprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "61141799-1a62-4c49-8a59-7d920ebe597c",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadSharePointData",
+    "depth": "Global",
+    "privilegeId": "fecbd29c-df64-4ede-a611-47226b402c22",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadSharePointDocument",
+    "depth": "Global",
+    "privilegeId": "d71fc8d0-99bc-430e-abd7-d95c64f11e9c",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Communication",
+    "depth": "Basic",
+    "privilegeId": "effd0e4a-e9a9-425b-88b9-99936d8b4868",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Document",
+    "depth": "Basic",
+    "privilegeId": "c9d86ff1-d718-4550-9902-083baf7436ac",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Event",
+    "depth": "Basic",
+    "privilegeId": "a6e63222-f024-418a-9641-7b214cb69625",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "7c8f8d5c-d415-4bde-bd41-b37183e6ef34",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Memo",
+    "depth": "Basic",
+    "privilegeId": "abd5e1ab-22de-4d4d-8180-9511654313aa",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Project",
+    "depth": "Basic",
+    "privilegeId": "9c329413-707f-49e8-b38b-c3a55c4233b9",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_Todo",
+    "depth": "Basic",
+    "privilegeId": "043dc824-e266-486d-899d-47af483a93b0",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvReadsprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "efab48f5-63db-42be-93da-246bc6d69acd",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvSharesprk_Document",
+    "depth": "Basic",
+    "privilegeId": "62d33af7-7d8d-4c83-9423-82fc4d7ae2fc",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvSharesprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "dfd72893-b46d-4f30-97a1-9c351cf02e06",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvSharesprk_Project",
+    "depth": "Basic",
+    "privilegeId": "ab531a30-528e-463b-b730-6600a53b90fc",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvSharesprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "76089a55-854f-4f51-8f84-a5b32c36261f",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvWriteSharePointData",
+    "depth": "Global",
+    "privilegeId": "cfdd12cf-090b-4599-8302-771962d2350a",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvWritesprk_Document",
+    "depth": "Basic",
+    "privilegeId": "6fda2674-f0f4-470b-8591-35dcccea245e",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvWritesprk_Matter",
+    "depth": "Basic",
+    "privilegeId": "bbd37a43-9b73-4466-a372-a5f84d141139",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvWritesprk_Project",
+    "depth": "Basic",
+    "privilegeId": "9a6dffc8-be31-4d18-b51d-a2a38c901f13",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  },
+  {
+    "name": "prvWritesprk_WorkAssignment",
+    "depth": "Basic",
+    "privilegeId": "fe9bce59-a4b2-45cd-908b-d927c5a5935c",
+    "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7"
+  }
+]

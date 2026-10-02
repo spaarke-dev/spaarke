@@ -22,7 +22,7 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
-import { FindView } from './components/views/FindView';
+import { FindView, type FindItemNoun } from './components/views/FindView';
 import type {
   SavedTodoContext,
   CreateTodoInput,
@@ -554,6 +554,11 @@ export const App: React.FC<AppProps> = ({
   const canSendEmail =
     hostAdapter.getCapabilities().canComposeEmail && Boolean(savedContext?.documentId || savedContext?.relatedRecord);
 
+  // Task 077: what Find calls the pane's item. From the `canGetSender` CAPABILITY (NFR-10), never
+  // `hostType` — an item that has a sender IS an email, so this is the exact semantic, not a proxy.
+  // WordAdapter always reports `canGetSender: false`; OutlookAdapter reports it in read AND compose mode.
+  const findItemNoun: FindItemNoun = hostAdapter.getCapabilities().canGetSender ? 'email' : 'document';
+
   // `CreateTodoView.savedContext` expects the narrower `SavedTodoContext` shape (regardingEntity +
   // regardingRecordId required). `App.savedContext` (AppSavedContext) widens those to optional so a
   // resolved-but-unassociated FR-01 document can still carry documentId/documentName/fileName with
@@ -746,8 +751,15 @@ export const App: React.FC<AppProps> = ({
         {currentTab === 'find' && (
           <FindView
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
+            // task 077 gaps (b) + (c): the id a completed save produced this session, as Find's
+            // identity source of last resort. The producer is `SaveView.onComplete` above, which
+            // fires on BOTH hosts (task 036 / FR-15) — so this is what lets a document saved in this
+            // session become findable (Word), and the ONLY thing that makes Outlook's Find tab
+            // reachable at all, since `canGetDocumentUrl` is always false there.
+            {...(savedContext?.documentId ? { savedDocumentId: cleanGuid(savedContext.documentId) } : {})}
             onRetryDocumentIdentity={retryDocumentIdentity}
             onGoToSave={() => setCurrentTab('save')}
+            itemNoun={findItemNoun}
           />
         )}
 

@@ -206,6 +206,31 @@ describe('resolveFindState (pure)', () => {
       message: 'network down',
     });
   });
+
+  // Task 077 gaps (b) + (c): a completed save is an identity source of last resort.
+  describe('a completed save (savedDocumentId) — task 077', () => {
+    it('overrides the two "we do not know of a record" outcomes: new, and undefined (Outlook)', () => {
+      expect(
+        resolveFindState({ kind: 'new', reason: 'not_spaarke_document' }, false, undefined, DOCUMENT_ID_CLEAN)
+      ).toEqual<FindState>({ kind: 'not-indexed', documentId: DOCUMENT_ID_CLEAN });
+      expect(resolveFindState(undefined, true, undefined, DOCUMENT_ID_CLEAN)).toEqual<FindState>({
+        kind: 'indexed',
+        documentId: DOCUMENT_ID_CLEAN,
+      });
+      expect(resolveFindState(undefined, undefined, undefined, DOCUMENT_ID_CLEAN)).toEqual<FindState>({
+        kind: 'loading-index-status',
+      });
+    });
+
+    it.each<[string, DocumentIdentityState, FindState['kind']]>([
+      ['conflict', { kind: 'conflict' }, 'identity-conflict'],
+      ['indeterminate', { kind: 'indeterminate', reason: 'unavailable' }, 'identity-indeterminate'],
+      ['denied', { kind: 'denied' }, 'identity-denied'],
+      ['error', { kind: 'error', message: 'boom' }, 'identity-error'],
+    ])('does NOT override %s — an honest refusal must not be papered over by a save id', (_, identity, expected) => {
+      expect(resolveFindState(identity, true, undefined, DOCUMENT_ID_CLEAN).kind).toBe(expected);
+    });
+  });
 });
 
 describe('FindView (component)', () => {
@@ -224,8 +249,10 @@ describe('FindView (component)', () => {
         <FindView documentIdentity={{ kind: 'new', reason: 'not_spaarke_document' }} onGoToSave={onGoToSave} />
       );
 
+      // Regex, not the full string: task 077 appended a sentence telling the user what Find will show
+      // once the item is saved. The save prompt itself — what this asserts — is unchanged.
       expect(
-        screen.getByText('Save this document to Spaarke so it can be indexed for AI similarity search.')
+        screen.getByText(/Save this document to Spaarke so it can be indexed for AI similarity search\./)
       ).toBeTruthy();
 
       const goToSave = screen.getByRole('button', { name: /go to save/i });
@@ -239,8 +266,10 @@ describe('FindView (component)', () => {
 
     it('undefined documentIdentity (Outlook) renders the same save prompt', async () => {
       renderWithProvider(<FindView />);
+      // Regex, not the full string: task 077 appended a sentence telling the user what Find will show
+      // once the item is saved. The save prompt itself — what this asserts — is unchanged.
       expect(
-        screen.getByText('Save this document to Spaarke so it can be indexed for AI similarity search.')
+        screen.getByText(/Save this document to Spaarke so it can be indexed for AI similarity search\./)
       ).toBeTruthy();
     });
   });
@@ -435,6 +464,46 @@ describe('FindView (component)', () => {
         String(call[0]).includes('/api/ai/visualization/related/')
       ).length;
       expect(relatedCallsAfter).toBe(1); // still exactly one — reveal is DOM-only, never a re-fetch
+    });
+  });
+
+  // Task 077 gaps (b) + (c).
+  describe('after a save in this session (task 077)', () => {
+    it('a document saved in this session leaves the save prompt and reaches Run Index — without reopening it', async () => {
+      mockGet.mockResolvedValue(profileEnvelope({ searchIndexed: false, summaryStatus: null }));
+      const identity: DocumentIdentityState = { kind: 'new', reason: 'not_spaarke_document' };
+
+      const { rerender } = renderWithProvider(<FindView documentIdentity={identity} />);
+      expect(screen.getByText('Save this document to Spaarke')).toBeTruthy();
+      expect(mockGet).not.toHaveBeenCalled();
+
+      // The save completes: App threads SaveView.onComplete's id through as savedDocumentId.
+      rerender(
+        <FluentProvider theme={webLightTheme}>
+          <FindView documentIdentity={identity} savedDocumentId={DOCUMENT_ID_CLEAN} />
+        </FluentProvider>
+      );
+
+      expect(await screen.findByRole('button', { name: /run index/i })).toBeTruthy();
+      expect(screen.queryByText('Save this document to Spaarke')).toBeNull();
+      expect(mockGet).toHaveBeenCalledWith(`/api/v1/documents/${DOCUMENT_ID_CLEAN}`);
+    });
+
+    it('Outlook: before a save the prompt names the EMAIL; after a save, Find is reachable (FR-16 not amended)', async () => {
+      mockGet.mockResolvedValue(profileEnvelope({ searchIndexed: false, summaryStatus: null }));
+
+      // Outlook: identity resolution never applies (documentIdentity undefined).
+      const { rerender } = renderWithProvider(<FindView itemNoun="email" />);
+      expect(screen.getByText('Save this email to Spaarke')).toBeTruthy();
+
+      rerender(
+        <FluentProvider theme={webLightTheme}>
+          <FindView itemNoun="email" savedDocumentId={DOCUMENT_ID_CLEAN} />
+        </FluentProvider>
+      );
+
+      expect(await screen.findByRole('button', { name: /run index/i })).toBeTruthy();
+      expect(screen.getByText(/This email isn.t indexed yet\./)).toBeTruthy();
     });
   });
 

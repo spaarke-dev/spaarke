@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Office;
@@ -91,7 +92,6 @@ public class OfficeDocumentPersistenceEditableDedupTests
     private static OfficeDocumentPersistence Sut(
         Mock<IDocumentDataverseService> docs, Mock<ContentDedupDetector> detector, Mock<IGenericEntityService>? generic) =>
         new(docs.Object,
-            Mock.Of<IProcessingJobService>(),
             detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance,
             Mock.Of<ICommunicationDataverseService>(),
@@ -128,7 +128,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         var generic = GenericService(existingRowForItem: null, writes);
 
         var result = await Sut(docs, detector, generic).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         // 1. A SECOND record exists — the create was NOT skipped (this is the F-h defect).
         result.DocumentId.Should().Be(newDocId, "an editable save owns its own sprk_document, never the canonical's id");
@@ -168,7 +168,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         var generic = GenericService(existingRowForItem: null, writes);
 
         var result = await Sut(docs, detector, generic).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         result.WasContentDuplicate.Should().BeFalse();
         update!.CanonicalHash.Should().Be("hash-first", "the first writer stamps its own content identity");
@@ -190,7 +190,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         var writes = new List<(Guid Id, Dictionary<string, object> Fields)>();
 
         var result = await Sut(docs, detector, GenericService(null, writes)).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         result.DocumentId.Should().Be(newDocId);
         result.WasContentDuplicate.Should().BeFalse();
@@ -214,7 +214,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         var generic = GenericService(LinkedCopyRow(copyId, canonical, "hash-old"), writes);
 
         await Sut(DocumentService(Guid.NewGuid()), detector, generic).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         var graduation = writes.Should().ContainSingle(w => w.Id == copyId).Subject;
         graduation.Fields.Should().ContainKey("sprk_canonicaldocument")
@@ -234,7 +234,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         var generic = GenericService(LinkedCopyRow(copyId, Guid.NewGuid(), "hash-same"), writes);
 
         await Sut(DocumentService(Guid.NewGuid()), detector, generic).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         writes.Should().NotContain(w => w.Id == copyId,
             "content that has not diverged is still a faithful copy — graduating it early would lose the link for no reason");
@@ -256,7 +256,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         var generic = GenericService(trueCanonical, writes);
 
         await Sut(DocumentService(Guid.NewGuid()), detector, generic).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         writes.Should().NotContain(w => w.Id == canonicalRowId, "only a hash-linked COPY can graduate");
     }
@@ -277,7 +277,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
 
         var newDocId = Guid.NewGuid();
         var act = async () => await Sut(DocumentService(newDocId), detector, generic).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         (await act.Should().NotThrowAsync()).Which.DocumentId.Should().Be(newDocId);
     }
@@ -292,7 +292,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
         ResolvesIdentity(detector, "hash-identical", Guid.NewGuid());
 
         var result = await Sut(DocumentService(newDocId), detector, generic: null).CreateDocumentWithSpePointersAsync(
-            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+            DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         result.DocumentId.Should().Be(newDocId);
         result.WasContentDuplicate.Should().BeFalse("an unavailable link seam must never re-open the suppress path");
@@ -312,7 +312,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
 
         var act = async () => await Sut(DocumentService(newDocId, u => update = u), detector, GenericService(null, writes))
             .CreateDocumentWithSpePointersAsync(
-                DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None);
+                DocumentSave(), DriveId, ItemId, "https://spe/web", FileName, 4096, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         (await act.Should().NotThrowAsync()).Which.DocumentId.Should().Be(newDocId);
         update!.CanonicalHash.Should().BeNull("no identity could be resolved, so nothing is stamped");
@@ -345,7 +345,7 @@ public class OfficeDocumentPersistenceEditableDedupTests
 
         var result = await Sut(docs, detector, GenericService(null, new List<(Guid, Dictionary<string, object>)>()))
             .CreateDocumentWithSpePointersAsync(
-                request, DriveId, ItemId, "https://spe/web", FileName, 1024, OwnerOid, CancellationToken.None);
+                request, DriveId, ItemId, "https://spe/web", FileName, 1024, OwnerOid, CancellationToken.None, owningTeamId: RecordOwnershipResolverDouble.DefaultTeamId);
 
         result.DocumentId.Should().Be(canonical, "an immutable byte-identical capture resolves to the existing canonical");
         result.WasContentDuplicate.Should().BeTrue("the caller must skip finalization and clean up the transient blob");

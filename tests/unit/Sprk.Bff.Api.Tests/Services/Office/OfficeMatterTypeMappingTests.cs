@@ -6,11 +6,11 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Office;
 
 /// <summary>
-/// Proves <see cref="OfficeService.MapMatterTypeRow"/> — the pure mapper behind
+/// Proves <see cref="OfficeSearchService.MapMatterTypeRow"/> — the pure mapper behind
 /// <c>GET /api/office/search/matter-types</c> (spaarkeai-word-add-in-r1 task 038) — maps
 /// <c>sprk_mattertype_ref</c> Web API JSON rows to <see cref="Sprk.Bff.Api.Models.Office.MatterTypeOption"/>
 /// correctly. No mocks, no HTTP — mirrors <c>OfficeEntitySearchMappingTests</c>'s shape for
-/// <see cref="OfficeService.MapSearchRow"/>.
+/// <see cref="OfficeSearchService.MapSearchRow"/>.
 /// </summary>
 public class OfficeMatterTypeMappingTests
 {
@@ -30,7 +30,7 @@ public class OfficeMatterTypeMappingTests
         }
         """);
 
-        var result = OfficeService.MapMatterTypeRow(row);
+        var result = OfficeSearchService.MapMatterTypeRow(row);
 
         result.Should().NotBeNull();
         result!.Id.Should().Be(id);
@@ -45,7 +45,7 @@ public class OfficeMatterTypeMappingTests
         { "sprk_mattertype_refid": "{{Guid.NewGuid()}}", "sprk_mattertypename": "Commercial" }
         """);
 
-        var result = OfficeService.MapMatterTypeRow(row);
+        var result = OfficeSearchService.MapMatterTypeRow(row);
 
         result.Should().NotBeNull();
         result!.Name.Should().Be("Commercial");
@@ -59,7 +59,7 @@ public class OfficeMatterTypeMappingTests
         { "sprk_mattertype_refid": "{{Guid.NewGuid()}}", "sprk_mattertypecode": "PAT" }
         """);
 
-        OfficeService.MapMatterTypeRow(row)
+        OfficeSearchService.MapMatterTypeRow(row)
             .Should().BeNull("an unnamed reference row must never surface in the dropdown");
     }
 
@@ -70,7 +70,7 @@ public class OfficeMatterTypeMappingTests
         { "sprk_mattertype_refid": "{{Guid.NewGuid()}}", "sprk_mattertypename": "   " }
         """);
 
-        OfficeService.MapMatterTypeRow(row).Should().BeNull();
+        OfficeSearchService.MapMatterTypeRow(row).Should().BeNull();
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class OfficeMatterTypeMappingTests
         { "sprk_mattertypename": "Employment" }
         """);
 
-        OfficeService.MapMatterTypeRow(row)
+        OfficeSearchService.MapMatterTypeRow(row)
             .Should().BeNull("a reference row with no parseable id cannot be sent back as matterTypeId");
     }
 
@@ -91,6 +91,6 @@ public class OfficeMatterTypeMappingTests
         { "sprk_mattertype_refid": "not-a-guid", "sprk_mattertypename": "Trademark" }
         """);
 
-        OfficeService.MapMatterTypeRow(row).Should().BeNull();
+        OfficeSearchService.MapMatterTypeRow(row).Should().BeNull();
     }
 }

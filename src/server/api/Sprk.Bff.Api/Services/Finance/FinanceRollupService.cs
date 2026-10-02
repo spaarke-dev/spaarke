@@ -17,9 +17,15 @@ namespace Sprk.Bff.Api.Services.Finance;
 /// Follows the same pattern as ScorecardCalculatorService:
 ///   1. Parallel queries for child records
 ///   2. Compute derived values
-///   3. Write back to parent via UpdateRecordFieldsAsync
+///   3. Write back to parent via UpdateExistingRecordFieldsAsync (update-only, task 130)
 /// </summary>
-public sealed class FinanceRollupService
+/// <remarks>
+/// Concrete (ADR-010) with the two entry points <c>virtual</c> as its substitution seam — the
+/// <c>CallerRecordAccessProbe</c> precedent. The reads unwrap a concrete <c>ServiceClient</c>, which no in-process
+/// double can stand in for, so without the seam neither the recalculate routes' post-check 404 nor
+/// SpendSnapshotGenerationJobHandler's deleted-matter skip could be tested (task 130).
+/// </remarks>
+public class FinanceRollupService
 {
     // INTENTIONAL: Keeps IDataverseService — casts to ServiceClient for FetchXML queries.
     // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
@@ -108,11 +114,11 @@ public sealed class FinanceRollupService
         };
 
     /// <summary>Recalculate and persist financial fields for a matter.</summary>
-    public Task<RecalculateFinanceResponse> RecalculateMatterAsync(Guid matterId, CancellationToken ct = default)
+    public virtual Task<RecalculateFinanceResponse> RecalculateMatterAsync(Guid matterId, CancellationToken ct = default)
         => RecalculateForEntityAsync(matterId, Invoice_Matter, Budget_Matter, "sprk_matter", ct);
 
     /// <summary>Recalculate and persist financial fields for a project.</summary>
-    public Task<RecalculateFinanceResponse> RecalculateProjectAsync(Guid projectId, CancellationToken ct = default)
+    public virtual Task<RecalculateFinanceResponse> RecalculateProjectAsync(Guid projectId, CancellationToken ct = default)
         => RecalculateForEntityAsync(projectId, Invoice_Project, Budget_Project, "sprk_project", ct);
 
     private async Task<RecalculateFinanceResponse> RecalculateForEntityAsync(
@@ -190,7 +196,10 @@ public sealed class FinanceRollupService
             totalSpend, invoiceCount, currentMonthSpend, totalBudget,
             remainingBudget, utilization, velocity ?? 0m, averageInvoice, timelineJson);
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(parentEntityName, parentId, fields, ct);
+        // UPDATE-ONLY (task 130): never create. A plain PATCH upserts, so a parent deleted after the caller's
+        // authorization check (or a background job's stale id) would be recreated as an empty row carrying
+        // only these rollup fields. A missing parent surfaces as KeyNotFoundException → the endpoint's uniform 404.
+        await _fieldMappingService.UpdateExistingRecordFieldsAsync(parentEntityName, parentId, fields, ct);
 
         _logger.LogInformation(
             "Finance rollup complete for {Entity} {EntityId}: " +

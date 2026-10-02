@@ -83,8 +83,15 @@ public class EntityAccessFilter : IEndpointFilter
     private readonly CallerRecordAccessProbe _probe;
     private readonly ILogger<EntityAccessFilter>? _logger;
 
-    // Operation constant for entity association
-    private const string AssociateOperation = "entity.associate_document";
+    /// <summary>
+    /// The <see cref="OperationAccessPolicy"/> operation this filter enforces: filing a document TO the target.
+    /// </summary>
+    /// <remarks>
+    /// Internal (task 084) so the Office picker's per-row <c>canFile</c> flag is decided by the SAME operation,
+    /// and therefore the same right, as this filter. "Pickable" and "savable" cannot drift apart while both
+    /// read this one constant.
+    /// </remarks>
+    internal const string AssociateOperation = "entity.associate_document";
 
     /// <summary>
     /// Association target type → Dataverse entity SET (plural collection) name.
@@ -176,6 +183,15 @@ public class EntityAccessFilter : IEndpointFilter
         entitySet = string.Empty;
         return false;
     }
+
+    /// <summary>
+    /// Every type spelling this table accepts — for the LOCKSTEP guard only
+    /// (<c>AssociationTypeLockstepTests</c>, task 151 review), which must enumerate the keys to prove each one is
+    /// also a <c>DocumentAssociationMap</c> spelling naming the SAME entity. Internal (test assembly via
+    /// <c>InternalsVisibleTo</c>, ADR-038 Amendment A2): production callers keep the <see cref="TryResolveEntitySet"/>
+    /// shape, so a miss still has exactly one legal interpretation.
+    /// </summary>
+    internal static IEnumerable<string> SupportedEntityTypes => EntitySetByType.Keys;
 
     public EntityAccessFilter(
         CallerRecordAccessProbe probe,

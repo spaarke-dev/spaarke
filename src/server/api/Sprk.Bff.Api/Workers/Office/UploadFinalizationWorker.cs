@@ -59,6 +59,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IConfiguration _configuration;
 
+    /// <summary>Task 080 (write-path invariant I-6): the owner team for every document this worker creates.</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownershipResolver;
+
     private const string QueueName = "office-upload-finalization";
     private const string ProfileQueueName = "office-profile";
     private const string IndexingQueueName = "office-indexing";
@@ -87,7 +90,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IDocumentDataverseService documentService,
         IProcessingJobService processingJobService,
         JobSubmissionService jobSubmissionService,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -99,6 +103,46 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _processingJobService = processingJobService ?? throw new ArgumentNullException(nameof(processingJobService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _ownershipResolver = ownershipResolver ?? throw new ArgumentNullException(nameof(ownershipResolver));
+    }
+
+    /// <summary>
+    /// The owner team for a document this save creates — the one <c>SaveAsync</c> resolved and carried on the
+    /// payload, or, when the payload predates task 080, the same resolver's answer for the save's association
+    /// and user. Returns <see langword="null"/> when neither yields a team: the caller MUST NOT create the
+    /// document, because an app-owned row lands in the ROOT business unit, unreachable by its own author.
+    /// </summary>
+    private Task<Guid?> ResolveDocumentOwnerTeamAsync(
+        UploadFinalizationPayload payload,
+        string userId,
+        CancellationToken cancellationToken)
+        => ResolveDocumentOwnerTeamAsync(_ownershipResolver, payload, userId, cancellationToken);
+
+    /// <summary>
+    /// The rule behind <see cref="ResolveDocumentOwnerTeamAsync(UploadFinalizationPayload, string, CancellationToken)"/>,
+    /// static so it is assertable without constructing a Service Bus worker: the CARRIED team wins (so an email's
+    /// attachment children match their parent), and only a payload without one asks the resolver.
+    /// </summary>
+    internal static async Task<Guid?> ResolveDocumentOwnerTeamAsync(
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        UploadFinalizationPayload payload,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        if (payload.OwningTeamId is { } carried && carried != Guid.Empty)
+        {
+            return carried;
+        }
+
+        return await ownershipResolver.ResolveOwningTeamAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                // AssociationType may be the friendly spelling ("matter"); the resolver normalizes it.
+                TargetEntityLogicalName = payload.AssociationType,
+                TargetRecordId = payload.AssociationId,
+                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -279,6 +323,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     itemId,
                     documentId,
                     payload,
+                    message.UserId,
                     cancellationToken);
 
                 await UpdateJobStatusAsync(
@@ -558,6 +603,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             payload.AssociationType ?? "none",
             payload.AssociationId);
 
+        // Task 080: owned by a BU default owner team, never the app user. Refuse rather than create app-owned —
+        // this throw fails the message, the same outcome as any other failed create on this path.
+        var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "No owner team could be resolved for this save's document; refusing to create it app-owned "
+                + "(task 080). See the preceding RecordOwnershipResolver warning for which link broke.");
+
         // Step 1: Create the base document record using IDataverseService
         var createRequest = new Spaarke.Dataverse.CreateDocumentRequest
         {
@@ -565,7 +617,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ContainerId = payload.ContainerId,
             Description = payload.ContentType == SaveContentType.Email
                 ? payload.EmailMetadata?.Subject
-                : payload.AttachmentMetadata?.OriginalFileName
+                : payload.AttachmentMetadata?.OriginalFileName,
+            OwningTeamId = owningTeamId
         };
 
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
@@ -786,11 +839,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // be analysed or indexed. Its keys therefore carry THIS save's discriminator (its ProcessingJob id, stamped
         // only by the version-save path): a redelivery or retry of the same save repeats it and still skips; every
         // new save — even one whose bytes repeat an earlier version — has its own. Every other save carries none and
-        // keeps its key string byte-for-byte.
+        // keeps its key string byte-for-byte. The format lives on the handler that reads it (task 068 shares it with
+        // the Generate Profile request).
         var versionSaveJobId = payload.VersionSaveJobId;
-        var analysisIdempotencyKey = versionSaveJobId is { } saveJobId
-            ? $"analysis-{documentId}-documentprofile-version-{saveJobId:N}"
-            : $"analysis-{documentId}-documentprofile";
+        var analysisIdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId, versionSaveJobId);
 
         _logger.LogWarning(
             "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}, VersionSaveJobId={VersionSaveJobId}",
@@ -879,6 +931,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string itemId,
         Guid parentDocumentId,
         UploadFinalizationPayload payload,
+        string userId,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -974,6 +1027,25 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Get container ID from drive ID
             var containerId = driveId;
 
+            // Task 080: every child gets the PARENT's owner team, so an email and its attachments can never land in
+            // different business units. Resolved once, only once there is something to create. Unresolvable →
+            // no children at all: attachment failures never fail the main job (see remarks), and an app-owned
+            // child would sit in the ROOT business unit where nobody who can read the parent could read it.
+            var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken);
+            if (owningTeamId is null)
+            {
+                _logger.LogError(
+                    "No owner team could be resolved for the attachments of document {DocumentId}; creating none of "
+                    + "the {Count} attachment document(s) rather than creating them app-owned (task 080).",
+                    parentDocumentId, filteredAttachments.Count);
+                foreach (var att in attachments)
+                {
+                    att.Content?.Dispose(); // nothing below will consume them
+                }
+
+                return;
+            }
+
             // Process each attachment (sequential to avoid overwhelming SPE)
             var uploadedCount = 0;
             var failedCount = 0;
@@ -993,6 +1065,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         payload.EmailMetadata?.InternetMessageId,
                         payload.AssociationType,
                         payload.AssociationId,
+                        owningTeamId.Value,
                         cancellationToken);
 
                     uploadedCount++;
@@ -1055,7 +1128,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         {
             _logger.LogWarning(
                 "Association type {AssociationType} has no sprk_document lookup — document {DocumentId} " +
-                "will be created UNASSOCIATED. Known gaps: account, contact, sprk_todo (no column exists).",
+                "will be created UNASSOCIATED. Known gap: account (no column exists).",
                 associationType,
                 request.GraphItemId);
         }
@@ -1072,6 +1145,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string? internetMessageId,
         string? associationType,
         Guid? associationId,
+        Guid owningTeamId,
         CancellationToken cancellationToken)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -1120,7 +1194,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         {
             Name = attachment.FileName,
             ContainerId = containerId,
-            Description = $"Email attachment from {parentFileName}"
+            Description = $"Email attachment from {parentFileName}",
+            OwningTeamId = owningTeamId // task 080 — the parent email's team
         };
 
         var childDocumentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
@@ -1192,7 +1267,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
-                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
                 MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,

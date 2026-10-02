@@ -120,54 +120,6 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Searches for documents to share from the Office add-in.
-    /// Returns documents the user has permission to share.
-    /// </summary>
-    /// <param name="request">Search request with query, filters, and pagination.</param>
-    /// <param name="userId">Authenticated user ID for permission filtering.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Search response with matched documents and metadata for preview.</returns>
-    /// <remarks>
-    /// <para>
-    /// Searches the sprk_document entity and filters results based on:
-    /// - User's share permissions (only returns shareable documents)
-    /// - Association type/ID if specified
-    /// - Container/folder if specified
-    /// - Content type if specified
-    /// - Date range if specified
-    /// </para>
-    /// <para>
-    /// Results include thumbnail URLs and association info for UI preview.
-    /// </para>
-    /// </remarks>
-    Task<DocumentSearchResponse> SearchDocumentsAsync(
-        DocumentSearchRequest request,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Creates shareable links for the specified documents.
-    /// </summary>
-    /// <param name="request">Share links request containing document IDs and options.</param>
-    /// <param name="userId">Authenticated user ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Share links response with URLs and any invitations created.</returns>
-    /// <remarks>
-    /// <para>
-    /// Generated links resolve through Spaarke access controls. The link format
-    /// is configurable via ShareLinkBaseUrl setting.
-    /// </para>
-    /// <para>
-    /// Supports partial success - documents the user cannot share will be returned
-    /// in the Errors array, while accessible documents will have links generated.
-    /// </para>
-    /// </remarks>
-    Task<ShareLinksResponse> CreateShareLinksAsync(
-        ShareLinksRequest request,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Creates a new entity (Matter, Project, Invoice, Account, Contact) with minimal fields.
     /// </summary>
     /// <param name="entityType">Type of entity to create.</param>
@@ -204,16 +156,16 @@ public interface IOfficeService
     /// </summary>
     /// <param name="request">Create-To-Do request (name, description, contact assignee, due date, priority/effort scores, regarding).</param>
     /// <param name="userId">Authenticated user id (OBO oid).</param>
-    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> for <c>ownerid</c> attribution (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER pattern and says nothing about ownership. The create-time convention itself — caller vs BU Owner team — is task 080's to settle); null → app-owned.</param>
+    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> — an INPUT to the owner-team resolution, not the owner (task 080: every record created here is owned by a business-unit default owner team, and the create is refused with OFFICE_022 when none resolves — never app-owned).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The created To Do id + name, or null when creation is unavailable (no generic-create dep injected).</returns>
+    /// <returns>The created To Do id + name, or null when the request carries no name (the endpoint validates the name first, so this is a defensive guard).</returns>
     /// <remarks>
     /// <para>
     /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The
     /// regarding is written via the entity-specific lookup (<c>sprk_regardingmatter</c>/<c>project</c>/<c>invoice</c>)
     /// plus the ADR-024 denormalized resolver fields (id/name, and a best-effort record-type ref). App-only create
-    /// via <see cref="IGenericEntityService"/> with <c>ownerid</c> = caller (same posture as
-    /// <see cref="QuickCreateAsync"/> — no impersonated-create helper exists in the BFF).
+    /// via <see cref="IGenericEntityService"/>, owned by a business-unit default owner team resolved record-first
+    /// (regarding record → document → communication → caller; task 080), refused with OFFICE_022 when none resolves.
     /// </para>
     /// </remarks>
     Task<CreateTodoResponse?> CreateTodoAsync(
@@ -223,88 +175,27 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// FR-08 (spaarkeai-word-add-in-r1 task 022): re-runs document profiling for the given
-    /// <c>sprk_document</c> on user request from the pane's "Generate Profile" control. Fire-and-forget,
-    /// best-effort — mirrors Compose's shipped <c>refresh-profile</c> semantics exactly: dispatches the
-    /// SAME OBO direct-Action profile pipeline (<c>IDocumentProfileAi</c>) and returns as soon as the
-    /// DISPATCH DECISION is made (fast, synchronous), never awaiting the profile itself. Unconditionally
-    /// OVERWRITES any existing profile — no confirmation, no idempotency gate (deliberately NOT the
-    /// <c>AppOnlyDocumentAnalysis</c> Service-Bus job path, whose idempotency key would silently skip an
-    /// already-profiled or Failed document).
+    /// FR-08 (task 022; durable since task 068, #1086): requests a fresh document profile for the given
+    /// <c>sprk_document</c> from the pane's "Generate Profile" control. Queues ONE <c>AppOnlyDocumentAnalysis</c>
+    /// job whose key carries this request's id (task 029's discriminator), so every click runs, including on an
+    /// already-profiled or Failed document, with no confirmation; and returns once the job is on the queue, never
+    /// awaiting the profile. See <see cref="OfficeProfileQueue"/>.
     /// </summary>
     /// <param name="documentId">The target <c>sprk_document</c> id. Caller (the endpoint filter) has
     /// already authorized <c>write</c> on this record.</param>
-    /// <param name="httpContext">The current request context — the OBO bearer token and claims are
-    /// captured from it before the background dispatch detaches.</param>
-    /// <param name="cancellationToken">Request-scope cancellation token (not used by the detached
-    /// background profile itself, which runs under the app-shutdown token instead).</param>
+    /// <param name="httpContext">The current request: its trace id is the job's correlation id, and its caller is
+    /// recorded as the requester.</param>
+    /// <param name="cancellationToken">Unused: once started, the submit is not abandoned (see
+    /// <see cref="OfficeProfileQueue.QueueAsync"/>).</param>
     /// <returns>
-    /// The dispatch outcome (<see cref="GenerateProfileDispatchOutcome"/>). The caller MUST branch on
-    /// this — coordinator-review fix: an earlier draft ignored a bare <see langword="bool"/> return and
-    /// always answered 202, which let the endpoint claim success for a profile that would never run
-    /// (compound AI gate off). Only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce
-    /// a 202; <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> and
-    /// <see cref="GenerateProfileDispatchOutcome.NoBearer"/> are honest non-success outcomes the endpoint
-    /// maps to 503 and 401 respectively.
+    /// The outcome and, when queued, the job's id (<see cref="GenerateProfileResult"/>). The caller MUST branch on it:
+    /// only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce a 202;
+    /// <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> (profiling off) and
+    /// <see cref="GenerateProfileDispatchOutcome.QueueUnavailable"/> (Service Bus refused) are 503s.
     /// </returns>
-    Task<GenerateProfileDispatchOutcome> GenerateProfileAsync(
+    Task<GenerateProfileResult> GenerateProfileAsync(
         Guid documentId,
         HttpContext httpContext,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Gets recently used association targets and documents for the user.
-    /// </summary>
-    /// <param name="userId">Authenticated user ID.</param>
-    /// <param name="top">Maximum number of items to return per category (default: 10, max: 50).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Response containing recent associations, documents, and favorites.</returns>
-    /// <remarks>
-    /// <para>
-    /// Recent items are tracked when users save documents via the Office add-in.
-    /// Items are sorted by most recently used and filtered to only include
-    /// entities the user still has access to.
-    /// </para>
-    /// <para>
-    /// Storage mechanism: Recent items are stored in Redis sorted sets per user
-    /// for efficient retrieval. Keys expire after 30 days of inactivity.
-    /// </para>
-    /// <para>
-    /// Categories returned:
-    /// - RecentAssociations: Entities used as save targets (Matter, Project, etc.)
-    /// - RecentDocuments: Documents the user has accessed/modified
-    /// - Favorites: User-pinned entities (persisted in Dataverse)
-    /// </para>
-    /// </remarks>
-    Task<RecentDocumentsResponse> GetRecentDocumentsAsync(
-        string userId,
-        int top = 10,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Retrieves documents and packages them for attachment to Outlook compose emails.
-    /// </summary>
-    /// <param name="request">Request containing document IDs and delivery mode.</param>
-    /// <param name="userId">Authenticated user ID for permission verification.</param>
-    /// <param name="correlationId">Correlation ID for request tracing.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Response containing packaged attachments and any errors.</returns>
-    /// <remarks>
-    /// <para>
-    /// Each document is validated for:
-    /// - Existence in Dataverse
-    /// - User share permission via UAC
-    /// - Size limits (25MB per file, 100MB total per spec NFR-03)
-    /// </para>
-    /// <para>
-    /// Partial success is allowed - some documents may succeed while others fail.
-    /// Failed documents are reported in the Errors array.
-    /// </para>
-    /// </remarks>
-    Task<ShareAttachResponse> GetAttachmentsAsync(
-        ShareAttachRequest request,
-        string userId,
-        string correlationId,
         CancellationToken cancellationToken = default);
 
     /// <summary>

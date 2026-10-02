@@ -1,0 +1,269 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text.Json;
+using FluentAssertions;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Tests.Api.Office;
+using Sprk.Bff.Api.Tests.Shared.Office;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
+using Xunit;
+using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
+
+namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
+
+/// <summary>
+/// Protects write-path invariant I-6 for the Office writers (spaarkeai-word-add-in-r1 task 080): <b>every record the
+/// Office surface creates is owned by a business unit's DEFAULT OWNER TEAM — resolved record-first — or it is not
+/// created at all.</b>
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The failure mode.</b> These creates run app-only. With no explicit owner, Dataverse makes the BFF application
+/// user the owner, and that user sits in the ROOT business unit — measured 2026-09-22, all 512 <c>sprk_document</c>
+/// rows. Dataverse Deep depth reaches a unit's DESCENDANTS, never its parent, so no child-unit user could read a
+/// document they had just saved, and task 063's Run Index and task 064's To Do refused every ordinary user.
+/// </para>
+/// <para>
+/// <b>Why the refusals matter as much as the owner.</b> A writer that fell back to app ownership when no team resolved
+/// would pass every happy-path test here and silently reintroduce the defect. So each writer is also asserted to
+/// REFUSE — in its own error contract — and to have written nothing.
+/// </para>
+/// <para>
+/// Companion: <c>RecordOwnershipResolverTests</c> pins the resolution order and both refuse branches. These tests pin
+/// that the WRITERS ask (with the right target) and write what they are told. The resolver is doubled at its module
+/// boundary (<see cref="RecordOwnershipResolverDouble"/>); everything else is the real route, filters and services.
+/// </para>
+/// </remarks>
+[Trait("status", "new")]
+public class OfficeRecordOwnershipTests
+{
+    private const string SaveContainer = "b!test-office-save-drive";
+
+    private static readonly byte[] Docx = MinimalDocx.Create("owned draft");
+    private static readonly EntityReference OwnerTeam = new("team", RecordOwnershipResolverDouble.DefaultTeamId);
+
+    // =====================================================================================
+    // sprk_document — POST /api/office/save
+    // =====================================================================================
+
+    [Fact]
+    public async Task Save_FiledToARecord_OwnsTheNewDocumentByThatRecordsTeam_AndHandsTheSameTeamToTheWorker()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var matterId = Guid.NewGuid();
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        {
+            ContentType = SaveContentType.Document,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = matterId },
+            Document = new DocumentMetadata { FileName = "Owned.docx", ContentBase64 = Convert.ToBase64String(Docx) },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        world.CreatedDocumentOwningTeams.Should().Equal(RecordOwnershipResolverDouble.DefaultTeamId);
+
+        var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
+        // The friendly spelling the add-in sends; the resolver maps it to sprk_matter (RecordOwnershipResolverTests).
+        asked.TargetEntityLogicalName.Should().Be("matter", "a filed document follows its record, not its uploader");
+        asked.TargetRecordId.Should().Be(matterId);
+
+        // The worker creates an email's attachment children; it must give them the parent's team, not resolve anew.
+        var payload = world.FinalizationPayloads.Should().ContainSingle().Subject;
+        Guid.Parse(OfficeVersionSaveWorld.PayloadValue(payload, "OwningTeamId")!)
+            .Should().Be(RecordOwnershipResolverDouble.DefaultTeamId);
+    }
+
+    [Fact]
+    public async Task Save_FiledToNothing_AsksForTheCallersBusinessUnitTeam_WithNoTarget()
+    {
+        // The Word ribbon quick-save and every pane save with no "Related to" — the save spine's mainline (task 065).
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        {
+            ContentType = SaveContentType.Document,
+            Document = new DocumentMetadata { FileName = "Unfiled.docx", ContentBase64 = Convert.ToBase64String(Docx) },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted, "a save with no related record is a required use case");
+        world.CreatedDocumentOwningTeams.Should().Equal(RecordOwnershipResolverDouble.DefaultTeamId);
+        factory.Ownership.Requests.Should().ContainSingle().Which.HasTarget.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Save_WhenNoOwnerTeamResolves_Returns403Office022_AndWritesNothing()
+    {
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        factory.Ownership.TeamId = null;
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        {
+            ContentType = SaveContentType.Document,
+            TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = Guid.NewGuid() },
+            Document = new DocumentMetadata { FileName = "Refused.docx", ContentBase64 = Convert.ToBase64String(Docx) },
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_022");
+        // Refused before the job row, the upload and the document row — not after the bytes moved.
+        world.ShouldHaveWrittenNothing();
+        world.SpeItems.Values.Should().NotContain(i => i.DriveId == SaveContainer && i.Name == "Refused.docx");
+    }
+
+    [Fact]
+    public async Task VersionSave_NeverAsksForAnOwner_AndStillSucceedsWhenNoTeamWouldResolve()
+    {
+        // A version save writes a new SPE version of an EXISTING document and creates no row, so its row keeps the
+        // owner it has. Proven by making every ownership answer a refusal: the version save must not notice.
+        var world = new OfficeVersionSaveWorld();
+        using var factory = new OfficeVersionSaveTestWebAppFactory(world);
+        var (documentId, _) = world.SeedDocument(SaveContainer, "Brief.docx", MinimalDocx.Create("v1"));
+        factory.Ownership.TeamId = null;
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/save", OfficeVersionSaveWorld.VersionSave(documentId, MinimalDocx.Create("v2")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Ownership.Requests.Should().BeEmpty();
+        world.DocumentCreates.Should().Be(0);
+    }
+
+    // =====================================================================================
+    // sprk_todo — POST /api/office/todo (record-first: record regarding → document → communication → caller)
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateTodo_WithARecordAndADocument_IsOwnedByTheRecordsTeam_NotTheDocuments()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var matterId = Guid.NewGuid();
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Review red-lines",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            DocumentId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle()
+            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+
+        var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be("sprk_matter");
+        asked.TargetRecordId.Should().Be(matterId);
+    }
+
+    [Fact]
+    public async Task CreateTodo_WithOnlyADocument_IsOwnedByTheDocumentsTeam()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var documentId = Guid.NewGuid();
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Follow up on the draft",
+            DocumentId = documentId,
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle()
+            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+
+        var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be("sprk_document");
+        asked.TargetRecordId.Should().Be(documentId);
+    }
+
+    [Fact]
+    public async Task CreateTodo_WhenNoOwnerTeamResolves_Returns403Office022_AndCreatesNothing()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        factory.Ownership.TeamId = null;
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Nobody owns this",
+            RegardingEntityType = "Project",
+            RegardingRecordId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_022", "distinct from OFFICE_010's generic create failure");
+        factory.CreatedEntities.Should().BeEmpty();
+    }
+
+    // =====================================================================================
+    // sprk_invoice — POST /api/office/quickcreate/invoice (filed against nothing: the caller's unit)
+    // =====================================================================================
+
+    [Fact]
+    public async Task QuickCreateInvoice_IsOwnedByTheCallersTeam_NotTheCaller()
+    {
+        var callerSystemUserId = Guid.NewGuid();
+        using var factory = InvoiceFactory(callerSystemUserId, out var created);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-0080" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        created.Should().ContainSingle()
+            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+        factory.Ownership.Requests.Should().ContainSingle()
+            .Which.CallerSystemUserId.Should().Be(callerSystemUserId);
+    }
+
+    [Fact]
+    public async Task QuickCreateInvoice_WhenNoOwnerTeamResolves_Returns403Office022_AndCreatesNothing()
+    {
+        // Was best-effort until task 080: an unresolved owner left the invoice app-owned in ROOT and still created it.
+        using var factory = InvoiceFactory(Guid.NewGuid(), out var created);
+        factory.Ownership.TeamId = null;
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-0081" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ErrorCodeOf(response)).Should().Be("OFFICE_022");
+        created.Should().BeEmpty();
+    }
+
+    // =====================================================================================
+    // Harness
+    // =====================================================================================
+
+    private static OfficeQuickCreateTestWebAppFactory InvoiceFactory(Guid callerSystemUserId, out List<Entity> created)
+    {
+        var factory = new OfficeQuickCreateTestWebAppFactory();
+        var captured = new List<Entity>();
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        factory.Entities
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((entity, _) => captured.Add(entity))
+            .ReturnsAsync(Guid.NewGuid());
+        created = captured;
+        return factory;
+    }
+
+    private static async Task<string?> ErrorCodeOf(HttpResponseMessage response)
+    {
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.TryGetProperty("errorCode", out var code) ? code.GetString() : null;
+    }
+}

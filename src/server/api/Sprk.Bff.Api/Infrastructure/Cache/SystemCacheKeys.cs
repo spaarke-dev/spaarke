@@ -16,8 +16,10 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <para>
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
-/// 14 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; see <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c>
-/// for the per-exception three-question justification).
+/// 15 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
+/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068, its justification in its own remarks; see
+/// <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c> for the earlier per-exception
+/// three-question justification).
 /// </para>
 /// <para>
 /// AI wrappers that use the <c>"system"</c> tenant sentinel against <see cref="ITenantCache"/>
@@ -87,6 +89,17 @@ public static class SystemCacheKeys
     /// </summary>
     public const string SchedulerLastFire = "scheduler-last-fire";
 
+    /// <summary>
+    /// The SSE event number line of one Office job (task 068, #1086). Site: <c>Services/Office/JobStatusService.cs</c>.
+    /// Raw key: <c>sdap:job:{jobId}:seq</c> (Redis <c>INCR</c>, 24 h sliding expiry), beside that job's own pub/sub
+    /// channel <c>sdap:job:{jobId}:status</c>.
+    /// Justification: (1) existing — it replaced a per-instance in-memory dictionary, which numbered one job's events
+    /// independently on each instance and after every restart; (2) a tenant key would not help — the job's GUID is the
+    /// unit, and every instance publishing for that job must share one counter; (3) without it a <c>Last-Event-ID</c>
+    /// reconnect skips or repeats events.
+    /// </summary>
+    public const string JobStatusSequence = "job-status-sequence";
+
     // ---- Authentication & token caches ------------------------------------
 
     /// <summary>
@@ -108,17 +121,20 @@ public static class SystemCacheKeys
     public const string DataverseEntityMetadata = "dv-entity-metadata";
 
     /// <summary>
-    /// The set of Dataverse entities carrying <c>sprk_issecure</c>, derived from live attribute metadata
-    /// (unified-access-control-r2 task 075).
+    /// The org's entity catalog as the securable-entity registry derives it from ONE live metadata query:
+    /// every entity LOGICAL NAME in the org, and the subset carrying <c>sprk_issecure</c>
+    /// (unified-access-control-r2 task 075; the known-entity half added by task 151 / #1038).
     /// Site: <c>Infrastructure/Dataverse/SecurableEntityRegistry.cs</c>. Raw key:
-    /// <c>sdap:dv:securable-entities</c>.
+    /// <c>sdap:dv:dv-securable-entities:v2</c> (<c>SecurableEntityRegistry.CacheKey</c>).
     /// Justification: like <see cref="DataverseEntityMetadata"/> this is org-wide SCHEMA, not per-tenant
-    /// data — which entities can be marked secure is a property of the solution, identical for every caller,
-    /// so tenant-scoping would defeat the cache without changing any answer. The cached value is a list of
-    /// entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
-    /// Fail-closed note: an EMPTY result is deliberately never written to this key — an empty set is
+    /// data — which entities exist and which can be marked secure is a property of the solution, identical
+    /// for every caller, so tenant-scoping would defeat the cache without changing any answer. The cached
+    /// value is entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
+    /// Versioning: <c>:v2</c> because the unversioned key holds the previous build's bare securable-names
+    /// array, which must never be read as the known-entity set; the value is also shape-checked on read.
+    /// Fail-closed note: an EMPTY set is deliberately never written to this key — an empty set is
     /// indistinguishable from a failed metadata query, and caching it would make every record read as
-    /// non-secure for the 6h TTL.
+    /// non-secure (or every entity read as unknown) for the 6h TTL.
     /// </summary>
     public const string DataverseSecurableEntities = "dv-securable-entities";
 

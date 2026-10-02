@@ -63,12 +63,39 @@ async function renderOutline(size, outName, padRatio = 0.04) {
   console.log(`wrote ${outName} (${size}×${size}, outline)`);
 }
 
+/**
+ * Every output this script can produce. `icon-color-192.png` (spaarkeai-word-add-in-r1 task 078) is the
+ * COLOR icon for the combined Outlook + Word app PACKAGE: the Microsoft 365 app-package validation expects
+ * the color icon at 192×192 (outline 32×32). The 128px `icon-color.png` is left untouched — the standalone
+ * Outlook manifest still references it until the owner cuts over to the combined package.
+ */
+const TARGETS = {
+  'icon-16.png': () => renderColor(16, 'icon-16.png'),
+  'icon-32.png': () => renderColor(32, 'icon-32.png'),
+  'icon-64.png': () => renderColor(64, 'icon-64.png'),
+  'icon-80.png': () => renderColor(80, 'icon-80.png'),
+  'icon-128.png': () => renderColor(128, 'icon-128.png'),
+  'icon-color.png': () => renderColor(128, 'icon-color.png'),
+  'icon-color-192.png': () => renderColor(192, 'icon-color-192.png'),
+  'icon-outline.png': () => renderOutline(32, 'icon-outline.png'),
+};
+
+/**
+ * `node generate-icons.mjs`                     → render every target
+ * `node generate-icons.mjs icon-color-192.png`  → render only the named target(s)
+ *
+ * Rendering only what changed matters: re-running the full set re-encodes icons the LIVE add-in already
+ * serves, producing byte churn (and a different `sharp` version can shift pixels) with no visual intent.
+ */
 async function main() {
-  for (const size of [16, 32, 64, 80, 128]) {
-    await renderColor(size, `icon-${size}.png`);
+  const requested = process.argv.slice(2);
+  const unknown = requested.filter(name => !(name in TARGETS));
+  if (unknown.length > 0) {
+    throw new Error(`Unknown icon target(s): ${unknown.join(', ')}. Known: ${Object.keys(TARGETS).join(', ')}`);
   }
-  await renderColor(128, 'icon-color.png');
-  await renderOutline(32, 'icon-outline.png');
+  for (const name of requested.length > 0 ? requested : Object.keys(TARGETS)) {
+    await TARGETS[name]();
+  }
 }
 
 main().catch(err => {

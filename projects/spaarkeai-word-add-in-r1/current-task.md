@@ -1,155 +1,523 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-## 🚦 MERGE TO MASTER — **NOT DONE. THIS IS THE FIRST THING TO FINISH.**
-
-> **Last Updated**: 2026-09-29 (context-handoff at 9% context; session stopped here deliberately)
-
-| Field | Value |
-|---|---|
-| **Branch HEAD** | `ce4e8be84` — **pushed**, tree clean, **0 behind master** |
-| **PR** | **#960**, marked **ready** (not draft), `mergeable=MERGEABLE` |
-| **Blocker** | `state=BLOCKED` only because **`Router` has not reported at `ce4e8be84`** — CI restarted on the push |
-| **NEXT ACTION** | Full suite is ✅ **done and green** (13,003/0/56). So: **1)** wait for `Router` = pass at the current HEAD; **2)** run `/merge-to-master`. Nothing else is outstanding before the merge. |
-
-### Verified AT `ce4e8be84` (after merging master's last 35 commits)
-
-| Gate | Result |
-|---|---|
-| Merge of master | **no conflicts**; our `OwningTeamId` in the shared `Spaarke.Dataverse/Models.cs` **survived** (both sides touched that file) |
-| Build | **0 warnings / 0 errors** |
-| ArchTests, full unfiltered | **333 / 333** — up from 326; master's 3 new guard files pass against our code |
-| Full `Sprk.Bff.Api.Tests` | ✅ **13,003 passed / 0 failed / 56 skipped** (13,059 total, 12 m 34 s) — landed just after the first handoff write, so **no re-run is needed**. Reconciles upward from 12,985 at `71cd2aeff`: +18 tests, which is master's new Compose/ReviewMemo/DocumentLinkFieldMap coverage arriving with its 35 commits. |
-| Publish | 45.67 MB vs 60 MB ceiling (measured at `77242c010`) |
-| CVE | none |
-
-### 🔴 Two things about the merge gate that will waste your time if you do not know them
-
-**1. `Router` is structurally gated behind the advisory tier it ignores.** `ci-router.yml:275` is
-`needs: [classify, tier1, tier2]` with `if: always()`. Tier 2 is excluded from Router's *adjudication* by
-construction (`:280-285` — a timeout reports `CANCELLED`, which an allow-list cannot cover), but Router still
-**waits for tier2 to finish**. Tier 2 burns its 30-minute cap and is cancelled (6/6 historically). So expect
-**~40 minutes** before `Router` reports, and expect exactly one non-pass check —
-`Tier 2 (Advisory) / Full Unit Tests` = `cancel` — which is **normal and not a blocker**.
-`state=UNSTABLE` (not `BLOCKED`) is the mergeable state once Router passes.
-
-**Proof it works**: at the previous commit `71cd2aeff` the final state was 37 checks — **35 pass, 1 cancel
-(Tier 2), 1 skipping (Trivy)** — with **`Router: pass / SUCCESS`**.
-
-**2. There is a TREADMILL.** Master moved **35 commits in the hour** spent waiting for one Router cycle, and it
-moved 229 and then 10 before that. If you insist on "fresh full CI at a commit that is 0-behind", the condition
-may never hold. The judgment made here, for you to accept or override: merge on the strength of **local
-verification at the exact commit** (build + full arch + full suite) plus a passed Router, rather than chasing a
-fresh Router that master will invalidate again. Master's last 35 commits were Compose-r8 wrap-up +
-field-mapping, with **no overlap** on `RecordCreationService`, `CreateTimeFieldMapping`,
-`RecordOwnershipResolver`, `OfficeService` or `OfficeEndpoints` — checked, not assumed.
-
-**Residual risk, named rather than hidden**: a *semantic* merge conflict with master that local tests miss. That
-is not hypothetical — it happened this session (UAC-r2 removed `"account"` from `validEntityTypes` while our
-test asserted an `account` target is still gated; different files, clean merge, red suite). If CI goes red on
-master after the merge, look there first.
-
-### Merge mechanics
-Use **`/merge-to-master`**, not a bare `gh pr merge` — it performs the pre-merge branch update and the
-**worktree sync** (this is a worktree; the main checkout's local `master` needs an explicit pull afterwards).
-⚠️ Before any `--delete-branch`, confirm **pending is genuinely 0** — deleting the branch while jobs are queued
-fails them at `Checkout` and looks like a quality regression (happened on PR #890).
+> **Last Updated**: 2026-10-01 (075 done and gated; ship its PR, then task 079)
+> **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
 
-## 🔵 ACTIVE TASK — **077** (analysis done, implementation NOT started) — READ THIS FIRST
+## ⚡ Quick Recovery (READ THIS FIRST)
 
-> **Last Updated**: 2026-09-29 (by context-handoff, pre-merge-to-master)
+### ✅ Owner answers, 2026-10-01 (all actioned; the "Waiting on the OWNER" list below is SUPERSEDED for items 1–4)
+
+| # | Owner's words | Done |
+|---|---|---|
+| 1 | Drift on Secure Record Owner: *"yes can remove them if not needed"* | **Removed live**: 40 → 8, proven by probes; `-Verify` PASS. `notes/082-secure-owner-role.md` §4.1; snapshot `notes/082-role-before-strip-2026-10-01.json`; guide §5.4 updated; #1046 commented |
+| 2 | Hotmail guest: *"this is in dev and we'll change this"* | The owner changes the account; no task. UAC-r2: no census exception |
+| 3 | #1037: *"yes write the task"* | **Task 084** authored (validator PASS); TASK-INDEX row; #1037 commented. It folds in the new **#1075 / ISS-014** (the ribbon quick-save sends `sprk_matter` → 400 `OFFICE_002`; latent until 078's package is installed) |
+| 4 | Trusted-tenant list: *"yes proceed"* | UAC-r2's owner had already chosen (b). 141 proceeds, but **is not in their current batch**, so 083 stays blocked |
+
+All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
+
+### 🔄 ACTIVE: ship task 075's PR, then task 079
 
 | Field | Value |
 |---|---|
-| **Task** | 077 — FR-16's three Find gaps |
-| **File** | `tasks/077-find-view-three-gaps.poml` |
-| **Rigor / tier** | FULL · opus @ xhigh · steps directional |
-| **Status** | in-progress — **reproduce-first + design COMPLETE and committed; NO implementation written yet** |
-| **Next Action** | Implement in this order, per `notes/077-find-gaps.md` §"Implementation plan": **(1)** thread `savedContext.documentId` into `FindView` at `App.tsx:748` — this fixes gap (c) AND unlocks Outlook (b); **(2)** add the records half using `useDocumentProfile` keywords → `POST /api/ai/search/records`; **(3)** Outlook copy says *email* not *document*; **(4)** tests: records negative-authorization, post-save transition, mixed-result lazy scroll. |
+| **075** | ✅ DONE 2026-10-01 (`notes/075-dead-code.md`). Dead Outlook adapter deleted; one share-link minter; uncalled factory API removed; `OFFICE_INTERNAL` → 500 with no exception text; dead `GenerateDataverseUrl` deleted. Suite 13,072/0/54; ArchTests 337; publish −330 B; office-addins jest 62/817, lint 0, build OK |
+| **Next Action** | 1) Commit 075 and push; open the PR. 2) Merge after `Router` passes and nothing is pending (`gh pr merge N --merge`, **NEVER `--delete-branch`**); sync both checkouts. 3) Portfolio #945 Tasks Completed → 72. 4) Start task **079** via `task-execute` (`tasks/079-record-integrity-reconciliation.poml`: SC-6/SC-8 test citations, the FR-12 ADR-Tensions row, unsupported ✅ claims, POML status drift, 10 unparseable POMLs) |
+| **Queue after 079** | 090 (wrap-up, with the `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
+| **For the owner** | (1) #1081 before the next BFF deploy from master. (2) `SystemCacheKeys.JobStatusSequence` architecture review. (3) #1088, #1089, #1090 filed |
 
-### 🔑 077's design is already decided — do not re-derive it
+### ✅ Shipped 2026-10-01: #1091 merged as `08b70d6cc` (task 068, #1086 / ISS-018)
 
-**Neither escalation trigger fires.** Both were checked and the reasons are recorded in
-`notes/077-find-gaps.md`:
+- 37 checks terminal: `Router` pass, Build & Test pass (54m51s, full suite), Code Quality pass, Office server tests pass; Tier 2 Full Unit Tests cancelled at its 30-minute cap (advisory). Merged `--merge`, branch kept; both checkouts fast-forwarded. #1086 closed; ISS-018 → Done.
+- What it did: Generate Profile → one queued `AppOnlyDocumentAnalysis` job (`OfficeProfileQueue`), 202 only after the submit with `jobId` + `Location`; job locks always release and a job may take back its own lock after 1 min; SSE ids = Redis `INCR` per job, subscribe before the snapshot, polling fallback. Suite 13,071/0/54; ArchTests 337; publish +2,206 B. `notes/068-durability-siblings.md`.
 
-- **Trigger 2 avoided — (b) and (c) are ONE fix.** Outlook is `documentIdentity === undefined` because
-  `App.tsx:207` gates on **`canGetDocumentUrl`** (correct NFR-10 design; an email has no document URL), and
-  Outlook learns a `documentId` from exactly one place — a completed save. So its Find tab is dead *until you
-  save*, not permanently. Fix (c) and it works when it should. No Graph call, no manifest change, no FR-16
-  amendment.
-- **Trigger 1 avoided — no new BFF endpoint.** `hooks/useDocumentProfile.ts` already reads
-  `sprk_filekeywords` / `sprk_filetldr` / `sprk_filesummary`. So the bridge is two EXISTING calls composed
-  client-side. `/api/ai/search/records` satisfies the per-row-authorization constraint — verified, not assumed:
-  `RecordSearchEndpoints.cs:41` applies the filter, `AuthorizeRowsAsync` at `:162`/`:242`, and `:115-123` is a
-  forcing function that **refuses the request if the filter is ever detached**.
-- **Honest limitation to keep in the UI's framing**: this returns records related to the document's SUBJECT
-  MATTER, not records vector-similar to its content. True cross-entity vector similarity needs the endpoint
-  trigger 1 forbids and is separate, larger work.
+### ✅ Shipped 2026-10-01: #1085 merged as `402afb657` (task 060)
 
-### 🟢 WHERE THE BRANCH IS: merging to master
+- All 37 checks terminal: `Router` pass, Build & Test pass (1h0m45s), Tier 2 Full Unit Tests pass (26m42s), Code Quality pass. Merged with `--merge`, branch kept.
+- Main checkout and worktree fast-forwarded to `402afb657`. #1084 closed with a comment; ISS-017 → Done. The live restart check waits on the next deploy.
 
-PR **#960** marked ready 2026-09-29. Final pre-merge gates, all re-measured after merging master twice
-(UAC-r2's 228-commit #950, and #1028):
+### ✅ DONE 2026-10-01: task 060 (#1084 / ISS-017)
 
-| Gate | Result |
+- **What it found** (App Insights `spe-insights-dev-67e2xz`):
+  - Both Dataverse job reads returned ANONYMOUS types read through `dynamic`. That throws across assemblies
+    (`RuntimeBinderException`, 2026-08-25), so **the 039 idempotency check never worked live** and a job poll that
+    missed memory returned 404.
+  - **40 saves / 13 job rows / 27 `sprk_payload` > 50,000 refusals** in 60 days: the content base64 was in the payload.
+  - The pane hung on Completed-without-document, and its SSE handler used the wrong event names.
+- **Decision (written before code)**: the store is the `sprk_processingjob` row.
+  - The save's own view is kept in `sprk_result`; the workers never write it.
+  - Typed `ProcessingJobRecord` reads.
+  - ONE effective-state rule (`OfficeJobStatusService.ToEffectiveView`) for the status read AND the idempotency check,
+    with a 5-minute abandoned rule.
+  - Payload = metadata only; a create failure → `OFFICE_014`, a retryable 502, before any write.
+- **Built**: new `Services/Office/OfficeJobStatusService.cs` (stream moved verbatim); `OfficeService` ctor 20 → 19 and
+  `_jobStore` gone; the dead `Workers/Office` stub deleted; the pane always reaches an outcome, applied once.
+- **Gates**: suite **13,058/0/54** (exact); ArchTests 337; jest 62/816; lint 0; tsc 68 (0 prod); publish **+338 B**
+  (212 = 212); seeds caught 11 / 3 / 1 / 1.
+- **Records**: `notes/060-job-status-store-and-extraction.md` (§1 findings, §2 decision, §6 reds, §9 gates); POML
+  completed (with `<ui-tests>` for the live restart check); TASK-INDEX ✅; portfolio #945 = 70 done.
+- **UAC-r2 told**; they confirmed **no action** on their side (their #1083 overlaps only in different hunks of
+  `OfficeEndpointsContractTests.cs`; #1083 is a draft).
+- **App Insights recipe** (for the next investigation):
+  - get the appId with `az monitor app-insights component show -a spe-insights-dev-67e2xz -g spe-infrastructure-westus2 --query appId`;
+  - query through REST `POST https://api.applicationinsights.io/v1/apps/{appId}/query` with a token for `https://api.applicationinsights.io`;
+  - NOT `az monitor app-insights query`: Windows quoting mangles KQL;
+  - `first`, `last` and `kind` are KQL reserved words.
+
+### ✅ Shipped 2026-10-01: #1082 merged as `d68924b93` (tasks 084 + 085)
+
+- **084** (`91e73b6fc`): pickable equals savable. #1037 closed; #1075 closed.
+- **085** (`04158652e`): the invoice quick-create writes `sprk_name`. #1079 stays open for the 3 other-owner sites.
+- Suite 13,065/0/54; ArchTests 337. Publish: master 47,666,117 → 47,671,272 B (+5,155 B; 085 +30 B).
+- CI: `Router` passed, 0 pending. Tier 2 Full Unit Tests was cancelled at its 30-minute cap (advisory).
+- Real-Dataverse probe done for 085. Records: `notes/084-…md`, `notes/085-invoice-quickcreate-name.md`.
+- Portfolio #945 synced: 86 tasks, 69 ✅, Active / In progress.
+
+**Critical context:**
+- 🔔 **NEW, owner decision, BEFORE the next BFF deploy from master: ISS-016 / #1081.**
+  - The root BU's default team ("Spaarke") has **0 privileges**, so Dataverse refuses to let it own anything.
+  - 080 (on master) gives it ownership for root-BU callers. That affects **9 people, including the owner**, on the
+    unfiled save, the quick-creates and To Do: a 5xx, not `OFFICE_022`.
+  - Found by 085's live probe. Recommendation: (A) a minimal Read-only owner role on the root team, as 082 did.
+    Do NOT change role config without the owner's go.
+  - **UAC-r2 depends on the decision** (their 130 confirmed-invoice create and 146 child writers both go through
+    our resolver; they will NOT fork a fix). **Message them when the owner decides.** If it becomes a resolver
+    behaviour change (e.g. a new refusal code instead of a propagated fault), they will map it to a clean 4xx on
+    130's route.
+- **Open for the owner (084 + 085):** the live checks (no deploy; the owner defers deploys), and 084's latency on the real BFF (≈0.71 s p50 modelled from a workstation; the trigger is 1 s).
+- **UAC-r2 coordination (2026-10-01):** their task 151 replaces `ISecurableEntityRegistry.IsSecurableAsync` / `IsKnownEntityAsync` with `ClassifyEntityAsync` → `EntitySecurability`. No doubles or callers on our branch; they already migrated the two doubles in `OfficeEndpointsContractTests.cs` (on master). Their task 130 edits `CallerRecordAccessProbe.cs` (`CallerHoldsPrivilegeAsync`), and so did our 084 (three members `protected virtual`, plus `GetCallerRightsForRecordsAsync`), so **expect a small overlap there. Whoever lands second rebases.**
+- **#1076 (059) merged** as `c08ef6013`.
+
+**Found this session:** #1079 (ISS-015). `sprk_invoice` has no `sprk_invoicename`. Our half is task 085; `DataverseIndexSyncService.cs:52-55` and two scripts belong to others.
+
+| Field | Value |
 |---|---|
-| Build | 0 warnings / 0 errors |
-| Full `Sprk.Bff.Api.Tests` | **12,985 passed / 0 failed / 56 skipped** (13 m 51 s) |
-| ArchTests, full unfiltered | **326 / 326** |
-| ESLint (office-addins) | clean, `--max-warnings 0` |
-| tsc | 68 total / **0 production** (pinned at 68) |
-| Publish | **45.67 MB** vs 60 MB ceiling |
-| CVE | none |
+| **After 060** | Next task: 068 (deletes the profile dispatcher: ctor 19 → 16) → 075, then 079 → 090; 076 when the owner answers; 083 after UAC-r2 sends 141's contract |
 
-**If the merge did not complete**, resume at `/merge-to-master`. The branch was `MERGEABLE`, 0 behind.
+### This session (2026-09-30 → 10-01), all committed and pushed
 
-### WORK COMPLETED THIS SESSION
-
-| Task | Outcome |
+| Item | Result |
 |---|---|
-| **069** | ✅ Debt pinned (74→68 after 072), trailing-newline hole closed FOR REAL, three stale claims retired. Finding (a) "gate does not bind" **REJECTED on evidence** — both jobs already failed the run; the POML conflated *fails the run* with *blocks a merge*. 6 CI proofs. |
-| **070** | ✅ New `server-tests` job runs **1,776** office-scope tests per PR in **9 m 40 s** (2.1× margin) via a 15-term namespace filter — a third option the POML did not anticipate, changing no test file. Found its own defect on run 1: missing `lfs: true` → LFS **pointer files**. 4 CI proofs. |
-| **072** | ✅ Lint ran for the FIRST time: **32 violations → 0**. No rule disabled (one rule *option*, `no-namespace: allowDeclarations`). Found **two INERT suppressions**. `--max-warnings 0` proven load-bearing. |
-| **074** | ✅ **Owner decided: accept as live-host-manual**, harness declined. 109 e2e tests classified, marked in-file, listed in `parity-checklist.md` §10. |
-| merge + repair | Merged master twice; fixed ADR-052 doc drift, raised the ADR-010 ceiling 157→158 (UAC-r2 verified), repaired one test red from a **semantic merge conflict** (`account` removed from `validEntityTypes`). |
-| hooks | `.husky/pre-commit` now skips lint-staged on **merge** commits (587-file merges were SIGKILLed). Uses `git rev-parse --git-path MERGE_HEAD` — a literal `.git/MERGE_HEAD` never fires in a worktree. |
+| **#1045 merged** `38ad83962` | 080 + 077 + 078 + the security fixes #1038 / #1043 (both issues closed). The owner said to "take the most efficient path" |
+| **082 ⚠️ via #1051** `b8fc4dc3e` | The Secure Record Owner role covers the child tables. LIVE in dev: 36 → 40 privileges. Adds `config/secure-record-owner-role.json` (the ONE list, which UAC-r2's 145/146 read and extend), `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` (`-Verify`) and guide §5. #1046 closed |
+| **083 authored** (blocked) | The #1044 writer half: default `sprk_assignedto` to the caller's contact. It waits on UAC-r2 141 |
+| **058 ✅ via #1052** `76a9b0fa0` | The fabricated-data Office routes were deleted; `AssociationType` moved to `Models/Office/AssociationType.cs`. #1023 and #1024 closed; #229 commented (only the 060 job-status store remains there) |
+| Issues filed | #1046 (ISS-013) |
 
-### 🔴 OPEN DECISIONS FOR THE OWNER
+**Critical context:**
+- `spaarke-bff-dev` still runs `2682e8225`, which is PRE-#1045, so #1038/#1043 stay live THERE until someone deploys
+  master. The owner defers deploys.
+- 080's owner actions (the backfill `-Apply`, the Test User 1 live checks) are still pending; see below.
+- The required check is only `Router`. Tier 2 "Full Unit Tests" is always CANCELLED at its 30-min cap, which is not a
+  failure. The legacy `Build & Test (Debug)` takes about 60 min.
+- Merge PRs with `gh pr merge N --merge` (a merge commit, as #960 was). NEVER use `--delete-branch`; the branch
+  continues.
 
-1. **Five zero-assertion tests in `SaveFlow.test.tsx`** pass inside the gated 56, so the gate counts them as
-   coverage. Route to `/test-diet` at 090 or its own task. (Raised in 072.)
-2. **081's premise is overstated** — measured live: **173 of 187 users are in ROOT**, so they read root-owned
-   records fine; the defect bites **14** child-BU users, not "every ordinary user". **Owner decided: wait for
-   080**, no manual backfill. Recipe kept in `notes/081-manual-backfill-assessment-2026-09-28.md`.
-3. **Tier 1 migration is now LIVE, not hypothetical** — the CI shadow window **CLOSED** (9/8 agreeing, 0 false
-   greens). `server-tests` + `lint` should migrate into Tier 1 and be **deleted** from
-   `office-addins-tests.yml`; issue **#1016** converts from advisory to urgent. Deliberately not done pre-merge
-   (edits `ci-tier1-blocking.yml`, no CI cycle to validate). Detail appended to `notes/070-pr-time-runner.md`.
+### Coordination with UAC-r2 (2026-09-30, late)
 
-### HANDED OFF / UNBLOCKED
+- Their task 130 (C8 finance IDOR, **#1053**) also edits `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`,
+  adding Api/Finance and ScorecardCalculatorEndpoints to the census. **Whichever lands second rebases**; they rebase if
+  #1052 merges first.
+- **083 is blocked on their 141**, which waits on an OWNER answer about the trusted-tenant list. They will send 141's
+  link contract after it executes.
 
-- **#1014** — ADR-038 amendment collision → UAC-r2. Theirs stays **A2**; ours becomes **A3**, authored against
-  their **amended** B8 text (now on master) or it silently reverts them.
-- **#1015** — Office route census in `RouteAuthorizationGuardTests` → UAC-r2 (their surface). ⚠️ `FilterMarker`
-  is at `:1528-1531`; `AddJobOwnershipFilter` is the worst case because **"Ownership" is not in the alternation
-  at all**, so widening only for `Access` still misses it. Needs a negative control.
-- **#1016** — retiring `sdap-ci.yml` must extend Tier 1's filter or
-  `SpeWriteSinkContainerProvenanceGuardTests` is evaluated **nowhere**.
-- **058 UNBLOCKED** — UAC-r2 confirmed no dependency on `/office/recent`. 🔴 Their `AssociationType`
-  change (`Account` removed, **ordinal 3 BURNED**) must survive a **hand** rebase. ⚠️ Deleting the routes also
-  leaves **live validated config** dangling (`OfficeRateLimitOptions.RecentRequestsPerMinute` with
-  `[Range(1,1000)]`, plus an unreachable `Recent` enum member) — neither breaks the build. Detail in the POML.
-- **080 UNBLOCKED** — task 043 is now **on master**, so team-owned records confer via `owningteam` and 080 no
-  longer ships into the #1011 hazard. #1011 itself is still OPEN (they routed around it, did not repair it).
+### 🔔 Waiting on the OWNER
 
-### NEXT TASKS, in the owner's stated order
+1. **The drift: 32 privileges on `Secure Record Owner` outside the list.** They are Create/Write/Delete/Assign/Share/Append/AppendTo on project, matter, work assignment and document, plus the SharePoint four at Global. Origin unrecorded; UAC-r2 did not add them, and nothing depends on them. **Recommendation: remove them** (guide §5.4, whose `$keep` now keeps the 8). Record the answer in `notes/082-secure-owner-role.md` §4.
+2. **NFR-05 clause 1 fails in dev on a PRE-EXISTING finding:** the hotmail `#EXT#` guest `Ralph Schroeder` in the root BU holds `Spaarke Basic User` Read on project and matter at a depth that reaches the Secure BU, so it can read secure records. UAC-r2 is taking it to their owner decision.
+3. **#1037 (option A, disabled with the reason)** is decided but **untasked**. The picker is ours; authoring it needs the owner's go (ISS-010).
+4. **The trusted-tenant list** (UAC-r2's question): it blocks their task 141 (the user↔contact link), which blocks our **083** (Office To Dos back in the Daily Briefing, #1044).
 
-**077** (in progress) → **078** → **076** → **079** → **080**. Then **058** and the four it unblocks
-(059/060/068/075), then **090**.
+### Facts from 082 (do not re-derive)
 
-⚠️ **076 opens with an escalation**: the owner re-scoped matter numbering out **twice**, so its first action is
-to confirm scope, not to implement.
+- Dataverse error for a missing owner privilege: *"Read Privilege Check For Owner failed … Principal team (…, privilegeCount=N) is missing prvRead<Table> privilege"*. The CALLER's privileges don't matter; an admin caller is refused too.
+- The privilege cache lags about one poll after a role edit: the first probe reported the OLD `privilegeCount`. Re-probe for 3 polls.
+- UAC-r2's live NFR-05 census runs with `SPAARKE_NFR05_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com SPAARKE_NFR05_REQUIRED=true AZURE_TOKEN_CREDENTIALS=AzureCliCredential` (a plain DefaultAzureCredential reaches only EnvironmentCredential in this shell).
+- `scripts/check-task-status-drift.ps1` cannot parse this project's index (status is in its own column), so it reports ~79 "one-sided" tasks and 5 "`**`" disagreements (002/005/010/030/032, from the Risk-table rows). It is pre-existing, and the real status column agrees.
+
+### #1044: route DECIDED 2026-09-30 (owner, relayed by UAC-r2). #1045 is merged; the gap stays open until 083 + UAC-r2 141/152 land.
+
+The decision: use the EXISTING `sprk_todo.sprk_assignedto` (contact) plus Created By, with no new column.
+- **Our task 083:** the Office writer defaults `sprk_assignedto` to the caller's contact. Created By is the app user
+  for BFF creates (verified live), so it cannot carry the person.
+- **UAC-r2 141:** the user↔contact link.
+- **UAC-r2 152:** the briefing matches Assigned To plus human-only Created By, and fixes the server generators.
+
+Until 083, 141 and 152 land, an Office-pane To Do with no assignee is missing from the briefing. Full record:
+`notes/uac-r2-findings-2026-09-30.md` §9. Also decided: **#1037 = option A** (show disabled with the reason). The
+picker is ours and **untasked**, and needs the owner's go (ISS-010).
+
+**Original #1044 write-up (history):** a regression introduced by 080, in which team-owned To Dos drop out of the
+Daily Briefing. `DailyBriefingCollector`
+filters to-dos on `owninguser = caller` (`:1027`, `ScopeToOwner` `:430-432`). `sprk_todo` has no other user-typed "for
+whom" column (verified), so there is NO data-only guard. The options, in the issue:
+
+1. To Dos stay CALLER-owned (a personal-task exception to team ownership).
+2. Add a "for" user column that the briefing filters on — the likely long-term fix; it overlaps UAC-r2's "who is
+   notified" design.
+3. Accept the regression until that design lands.
+
+#1044 is a real regression against master: master's `CreateTodoAsync` sets `ownerid = systemuser(caller)`
+(`OfficeService.cs:2859` on `origin/master`), so Office To Dos DO appear in the briefing today.
+
+~~Also stated in the PR: saves filed to a SECURE project will likely FAIL until UAC-r2's C10 grants child-table
+privileges.~~ **Corrected 2026-09-30.** This project owns it: **task 082**, ISS-013,
+[#1046](https://github.com/spaarke-dev/spaarke/issues/1046). The live role has all 8 `sprk_document` privileges, so
+secure-target document saves **work in dev**. It has **none** on `sprk_todo`, so a To Do filed against a secure record
+is refused until 082. The PR body was corrected to match.
+
+### 080 — what the owner must do (not blocking 058)
+
+1. **Backfill** (the owner runs it, by the owner's own instruction): `.\scripts\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply -MaxWritesPerRun 5` → open a re-owned document as **Test User 1** → then the full run → run again for `sprk_todo`. Undo: `-RevertManifest <path printed> -Apply`. Dry run: 31 documents + 10 To Dos would re-own; 376 unfiled documents stay in root.
+2. **Live verification after a deploy from master**: as Test User 1 (the ONLY child-BU account), save a document and read it back; confirm 063 Run Index and 064 document-source To Do succeed.
+3. **Filed**:
+   - #1034: ~20 other BFF writers
+   - #1035: work assignment
+   - #1036: playbooks
+   - #1037: picker Read vs AppendTo
+   - #1039–#1042: older deferrals, now filed
+   - #1043 / #1038: the security fixes in #1045
+   - #1044: the regression above
+   - #1046: the Secure Record Owner child-privilege gap, **tasked as 082** (scope agreed with UAC-r2 — §9)
+
+### Session commits (after `6bf83c87c`)
+
+- `26acc00e2` merge master (#1029)
+- `5d870b898` 080 implementation
+- `19c2db13a` 080 close
+- `999d64d6d` #1038 blast radius
+- `4534039f8` deferrals filed (#1039–#1042)
+- `1de0fe2f7` corrections (#1043 IS on master; #1044)
+
+### ⚠️ Facts NOT to re-derive (added this session)
+
+| Fact | Where |
+|---|---|
+| The Office save accepts ONLY friendly types (`matter`, `project`…). Anything keyed on logical names must map through `DocumentAssociationMap.ToLogicalName` (the single alias table) | #1038; resolver |
+| `CreateDocumentRequest` is bound `[FromBody]` by `POST /api/v1/documents`; any property added to it is a wire field unless `[JsonIgnore]` | #1043 |
+| Test oid in the Office test hosts is `"test-user-oid"` (not a GUID); the Office test factories register `RecordOwnershipResolverDouble` (`factory.Ownership`) | `OfficeEndpointsContractTests.cs` |
+| The full BFF suite has one pre-existing wall-clock flake: `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort` (`Task.Delay`) | note §6.10 |
+
+### 🔔 Waiting on the OWNER
+
+1. **078 — observed install** (`notes/078-manifest-decision.md` §6): deploy → download artifact `spaarke-addin-unified-package` → upload the **`-TEST` zip** in admin center (Integrated apps → Upload custom apps → App type **"Teams app"**) to **Just me** → check Outlook + Word, desktop + web → **note any permission prompt** (mixing mail + document permissions in one package is undocumented) → then the production zip.
+2. **076 — three answers** (option B = numbering as write-path invariant I-10 owned by `RecordCreationService`): (a) Project number format — projects have NONE today; (b) random 6 digits vs a per-type sequence; (c) who verifies production matter-number uniqueness before the alternate key. Detail: the 076 POML UPDATE block.
+3. **042 UAT** — deferred by owner (no redeploy now). The shared `spaarke-bff-dev` is missing this project's routes (overwritten 9× by other projects' branch deploys) — any future deploy must come from **master**.
+
+### ✅ UAC-r2 PR #1029 MERGED 2026-09-30 (`2682e8225`) — merged into this branch as `26acc00e2`
+
+Order: ~~080~~ ⚠️ done → **058 → 059 → 060 → 068 → 075**; 077/078 done; then 079 → 090. Their post-merge message is recorded in `notes/uac-r2-findings-2026-09-30.md` §6, including NEW finding **(e)**: the picker trims by Read but the save demands AppendTo — owner routing needed. **Every one of those POMLs now carries a "UPDATE 2026-09-30 (pre-compact handoff)" block** with this session's findings — read it at task start.
+
+### 🧠 Facts NOT to re-derive (each cost real time this session)
+
+| Fact | Where |
+|---|---|
+| **Production runs XML for BOTH add-ins** (Outlook `outlook/outlook-manifest.xml` `5e4d66d0-…`; Word `word/word-manifest.xml` `b3965ea0-…`). ⚠️ `/outlook/manifest.xml` **404s** — a recorded trap this session still fell into once, producing two wrong claims later corrected with the owner | `notes/078-manifest-decision.md` §1 |
+| **Inspect BUILT files, not `src/`** — webpack rewrites manifests (URLs, ids, resource) | 078 note |
+| **Never name a folder `build/` under office-addins** — the repo-root `.gitignore` ignores it; 078's first commit shipped a module that was never tracked | 078 note §5; module CLAUDE.md |
+| **Job-status Dataverse fallback NEVER works** (anonymous type → `dynamic` across an assembly boundary; only the TEST assembly can see it, so tests pass while production 404s) — **task 060's fix** | `notes/uac-r2-findings-2026-09-30.md` (a) |
+| **`check-task-status-drift.ps1` cannot read this index** (parses 5 of 82 rows — the risk table); red independent of any task; verify task pairs by hand; routed to **079** | 079 POML UPDATE |
+| **ADR-051 records paging = *non-empty ⇒ more*** — owner-APPROVED path A (the per-row trim shortens pages) | spec ADR Tensions; project Decisions |
+| **`TargetEntity` is never required** (no-record saves are required); **066 = option A via 080's team-ownership convention**; every add-in user holds ≥ `Spaarke Basic User` | owner decisions below; memory |
+| **UAC-r2 retracted the OfficeService.cs source-scan guards** (059 may move `QuerySearchEntityAsync` freely); the `CommunicationsEndpoints.cs` rule stands; new Office-route filters without "Authorization" in the name → `ExplicitlyCreditedFilterTypeNames` | UAC-r2 block below |
+
+### 📦 Earlier session commits (after the `e6bc26df9` merge, before `6bf83c87c`)
+
+`1ce8261a4` owner decisions 065/066 · `7b7688f5c` 077 (b)+(c) · `69803493c` 042 UAT round 2 · `73c858f28` 077 (a) records · `22f6ac55e` 077 review fix (paging race) · `06823f339` 077 notes · `89be27733` researcher memory · `9d9e54e41` 077 close · `450401be7` ADR-051 approved · `e2e50a965` 078 package · `6e590d012` 078 fix (gitignored `build/`) · `d17ac8152` 078 docs + 011 corrected · `34e105ed1` 078 review fix (NO permissions) · `eb166d4ad` 078 close + UAC-r2 findings · *(this handoff: POML updates for 058/059/060/076/079/080 + this block)*
+
+### Critical context
+
+UAC-r2's #1029 has merged, 080 is closed ⚠️, and the branch is up for merge as **PR #1045**, a security merge. What
+remains:
+
+- **The OfficeService track:** 058 → 059 → 060 → 068 → 075. Startable now; 058 is next.
+- **076:** gated on the owner's three answers.
+- **079 and 090:** follow the tasks above.
+- **Owner-side actions:**
+  - the #1044 decision, before #1045 merges
+  - 080's backfill `-Apply` and the live check as Test User 1
+  - 078's observed install
+  - 042's UAT
+
+No task is in progress, and nothing is half-applied.
+
+---
+
+## 📜 HISTORY — ✅ MERGED TO MASTER — **DONE 2026-09-30**
+
+> **Last Updated**: 2026-09-30 (post-merge + owner decisions on 065 / 066)
+
+| Field | Value |
+|---|---|
+| **Merge commit** | **`e6bc26df9`** — `Merge pull request #960` (merge commit, NOT squash — all 82 task commits preserved) |
+| **PR** | **#960 `MERGED`** 2026-09-30T03:02:48Z, 305 commits |
+| **Main repo** | fast-forwarded to `e6bc26df9` |
+| **Branch** | **NOT deleted** — this worktree is still on it |
+
+Verified at `9f938336e` before merging (only `current-task.md` changed since the fully-gated
+`ce4e8be84`, so no source-file delta): build **0/0** · ArchTests **333/333** · full suite
+**13,003 / 0 / 56** · publish **45.67 MB** vs 60 ceiling · no CVEs · **Router = pass**, all 9 Tier 1
+blocking jobs green.
+
+### ⚠️ Why the merge happened at `UNSTABLE`, and the repo finding behind it
+
+`/merge-to-master` carries `mergeStateStatus: UNSTABLE → STOP` (near-miss #858, where `Router` passed
+while test jobs were red). We merged anyway, **deliberately and with the reason recorded**: the single
+non-pass was `Tier 2 (Advisory) / Full Unit Tests` = `cancelled`, which is a **30-minute
+`timeout-minutes` kill after a SUCCESSFUL build**, on a job that is `continue-on-error: true`. Zero
+`fail`, zero `pending`. The measurement that job would have produced we had locally at the same commit.
+The #858 hazard is *real failures hiding*; nothing was hiding.
+
+🔴 **Repo finding worth filing**: that 30-min guard was sized 2026-08-24 against a **10,762-test**
+suite. The suite is now **13,059** (+21%), and this run took **30.5 min** — it is being killed at the
+wall. `ci-tier2-advisory.yml:207-236` documents the previous time this happened: the job *never completed
+once in 20 runs*, so there was no observed duration to re-size against. On master it still completes
+sometimes, so we are at the edge rather than broken — but it will tip.
+
+---
+
+## 🟢 OWNER DECISIONS 2026-09-30 — these CLOSE two escalations and re-point 080
+
+### 065 — **`TargetEntity` must NEVER be required.** Escalation resolved.
+
+Owner: *"a Document (and a file saved to SPE) without a related record is a REQUIRED use case; we can't
+'guess' what record it belongs to — no record is required."*
+
+**Consequence — F4's frame was wrong, not just its fix.** F4 was written as *"the save bypasses
+per-record authorization."* If no record is required, **there is no other record to authorize against** —
+a per-record check has no subject to discriminate on. So:
+
+| Control | Disposition |
+|---|---|
+| Container placement | ✅ **already shipped** (acting-user BU container → tenant default last resort) |
+| Ownership of the created `sprk_document` | ❌ **this is task 080** — the real residual gap |
+| Table-level create right on `sprk_document` | ❓ unverified — confirm whether the row is created under the caller's identity (Dataverse enforces natively) or app-only (nothing checks it) |
+
+- **DO NOT** require `TargetEntity`. **DO NOT** build a document-side association predictor (option a).
+- Ribbon option (b) “open the pane when there is no target” is **dropped** — unfiled saving is correct.
+- ✅ Owner **granted `AppendTo` to `Spaarke Office Add In User`** — this fixes the SEPARATE half (filing
+  *to* a Matter when the user chooses to). Re-verify live and add the row to
+  `notes/role-grant-gap-2026-09-21.md`.
+
+### 066 — **Option A, delivered as 080's convention.** Not B, not C.
+
+Owner: *"we need to implement the best solution not the 'easy' solution"*; backfill is **not** a concern
+(dev). The earlier recommendation of **B was wrong** — it rested on (i) backfill cost and (ii) “A is a
+data-model decision owned elsewhere.” (i) is void, and (ii) is false: **the owner already settled the
+data-model question repo-wide** in 080 (*“owned by the acting user's BU default owner team … not the
+user”*). B would bolt a bespoke “participant read” concept alongside the ownership model already chosen.
+
+⚠️ Earlier phrasing of A said “set `ownerid` to the saving **user**” — wrong. The model is **TEAM
+ownership** (BU default Owner team, `isdefault = true` AND `teamtype = 0`), as `sprk_matter` already does.
+
+⚠️ **080 carries a cross-project boundary**: `sprk_communication` is created by
+`EmailUploadCaptureService.BuildCommunicationEntity`, owned by the Communication project, with an
+escalation trigger *“do not reach into their create path — coordinate or hand off.”* **Coordinate**;
+do not unilaterally edit it. C remains available as an interim mitigation for the matter-title leak only
+if the owner asks.
+
+### 062's picker-500 concern — **CLOSED, not a deploy risk**
+
+Owner: *“all users will have at least a Basic User assigned because if they are using the addin, then they
+are using the system.”* So the all-types-failed → **500** path for a user holding
+`Spaarke Office Add In User` *alone* is **unreachable in practice**. Do not re-raise it.
+
+---
+
+## 📨 UAC-r2 ANSWERED 2026-09-30 — load-bearing for 058 / 059 / 060 / 080
+
+From the live `unified-access-control-r2` session, verified against source on their side. **Do not
+re-derive these; they were expensive to get.**
+
+### Merge order: WAIT for #1029, then rebase ONTO them
+
+#1029 was **one CI check from merging** (1 pending / 0 failing, all Tier 1 green, 20 ahead / 0 behind).
+They will message when it lands. **Do not touch `OfficeService.cs` until then.**
+
+### The ctor: append AFTER `userClient` for a clean add
+
+Their #1029 adds the LAST optional ctor parameter. Exact tail to rebase against:
+
+```
+        ILogger<OfficeService> logger,
+        EmailUploadCaptureService? emailUploadCapture = null,
+        DataverseWebApiClient? dataverseClient = null,
+        IGenericEntityService? genericEntityService = null,
+        IDataverseUserClient? userClient = null)          ← APPEND 080's resolver AFTER this
+```
+
+✅ **Directly useful to 080**: `IDataverseUserClient` (the DELEGATED user-OBO Dataverse client) moved to
+`Sprk.Bff.Api.Infrastructure.Dataverse`, and its DI registration moved from `AddToolFramework` (inside
+the compound AI gate) to **`AddSpaarkeCore` — unconditional**. So per-user Dataverse reads are now
+available to CRUD code. **It fails closed — no app-only fallback.** 080 needs exactly this to resolve the
+acting user's BU + default Owner team as the USER rather than as the application identity.
+
+### 🔴 058 WILL FAIL `NoWaiverIsStale` UNLESS IT REMOVES FOUR WAIVERS IN THE SAME CHANGE
+
+`tests/.../RouteAuthorizationGuardTests.cs` carries **Pending waivers** for the four routes 058 deletes:
+`/office/search/documents` + `/office/recent` (**#1023**) and `/office/share/links` +
+`/office/share/attach` (**#1024**). The guard **used** to fire only when a waived route became *gated*,
+not when it was *deleted* — **that gap is now CLOSED** (see the file's notes at `:348-349`). So deleting
+the routes without deleting the waiver entries turns the build red **in a way that looks unrelated to the
+diff**. Add this to 058's acceptance criteria.
+
+### ⚠️ 058 near-miss in naming — two helpers one character apart in meaning
+
+| Helper | Used by | Action |
+|---|---|---|
+| `GenerateStubResults` | `SearchEntitiesAsync` (UAC-r2 **KEEPS**) | ❌ **DO NOT DELETE** |
+| `GenerateStubDocumentResults` | `SearchDocumentsAsync` (058 **DELETES**) | ✅ delete |
+
+They verified **zero shared helpers** between the two methods: `SearchEntitiesAsync` uses
+`GetEntityTypesToSearch`, `GenerateStubResults`, `QuerySearchEntityAsync`, `_searchMeta`, `MapSearchRow`,
+`EntitySearchMeta`; `SearchDocumentsAsync`'s body references exactly one helper. Re-confirmed they do
+**not** depend on `/office/recent` or any share/attach member.
+
+### ✅ UPDATE 2026-09-30 (later) — UAC-r2 merged master; read `notes/uac-r2-findings-2026-09-30.md`
+
+- **RETRACTED: the six `OfficeService.cs` source-scan dependencies below are GONE** — UAC-r2 deleted
+  `OfficeEntitySearchSecurityTrimmingTests`. 059 may move `QuerySearchEntityAsync` freely. The
+  `CommunicationsEndpoints.cs` rule (no code line containing `entityService`/`IGenericEntityService`) still stands.
+- #1029 kept OUR 062/064/067 everywhere we overlapped; `OfficeService.cs` is our version on their branch.
+- 🔴 **Verified here: the job-status Dataverse fallback NEVER works** (anonymous type across an assembly boundary +
+  `dynamic`; only the TEST assembly can see it, so tests pass while production 404s) → **task 060**.
+- `RecordOwnershipResolver` TopCount=1 vs its sibling's refuse-on-ambiguity → **task 080**.
+- 🔴 Standing rule: a new Office-route filter whose name lacks "Authorization" must be added to
+  `ExplicitlyCreditedFilterTypeNames`. 058 must still delete the four Pending waivers.
+
+### ~~🔴 059 / 060 — SOURCE-SCANNING GUARDS MEAN A BEHAVIOUR-PRESERVING REFACTOR CAN STILL GO RED~~ (RETRACTED — see above)
+
+This is the one that most threatens the extraction tasks. UAC-r2 added guards that **read the file text**,
+so 059's and 060's "behaviour-preserving move" can fail them without changing any behaviour.
+
+In `OfficeService.cs` the guards depend on:
+- the exact signature `private async Task<List<EntitySearchResult>> QuerySearchEntityAsync`
+- the **presence** of `_userClient!.GetAsync`
+- the **ABSENCE** of `_dataverseClient` anywhere in that method body
+- `catch (Exception ex) when (ex is not InvalidOperationException)`
+- `_userClient is null && _dataverseClient is not null`
+- `TotalCount = ordered.Count` / `HasMore = ordered.Count`
+
+In `CommunicationsEndpoints.cs`: **no code line** may contain `entityService` or `IGenericEntityService`
+(doc comments are exempt — the guard skips `///` lines).
+
+These are deliberate: reverting to the app-only client would reopen **#1020/#1021** without failing any
+behavioural test. **Treat them as part of the contract, not as incidental test brittleness.**
+
+### 🟢 065's MISSING SUBJECT, from UAC-r2's #1025 — authorize the DESTINATION CONTAINER
+
+Their open issue **#1025** covers the same pass-through from their side, and their recommendation supplies
+the piece our 065 analysis was missing. With `TargetEntity` now permanently optional by owner decision,
+065's residual is not "find a record to check" but:
+
+> **the subject CHANGES rather than disappearing.** With no related record there is no record to check,
+> but there IS still a destination (`EmailProcessing:DefaultContainerId`, `OfficeService.cs:154-163`)
+> that nothing currently authorizes anyone against.
+
+So 065's residual control set is **four** items, not three:
+
+| # | Control | Status |
+|---|---|---|
+| 1 | Container **placement** (acting-user BU → tenant default) | ✅ shipped |
+| 2 | **Ownership** of the created `sprk_document` (BU default Owner team) | → **080** |
+| 3 | Table-level **create** right on `sprk_document` | ❓ unverified |
+| 4 | **Authorize the caller against the destination CONTAINER** | 🆕 **#1025** — the missing subject |
+
+Item 4 is the honest answer to "what does a no-record save authorize against". Coordinate with UAC-r2 on
+#1025 rather than inventing a parallel mechanism.
+
+### ⚠️ A verification lesson UAC-r2 recorded against their task 128 — applies to ANY filter we attach
+
+They attached `EntityAccessFilter` to `POST /api/office/todo`, having explicitly checked that the filter
+could **resolve the entity type** — and never checked whether any end-user role grants the **right the
+filter demands** (`AppendTo`, per `OperationAccessPolicy.cs:176-185`). Until the owner's grant today that
+change would have 403'd `/office/todo` for every non-admin. `OperationAccessPolicy.cs:182-185` even
+carries a warning that AppendTo's first use *"stays permanently 403 — a silent failure"*.
+
+**The rule for us**: attaching a filter requires verifying **both** dimensions — (1) can the filter resolve
+the request/type, and (2) does any end-user role actually hold the right it enforces. Checking only (1)
+is the same failure class one dimension over. Also useful: only **two** routes carry
+`.AddEntityAccessFilter()` today — `/office/save` (`:183`) and `/office/todo` (`:1229`) — so the
+"gate present, nothing checked" surface is small and cheaply guarded. UAC-r2 is taking the general reach
+guard on their side.
+
+### ⚠️ Relevant to 065 and to 080: `ExtractTargetEntity` is the filter's REACH
+
+#1029 also changed `EntityAccessFilter` (`ExtractTargetEntity` now recognises `CreateTodoRequest`) and
+gated `POST /office/todo` with `.AddEntityAccessFilter()` (**#1022**), so that waiver is deleted rather
+than resolved.
+
+🔴 **The general lesson, in their words**: `ExtractTargetEntity` returns null for an unrecognised
+request shape, **and a null target makes the filter pass through** — so *"a route can be gated, credited
+by Rule A, and authorize nothing."* That is the SAME failure shape as 065's F4, one level up: the gate is
+present, the census counts it, and no check runs. Anyone touching `EntityAccessFilter` must check
+`ExtractTargetEntity` recognises the request type, not merely that the filter is attached.
+
+`AssociationType` / burned ordinal 3: **unchanged by #1029**, so no interaction with our hand-rebase.
+
+---
+
+## 📍 SEQUENCING — owner-approved 2026-09-30 (supersedes 077→078→076→079→080)
+
+Rationale: **058 deletes ~800 lines from `OfficeService.cs`**, and 059/060/068/075 all refactor code in
+that same file — any order running them first refactors code that then gets deleted. 058 is also the most
+severe finding and the keystone unblocking four tasks.
+
+| Track | Tasks | Why it is one track |
+|---|---|---|
+| **A — BFF `OfficeService.cs`** | **058 → 080 → 059 → 060 → 068 → 075** | ⚠️ **All of these touch `OfficeService.cs`** — strictly serial. 080 is 2nd (not last) because it is now the fix for BOTH 065's residual risk and 066. |
+| **B — client add-in** | 077 → 078 | `office-addins/**` only — genuinely parallel with Track A |
+
+Then **076** (opens by escalating scope — numbering re-scoped out twice; confirm before implementing)
+→ **079** (reconciliation, must follow what it reconciles) → **090** (gated on the owner's 042 UAT).
+
+⚠️ **058 hand-rebase requirement**: UAC-r2's `AssociationType` decision must survive — `Account`
+**removed, ordinal 3 BURNED**. Also leaves live validated config dangling
+(`OfficeRateLimitOptions.RecentRequestsPerMinute`, `[Range(1,1000)]`, plus an unreachable enum member);
+neither breaks the build, so the compiler will not catch it.
+
+---
+
+## 🔵 NEXT — every remaining task is gated on an OWNER DECISION or on UAC-r2 #1029
+
+> **Last Updated**: 2026-09-30 (077 closed; task-execute Step 11 transition)
+
+| Field | Value |
+|---|---|
+| **Last completed** | **077** ⚠️ complete-with-escalation — `7b7688f5c` `73c858f28` `22f6ac55e` + close commit |
+| **Active task** | **none** — 078 closed ⚠️ (owner install pending). Next: 076 awaits the owner's three answers; the OfficeService track (080 → 058 → 059 → 060 → 068 → 075) waits on UAC-r2 #1029, which now carries OUR OfficeService.cs. |
+| **Next Action** | Get the owner's answers to the three 🔔 items below, then start the task they unblock. |
+
+### 🔔 Owner decisions — status 2026-09-30
+
+1. ✅ **077 — ADR-051 records-paging exception: APPROVED** (§6.5 path A). Recorded in the spec ADR Tensions table
+   and the project Decisions log (`450401be7`).
+2. ⚠️ **078 — COMPLETE WITH ESCALATION** (owner: "best long-term solution, take that path now"). Code review found and fixed a Critical: the package granted NO permissions. ONE unified app package
+   (schema 1.30) for Outlook AND Word; decision, evidence and the rollout runbook in `notes/078-manifest-decision.md`.
+   ⚠️ **Two earlier claims in this file were WRONG and are corrected:** production runs **XML for BOTH hosts**
+   (Outlook `outlook/outlook-manifest.xml` `5e4d66d0-…`; Word `word/word-manifest.xml` `b3965ea0-…`) — Outlook does
+   NOT run unified JSON (that came from probing `/outlook/manifest.xml`, the known 404 trap); and `c1258e2d-…` is
+   the Entra client id, NOT a live app's id, so no live add-in was ever at risk from the Word JSON.
+   **Waiting on the OWNER** for 078 §6: deploy → upload the `-TEST` zip to "Just me" → observe on Outlook + Word,
+   desktop + web → then the production zip.
+3. 🔔 **076 — explained to the owner 2026-09-30; awaiting answers** if option B (numbering as write-path invariant
+   I-10, owned by `RecordCreationService`): (a) Project number format — projects have NONE today; (b) random 6
+   digits (current convention, 53/59 matters) vs per-type sequence; (c) someone must verify production matter
+   numbers are unique before the alternate key goes in.
+
+### ⛔ Blocked on UAC-r2 PR #1029 (OPEN as of 2026-09-30 11:05)
+
+**080 → 058 → 059 → 060 → 068 → 075** all edit `OfficeService.cs`. UAC-r2 will message on merge. Rebase ONTO
+them; append 080's resolver ctor param AFTER `userClient`. See the **UAC-r2 ANSWERED** block above.
+
+### ⚠️ `check-task-status-drift.ps1` CANNOT READ this project's index — route to 079
+
+It parses **5 of 82** rows, and those 5 are the *risk table* (`| **002** | Negative result …`, ~line 355), not
+status rows: the status table puts the marker in cell 3 (`| 002 | title | ✅ |`), the parser expects cell 1.
+So it is red (77 "unpaired" + 5 false drifts) independent of any task. 077's pair was verified by hand
+(POML `completed-with-escalation` ⇔ index ⚠️). The noise HIDES REAL drift: **011** (`in-progress` vs ✅),
+**014** and **025** (`not-started` vs ✅). That is task **079**'s record-integrity scope.
 
 ## ⏸ PAUSED — **080** (reference; was the active task until 2026-09-28)
 

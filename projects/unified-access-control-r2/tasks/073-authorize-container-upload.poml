@@ -105,7 +105,7 @@ The prescribed fix (resolve container -> owning record, then authorize Write) wa
 
 1. THE POML'S CALLER ASSUMPTION WAS WRONG. The constraint "this route is used by upload flows" does not hold. A repo-wide sweep (client, solutions, dataverse web resources, server, tests, scripts, .http, Postman; literals + template joins + route-builder maps; plus a check for any /api/obo -> /api rewrite) found ZERO callers of all three routes in this file. Every live upload flow uses the OBO sibling PUT /api/obo/containers/{id}/files/{*path} — 11 wizard sites via EntityCreationService.ts:493, Spaarke.SdapClient UploadOperation.ts:27, document-upload/SdapApiClient.ts:101.
 
-2. GATING WOULD HAVE FORKED TASK 075'S MAPPING. Task 075 owns the bidirectional container<->record mapping and its constraints forbid a second one. 075 is being built in a different worktree and its seam does not exist here, so gating meant either duplicating the mapping (forbidden) or blocking. Deletion needs neither, and satisfies "exactly one container-to-record mapping" by adding ZERO.
+2. GATING WOULD HAVE FORKED TASK 075'S MAPPING. Task 075 owns the bidirectional container&lt;->record mapping and its constraints forbid a second one. 075 is being built in a different worktree and its seam does not exist here, so gating meant either duplicating the mapping (forbidden) or blocking. Deletion needs neither, and satisfies "exactly one container-to-record mapping" by adding ZERO.
 
 3. DELETION IS THE GUARD'S OWN REMEDY #2 and task 071's established precedent in this project.
 
