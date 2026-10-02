@@ -57,9 +57,10 @@ describe('HostAdapterFactory', () => {
     it('starts empty — this is the state that made create() always throw before task 010', () => {
       const { HostAdapterFactory } = freshFactory();
 
-      expect(HostAdapterFactory.getRegisteredHosts()).toEqual([]);
-      expect(HostAdapterFactory.hasAdapter('word')).toBe(false);
-      expect(HostAdapterFactory.hasAdapter('outlook')).toBe(false);
+      // Task 075 removed the uncalled hasAdapter()/getRegisteredHosts(); the public behaviour they summarized is
+      // that create() refuses every host until a pane registers its adapter.
+      expect(() => HostAdapterFactory.create('word')).toThrow();
+      expect(() => HostAdapterFactory.create('outlook')).toThrow();
     });
 
     // NOTE: there were once two more tests here asserting that registerAdapter('word'|'outlook', X)
@@ -89,9 +90,7 @@ describe('HostAdapterFactory', () => {
       const { HostAdapterFactory } = freshFactory();
       setHost(Office.HostType.Excel);
 
-      expect(() => HostAdapterFactory.detectHostType()).toThrow(
-        expect.objectContaining({ code: 'INVALID_HOST' })
-      );
+      expect(() => HostAdapterFactory.detectHostType()).toThrow(expect.objectContaining({ code: 'INVALID_HOST' }));
     });
 
     it('throws INVALID_HOST when Office.context.host is undefined (plan.md R-4 failure shape)', () => {
@@ -100,9 +99,7 @@ describe('HostAdapterFactory', () => {
       const { HostAdapterFactory } = freshFactory();
       setHost(undefined);
 
-      expect(() => HostAdapterFactory.detectHostType()).toThrow(
-        expect.objectContaining({ code: 'INVALID_HOST' })
-      );
+      expect(() => HostAdapterFactory.detectHostType()).toThrow(expect.objectContaining({ code: 'INVALID_HOST' }));
     });
   });
 
@@ -111,9 +108,7 @@ describe('HostAdapterFactory', () => {
       const { HostAdapterFactory } = freshFactory();
       setHost(Office.HostType.Word);
 
-      expect(() => HostAdapterFactory.create()).toThrow(
-        expect.objectContaining({ code: 'INVALID_HOST' })
-      );
+      expect(() => HostAdapterFactory.create()).toThrow(expect.objectContaining({ code: 'INVALID_HOST' }));
     });
 
     it('returns the registered class, NOT initialized', () => {

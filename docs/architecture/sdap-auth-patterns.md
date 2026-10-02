@@ -59,7 +59,7 @@ Authorization is enforced at the endpoint level via endpoint filters (ADR-008) â
 | `CommunicationAuthorizationFilter` | Email/communication endpoints | Communication permissions |
 | `EntityAccessFilter` | Office save endpoints | Entity association permissions |
 | `ExternalCallerAuthorizationFilter` | External-facing endpoints | External caller validation |
-| `FinanceAuthorizationFilter` | Finance endpoints | Finance feature access |
+| `FinanceAuthorizationFilter` | Finance + scorecard endpoints | Per-record caller rights on the exact id each route acts on (task 130) |
 | `JobOwnershipFilter` | Background job endpoints | Job ownership verification |
 | `OfficeAuthFilter` | Office add-in endpoints | Office token validation |
 | `PlaybookAuthorizationFilter` | Playbook endpoints | Playbook access |

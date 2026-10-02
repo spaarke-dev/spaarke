@@ -51,10 +51,10 @@ Its other boundaries contribute nothing:
 | Criterion | Test | Cases |
 |---|---|---|
 | 1 | `ComposeAsync_DirectCollaborateGrantOnSecureRoot_ComposesReadCreateWriteOnMissAndIdenticallyOnHit` | 3 roots × {contact-only plane, systemuser plane via linked contact} = 6 |
-| 2 | `ComposeAsync_OrgInheritedOnlyGrantOnSecureRoot_ComposesNoneOnMissAndOnHit` | 3 roots |
+| 2 | `ComposeAsync_OrgInheritedOnlyGrantOnSecureRoot_IsAbsentOnMissAndOnHit` (renamed by task 136; was `..._ComposesNoneOnMissAndOnHit`) | 3 roots |
 | 3 | `ComposeAsync_ViewOnlyDirectPlusCollaborateOrgOnSecureRoot_ComposesReadOnlyOnMissAndOnHit` | 3 roots |
 | 4 | `ComposeAsync_OrgInheritedCollaborateGrantOnNonSecureRoot_ComposesReadCreateWriteOnMissAndOnHit` | 3 roots |
-| 5 | `ComposeAsync_NullLevelGrant_KeepsItsIdWithNoRightsOnMissAndOnHit` | matter, work assignment |
+| 5 | `ComposeAsync_NullLevelGrant_ConfersNothingOnMissAndOnHit` (renamed and reversed by task 136; was `..._KeepsItsIdWithNoRightsOnMissAndOnHit`) | matter, work assignment |
 | 6 | `GetGrantSetAsync_EntryCachedUnderThePreviousVersionKey_IsNotServedAndDataverseIsRequeried` | 1 |
 | 7 | `GetGrantSetAsync_EveryPublicSettableGrantProperty_SurvivesTheRoundTripThroughTheProductionCache` | 1 |
 

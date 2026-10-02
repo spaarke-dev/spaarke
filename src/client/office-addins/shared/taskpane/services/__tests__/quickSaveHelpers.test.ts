@@ -6,6 +6,7 @@ import {
   type QuickSaveEmailContext,
 } from '../quickSaveHelpers';
 import type { EntitySearchResult } from '../../hooks/useEntitySearch';
+import { LOGICAL_TO_ENTITY_TYPE } from '../communicationSuggestionsService';
 
 const target: EntitySearchResult = {
   id: '11111111-1111-1111-1111-111111111111',
@@ -32,9 +33,10 @@ describe('buildEmailSaveRequest', () => {
 
     expect(req.contentType).toBe('Email');
     expect(req.triggerAiProcessing).toBe(true);
-    // Target entity uses the Dataverse logical name (not the picker's display EntityType).
+    // Target entity uses the FRIENDLY type name the save accepts ("Matter"), never the logical name
+    // ("sprk_matter") — the server refuses that with 400 OFFICE_002 (#1075, task 084).
     expect(req.targetEntity).toEqual({
-      entityType: 'sprk_matter',
+      entityType: 'Matter',
       entityId: '11111111-1111-1111-1111-111111111111',
       displayName: 'Smith v Jones',
     });
@@ -53,6 +55,13 @@ describe('buildEmailSaveRequest', () => {
     expect(req.idempotencyKey).toBe('idem-key-1');
   });
 
+  it('never sends the logical name as targetEntity.entityType (#1075: "sprk_matter" → 400 OFFICE_002)', () => {
+    const req = buildEmailSaveRequest(context, target, 'idem-key-1');
+
+    expect(req.targetEntity.entityType).not.toBe(target.logicalName);
+    expect(req.targetEntity.entityType).toBe(target.entityType);
+  });
+
   it("marks the name system-derived: the ribbon files under the email's own subject, never a typed name (task 046)", () => {
     const req = buildEmailSaveRequest(context, target, 'idem-key-1');
 
@@ -68,6 +77,35 @@ describe('buildEmailSaveRequest', () => {
     expect(req.email.recipients).toEqual([]);
     expect(req.email.sentDate).toBeUndefined();
   });
+});
+
+/**
+ * Task 084 (#1075). MIRROR of the type list the save accepts — `OfficeEndpoints.ValidateSaveRequest`
+ * (src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs, `validEntityTypes`, compared
+ * lowercased). If the server list changes, change this mirror in the same PR. It is a TEST-only copy:
+ * production code never carries a second copy of the server's rule.
+ */
+const SAVE_ACCEPTED_ENTITY_TYPES = ['matter', 'project', 'invoice', 'workassignment', 'event', 'todo', 'contact'];
+
+describe('the ribbon quick-save only ever sends a type the save accepts (#1075, task 084)', () => {
+  const producible = Array.from(new Set(Object.values(LOGICAL_TO_ENTITY_TYPE)));
+
+  it('the logical-name map produces at least the filing types the picker offers', () => {
+    expect(producible).toEqual(expect.arrayContaining(['Matter', 'Project', 'Invoice']));
+  });
+
+  it.each(producible)('%s, lowercased, is in the list of types the save accepts', entityType => {
+    expect(SAVE_ACCEPTED_ENTITY_TYPES).toContain(entityType.toLowerCase());
+  });
+
+  it.each(Object.entries(LOGICAL_TO_ENTITY_TYPE))(
+    'a prediction of %s reaches the wire as an accepted type (%s)',
+    (logicalName, entityType) => {
+      const predicted: EntitySearchResult = { id: target.id, entityType, logicalName, name: 'Predicted' };
+      const req = buildEmailSaveRequest(context, predicted, 'k');
+      expect(SAVE_ACCEPTED_ENTITY_TYPES).toContain(req.targetEntity.entityType.toLowerCase());
+    }
+  );
 });
 
 describe('computeQuickSaveIdempotencyKey', () => {

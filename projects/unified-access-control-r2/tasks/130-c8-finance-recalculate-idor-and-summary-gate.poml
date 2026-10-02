@@ -4,7 +4,7 @@
     <title>C8 — close the finance (and scorecard) recalculate IDOR and make the /api/finance gate authorize the record each route actually acts on (summary no longer always 403; no id-substitution on confirm/reject/search)</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C8)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on live, unconditionally mapped BFF routes (tags bff-api, auth, security); closes a cross-matter financial disclosure plus an app-only write.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -179,5 +179,51 @@ ENTITY-SET NAMES. Two logical-name → entity-set maps already exist and EACH de
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL).</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-130" result="code-complete; one part escalated; live gate pending">
+      Status is "blocked" ONLY on (1) the escalation below and (2) the manual live gate; all code acceptance criteria are met
+      offline. Full record: notes/task-130-finance-authorization.md.
+      DONE: FinanceAuthorizationFilter extended (per-route declaration; fallback chain deleted; Document path = AuthorizeAsync,
+      Record path = GetCallerRecordAccessAsync + HasRequiredRights; fail closed; uniform 404 for recalculate). Group filter removed;
+      summary = Read sprk_matters; search = matterId REQUIRED + Read; reject = Write body doc; confirm = Write body doc + AppendTo
+      doc/matter/sprk_organizations. Four recalculate routes gated (finance + scorecard); handler KeyNotFound uses the same 404.
+      Rollup/scorecard writes now UpdateExistingRecordFieldsAsync (If-Match: *); UpdateRecordFieldsAsync unchanged. New policy key
+      "finance.attach_invoice" = AppendTo; "finance.read"/"finance.confirm" comments corrected. 3 files added to GovernedFiles
+      (RouteLevelGate, no waivers); perturbation proof recorded. Entity sets read from live metadata (sprk_organizations).
+      TESTS: BFF unit suite 13104 passed / 56 skipped / 0 failed; ArchTests 340/340; 49 new contract cases, 4 no-create write cases,
+      3 arch cases; 8 seeded-violation proofs recorded.
+      ESCALATED (trigger 3): live sprk_invoice has NO sprk_document lookup (link is sprk_document.sprk_invoice), and
+      sprk_reviewernotes / sprk_createdon do not exist; _x_value lookup keys are not writable. Confirm's create therefore fails on
+      every authorized call now that the route is reachable. Not fixed here — options (a: rewrite against live schema, document
+      right becomes Append; b: add the lookup) in the note §6. Also: reject-with-notes writes sprk_invoicerejectionnotes, absent on
+      live sprk_document (live: sprk_invoicereviewnotes).
+      LIVE GATE (pending, manual): items (a)-(f) in the note §7. (g) recorded read-only: Test User 1 has prvCreatesprk_Invoice Deep
+      (privilege trigger does not fire) but NO prvAppendTosprk_Organization in any role, so gate (f)'s positive half needs an owner
+      role decision. Publish size not measured (main session batch); no NuGet change.
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-130" result="completed (code); escalation resolved; manual live gate pending">
+      Escalation trigger 3 RESOLVED by owner decision G5 (round 3b): option (a), adjusted — "check as the user, create as the
+      app, owned by the team". Full record: notes/task-130-finance-authorization.md §11.
+      CHECK AS THE USER: confirm = Write on doc (document path) + Write+Append on doc (NEW key "finance.link_invoice"; the
+      document holds the lookup, replacing AppendTo-on-document) + AppendTo on matter and vendor ("finance.attach_invoice")
+      + the caller's Create privilege on sprk_invoice (NEW FinanceCheckPath.Privilege → CallerRecordAccessProbe.
+      CallerHoldsPrivilegeAsync: OBO, WhoAmI, RetrieveUserSetOfPrivilegesByNames; uncached; fail closed).
+      CREATE AS THE APP, OWNED BY THE TEAM: InvoiceReviewService resolves ownerid record-first from the MATTER via
+      IRecordOwnershipResolver (no caller fallback); unresolved → refused, nothing written.
+      LIVE SCHEMA (verified read-only 2026-10-01): sprk_Matter@odata.bind, sprk_vendororg@odata.bind, ownerid@odata.bind
+      /teams(id), sprk_name derived (vendor + number/date); sprk_createdon / sprk_reviewernotes dropped; document linked via
+      sprk_document sprk_Invoice@odata.bind; notes → sprk_invoicereviewnotes (confirm and reject).
+      NO PARTIAL WRITE: create → link → status LAST → enqueue; link failure deletes the created invoice (compensation;
+      a failed delete names the orphan); status/enqueue failure names the invoice; retry resumes from the document's link
+      (same matter + vendor) — no second invoice; a link to another matter's invoice → 409, nothing written.
+      Uniform-404 KeyNotFound-after-check now tested on both finance recalculate routes (FinanceRollupService entry points
+      made virtual). SpendSnapshotGenerationJobHandler: deleted matter → logged skip, job completes (not poisoned).
+      TESTS: BFF unit 13155 passed / 56 skipped / 1 failed (PinnedMemoryEndpointsContractTests.DeletePin_… — unrelated
+      memory-endpoint counter test, flaky under load; 15/15 in isolation ×3); ArchTests 340/340; affected set 157/157;
+      12 seeded-violation proofs recorded (note §11.4).
+      PENDING (not code): manual live gate (note §7 + §11.6 — Test User 1 now holds every privilege the confirm rule asks);
+      publish size measured by the main session after merge (no NuGet change).
+      NOT FIXED (outside this task's files, note §11.5): OfficeService invoice quick-create writes the absent column
+      sprk_invoicename.
+    </outcome>
   </execution>
 </task>

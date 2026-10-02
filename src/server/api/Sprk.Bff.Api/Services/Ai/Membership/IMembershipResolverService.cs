@@ -169,8 +169,10 @@ public interface IMembershipResolverService
 /// <para>
 /// ⚠️ <b>Supplied by the caller, deliberately not read here.</b> The ids come from the
 /// <c>sprk_contactorganization</c> junction, which lives behind
-/// <c>Infrastructure/ExternalAccess/ExternalParticipationService.QueryActiveOrgIdsAsync</c> — a read the
-/// accessible-record-set composer ALREADY performs for the FR-23 deny veto. Resolving them here instead
+/// <c>Infrastructure/ExternalAccess/ExternalParticipationService.ReadOrganizationMembershipsAsync</c> — a
+/// read the accessible-record-set composer ALREADY performs for the FR-23 deny veto (since task 109 it
+/// passes the read's CONFERRING set here — date-bounded, active organizations only — and keeps the
+/// statecode-only WALL set for the veto). Resolving them here instead
 /// would invert the layering (<c>Services/Ai/Membership</c> depending on
 /// <c>Infrastructure/ExternalAccess</c>) and add a SECOND, separately-cached junction read that could
 /// disagree with the first mid-composition. The pre-existing

@@ -1,6 +1,6 @@
-import { apiClient, ApiClientError } from '@shared/services';
 import { cleanGuid } from '../utils/cleanGuid';
 import { buildOpenRecordUrl } from './openRecordLauncher';
+import { mintDocumentShareLink } from './shareLinkService';
 
 /**
  * sendEmailService.ts — spaarkeai-word-add-in-r1 task 036 (FR-15): Send Email via Outlook.
@@ -78,45 +78,8 @@ export type PrepareSendEmailResult =
 
 const DEFAULT_SUBJECT = 'Document from Spaarke';
 
-/** @internal Response shape from `POST /api/documents/{documentId}/share-link`. */
-interface ShareLinkResponseBody {
-  url: string;
-  expiresAt: string;
-  scope: string;
-}
-
-function shareLinkEndpoint(documentId: string): string {
-  return `/api/documents/${documentId}/share-link`;
-}
-
-/**
- * Mint the document's recipient-openable share link via the EXISTING share-link route, at its
- * existing expiry policy. No request body is sent — omitting `allowExternalRecipients` keeps the
- * route's default (organization-scoped) behavior; this service never requests an expiry override or
- * external-recipient scope, and never mints a link through any other route.
- */
-async function mintDocumentShareLink(
-  documentId: string
-): Promise<{ ok: true; url: string } | { ok: false; message: string }> {
-  const id = cleanGuid(documentId);
-  if (!id) {
-    return { ok: false, message: 'No document id was available to link.' };
-  }
-
-  try {
-    const response = await apiClient.post<ShareLinkResponseBody>(shareLinkEndpoint(id));
-    return { ok: true, url: response.url };
-  } catch (err) {
-    if (err instanceof ApiClientError) {
-      const status = err.error.status;
-      if (status === 401 || status === 403) {
-        return { ok: false, message: "You don't have permission to share this document." };
-      }
-      return { ok: false, message: err.error.detail || err.message || 'Could not create the document link.' };
-    }
-    return { ok: false, message: err instanceof Error ? err.message : 'Could not create the document link.' };
-  }
-}
+// The document link is minted by `shareLinkService.mintDocumentShareLink` (task 075): one minter for the Send
+// Email path and the Word ribbon's Share command, the same route at its existing expiry policy.
 
 /**
  * Build the related-record deep link, reusing task 027's URL builder verbatim — never a second

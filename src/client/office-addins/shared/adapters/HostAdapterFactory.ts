@@ -31,11 +31,6 @@ type HostAdapterConstructor = new () => IHostAdapter;
 const adapterRegistry: Map<HostType, HostAdapterConstructor> = new Map();
 
 /**
- * Cached adapter instance for singleton pattern.
- */
-let cachedAdapter: IHostAdapter | null = null;
-
-/**
  * Creates a custom HostAdapterError.
  */
 function createError(code: HostAdapterErrorCode, message: string, innerError?: Error): HostAdapterError {
@@ -48,8 +43,11 @@ function createError(code: HostAdapterErrorCode, message: string, innerError?: E
  * This factory:
  * - Detects the Office host (Outlook or Word) at runtime
  * - Creates the appropriate adapter implementation
- * - Supports singleton pattern for the adapter instance
  * - Allows lazy registration of adapter implementations
+ *
+ * Each pane registers its shared adapter (`shared/adapters/WordAdapter.ts`, `shared/adapters/OutlookAdapter.ts`)
+ * and calls {@link HostAdapterFactory.createAndInitialize} once at startup. Task 075 removed the members nothing
+ * called (`getOrCreate`, `clearCache`, `hasAdapter`, `getRegisteredHosts`, `waitForOfficeReady`) and the cache.
  */
 export const HostAdapterFactory = {
   /**
@@ -63,8 +61,8 @@ export const HostAdapterFactory = {
    *
    * @example
    * ```typescript
-   * import { OutlookHostAdapter } from '../outlook/OutlookHostAdapter';
-   * HostAdapterFactory.registerAdapter('outlook', OutlookHostAdapter);
+   * import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
+   * HostAdapterFactory.registerAdapter('outlook', OutlookAdapter);
    * ```
    */
   registerAdapter(hostType: HostType, adapterClass: HostAdapterConstructor): void {
@@ -141,80 +139,6 @@ export const HostAdapterFactory = {
     const adapter = this.create(hostType);
     await adapter.initialize();
     return adapter;
-  },
-
-  /**
-   * Get or create a singleton adapter instance.
-   *
-   * Returns the cached adapter if available, otherwise creates
-   * and initializes a new one. Use this for most scenarios where
-   * you want a single shared adapter instance.
-   *
-   * @returns Promise resolving to the singleton adapter instance
-   */
-  async getOrCreate(): Promise<IHostAdapter> {
-    if (cachedAdapter && cachedAdapter.isInitialized()) {
-      return cachedAdapter;
-    }
-
-    cachedAdapter = await this.createAndInitialize();
-    return cachedAdapter;
-  },
-
-  /**
-   * Clear the cached adapter instance.
-   *
-   * Use this when you need to force creation of a new adapter,
-   * such as during testing or after a context change.
-   */
-  clearCache(): void {
-    cachedAdapter = null;
-  },
-
-  /**
-   * Check if an adapter is registered for a host type.
-   *
-   * @param hostType - The host type to check
-   * @returns True if an adapter is registered
-   */
-  hasAdapter(hostType: HostType): boolean {
-    return adapterRegistry.has(hostType);
-  },
-
-  /**
-   * Get the list of registered host types.
-   *
-   * @returns Array of registered host types
-   */
-  getRegisteredHosts(): HostType[] {
-    return Array.from(adapterRegistry.keys());
-  },
-
-  /**
-   * Wait for Office.js to be ready and detect the host.
-   *
-   * This is a convenience method that wraps Office.onReady
-   * and returns the detected host type.
-   *
-   * @returns Promise resolving to the host type once Office.js is ready
-   */
-  async waitForOfficeReady(): Promise<HostType> {
-    return new Promise((resolve, reject) => {
-      if (typeof Office === 'undefined') {
-        reject(createError('API_NOT_AVAILABLE', 'Office.js is not loaded. Make sure to include the Office.js script.'));
-        return;
-      }
-
-      Office.onReady(info => {
-        if (info.host === Office.HostType.Outlook) {
-          resolve('outlook');
-        } else if (info.host === Office.HostType.Word) {
-          resolve('word');
-        } else {
-          reject(createError('INVALID_HOST', `Unsupported Office host: ${info.host}`));
-        }
-      });
-    });
   },
 };
 

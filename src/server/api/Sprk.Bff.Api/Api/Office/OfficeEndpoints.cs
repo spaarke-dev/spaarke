@@ -632,10 +632,15 @@ public static class OfficeEndpoints
             OfficeErrorCodes.CorruptDocumentPackage => ProblemDetailsHelper.OfficeValidationError(
                 error.Code, OfficeErrorCodes.GetTitle(error.Code), error.Message, correlationId),
             // Task 080 — OFFICE_022 (no owner could be determined) joins the two version refusals: a refusal that
-            // wrote nothing, rendered with its own status and title from OfficeErrorCodes.
+            // wrote nothing, rendered with its own status and title from OfficeErrorCodes. Task 060 — OFFICE_014 (the
+            // save's job row could not be created) too: a retryable 502, not the default 400, which would blame the request.
+            // Task 075 — OFFICE_INTERNAL (an unexpected server exception) too: a 500 with a generic message, not the
+            // default 400 below, which blamed the request and carried the exception's message.
             OfficeErrorCodes.VersionTargetHasNoFile
                 or OfficeErrorCodes.VersionTargetLocked
-                or OfficeErrorCodes.RecordOwnerUnresolved => Results.Problem(
+                or OfficeErrorCodes.RecordOwnerUnresolved
+                or OfficeErrorCodes.DataverseError
+                or OfficeErrorCodes.InternalError => Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(error.Code),
                 title: OfficeErrorCodes.GetTitle(error.Code),
                 detail: error.Message,
@@ -1073,7 +1078,12 @@ public static class OfficeEndpoints
     /// <param name="type">Comma-separated entity types to filter (Matter, Project, Invoice, Account, Contact).</param>
     /// <param name="skip">Number of results to skip for pagination (default: 0).</param>
     /// <param name="top">Maximum results to return (default: 20, max: 50).</param>
+    /// <param name="access">
+    /// <c>file</c> asks for each result's <c>canFile</c>: whether <c>POST /api/office/save</c> would accept it as
+    /// the target (task 084, #1037). Any other value, or none, leaves <c>canFile</c> unset and costs nothing.
+    /// </param>
     /// <param name="officeService">Office service for search operations.</param>
+    /// <param name="searchService">Evaluates <c>canFile</c> with the save's own rights check (task 084).</param>
     /// <param name="callerResolver">Resolves the caller's Dataverse systemuserid for the impersonated read (task 062).</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="context">HTTP context for user claims.</param>
@@ -1084,7 +1094,9 @@ public static class OfficeEndpoints
         string? type,
         int? skip,
         int? top,
+        string? access,
         IOfficeService officeService,
+        OfficeSearchService searchService,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         ILogger<Program> logger,
         HttpContext context,
@@ -1190,6 +1202,15 @@ public static class OfficeEndpoints
         {
             var response = await officeService.SearchEntitiesAsync(
                 request, userId, callerSystemUserId, cancellationToken);
+
+            // Task 084 (#1037): "pickable equals savable". The Save tab's picker asks with access=file, and each
+            // row then says whether the save would accept it, decided by the save's own rights check. The To Do
+            // assignee search does not ask, and pays nothing.
+            if (string.Equals(access, "file", StringComparison.OrdinalIgnoreCase))
+            {
+                response = await searchService.ApplyFilingAccessAsync(
+                    response, TokenHelper.ExtractBearerTokenOrNull(context), cancellationToken);
+            }
 
             // Add correlation ID to response
             response = response with { CorrelationId = traceId };
@@ -1449,9 +1470,9 @@ public static class OfficeEndpoints
     #region Document Profile Endpoints
 
     /// <summary>
-    /// FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" trigger. Mirrors
-    /// <c>ComposeDocumentEndpoints.RefreshProfileAsync</c> exactly — fire-and-forget, 202 Accepted, no
-    /// synchronous wait for the profile to complete, unconditional overwrite with no confirmation.
+    /// FR-08 (spaarkeai-word-add-in-r1 task 022): the "Generate Profile" trigger. 202 Accepted, no wait for the
+    /// profile to complete, unconditional overwrite with no confirmation. Since task 068 (#1086) the 202 means the
+    /// request is on the job queue, so it survives a restart.
     /// </summary>
     private static void MapDocumentProfileEndpoints(RouteGroupBuilder group)
     {
@@ -1469,7 +1490,7 @@ public static class OfficeEndpoints
         documents.MapPost("/{documentId:guid}/generate-profile", GenerateProfileAsync)
             .WithName("OfficeGenerateDocumentProfile")
             .WithSummary("Re-run the Document Profile for an identified document (FR-08)")
-            .WithDescription("Fire-and-forget best-effort re-dispatch of the Document Profile for the given sprk_document, mirroring Compose's shipped refresh-profile semantics: 202 Accepted, unconditional overwrite of any existing profile, no confirmation prompt.")
+            .WithDescription("Queues a fresh Document Profile for the given sprk_document: 202 Accepted once the request is on the job queue, unconditional overwrite of any existing profile, no confirmation prompt.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate) // low-frequency inline action — same category as /todo
             .AddOfficeAuthFilter()
             .AddEndpointFilter(async (context, next) =>
@@ -1497,8 +1518,8 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
-            // 503: the compound AI gate is off (IDocumentProfileAi unavailable) — coordinator-review fix,
-            // see GenerateProfileDispatchOutcome.FacadeUnavailable.
+            // 503: the compound AI gate is off, so the queued job could never run (OFFICE_PROFILE_002), or the job
+            // queue refused the request (OFFICE_PROFILE_004).
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
@@ -1510,15 +1531,10 @@ public static class OfficeEndpoints
     /// has already authorized the caller for <c>write</c> on it (ADR-008 — no inline authorization here).
     /// </summary>
     /// <remarks>
-    /// Coordinator-review fix: this handler used to fire-and-forget
-    /// <c>officeService.GenerateProfileAsync</c> WITHOUT awaiting or inspecting its result, so it
-    /// returned 202 unconditionally — including when the AI profile facade was unavailable (compound AI
-    /// gate off) or no usable bearer token reached the dispatcher. That let an unconditionally-mapped
-    /// endpoint claim success for a feature-gated dependency that would never run the job (root
-    /// CLAUDE.md §10 asymmetric-registration rule / §F.1 / the ADR-032 Null-Object kill-switch
-    /// principle). The fix AWAITS the dispatch DECISION (fast — it does not wait for the background
-    /// profile itself, only for <c>OfficeProfileDispatcher.Dispatch</c>'s synchronous branch) and
-    /// switches on the outcome, so only a genuine dispatch produces 202.
+    /// Only a request that is on the job queue produces 202. With the compound AI gate off the job could never run, so
+    /// that is a 503, never a 202 (root CLAUDE.md §10 asymmetric-registration rule / §F.1 / ADR-032); so is a request
+    /// the job queue refused. The 202 carries the job's id, and its <c>Location</c> is the document read, where this job
+    /// type records its status (<c>sprk_filesummarystatus</c>, ADR-017).
     /// </remarks>
     private static async Task<IResult> GenerateProfileAsync(
         Guid documentId,
@@ -1528,23 +1544,37 @@ public static class OfficeEndpoints
     {
         var traceId = context.TraceIdentifier;
 
-        // Awaits only the DISPATCH DECISION, not the background profile — see the XML remarks above and
-        // OfficeProfileDispatcher.Dispatch, whose synchronous branch (facade-availability check, bearer
-        // check, Task.Run scheduling) completes immediately; the profile itself continues detached.
-        var outcome = await officeService.GenerateProfileAsync(documentId, context, context.RequestAborted)
+        // Awaits the queue submit, not the profile, which runs on the job queue.
+        var result = await officeService.GenerateProfileAsync(documentId, context, context.RequestAborted)
             .ConfigureAwait(false);
+        var outcome = result.Outcome;
 
         switch (outcome)
         {
             case GenerateProfileDispatchOutcome.Dispatched:
                 logger.LogInformation(
-                    "Office Generate Profile: document {DocumentId} requested by user, dispatched (best-effort) TraceId={TraceId}",
-                    documentId, traceId);
-                return Results.Accepted(value: new { documentId, correlationId = traceId });
+                    "Office Generate Profile: document {DocumentId} requested by user, queued as job {JobId} TraceId={TraceId}",
+                    documentId, result.JobId, traceId);
+                return Results.Accepted(
+                    $"/api/v1/documents/{documentId}",
+                    new { documentId, jobId = result.JobId, correlationId = traceId });
+
+            case GenerateProfileDispatchOutcome.QueueUnavailable:
+                return Results.Problem(
+                    type: "https://spaarke.com/errors/office/office_profile_004",
+                    title: "Service Unavailable",
+                    detail: "The profile request could not be queued. Try again in a moment.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_PROFILE_004",
+                        ["retryable"] = true,
+                        ["correlationId"] = traceId,
+                    });
 
             case GenerateProfileDispatchOutcome.FacadeUnavailable:
                 logger.LogWarning(
-                    "Office Generate Profile: document {DocumentId} — AI profile facade unavailable, refusing to claim success. TraceId={TraceId}",
+                    "Office Generate Profile: document {DocumentId} — document profiling unavailable, refusing to claim success. TraceId={TraceId}",
                     documentId, traceId);
                 return Results.Problem(
                     type: "https://spaarke.com/errors/office/office_profile_002",
@@ -1554,24 +1584,6 @@ public static class OfficeEndpoints
                     extensions: new Dictionary<string, object?>
                     {
                         ["errorCode"] = "OFFICE_PROFILE_002",
-                        ["correlationId"] = traceId,
-                    });
-
-            case GenerateProfileDispatchOutcome.NoBearer:
-                // Defensive-only branch — unreachable via this route's filter chain (see the XML doc on
-                // GenerateProfileDispatchOutcome.NoBearer and OfficeProfileDispatcher.Dispatch for the
-                // proof). Mapped honestly rather than assumed away.
-                logger.LogWarning(
-                    "Office Generate Profile: document {DocumentId} — no usable bearer token reached the dispatcher. TraceId={TraceId}",
-                    documentId, traceId);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status401Unauthorized,
-                    title: "Unauthorized",
-                    detail: "A caller bearer token is required to generate a document profile.",
-                    type: "https://tools.ietf.org/html/rfc7235#section-3.1",
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["errorCode"] = "OFFICE_PROFILE_003",
                         ["correlationId"] = traceId,
                     });
 

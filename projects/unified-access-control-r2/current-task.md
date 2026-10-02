@@ -4,6 +4,52 @@
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
 >
+> **LATEST (2026-10-02 ~03:30Z) — READ FIRST:**
+> - **Owner round 4 answered all 7 questions.** They are recorded in `notes/session27-owner-decisions-and-research.md` § round 4 and include 141 B2, 155 option (b) → task 156, live steps approved for 141/144/145, and 134 D1 → task 157.
+> - **PR #1083** (130/131/134/151, head `cf70ac417`; master merged in, green at unit 13,364/0 and arch 340) has `Router` ✅. The last legacy check, "Code Quality", was pending. **Merge it as a merge commit when pending = 0.** Then fast-forward the work branch to `integ/uac-r2-batch2` (worktree `C:\wt27i`), measure publish size vs the new master, push, and open PR #2.
+> - **`integ/uac-r2-batch2`** (`C:\wt27i`) = `cf70ac417` + lanes 136-f2 (109/135/136) and 145-f1 (144/145), index updated, round-4 notes, and new POMLs 156/157. It is green: arch 341, unit 13,564/0. **Commit docs here, not on the work branch,** so the fast-forward stays possible.
+> - **Batch 3 RUNNING:** workflow `wgqgt6cu7`, run `wf_e6eb5677-3f0`, a DAG of 141(B2, branch -f3), 138→139, 133→150, 146→149→148→147, 157, 137(139+141)→132, 152(141), 143(141+133+139)→142(+137)→140. The base is the integ branch, and there are no live writes. The first launch (`wh0kouulp`) was stopped because of wrong POML paths; that is fixed.
+> - **155 fix round 3:** workflow `wd2pia0jm` (verify running). When it is READY, launch **156** from `task/uac-r2-155-f3` (or the final 155 branch).
+> - **After deploy, run the live steps** (approved): 144 (create the "Secure Record Owners" team, migrate with `-AcceptedAssignCascade team,sharepointdocumentlocation,sharepointdocument`, provision 65a3fab2 as the fixture), 145 G1 (resend the peer message FIRST), and 141 G-1..G-8 once 141-f3 has merged.
+>
+> **PROGRESS after the handoff (2026-10-01, post-compact):**
+> - **Step 1 done.** On the merged branch, ArchTests are 337/0 and the unit suite is 13,189 passed, 0 failed, 54 skipped. Integration projects build clean.
+> - **Step 7 done.** The peer confirmed it has no doubles; the Office contract test was already migrated by 151.
+> - **Master publish baseline** (the size step): `C:\wt27m` @ `c08ef6013` is **45.46 MB / 212 files** (Compress-Archive Optimal, incl. PDBs, zip at `C:\tmp\pubsize\master.zip`). The branch side is still pending (after the 130b merge).
+> - **Housekeeping done:** `25eee2074` makes all 152 POMLs valid XML (0 errors).
+> - **Worktrees:** `wf_921a992b-425-1/2` were removed. `wf_921a992b-425-3` and `wf_aa385556-714-*` are still locked by another process.
+> - **Step 8 LAUNCHED early:** workflow `wd4apuq7r`, run `wf_fe3801ba-d23` (script under `workflows/scripts/uac-batch2-execute-*.js`). It runs four lanes, `109→135→136`, `141`, `144→145` and `155`. Each task gets an executor, a verifier and up to 2 fix rounds, on branches `task/uac-r2-{id}[-fN]`. There are **no live writes**: 144's team creation and migration and 145's role change come back as manual gates. Handoff notes land in `notes/handoffs/INCOMING-141-*` and `INCOMING-145-*`, plus `notes/141-link-contract.md`, which goes to the peer for their 083. Merge the batch-2 branches into the work branch **after** the batch-1 PR merges.
+> - **Owner answers passed to batch 2:**
+>   - **I1:** (b).
+>   - **I2:** (1).
+>   - **A2 reversed:** for 135, there are no derived terms on CIAM and nothing is retired.
+>   - **F2:** (a).
+>   - **F8:** the interim default.
+>   - **F9:** "Secure Record Owners".
+>   - **F10:** (a), handed to customer-provisioning-orchestration-r1.
+> - 🔴 **New cross-project risk #1081 (peer ISS-016).** Dev's ROOT BU default team "Spaarke" holds 0 privileges, so Dataverse refuses it as an owner. **Task 130's invoice owner comes from `RecordOwnershipResolver`**, so a root-owned matter or a root-BU caller gets a 5xx on confirm. 146 is exposed the same way. Owner decision is pending in the peer project; we do NOT fork a fix. When it is decided, map any new resolver refusal to a clean 4xx on the 130 route. Record it as a live-gate risk in the PR body.
+> - **PR #1083 opened as a DRAFT** (batch 1: 131/134/151) on 2026-10-01. It leaves draft once 130 is merged in, the suites are re-run, and branch publish size + CVE scan are done.
+> - **130 status:**
+>   - Fix round 2 (`task/uac-r2-130b` @ `29f07a4d2`) **PASSED** adversarial verification (unit 13,176/0, ArchTests 340).
+>   - Fix round 3 is running: workflow `woqdms6sw` (run `wf_5fa8277b-fee`) on `task/uac-r2-130c`. It closes the residuals: no second extraction job (dup detection is OFF on `sdap-jobs`, verified live, and the property is immutable), a bounded retry instead of a spurious 409, the confirm/reject race (conditional status writes; reject refuses a linked document), orphan over-report, and the regarding id/name convention.
+>   - **MERGE `task/uac-r2-130c` (not 130b) when verified.**
+> - **130 DONE:** merged `task/uac-r2-130c`, then commit `7275472d9` (decision-identity fix, note §11.9). Filed #1087 and commented on #984. Branch publish size 45.49 MB vs master 45.46 MB, 212/212 files, +0.03. No CVEs. **PR #1083 marked READY.** `Router` was green on `7275472d9`; Tier 2 was cancelled at its 30-min limit (advisory).
+> - **Master moved 17 commits** (peer #1082/#1085/#1091/#1092). It was merged into the work branch locally as a merge commit, with no textual conflicts; that merge is NOT pushed yet. Suites on the combined tree are running (shell `b571yvjq2`, output `scratchpad/postmaster-tests.txt`). When green → push → `Router` → merge #1083 (merge commit).
+> - **BATCH 2 RESULTS** (workflow `wf_fe3801ba-d23`; full output in task `wd4apuq7r`):
+>   - ✅ ready to merge: **136** `task/uac-r2-136-f2` (contains 109-f1 and 135), and **145** `task/uac-r2-145-f1` (contains 144-f1). Merge both into the work branch **AFTER #1083 merges**, run the suites, measure publish size, then open PR #2.
+>   - ❌ **141** `task/uac-r2-141-f2`: BLOCKED on an owner decision (notes §9). An alternate key and FLS cannot share `contact.sprk_externalobjectid`. Recommended **B2**: a mirror key column `sprk_externalobjectidkey`.
+>   - ❌ **155** `task/uac-r2-155-f2`: fix round 3 RUNNING (workflow `wd2pia0jm`, run `wf_865d57e2-c95`, branch `task/uac-r2-155-f3`). It covers the invoice→agreement fail-open, a full live lookup sweep, the polymorphic regarding pair, and the undefined-enum fail-closed. Escalation trigger 2 (a/b/c) is held at (c) pending the owner; rec (b).
+> - **OWNER DECISIONS PENDING** (asked 2026-10-01):
+>   - **144(a):** accept the assign-cascade list (rec: accept).
+>   - **144(b):** structural Deep reach from the root BU (Chelsea Friez and Lori Witkin, Entra-synced 2026-10-01, plus the hotmail guest). Options: (a) remove the roles, or (b) narrow Core User / Office Add In User Read on project/matter/WA from Deep to Local. My lean is (b).
+>   - **144(c):** project `65a3fab2` is not isolated (rec: provision it).
+>   - **141 live-gate approval** (schema/FLS/acct claim/app setting/reconciliation job).
+>   - **141 §9:** B2.
+>   - **155 trigger 2:** (b), plus the Office to-do carrier shape.
+> - **Peer:** the 145 plan message (asks about pending role changes, plus the 144 backfill-script note) **EXPIRED UNDELIVERED**: the peer's user did not approve it. **RESEND it before running 145's G1**; the text is in the 145 note §8a, plus the backfill note. Not yet delivered: INCOMING-141 and INCOMING-145 to cpo-r1 (after merge), and the 141 link contract to the peer (after B2 is decided; the contract §1.1 changes).
+> - **Peer PR #1085 (060)** also touches `OfficeEndpointsContractTests.cs`, on different hunks from ours.
+> - **Peer PR #1082 (084+085)** touches `CallerRecordAccessProbe.cs` (new `GetCallerRightsForRecordsAsync`; protected virtual seams) and `EntityAccessFilter.cs`. Our 130 also touches `CallerRecordAccessProbe`. Whoever lands second rebases.
+>
 > | | |
 > |---|---|
 > | **Branch state** | `work/unified-access-control-r2` HEAD `4b3661852`, **NOT pushed**. Local commits since origin: `b84cf525c` (origin/master merge, incl. #1052 + #1076), merges of task branches **131** (`bb4dd61aa`), **134** (`92d82b3d8`) and **151** (`4eabdb776`), then index/155 docs. Builds of the BFF and the unit project are clean. |

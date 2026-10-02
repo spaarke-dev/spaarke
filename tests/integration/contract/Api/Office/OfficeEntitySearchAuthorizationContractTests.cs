@@ -258,6 +258,23 @@ public class OfficeEntitySearchAuthorizationContractTests : IClassFixture<Office
 
     #endregion
 
+    #region Filing access is opt-in (task 084)
+
+    [Fact]
+    public async Task SearchEntities_WithoutAccessFile_ReturnsNoCanFileOnAnyRow()
+    {
+        // The To Do assignee search (App.tsx) and every caller that does not ask must see the response exactly as
+        // before task 084: canFile is computed only for access=file (OfficeFilingAccessParityContractTests).
+        var dataverse = StubDataverse.WithFullWorld().Permitting(AllPermittedIds.ToArray());
+
+        var body = await SearchAsync(dataverse, "?q=Ac&top=50");
+
+        body.Results.Should().NotBeEmpty();
+        body.Results.Should().OnlyContain(r => r.CanFile == null);
+    }
+
+    #endregion
+
     // ── Harness ─────────────────────────────────────────────────────────────────────────────────────
 
     private async Task<EntitySearchResponse> SearchAsync(StubDataverse dataverse, string queryString)

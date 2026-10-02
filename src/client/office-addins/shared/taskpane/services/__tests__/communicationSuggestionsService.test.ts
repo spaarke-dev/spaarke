@@ -1,4 +1,4 @@
-import { fetchEnginePreSelection } from '../communicationSuggestionsService';
+import { fetchEnginePreSelection, fetchRelatedCandidates } from '../communicationSuggestionsService';
 import { apiClient, ApiClientError } from '@shared/services';
 
 // Mock the shared apiClient; keep a real ApiClientError class so the service's
@@ -157,5 +157,108 @@ describe('fetchEnginePreSelection', () => {
     mockGet.mockRejectedValueOnce(new ApiClientError({ type: 'about:blank', title: 'Server Error', status: 500 }));
 
     await expect(fetchEnginePreSelection('<err@contoso.com>')).rejects.toBeInstanceOf(ApiClientError);
+  });
+
+  it('returns null for an Account prediction: the save refuses "account", so the ribbon must not try (task 084 / #1075)', async () => {
+    mockGet.mockResolvedValueOnce(
+      matterSuggestion({
+        candidates: [
+          {
+            field: 'sprk_regardingaccount',
+            targetEntity: 'account',
+            targetId: '44444444-4444-4444-4444-444444444444',
+            reinforcedConfidence: 0.95,
+            deterministicConfidence: 0.95,
+            written: false,
+            conflict: false,
+            contributors: [],
+          },
+        ],
+      })
+    );
+
+    const result = await fetchEnginePreSelection('<account@contoso.com>');
+
+    expect(result).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Task 084 (#1037, "pickable equals savable"): the suggestions route's `filingAccess` map (keyed by
+// candidate targetId, like `names`) becomes `canFile` on the cards AND on the ribbon's prediction.
+// ---------------------------------------------------------------------------------------------
+
+const MATTER_ID = '11111111-1111-1111-1111-111111111111';
+const PROJECT_ID = '55555555-5555-5555-5555-555555555555';
+
+/** A matter (0.92) + a project (0.8) suggestion, optionally with a `filingAccess` map. */
+function twoCandidateSuggestion(filingAccess?: Record<string, boolean>) {
+  const base = matterSuggestion();
+  const project = {
+    field: 'sprk_regardingproject',
+    targetEntity: 'sprk_project',
+    targetId: PROJECT_ID,
+    reinforcedConfidence: 0.8,
+    deterministicConfidence: 0.8,
+    written: false,
+    conflict: false,
+    contributors: [],
+  };
+  return {
+    ...base,
+    ...(filingAccess ? { filingAccess } : {}),
+    suggestions: { ...base.suggestions, candidates: [...base.suggestions.candidates, project] },
+  };
+}
+
+describe('filingAccess → canFile (task 084)', () => {
+  it('fetchRelatedCandidates carries filingAccess onto each card as canFile', async () => {
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion({ [MATTER_ID]: false, [PROJECT_ID]: true }));
+
+    const cards = await fetchRelatedCandidates('<abc@contoso.com>');
+
+    expect(cards.find(c => c.id === MATTER_ID)?.canFile).toBe(false);
+    expect(cards.find(c => c.id === PROJECT_ID)?.canFile).toBe(true);
+  });
+
+  it('fetchEnginePreSelection carries filingAccess onto the predicted record (and the alternates)', async () => {
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion({ [MATTER_ID]: false, [PROJECT_ID]: true }));
+
+    const result = await fetchEnginePreSelection('<abc@contoso.com>');
+
+    expect(result).not.toBeNull();
+    expect(result!.predicted.id).toBe(MATTER_ID);
+    expect(result!.predicted.canFile).toBe(false);
+    expect(result!.alternates.find(a => a.id === PROJECT_ID)?.canFile).toBe(true);
+  });
+
+  it('an absent key leaves canFile ABSENT (selectable, as before) — never invented as true or false', async () => {
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion({ [MATTER_ID]: false }));
+
+    const cards = await fetchRelatedCandidates('<abc@contoso.com>');
+
+    expect(cards.find(c => c.id === MATTER_ID)?.canFile).toBe(false);
+    expect(cards.find(c => c.id === PROJECT_ID)).not.toHaveProperty('canFile');
+  });
+
+  it('no filingAccess map at all → no canFile anywhere (a pre-084 server response behaves as before)', async () => {
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion());
+
+    const cards = await fetchRelatedCandidates('<abc@contoso.com>');
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion());
+    const pre = await fetchEnginePreSelection('<abc@contoso.com>');
+
+    expect(cards).toHaveLength(2);
+    cards.forEach(c => expect(c).not.toHaveProperty('canFile'));
+    expect(pre!.predicted).not.toHaveProperty('canFile');
+  });
+
+  it('filingAccess does not change the ranking (ADR-045: the shared model is untouched)', async () => {
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion());
+    const without = await fetchRelatedCandidates('<abc@contoso.com>');
+    mockGet.mockResolvedValueOnce(twoCandidateSuggestion({ [MATTER_ID]: false, [PROJECT_ID]: true }));
+    const withAccess = await fetchRelatedCandidates('<abc@contoso.com>');
+
+    expect(withAccess.map(c => [c.id, c.confidence])).toEqual(without.map(c => [c.id, c.confidence]));
   });
 });

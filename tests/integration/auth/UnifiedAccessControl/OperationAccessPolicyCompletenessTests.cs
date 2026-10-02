@@ -147,6 +147,8 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
+    [InlineData("finance.attach_invoice")] // task 130: Operation = "…" initialiser in FinanceEndpoints' resolvers
+    [InlineData("finance.link_invoice")] // task 130 (owner G5): Operation = "…" initialiser, confirm's document check
     [InlineData("entity.associate_document")]
     public void SourceScan_DiscoversKnownCallSiteOperation(string operation)
     {
@@ -236,6 +238,8 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("read", AccessRights.Read)]
     [InlineData("finance.read", AccessRights.Read)]
     [InlineData("finance.confirm", AccessRights.Write)]
+    [InlineData("finance.attach_invoice", AccessRights.AppendTo)] // task 130
+    [InlineData("finance.link_invoice", AccessRights.Write | AccessRights.Append)] // task 130, owner G5: the document HOLDS the lookup
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
     public void RegressionA3A20_Operation_ResolvesWithLeastPrivilegeRights(
         string operation, AccessRights expected)
@@ -258,6 +262,8 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
+    [InlineData("finance.attach_invoice")] // task 130
+    [InlineData("finance.link_invoice")] // task 130, owner G5
     [InlineData("entity.associate_document")]
     public void RegressionA3A20_Operation_DoesNotRequireDeleteOrShare(string operation)
     {

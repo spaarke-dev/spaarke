@@ -92,7 +92,6 @@ public class OfficeDocumentPersistenceEditableDedupTests
     private static OfficeDocumentPersistence Sut(
         Mock<IDocumentDataverseService> docs, Mock<ContentDedupDetector> detector, Mock<IGenericEntityService>? generic) =>
         new(docs.Object,
-            Mock.Of<IProcessingJobService>(),
             detector.Object,
             NullLogger<OfficeDocumentPersistence>.Instance,
             Mock.Of<ICommunicationDataverseService>(),

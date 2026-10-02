@@ -77,7 +77,7 @@ becomes a `Content-Disposition` header or a ZIP entry name, never an SPE path.
 
 ⚠️ `GraphMessageToEmlConverter`'s copy was a **latent production bug**, not merely a duplicate: it used a
 bare `Path.GetInvalidFileNameChars()`, which on the **linux-x64** runtime this publishes to returns only
-`{'\0','/'}`. Its unit test asserted `<`, `>`, `"` were stripped and passed — because it runs on Windows,
+`{'\0','/'}`. Its unit test asserted `&lt;`, `>`, `"` were stripped and passed — because it runs on Windows,
 where that call returns the wide set.
 
 ═══════════════════════════════════════════════════════════════════════

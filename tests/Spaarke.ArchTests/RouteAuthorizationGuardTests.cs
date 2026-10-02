@@ -245,6 +245,37 @@ public class RouteAuthorizationGuardTests
             + "handlers refuse (500) without it; rows are authorized per document in the endpoint, the "
             + "filter/endpoint PAIR shape Rule B was widened for in task 077."),
 
+        // ---- Finance + scorecard: added 2026-09-30 by unified-access-control-r2 task 130 (defect C8) ----
+        //
+        // All three files were ABSENT from this census, so they were NotGoverned by omission while serving
+        // Dataverse content: four recalculate routes that read a matter's/project's invoices, budgets or KPI
+        // assessments APP-ONLY, wrote derived fields back APP-ONLY, and returned the numbers to any signed-in
+        // caller (bare RequireAuthorization() — there is no default/fallback policy in the BFF); and four
+        // /api/finance routes gated by ONE group-level filter that authorized whatever id a route→query
+        // fallback chain found first, always against sprk_documents. RouteLevelGate, not GroupGated: the gate
+        // that matters is the per-route declaration of WHICH id is authorized, so it has to be visible in each
+        // route's own fluent chain. No route in these files carries a waiver.
+        new GovernedFile("Api/Finance/FinanceEndpoints.cs", Scope.RouteLevelGate,
+            "/api/finance/* — summary (Read on sprk_matters(route matterId)), invoice search (query matterId "
+            + "REQUIRED, Read on that matter — an unscoped search was tenant-wide), and invoice-review confirm / "
+            + "reject (Write on the BODY DocumentId; confirm also Write+Append on that document, which holds the "
+            + "invoice lookup, AppendTo on the matter and vendor organization, and the caller's Create privilege "
+            + "on sprk_invoice — owner G5). Each route carries its own "
+            + "AddFinanceAuthorizationFilter declaring the id it authorizes from the SAME source its handler "
+            + "binds; the group-level 'finance.read' filter and its id-fallback chain were deleted by task 130."),
+
+        new GovernedFile("Api/Finance/FinanceRollupEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/finance/{matters|projects}/{id}/recalculate — reads invoices/budgets app-only, writes "
+            + "nine rollup fields app-only, returns spend/budget/utilization/12-month timeline. Gated by task 130 "
+            + "with Read on the parent as the caller, denied with a 404 identical for absent and unreadable ids. "
+            + "The check is at the endpoint because SpendSnapshotGenerationJobHandler calls the service with no "
+            + "caller."),
+
+        new GovernedFile("Api/ScorecardCalculatorEndpoints.cs", Scope.RouteLevelGate,
+            "POST /api/{matters|projects}/{id}/recalculate-grades — reads KPI assessments app-only and writes six "
+            + "grade fields app-only. The finance rollup routes were copied from this file, defect included. Gated "
+            + "by task 130 exactly as FinanceRollupEndpoints: Read on the parent as the caller, uniform 404."),
+
         // ---- Rule A does NOT apply: authorization lives in the handler ----
         new GovernedFile("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", Scope.HandlerAuthorized,
             "THE reference implementation per the Wave-3 build plan: each handler checks project access AND "

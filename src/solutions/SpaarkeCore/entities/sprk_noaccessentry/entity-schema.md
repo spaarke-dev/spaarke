@@ -58,7 +58,7 @@ row nobody should be routinely reassigning.
 | Logical Name | Display Name | Type | Target Entity | Description |
 |--------------|--------------|------|----------------|-------------|
 | sprk_subjectcontact | Subject Contact | Lookup | contact | The denied contact. |
-| sprk_subjectorganization | Subject Organization | Lookup | sprk_organization | The denied organization — denies every contact who is an ACTIVE member (the caller resolves membership via the same `sprk_contactorganization` junction `ExternalParticipationService.QueryActiveOrgIdsAsync` already reads; the reader is agnostic to how membership was resolved — see `<notes>`). |
+| sprk_subjectorganization | Subject Organization | Lookup | sprk_organization | The denied organization — denies every contact who is an ACTIVE member — `statecode`-active, with NO date or organization-state bound, so a member whose membership ended by date or has not yet started is still denied (owner D-2 part 2 / D-10). The caller resolves membership via the same `sprk_contactorganization` junction read `ExternalParticipationService.ReadOrganizationMembershipsAsync` performs (its `WallSubjectOrganizationIds` set, task 109); the reader is agnostic to how membership was resolved — see `<notes>`. |
 
 ### Object Fields — exactly ONE of {Object Organization} or {Object Record Type + Object Record Id} populated
 

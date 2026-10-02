@@ -86,6 +86,7 @@ shared/taskpane/components/__tests__/DocumentProfileSection.test.tsx
 # save-as-new; `indeterminate` is never treated as new; each OFFICE_016-019
 # refusal has a way forward; the override sends no existingDocumentId.
 shared/taskpane/hooks/__tests__/useSaveFlow.versionSave.test.ts
+shared/taskpane/hooks/__tests__/useSaveFlow.terminalOutcome.test.ts
 shared/taskpane/components/__tests__/SaveModeSection.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
 
@@ -216,6 +217,19 @@ shared/taskpane/services/__tests__/documentIdentityService.stampPrecedence.test.
 # key while a real edit does not.
 word/commands/__tests__/commands.test.ts
 shared/taskpane/services/__tests__/shareLinkService.test.ts
+# --- pickable equals savable (task 084, #1037 + #1075) - green from creation ---
+# Pins: a record the caller can read but not FILE to (canFile === false, from
+# `access=file` search or the suggestions route's filingAccess) renders DISABLED
+# with the owner's verbatim reason and is never selected — not by click, Enter,
+# Space or any pre-selection; true/null/absent rows behave as before. SaveFlow
+# sends access=file and its explicit field map carries canFile. The Outlook
+# ribbon never posts a save to a non-fileable prediction (verbatim notice + open
+# the pane) and sends the FRIENDLY type name the save accepts, never the logical
+# name (#1075: "sprk_matter" -> 400 OFFICE_002). Seeded both ways (picker branch
+# removed; canFile dropped from SaveFlow's map).
+shared/taskpane/components/__tests__/RelatedToPicker.filingAccess.test.tsx
+shared/taskpane/components/__tests__/SaveFlow.filingAccess.test.tsx
+outlook/commands/__tests__/commands.test.ts
 # --- the final 10 (task 071, 2026-09-21) — repaired and gated in one change --
 # Every one of these was a stale test or a harness gap, never a shipped code
 # bug (full diagnosis table: notes/071-jest-repair.md). Representative causes:

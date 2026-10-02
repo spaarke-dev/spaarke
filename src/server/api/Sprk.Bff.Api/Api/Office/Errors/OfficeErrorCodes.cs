@@ -126,6 +126,15 @@ public static class OfficeErrorCodes
     public const string RecordOwnerUnresolved = "OFFICE_022";
 
     /// <summary>
+    /// The save failed in a way no other code describes: an exception the server did not expect.
+    /// </summary>
+    /// <remarks>
+    /// A server fault, so a 500, never the 400 it used to fall through to (task 075). The message on the wire is
+    /// generic; the exception is logged with the request's correlation id, and never sent to the caller.
+    /// </remarks>
+    public const string InternalError = "OFFICE_INTERNAL";
+
+    /// <summary>
     /// Base URI for Office error types.
     /// </summary>
     public const string TypeBaseUri = "https://spaarke.com/errors/office/";
@@ -161,6 +170,7 @@ public static class OfficeErrorCodes
             GraphApiError => "service-error",
             DataverseError => "service-error",
             ProcessingUnavailable => "unavailable",
+            InternalError => "internal-error",
             _ => "error"
         };
 
@@ -198,6 +208,7 @@ public static class OfficeErrorCodes
             NameCollision => "File Already Exists",
             CorruptDocumentPackage => "Document File Unreadable",
             RecordOwnerUnresolved => "Record Owner Unresolved",
+            InternalError => "Save Failed",
             _ => "Error"
         };
     }
@@ -233,6 +244,7 @@ public static class OfficeErrorCodes
             GraphApiError => 502,
             DataverseError => 502,
             ProcessingUnavailable => 503,
+            InternalError => 500,
             _ => 500
         };
     }

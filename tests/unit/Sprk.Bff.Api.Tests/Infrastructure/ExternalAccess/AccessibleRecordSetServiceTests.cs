@@ -93,6 +93,30 @@ public class AccessibleRecordSetServiceTests
             .Should().BeFalse("a record outside membership must be denied, not omitted");
     }
 
+    [Fact]
+    public void AccessibleRecordSet_BuiltDirectlyWithANoneRightsEntry_ItsReadViewsExcludeIt()
+    {
+        // Task 136 (C2), the set's own layer. Every composition removes entries without Read, which would mask
+        // these views; a set built some other way (a test double, a future composer) must still answer "holds
+        // Read" — so this builds one directly, with the entry the evaluator itself used to leave behind.
+        var set = new AccessibleRecordSet
+        {
+            PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+            EntityType = ProjectEntity,
+            Rights = new Dictionary<Guid, AccessRights>
+            {
+                [GrantedProject] = AccessRights.Read,
+                [UnrelatedRecord] = AccessRights.None,
+            },
+            Sources = new AccessibleRecordSetSources(false, true, false),
+        };
+
+        set.Contains(GrantedProject).Should().BeTrue("control: a Read-bearing entry is in the set");
+        set.Contains(UnrelatedRecord).Should().BeFalse("Contains means \"holds Read\", not \"is a key\"");
+        set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject });
+        set.Count.Should().Be(1);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // (1b) systemuser + linked contact grant — membership ∪ contact grants (project-scoped)
     //      §6.5 Path-B amendment (external-access-r2 UAT 2026-08-07 — parallel workforce/contact access)
@@ -483,8 +507,9 @@ public class AccessibleRecordSetServiceTests
     [Fact]
     public void ToAccessRights_NullLevel_IsNone_FailClosed()
     {
-        // A grant row with no level keeps its id (set membership preserved — deliberately NOT filtered
-        // out, which would be a silent revocation) but contributes NO rights.
+        // A grant row with no level is read with a null level, which maps to None here. No level means
+        // not granted (owner rule, 2026-09-30): the evaluator's RemoveEntriesWithoutRead takes such a
+        // record out of the answer at the end of composition (task 136).
         Assert.Equal(AccessRights.None, ExternalAccessLevels.ToAccessRights(null));
     }
 
@@ -634,6 +659,7 @@ public class AccessibleRecordSetServiceTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         set.Contains(GrantedProject).Should().BeFalse(
             "a veto REMOVES the key — it never writes a low value that max() would ignore");
         set.RecordIds.Should().NotContain(GrantedProject,
@@ -710,6 +736,7 @@ public class AccessibleRecordSetServiceTests
 
         set.RightsFor(orgOnly).Should().Be(AccessRights.None,
             "a FullAccess ORG grant confers nothing on a secure record — Secure suppresses org expansion");
+        set.Rights.Should().NotContainKey(orgOnly, "task 136: absent from the answer, not present with no rights");
         set.RightsFor(direct).Should().Be(
             ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate),
             "a DIRECT personal grant survives Secure (FR-22 survivor case)");
@@ -798,6 +825,7 @@ public class AccessibleRecordSetServiceTests
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "a Type 1 user must not derive access to a secure record via their linked contact — the Secure "
             + "BU covers the Dataverse half, this veto covers the grant half (design §5.1)");
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         standing.Verify(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "the systemuser plane must never consult the standing-grant flag");
     }
@@ -885,6 +913,7 @@ public class AccessibleRecordSetServiceTests
 
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "a Full Access grant plus a matching deny entry must resolve to None — the veto runs after the max");
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         set.Contains(GrantedProject).Should().BeFalse(
             "a veto REMOVES the key; it never writes AccessRights.None (which IsOperationPermittedAsync " +
             "would refuse as a malformed request, not honour as a denial)");
@@ -1086,6 +1115,7 @@ public class AccessibleRecordSetServiceTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(secureRecord).Should().Be(AccessRights.None, "Secure suppresses the org-inherited grant pre-max");
+        set.Rights.Should().NotContainKey(secureRecord, "task 136: absent from the answer, not present with no rights");
         set.Contains(deniedRecord).Should().BeFalse("the deny veto removes the entry post-max, slot 1");
         set.Contains(restrictedRecord).Should().BeFalse("Restricted removes every contact-sourced entry post-max, slot 2");
         set.RightsFor(openRecord).Should().Be(AccessRights.Read, "an unvetoed record is untouched by any of the three mechanisms");
@@ -1386,6 +1416,7 @@ public class AccessibleRecordSetServiceTests
         set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
             "only the explicit grant survives — an unchosen level confers nothing");
         set.RightsFor(StandingProject).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(StandingProject, "task 136: absent from the answer, not present with no rights");
         set.Sources.StandingGrantMembership.Should().BeFalse(
             "provenance must not claim a term that contributed nothing");
 
@@ -1486,10 +1517,11 @@ public class AccessibleRecordSetServiceTests
         // not even attempted (NFR-02 — a term that cannot contribute costs nothing).
         //
         // NOTE on the OTHER half of the acceptance criterion — "an INACTIVE junction row confers
-        // nothing". That is enforced by the `statecode eq 0` predicate inside
-        // ExternalParticipationService.QueryActiveOrgIdsAsync, which THIS DOUBLE REPLACES. Asserting it
-        // here would assert the fake, not the product, so it is pinned where it lives (the junction
-        // query) and deliberately not restated here.
+        // nothing". That is decided by the junction read's filter + projection
+        // (ExternalParticipationService.BuildOrganizationMembershipFilter / ProjectOrganizationMemberships,
+        // task 109), which THIS DOUBLE REPLACES. Asserting it here would assert the fake, not the product,
+        // so it is pinned where it lives — OrganizationMembershipReadTests — and deliberately not
+        // restated here.
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
 
         var standing = new Mock<ISubjectStandingGrantReader>();
@@ -1533,6 +1565,7 @@ public class AccessibleRecordSetServiceTests
         set.Contains(OrgDerivedRecord).Should().BeFalse(
             "a Full Access ORG standing grant confers nothing on a secure record");
         set.RightsFor(OrgDerivedRecord).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(OrgDerivedRecord, "task 136: absent from the answer, not present with no rights");
         set.Contains(OrgDerivedRecordB).Should().BeTrue(
             "the non-secure record still comes through the very same term");
     }
@@ -1571,6 +1604,7 @@ public class AccessibleRecordSetServiceTests
 
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "org-inherited access is suppressed on a secure record for a systemuser principal too");
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         set.Contains(MemberRecordA).Should().BeTrue("the user's own ADR-034 membership is untouched");
         set.Sources.OrgExpansionMembership.Should().BeFalse();
         membership.Verify(
@@ -1733,8 +1767,12 @@ public class AccessibleRecordSetServiceTests
     }
 
     [Fact]
-    public async Task ComposeAsync_WhenTheJunctionReadFaults_DeniesEveryCandidateAndDoesNotThrow()
+    public async Task ComposeAsync_WhenTheJunctionEntryThrows_DeniesEveryCandidateAndDoesNotThrow()
     {
+        // The TOKEN/API-URL acquisition fault — the one junction failure that reaches the composer as an
+        // exception. Task 109 must not weaken it while making the QUERY-level fault report itself; the
+        // query-level half is driven through a real transport in OrganizationMembershipReadTests.
+        //
         // NFR-01 / NFR-02. The junction read feeds TWO consumers whose safe failure directions are
         // opposite, so one fault has two consequences and the test states both:
         //   • the additive org-expansion term contributes NOTHING (over-inclusion there is an
@@ -1913,31 +1951,36 @@ public class AccessibleRecordSetServiceTests
         //
         // ⚠️ Both overrides are REQUIRED, not convenience — exactly like the Flags override above. The
         // base ExternalParticipationService implementations need `credential`/`configuration`, which are
-        // `null!` here; without an override, QueryActiveOrgIdsAsync's token acquisition throws
-        // uncaught into AccessibleRecordSetService.ResolveDenyVetoAsync's own fail-closed catch, which
-        // then denies EVERY candidate in the composition — silently failing every pre-039 test that
-        // reaches the deny-veto call (i.e. almost all of them, since a resolved contact id is enough to
-        // reach it). "References/belongs to nothing" is the deny-veto's honest, inert default for a
-        // test that predates it.
+        // `null!` here; without an override, ReadOrganizationMembershipsAsync's token acquisition throws
+        // into AccessibleRecordSetService's fail-closed handling, which then denies EVERY candidate in the
+        // composition — silently failing every pre-039 test that reaches the deny-veto call (i.e. almost
+        // all of them, since a resolved contact id is enough to reach it). "References/belongs to
+        // nothing" is the deny-veto's honest, inert default for a test that predates it.
+        //
+        // ActiveOrgIds are CURRENT memberships of ACTIVE organizations, so each one is in BOTH named sets
+        // (task 109). Which rows fall into which set is the junction read's projection, pinned on the real
+        // code in OrganizationMembershipReadTests — never restated by this double.
         public HashSet<Guid> ActiveOrgIds { get; } = new();
         public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
         public HashSet<Guid> UnreadableOrgReferences { get; } = new();
 
         /// <summary>
-        /// Makes the junction read FAULT (task 043). The real query is wrapped in a try/catch that
-        /// returns an empty list, so a fault surfaces to the composer as
-        /// <c>ActiveOrgMemberships.Failed</c> rather than as an exception — and that outcome drives TWO
-        /// decisions in opposite directions: the additive org-expansion term contributes nothing, while
-        /// the FR-23 deny veto denies every queried candidate. A double that could only return an empty
-        /// list could not tell those apart, which is the whole point of the distinction.
+        /// Makes the junction ENTRY throw — the token/API-url acquisition fault, the only failure that
+        /// reaches the composer as an exception. The composer must map it to
+        /// <c>ActiveOrgMemberships.Failed</c>, and that outcome drives TWO decisions in opposite
+        /// directions: the additive org-expansion term contributes nothing, while the FR-23 deny veto
+        /// denies every queried candidate. (A junction QUERY fault — HTTP 500/403/timeout — is reported by
+        /// the real query as an outcome instead, task 109; that path is driven through a real transport in
+        /// OrganizationMembershipReadTests, because a double here would assert the fake — the exact error
+        /// that let ISS-019 ship green.)
         /// </summary>
         public bool ThrowOnActiveOrgIds { get; set; }
 
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
             => ThrowOnActiveOrgIds
-                ? Task.FromException<IReadOnlyList<Guid>>(
-                    new InvalidOperationException("sprk_contactorganization query failed"))
-                : Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
+                ? Task.FromException<ActiveOrgMemberships>(
+                    new InvalidOperationException("Dataverse:ServiceUrl is required"))
+                : Task.FromResult(new ActiveOrgMemberships(ActiveOrgIds.ToList(), ActiveOrgIds.ToList(), Unreadable: false));
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
@@ -1990,8 +2033,8 @@ public class AccessibleRecordSetServiceTests
         // would see its systemuser membership force-denied by ResolveDenyVetoAsync's own catch-all,
         // for a reason unrelated to what this double is testing. Benign, non-throwing defaults keep the
         // fault surface exactly where this class's name says it is.
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(ActiveOrgMemberships.None);
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
