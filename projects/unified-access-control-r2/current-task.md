@@ -25,6 +25,20 @@
 >   - Fix round 2 (`task/uac-r2-130b` @ `29f07a4d2`) **PASSED** adversarial verification (unit 13,176/0, ArchTests 340).
 >   - Fix round 3 is running: workflow `woqdms6sw` (run `wf_5fa8277b-fee`) on `task/uac-r2-130c`. It closes the residuals: no second extraction job (dup detection is OFF on `sdap-jobs`, verified live, and the property is immutable), a bounded retry instead of a spurious 409, the confirm/reject race (conditional status writes; reject refuses a linked document), orphan over-report, and the regarding id/name convention.
 >   - **MERGE `task/uac-r2-130c` (not 130b) when verified.**
+> - **130 DONE:** merged `task/uac-r2-130c`, then commit `7275472d9` (decision-identity fix, note §11.9). Filed #1087 and commented on #984. Branch publish size 45.49 MB vs master 45.46 MB, 212/212 files, +0.03. No CVEs. **PR #1083 marked READY.** `Router` was green on `7275472d9`; Tier 2 was cancelled at its 30-min limit (advisory).
+> - **Master moved 17 commits** (peer #1082/#1085/#1091/#1092). It was merged into the work branch locally as a merge commit, with no textual conflicts; that merge is NOT pushed yet. Suites on the combined tree are running (shell `b571yvjq2`, output `scratchpad/postmaster-tests.txt`). When green → push → `Router` → merge #1083 (merge commit).
+> - **BATCH 2 RESULTS** (workflow `wf_fe3801ba-d23`; full output in task `wd4apuq7r`):
+>   - ✅ ready to merge: **136** `task/uac-r2-136-f2` (contains 109-f1 and 135), and **145** `task/uac-r2-145-f1` (contains 144-f1). Merge both into the work branch **AFTER #1083 merges**, run the suites, measure publish size, then open PR #2.
+>   - ❌ **141** `task/uac-r2-141-f2`: BLOCKED on an owner decision (notes §9). An alternate key and FLS cannot share `contact.sprk_externalobjectid`. Recommended **B2**: a mirror key column `sprk_externalobjectidkey`.
+>   - ❌ **155** `task/uac-r2-155-f2`: fix round 3 RUNNING (workflow `wd2pia0jm`, run `wf_865d57e2-c95`, branch `task/uac-r2-155-f3`). It covers the invoice→agreement fail-open, a full live lookup sweep, the polymorphic regarding pair, and the undefined-enum fail-closed. Escalation trigger 2 (a/b/c) is held at (c) pending the owner; rec (b).
+> - **OWNER DECISIONS PENDING** (asked 2026-10-01):
+>   - **144(a):** accept the assign-cascade list (rec: accept).
+>   - **144(b):** structural Deep reach from the root BU (Chelsea Friez and Lori Witkin, Entra-synced 2026-10-01, plus the hotmail guest). Options: (a) remove the roles, or (b) narrow Core User / Office Add In User Read on project/matter/WA from Deep to Local. My lean is (b).
+>   - **144(c):** project `65a3fab2` is not isolated (rec: provision it).
+>   - **141 live-gate approval** (schema/FLS/acct claim/app setting/reconciliation job).
+>   - **141 §9:** B2.
+>   - **155 trigger 2:** (b), plus the Office to-do carrier shape.
+> - **Peer:** the 145 plan message (asks about pending role changes, plus the 144 backfill-script note) **EXPIRED UNDELIVERED**: the peer's user did not approve it. **RESEND it before running 145's G1**; the text is in the 145 note §8a, plus the backfill note. Not yet delivered: INCOMING-141 and INCOMING-145 to cpo-r1 (after merge), and the 141 link contract to the peer (after B2 is decided; the contract §1.1 changes).
 > - **Peer PR #1085 (060)** also touches `OfficeEndpointsContractTests.cs`, on different hunks from ours.
 > - **Peer PR #1082 (084+085)** touches `CallerRecordAccessProbe.cs` (new `GetCallerRightsForRecordsAsync`; protected virtual seams) and `EntityAccessFilter.cs`. Our 130 also touches `CallerRecordAccessProbe`. Whoever lands second rebases.
 >
