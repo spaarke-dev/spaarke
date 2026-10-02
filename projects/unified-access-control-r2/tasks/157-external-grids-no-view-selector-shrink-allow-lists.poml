@@ -4,7 +4,7 @@
     <title>External SPA grids stop offering the internal MDA views (showViewSelector=false), and each external module's column allow-list shrinks to what its grid actually shows (owner round 4 item 7, task 134 open item D1)</title>
     <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
     <gate>startable now (134 merged)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Narrows the columns an external (CIAM/contact) caller may read through /fetch and /record. That is an authorization surface (defect C6), plus a client change to the external SPA.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -68,4 +68,28 @@
   </escalation>
 
   <notes>Owner round 4 item 7 (2026-10-01). Closes task 134's open item D1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; code-review and adr-check at Step 9.5.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-157">
+      Code complete. The live deploy and the MANUAL live gate are PENDING; no live write was made.
+      Client: the one Spaarke DataGrid mount (GridWidgetBody.tsx) passes showViewSelector={false}. The shared default
+      is unchanged. Premise correction: OutsideCounselDashboard, ContactsOrganizations and DocumentLibrary mount
+      Fluent's DataGrid, which has no view picker, so they are untouched. The SPA has no build:prod; npm run build
+      (vite build) succeeds.
+      Server: lists re-derived READ-ONLY from live dev on 2026-10-01 from the six grid configjson records,
+      EntityDefinitions and IsSecured. The escalation trigger did not fire: there are no pointer columns and no
+      FLS-secured columns. 16 rule-(b)-only columns were dropped across project, invoice, work assignment and
+      matter. Documents, service requests and grid configuration are unchanged. No column was added.
+      Tests: ExternalModuleColumnAllowListTests section 6 has an equality pin per module, a shrink-only check
+      against the task-134 lists, and fetch-400 / record-$select-400 / record-strip for each dropped column. A new
+      arch guard, ExternalSpaGridViewSelectorGuardTests, has controls.
+      Perturbations P1-P3 each turned tests red (1 / 4 / 7) and were reverted.
+      No new service, DI registration, endpoint, option, job or package; the change is data in the existing
+      registrations, so the section 11 justification is n/a.
+      Deploy order: SPA first, or together with the BFF. Full record:
+      notes/task-157-external-grid-columns.md.
+    </outcome>
+  </execution>
 </task>

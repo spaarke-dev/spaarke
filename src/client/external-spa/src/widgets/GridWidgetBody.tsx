@@ -21,6 +21,15 @@
  * via its `sprk_configjson` where relevant. Row-open likewise defaults to `Xrm.Navigation.navigateTo`,
  * which console-warns and no-ops without `Xrm` present — a graceful degrade (no crash, no write),
  * consistent with "widgets are READ-ONLY (broker)". See notes/task-016-deviations.md.
+ *
+ * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). `showViewSelector={false}`
+ * is a SECURITY setting here, not a cosmetic one. With the selector on, the grid offered the entity's
+ * INTERNAL MDA main views (`/savedqueries/{entity}`), and the BFF had to admit every column those views
+ * project. With it off, the grid only ever runs its own `sprk_gridconfiguration` FetchXML, so each
+ * external module's server column allow-list (ExternalAccessModule.cs) is that config's columns plus the
+ * scope and /record default columns, and nothing more. Turning the selector back on would make every
+ * sibling view error with DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard
+ * ExternalSpaGridViewSelectorGuardTests fails the build if any external DataGrid mount drops this prop.
  */
 import * as React from 'react';
 import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';
@@ -59,7 +68,7 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
     const theme = useAmbientTheme();
     return (
       <div className={s.root}>
-        <DataGrid configId={configId} dataverseClient={gridDataverseClient} theme={theme} />
+        <DataGrid configId={configId} dataverseClient={gridDataverseClient} theme={theme} showViewSelector={false} />
       </div>
     );
   };
