@@ -143,15 +143,27 @@ public class AccessibleRecordSetServiceTests
         set.Sources.StandingGrantMembership.Should().BeFalse("standing-grant is never consulted for a systemuser");
     }
 
+    /// <summary>
+    /// ✅ FLIPPED BY TASK 141 (defect C7 item 5) — was
+    /// <c>ComposeAsync_SystemUserNoLinkedContact_EmailFallbackResolvesContactGrants</c>, which pinned the hole:
+    /// a licensed user with no linked contact had a contact resolved by EMAIL ($top=1, no ambiguity check, no
+    /// binding) and inherited the grants of any unbound contact that carried the address. A licensed user's
+    /// contact now comes ONLY from the systemuser↔contact link.
+    /// </summary>
+    /// <remarks>
+    /// Proven by what the composer ASKS for, not only by what it returns: the participation double holds a
+    /// grant that an email resolution would have reached, and counts every grant read. Zero reads is the
+    /// property — a composer that resolved any contact would have to read that contact's grants.
+    /// </remarks>
     [Fact]
-    public async Task ComposeAsync_SystemUserNoLinkedContact_EmailFallbackResolvesContactGrants()
+    public async Task ComposeAsync_SystemUserNoLinkedContact_WithAnEmail_NeverResolvesAContactOrReadsGrants()
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
             .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity)); // no ADR-034 membership
 
-        // No derived contact (sprk_primarycontact null) but a verified email that resolves to a contact.
+        // No derived contact (sprk_primarycontact null) — but an email that a contact carries.
         var principal = new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
@@ -162,16 +174,17 @@ public class AccessibleRecordSetServiceTests
             Email = "ralph.schroeder@hotmail.com",
         };
         var participations = new FakeParticipationService(
-            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } },
-            resolveContactId: ContactId);
+            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } });
 
         var sut = CreateSut(membership.Object, participations, NeverStanding());
 
         var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
 
-        set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
-            "with no linked contact, the verified-email fallback finds the caller's contact grants");
-        set.Sources.ContactGrants.Should().BeTrue();
+        set.RecordIds.Should().BeEmpty(
+            "an email is not an identity: with no link there is no contact, so no contact grants");
+        set.Sources.ContactGrants.Should().BeFalse();
+        participations.GrantSetReads.Should().Be(0,
+            "no contact may be resolved from the email — any resolution would have read that contact's grants");
     }
 
     [Fact]
@@ -192,7 +205,6 @@ public class AccessibleRecordSetServiceTests
             TenantId = Tenant,
             Email = string.Empty,
         };
-        // Strict-ish: resolveContactId null so even if called, nothing resolves.
         var sut = CreateSut(membership.Object, new FakeParticipationService(Array.Empty<ExternalParticipation>()), NeverStanding());
 
         var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
@@ -435,8 +447,7 @@ public class AccessibleRecordSetServiceTests
                 new[]
                 {
                     new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly }
-                },
-                resolveContactId: ContactId),
+                }),
             standing.Object);
 
         var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
@@ -2040,14 +2051,16 @@ public class AccessibleRecordSetServiceTests
     private sealed class FakeParticipationService : ExternalParticipationService
     {
         private readonly ExternalGrantSet _grantSet;
-        private readonly Guid? _resolveContactId;
+
+        /// <summary>How many times a contact's grants were read (task 141's no-email-resolution proof).</summary>
+        public int GrantSetReads { get; private set; }
 
         /// <param name="matters">Matter grant IDS, for tests that predate levels (task 032). Converted at
         /// Collaborate — the level a bare id effectively resolved to before levels were carried.</param>
         /// <param name="matterGrants">Matter grants WITH levels — use this for rights-fidelity tests.
         /// Takes precedence over <paramref name="matters"/>.</param>
         public FakeParticipationService(
-            IReadOnlyList<ExternalParticipation> participations, Guid? resolveContactId = null,
+            IReadOnlyList<ExternalParticipation> participations,
             IReadOnlySet<Guid>? matters = null, IReadOnlySet<Guid>? workAssignments = null,
             IReadOnlyList<ExternalRootGrant>? matterGrants = null,
             IReadOnlyList<ExternalRootGrant>? workAssignmentGrants = null)
@@ -2060,17 +2073,13 @@ public class AccessibleRecordSetServiceTests
                 MatterGrants = matterGrants ?? RootGrants((matters ?? new HashSet<Guid>()).ToArray()),
                 WorkAssignmentGrants = workAssignmentGrants ?? RootGrants((workAssignments ?? new HashSet<Guid>()).ToArray()),
             };
-            _resolveContactId = resolveContactId;
         }
 
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult(_grantSet);
-
-        // Email-fallback resolution (systemuser with no derived contact). Returns the configured
-        // contact id regardless of the (oid, email) passed — the test controls whether a match exists.
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult(_resolveContactId);
+        {
+            GrantSetReads++;
+            return Task.FromResult(_grantSet);
+        }
 
         // ── Task 037 veto flags ──────────────────────────────────────────────────────────────────
         //
@@ -2171,10 +2180,6 @@ public class AccessibleRecordSetServiceTests
 
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_grantSet);
-
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult<Guid?>(null);
 
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

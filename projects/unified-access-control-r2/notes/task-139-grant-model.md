@@ -16,7 +16,7 @@ round 2 item 3 + Q1, round 3 A1 / S5, round 3b (A1 settled: the cap stays for MA
 | NARROW, never refuse; response says so | additive `GrantedAccessLevel` + `Narrowed` on `GrantAccessResponse` / `InviteAndGrantResponse` |
 | Never silently lower → 409 `sdap.access.grant.would_lower_existing` | core (`CheckGrantAsync` step 3) and `/share-user` (`RecordShareLevels.WouldRemoveRights`) |
 | No Access list at write time → 422 `sdap.access.grant.grantee_denied`, from the read path's own veto code | `IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync` → `ResolveDenyVetoAsync` (guard widened so an organization subject with no contact is checked) |
-| `/invite-and-grant`: never-lower + deny BEFORE onboarding, existing contact found READ-ONLY by the same email match | `InviteExternalUserEndpoint.FindContactByEmailAsync` (extracted from `ResolveOrCreateContactAsync`) + `CheckGrantAsync` |
+| `/invite-and-grant`: never-lower + deny BEFORE onboarding, existing contact found by the same email match | ~~`InviteExternalUserEndpoint.FindContactByEmailAsync`~~ — **since the merge with task 141 (§9)**: `ContactIdentityBinder.ResolveInviteContactAsync`, resolved ONCE and handed to onboarding (`ProvisionAsync(…, resolution, …)`) + `CheckGrantAsync` |
 | S5 (amendment R3): `/unshare-user` refuses to remove the last enabled user who can read a SECURE record → 409 `sdap.access.user_share.last_reader_on_secure_record` | `InternalShareEndpoints.LastReaderRefusalAsync` |
 | Modal renders narrowed + the server's detail for 403/409/422 and the S5 refusal | `AccessGrantModal.tsx`; TrackingFieldTrio **v1.0.33** (5 locations + bundle) |
 | Backfill (dry-run default) | `scripts/Upgrade-LegacyRecordShareMasks.ps1` |
@@ -78,7 +78,7 @@ DI registration, option, job or package. Publish size: measured by the main sess
 | `GrantCeiling` (sealed, private ctor) | none — the core took no grantor input | A value type inside `ExternalGrantLifecycle.cs`, no DI | WP-1: a writer could persist a grant without stating a ceiling; the guard has nothing to pin |
 | `GrantGrantee` record | `ExternalGrantKey` (has no "contact not created yet" shape, and no deny subjects) | Wraps the key | `/invite-and-grant` could not run the checks before onboarding without creating the contact (forbidden) |
 | `IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync` | `ResolveDenyVetoAsync` (private, composition-only) | One method on the existing interface/impl that calls the existing veto — no new registration | Write-time deny would have to re-implement the key shapes (forbidden) or be skipped |
-| `InviteExternalUserEndpoint.FindContactByEmailAsync` | the inline query in `ResolveOrCreateContactAsync` | Extracted; the onboarding path now calls it | The pre-check would use a second, divergent email match |
+| ~~`InviteExternalUserEndpoint.FindContactByEmailAsync`~~ (removed at the 141 merge, §9) | the inline query in `ResolveOrCreateContactAsync` | Extracted; the onboarding path now calls it | The pre-check would use a second, divergent email match |
 | `InternalShareEndpoints.LastReaderRefusalAsync` + 1 reason code | none | Private helper in the existing handler | Owner S5 unenforced: a secure record could be left with nobody able to open it |
 | DTO fields `GrantedAccessLevel`, `Narrowed` | `/share-user` has `narrowed` | Additive optional record params | A narrowed grant reports success at a level the caller did not get |
 | `scripts/Upgrade-LegacyRecordShareMasks.ps1` | no script enumerates POA rows (`Deploy-AccessEventEntity.ps1` is schema-only) | Follows its shape: own `az` identity, read-only by default, report-first | Colleagues shared before 2026-09-30 keep no ShareAccess → MDA Share unavailable to exactly the people the owner said may share |
@@ -214,3 +214,27 @@ publish-size delta remains with the main session (fresh master worktree, short p
 
 **AC13 (finding 15) — still pending**: the §7 manual live gate, the BFF + PCF v1.0.33 deploy and the backfill `-Apply` (live
 writes; main session).
+
+## 9. Merge with task 141 (`integ/uac-r2-batch3`, 2026-10-02)
+
+Task 141 (identity binding) replaced the invite's email lookup with `ContactIdentityBinder.ResolveInviteContactAsync`
+(ACTIVE contacts, two rows, the systemuser-reference check; ambiguity → 409 `email_ambiguous`, a contact another
+sign-in owns → 409 + flag, an unreadable lookup → 503 `contact_lookup_failed`) and deleted the `top: 1`, any-state
+query `FindContactByEmailAsync` was built on. Resolution:
+
+- `/invite-and-grant` resolves the invitee ONCE through the binder, before the grant checks, and passes that SAME
+  resolution into `InviteExternalUserEndpoint.ProvisionAsync` — the contact the never-lower / No Access checks judge
+  IS the contact onboarding provisions (one email→contact answer; onboarding does not look the email up again).
+- A refusal or a lookup failure from that resolution is answered before the grant checks, through the one mapping
+  `InviteExternalUserEndpoint.NotProvisionable` that `ProvisionAsync` also uses (409 + reasonCode, or 503 +
+  `sdap.access.invite.contact_lookup_failed`). Neither is ever read as "no contact yet" (which would judge a
+  prospective person and then onboard a new contact). An unexpected decision state fails closed (500).
+- Order on `/invite-and-grant`: validation → record policy (138: 422/503) → caller-rights probe (139: 500) → invitee
+  resolution (141: 409/503) → grant checks (139: 403/409/422) → onboarding → grant core (re-checks). `/invite`:
+  policy (138) → `ProvisionAsync` (141).
+- Tests: `GrantorCeilingTests` now seeds the invitee in `InMemoryContactIdentityStore` behind the real binder (its
+  Dataverse double THROWS on a `contacts` query); +3 cases (two active contacts → 409 email_ambiguous and a lookup
+  failure → 503, each with the firm on the No Access list so a "no contact" misreading would answer 422; one email
+  lookup per successful request). `GrantPolicyContractTests`' "the Contact lookup is never reached" assertions read the
+  identity store (they had become vacuous). Seeds: treating a refusal/failure as "no contact" → 6 red; onboarding
+  re-resolving → 1 red; resolving before the policy check → 4 red.

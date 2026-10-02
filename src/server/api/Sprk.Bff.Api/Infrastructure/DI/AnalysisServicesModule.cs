@@ -952,8 +952,8 @@ public static class AnalysisServicesModule
         Console.WriteLine("✓ IOrganizationalContextProvider registered (task 060 FR-B-11; Null-Object default — Work IQ provider deferred)");
 
         // ICallerContactResolver — deterministic claims→Dataverse-contact resolver (task 055, FR-B-06).
-        // Maps the caller's AAD oid claim to a Dataverse contact via the
-        // contact.azureactivedirectoryobjectid cross-reference (ADR-028) so "assign it to me" resolves
+        // Maps the caller's AAD oid claim to the Dataverse contact BOUND to it
+        // (contact.sprk_externalobjectid — unified-access-control-r2 task 141) so "assign it to me" resolves
         // server-side, never a model guess. Scoped: wraps IDataverseService (Singleton) and is consumed
         // by ContextBinder (Scoped, registered immediately below). §F.1 asymmetric-registration audit:
         // sole consumer is ContextBinder in THIS compound-ON block; the compound-OFF path's

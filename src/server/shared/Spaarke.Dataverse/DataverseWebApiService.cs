@@ -408,7 +408,34 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
     {
+        var payload = BuildCreateEventPayload(request);
 
+        _logger.LogInformation("Creating event: {Name}", request.Name);
+
+        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
+        if (entityIdHeader != null)
+        {
+            var idString = entityIdHeader.Split('(', ')')[1];
+            var id = Guid.Parse(idString);
+            var createdOn = DateTime.UtcNow;
+
+            _logger.LogInformation("Event created: {Id}", id);
+            return (id, createdOn);
+        }
+
+        throw new InvalidOperationException("Failed to extract entity ID from create response");
+    }
+
+    /// <summary>
+    /// The Web API body <see cref="CreateEventAsync"/> POSTs to <c>sprk_events</c>. Internal (InternalsVisibleTo the
+    /// BFF unit tests) so the payload — including the unified-access-control-r2 task 152 <c>sprk_AssignedTo</c> bind —
+    /// is asserted without intercepting the HTTP transport (ADR-038 bans <c>Mock&lt;HttpMessageHandler&gt;</c>).
+    /// </summary>
+    internal static Dictionary<string, object?> BuildCreateEventPayload(CreateEventRequest request)
+    {
         var payload = new Dictionary<string, object?>
         {
             ["sprk_eventname"] = request.Name,
@@ -430,6 +457,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (request.Priority.HasValue)
             payload["sprk_priority"] = request.Priority.Value;
 
+        // unified-access-control-r2 task 152 (owner S1): the person the event is FOR. PascalCase navigation property,
+        // the same bind the client event wizard uses (CreateEventWizard eventService).
+        if (request.AssignedToContactId is { } assignedTo && assignedTo != Guid.Empty)
+            payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
+
         if (request.RegardingRecordType.HasValue)
         {
             payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
@@ -445,23 +477,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             }
         }
 
-        _logger.LogInformation("Creating event: {Name}", request.Name);
-
-        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
-        if (entityIdHeader != null)
-        {
-            var idString = entityIdHeader.Split('(', ')')[1];
-            var id = Guid.Parse(idString);
-            var createdOn = DateTime.UtcNow;
-
-            _logger.LogInformation("Event created: {Id}", id);
-            return (id, createdOn);
-        }
-
-        throw new InvalidOperationException("Failed to extract entity ID from create response");
+        return payload;
     }
 
     public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)

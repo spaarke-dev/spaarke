@@ -686,8 +686,8 @@ public class MembershipPagingCharacterizationTests
             => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
                 recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.None));
 
-        public override Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult<Guid?>(null);
+        // (Task 141 removed ResolveExternalContactAsync from the participation service — no email fallback
+        // remains to stub. Contact resolution is ContactIdentityBinder's job.)
 
         // Task 039: same reasoning as the RootRecordFlags override above — without these, the base
         // implementations throw on `credential: null!`, and the deny-veto resolution would fail closed
