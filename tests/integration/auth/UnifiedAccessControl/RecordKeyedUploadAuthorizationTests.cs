@@ -629,6 +629,32 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.Uploads.Should().BeEmpty("before f3 this resolved the shared business-unit container");
     }
 
+    [Fact(DisplayName = "Task 155 f4: PUT for an event under a NON-secure work assignment that is itself filed under a SECURE project stores the file in the PROJECT's own container — the two-hop fail-open, through the real route")]
+    public async Task Put_EventUnderANonSecureWorkAssignment_UnderASecureProject_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/event/{RecordKeyedUploadRouteFixture.EventUnderWorkAssignmentUnderSecureProject}/files/w.docx",
+            new ByteArrayContent([13]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "before f4 the event read only the work assignment's own flag and took the shared BU container");
+    }
+
+    [Fact(DisplayName = "Task 155 f4: PUT for an event under a work assignment whose pair names a project that NO LONGER EXISTS is refused (409 container_ancestor_unresolved) and NOTHING reaches SPE — the live a30254d0 shape")]
+    public async Task Put_EventUnderAWorkAssignmentWithADanglingPair_IsRefused_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_event/{RecordKeyedUploadRouteFixture.EventUnderWorkAssignmentWithDanglingPair}/files/x.txt",
+            new ByteArrayContent([14]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain(RecordContainerResolver.AncestorUnresolvedCode);
+        _fixture.Uploads.Should().BeEmpty("before f4 this resolved the shared business-unit container");
+    }
+
     [Fact(DisplayName = "Task 155: an event with no ancestor whose business unit has NO container answers the documented 409 with precise copy, and NOTHING reaches SPE")]
     public async Task Put_EventWithNoAncestor_AndABusinessUnitWithoutContainer_AnswersTheDocumented409()
     {
@@ -659,8 +685,14 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     public static readonly Guid TodoLinkedOnlyByPairToSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000007");
     public static readonly Guid InvoiceRegardingAgreement = Guid.Parse("15500000-0000-0000-0000-000000000008");
 
+    public static readonly Guid EventUnderWorkAssignmentUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000009");
+    public static readonly Guid EventUnderWorkAssignmentWithDanglingPair = Guid.Parse("15500000-0000-0000-0000-000000000011");
+
     private static readonly Guid ProjectTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
     private static readonly Guid Agreement = Guid.Parse("15500000-0000-0000-0000-000000000010");
+    private static readonly Guid WorkAssignmentUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000012");
+    private static readonly Guid WorkAssignmentWithDanglingPair = Guid.Parse("15500000-0000-0000-0000-000000000013");
+    private static readonly Guid DeletedProject = Guid.Parse("15500000-0000-0000-0000-000000000014");
 
     public const string UnreadableRowFaultText = "Dataverse timed out reading the to-do";
 
@@ -785,6 +817,29 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
                 ["owningbusinessunit"] = bu,
                 ["sprk_regardingagreement"] = new EntityReference("sprk_agreement", Agreement)
             },
+            // Task 155 f4: an event under a NON-secure work assignment whose own row regards the SECURE project.
+            [("sprk_event", EventUnderWorkAssignmentUnderSecureProject)] = new("sprk_event", EventUnderWorkAssignmentUnderSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentUnderSecureProject)
+            },
+            [("sprk_workassignment", WorkAssignmentUnderSecureProject)] = new("sprk_workassignment", WorkAssignmentUnderSecureProject)
+            {
+                ["sprk_issecure"] = false,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject)
+            },
+            // Task 155 f4: the live a30254d0 → 9c0254d0 shape — the work assignment's only link is a pair naming a
+            // record that was deleted (the pair is a STRING; nothing clears it).
+            [("sprk_event", EventUnderWorkAssignmentWithDanglingPair)] = new("sprk_event", EventUnderWorkAssignmentWithDanglingPair)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentWithDanglingPair)
+            },
+            [("sprk_workassignment", WorkAssignmentWithDanglingPair)] = new("sprk_workassignment", WorkAssignmentWithDanglingPair)
+            {
+                ["sprk_regardingrecordid"] = DeletedProject.ToString("D").ToUpperInvariant(),
+                ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectTypeRef)
+            },
         };
 
         var service = Substitute.For<IGenericEntityService>();
@@ -795,6 +850,14 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
                 if (key == ("sprk_todo", TodoWhoseRowCannotBeRead))
                 {
                     throw new TimeoutException(UnreadableRowFaultText);
+                }
+
+                if (key == ("sprk_project", DeletedProject))
+                {
+                    // Dataverse 0x80040217 ObjectDoesNotExist — what a deleted record's id reads as.
+                    throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = -2147220969 },
+                        new System.ServiceModel.FaultReason("sprk_project does not exist"));
                 }
 
                 return rows.TryGetValue(key, out var row)

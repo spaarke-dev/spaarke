@@ -164,6 +164,9 @@ is not a child (`CoreAncestorResolver`: unclassified), so it takes its own busin
 
 ## Manual live gates (NOT run: no live writes in this session)
 
+> **Superseded by the consolidated list in "Round f4" → "AC7 manual live gates (all rounds)".** Items 1–4 below are
+> kept as written in round r0; the consolidated list carries them forward with every later round's additions.
+
 1. **Deploy the BFF to dev.** This is a deploy, owned by the main session.
 2. **Upload to a to-do under the secure test project.**
    - As an existing non-admin test user who has access to the secure test project (`65a3fab2-77a5-f111-aaad-70a8a590c51c`,
@@ -520,7 +523,8 @@ restored the backup. The file was touched after every restore. The final restore
 1. **Escalation trigger 2, (a)/(b)/(c).** This is unchanged, but the held path now also covers a service request, an
    invoice → agreement, a work assignment → communication / event / invoice, a contact → invoice, and a pair naming
    any intermediate.
-2. **Interpretations the owner may reverse** (each is one line in `KindByEntity` or `ByEntity`):
+2. **Interpretations the owner may reverse** — now recorded, each with the one-line change that reverses it, under
+   "Owner-reversible interpretations" at the end of this note (f4 item 4). As written in f3:
    - **(i)** A pair naming a PARTY adds nothing, rather than being held. This matches the typed party columns. The
      brief's literal "non-root → intermediate" would refuse every to-do whose pair names a person.
    - **(ii)** Agreement by identity does not read the pair's type (event `a6d00177` above).
@@ -529,6 +533,348 @@ restored the backup. The file was touched after every restore. The final restore
      rule 1: a core record does not inherit from another) is untouched.
    - **(iv)** A contact's `sprk_invoice` is held. This reverses the f2 reading, per the f3 brief.
    - **(v)** `sprk_servicerequest` is an intermediate for CONTAINER purposes only. It stays CORE for access.
-3. **AC7 live gate.** It now also covers: an upload to event `80164675-0311-f111-8342-7c1e520aa4df` (pair-only,
+3. **AC7 live gate** (consolidated, with every round's additions, in "Round f4" → "AC7 manual live gates (all
+   rounds)"). It now also covers: an upload to event `80164675-0311-f111-8342-7c1e520aa4df` (pair-only,
    dangling matter) must answer 409 `container_ancestor_unresolved` with nothing written.
 4. **The SPE-membership 403 observation** (unchanged).
+
+## Round f4: fourth adversarial-verifier findings (branch `task/uac-r2-155-f4`)
+
+The f3 verifier judged NEEDS-FIXES. Items 1–4 are closed below. Escalation trigger 2 options (a)/(b) are still NOT
+implemented here (task 156 does (b), owner round 4 item 5). `OfficeService` is untouched.
+
+### Item 1 (fail-open): the root walk was one hop
+
+**The defect.** A root link was followed ONE hop. f3 interpretation (iii) stores a NON-secure work assignment's own files
+in the SECURE matter / project its row names (and a project's, through its pair). But a to-do, event or invoice under
+that work assignment — by `sprk_regardingworkassignment`, or a pair naming a work assignment or project — read only the
+work assignment's own flag ("not secure") and resolved the shared business-unit container. The chain disagreed with
+itself, and the disagreement was a fail-open. Live example: event `a30254d0-7f1e-f111-88b3-7ced8d1dc988` under work
+assignment `9c0254d0-7f1e-f111-88b3-7ced8d1dc988`.
+
+**The fix** (`RecordContainerResolver.ResolveSecureAncestorAsync`, now a walk). Every row the walk reads names the records
+above IT, through the same `ChildAncestorLinks` table the record's own row uses, and those are read in turn.
+
+- **One read per row.** A root above the record is read with its flag, its container AND its own links. A project's
+  links are its pair; a matter has none; a work assignment has its typed roots, its held columns and its pair.
+- **Any secure root in the chain decides.** The content goes to that root's own container, or the resolver refuses
+  (`secure_record_container_missing`). Never a shared container while a secure root is anywhere above.
+- **Two DIFFERENT secure roots anywhere → `container_ancestor_ambiguous`.** That covers two branches, or two secure roots
+  stacked one above the other. The walk continues PAST a secure root to find a second one (interpretation vi). The same
+  record reached twice (a diamond) is one root.
+- **Failures.** An unreadable row → `container_ancestor_unresolved` 503. A missing row, a null row or an unknown type → 409.
+- **Held rows.** A row above the record that names an intermediate is the held path (`container_ancestor_unverifiable`).
+  The response then names that row ("File the sprk_workassignment directly against …").
+- **The pair rules hold on every row.** Agreement by identity, disagreement → ambiguous, type read when it alone names a
+  record.
+- **Bounded and cycle-guarded.** `MaxRootChainDepth` = 4 hops deep and `MaxRootReads` = 8 rows across all branches.
+  Anything past either bound is REFUSED (409), never truncated into "no secure root". A record already on the walk —
+  including the record being resolved — is not read again.
+- **A root type that cannot carry `sprk_issecure` but names roots above it is still followed.** Its links are read; its
+  flag is not, because reading it would fault. A root type that can do neither (a matter in such an org) is still never
+  read.
+
+Interpretation (iii) is kept exactly as implemented. Whether such a work assignment should itself become secure for
+OWNERSHIP / ACCESS is a separate owner question, not this task.
+
+**Live (read-only simulation, below):** exactly one record changes on the record path — event `a30254d0` goes from the
+shared BU container to `container_ancestor_unresolved` 409. Its work assignment's pair names matter `c4ef17ed-…`, which no
+longer exists. No live record moves INTO a secure container, because the one secure root (project `65a3fab2`) has no
+work assignment under it.
+
+### Item 2 (fail-open): the communication path
+
+**The defect.** `sprk_communication` carries the polymorphic pair (161 of 276 live rows) and non-securable intermediates
+(service request, event, analysis, budget, report card). `CommunicationContainerResolver` read only its SECURABLE typed
+regardings, so a communication linked to a secure matter only by its pair, or filed under a service request, went to
+the shared archive container.
+
+**The fix.** The communication ITSELF is now the record: one call into the same child resolution as the record path.
+
+- **The entry.** `ChildAncestorLinks` gains a `sprk_communication` entry, from a read-only live sweep of its 24 lookups
+  (2026-10-02).
+- **What the resolution covers.** The pair rules, the held path for intermediates and the transitive root walk are the
+  record path's own code.
+- **Fallback.** `CommunicationContainerResolver.ResolveContainerAsync` now calls
+  `RecordContainerResolver.ResolveForRecordWithFixedFallbackAsync("sprk_communication", id, archive)`. The archive fallback
+  stays ONLY when no root can be involved. When the archive is unconfigured the answer is still "none — skip"; the
+  communication's business unit is never derived, which the public four-argument overload would have done.
+- **What is preserved.**
+  - The empty-securable-set refusal (`securable_entities_unknown`, before any read) moved with the adapter.
+  - The inbound processor's permanent/transient split (`IsPermanentContainerRefusal`) is unchanged and pinned. The new
+    refusals are 409 ancestor codes (permanent) or 503 (transient).
+  - An unreadable communication row is now the typed 503, still transient. Before it was a raw fault, also transient.
+  - A missing communication row is `container_record_not_found` 404, non-permanent. Before it was
+    `communication_regarding_unknown` 409, also non-permanent.
+- **No longer raised: `communication_secure_container_ambiguous`.** Two secure records are now the record path's
+  `container_ancestor_ambiguous`, which is also permanent. Two DIFFERENT secure records now refuse even if they share one
+  container. That is co-mingling, and `ResolveOwningRecordAsync` already treats it as ambiguous. The old code stays in
+  the predicate for compatibility.
+- The adapter's unused `IGenericEntityService` constructor parameter was removed. DI is constructor-injected, so only the
+  four test constructions changed.
+
+**`sprk_communication`'s 24 lookups, classified (live, read-only, 2026-10-02):**
+
+| Kind | Columns |
+|---|---|
+| Root, FOLLOWED | `sprk_regardingproject`, `sprk_regardingmatter`, `sprk_regardingworkassignment` |
+| Securable record, FOLLOWED live (interpretation viii) | `sprk_regardinginvoice` → sprk_invoice (its own flag, container, typed `sprk_project` / `sprk_matter`, held `sprk_regardingagreement`, pair) |
+| Intermediate, HELD (`container_ancestor_unverifiable`) | `sprk_regardingservicerequest`, `sprk_regardingevent`, `sprk_regardinganalysis`, `sprk_regardingbudget`, `sprk_regardingreportcard` |
+| Party (not read) | `sprk_regardingperson` → contact, `sprk_regardingorganization` → sprk_organization, `sprk_regardingaccount` → account |
+| Grouping (not read; interpretation vii) | `sprk_communicationthread` → sprk_communicationthread |
+| Reference / principal / system (not read) | `sprk_triagecategory` → sprk_triagecategory (its own lookups: the four system columns + `organizationid`); `sprk_regardingrecordtype` (the pair's type); `sprk_sentby` → systemuser; `createdby` / `createdonbehalfby` / `modifiedby` / `modifiedonbehalfby` / `owninguser` → systemuser; `ownerid` → systemuser\|team; `owningteam` → team; `owningbusinessunit` → businessunit |
+| Polymorphic pair | YES — `sprk_regardingrecordid` (String) + `sprk_regardingrecordtype` |
+
+**Why the thread is not ownership.** `sprk_communicationthread` carries the same regarding lookups as a communication.
+Read literally, f3's rule — "a column whose target can hang off a root is read or refused" — would hold it. It is not
+held, for three reasons:
+
+- **Its anchor is COPIED FROM its messages' regarding** (`IThreadResolver`: "when a NEW thread is created, its anchor is
+  copied from the message's resolved regarding"). The thread is downstream of the communication, not its owner.
+- **Live threads group messages filed under DIFFERENT matters.** Thread `1e992cc9`'s messages `14b094bb` and `dd89f19c`
+  regard matter `b68299c6`.
+- **Every message gets a thread** by the 3-tier ladder, and on inbound the thread is assigned before archival. Holding on
+  it would refuse every threaded message: 95 of 276 live, and every new inbound email.
+
+What this leaves: a message with no regarding of its own, inside a thread anchored to a SECURE matter, still goes to the
+archive, exactly as before f4. Live: 5 such messages. Their threads regard matters `b68299c6` and `1e992cc9`, neither
+secure. This is interpretation (vii), and it is an owner question.
+
+**Live (read-only simulation):** 10 of 276 communications change outcome, all from "archive" to a permanent refusal. None
+was under a secure root.
+
+- Unverifiable: `3b7b5825-8a96-f111-b8db-0022482fb5a7` (regarding an event) and `a36784ef-e38e-f111-b8db-7ced8ddc4a05`
+  (an analysis).
+- Unresolved 409, a pair id with no type:
+  - `ab302254-ab58-f111-a824-3833c5d9bcb1`
+  - `d3516503-748b-f111-8076-7ced8d1dc216`
+  - `4971a3c2-236b-f111-ab0d-7ced8ddc4a05`
+  - `817708e9-427b-f111-ab0e-7ced8ddc4a05`
+  - `70741c9f-477b-f111-ab0e-7ced8ddc4a05`
+  - `a4c9b0ca-9b7b-f111-ab0e-7ced8ddc4cc6`
+- Ambiguous, the typed link and the pair disagree:
+  - `83349fe9-828c-f111-8077-7ced8ddc4a05`: typed invoice; pair id with no type.
+  - `84d04780-2f81-f111-ab0f-7ced8ddc4a05`: typed matter; the pair names a CONTACT. See interpretation (ix).
+
+The other 266 keep the archive.
+
+### Item 3: bookkeeping
+
+The consolidated lists below include work assignment `9c0254d0-7f1e-f111-88b3-7ced8d1dc988` (409
+`container_ancestor_unresolved`), work assignment `b10b7dab-437b-f111-ab0e-7ced8ddc4cc6` (`container_ancestor_unverifiable`),
+event `80164675-0311-f111-8342-7c1e520aa4df` and to-do `4ff4dc1f-3c9a-f111-b8de-7ced8ddc4cc6`.
+
+### New live refusals (all rounds; read-only simulation, spaarkedev1, 2026-10-02)
+
+**Method.** A read-only Python simulation (GET only) loaded every live to-do (50), event (73), invoice (10), work
+assignment (22), project (19), matter (59), communication (276), the contacts carrying `sprk_invoice` (0) and the 14
+`sprk_recordtype_ref` rows. It applied the resolver's rules in both f3 and f4 form and diffed the outcomes. Live has ONE
+secure root: project `65a3fab2-77a5-f111-aaad-70a8a590c51c`. "Before" is what the record resolved before the round that
+introduced the refusal: the BU container on the record path, the archive on the communication path. That was shared
+either way.
+
+| Record | Refusal | Why | Round |
+|---|---|---|---|
+| to-do `1432926a-0266-f111-ab0c-70a8a590c51c`, `1b32926a-0266-f111-ab0c-70a8a590c51c`, `9fb4ece2-397b-f111-ab0e-7ced8ddc4a05`, `31c9680c-037c-f111-ab0e-7ced8ddc4a05`, `33c9680c-037c-f111-ab0e-7ced8ddc4a05`, `36c9680c-037c-f111-ab0e-7ced8ddc4a05`, `b70b7dab-437b-f111-ab0e-7ced8ddc4cc6`, `9250d1b8-467b-f111-ab0e-7ced8ddc4cc6`, `6d67b203-049d-f111-b8de-7ced8ddc4cc6` | 409 `container_ancestor_unverifiable` | regarding an invoice (held, trigger 2) | r0 |
+| to-do `736a6eb7-9570-f111-ab0e-7ced8ddc4cc6`, `bc19baa5-9870-f111-ab0e-7ced8ddc4cc6`, `b856b1ed-7e74-f111-ab0e-7ced8ddc4cc6`, `15d2a80b-7f74-f111-ab0e-7ced8ddc4cc6` | 409 `container_ancestor_unverifiable` | regarding an event | r0 |
+| event `edfef460-43bc-f111-aaaf-0022482913fc` | 409 `container_ancestor_unverifiable` | regarding a communication | r0 |
+| to-do `a01477e8-427b-f111-ab0e-7ced8ddc4cc6` | 409 `container_ancestor_unverifiable` | regarding report card `9d1477e8-…` | f2 |
+| **to-do `4ff4dc1f-3c9a-f111-b8de-7ced8ddc4cc6`** | 409 `container_ancestor_unresolved` | pair id with no type | f3 |
+| **event `80164675-0311-f111-8342-7c1e520aa4df`**, `8478ea81-0311-f111-8342-7c1e520aa4df`, `a67d88d8-3e01-f111-8407-7ced8d1dc988`, `094c75e0-4b01-f111-8407-7ced8d1dc988`, `338c5c1e-4c01-f111-8407-7ced8d1dc988`, `6c54b6f0-4c01-f111-8407-7ced8d1dc988`, `0f8efca9-4d01-f111-8407-7ced8d1dc988`, `088dcbd3-4e01-f111-8407-7ced8d1dc988`, `0c6e31b3-6801-f111-8407-7ced8d1dc988`, `4aca40a1-0305-f111-8407-7ced8d1dc988` | 409 `container_ancestor_unresolved` | pair-only, naming a matter that no longer exists (`c4ef17ed-…`, `050995f1-…`, `97962160-…`, `d57bc02f-…`) | f3 |
+| **work assignment `9c0254d0-7f1e-f111-88b3-7ced8d1dc988`** | 409 `container_ancestor_unresolved` | its pair names matter `c4ef17ed-…`, which no longer exists | f3 |
+| **work assignment `b10b7dab-437b-f111-ab0e-7ced8ddc4cc6`** | 409 `container_ancestor_unverifiable` | regarding invoice `a1652ca5-…` | f3 |
+| event `a30254d0-7f1e-f111-88b3-7ced8d1dc988` | 409 `container_ancestor_unresolved` | its work assignment `9c0254d0` names the deleted matter (transitive walk) | **f4** |
+| communication `3b7b5825-8a96-f111-b8db-0022482fb5a7` / `a36784ef-e38e-f111-b8db-7ced8ddc4a05` | 409 `container_ancestor_unverifiable` (inbound: permanent skip) | regarding an event / an analysis | **f4** |
+| communication `ab302254-ab58-f111-a824-3833c5d9bcb1`, `d3516503-748b-f111-8076-7ced8d1dc216`, `4971a3c2-236b-f111-ab0d-7ced8ddc4a05`, `817708e9-427b-f111-ab0e-7ced8ddc4a05`, `70741c9f-477b-f111-ab0e-7ced8ddc4a05`, `a4c9b0ca-9b7b-f111-ab0e-7ced8ddc4cc6` | 409 `container_ancestor_unresolved` (permanent) | pair id with no type | **f4** |
+| communication `83349fe9-828c-f111-8077-7ced8ddc4a05` / `84d04780-2f81-f111-ab0f-7ced8ddc4a05` | 409 `container_ancestor_ambiguous` (permanent) | the typed link and the pair disagree (the second's pair names a contact — interpretation ix) | **f4** |
+
+Totals under f4: 29 record-path refusals (15 to-dos, 12 events, 2 work assignments; 0 invoices, 0 projects, 0
+contacts) and 10 communication refusals. Cleaning the dangling and type-less pair ids is a data fix. It was not done,
+because no live writes were allowed.
+
+### AC7 manual live gates (all rounds; NOT run — no live writes or deploys in this session)
+
+1. **Deploy** the BFF to dev. This is owned by the main session.
+2. **Secure child.** As an existing non-admin user shared on the secure test project
+   `65a3fab2-77a5-f111-aaad-70a8a590c51c` (container `b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm`):
+   - create a to-do with `sprk_regardingproject` set to it (a live write);
+   - upload through its document control;
+   - confirm read-only: `GET https://graph.microsoft.com/v1.0/drives/b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm/root/children`.
+3. **Ordinary child.** Upload to a to-do under an ordinary project. Confirm it lands in the to-do's `owningbusinessunit`
+   container (`SELECT owningbusinessunit FROM sprk_todo …`, then `SELECT sprk_containerid FROM businessunit …`).
+4. **Held path (r0 / f2).** An upload to to-do `1432926a-0266-f111-ab0c-70a8a590c51c` (regarding an invoice) and to-do
+   `a01477e8-427b-f111-ab0e-7ced8ddc4cc6` (regarding a report card) answers 409 `container_ancestor_unverifiable`, and
+   nothing is written.
+5. **f3 refusals.** Each of these answers the stated code, and nothing is written:
+   - event `80164675-0311-f111-8342-7c1e520aa4df` → 409 `container_ancestor_unresolved`;
+   - to-do `4ff4dc1f-3c9a-f111-b8de-7ced8ddc4cc6` → 409 `container_ancestor_unresolved`;
+   - work assignment `9c0254d0-7f1e-f111-88b3-7ced8d1dc988` → 409 `container_ancestor_unresolved`;
+   - work assignment `b10b7dab-437b-f111-ab0e-7ced8ddc4cc6` → 409 `container_ancestor_unverifiable`.
+6. **f4 transitive.**
+   - An upload to event `a30254d0-7f1e-f111-88b3-7ced8d1dc988` answers 409 `container_ancestor_unresolved`, and nothing
+     is written.
+   - Positive case: a live write. Set an existing non-secure work assignment's `sprk_regardingproject` to the secure test
+     project, create an event regarding that work assignment, upload, and confirm read-only that the file is in the
+     project's container (the same GET as gate 2).
+7. **f4 communication.**
+   - Re-run archival for communication `3b7b5825-8a96-f111-b8db-0022482fb5a7` (regarding an event). It is skipped as a
+     permanent refusal (`container_ancestor_unverifiable` in the `[SECURE-CONTAINER] REFUSING` log line), and nothing
+     reaches the archive container.
+   - Positive case: a live write. An inbound email associated to the secure test project lands its `.eml` in the
+     project's container, not the archive.
+
+### Read budget after f4 (two-argument overload unless stated)
+
+| Shape | f3 | f4 |
+|---|---|---|
+| To-do / event / invoice under a project or matter, root not secure (the project's pair is read on the same row; live 0 projects carry it) | 3 | 3 |
+| The same, root secure | 2 | 2 |
+| Under a work assignment that names nothing above it | 3 (row + WA + BU) | 3 |
+| Under a work assignment filed regarding a matter / project, none secure | 3 (**leak** if the matter is secure) | 4 (row + WA + matter + BU); 3 if the matter is secure |
+| Under a work assignment whose pair alone names a matter | 3 (**leak**) | 5 (row + WA + type + matter + BU) |
+| A pair alone naming a work assignment that names a matter | 4 (row + type + WA + BU; **leak**) | 5 / 6 |
+| Communication, no regarding | 1 | 1 |
+| Communication regarding a non-secure matter (adapter) | 3 (comm + matter + the matter's BU) | 2 (comm + matter; no BU — the archive is the fallback) |
+| Communication regarding an invoice under a matter | 4 (comm + invoice + matter + invoice's BU) | 3 |
+| Communication linked only by its pair to a matter | 1 (**leak**) | 3 (comm + type + matter) |
+| Worst case | — | 1 record + 8 rows above it + one type read per row whose pair alone names a record + 1 BU; past the bounds → 409 |
+
+Each new read decides whether a secure root is above the record. There are no extra metadata round trips: every
+classification comes from the scope-memoized catalog.
+
+### Tests (f4)
+
+**`ChildRecordContainerResolutionTests`:**
+
+- **Item 1:**
+  - two-hop theory ×5: event/to-do under a work assignment, to-do pair → work assignment, invoice → project-pair →
+    matter, to-do pair → project-pair → matter;
+  - cost pin (4 reads; the work assignment's links ride on its one read);
+  - dangling pair two hops up (409);
+  - unreadable row two hops up (503);
+  - work assignment held under an invoice;
+  - two-secure-roots theory ×2 (branches, stacked);
+  - diamond; two cycle tests;
+  - depth-bound theory ×2 (exactly 4 resolves, 5 refuses);
+  - breadth bound;
+  - non-securable root followed for its links;
+  - secure root two hops up without a container;
+  - row-above-the-record pair disagreement.
+- **Item 2:**
+  - communication pair → secure matter (archive and no archive);
+  - held theory ×5 (service request, event, analysis, budget, report card);
+  - communication → non-secure work assignment → secure matter;
+  - dangling pair;
+  - no link to any root (archive kept; no archive → null; the BU never read);
+  - two different secure records;
+  - typed vs pair disagreement;
+  - unreadable / missing communication row (503 transient, 404 non-permanent);
+  - empty securable set refused before any read;
+  - a `sprk_communication` row in the live-sweep pin theory.
+- **Changed:**
+  - `Todo_UnderARootTypeThatCannotBeSecure…` pinned "a non-securable work assignment is never read". That is exactly the
+    one-hop assumption f4 removes. It now pins the surviving guarantee — a non-securable root type that ALSO names
+    nothing above it (a matter) is never read — with a new test for the followed case.
+  - The pin theory's `NonOwnerTargets` gained `sprk_triagecategory` and `sprk_communicationthread`, each with its
+    evidence.
+  - The f1/f3 communication → invoice tests are unmodified and green.
+
+**Other suites:**
+
+- **`RecordKeyedUploadRouteChildRecordTests`:** +2 REAL-route cases. An event under a non-secure work assignment that
+  regards the secure project stores in the project's container. An event under a work assignment with a dangling pair is
+  refused 409, and nothing is uploaded.
+- **Fixtures (§F.2, assertions unchanged):** `SpeScopeFactoryStub`, `MessageAttachmentMaterializerTests` and
+  `SpeFlatUploadPathTests` construct the adapter without the removed parameter, and their registry doubles now answer
+  `ClassifyEntityAsync` through `TestEntityCatalog`. The communication is the record being classified.
+
+**Counts:**
+
+| Suite | Result |
+|---|---|
+| `ChildRecordContainerResolutionTests` | 136 cases (102 in f3) |
+| `RecordKeyedUploadRouteChildRecordTests` (real mapped PUT route) | 10 (8 in f3) |
+| Affected suites (resolver, child-record, route, registry, Office no-target / provenance, #1038, communication service / processor / materializer, SPE upload paths, document list, acting user, decision table, lockstep) | 364 / 364 |
+| Full BFF unit suite (`dotnet test tests/unit/Sprk.Bff.Api.Tests`) | Passed 13339, Failed 0, Skipped 54 (Total 13393) |
+| `Spaarke.ArchTests` | 337 / 337 |
+
+`dotnet format` (what the pre-commit hook runs) was run on the changed files before the counts. Its only effect was to
+re-order one pre-existing `using` in `SpeFlatUploadPathTests.cs`.
+
+### Mutation proof (f4)
+
+**How the seeds were run.** Each seed was applied by a harness script (`seed_harness.py`, in the session scratchpad):
+
+- replace one exact anchor (asserted unique);
+- rebuild;
+- run the affected suites (resolver, child-record, route, registry, Office no-target, Office provenance, #1038,
+  communication service / processor / materializer, SPE upload paths, document list, acting user, decision table,
+  lockstep);
+- restore the backup, touch it, and assert byte-identity.
+
+Every seed turned tests red. Out of 364 affected tests:
+
+| Seed | Tests that failed |
+|---|---|
+| S1 (item 1): one hop only — the rows above a root are not followed | 26, including both new route PUTs and the f1/f3 communication → invoice tests |
+| S2 (item 1): a hop's own links left out of its read | 24 |
+| S3 (item 1): the walk stops at the first secure root on a branch | 1 (stacked ambiguity) |
+| S4 (item 1): the cycle / diamond guard removed | 3 (two cycles, diamond) |
+| S5 (item 1): the depth bound removed | 1 |
+| S6 (item 1): the breadth (row-read) bound removed | 1 |
+| S7 (item 1): a missing hop read as an empty row | 6, including the route PUT and the communication pair |
+| S8 (item 1): an unreadable hop read as an empty row | 4 |
+| S9 (item 1): a held column on a row ABOVE the record ignored | 2 |
+| S10 (item 1): a non-securable root type skipped even when it names roots above it | 1 |
+| S11 (item 1): the pair ignored on rows above the record | 9, including the route PUT |
+| S12 (item 2): the `sprk_communication` entry removed | 33, including the communication-service / materializer / flat-path suites (the communication is refused as a child with unknown links) |
+| S13 (item 2): the communication's invoice no longer followed (held) | 5 (four f1 communication → invoice tests and the f4 two-secure-records test) |
+| S14 (item 2): the communication's service-request / event columns dropped | 3 (pin + 2 held rows) |
+| S15 (item 2): the adapter derives the business unit when the archive is unconfigured | 1 |
+| S16 (item 2): the adapter's empty-securable-set refusal removed | 1 |
+| S17 (item 2): the communication's pair not read | 4 |
+
+## Owner-reversible interpretations
+
+Each line is a reading this task chose where the brief or the data left room. The second line is the change that
+reverses it. All but (vii) are in `RecordContainerResolver.cs`.
+
+- **(i) f3 — a polymorphic pair naming a PARTY (contact / account / organization) adds nothing, rather than being
+  held.** This matches the typed party columns.
+  - *Reverse:* in `ResolvePolymorphicRegardingAsync`, make `case RecordKind.Party:` throw `Unverifiable(...)` like
+    `Intermediate`.
+- **(ii) f3 — agreement by identity (the pair's id equals a typed link's id on the same row) does not read the pair's
+  type.** A mislabelled type (live event `a6d00177`) is ignored.
+  - *Reverse:* in rule 3, read the type and refuse `container_ancestor_ambiguous` when `pairEntity` differs from the
+    matching hop's entity.
+- **(iii) f3 — a NON-secure work assignment / project whose row names a SECURE root stores its own content in that root's
+  container** (C10 part 2 read as "filed regarding = child"; the ACCESS taxonomy is untouched). f4 keeps it, and makes the
+  records under such a work assignment agree.
+  - *Reverse:* delete the `["sprk_workassignment"]` and `["sprk_project"]` entries from `ChildAncestorLinks.ByEntity`.
+    The walk then stops at a work assignment / project both for its own uploads and for its children's, so content under
+    a non-secure work assignment under a secure matter goes to a shared container.
+- **(iv) f3 — a contact's `sprk_invoice` is held** (reversing f2's "party → invoice reference" reading).
+  - *Reverse:* delete the `["contact"]` entry from `ByEntity`. The f2 zero-read behaviour for a contact with an explicit
+    fallback returns.
+- **(v) f3 — `sprk_servicerequest` is an INTERMEDIATE for containers (held) and stays CORE for access.**
+  - *Reverse:* set `KindByEntity["sprk_servicerequest"] = RecordKind.Root` and add a `ByEntity` entry for its
+    `sprk_regarding{matter,project,workassignment}`. It is then walked live like a work assignment: never read for a
+    flag (it cannot carry one), read for its links.
+- **(vi) f4 — the walk continues PAST a secure root, so two different secure roots stacked on one chain refuse as
+  ambiguous for the records below.** Example: a to-do under a secure work assignment that regards a different secure
+  matter. The work assignment's own uploads keep its own container (a secure record is never walked).
+  - *Reverse:* in `ResolveSecureAncestorAsync`, do not call `NextHopsAsync` for a hop just added to `secureRoots`. Each
+    branch then stops at its first secure root, and the nearest secure root wins.
+- **(vii) f4 — `sprk_communicationthread` is a GROUPING, not ownership: never read.** A message with no regarding of its
+  own inside a thread anchored to a secure matter keeps the archive (live 5, none secure).
+  - *Reverse:* add `("sprk_communicationthread", "sprk_communicationthread")` to the communication entry and
+    `KindByEntity["sprk_communicationthread"] = RecordKind.Intermediate`. That refuses EVERY threaded message (95 live,
+    all new inbound). Alternatively, follow the thread live — that is option (a), task 156's territory.
+- **(viii) f4 — a communication's `sprk_regardinginvoice` is FOLLOWED live** (the invoice's own flag, container and
+  links), not held like a to-do's. This preserves what the communication path has done since task 155 r0. An invoice's
+  typed `sprk_project` / `sprk_matter` are its own links, not a stamp.
+  - *Reverse:* drop `followed: ["sprk_invoice"]` from the communication entry. An email regarding an invoice then refuses
+    `container_ancestor_unverifiable` (3 live).
+- **(ix) f4 (inherited from f3 rule 4) — a typed link and a pair that name DIFFERENT records refuse as ambiguous without
+  reading the pair's type, even when the pair names a PARTY.** Live: communication `84d04780` (matter + a contact pair).
+  - *Reverse:* on disagreement, read the type and ignore the pair when `KindOf(pairEntity) == RecordKind.Party`.
