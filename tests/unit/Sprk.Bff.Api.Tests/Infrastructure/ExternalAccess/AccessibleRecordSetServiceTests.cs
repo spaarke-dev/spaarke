@@ -496,8 +496,9 @@ public class AccessibleRecordSetServiceTests
     [Fact]
     public void ToAccessRights_NullLevel_IsNone_FailClosed()
     {
-        // A grant row with no level keeps its id (set membership preserved — deliberately NOT filtered
-        // out, which would be a silent revocation) but contributes NO rights.
+        // A grant row with no level is read with a null level, which maps to None here. No level means
+        // not granted (owner rule, 2026-09-30): the evaluator's RemoveEntriesWithoutRead takes such a
+        // record out of the answer at the end of composition (task 136).
         Assert.Equal(AccessRights.None, ExternalAccessLevels.ToAccessRights(null));
     }
 

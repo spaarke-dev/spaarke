@@ -214,5 +214,23 @@ Related: tasks 029, 032, 037, 039, 042, 070, 107, 131, 135, 137, 138, 140 (conta
       - Still not closed: criterion 12 (manual CIAM live gate, procedure in notes §10), criterion 15 (blocked on the
         037/039 criterion-5 live gates), criterion 16 publish size (main session).
     </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-136-f2" base="task/uac-r2-136-f1" status="code-complete; verifier round 2 closed; manual live gate (criterion 12) pending; criterion 15 blocked on 037/039 live gates; publish size measured by the main session after merge">
+      Verifier round 2.
+      - Finding 1 / 14 (stale comment -> closed): AccessibleRecordSetServiceTests.ToAccessRights_NullLevel_IsNone_FailClosed
+        still carried task 032's "keeps its id ... silent revocation" rationale. Reworded: the row is read with a
+        null level, maps to None, and RemoveEntriesWithoutRead removes the record at the end of composition
+        (owner rule 2026-09-30, task 136). Comment-only; the assertion is unchanged, so there is no new guard to
+        seed. Re-grepped src/ and tests/ for "silent revocation" / "keeps its id" / "set membership preserved":
+        the only remaining hit is GrantCacheRoundTripSeamTests:190, which quotes 032's rule as the one task 136
+        reversed. That is accurate history, not a stale claim, so it stays.
+      - Null-level trigger re-run READ-ONLY (read_query, 2026-10-01): 0 sprk_externalrecordaccess rows with a null
+        sprk_accesslevel in any state. Lapses; nothing to list.
+      - Status stays pending (criterion 15). No production code changed; no new service, endpoint, DI
+        registration, option, job or package.
+      - Runs: AccessibleRecordSetServiceTests 65 / 65; full BFF unit suite 13,300 passed / 0 failed / 54 skipped
+        (13,354); ArchTests 338 / 338.
+      - Still not closed: criterion 12 (manual CIAM live gate, procedure in notes §10), criterion 15 (blocked on the
+        037/039 criterion-5 live gates), criterion 16 publish size (main session).
+    </outcome>
   </execution>
 </task>
