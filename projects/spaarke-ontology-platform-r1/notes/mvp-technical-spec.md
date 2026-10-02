@@ -1,8 +1,45 @@
-# MVP Technical Specification — Spend Governance Loop
+# MVP Technical Specification — the Signal → Decision Loop
 
-> **Status**: Draft for review, 2026-09-24. Concrete enough to act on; not yet task-decomposed.
+> *(Renamed 2026-10-01 from "Spend Governance Loop". The spend loop is one producer, not the subject — see the
+> scope correction below.)*
+>
+> **Status**: Draft for review — **field-level detail current to 2026-10-01**. Concrete enough to act on; not yet
+> task-decomposed. **`design.md` rev 4 holds the decisions; this document holds the evidence.** Where they
+> disagree, `design.md` is newer.
 > **Marking convention**: `[VERIFIED]` = read from source in this repo today · `[PROPOSED]` = new, needs review · `[MUST VERIFY]` = I could not confirm and it changes the design.
-> **Companions**: [`mvp-synopsis.md`](mvp-synopsis.md) (scope) · [`ontology-component-model.md`](ontology-component-model.md) (definitions)
+> **Companions**: [`mvp-synopsis.md`](mvp-synopsis.md) (scope) · [`ontology-component-model.md`](ontology-component-model.md) (definitions, **authoritative vocabulary** §3) · [`daily-briefing-ontology-fit.md`](daily-briefing-ontology-fit.md) (how the shipped Briefing's items enter the worklist)
+
+> ## 🔴 Scope correction — 2026-10-01 (owner feedback round 2)
+>
+> Four changes reach this document. Sections affected are stamped inline; **nothing has been deleted**, so the
+> superseded reasoning stays readable.
+>
+> **(1) R1 is intelligence-forward — no connector.** The project builds from the Spaarke data model out and
+> assumes the data is present: Spaarke-owned, or mirrored by a later phase with the customer. **§7 (Connector
+> contract) is therefore OUT of R1** and retained as the design the later phase inherits. The carve-out R1 does
+> own is the **landing contract** — the pointer columns in §5 and `sourceasof` freshness — because it is free now
+> and a data migration later.
+>
+> **(2) No LEDES intake.** Invoice / budget / spend-variance arrive from the e-billing platform as **computed
+> metrics**, not raw LEDES files we parse. Trace step ① in §1 is restated accordingly.
+>
+> **(3) No per-entity fact or signal tables.** `ILiveFactResolver` is **already generic** — keyed
+> `(subject-scheme, predicate)` with Matter / Invoice / Project implementations, plus `SubjectParser` and
+> `SubjectSchemeCatalogOptions` — and CM-3 already says materialize facts as rollup + calculated columns, zero
+> C#. So **`sprk_spendsnapshot` is one materialization, not the mechanism**, and `sprk_spendsignal` is replaced
+> by generic `sprk_signal` with `SignalEvaluationService` as one producer among several. Tracked as **D-8** in
+> `design.md` §8.0a; the §2.1 / §2.2 descriptions below remain accurate as *descriptions of what exists*.
+>
+> **(4) The Daily Briefing dissolves into the worklist.** Its overdue/upcoming work becomes a **Do lane** whose
+> membership comes from declared `Temporal` policies rather than `DailyBriefingCollector`'s own queries; its news
+> becomes narrative and Context; its tiles become filters; its LLM stops choosing priority. This adds signal
+> **producers**, not mechanism. Analysis: [`daily-briefing-ontology-fit.md`](daily-briefing-ontology-fit.md);
+> scheduled as BR-1..BR-6 in `design.md` §8.0b.
+>
+> **Also settled**: the worklist **reads signals and groups them by matter** (D-3, settled by the Console
+> prototype), so `sprk_signal` needs a polymorphic subject **plus an always-populated matter lookup** derived
+> from it. And **D-2 gains two constraints**: a *nullable decision reference* (BR-1 — a Do item resolved as one's
+> own work writes no Decision Record) and **Decision Record → flag is 1:N** (prototype finding 4).
 
 ---
 
@@ -56,7 +93,11 @@ Inquiry action is back in MVP scope (`design.md` §5, criterion 10).
 This is the whole MVP. Everything in §§2–7 exists to make this run.
 
 ```
-① LEDES/export lands                                        Connection Engine  [PROPOSED]
+① Invoice / budget metrics are present in Spaarke            [OUT OF R1 — later phase]
+     (computed metrics from the e-billing platform; NOT a
+      LEDES file we parse. In R1 this data is SEEDED in dev —
+      design.md §8.1. R1 owns only the landing contract: the
+      pointer columns + sourceasof freshness.)
      → sprk_billingevent rows
        sprk_sourcesystem = "legaltracker"
        sprk_sourceid     = "INV-8832-L22"
@@ -399,7 +440,20 @@ A policy may only reference fields that exist. Three kinds, and the `computed:` 
 
 ---
 
-## 7. Connector contract `[PROPOSED]`
+## 7. Connector contract `[PROPOSED]` — 🔴 **OUT OF R1 SCOPE (2026-10-01)**
+
+> **Retained, not deleted.** Owner decision 2026-10-01: R1 is intelligence-forward and does not build the
+> connector (`design.md` §1.0 / §5 Out). This section is the design the **later mirroring phase inherits**, so
+> deleting it would mean re-deriving it with the customer in the room.
+>
+> **What R1 does keep from this section**: nothing in the interface or the pipeline below, and **only the landing
+> contract** — the pointer columns (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) and attribute
+> ownership in §5. Those are in R1 because retrofitting them is a data migration, and because **freshness is
+> load-bearing in the UI**: an absence clause (`notExists …`) evaluated over a stale mirror is a false negative
+> wearing a confident face (Console prototype finding 3).
+>
+> ⚠️ The **"MVP adapters"** line at the end of this section is void for R1 — there is no `FileExportConnector`
+> and no `RestConnector` in this project.
 
 ```csharp
 public interface ISourceConnector
@@ -448,10 +502,14 @@ public sealed record SourceRecord(
 | 4b | **Second producer: communication-derived rule** — the cross-source demo (§0.1). Consumes the existing association ladder | **this is the differentiated capability** |
 | 5 | `sprk_matter` + `sprk_billingevent`: pointer fields, alt keys, §5 projected fields | schema |
 | 6 | `budgetUtilization` calculated column; `invoicedToDate` rollup | **zero code** |
-| 7 | `ISourceConnector` + landing pipeline + `FileExportConnector` | new — **the bulk of the work** |
-| 8 | Worklist widget over `sprk_spendsignal WHERE sprk_isactive = true` | new |
-| 9 | `sprk_decisionrecord` entity + gate write + subgrid + view | new |
-| 10 | `sprk_servicerequest`: outbound direction + typed outcome | extend |
+| ~~7~~ | ~~`ISourceConnector` + landing pipeline + `FileExportConnector`~~ | 🔴 **OUT OF R1 (2026-10-01)** — §7. Rev 3 called this *"the bulk of the work"*; removing it is why R1 now concentrates on the loop. **Replaced by 7a** |
+| **7a** | **Landing contract only** — pointer columns (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) + attribute ownership on any entity a later ingest touches, and `sourceasof` **surfaced in the UI as a gap when stale** | schema + a render rule. In R1 because it is free now and a migration later |
+| 8 | Worklist: **one row component** over `sprk_signal` where unresolved, **grouped by matter** (D-3). ⚠️ Not `sprk_spendsignal`, and ⚠️ **not "zero new UI code"** — prototype finding 9 disproved that; finding 10 is the recovered half (one component carried all three signal shapes, so the cost is build-once) | new |
+| 9 | `sprk_decisionrecord` entity + gate write + subgrid + view. ⚠️ **1:N to flags** (prototype finding 4) and the flag's decision reference is **nullable** (BR-1) | new |
+| 10 | `sprk_servicerequest`: outbound direction + outcome vocabulary. ⚠️ **Term pending CM-4** — component model §3 marks *disposition* ✅ Keep and flags *typed outcome* with "consider reusing disposition"; do not harden either phrasing until CM-4 is confirmed | extend |
+| **11** | **Do-lane `Temporal` policy rows** — overdue task · due within 3 days · work assignment past `sprk_responseduedate` (BR-2). Membership moves off `DailyBriefingCollector`'s own queries onto declared rules | 3 data rows, **no new evaluator** |
+| **12** | **Retire *Critical Today* as a list** — `sprk_highpriority` → rank input, `sprk_monitor` → subscription (BR-3); **remove the LLM-chosen "Top action"** (it breaks row-contract requirement 2 and decision 15) | configuration + deletion |
+| **13** | **First Know-promotion rule** — *new matter with no budget after 5 days* (`Absence`, Spaarke-held data) (BR-6). ⚠️ Document-based Absence rules wait until documents are mirrored — impossible over reference-mode data | one data row |
 
 ---
 
@@ -461,11 +519,12 @@ public sealed record SourceRecord(
 |---|---|---|
 | 1 | **`sprk_matter` current schema** — read before adding anything in §5.1 | several fields may already exist under different names |
 | 2 | **`sdkmessagefilters` on `sprk_matter` / `sprk_billingevent`** — is `UpsertMultiple` supported? | bulk messages are not available on every table; plugin registrations can disable them |
-| 3 | **What populates `sprk_spendsnapshot` today?** | determines whether ① and ③ connect, or whether the snapshot job needs rework |
+| ~~3~~ | ~~**What populates `sprk_spendsnapshot` today?**~~ | ✅ **CLOSED 2026-10-01 — no longer an R1 question.** Budget and spend are **seeded manually in dev** for development testing; R1 does not define their provenance (owner, synopsis §7 item 2). The question returns with the mirroring phase. Replaced by the §8.1 seeding checklist in `design.md`. ⚠️ Seeded data proves the predicate *evaluates*, never that it *fires on reality* |
 | 4 | **Null-budget behaviour** (§4) | decide and test; silent wrong-firing is the failure mode |
-| 5 | **Which platform is first** | determines the `RestConnector` and whether Tier-1 (API) or Tier-2 (export) is the MVP path |
+| ~~5~~ | ~~**Which platform is first**~~ | ✅ **Moot for R1 — no connector** (§7). Still customer-determined when the mirroring phase starts |
 | 6 | **Does `sprk_servicerequest` have a direction/outcome model already?** | CM-5 assumed it absorbs Inquiry; unverified |
-| 7 | **What is the second (cross-source) rule, precisely?** Needs a concrete predicate over communication + spend — e.g. *"over budget AND an inbound communication in the last 30 days classified as scope/fee-related with no disposition"* | **This is the differentiated capability (§0.1). Spec it before building the first rule, so `sprk_signal` is shaped by two producers rather than one** |
+| ~~7~~ | ~~**What is the second (cross-source) rule, precisely?**~~ | ✅ **ANSWERED — §11.4** (Path B, rewritten 2026-09-30): a communication classified fee/scope in the window **AND** no `sprk_budgetrevision` in that window. ⚠️ Note the example phrasing in the original cell (*"over budget AND … with no disposition"*) is **exactly the §0.3 failure** — it asserts a budget comparison the predicate never makes. Kept visible as the worked example of the trap |
+| **9** | **How many signal producers at MVP, now that the Do lane is in?** `[new 2026-10-01]` | Three were assumed (spend · communication · memo); BR-2 adds three `Temporal` rules and BR-6 one `Absence` rule. **This strengthens the generic-`sprk_signal` case rather than complicating it** — but it changes "shaped by two producers" to "shaped by six", which is the right time to settle the shape (D-2 / D-7 / D-8) |
 | 8 | **Run the §0 differentiation test retroactively** across §8 Wave 2 / Wave 3 modules in the strategy synopsis before any is specced | Several may fail it the same way budget variance did |
 
 ---

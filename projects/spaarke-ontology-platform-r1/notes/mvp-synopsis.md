@@ -1,6 +1,8 @@
 # Spaarke LOI Platform — MVP Synopsis
 
-> **Status**: Draft for owner review, 2026-09-24. Not a spec.
+> **Status**: Draft for owner review — **updated 2026-10-01 (owner feedback round 2)**. Not a spec.
+> **Authoritative for decisions**: [`../design.md`](../design.md) **rev 4**. Where this synopsis and `design.md`
+> disagree, `design.md` is newer. **Vocabulary**: [`ontology-component-model.md`](ontology-component-model.md) §3.
 > **Companions**: [`ontology-component-model.md`](ontology-component-model.md) (definitions) · [`spaarke-ontology-strategy-synopsis-v2.md`](spaarke-ontology-strategy-synopsis-v2.md) (strategy) · [`phase0-codebase-inventory.md`](phase0-codebase-inventory.md) (verified state)
 
 ---
@@ -9,7 +11,28 @@
 
 > **Bind a customer's matter-management and e-billing data, evaluate it against rules the customer owns, surface what needs attention in the Spaarke Console, let the user act, and record what was decided.**
 
-This is §8's second bootcamp SKU — *"if the buyer's pain is spend, run a LEDES drop plus the inquiry loop"* — extended with matter mirror so the binding story is proven rather than dodged.
+This is §8's second bootcamp SKU, *"if the buyer's pain is spend, run the inquiry loop"*.
+
+> ### 🔴 Scope correction — 2026-10-01 (owner)
+>
+> **Two changes that reach most of this document.**
+>
+> **(a) R1 is intelligence-forward.** It builds the intelligence layer **from the Spaarke data model out**, and
+> **not** the connector that brings a system of record's data in. Every capability is specced against data
+> already in Dataverse — because Spaarke *is* the system of record for it (matters, communications, documents,
+> tasks, memos), or because a later phase with the customer mirrors it in (invoice, budget, spend metrics). The
+> Connection Engine is **out of scope** (`design.md` §1.0 / §5 Out); the one carve-out is the **landing
+> contract** — pointer columns + attribute ownership — because it is free now and a migration later.
+>
+> **(b) No LEDES intake.** Invoice, budget and spend-variance values arrive from the e-billing platform as
+> **computed metrics**, not as raw LEDES files we parse. This retires §4.1's claim that *"half the binding story
+> needs no connector at all"* — that argument was LEDES-shaped and no longer applies.
+>
+> **And one expansion** (owner items 2–3): the shipped **Daily Briefing dissolves into the worklist** rather than
+> sitting beside it. Its overdue/upcoming work becomes a **Do lane** with rule-declared membership, its news
+> becomes narrative and Context, its tiles become filters, and its LLM stops choosing priority. Four of the six
+> changes are configuration or deletion. Full analysis: [`daily-briefing-ontology-fit.md`](daily-briefing-ontology-fit.md);
+> scheduled as BR-1..BR-6 in `design.md` §8.0b.
 
 > ### 🚩 Positioning correction — 2026-09-24
 >
@@ -53,15 +76,17 @@ This is §8's second bootcamp SKU — *"if the buyer's pain is spend, run a LEDE
 
 | Stage | MVP implementation | New? |
 |---|---|---|
-| **bind** | One MM connector (mirror Matter) + LEDES file drop (mirror Invoice) | 🔴 **new — Area 1** |
+| **bind** | **Declared, not built** — the landing contract only (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof` + attribute ownership). Data is assumed present: Spaarke-owned, or mirrored by a later phase | 🟡 **columns only** *(was "MM connector + LEDES drop")* |
 | **resolve** | Matter-number match → extend the existing rung ladder | 🟡 extend |
-| **compute facts** | `sprk_spendsnapshot` (`invoicedamount`, `budgetamount`, `velocitypct`) | 🟢 **built** |
-| **match** | `SignalEvaluationService` → `sprk_spendsignal`; swap appsettings thresholds for policy rows | 🟢 built · 🟡 small change |
+| **compute facts** | **`ILiveFactResolver`** — already generic, keyed `(subject-scheme, predicate)`, with Matter / Invoice / Project implementations — plus native rollup + calculated columns per CM-3. `sprk_spendsnapshot` is read as **one materialization, not the mechanism** | 🟢 **built** *(corrected 2026-10-01 — see §4.3a)* |
+| **match** | Policy rows + the cross-source evaluator → **generic `sprk_signal`**. `SignalEvaluationService` becomes **one producer among several**, reading policy rows instead of appsettings thresholds | 🟡 extend · 🔴 evaluator is new |
 | **execute under gate** | Inquiry action through the existing gate engine | 🟢 built · data only |
-| **record** | Decision Record entity + subgrid on the matter + list view | 🔴 **new — Area 2** |
-| **surface** | Worklist widget over open signals | 🔴 **new — Area 2** |
+| **record** | Decision Record entity + subgrid on the matter + list view | 🔴 **new** |
+| **surface** | One worklist row component over open signals, membership from configuration | 🔴 **new** |
 
-**Four of seven stages are already built.** The work concentrates at the two ends — getting data in, and closing the loop once something fires.
+**Five of seven stages are built or configuration.** With the connector out of scope, the work concentrates at
+**one** end — closing the loop once something fires — plus the cross-source evaluator that makes the claim
+differentiated at all.
 
 ## 3. What already exists — verified 2026-09-24
 
@@ -84,20 +109,23 @@ This is why the MVP is small. Discovered during verification, not assumed:
 
 ## 4. Two new capability areas — and everything else is data or already built
 
-> **(1) Connection Engine** — new, zero code, the bulk of the work
-> **(2) Close the loop** — worklist widget + Decision Record
+> **(1) Close the loop** — the worklist row + Decision Record · **(2) the cross-source evaluator**
+>
+> 🔴 **Changed 2026-10-01**: the Connection Engine was Area 1 and is now **out of scope** (§1 correction (a)).
+> What remains of it in R1 is the landing contract — columns, not machinery.
 
-### 4.1 Area 1 — Connection Engine
+### 4.1 ~~Area 1 — Connection Engine~~ → the landing contract only `[rewritten 2026-10-01]`
 
-The only genuinely new engine. Nothing exists today.
+**The Connection Engine is out of R1** (§1 correction (a); `design.md` §1.0). Kept here, struck through, so the
+decision is visible rather than silently dropped:
 
-| Deliverable | Notes |
+| Deliverable | Disposition in R1 |
 |---|---|
-| **LEDES parser + invoice landing** | Vendor-neutral; **no vendor cooperation required**. Half the binding story needs no connector at all |
-| **MM connector** (mirror Matter) | First connector; builds the pattern for every subsequent one |
-| **Landing contract** | Pointer fields (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) + attribute ownership on `sprk_matter` |
-| **Raw payload retention** | Cosmos, keyed by sync run — buys replay when a mapping rule is wrong (§4.15.1 of the component model) |
-| **Freshness surfacing** | Per-object `sourceasof`, visible in the UI. Not rentable; platform work |
+| ~~LEDES parser + invoice landing~~ | **Out, and not the plan.** Invoice / budget / spend-variance arrive as **computed metrics** from the e-billing platform. Parsing LEDES opens code mapping — work for when we are the system of record |
+| ~~MM connector (mirror Matter)~~ | **Out.** A later phase, with the customer |
+| **Landing contract** | ✅ **IN.** Pointer fields (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) + attribute ownership on any entity a later ingest touches. In R1 because it is **free now and a data migration later** (component model §11) |
+| ~~Raw payload retention (Cosmos)~~ | **Out** — belongs with the ingest that produces payloads |
+| **Freshness surfacing** | ✅ **IN**, and load-bearing rather than cosmetic: prototype finding 3 — *an absence clause is only as true as its source is fresh*. A `notExists` conjunct over a stale mirror is a false negative with a confident face |
 
 ### 4.2 Area 2 — Close the loop
 
@@ -105,7 +133,8 @@ Where the verified gap is: **`sprk_spendsignal` is computed and stored today wit
 
 | Deliverable | Notes |
 |---|---|
-| **Worklist widget** | View over open signals. Each row: the object · **why it fired** (policy code + version + triggering values) · its actions. **Narrower than it sounds** — Daily Briefing's "Critical Today" is already a worklist in structure (type badge, status chip, per-row ⋮ menu). The upgrade is *where membership comes from*, *the reason*, and *wiring the actions* |
+| **Worklist** | Rows are **matters**; the worklist **reads signals and groups them by matter** (D-3, settled by the Console prototype). Each row: the object · **why it fired** (policy name + version + the values) · its actions. ⚠️ **Not "narrower than it sounds"** — the 2026-09-24 text claimed the upgrade was only membership + reason + actions, and the prototype disproved it (finding 9): the row needs expandable evidence tiers, a *Why this fired* disclosure, outcome cards and a gate host. **One row component, built once**, carried all three signal shapes (finding 10) |
+| **The Do lane** | The Briefing's overdue/upcoming work, with membership from **declared `Temporal` policies** instead of the collector's own queries — which buys a stated reason, versioning, suppression and freshness for free. `Acted` on one's own work writes **no** Decision Record (BR-1); dismissal does. See [`daily-briefing-ontology-fit.md`](daily-briefing-ontology-fit.md) §4.2 |
 | **Decision Record entity** | Append-only (no Update/Delete privileges for anyone), **written at the gate**, subgrid on the matter + list view. The Context pane already renders session-ledger entries via `ISessionTraceReader` — an existing pattern to extend |
 
 ### 4.3 Small additions inside existing code — *not* a new engine
@@ -118,6 +147,23 @@ Where the verified gap is: **`sprk_spendsignal` is computed and stored today wit
 | **`sprk_budgetrevision` entity** | *Added 2026-09-30.* Smallest possible: matter · prior amount · new amount · `sprk_revisedon` · reason · author. **Verified necessary**: `sprk_budget` carries only `sprk_totalbudget` + `modifiedon`, with no revision rows, and auditing is not a fallback (zero `RetrieveRecordChangeHistory` usage anywhere). Path B's second conjunct cannot be expressed without it. ⚠️ `sprk_budget.modifiedon` is **not** a substitute — any unrelated edit bumps it, which would suppress a true signal |
 | **`SignalEvaluationService` reads policy rows** | Replaces `FinanceOptions` appsettings thresholds |
 | **Stamp policy code + version onto each signal** | This is what makes the "why" citable and the old signals still explicable after a threshold changes |
+
+### 4.3a Do we need entity-specific fact and signal tables? `[new 2026-10-01 — owner item 5]`
+
+**Recommendation: no.** Verified on master 2026-10-01:
+
+- **Facts** already have a generic mechanism — `ILiveFactResolver`, keyed `(subject-scheme, predicate)` with
+  `MatterLiveFactResolver` / `InvoiceLiveFactResolver` / `ProjectLiveFactResolver`, plus `SubjectParser` and
+  `SubjectSchemeCatalogOptions`. **CM-3** independently says materialize facts as **rollup + calculated columns,
+  zero C#**. So `sprk_spendsnapshot` is **one materialization, not a pattern to replicate**: keep it, read it as
+  evidence, and add no per-entity `sprk_*snapshot` sibling.
+- **Signals** go the same way: generic **`sprk_signal`** replaces `sprk_spendsignal`, whose `sprk_snapshot`
+  lookup makes it structurally spend-only, and `SignalEvaluationService` becomes **one producer among several**.
+
+This is the same mistake twice if we get it wrong twice — a spend-shaped fact table and a spend-shaped signal
+table. Tracked as **D-8** in `design.md` §8.0a. It also makes §5's *"unifying `sprk_spendsignal` with
+`InsightArtifact`"* obsolete as written: there is nothing left to unify, and the live question — sibling or
+subtype — is **D-7**.
 
 > **CM-1 (Policy lives in Insights) is a destination, not an MVP move.** The `IPolicyEvaluator` contract in Insights gets built when a *second* consumer appears. For MVP, Policy is Dataverse rows that Finance's existing service reads.
 
@@ -151,7 +197,24 @@ main.aspx?appid={guid}&pagetype=webresource&webresourceName=sprk_spaarkeai&navba
 
 **Still to verify:** does `navbar=off` survive a wizard launch + return (`Create a matter` hands off via sessionStorage to an OOB form / wizard code page)? The self-heal catches it regardless.
 
-**Still open:** solution packaging — the deploy script does a direct Web API upload, not a managed-solution import, and there are **no `AppModule`/`SiteMap` XML definitions in the repo**. Customer deployment goes through the provisioning control plane, so both need resolving (§7 item 6).
+**Solution packaging — CLOSED for R1** `[2026-10-01, owner item 8-6]`: we are **not using managed solutions**, and
+R1 builds and deploys **in dev only**. Packaging is a deployment question for a later phase, not a design
+constraint here.
+
+**Should `sprk_spaarkeai` be renamed to "Console"?** `[new 2026-10-01 — owner item 8-6]` The *concept* is settled:
+**SpaarkeAi becomes the Console** (component model decision 19, `design.md` decision 1). The question is whether
+the **identifier** follows, and the measured blast radius says split the two:
+
+| Layer | Occurrences | Recommendation |
+|---|---|---|
+| **Product / UI surface** — titles, labels, docs, how we talk about it | — | ✅ **Rename now to "Spaarke Console."** Costs nothing and ends the ambiguity |
+| **Live source + config** — `src/**` (16 files), 2 deploy scripts, 1 workflow, 1 ribbon XML | **32 in `src/`**, ~21 files live | ⚠️ **Defer.** Mechanical but not free |
+| **The Dataverse web-resource name `sprk_spaarkeai`** | the deployed artifact | 🔴 **Do not rename in R1.** Deep links are **server-generated** (`HandoffUrlBuilder`), and the name is also embedded in ribbon XML and 16 launch points. Renaming breaks every live link, bookmark and ribbon until everything is republished together |
+| **Historical project docs** | 705 across 256 files repo-wide | Leave. Rewriting history adds risk and no value |
+
+**This is the pattern decision 10 already set** — *"ledger"* → **Decision Record** customer-facing while
+*ledger* stays in engineering docs. Customer-facing name and engineering identifier are allowed to differ, and
+here that is the cheap, reversible option. Revisit the identifier when solution packaging is addressed.
 
 > **Architectural dependency to record: the Xrm wrapper is load-bearing.** Because the Console runs inside `main.aspx`, the global `Xrm.WebApi` is available — which is *why* LegalWorkspace sections can self-fetch and why the worklist needs no workspace changes. Every rejected alternative above costs that, which is the real reason this one wins.
 
@@ -159,9 +222,12 @@ main.aspx?appid={guid}&pagetype=webresource&webresourceName=sprk_spaarkeai&navba
 
 | Out | Why |
 |---|---|
-| **The Action Engine** | The MVP needs an *Action*, not the *Action Engine*. Tool Registry, Action Definitions, templates, triggers, scheduling, three invocation paths, run records and meta-tools are a management plane — on hold at 5% and not on the MVP path. The dispatch spine already exists (§4.4) |
-| **Moving Policy into Insights Engine** | CM-1 is the destination. For MVP, Policy is Dataverse rows that `SignalEvaluationService` reads in place. Build the `IPolicyEvaluator` contract when a second consumer appears |
-| **Unifying `sprk_spendsignal` with `InsightArtifact`** | Conceptually right (a policy evaluation is a Fact, §4.2 of the component model) but **zero MVP payoff** |
+| **The Connection Engine** — connector, parser, sync engine, scheduler | **Out by owner decision 2026-10-01** (§1 correction (a)). The carve-out is the landing contract in §4.1 |
+| **LEDES intake** | **Out, and not the plan.** Computed metrics from the e-billing platform instead |
+| **The Action *Engine*** (not Actions) | ⚠️ **The distinction, since it has been asked**: an **Action** is a *data row* — an Action + an ADR-039 Binding — dispatched by the spine that already ships (`ConfirmationPolicyEngine` · `GateDecisionV2` · `SideEffectGateAIFunction` · `OutputRouter`, 8 dispositions). The **Action Engine** is the management plane above it: tool registry, action definitions, templates, triggers, scheduling, three invocation paths, run records, meta-tools. R1 needs the row and the shipped spine. **If the Engine is built later, R1's rows are its input, not a rewrite** — which is what makes deferring it safe |
+| **Moving *Policy* into the Insights Engine** (CM-1) | ⚠️ **Re-worded 2026-10-01.** The **Insights Engine is built and consumed by R1** — verified on master: `Services/Insights/{Graph,LiveFacts,Observations,Precedents}`, `InsightsOrchestrator`, `InsightArtifact`, `EvidenceRef`, Insight endpoints. R1 reads facts through `ILiveFactResolver` and renders the Fact / Observation tiers, and **adds one new output type, the signal.** What waits for a second consumer is only the `IPolicyEvaluator` contract. The earlier phrasing read as though Insights itself were out of scope |
+| ~~**Unifying `sprk_spendsignal` with `InsightArtifact`**~~ | **Obsolete as written** (§4.3a): `sprk_spendsignal` is being *replaced* by generic `sprk_signal`, so there is nothing to unify. The live question — is `sprk_signal` an `InsightArtifact` subtype or a sibling table? — is **D-7**, recommended **sibling**, because `InsightArtifact` is a response/evidence contract while a signal is a durable queue row with a lifecycle and suppression |
+| **Per-entity fact / signal tables** | `ILiveFactResolver` + rollup/calculated columns cover fact supply (§4.3a, D-8) |
 | **Authority** | While every action requires human confirmation, the human *is* the authority and Dataverse security answers "may this person confirm" |
 | **Writeback to source** (Patterns C/D) | Not needed — Pattern A/B only. Inquiry acts through email, not the e-billing API |
 | **MCP egress** | Reach, not function. No dependency either way |
@@ -175,8 +241,13 @@ main.aspx?appid={guid}&pagetype=webresource&webresourceName=sprk_spaarkeai&navba
 
 ## 6. Success criteria
 
-1. A LEDES file dropped for a customer produces invoice rows linked to the correct matters, with source attribution and a freshness stamp.
-2. Matter data from the MM system appears in Spaarke with projected fields read-only and derived fields writable **in the same row**.
+1. ⚠️ **Replaced 2026-10-01** (no LEDES, no connector). **Invoice, budget and spend values present in Spaarke
+   carry source attribution and a freshness stamp, and the UI shows a stale or unbound source as a gap — never
+   as a zero.** *(The landing contract is what R1 owes here; producing the rows is the later connector phase.
+   The freshness half is not cosmetic: prototype finding 3 — an absence clause is only as true as its source is
+   fresh.)*
+2. ⚠️ **Replaced 2026-10-01.** **Attribute ownership holds on a mirrored entity**: projected fields are
+   read-only and derived fields writable **in the same row**, demonstrable on seeded data without a connector.
 3. A legal-ops admin can change a budget-variance threshold **in a form, without a deploy**, and the change produces a new policy version that the old signals still reference.
 4. A matter breaching the threshold appears in the Console worklist, showing **why** (policy code + version + the triggering values).
 5. One click sends a budget inquiry through the gate; the inquiry is tracked with an SLA; the reply resolves it with a **typed outcome**.
@@ -195,22 +266,30 @@ main.aspx?appid={guid}&pagetype=webresource&webresourceName=sprk_spaarkeai&navba
 
 ## 7. Open items before this becomes a spec
 
-| # | Item | Owner |
+> **All seven answered by the owner on 2026-10-01.** Kept with their resolutions rather than deleted, so the
+> reasoning survives. Live decisions now sit in `design.md` §8.
+
+| # | Item | Resolution (2026-10-01) |
 |---|---|---|
-| 1 | **Which MM system** for the first connector? Aderant / Elite 3E / other — determined by the first customer | Owner |
-| 2 | **Where does budget come from?** *Partly answered 2026-09-30 — now the D-1 scoping spike (`design.md` §8.1).* Verified: **`sprk_spendsnapshot` has ZERO rows**, against 2 `sprk_budget` rows and 1 `sprk_billingevent`, so the spend half of the differentiated claim is **untestable today**. Also verified: no budget **revision history** exists in any form. The spike must establish what populates the snapshot, whether that path assumes Spaarke-originated invoices (which feeds item 7), and the cheapest honest route to one over-budget matter | **Spike** |
-| 3 | **Does `sprk_spendsignal` need extending** to carry policy code + version + triggering values, or does it already? | Verify |
-| 4 | **Tell Front Door before it specs** — `sprk_servicerequest` with a direction discriminator likely absorbs both `sprk_legalrequest` and Inquiry (CM-5). Its roadmap says this decision "gates everything" | Owner |
-| 5 | **Contention** — `Services/Ai/` is owned by `spaarke-ai-architecture-redesign-r2`; **Finance is quieter, which is where the MVP's server work lands.** Favourable | Coordinate |
-| 6 | **Is `sprk_spaarkeai` in the managed solution**, or deployed per-environment by script? Determines how the Console reaches a customer environment | Verify |
-| 7 | **Scope call: is the MM connector in MVP?** It is the single largest item. LEDES-only is ~2 months and still proves all seven stages; MM mirror adds ~2 months and proves the *binding* story properly | Owner |
+| 1 | **Which MM system** for the first connector? | ✅ **Moot for R1 — no connector in this project** (§1 correction (a)). The question returns with the connector phase, and is still customer-determined |
+| 2 | **Where does budget come from?** | ✅ **Not an R1 question.** Budget is **created manually in dev for development testing**; R1 does not define its provenance. This collapses the D-1 spike into the §8.1 seeding checklist and **removes D-1 from the critical path**. Two obligations survive: the smallest `sprk_budgetrevision` must still be created (no revision history exists in any form), and §8.1's **exit pair** must exist before criterion 2 can be shown. ⚠️ Seeded data proves the predicate *evaluates*; it cannot prove it *fires on reality* — `design.md` §9's top risk is not retired by seeding |
+| 3 | **Does `sprk_spendsignal` need extending?** | ✅ **Assessed — it needs replacing, not extending.** Its `sprk_snapshot` lookup makes it structurally spend-only, so it cannot carry cross-source evidence. Generic **`sprk_signal`** instead, free now (zero client references, no production data) and a migration later. **Shape from D-3** (prototype): a **polymorphic subject** — the SLA flag is *about* an Inquiry — **plus an always-populated matter lookup** as the grouping key, derived from the subject. Carries policy name + version + the values that fired, a `sprk_dedupekey` alternate key, `sprk_resolutiontype` (`ConditionCleared` / `Acted` / `Dismissed` / `Superseded` / `PolicyRetired`), `sprk_lastevaluated`, and a **nullable** decision reference (BR-1). See §4.3a and D-7/D-8 |
+| 4 | **Tell Front Door before it specs** | ✅ **Confirmed: `sprk_legalrequest` is absorbed by the existing `sprk_servicerequest`** with a direction discriminator (CM-5). `spaarke-legal-front-door-r1` is pre-spec and **must be told**, since its roadmap says this decision "gates everything" — the only open part is the telling |
+| 5 | ~~**Contention** — `Services/Ai/` owned by `spaarke-ai-architecture-redesign-r2`~~ | ✅ **Void — that project is CLOSED** and will not reopen (verified 2026-10-01 in `projects/INDEX.md`). `Services/Ai/` has **no sole owner**, so whatever AI-side work this project needs is **done in this project**. `/conflict-check` still applies for in-flight neighbours (`spaarkeai-assistant-enhancements-r3/r4`, the Compose line) |
+| 6 | **Is `sprk_spaarkeai` in the managed solution?** | ✅ **Not a question for R1.** We are **not using managed solutions**, and R1 builds and deploys **dev only**. **New question in its place — should `sprk_spaarkeai` be renamed "Console"?** Answered in §4.5 with the measured blast radius: **rename the product surface now, keep the web-resource identifier**, because deep links are server-generated and the name is embedded in ribbon XML and 16 launch points |
+| 7 | **Scope call: is the MM connector in MVP?** | ✅ **No — out of scope** (§1 correction (a)). Decided, not deferred |
 
 ## 8. Why this is the right MVP
 
-- **Proves all six pipeline stages** with the cheapest possible binding pair.
-- **Rides existing work** — the fact layer and the evaluation engine are built; we are adding the policy layer above and the surface below.
-- **Needs no vendor cooperation** for half the binding (LEDES is a file).
-- **Closes a real gap today** — signals are already computed and invisible.
+- **Proves the pipeline from the Spaarke data model forward**, which is the half we can build without a customer
+  in the room.
+- **Rides existing work** — the fact layer (`ILiveFactResolver`), the Insights Engine, the evaluation engine, the
+  gate and the dispatch spine are all built; we are adding the policy layer above and the surface below.
+- ~~Needs no vendor cooperation for half the binding (LEDES is a file).~~ **Retired 2026-10-01** — this argument
+  was LEDES-shaped. The replacement is stronger: **R1 needs no vendor cooperation at all**, because it assumes
+  the data is already in Spaarke.
+- **Closes two real gaps today** — signals are computed and invisible, and the Daily Briefing surfaces work with
+  no reason, no action and no record.
 - **It is a sellable bootcamp**, not a demo: a live spend-governance loop on the customer's own data in a bootcamp window.
 
 **But only if the cross-source rule ships with it.** The spend loop alone proves the plumbing and loses the pitch. What makes the bootcamp sellable is the second rule — an assessment the customer's own e-billing platform structurally cannot produce, delivered with the evidence, the rule version that flagged it, and the record of what was decided.

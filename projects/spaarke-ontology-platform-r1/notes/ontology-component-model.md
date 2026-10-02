@@ -3,6 +3,10 @@
 > **Status**: Working reference from the 2026-09-21 → 09-24 owner design sessions. **Not ratified.** Companion to [`spaarke-ontology-strategy-synopsis-v2.md`](spaarke-ontology-strategy-synopsis-v2.md) (strategy) and [`phase0-codebase-inventory.md`](phase0-codebase-inventory.md) (verified state).
 > **Purpose**: fix the vocabulary and the component boundaries so downstream design work stops re-deriving them. §10 lists what should become ADRs.
 > **Audience**: Ralph (owner); `design-to-spec` / `project-pipeline`; any future session picking this up.
+> **Updated 2026-10-01** (owner feedback round 2) — §3 carries the *disposition* finding, §6.1 carries the
+> Console prototype's corrections, §7 gains decisions 20–24, §11.1's open question is answered, and §12 logs it.
+> **This file remains the authoritative vocabulary** (§3). A terminology change may originate **here and
+> nowhere else**; `design.md` and the spec cite it rather than re-deciding.
 
 ---
 
@@ -102,6 +106,28 @@ No general browsing wrapper over TyMetrix and iManage. Instead: for every item t
 | ~~originate~~ (binding mode) | ⚠️ Prefer **"system of record"** | Palantir-flavoured; SOR is the industry term |
 | ~~field classes~~ | ⚠️ Prefer **"attribute ownership"** | Plainer, and says what it does |
 | ~~typed outcome~~ | ⚠️ Consider reusing **"disposition"** | We already have 8 action dispositions + File/File+Act/Route/Hold/Dismiss for communications; an Inquiry's outcome is the same shape |
+
+> ### 📌 The *disposition* question, settled as far as this file can settle it `[2026-10-01]`
+>
+> Raised in owner feedback: *"I thought we changed the terminology including not using disposition."*
+>
+> **The record says otherwise, and the record is this table.** Two rows above: **"Action · gate · disposition" is
+> ✅ Keep** (it is ADR-039's own vocabulary — eight action dispositions, plus File / File+Act / Route / Hold /
+> Dismiss for communications), and only ***typed outcome*** carries a ⚠️. What this file retired was
+> **~~ledger~~ → Decision Record** (customer-facing), plus ~~binding registry~~, ~~connector manifest~~,
+> ~~originate~~ and ~~field classes~~. *Disposition* was never among them — it is a term we **kept because we
+> already own it in shipped code**.
+>
+> **Recommended resolution of CM-4** (`design.md` §8.0a), which is this row's own suggestion taken: use
+> **disposition** for an Inquiry's outcome and **drop *typed outcome* as a separate term**, then sweep *typed
+> outcome* out of `design.md` criterion 10, `mvp-synopsis.md` §6 and the architecture review. One word, one
+> meaning, already in the code.
+>
+> ⚠️ **Not applied yet — it needs the owner's explicit confirmation**, precisely because the premise differs from
+> recollection. If the preference is instead to retire *disposition*, that is an amendment to **this table**, and
+> it carries a real cost to name: ADR-039's dispatch vocabulary and the communication outcomes would then
+> disagree with the ontology's. Either answer is defensible; the one thing that is not is leaving both words in
+> circulation, which is the state owner item 9 objected to.
 | **reference / mirror** | ✅ Keep | Ordinary data-integration terms, not Palantir's |
 | **Action · gate · disposition** | ✅ Keep | ADR-039, already ours |
 | **Fact / Observation / Precedent / Inference** | ✅ Keep | Insights Engine, already shipped |
@@ -481,7 +507,7 @@ The 13-rung ladder with an explicit deterministic/AI partition (`RungKind.cs`), 
 
 | Surface | For | Ontology's contribution |
 |---|---|---|
-| **Spaarke Console** (three-pane app) | everyday users | **widgets** they select; the Assistant launches them |
+| **Spaarke Console** (three-pane app) | everyday users | **widgets** they select; the Assistant launches them. ⚠️ **Identifier vs name `[2026-10-01]`**: the Console *is* today's SpaarkeAi surface (decision 19). The **product name changes now**; the Dataverse web-resource identifier **`sprk_spaarkeai` does not change in R1** — deep links are server-generated (`HandoffUrlBuilder`) and the name is embedded in ribbon XML and 16 launch points, so renaming it breaks every live link until all are republished together. Same split as ~~ledger~~ → Decision Record: customer-facing name and engineering identifier are allowed to differ. Measured blast radius in `mvp-synopsis.md` §4.5 |
 | **Spaarke Matter Management** (model-driven app) | admin / operator / full matter management | forms over ontology entities |
 | **Spaarke External Access** (SPA) | requesters, Legal Front Door | Request origination |
 | **Office add-ins** | Outlook / Word | capture, save, share |
@@ -513,6 +539,26 @@ A **worklist** is a list whose **membership is computed by rule evaluation**, no
 
 **Guard:** over-generalizing UI is the playbook trap in another costume. The configurable dimensions must be a **closed set** (facts shown · policies evaluated · actions offered · grouping/sort · narrative on/off), not an open one.
 
+> ### ✅ The one-archetype claim, tested `[2026-10-01 — Console prototype]`
+>
+> Built and reviewed at `c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\` (v2.1). What it
+> found, against the claims above:
+>
+> | Claim | Verdict |
+> |---|---|
+> | *"Daily Briefing, the work queue and email triage are the same widget"* | ✅ **Held.** One row component rendered all three signal shapes — cross-source, threshold and SLA (finding 10). It needed **five things present in the data**, which is the real content of the claim |
+> | *"…with a narrative wrapper"* | ✅ **Held, with a condition** (finding 11): the narrative must stay a **wrapper over the same rows in the same order**. The moment it re-ranks or re-selects, requirement 2 breaks and it is a second surface wearing the first one's clothes |
+> | *"the worklist is a `sprk_gridconfiguration` row — zero new UI code"* | 🔴 **False** (finding 9). The row contract needs expandable evidence tiers, a *Why this fired* disclosure, outcome cards and a gate host; a column renderer gives none of them. **Membership stays configuration; the row is new UI, built once.** `design.md` §7 criterion 7 is amended accordingly |
+> | Stat tiles | 🔴 **Replaced by count filters** (finding 17): *a filter is a lens on membership, never membership.* The Briefing's own overlapping "independent lenses" read as contradictions in UAT; cards that **split** the list add up |
+>
+> **Three further requirements the prototype surfaced**, none of which this section had: a rule needs a declared
+> **short headline** as well as its sentence (finding 14), a **plain display name** — `POL-COMMIT-BUDGET v2`
+> belongs in *How this was determined*, not in the row (finding 15) — and a **declared proposed action**, so
+> review can show the rule's recommendation first (finding 16).
+>
+> **Treat the prototype's component kit as the Console's UI contract** (`design.md` §11), not as a sketch to
+> admire and re-derive. Round-2 review is pending, so the **kit** is settled and the **row copy** is draft.
+
 #### 6.1.1 How a worklist row is actually produced
 
 **Evaluate on write and persist the flag** — not evaluate on read.
@@ -541,6 +587,18 @@ So the worklist's data is a **flag entity**; the Decision Record is written when
 "Not a dashboard" means **charts are not the primary interaction**, not that charts are unwelcome. Palantir ships Quiver and Contour for exactly this reason.
 
 > **The worklist is the work surface. Charts and reports are a supporting surface — and Power BI over Dataverse covers them at zero build cost, with the customer's own analysts able to extend them.**
+
+> **📌 Resolved `[2026-10-01]`: the Briefing does not merely get upgraded — it dissolves into the worklist.**
+> Owner decision, analysed in [`daily-briefing-ontology-fit.md`](daily-briefing-ontology-fit.md). Its items sort
+> into three kinds by the row contract: **Decide** (rule-raised flags) · **Do** (dated assigned work, membership
+> from declared `Temporal` policies) · **Know** (news — which **fails requirement 4**, so it is not a row and
+> becomes narrative + Context pane). Decide and Do are two **lanes**, Decide always above Do, because 11 overdue
+> tasks would otherwise push 5 decisions off the screen. *Critical Today* disappears as a list —
+> `sprk_highpriority` becomes a rank input, `sprk_monitor` a subscription — and the LLM-chosen *"Top action"* is
+> removed, because the first row **is** the top action when rank is deterministic. A Know item is promoted to a
+> row **only when a rule says something about it is missing or wrong**: *"a new matter was opened"* is news,
+> *"a new matter has no budget"* is work, and that difference is the ontology. Scheduled as BR-1..BR-6 in
+> `design.md` §8.0b.
 
 **Daily Briefing is the upgrade target, not a bad example.** Tested against the four clauses it exercises only presentation — no policy evaluation, no actions, no record. But the shape is right, and because the fact layer is source-agnostic (§4.15) the upgrade is mostly configuration plus a freshness stamp. The demo version:
 
@@ -578,6 +636,11 @@ So the worklist's data is a **flag entity**; the Decision Record is written when
 17. **Build read surfaces for what you act on**, not for everything you bind. No general browsing wrapper.
 18. **Orchestration is the product; linked evidence is load-bearing; co-display alone is the trap.** The view is only a wrapper if the links aren't real — which makes Resolution the component that turns it from portal into product.
 19. **Naming**: Spaarke Console (three-pane app) · Spaarke Matter Management (MDA) · Spaarke External Access (SPA) · Spaarke Connect (SKU) / Connection Engine (component).
+20. **R1 is intelligence-forward** `[2026-10-01]` — the first project builds from the Spaarke data model out and assumes the data is present (Spaarke-owned, or mirrored by a later phase with the customer). The **Connection Engine is out of R1**; the carve-out R1 owns is the **landing contract** — pointer columns + `sourceasof` freshness — because retrofitting it is a data migration, and because freshness is load-bearing: an absence clause over a stale mirror is a false negative.
+21. **No LEDES intake** `[2026-10-01]` — invoice / budget / spend-variance arrive as **computed metrics** from the e-billing platform. This supersedes decision 5's *"one LEDES parser"* as part of the connector count.
+22. **No per-entity fact or signal tables** `[2026-10-01]` — `ILiveFactResolver` is already generic (keyed `(subject-scheme, predicate)`; Matter / Invoice / Project implementations), and decision/CM-3 already makes facts rollup + calculated columns. `sprk_spendsnapshot` is **one materialization, not a pattern**; generic `sprk_signal` replaces `sprk_spendsignal`, with `SignalEvaluationService` as one producer among several.
+23. **The worklist reads signals and groups them by matter** `[2026-10-01]` — rows are **matters** (Console prototype, D-3). One-row-per-communication strands the shapes that have no communication subject; one-row-per-flag hides that one inquiry can answer two flags. Consequence: `sprk_signal` needs a **polymorphic subject plus an always-populated matter lookup** derived from it. **Both surfaces, split by verb**: Console acts; the MDA authors, administers and audits.
+24. **The Briefing dissolves into the worklist** `[2026-10-01]` — see §6.2. Work becomes lanes, news becomes narrative and Context, tiles become filters, and the model stops choosing priority.
 
 ---
 
@@ -655,6 +718,20 @@ Four concerns raised on 2026-09-24 reduced to one after review:
 
 **The remaining question: can a worklist widget source its rows from a plain Dataverse query inside `WorkspaceLayoutWidget` / `LegalWorkspaceApp` embedded mode?** If yes, the existing workspace architecture supports the Console unchanged. That is the assessment to run.
 
+> ### Answered `[2026-10-01]` — with one honest caveat
+>
+> **Yes, for the data path.** `mvp-synopsis.md` §3 verified that LegalWorkspace sections already self-fetch via
+> `Xrm.WebApi` / `authenticatedFetch`, which is available because the Console runs inside `main.aspx` (§4.5).
+> That is *why* the Xrm wrapper is recorded there as load-bearing, and it means **membership needs no workspace
+> change**.
+>
+> ⚠️ **The caveat, stated because it is easy to over-read this as "no UI work."** The Console prototype is a
+> standalone Vite app, so it exercised the **row contract**, not embedded-mode hosting. And finding 9 is the
+> other half: the *row component* is new UI regardless of where its rows come from. So the correct reading is —
+> **the query path is free; the row is not.** The hosting question that remains is narrow: mounting the new row
+> component inside `WorkspaceLayoutWidget`, under the embedded-mode host contract in
+> `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`.
+
 ---
 
 ## 12. Changelog
@@ -663,4 +740,5 @@ Four concerns raised on 2026-09-24 reduced to one after review:
 |---|---|
 | 2026-09-24 | Created from the 09-21 → 09-24 design sessions. Supersedes scattered terminology in the strategy synopsis §§1.4, 4.7–4.8, 5.5, 6.6 |
 | 2026-09-24 (b) | Added §1.1 naming (**Spaarke Console**) · §1.2 value hierarchy (orchestration vs linked evidence vs co-display) · §4.15 how third-party data lands and why Policies/Actions work over it · §4.16 the seven-step ingest template · §6.1 one widget archetype + Daily Briefing as upgrade target · writeback mechanism sketch in §5.1 · decisions 15–19 |
+| **2026-10-01** | Owner feedback round 2. §3 — the ***disposition*** finding (it was **never retired**; *typed outcome* is the ⚠️ term, and CM-4's recommended resolution is to adopt *disposition*, **pending owner confirmation**). §6 — Console **name** changes now, web-resource **identifier** `sprk_spaarkeai` does not (blast radius measured). §6.1 — the one-archetype claim **tested by the Console prototype**: held for the archetype and the narrative wrapper, **false** for *"zero new UI code"* (finding 9), stat tiles replaced by count filters (finding 17), plus three new rule-declaration requirements (findings 14–16). §6.2 — the Briefing **dissolves** into the worklist (Decide / Do / Know). §7 — decisions **20–24** (intelligence-forward · no LEDES · no per-entity fact or signal tables · rows are matters · the Briefing dissolves). §11.1 — the open hosting question **answered**, with the caveat that the query path is free and the row component is not. ⚠️ Decision **5**'s LEDES-parser clause is superseded by decision 21 |
 | 2026-09-24 (c) | **Scope-reduction pass.** §4.15.1 **materialize the fact** — rollup + calculated column, zero C#, which makes a worklist a Dataverse view and **closes CM-3**. §6.1 renamed to **worklist** with prior art (Palantir Workshop, ServiceNow, Dynamics) and §6.1.1 how a row is produced (evaluate-on-write + flag entity, not evaluate-on-read). §6.2 charts/reports are supporting surfaces via Power BI — "not BI" ≠ "no charts". **§11 MVP scope** — LEDES → threshold → worklist → inquiry → Decision Record. §11.1 workspace assessment reduced to one question. **Authority moved post-MVP** (human confirmation *is* the authority while every action is gated) |

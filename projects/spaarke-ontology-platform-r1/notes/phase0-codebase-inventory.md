@@ -1,5 +1,20 @@
 # Spaarke Ontology Platform — Phase 0 Codebase Inventory & Strategy Assessment
 
+> ## ⚠️ STATUS: POINT-IN-TIME SNAPSHOT — partially superseded `[stamped 2026-10-01]`
+>
+> Verified against master `379c221e0` on **2026-09-19**. Still the best single map of what existed then, and the
+> reason the MVP is small. **But it is a snapshot, and three things have moved since:**
+>
+> 1. **PR #1032 repaired eight defects** in the notification pipeline this inventory described as present —
+>    which it was, and which had never once run its happy path. `design.md` §3.1 is the list.
+> 2. **The project scope narrowed** (owner, 2026-10-01): R1 is intelligence-forward, the Connection Engine and
+>    LEDES intake are **out**. Any statement here that sizes connector work is describing a later phase.
+> 3. **Live Dataverse was unavailable** for this session (see the method caveat above), so its schema claims came
+>    from `docs/data-model/`, entity XML and schema-contract tests. `mvp-technical-spec.md` §10 is the
+>    **live-verified** replacement and wins on any schema disagreement.
+>
+> Read it for *what existed and why that matters*; read `design.md` for *what we decided*.
+
 > **Date**: 2026-09-19
 > **Input**: `spaarke-ontology-strategy-synopsis.md` v2.0 (Ralph / Claude strategy session, 2026-09-19)
 > **Method**: 6 parallel read-only verification agents over `c:\code_files\spaarke` @ master `379c221e0`, plus direct `git grep` checks. Dataverse MCP failed to connect this session — schema evidence is from `docs/data-model/`, entity XML, and the C# schema-contract tests, not the live environment.

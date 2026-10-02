@@ -1,5 +1,23 @@
 # Spaarke Ontology-Centric Platform Strategy — Analysis Synopsis
 
+> ## ⚠️ STATUS: STRATEGY — current for thesis, superseded for MVP scope `[stamped 2026-10-01]`
+>
+> **Still current** as the strategic thesis, the competitive read and the Microsoft-platform risk analysis. That
+> is what this document is for, and none of it has been falsified.
+>
+> **Superseded wherever it describes what R1 builds.** Three specific corrections, all owner decisions of
+> 2026-10-01 (`design.md` §1.0, §5 Out, decisions 16–17):
+>
+> | This document says | Now |
+> |---|---|
+> | The bootcamp SKU is *"a LEDES drop plus the inquiry loop"* | **No LEDES intake.** Invoice / budget / spend-variance arrive as **computed metrics** from the e-billing platform |
+> | Connector / mirror work is in the first build | **R1 is intelligence-forward** — it assumes the data is in Spaarke. The Connection Engine is a later phase with the customer; R1 owns only the landing contract |
+> | §6 build-vs-buy decisions are open | Several are now decided in `design.md` §8 and §10. Check there before treating one as open |
+>
+> ⚠️ **One outstanding obligation this document owns**: `design.md` §12 step 6 — the **§0 differentiation test
+> must be run retroactively across §8 Wave 2 / Wave 3** before any of those modules is specced. Several are
+> expected to fail it the same way budget variance did.
+
 **Status:** Strategy synopsis for discovery handoff
 **Version:** 2.2 — adds the platform statement (§1.4.0), the Policy object (§4.8), and the verified Microsoft IQ-family research; corrects the sequencing conclusion
 **Date:** 2026-09-19 (v2.0) · 2026-09-21 (v2.1, v2.2)

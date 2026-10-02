@@ -1,5 +1,22 @@
 # Ontology Architecture — Review Feedback
 
+> ## ✅ STATUS: APPLIED — this is a historical INPUT, not a live document `[stamped 2026-10-01]`
+>
+> Every finding in this review has been dispositioned. **Do not act from this file; act from `design.md`.**
+>
+> | Where it went | What |
+> |---|---|
+> | `design.md` §0.3 | §1.1's blocking finding, generalized — *a capability must TEST what its message CLAIMS* |
+> | `design.md` §8.0 (CM-6..CM-11) | §6's open decisions, each resolved — Path B adopted, `Existence` added, `sprk_budgetrevision` created, Inquiry restored |
+> | `design.md` §7 criteria 10 + 11 | §1.3 (the action loop regressed) and §1.6b (classifier recall) |
+> | `design.md` §8.0.1 | §3.3's proposed predicate body, **rejected** — it passes a variable between clauses, which breaks CM-3 |
+> | `mvp-technical-spec.md` §3.4a, §11.4 | the `Existence` rule body and the corrected predicate |
+> | the Console prototype | §4's row contract, built and then **corrected by it** — findings 2, 4, 8 and 9 contradict §4.2/§4.4 |
+>
+> ⚠️ **Three places this review is now known to be wrong**, so read it with them in hand: its §4.2 target row
+> over-claims in its sentence's verb (prototype finding 1); its §3.3 body cannot produce the per-clause witnesses
+> its own §4 requires (finding 2); and its §4.4 *acted ÷ surfaced* metric needs a better denominator (finding 8).
+
 > **Status**: External review input, 2026-09-30. Not a design document and not a competing one.
 > **Reviewed**: `design.md` (Ontology Platform R1, draft 2026-09-30) · `mvp-synopsis.md` (2026-09-24) ·
 > `mvp-technical-spec.md` (2026-09-24, verified 09-29) · `ontology-component-model.md` (2026-09-24)
