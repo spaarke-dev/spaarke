@@ -20,7 +20,7 @@ filed under another record (`container_ancestor_unverifiable`). This task replac
 | **Derivation extended** | `Services/Dataverse/CoreAncestorResolver.cs` | A child's stamp is the root of WHATEVER it is filed under. `IntermediateRootColumns` names each intermediate's root columns: the four `sprk_regarding{core}` for communication / event / to-do / analysis; typed `sprk_matter` / `sprk_project` for invoice and budget; typed `sprk_matter` / `sprk_project` / `sprk_workassignment` (and their `sprk_related*` twins) for document; `sprk_regardingmatter` / `sprk_regardingproject` for agreement and report card. Before, invoice and document yielded **no** stamp (they lack the four columns) and agreement / budget / report card were Unclassified. Two different roots of one type on one row (a document's `sprk_matter` vs `sprk_relatedmatter`) is a derivation ERROR — never a guess. |
 | **The shared topology** | same file | `StampSourceColumns` (the four tables that carry a copy, and the columns that name its source), `PartyRegardingColumns`, and `ClassifyStampSource` — the ONE rule the cascade, the job and the resolver use to decide which record a row's copy comes from (below). |
 | **The cascade** | `Services/Dataverse/CoreAncestorRestamper.cs` (new) | `AfterWriteAsync(entity, id, writtenColumns)`: after a BFF write that changed what a record is filed under (its own source or pair) or its root, re-stamp the record itself and/or every child copying it, transitively (bounded at depth 4; a cycle converges because it recurses only below a copy it just changed), in the same operation. Writes ONLY the stamp columns of the root types the source can carry. A child that fails is reported, never thrown; the caller's own write stands. A write that cannot move a stamp reads nothing (`WriteCanMoveAStamp`). |
-| **The job** | `Services/Dataverse/CoreAncestorStampReconciliationJob.cs` (new) | ADR-036 `IScheduledJob`, every 5 minutes (`*/5 * * * *`), registered with `AddScheduledJob` in `AddDataverseMetadataServices`. Scans each stamped table (FetchXML, paged, bounded), classifies every row, and repairs the stale ones through the restamper (which cascades). Also clears copies orphaned by a regarding cleared on a form (F-051-6). A failed scan is a FAILED run, never "0 stale". A claim per repair + a completion marker scoped to the run (A1 rule 3; interpretation xix), one heartbeat per attempt (A1 rule 5). Writes on by default; `CoreAncestor:StampReconciliation:WritesEnabled=false` (or an unparseable value) = report-only dry run. |
+| **The job** | `Services/Dataverse/CoreAncestorStampReconciliationJob.cs` (new) | ADR-036 `IScheduledJob`, every 5 minutes (`*/5 * * * *`), registered with `AddScheduledJob` in `AddDataverseMetadataServices`. Scans each stamped table (FetchXML, paged, bounded — and, since verifier round 1, CONTINUED by the next run when the page bound stops it), classifies every row, and repairs the stale ones through the restamper (which cascades). Also clears copies orphaned by a regarding cleared on a form (F-051-6) — found by the pair's type when it names an intermediate, or by the pair's id when it has no type (communication / agreement); a row written with NO pair cannot be found (verifier round 1 item 5, owner decision below). A failed scan is a FAILED run, never "0 stale". A claim per repair + a completion marker scoped to the run (A1 rule 3; interpretation xix), one heartbeat per attempt (A1 rule 5). Writes on by default; `CoreAncestor:StampReconciliation:WritesEnabled=false` (or an unparseable value) = report-only dry run. |
 | **The enqueue** | `Services/Dataverse/CoreAncestorRestampQueue.cs` + `CoreAncestorRestampJobHandler.cs` (new) | ADR-004 `IJobHandler` (`CoreAncestorRestamp`) on the shared `sdap-jobs` queue (ADR-052: queue work → `IJobHandler`). The resolver enqueues a stale row; the user-OBO AI tool enqueues its after-write cascade. Best effort: a failed enqueue is logged and the job repairs within one cycle. Service Bus is resolved lazily, so composing the resolver never needs Service Bus configuration. |
 | **The live comparison** | `Infrastructure/Dataverse/RecordContainerResolver.cs` | Task 155's held branch is replaced (next section). New reason code **`container_ancestor_stale`** (409). New links entries for analysis, document, agreement, budget and report card (swept live, below). |
 | **Wiring** | the BFF paths in the inventory | Each calls `AfterWriteAsync` (or enqueues it) after its own write succeeded. |
@@ -150,6 +150,9 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   together with an intermediate also writes the pair (the Office save, `IncomingAssociationResolver`'s priority — matter /
   project before invoice / event — the outbound sender, the client RegardingResolver). *Reverse:* treat such rows as direct
   links in `ClassifyStampSource` (they would then never be re-stamped, and the resolver would apply the carrier rule).
+  **Corrected in verifier round 1 (item 9):** the premise did not hold for an Ambiguous inbound association (no pair) once
+  an operator widens `CoreWritableEntities` to an intermediate (the shipped set writes roots only). That writer now makes
+  the premise true — see (xxv).
 - **(xiv) The communication's invoice is compared, not followed** — task 155 f4 interpretation (viii) is superseded. An email
   under an invoice now needs its copy of the invoice's root (IncomingAssociationResolver stamps it at create; the job stamps
   older rows). A pair ALONE naming an invoice is held (f5 V15 followed it). A secure invoice still decides by its own flag.
@@ -160,6 +163,8 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   by its own MUST rule ("no app-only client is reachable from this class"), and the re-stamp is an app-only, server-owned
   write. The enqueue holds no Dataverse client; the job runs seconds later and the resolver refuses a stale copy meanwhile.
   This is the one inventory path not re-stamped "in the same operation" — flagged in the task result for the owner.
+  **Still open after verifier round 1 (item 6): AC1 is not met for this path until the owner accepts the deviation** — the
+  🔔 block is in the verifier round 1 section below.
 - **(xviii) Document `sprk_canonicaldocument` is held, and an analysis's `sprk_documentid` / `sprk_outputfileid` are
   carriers**, by the 155 f3 rule (a column whose target can hang off a root is read and checked, or refused).
 - **(xix) The job's completion marker (ADR-036 A1 rule 3) is scoped to the RUN** (`{job}:{entity}:{id}:{planHash}:{runId}`);
@@ -181,6 +186,116 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   distinguished the two: without the explicit check the walk answered `container_ancestor_stale` and enqueued a re-stamp
   the restamper can never derive (`CoreAncestorResolver` refuses that row), i.e. a refresh that never comes and, on the
   inbound path, a retry loop. Now pinned by a test.
+
+## Verifier round 1 (2026-10-02, branch `task/uac-r2-156-r1`)
+
+An independent verifier re-ran everything on a clean worktree of `4dde700b6` and confirmed the security core (no leak path;
+every refusal throws before a fallback is derived; ADR-002 / ADR-036 / ADR-052 hold) and the re-parent inventory (no
+unwired BFF path). Its findings, and what this round did with each:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Security core holds | Confirmed; nothing to change. |
+| 2 | Re-parent inventory complete | Confirmed; nothing to change. |
+| 3 | AC7 overclaimed: seeds M1, M2, M11, M12, M13 survived | **Closed.** Each now bites (seed table below). `StampWorld` now honours a FetchXML filter and paging, and a paged QueryExpression, so truncation and the scan's reach are asserted, not assumed. |
+| 4 | The job's scan read every regarding-filed row (F-051-6 clause = "any pair type"), and rows past 20 x 1000 were never checked | **Closed.** (a) The typed orphan clause is an `in` on the `sprk_recordtype_ref` ids that name an intermediate the table is filed under (the types are read once at the start of every run; unreadable = FAILED run). (b) A scan stopped by the page bound records where it stopped (the distributed cache, 6 h) and the next run continues after that row — paging across runs; a truncated or a continuing run is PARTIAL, never ok. See (xxiii). |
+| 5 | F-051-6 undetectable for communication / agreement (no `sprk_recordtype_ref` row live) | **Closed for every row that carries a pair id; a residual is escalated.** An untyped pair (id, no type) is a candidate too: the restamper and the job look the id up in each intermediate the table is filed under (exactly one hit = the cleared record; none = gone, left alone and counted; two = not guessed). The client regarding writer and the outbound sender always write the id. **Not closable without an owner decision:** a row written with NO pair at all (`TaskActionCore`'s events — live event `edfef460` — and an Ambiguous inbound association) leaves no trace of what a form clear removed. See the 🔔 block. |
+| 6 | AC1 deviation (xvii) needs owner sign-off | **Not closable here** — the owner's call. 🔔 block below. |
+| 7 | AC4 non-secure half not route-tested | **Closed.** A real OBO `PUT /api/obo/records/sprk_todo/{id}/files/…` for a to-do whose copy equals its communication's live root, a NON-secure project, stores in the to-do's business-unit container. |
+| 8 | Office carrier-only to-do born stale; comment false; access change unflagged | **Closed.** `OfficeService.CreateTodoAsync` stamps a carrier-only to-do from its carrier (the one classification rule decides; two carriers and no record = nothing stamped, fail closed; an unreadable carrier refuses the create). Comment corrected. Access change flagged as (xxiv). |
+| 9 | (xiii) premise false for `IncomingAssociationResolver` Ambiguous writes; DirectRootLink rows carry partial copies of a carrier's other root types | **Closed.** The inbound write now follows `ClassifyStampSource` over the row exactly as written: a pair naming a root → nothing copied from a carrier; no pair + a lone intermediate beside an explicit root it can carry → the intermediate is withheld (a review candidate, provenance `written: false`). Latent: the shipped `CoreWritableEntities` writes roots only. See (xxv). |
+| 10 | A generic write to a stamped intermediate's copy column cascaded the hand-written value | **Closed.** `AfterWriteAsync` re-derives a record that carries a copy from its source FIRST when its own root columns were written, so the source's root — never the hand-written one — reaches its children; if the record's own source cannot be read nothing is cascaded (the job repairs both); a row filed under nothing is taken at its word on this path (only the job clears orphans). See (xxvi). |
+| 11 | AC8 manual live gate and the §10 publish-size measurement pending | AC8: still the main session's, after deploy. Publish size: measured this round from fresh short-path worktrees (recorded below, in the commit after the code commit). |
+
+### New and changed interpretations (owner-reversible)
+
+- **(xxiii) The job reads only copy-carrying rows and F-051-6 candidates, and continues a stopped scan next run.** Live
+  (read-only, 2026-10-02): the typed clause matches 0 rows in every table; the untyped clause matches 20 communications —
+  every one OUTBOUND, its pair naming the matter / project / work assignment it carries (the outbound sender writes the pair
+  id without its type), recognised in code as a direct link with no extra read. That subset grows with outbound mail filed
+  directly to a root; the cursor guarantees every candidate is still checked within ⌈N / 20 000⌉ runs. *Follow-up (not
+  done — another writer):* have the outbound sender write `sprk_regardingrecordtype` when a ref exists, and the untyped
+  clause shrinks to communication / agreement filings. A cleared record that no longer exists is counted
+  (`orphanSourceGone`), never a partial run that repeats every tick.
+- **(xxiv) A carrier-only Office to-do inherits its carrier's project / matter / work assignment from creation.** Before,
+  it inherited nothing until the job's first run (and, before task 156, never). That is C10 part 2 (a child of a secure
+  record is secure) and the same access the job would have granted minutes later; live count today 0.
+- **(xxv) The inbound association write follows the one classification rule.** (a) Pair naming a root (Resolved /
+  Suggested — a root outranks every intermediate in ADR-024 priority): the intermediates are carriers and contribute no
+  copy (before: the carrier's OTHER root types were copied, partial copies nothing refreshed — an access over-grant once
+  the carrier moved; the Office carrier to-do never copied). (b) No pair (Ambiguous) and a lone intermediate beside an
+  explicit root it can carry: the intermediate is not written — the engine's explicit root stands and the intermediate
+  stays a review candidate. Without this the restamper read the root as the intermediate's copy and overwrote or cleared
+  it — and if that root was secure, the email's content would have followed the intermediate's root instead (fail open).
+  (c) Two intermediates and no pair: nothing copied (before: the last one written won — a guess). All three are reachable
+  only with `CoreWritableEntities` widened to an intermediate.
+- **(xxvi) A write to the copy column of a record filed under another is reverted at once.** The reconciliation job would
+  revert it a cycle later anyway; doing it in the same operation stops the hand-written value reaching the children (and
+  the second cascade that undid it).
+
+### 🔔 Human Input Required — two owner decisions
+
+🔔 **ADR Conflict — Resolution Required** (item 6 / AC1; interpretation xvii)
+
+- **ADR / rule in question:** the spec MUST rule on `DataverseUpdateRecordHandler` (spaarke-ai-architecture-redesign-r1,
+  task-012 audit): "User-OBO ONLY … No app-only client is reachable from this class".
+- **Conflict:** AC1 requires every BFF re-file path to re-stamp the children IN THE SAME OPERATION. The re-stamp is a
+  server-owned invariant written app-only (ADR-002 WP-1). Calling the restamper from the AI update tool would put an
+  app-only client in reach of that class.
+- **Proposed path: A (project-scoped exception).** Keep the enqueue: the cascade runs on `sdap-jobs` seconds later, the
+  storage resolver refuses a stale copy in that window (409, never a misfile — escalation trigger 1 did not fire), and the
+  job is the backstop. Cost: a stale copy is also a short access over-grant in that window.
+- **Alternatives considered:** (B) amend the MUST rule to allow one narrow, write-only facade onto the restamper (the AI
+  tool would then re-stamp inline; the rule's intent — no privilege escalation of the USER's write — is untouched, but the
+  audit's "no app-only client reachable" property is lost); (C) re-stamp with the user's OBO client — rejected: the stamp is
+  the server's invariant (WP-1), children the user cannot write would stay stale, and a partial OBO cascade is harder to
+  reason about than a complete deferred one.
+- **Owner action:** accept A (AC1 is then met by documented exception) or choose B.
+
+🔔 **Owner decision — F-051-6 for rows written with no pair** (item 5 residual)
+
+- **Situation:** a form clear of a regarding lookup is now found by the job whenever the row carries a pair id (typed or
+  not). `TaskActionCore` (the AI / communication RI "create task" seam) writes the typed regarding and the stamp but no pair,
+  so a later form clear of `sprk_regardingcommunication` on such an event leaves a copy with nothing on the row saying it
+  was one. Live exposure today: 1 row (event `edfef460`, under communication `99eb9b52`, which names no root — so there is
+  no copy to orphan). Storage: with no pair, a cleared row reads as a DIRECT link to the old root, so its content still goes
+  to that root's container (never another root's); the access over-grant to the old root's principals persists.
+- **Options:** (1) `TaskActionCore` writes the ADR-024 pair fields (id, type when a ref exists, name, url) like every other
+  regarding builder — new rows become detectable; nothing to backfill live. (2) Accept the residual and document it.
+  (3) Let the job write the pair id on rule-5 rows it re-stamps — rejected here: the constraint says re-stamping writes ONLY
+  stamp columns.
+- **Recommendation:** (1). Not done in this round: it changes another writer's data contract (a UI-visible regarding on
+  every RI follow-up task), outside the verifier's items.
+
+### Seeds this round (each restored byte-identical from a backup, then touched; checksums re-verified)
+
+| Seed | Removed guard | Bit |
+|---|---|---|
+| M1 | `sprk_recordtype_ref` read failure counted as a scan failure | `RecordTypesUnreadable_IsAFailedRun` |
+| M2 | unverified source → partial | `UnverifiableSource_IsAPartialRun` |
+| M11 | page-bound truncation → partial | `PageBound_IsAPartialRun_AndTheNextRunContinuesWhereItStopped` |
+| X1 | cursor saved on truncation | same test (third row never repaired) |
+| X2 | continuing run flagged | same test (second run reported ok) |
+| X3 | typed clause bounded to intermediate types | `RowsFiledDirectlyToARoot_AreNeverScanned` |
+| X4 | untyped orphan clause | `OrphanedCopy_WithAnUntypedPair_IsClearedByTheJob` (5 cases) + the gone test |
+| X5 | gone ≠ unverified | `OrphanCandidate_WhoseRecordIsGone_IsLeftAlone_AndTheRunIsOk` |
+| M12 | restamper per-source bound | `ChildrenPastThePerSourceBound_AreReportedTruncated` |
+| R2 | self re-derivation before the cascade | `WriteToTheCopyColumnOfAFiledRecord_…` + `…_WhenTheSourceIsUnreadable_…` |
+| R3 | no orphan clear on the after-write path | `RootWriteOnAnOrphanShapedRow_IsNotClearedByTheAfterWritePath` |
+| R4 | no cascade after a failed self re-derivation | `WriteToTheCopyColumn_WhenTheSourceIsUnreadable_CascadesNothing` |
+| R5 | untyped pair looked up by id | restamper + job untyped tests (7) |
+| R6 | a pair naming a carried root is not an orphan | `UntypedPairNamingItsOwnRoot_IsNeverAnOrphan` |
+| R7 | gone → skipped, not failed (restamper) | `OrphanCandidate_WhoseRecordIsGone_IsLeftAlone_NotAFailure` |
+| M13 | `IntermediateRootsAsync` bounds | `ChainOfIntermediatesPastTheDepthBound_…` + `IntermediateReadsPastTheReadBound_…` |
+| S7 | fresh copy followed (155 hold reinstated) | the new non-secure OBO PUT route test (+ 2 existing) |
+| O1 | carrier-only to-do stamped | `Post_OfficeCreateTodo_CarrierOnly_…` (2) + unreadable test |
+| O2 | unreadable carrier refuses the create | `Post_OfficeCreateTodo_CarrierOnly_WhenTheCarrierCannotBeRead_…` |
+| I1 | withhold the unplaceable intermediate | `ApplyDecision_Ambiguous_RootAndInvoiceWithNoPair_…` |
+| I2 | no carrier copies on a direct-root row | `ApplyDecision_RootAndInvoiceWritten_PairNamesTheRoot_…` |
+| I3 | provenance marks the withheld write | `ApplyDecision_Ambiguous_RootAndInvoiceWithNoPair_…` |
+
+Two seeds first failed to COMPILE (an unassigned counter field is a warning-as-error) and were re-run in a compiling form;
+the seed runner now refuses to run tests on a failed build, so no result came from stale binaries.
 
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
@@ -208,6 +323,9 @@ package or plugin; every registration is unconditional (ADR-032: no Null-Object 
   W1-W6, vocabulary G1-G4. Five seeds first failed to compile (`if (false)` trips CS0162) or did not bite (S9 — fixed by
   the (xxii) test) and were re-run green-to-red. G1 shows the load-time guard firing (an unclassified vocabulary column
   fails 269 tests); G2 shows the vocabulary test catching the same column with the guard removed.
+- **Verifier round 1:** 28 new tests (job 11, restamper 7, resolver bounds 2, OBO PUT route 1, Office create 4, inbound
+  association 3); affected suites **537 / 537**; full BFF unit **Passed 13516 / Failed 0 / Skipped 54 (Total 13570)**;
+  NetArchTest **337 / 337**; 22 seeds, each red (table in the verifier round 1 section).
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,

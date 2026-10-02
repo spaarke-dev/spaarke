@@ -305,7 +305,6 @@ public sealed class IncomingAssociationResolver
         }
 
         fields["sprk_associationstatus"] = new OptionSetValue(decision.Status);
-        fields["sprk_associationprovenance"] = SerializeProvenance(decision.Provenance);
 
         // Populate polymorphic resolver fields whenever we asserted a regarding lookup (a Suggested
         // record surfaces the proposed target too, so the review UI needs the denormalized fields).
@@ -319,6 +318,24 @@ public sealed class IncomingAssociationResolver
         {
             await PopulateResolverFieldsAsync(fields, ct);
         }
+
+        // Task 156 (verifier round 1 item 9): with NO pair (an Ambiguous decision), the row cannot say that a root the
+        // engine wrote is its DIRECT choice and an intermediate written beside it only evidence — the one classification
+        // rule (CoreAncestorResolver.ClassifyStampSource, rule 5) reads the lone intermediate as what the row is filed
+        // under and the root as its COPY, which the restamper and the reconciliation job would then overwrite or clear.
+        // So such an intermediate is not written: the engine's explicit root stands, and the intermediate stays a review
+        // candidate (provenance, Written = false). Only reachable when an operator widens CoreWritableEntities to an
+        // intermediate (the shipped set writes roots only).
+        var withheld = WithholdIntermediateTheRowCannotPlace(fields);
+        var provenance = withheld is { } w
+            ? decision.Provenance with
+            {
+                Candidates = decision.Provenance.Candidates
+                    .Select(c => c.Field == w.Field && c.TargetId == w.TargetId ? c with { Written = false } : c)
+                    .ToList(),
+            }
+            : decision.Provenance;
+        fields["sprk_associationprovenance"] = SerializeProvenance(provenance);
 
         // FR-26 core-ancestor stamps (task 052) - LAST, so nothing above can overwrite them, and only for
         // CHILD-class targets: a rung that wrote a core lookup directly has already written its own stamp.
@@ -339,16 +356,27 @@ public sealed class IncomingAssociationResolver
     }
 
     /// <summary>
-    /// Derives and applies the FR-26 core-record ancestor stamp for every CHILD-class regarding target the
-    /// decision wrote (task 052).
+    /// Derives and applies the FR-26 core-record ancestor stamp for the regarding target the communication is FILED
+    /// UNDER — decided by the one classification rule (<see cref="CoreAncestorResolver.ClassifyStampSource"/>) over the
+    /// row exactly as it will be written (task 052; task 156 verifier round 1 item 9).
     /// </summary>
     /// <remarks>
     /// <para>
-    /// A decision may write several targets at once (the review surface shows all candidates). Each
-    /// child-class one contributes its own core ancestor; a core lookup a rung wrote EXPLICITLY always wins
-    /// and is never overwritten by a derived stamp, because the rung observed evidence about this message
-    /// while the stamp is only an inherited pointer.
+    /// A decision may write several targets at once (the review surface shows all candidates). The row's pair (written
+    /// by <see cref="PopulateResolverFieldsAsync"/> for the highest-priority target — a root before any intermediate)
+    /// says which one the communication is filed under; the stamp is that record's root, and only it:
     /// </para>
+    /// <list type="bullet">
+    /// <item>The pair names an intermediate (or there is no pair and exactly one intermediate) → that intermediate's root
+    /// is copied, except a core lookup a rung wrote EXPLICITLY, which always wins (the rung observed evidence about this
+    /// message while the stamp is only an inherited pointer).</item>
+    /// <item>The pair names a ROOT → the root is the direct filing and every intermediate beside it is a CARRIER: nothing
+    /// is copied from a carrier. (Before task 156's verifier round, the carrier's OTHER root types were copied onto the
+    /// row — partial copies the restamper never refreshes, so they went stale as an access over-grant. The Office carrier
+    /// to-do never copied from its carrier either.)</item>
+    /// <item>Two intermediates and nothing saying which one → nothing is copied (never a guess); the storage resolver
+    /// refuses the row as ambiguous until a reviewer files it.</item>
+    /// </list>
     /// <para>
     /// <b>Fail closed (NFR-01).</b> A derivation failure throws, which this class's defensive caller treats
     /// as a failed association (NFR-06: the communication itself survives, unassociated). Writing the
@@ -365,39 +393,75 @@ public sealed class IncomingAssociationResolver
         if (decision.RegardingWrites.Count == 0)
             return;
 
+        var filing = CoreAncestorResolver.ClassifyStampSource(
+            CommunicationEntity, RowAsWritten(fields), CoreAncestorResolver.PartyRegardingColumnNames(CommunicationEntity));
+        if (filing.Kind != StampSourceKind.Source)
+            return; // a direct root (carriers carry no copy), nothing filed, or no single filing (never a guess)
+
         // Snapshot the lookups the rungs wrote explicitly - these are never overwritten below.
         var explicitLookups = new HashSet<string>(decision.RegardingWrites.Keys, StringComparer.OrdinalIgnoreCase);
+        var source = filing.Source!;
 
-        foreach (var (_, target) in decision.RegardingWrites)
+        var outcome = await _coreAncestors
+            .DeriveForHostAsync(CommunicationEntity, source.Intermediate, source.Id, ct)
+            .ConfigureAwait(false);
+
+        if (!outcome.Succeeded)
         {
-            if (target is not EntityReference reference || reference.Id == Guid.Empty)
-                continue;
-
-            // Task 156: every type a child's stamp is copied from (the child taxonomy plus agreement, budget and report
-            // card — CoreAncestorResolver.IntermediateRootColumns), not only the child taxonomy.
-            if (!CoreAncestorResolver.IsStampSourceEntity(reference.LogicalName))
-                continue; // core target = its own stamp; a party confers nothing here
-
-            var outcome = await _coreAncestors
-                .DeriveForHostAsync("sprk_communication", reference.LogicalName, reference.Id, ct)
-                .ConfigureAwait(false);
-
-            if (!outcome.Succeeded)
-            {
-                throw new InvalidOperationException(
-                    $"Core-ancestor derivation failed for {reference.LogicalName}({reference.Id:D}) while "
-                    + $"associating communication {communicationId:D}; refusing to write an unstamped "
-                    + $"regarding (FR-26 / NFR-01). {outcome.Error}");
-            }
-
-            foreach (var stamp in outcome.Stamps)
-            {
-                if (explicitLookups.Contains(stamp.LookupAttribute))
-                    continue; // a rung asserted this core target directly - its evidence outranks inheritance
-
-                fields[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
-            }
+            throw new InvalidOperationException(
+                $"Core-ancestor derivation failed for {source.Intermediate}({source.Id:D}) while "
+                + $"associating communication {communicationId:D}; refusing to write an unstamped "
+                + $"regarding (FR-26 / NFR-01). {outcome.Error}");
         }
+
+        foreach (var stamp in outcome.Stamps)
+        {
+            if (explicitLookups.Contains(stamp.LookupAttribute))
+                continue; // a rung asserted this core target directly - its evidence outranks inheritance
+
+            fields[stamp.LookupAttribute] = new EntityReference(stamp.EntityType, stamp.RecordId);
+        }
+    }
+
+    private const string CommunicationEntity = "sprk_communication";
+
+    /// <summary>
+    /// With NO pair on the row: a lone intermediate written beside an explicit root of a type that intermediate can carry
+    /// is removed from <paramref name="fields"/> (see <see cref="ApplyDecisionAsync"/>), and returned so the provenance can
+    /// say it was not written. <see langword="null"/> when nothing is withheld.
+    /// </summary>
+    private static (string Field, string TargetId)? WithholdIntermediateTheRowCannotPlace(Dictionary<string, object> fields)
+    {
+        if (fields.ContainsKey(CoreAncestorResolver.RegardingRecordIdColumn))
+            return null; // the pair says what the row is filed under
+
+        var filing = CoreAncestorResolver.ClassifyStampSource(
+            CommunicationEntity, RowAsWritten(fields), CoreAncestorResolver.PartyRegardingColumnNames(CommunicationEntity));
+        if (filing.Kind != StampSourceKind.Source)
+            return null;
+
+        var source = filing.Source!;
+        var carriable = CoreAncestorResolver.CarriableRootTypes(source.Intermediate);
+        var explicitRoot = CoreAncestorResolver.CoreAncestorLookups
+            .Any(l => carriable.Contains(l.EntityType) && fields.ContainsKey(l.LookupAttribute));
+        if (!explicitRoot)
+            return null;
+
+        fields.Remove(source.Column);
+        return (source.Column, source.Id.ToString("D"));
+    }
+
+    /// <summary>The communication row exactly as <paramref name="fields"/> will write it (its lookups and its pair id).</summary>
+    private static Entity RowAsWritten(Dictionary<string, object> fields)
+    {
+        var row = new Entity(CommunicationEntity);
+        foreach (var (column, value) in fields)
+        {
+            if (value is EntityReference || (value is string && column == CoreAncestorResolver.RegardingRecordIdColumn))
+                row[column] = value;
+        }
+
+        return row;
     }
 
     /// <summary>

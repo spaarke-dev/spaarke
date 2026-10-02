@@ -1,3 +1,4 @@
+using System.Data.SqlTypes;
 using System.ServiceModel;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -18,8 +19,11 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 /// <remarks>
 /// Faithful where it matters: a Retrieve returns ONLY the requested columns (a column left out of a read reads as "not
 /// set", task 155 f2); a missing row throws Dataverse's ObjectDoesNotExist fault; <see cref="DBNull.Value"/> clears a
-/// column, as <see cref="IGenericEntityService.UpdateAsync"/> documents. A FetchXML scan returns every row of its table —
-/// the scan filter is a bound on what comes back, the job re-decides each row in code.
+/// column, as <see cref="IGenericEntityService.UpdateAsync"/> documents. A FetchXML scan HONOURS its filter (and / or
+/// filters; <c>null</c>, <c>not-null</c>, <c>in</c>, <c>eq</c> and <c>gt</c> conditions) and its paging (<c>count</c> /
+/// <c>page</c>, ordered by the row id as SQL orders a <c>uniqueidentifier</c>), and a paged QueryExpression its
+/// <see cref="PagingInfo"/> — so what the job's scan READS, and where a page bound stops it, are both asserted (verifier
+/// round 1 items 3 and 4: a double that returned every row on one page hid both).
 /// </remarks>
 internal sealed class StampWorld
 {
@@ -115,10 +119,11 @@ internal sealed class StampWorld
                     .Where(r => query.Criteria.Conditions.All(c =>
                         c.Operator == ConditionOperator.Equal
                         && r.GetAttributeValue<EntityReference>(c.AttributeName)?.Id == (Guid)c.Values[0]))
+                    .OrderBy(r => new SqlGuid(r.Id))
                     .Select(r => query.ColumnSet.AllColumns ? Clone(r) : Project(r, [.. query.ColumnSet.Columns]))
                     .ToList();
 
-                return Task.FromResult(new EntityCollection(matches) { MoreRecords = false });
+                return Task.FromResult(Page(matches, query.PageInfo?.Count ?? 0, query.PageInfo?.PageNumber ?? 1));
             });
 
         Service.RetrieveMultipleAsync(Arg.Any<FetchExpression>(), Arg.Any<CancellationToken>())
@@ -130,9 +135,18 @@ internal sealed class StampWorld
                 FetchXml.Add(call.ArgAt<FetchExpression>(0).Query);
                 if (_scanFaults.TryGetValue(table, out var fault)) throw fault;
 
+                var filter = entity.Element("filter");
                 var attributes = entity.Elements("attribute").Select(a => a.Attribute("name")!.Value).ToArray();
-                var rows = _rows.Values.Where(r => r.LogicalName == table).Select(r => Project(r, attributes)).ToList();
-                return Task.FromResult(new EntityCollection(rows) { MoreRecords = false });
+                var rows = _rows.Values
+                    .Where(r => r.LogicalName == table)
+                    .Where(r => filter is null || Matches(r, table, filter))
+                    .OrderBy(r => new SqlGuid(r.Id))
+                    .Select(r => Project(r, attributes))
+                    .ToList();
+
+                var count = int.TryParse(fetch.Root.Attribute("count")?.Value, out var c) ? c : 0;
+                var page = int.TryParse(fetch.Root.Attribute("page")?.Value, out var p) ? p : 1;
+                return Task.FromResult(Page(rows, count, page));
             });
 
         Resolver = new CoreAncestorResolver(
@@ -149,6 +163,14 @@ internal sealed class StampWorld
     public CoreAncestorResolver Resolver { get; }
 
     public CoreAncestorRestamper Restamper { get; }
+
+    /// <summary>A restamper over this world with smaller paging bounds, so the per-intermediate bound is reachable.</summary>
+    public CoreAncestorRestamper RestamperWith(int childPageSize, int childrenPerSourceBound) =>
+        new(Service, Resolver, NullLogger<CoreAncestorRestamper>.Instance)
+        {
+            ChildPageSizeInUse = childPageSize,
+            ChildrenPerSourceBound = childrenPerSourceBound,
+        };
 
     /// <summary>Every PATCH, in order, with its fields as sent.</summary>
     public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Patches { get; } = [];
@@ -236,6 +258,60 @@ internal sealed class StampWorld
 
     public IEnumerable<(string Entity, Guid Id, Dictionary<string, object> Fields)> PatchesTo(string entity, Guid id)
         => Patches.Where(p => p.Entity == entity && p.Id == id);
+
+    /// <summary>One page of an ordered result: <paramref name="count"/> 0 = everything on one page.</summary>
+    private static EntityCollection Page(List<Entity> ordered, int count, int page)
+    {
+        if (count <= 0)
+        {
+            return new EntityCollection(ordered) { MoreRecords = false };
+        }
+
+        page = Math.Max(1, page);
+        var slice = ordered.Skip((page - 1) * count).Take(count).ToList();
+        return new EntityCollection(slice)
+        {
+            MoreRecords = ordered.Count > page * count,
+            PagingCookie = $"<cookie page=\"{page}\" />",
+        };
+    }
+
+    /// <summary>A FetchXML <c>filter</c> over one row (the operators the scan uses; anything else is refused loudly).</summary>
+    private static bool Matches(Entity row, string table, XElement filter)
+    {
+        var results = filter.Elements().Select(e => e.Name.LocalName switch
+        {
+            "condition" => ConditionHolds(row, table, e),
+            "filter" => Matches(row, table, e),
+            var other => throw new NotSupportedException($"StampWorld: FetchXML element <{other}> is not modelled."),
+        });
+
+        return (filter.Attribute("type")?.Value ?? "and") == "or" ? results.Any(x => x) : results.All(x => x);
+    }
+
+    private static bool ConditionHolds(Entity row, string table, XElement condition)
+    {
+        var attribute = condition.Attribute("attribute")!.Value;
+        var op = condition.Attribute("operator")!.Value;
+        object? value = attribute == table + "id" ? row.Id : row.Contains(attribute) ? row[attribute] : null;
+        Guid? id = value switch
+        {
+            EntityReference reference => reference.Id,
+            Guid guid => guid,
+            string text when Guid.TryParse(text, out var parsed) => parsed,
+            _ => null,
+        };
+
+        return op switch
+        {
+            "null" => value is null,
+            "not-null" => value is not null,
+            "in" => id is { } x && condition.Elements("value").Any(v => Guid.Parse(v.Value) == x),
+            "eq" => id is { } y && y == Guid.Parse(condition.Attribute("value")!.Value),
+            "gt" => id is { } z && new SqlGuid(z).CompareTo(new SqlGuid(Guid.Parse(condition.Attribute("value")!.Value))) > 0,
+            _ => throw new NotSupportedException($"StampWorld: FetchXML operator '{op}' is not modelled."),
+        };
+    }
 
     private static Entity Project(Entity row, string[]? columns)
     {

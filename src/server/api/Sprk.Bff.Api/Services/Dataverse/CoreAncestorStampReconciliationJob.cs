@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -31,8 +32,16 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// in one run, and a second run changes nothing.</para>
 ///
 /// <para><b>Fail direction</b> (ADR-003, inverted for a writer, as <c>ExternalAccessReconciliationJob</c>): a scan that
-/// fails writes nothing and the RUN IS RECORDED FAILED — never "0 stale". A source whose root cannot be derived is not
-/// guessed: its children are counted unverified and the run is partial.</para>
+/// fails writes nothing and the RUN IS RECORDED FAILED — never "0 stale" (that includes the <c>sprk_recordtype_ref</c>
+/// read the orphan clause is bounded by). A source whose root cannot be derived is not guessed: its children are counted
+/// unverified and the run is partial.</para>
+///
+/// <para><b>What it reads</b> (verifier round 1 item 4): every row filed under an intermediate (a source column set — the
+/// rows that carry a copy), plus the F-051-6 candidates only — a row filed under nothing whose pair names an intermediate
+/// by type, or carries a pair id with no type (the communication / agreement shape). Rows a regarding builder filed
+/// directly to a root are never read. A scan stopped by the page bound records where it stopped (the distributed cache)
+/// and the next run continues there, so every candidate is checked within a few runs however large the table; such a run
+/// reports partial, never ok.</para>
 ///
 /// <para><b>Idempotency</b> (ADR-036 A1 rule 3): each repair takes an atomic claim keyed by the row AND the stamp it
 /// plans, writes, then marks the repair complete FOR THE RUN; a failed repair releases the claim. A retry of the same run
@@ -63,6 +72,18 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
 
     internal const int PageSize = 1000;
     internal const int MaxPages = 20;
+
+    /// <summary>
+    /// How long a table's continuation point survives (see <see cref="ScanAsync"/>): far longer than the 5-minute cadence,
+    /// short enough that a cursor nobody resumes (the job disabled) is forgotten and the next scan starts from the top.
+    /// </summary>
+    private static readonly TimeSpan CursorLifetime = TimeSpan.FromHours(6);
+
+    /// <summary>Rows per scan page (<see cref="PageSize"/>). Settable only so a test can reach the page bound.</summary>
+    internal int ScanPageSize { get; init; } = PageSize;
+
+    /// <summary>Pages per table per run (<see cref="MaxPages"/>). Settable only so a test can reach the page bound.</summary>
+    internal int ScanMaxPages { get; init; } = MaxPages;
 
     internal const string StatusOk = "ok";
     internal const string StatusPartial = "partial";
@@ -141,7 +162,11 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
             var entityService = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
             var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
 
-            var stale = await FindStaleAsync(entityService, counts, problems, context, cancellationToken)
+            // Where a truncated scan continues next run (the BFF's distributed cache — the store the idempotency claims
+            // already use). Absent or failing → every run starts at the top (reported, never silent).
+            var cursors = scope.ServiceProvider.GetService<IDistributedCache>();
+
+            var stale = await FindStaleAsync(entityService, cursors, counts, problems, context, cancellationToken)
                 .ConfigureAwait(false);
 
             counts.Stale = stale.Count;
@@ -183,14 +208,12 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
             status = StatusError;
         }
         else if (status == StatusOk
-                 && (counts.RepairFailures > 0 || counts.Unverified > 0 || counts.Truncated || counts.ClaimHeld > 0))
+                 && (counts.RepairFailures > 0 || counts.Unverified > 0 || counts.Truncated || counts.Resumed
+                     || counts.ClaimHeld > 0))
         {
+            // A run that did not check every candidate row of every table (a page bound, a continuation, an
+            // unverifiable source) or did not finish every repair is never reported as a clean run.
             status = StatusPartial;
-        }
-
-        if (counts.Truncated)
-        {
-            problems.Add($"A scan stopped after {MaxPages} pages of {PageSize}; later rows were not checked.");
         }
 
         var duration = _timeProvider.GetElapsedTime(started);
@@ -199,12 +222,13 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "{Prefix} heartbeat status={Status} mode={Mode} attempt={Attempt} scanned={Scanned} stale={Stale} "
             + "repaired={Repaired} cascaded={Cascaded} alreadyApplied={AlreadyApplied} claimHeld={ClaimHeld} "
-            + "repairFailures={RepairFailures} unverified={Unverified} scanFailures={ScanFailures} truncated={Truncated} "
+            + "repairFailures={RepairFailures} unverified={Unverified} orphanSourceGone={OrphanSourceGone} "
+            + "scanFailures={ScanFailures} truncated={Truncated} resumed={Resumed} "
             + "durationMs={DurationMs} trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             LogPrefix, status, writesEnabled ? "write" : "report-only", context.Attempt, counts.Scanned, counts.Stale,
             counts.Repaired, counts.Cascaded, counts.AlreadyApplied, counts.ClaimHeld, counts.RepairFailures,
-            counts.Unverified, counts.ScanFailures, counts.Truncated, (long)duration.TotalMilliseconds, context.Trigger,
-            context.RunId, context.CorrelationId);
+            counts.Unverified, counts.OrphanSourceGone, counts.ScanFailures, counts.Truncated, counts.Resumed,
+            (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         return new JobRunResult(
             Success: status == StatusOk,
@@ -226,8 +250,10 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                     counts.ClaimHeld,
                     counts.RepairFailures,
                     counts.Unverified,
+                    counts.OrphanSourceGone,
                     counts.ScanFailures,
                     counts.Truncated,
+                    counts.Resumed,
                     sampleStale = counts.StaleSample,
                 },
                 ResultJsonOptions));
@@ -239,6 +265,7 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
     /// </summary>
     private async Task<List<StaleRow>> FindStaleAsync(
         IGenericEntityService entityService,
+        IDistributedCache? cursors,
         RunCounts counts,
         List<string> problems,
         JobRunContext context,
@@ -246,7 +273,24 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
     {
         var stale = new List<StaleRow>();
         var roots = new Dictionary<(string, Guid), CoreAncestorResult>();
-        Dictionary<Guid, string>? recordTypes = null;
+
+        // The sprk_recordtype_ref rows, read ONCE per run, first: the F-051-6 scan clause is bounded by them (only a pair
+        // TYPE that names an intermediate is a candidate), so an unreadable type table is a FAILED run — the copies a
+        // typed pair orphaned were not looked for (never "nothing orphaned"). The other clauses still run.
+        Dictionary<Guid, string>? recordTypes;
+        try
+        {
+            recordTypes = await LoadRecordTypesAsync(entityService, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            recordTypes = null;
+            counts.ScanFailures++;
+            problems.Add("sprk_recordtype_ref: the regarding types could not be read, so copies orphaned by a regarding "
+                         + $"cleared on a form (a typed pair) were not looked for ({ex.Message}).");
+            _logger.LogError(ex, "{Prefix} The regarding types could not be read; typed F-051-6 orphans were not looked for "
+                                 + "and the run is FAILED. correlationId={CorrelationId}", LogPrefix, context.CorrelationId);
+        }
 
         foreach (var (childTable, sources) in CoreAncestorResolver.StampSourceColumns)
         {
@@ -272,12 +316,16 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
 
             var columns = CoreAncestorRestamper.ChildColumns(childTable, host, withPairType: true);
             var parties = CoreAncestorResolver.PartyRegardingColumnNames(childTable);
+            var orphans = OrphanClauseFor(sources, host, recordTypes);
 
-            List<Entity> rows;
+            var cursorKey = $"{JobIdConstant}:cursor:{childTable}";
+            var after = await ReadCursorAsync(cursors, cursorKey, ct).ConfigureAwait(false);
+
+            ScanResult scan;
             try
             {
-                rows = await ScanAsync(entityService, childTable, columns, sourceColumns, stampColumns,
-                    host.Contains(CoreAncestorResolver.RegardingRecordTypeColumn), counts, ct).ConfigureAwait(false);
+                scan = await ScanAsync(entityService, childTable, columns, sourceColumns, stampColumns, orphans, after, ct)
+                    .ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -288,7 +336,26 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                 continue;
             }
 
-            foreach (var row in rows)
+            // Paging ACROSS runs: a scan stopped by the page bound records where it stopped, and the next run continues
+            // from there — so every candidate row is checked within a few runs, however large the table, instead of the
+            // same prefix forever. A run that stopped, or that only continued, did not check the whole table: partial.
+            if (scan.Truncated)
+            {
+                counts.Truncated = true;
+                var saved = await WriteCursorAsync(cursors, cursorKey, scan.LastId, ct).ConfigureAwait(false);
+                problems.Add(saved
+                    ? $"{childTable}: the scan stopped after {ScanMaxPages} pages of {ScanPageSize}; the next run continues after row {scan.LastId:D}."
+                    : $"{childTable}: the scan stopped after {ScanMaxPages} pages of {ScanPageSize} and where it stopped could not be "
+                      + "recorded, so the next run starts from the top again.");
+            }
+            else if (after is not null)
+            {
+                counts.Resumed = true;
+                await ClearCursorAsync(cursors, cursorKey, ct).ConfigureAwait(false);
+                problems.Add($"{childTable}: this run continued a scan an earlier run stopped (rows after {after:D}); the next run starts from the top.");
+            }
+
+            foreach (var row in scan.Rows)
             {
                 counts.Scanned++;
                 var decision = CoreAncestorResolver.ClassifyStampSource(childTable, row, parties);
@@ -305,13 +372,34 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
                 }
                 else if (decision.Kind == StampSourceKind.NotFiledUnderAnIntermediate)
                 {
-                    // F-051-6 candidate: the pair names an intermediate by TYPE, and its typed column is empty.
-                    recordTypes ??= await LoadRecordTypesAsync(entityService, ct).ConfigureAwait(false);
-                    if (!TryOrphanSource(row, childTable, recordTypes, out intermediate, out intermediateId))
+                    // F-051-6 candidate: its pair names an intermediate (by type, or — untyped — by id) whose typed column
+                    // is empty. The one lookup the restamper uses too.
+                    var cleared = await _restamper.FindClearedSourceAsync(childTable, row, recordTypes, ct).ConfigureAwait(false);
+                    if (cleared.Outcome == ClearedSourceOutcome.Gone)
+                    {
+                        // Deleted: the copy cannot be shown to be its copy (interpretation xvi) — counted, never a partial
+                        // run that would repeat on every tick.
+                        counts.OrphanSourceGone++;
+                        _logger.LogWarning(
+                            "{Prefix} {Entity} {Id}: its pair names {PairId}, which no intermediate holds any more; its stamp "
+                            + "cannot be shown to be a copy and is left alone.", LogPrefix, childTable, row.Id, cleared.PairId);
+                        continue;
+                    }
+
+                    if (cleared.Outcome == ClearedSourceOutcome.Unreadable)
+                    {
+                        counts.Unverified++;
+                        _logger.LogWarning("{Prefix} {Entity} {Id}: {Error}; not repaired.", LogPrefix, childTable, row.Id, cleared.Error);
+                        continue;
+                    }
+
+                    if (cleared.Outcome != ClearedSourceOutcome.Found)
                     {
                         continue;
                     }
 
+                    intermediate = cleared.Intermediate!;
+                    intermediateId = cleared.PairId;
                     orphan = true;
                 }
                 else
@@ -432,44 +520,78 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
     }
 
     /// <summary>
-    /// Rows of <paramref name="childTable"/> filed under an intermediate (any source column set), plus — when the table
-    /// carries the pair's type — rows filed under none whose pair names a type and that still carry a stamp (F-051-6).
-    /// Pages with a cookie to <see cref="MaxPages"/>; past it the run reports TRUNCATED rather than a silent prefix.
+    /// The F-051-6 part of one table's scan (verifier round 1 item 4): a row filed under NO intermediate is a candidate
+    /// only when its pair could name one — so the scan reads the rows that may hold an orphaned copy, not every row a
+    /// regarding builder filed directly to a project or matter (live 2026-10-02: 24 of 50 to-dos and 62 communications
+    /// are filed that way, against 14 and 5 filed under an intermediate).
     /// </summary>
-    private static async Task<List<Entity>> ScanAsync(
+    /// <remarks>
+    /// <para><b>Typed</b>: the pair's type is one of the <c>sprk_recordtype_ref</c> rows naming an intermediate this table
+    /// is filed under (an <c>in</c> on their ids). <b>Untyped</b>: a pair id with NO type — the shape a communication or an
+    /// agreement leaves, because neither has a <c>sprk_recordtype_ref</c> row (live, 2026-10-02), so the client regarding
+    /// writer sets the id alone. A row filed directly to a root carries the root's type (matter, project, work assignment
+    /// and service request all have one), so neither clause reads it.</para>
+    /// <para>No orphan clause on a table without the pair's id or type column (the column would fault the scan). With the
+    /// types unreadable (<paramref name="recordTypes"/> null — already a FAILED run) only the untyped clause runs.</para>
+    /// </remarks>
+    internal static OrphanClause OrphanClauseFor(
+        IReadOnlyList<(string Column, string Intermediate)> sources,
+        IReadOnlySet<string> host,
+        IReadOnlyDictionary<Guid, string>? recordTypes)
+    {
+        if (!host.Contains(CoreAncestorResolver.RegardingRecordIdColumn)
+            || !host.Contains(CoreAncestorResolver.RegardingRecordTypeColumn))
+        {
+            return OrphanClause.None;
+        }
+
+        var intermediates = sources.Select(s => s.Intermediate).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var typed = recordTypes is null
+            ? []
+            : recordTypes.Where(t => intermediates.Contains(t.Value)).Select(t => t.Key).OrderBy(id => id).ToArray();
+
+        return new OrphanClause(typed, Untyped: true);
+    }
+
+    /// <summary>
+    /// Rows of <paramref name="childTable"/> filed under an intermediate (any source column set), plus the F-051-6
+    /// candidates <paramref name="orphans"/> describes. Ordered by the row id; continues after <paramref name="after"/>
+    /// when an earlier run stopped there. Pages with a cookie to <see cref="ScanMaxPages"/>; past it the result says
+    /// TRUNCATED (and where), never a silent prefix.
+    /// </summary>
+    private async Task<ScanResult> ScanAsync(
         IGenericEntityService entityService,
         string childTable,
         string[] columns,
         string[] sourceColumns,
         string[] stampColumns,
-        bool hasPairType,
-        RunCounts counts,
+        OrphanClause orphans,
+        Guid? after,
         CancellationToken ct)
     {
         var rows = new List<Entity>();
         string? cookie = null;
 
-        for (var page = 1; page <= MaxPages; page++)
+        for (var page = 1; page <= ScanMaxPages; page++)
         {
             ct.ThrowIfCancellationRequested();
 
             var result = await entityService
                 .RetrieveMultipleAsync(new FetchExpression(
-                    BuildScanFetchXml(childTable, columns, sourceColumns, stampColumns, hasPairType, page, cookie)), ct)
+                    BuildScanFetchXml(childTable, columns, sourceColumns, stampColumns, orphans, after, ScanPageSize, page, cookie)), ct)
                 .ConfigureAwait(false);
 
             rows.AddRange(result.Entities);
 
             if (!result.MoreRecords)
             {
-                return rows;
+                return new ScanResult(rows, Truncated: false, LastId: null);
             }
 
             cookie = result.PagingCookie;
         }
 
-        counts.Truncated = true;
-        return rows;
+        return new ScanResult(rows, Truncated: true, LastId: rows.Count > 0 ? rows[^1].Id : after);
     }
 
     /// <summary>The scan FetchXML for one child table (see <see cref="ScanAsync"/>). Ordered by the row id for stable paging.</summary>
@@ -478,21 +600,50 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
         IReadOnlyList<string> columns,
         IReadOnlyList<string> sourceColumns,
         IReadOnlyList<string> stampColumns,
-        bool hasPairType,
+        OrphanClause orphans,
+        Guid? after,
+        int pageSize,
         int page,
         string? pagingCookie)
     {
         var filedUnder = new XElement("filter", new XAttribute("type", "or"),
             sourceColumns.Select(c => Condition(c, "not-null")));
 
-        var filter = new XElement("filter", new XAttribute("type", "or"), filedUnder);
+        var candidates = new XElement("filter", new XAttribute("type", "or"), filedUnder);
 
-        if (hasPairType)
+        // A row filed under nothing that still carries a stamp, whose pair could name the intermediate that was cleared.
+        XElement OrphanBase() => new("filter", new XAttribute("type", "and"),
+            sourceColumns.Select(c => Condition(c, "null")),
+            new XElement("filter", new XAttribute("type", "or"), stampColumns.Select(c => Condition(c, "not-null"))));
+
+        if (orphans.TypedIntermediateTypes.Count > 0)
         {
-            filter.Add(new XElement("filter", new XAttribute("type", "and"),
-                sourceColumns.Select(c => Condition(c, "null")),
-                Condition(CoreAncestorResolver.RegardingRecordTypeColumn, "not-null"),
-                new XElement("filter", new XAttribute("type", "or"), stampColumns.Select(c => Condition(c, "not-null")))));
+            var typed = OrphanBase();
+            typed.Add(new XElement("condition",
+                new XAttribute("attribute", CoreAncestorResolver.RegardingRecordTypeColumn),
+                new XAttribute("operator", "in"),
+                orphans.TypedIntermediateTypes.Select(id =>
+                    new XElement("value", id.ToString("D", CultureInfo.InvariantCulture)))));
+            candidates.Add(typed);
+        }
+
+        if (orphans.Untyped)
+        {
+            var untyped = OrphanBase();
+            untyped.Add(Condition(CoreAncestorResolver.RegardingRecordIdColumn, "not-null"));
+            untyped.Add(Condition(CoreAncestorResolver.RegardingRecordTypeColumn, "null"));
+            candidates.Add(untyped);
+        }
+
+        var filter = candidates;
+        if (after is { } continueAfter)
+        {
+            filter = new XElement("filter", new XAttribute("type", "and"),
+                new XElement("condition",
+                    new XAttribute("attribute", childTable + "id"),
+                    new XAttribute("operator", "gt"),
+                    new XAttribute("value", continueAfter.ToString("D", CultureInfo.InvariantCulture))),
+                candidates);
         }
 
         var entity = new XElement("entity", new XAttribute("name", childTable),
@@ -505,7 +656,7 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
             new XAttribute("version", "1.0"),
             new XAttribute("mapping", "logical"),
             new XAttribute("no-lock", "true"),
-            new XAttribute("count", PageSize),
+            new XAttribute("count", pageSize),
             new XAttribute("page", page));
 
         if (pagingCookie is not null)
@@ -520,7 +671,66 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
     private static XElement Condition(string attribute, string op)
         => new("condition", new XAttribute("attribute", attribute), new XAttribute("operator", op));
 
-    /// <summary>The <c>sprk_recordtype_ref</c> rows (live: 14), loaded once per run when an F-051-6 candidate needs one.</summary>
+    /// <summary>Where an earlier run's scan of a table stopped, or <see langword="null"/> (start at the top).</summary>
+    private async Task<Guid?> ReadCursorAsync(IDistributedCache? cursors, string key, CancellationToken ct)
+    {
+        if (cursors is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var raw = await cursors.GetStringAsync(key, ct).ConfigureAwait(false);
+            return Guid.TryParse(raw, out var id) && id != Guid.Empty ? id : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Start at the top: every row is still checked, just not past the page bound this run.
+            _logger.LogWarning(ex, "{Prefix} The scan cursor {Key} could not be read; this run starts at the top.", LogPrefix, key);
+            return null;
+        }
+    }
+
+    private async Task<bool> WriteCursorAsync(IDistributedCache? cursors, string key, Guid? lastId, CancellationToken ct)
+    {
+        if (cursors is null || lastId is not { } id)
+        {
+            return false;
+        }
+
+        try
+        {
+            await cursors.SetStringAsync(key, id.ToString("D", CultureInfo.InvariantCulture),
+                new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = CursorLifetime }, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "{Prefix} The scan cursor {Key} could not be saved; the next run starts at the top.", LogPrefix, key);
+            return false;
+        }
+    }
+
+    private async Task ClearCursorAsync(IDistributedCache? cursors, string key, CancellationToken ct)
+    {
+        if (cursors is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await cursors.RemoveAsync(key, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // Harmless: the cursor expires, and a stale one only makes the next run continue instead of starting over.
+            _logger.LogDebug(ex, "{Prefix} The scan cursor {Key} could not be cleared; it expires on its own.", LogPrefix, key);
+        }
+    }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> rows (live: 14), loaded once at the start of every run.</summary>
     private static async Task<Dictionary<Guid, string>> LoadRecordTypesAsync(IGenericEntityService entityService, CancellationToken ct)
     {
         var result = await entityService.RetrieveMultipleAsync(
@@ -533,27 +743,6 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
         return result.Entities
             .Where(e => e.Id != Guid.Empty && !string.IsNullOrWhiteSpace(e.GetAttributeValue<string>("sprk_recordlogicalname")))
             .ToDictionary(e => e.Id, e => e.GetAttributeValue<string>("sprk_recordlogicalname")!.Trim().ToLowerInvariant());
-    }
-
-    private static bool TryOrphanSource(
-        Entity row, string childTable, Dictionary<Guid, string> recordTypes, out string intermediate, out Guid intermediateId)
-    {
-        intermediate = string.Empty;
-        intermediateId = Guid.Empty;
-
-        var raw = row.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn);
-        if (string.IsNullOrWhiteSpace(raw) || !Guid.TryParse(raw.Trim(), out var pairId) || pairId == Guid.Empty
-            || row.GetAttributeValue<EntityReference>(CoreAncestorResolver.RegardingRecordTypeColumn) is not { } typeRef
-            || !recordTypes.TryGetValue(typeRef.Id, out var pairEntity)
-            || !CoreAncestorResolver.StampSourceColumns[childTable].Any(s =>
-                string.Equals(s.Intermediate, pairEntity, StringComparison.OrdinalIgnoreCase)))
-        {
-            return false;
-        }
-
-        intermediate = pairEntity;
-        intermediateId = pairId;
-        return true;
     }
 
     private static string Describe(Entity row, IEnumerable<string> columns)
@@ -575,6 +764,18 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
 
     private sealed record StaleRow(string Entity, Guid Id, string Source, string Before, string After, string PlanHash);
 
+    /// <summary>One table's scan: the rows, and — when the page bound stopped it — the last row id read.</summary>
+    private sealed record ScanResult(List<Entity> Rows, bool Truncated, Guid? LastId);
+
+    /// <summary>
+    /// The F-051-6 clauses of one table's scan (<see cref="OrphanClauseFor"/>): the <c>sprk_recordtype_ref</c> ids that
+    /// name an intermediate the table is filed under, and whether a pair id with no type is read.
+    /// </summary>
+    internal sealed record OrphanClause(IReadOnlyList<Guid> TypedIntermediateTypes, bool Untyped)
+    {
+        public static readonly OrphanClause None = new([], Untyped: false);
+    }
+
     private sealed class RunCounts
     {
         public int Scanned;
@@ -585,8 +786,10 @@ public sealed class CoreAncestorStampReconciliationJob : IScheduledJob
         public int ClaimHeld;
         public int RepairFailures;
         public int Unverified;
+        public int OrphanSourceGone;
         public int ScanFailures;
         public bool Truncated;
+        public bool Resumed;
         public List<string> StaleSample { get; } = [];
     }
 }

@@ -259,6 +259,77 @@ public partial class ChildRecordContainerResolutionTests
         ex.Detail.Should().Contain("lead back to themselves", "the loop is named, not mistaken for a long chain");
     }
 
+    [Fact(DisplayName = "Task 156 (verifier round 1, M13): the walk's DEPTH bound counts the records a child is filed under — a to-do under a chain of five events refuses 409, never follows it to the end")]
+    public async Task ChainOfIntermediatesPastTheDepthBound_IsRefused_NeverResolved()
+    {
+        // to-do → E1 → E2 → E3 → E4 → E5, every copy FRESH (a non-secure matter). Unbounded, the walk would read all five
+        // and resolve the business unit; bounded, the fifth record above the to-do is past MaxRootChainDepth (4).
+        var chain = Enumerable.Range(1, RecordContainerResolver.MaxRootChainDepth + 1)
+            .Select(i => Guid.Parse($"15600000-0000-0000-0000-0000000b{i:D4}")).ToArray();
+        var world = new World()
+            .WithRow("sprk_todo", ChildId,
+                [("sprk_regardingevent", "sprk_event", chain[0]), ("sprk_regardingmatter", "sprk_matter", MatterId)],
+                pairId: chain[0].ToString());
+        for (var i = 0; i < chain.Length; i++)
+        {
+            var above = i + 1 < chain.Length ? chain[i + 1] : (Guid?)null;
+            world.WithRow("sprk_event", chain[i],
+                above is { } next
+                    ? [("sprk_regardingevent", "sprk_event", next), ("sprk_regardingmatter", "sprk_matter", MatterId)]
+                    : [("sprk_regardingmatter", "sprk_matter", MatterId)],
+                pairId: above?.ToString());
+        }
+
+        world.WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null).WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        ex.Detail.Should().Contain("longer than the storage resolver follows");
+        world.Reads("sprk_event").Should().Be(RecordContainerResolver.MaxRootChainDepth,
+            "the record past the bound is never read");
+        world.Reads("businessunit").Should().Be(0, "an unbounded walk is never resolved into a shared container");
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 1, M13): the walk's READ bound counts the records a child is filed under — a to-do naming nine intermediates refuses 409 before the ninth read")]
+    public async Task IntermediateReadsPastTheReadBound_AreRefused_NeverResolved()
+    {
+        // The pair names event E1 (its source; E1 is itself filed under E2); every other source column is set too, so each
+        // is a CARRIER read live. Nine intermediate reads, none naming a root: unbounded, the walk would read them all and
+        // resolve the business unit with no root ever read.
+        var e1 = Guid.Parse("15600000-0000-0000-0000-0000000c0001");
+        var e2 = Guid.Parse("15600000-0000-0000-0000-0000000c0002");
+        var carriers = CoreAncestorResolver.StampSourceColumns["sprk_todo"]
+            .Where(s => s.Intermediate != "sprk_event")
+            .Select((s, i) => (s.Column, s.Intermediate, Id: Guid.Parse($"15600000-0000-0000-0000-0000000c01{i:D2}")))
+            .ToArray();
+
+        var world = new World()
+            .WithRow("sprk_todo", ChildId,
+                [("sprk_regardingevent", "sprk_event", e1), .. carriers.Select(c => (c.Column, c.Intermediate, c.Id))],
+                pairId: e1.ToString())
+            .WithRow("sprk_event", e1, [("sprk_regardingevent", "sprk_event", e2)], pairId: e2.ToString())
+            .WithRow("sprk_event", e2, [])
+            .WithBusinessUnit(BusinessUnitContainer);
+        foreach (var carrier in carriers)
+        {
+            world.WithRow(carrier.Intermediate, carrier.Id, []);
+        }
+
+        (2 + carriers.Length).Should().BeGreaterThan(RecordContainerResolver.MaxRootReads, "the shape must exceed the bound");
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
+        ex.StatusCode.Should().Be(409);
+        (world.TotalReads() - 1).Should().Be(RecordContainerResolver.MaxRootReads,
+            "the record's own row, then exactly MaxRootReads rows above it — never one more");
+        world.Reads("businessunit").Should().Be(0);
+    }
+
     [Fact(DisplayName = "Task 156: a root type the source CANNOT carry is the row's own direct link — an email under an invoice with its own work assignment is not stale")]
     public async Task RootTypeTheSourceCannotCarry_IsNotPartOfTheComparison()
     {

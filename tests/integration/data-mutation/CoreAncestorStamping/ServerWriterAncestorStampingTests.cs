@@ -329,4 +329,99 @@ public class ServerWriterAncestorStampingTests
 
         return resolver.ResolveAsync(Guid.NewGuid(), message, context, CancellationToken.None);
     }
+
+    /// <summary>Several caller-supplied regardings at once (each confidence 1.0 — two of one type CONFLICT → Ambiguous).</summary>
+    private static Task ResolveWithCallerSuppliedRegardingsAsync(
+        IncomingAssociationResolver resolver, params (string EntityType, Guid EntityId)[] regardings)
+    {
+        var message = new NormalizedMessage
+        {
+            Direction = CommunicationDirection.Incoming,
+            From = "sender@example.com",
+            Subject = "No token in this subject",
+        };
+        var context = new AssociationContext
+        {
+            CallerSuppliedRegarding = regardings
+                .Select(r => new CommunicationAssociation { EntityType = r.EntityType, EntityId = r.EntityId, EntityName = "target" })
+                .ToList(),
+        };
+
+        return resolver.ResolveAsync(Guid.NewGuid(), message, context, CancellationToken.None);
+    }
+
+    // =====================================================================================
+    // Task 156 verifier round 1 item 9: the inbound write follows the ONE classification rule
+    // (CoreAncestorResolver.ClassifyStampSource) — only reachable with CoreWritableEntities widened to an intermediate
+    // =====================================================================================
+
+    private static readonly string[] WidenedToInvoices = ["sprk_matter", "sprk_project", "sprk_servicerequest", "sprk_invoice"];
+
+    [Fact]
+    public async Task ApplyDecision_RootAndInvoiceWritten_PairNamesTheRoot_CopiesNothingFromTheInvoice()
+    {
+        // Resolved: the pair names the matter (ADR-024 priority — a root before any intermediate), so the matter is the
+        // direct filing and the invoice a CARRIER. Copying the invoice's PROJECT onto the email made a partial copy the
+        // restamper never refreshes (the row is a direct link): an access over-grant once the invoice moved.
+        var (resolver, updates) = BuildAssociationResolver(
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingproject", ProjectId)),
+            coreWritableEntities: WidenedToInvoices);
+
+        await ResolveWithCallerSuppliedRegardingsAsync(resolver, ("sprk_matter", MatterId), ("sprk_invoice", InvoiceId));
+
+        var written = updates.Should().ContainSingle().Subject;
+        written["sprk_regardingmatter"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(MatterId);
+        written.Should().ContainKey("sprk_regardinginvoice");
+        written["sprk_regardingrecordid"].Should().Be(MatterId.ToString("D"));
+        written.Should().NotContainKey("sprk_regardingproject",
+            "a carrier contributes no copy to a row filed directly under a root (the Office carrier to-do never did either)");
+    }
+
+    [Fact]
+    public async Task ApplyDecision_Ambiguous_RootAndInvoiceWithNoPair_WithholdsTheInvoice_TheRootStands()
+    {
+        // Ambiguous (two matters conflict): no pair is written (P2b). The engine still writes the clean project and — with
+        // invoices widened — the invoice. Without a pair the one rule reads the lone invoice as what the email is filed
+        // under and the project as the invoice's COPY, which the restamper / the job would overwrite or clear. So the
+        // invoice is withheld (a review candidate, not written) and the engine's explicit project stands.
+        var otherMatter = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var (resolver, updates) = BuildAssociationResolver(
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+            coreWritableEntities: WidenedToInvoices);
+
+        await ResolveWithCallerSuppliedRegardingsAsync(resolver,
+            ("sprk_matter", MatterId), ("sprk_matter", otherMatter), ("sprk_project", ProjectId), ("sprk_invoice", InvoiceId));
+
+        var written = updates.Should().ContainSingle().Subject;
+        ((OptionSetValue)written["sprk_associationstatus"]).Value.Should().Be(AssociationStatusCodes.Ambiguous);
+        written["sprk_regardingproject"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(ProjectId);
+        written.Should().NotContainKey("sprk_regardinginvoice");
+        written.Should().NotContainKey("sprk_regardingmatter", "nothing is copied from a withheld invoice");
+        written.Should().NotContainKey("sprk_regardingrecordid", "P2b: no headline on an Ambiguous decision");
+
+        using var provenance = System.Text.Json.JsonDocument.Parse((string)written["sprk_associationprovenance"]);
+        provenance.RootElement.GetProperty("candidates").EnumerateArray()
+            .Single(c => c.GetProperty("field").GetString() == "sprk_regardinginvoice")
+            .GetProperty("written").GetBoolean().Should().BeFalse("the provenance never claims a write that did not happen");
+    }
+
+    [Fact]
+    public async Task ApplyDecision_Ambiguous_LoneInvoiceWithNoRoot_IsFiledUnderTheInvoice_AndStamped()
+    {
+        // The rule-5 shape that IS consistent: no pair, one intermediate, no explicit root — the invoice is what the email
+        // is filed under, so it is written and its matter copied (nothing to withhold).
+        var otherMatter = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var invoiceMatter = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var (resolver, updates) = BuildAssociationResolver(
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", invoiceMatter)),
+            coreWritableEntities: WidenedToInvoices);
+
+        await ResolveWithCallerSuppliedRegardingsAsync(resolver,
+            ("sprk_matter", MatterId), ("sprk_matter", otherMatter), ("sprk_invoice", InvoiceId));
+
+        var written = updates.Should().ContainSingle().Subject;
+        written.Should().ContainKey("sprk_regardinginvoice");
+        written["sprk_regardingmatter"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(invoiceMatter,
+            "the invoice's matter — the conflicting matters were never written");
+    }
 }

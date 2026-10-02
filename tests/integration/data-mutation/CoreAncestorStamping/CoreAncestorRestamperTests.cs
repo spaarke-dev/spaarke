@@ -269,6 +269,87 @@ public class CoreAncestorRestamperTests
         world.Lookup("sprk_event", chain[1], "sprk_regardingmatter").Should().Be(MatterB);
     }
 
+    [Fact(DisplayName = "Task 156 (verifier round 1, M12): more children under ONE intermediate than the per-source bound → the cascade is reported TRUNCATED (never a silent prefix) and the rest is left for the job")]
+    public async Task ChildrenPastThePerSourceBound_AreReportedTruncated()
+    {
+        // Escalation trigger 2's mitigation: the bound (5000 live) is lowered so it is reachable — 5 to-dos, pages of 2,
+        // bound 3: two pages are listed (4 rows) and the cascade stops with more to come.
+        var todos = Enumerable.Range(1, 5).Select(i => Guid.Parse($"15600000-0000-0000-0000-00000000b0{i:D2}")).ToArray();
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)]);
+        foreach (var todo in todos)
+        {
+            world.Row("sprk_todo", todo,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+        }
+
+        var report = await world.RestamperWith(childPageSize: 2, childrenPerSourceBound: 3)
+            .RestampChildrenOfAsync("sprk_communication", Communication);
+
+        report.Truncated.Should().BeTrue("the bound stopped the listing with rows still to come");
+        report.Complete.Should().BeFalse("a truncated cascade is never reported complete");
+        todos.Count(t => world.Lookup("sprk_todo", t, "sprk_regardingmatter") == MatterA).Should().Be(1,
+            "the row past the bound is left for the reconciliation job, and the report says so");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Verifier round 1 item 10: a generic write to the COPY column of a record that is itself filed under another
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 10): a generic write of sprk_regardingmatter on an EVENT filed under a communication re-derives the event from its source — the hand-written value is never cascaded to the event's children")]
+    public async Task WriteToTheCopyColumnOfAFiledRecord_RederivesIt_AndNeverCascadesTheWrittenValue()
+    {
+        // Everything is fresh at matter B; then a field-mapping push / UpdateRecord writes matter A onto the event.
+        var world = CommunicationWithChildren(communicationMatter: MatterB, childCopy: MatterB)
+            .Row("sprk_todo", TodoUnderEvent,
+                [("sprk_regardingevent", "sprk_event", EventUnderComm), ("sprk_regardingmatter", "sprk_matter", MatterB)],
+                pairId: EventUnderComm.ToString())
+            .OutOfBand("sprk_event", EventUnderComm, "sprk_regardingmatter", "sprk_matter", MatterA);
+
+        var report = await world.Restamper.AfterWriteAsync("sprk_event", EventUnderComm, ["sprk_regardingmatter"]);
+
+        report.Complete.Should().BeTrue();
+        world.Lookup("sprk_event", EventUnderComm, "sprk_regardingmatter").Should().Be(MatterB,
+            "the event is filed under the communication: its matter is the communication's (the job would revert it anyway)");
+        world.PatchesTo("sprk_todo", TodoUnderEvent).Should().BeEmpty(
+            "the to-do already equals the source's root — the hand-written matter A is never carried down (no churn)");
+        world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterB);
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 10): when the written record's own source CANNOT be read, nothing is cascaded from the hand-written value — the failure is reported and the job repairs both")]
+    public async Task WriteToTheCopyColumn_WhenTheSourceIsUnreadable_CascadesNothing()
+    {
+        var world = CommunicationWithChildren(communicationMatter: MatterB, childCopy: MatterB)
+            .Row("sprk_todo", TodoUnderEvent,
+                [("sprk_regardingevent", "sprk_event", EventUnderComm), ("sprk_regardingmatter", "sprk_matter", MatterB)],
+                pairId: EventUnderComm.ToString())
+            .OutOfBand("sprk_event", EventUnderComm, "sprk_regardingmatter", "sprk_matter", MatterA)
+            .FailRead("sprk_communication", Communication);
+
+        var report = await world.Restamper.AfterWriteAsync("sprk_event", EventUnderComm, ["sprk_regardingmatter"]);
+
+        report.Complete.Should().BeFalse();
+        report.Failures.Should().Contain(f => f.Entity == "sprk_event" && f.Id == EventUnderComm);
+        world.PatchesTo("sprk_todo", TodoUnderEvent).Should().BeEmpty(
+            "the event's matter is not known to be its own, so it is never copied down");
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 10): a root write on an event filed under NOTHING is its own direct link — cascaded to its children unchanged")]
+    public async Task WriteToTheRootOfAnUnfiledRecord_IsCascadedAsWritten()
+    {
+        var world = new StampWorld()
+            .Row("sprk_event", Event, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_todo", TodoUnderEvent,
+                [("sprk_regardingevent", "sprk_event", Event), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Event.ToString());
+
+        await world.Restamper.AfterWriteAsync("sprk_event", Event, ["sprk_regardingmatter"]);
+
+        world.PatchesTo("sprk_event", Event).Should().BeEmpty("the event's matter is its own — the write stands");
+        world.Lookup("sprk_todo", TodoUnderEvent, "sprk_regardingmatter").Should().Be(MatterB);
+    }
+
     [Fact(DisplayName = "Task 156: two intermediates set and nothing saying which one the row is filed under — never written")]
     public async Task AmbiguousSource_IsNeverWritten()
     {
@@ -292,6 +373,7 @@ public class CoreAncestorRestamperTests
     [Fact(DisplayName = "Task 156 (F-051-6): a to-do whose communication was CLEARED on its form has the orphaned copy removed — when it still equals that communication's root")]
     public async Task OrphanedCopy_MatchingTheClearedSource_IsCleared()
     {
+        // A TYPED pair (a communication type row is seeded here; live has none — the untyped shape is the next test).
         var world = new StampWorld()
             .RecordType(CommunicationTypeRef, "sprk_communication")
             .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterA)])
@@ -302,6 +384,44 @@ public class CoreAncestorRestamperTests
 
         world.Lookup("sprk_todo", TodoUnderComm, "sprk_regardingmatter").Should().BeNull(
             "the to-do shows no regarding any more, so it must stop inheriting the old matter's access (fail closed)");
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 5): the LIVE communication shape — the pair id with NO type (sprk_recordtype_ref has no communication row) — is still found by its id, and the orphaned copy cleared")]
+    public async Task OrphanedCopy_WithAnUntypedPair_IsCleared()
+    {
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_todo", TodoUnderComm, [("sprk_regardingmatter", "sprk_matter", MatterA)], pairId: Communication.ToString());
+
+        var report = await world.Restamper.RestampChildAsync("sprk_todo", TodoUnderComm);
+
+        report.Complete.Should().BeTrue();
+        world.Lookup("sprk_todo", TodoUnderComm, "sprk_regardingmatter").Should().BeNull();
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 5): an untyped pair naming a record that NO LONGER EXISTS — the copy is left alone and the repair is not a failure (an enqueued re-stamp would otherwise retry it to poison)")]
+    public async Task OrphanCandidate_WhoseRecordIsGone_IsLeftAlone_NotAFailure()
+    {
+        var gone = Guid.Parse("15600000-0000-0000-0000-00000000aa02");
+        var world = new StampWorld()
+            .Row("sprk_todo", TodoUnderComm, [("sprk_regardingmatter", "sprk_matter", MatterA)], pairId: gone.ToString());
+
+        var report = await world.Restamper.RestampChildAsync("sprk_todo", TodoUnderComm);
+
+        report.Complete.Should().BeTrue("nothing is unreadable — the record is simply gone");
+        world.Patches.Should().BeEmpty("a copy whose record is gone cannot be shown to be its copy (interpretation xvi)");
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 5): the orphan path on the AFTER-WRITE route never clears a root the write just set (it may be the user's direct choice) — only the job does")]
+    public async Task RootWriteOnAnOrphanShapedRow_IsNotClearedByTheAfterWritePath()
+    {
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_event", EventUnderComm, [("sprk_regardingmatter", "sprk_matter", MatterA)], pairId: Communication.ToString());
+
+        await world.Restamper.AfterWriteAsync("sprk_event", EventUnderComm, ["sprk_regardingmatter"]);
+
+        world.PatchesTo("sprk_event", EventUnderComm).Should().BeEmpty();
     }
 
     [Fact(DisplayName = "Task 156 (F-051-6): a stamp that does NOT equal the cleared communication's root may be a direct choice — it is left alone")]

@@ -597,6 +597,21 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.RestampQueue.Children.Should().BeEmpty();
     }
 
+    [Fact(DisplayName = "Task 156 (verifier round 1 item 7): a to-do whose copy EQUALS its communication's live root, a NON-secure project, stores the file in the to-do's OWN business-unit container — the non-secure half of AC4, through the real PUT route")]
+    public async Task Put_TodoFiledUnderACommunication_WithAFreshCopy_UnderANonSecureProject_StoresInItsBusinessUnitContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainCommunicationFreshCopy}/files/plain.docx",
+            new ByteArrayContent([16]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer,
+                "resolved exactly as a direct link to the non-secure project would be: the record's business-unit container "
+                + "(task 155 refused this shape with container_ancestor_unverifiable)");
+        _fixture.RestampQueue.Children.Should().BeEmpty("a fresh copy is not stale");
+    }
+
     [Fact(DisplayName = "Task 155: a to-do under a SECURE project with NO container is refused (409 secure_record_container_missing) and NOTHING reaches SPE")]
     public async Task Put_TodoUnderASecureProjectWithoutContainer_FailsClosed_AndWritesNothing()
     {
@@ -709,6 +724,8 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     public static readonly Guid EventUnderWorkAssignmentUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000009");
     public static readonly Guid EventUnderWorkAssignmentWithDanglingPair = Guid.Parse("15500000-0000-0000-0000-000000000011");
     public static readonly Guid TodoUnderCommunicationFreshCopy = Guid.Parse("15600000-0000-0000-0000-000000000015");
+    public static readonly Guid TodoUnderPlainCommunicationFreshCopy = Guid.Parse("15600000-0000-0000-0000-000000000016");
+    private static readonly Guid CommunicationUnderPlainProject = Guid.Parse("15600000-0000-0000-0000-000000000017");
 
     private static readonly Guid ProjectTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
     private static readonly Guid Agreement = Guid.Parse("15500000-0000-0000-0000-000000000010");
@@ -816,6 +833,19 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
                 ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", Communication),
                 ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject),
                 ["sprk_regardingrecordid"] = Communication.ToString()
+            },
+            // Task 156 verifier round 1 item 7: the NON-secure half of AC4 — a communication filed under the plain
+            // project, and a to-do filed under it whose copy equals that live root.
+            [("sprk_communication", CommunicationUnderPlainProject)] = new("sprk_communication", CommunicationUnderPlainProject)
+            {
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject)
+            },
+            [("sprk_todo", TodoUnderPlainCommunicationFreshCopy)] = new("sprk_todo", TodoUnderPlainCommunicationFreshCopy)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", CommunicationUnderPlainProject),
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject),
+                ["sprk_regardingrecordid"] = CommunicationUnderPlainProject.ToString()
             },
             [("sprk_todo", TodoUnderUnprovisionedSecureProject)] = new("sprk_todo", TodoUnderUnprovisionedSecureProject)
             {

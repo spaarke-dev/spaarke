@@ -59,6 +59,18 @@ public sealed class CoreAncestorRestamper
 
     internal const string LogPrefix = "[CORE-ANCESTOR-RESTAMP]";
 
+    /// <summary>
+    /// The page size used when listing one intermediate's children (<see cref="ChildPageSize"/>). Settable only so a test
+    /// can reach the <see cref="ChildrenPerSourceBound"/> truncation without thousands of rows.
+    /// </summary>
+    internal int ChildPageSizeInUse { get; init; } = ChildPageSize;
+
+    /// <summary>
+    /// The per-intermediate, per-table bound (<see cref="MaxChildrenPerSource"/>): past it the report is TRUNCATED, never a
+    /// silent prefix (task 156 escalation trigger 2's mitigation). Settable only for the same test.
+    /// </summary>
+    internal int ChildrenPerSourceBound { get; init; } = MaxChildrenPerSource;
+
     private readonly IGenericEntityService _entityService;
     private readonly CoreAncestorResolver _coreAncestors;
     private readonly ILogger<CoreAncestorRestamper> _logger;
@@ -107,11 +119,25 @@ public sealed class CoreAncestorRestamper
         {
             report.Merge(await RestampChildAsync(entity, recordId, ct).ConfigureAwait(false));
         }
+        else if (touchesRoot && CoreAncestorResolver.IsStampedChildEntity(entity))
+        {
+            // The write set this record's OWN root columns, and the record is one that can carry a COPY (an event, a
+            // communication, an analysis). When it is filed under another record, those columns are a copy of THAT
+            // record's root, not the writer's to set (a field-mapping push or a generic update writing
+            // sprk_regardingmatter on an event filed under a communication): re-derive the record from its source FIRST,
+            // so the cascade below carries the source's root to the children — never the hand-written value, which the
+            // reconciliation job would only revert (and cascade again) a cycle later. A record whose root columns are its
+            // own (a direct link, or filed under nothing) is skipped here and cascades its written value below; an
+            // orphan-shaped pair is not cleared on this path (the write may be the user's direct choice after a clear).
+            report.Merge(await RestampChildAsync(entity, recordId, ct, clearOrphans: false).ConfigureAwait(false));
+        }
 
-        if (touchesRoot && !report.ChangedRecords.Contains((entity, recordId)))
+        var selfFailed = report.Failures.Any(f => f.Entity == entity && f.Id == recordId);
+        if (touchesRoot && !report.ChangedRecords.Contains((entity, recordId)) && !selfFailed)
         {
             // The record's own stamp did not change (or it carries none), but its root columns were written directly —
-            // its children's copies may now be stale.
+            // its children's copies may now be stale. (When the record's own re-derivation FAILED, its root is not
+            // known to be its own, so nothing is cascaded from it: the failure is reported and the job repairs both.)
             report.Merge(await RestampChildrenOfAsync(entity, recordId, ct).ConfigureAwait(false));
         }
 
@@ -170,13 +196,20 @@ public sealed class CoreAncestorRestamper
     /// <remarks>
     /// <para>A child whose source column was CLEARED (task 051 F-051-6: a native form clear of
     /// <c>sprk_regardingcommunication</c>) keeps its old copy and its pair still names the old intermediate. When the
-    /// pair's TYPE says it named an intermediate that the row no longer carries, each stamp column that still EQUALS
-    /// that record's current root is an orphaned copy and is CLEARED — fail closed: the record stops inheriting the old
-    /// root's access. A stamp that does NOT match it may be a direct choice made after the clear, so it is left alone
-    /// and reported.</para>
+    /// pair names an intermediate this table can be filed under and the row no longer carries it — by its TYPE, or, when
+    /// the pair has no type (live: <c>sprk_recordtype_ref</c> has no row for a communication or an agreement, so the
+    /// client writes the pair id alone), by finding the pair's id among those intermediates
+    /// (<see cref="FindClearedSourceAsync"/>) — each stamp column that still EQUALS that record's current root is an
+    /// orphaned copy and is CLEARED — fail closed: the record stops inheriting the old root's access. A stamp that does
+    /// NOT match it may be a direct choice made after the clear, so it is left alone and reported.</para>
     /// <para>A missing child is not an error (it was deleted); an unreadable one is a failure in the report.</para>
     /// </remarks>
-    public async Task<RestampReport> RestampChildAsync(string childEntity, Guid childId, CancellationToken ct = default)
+    /// <param name="clearOrphans">
+    /// <see langword="false"/> on the after-write path for a record whose own root columns were just written: a row filed
+    /// under nothing is then taken at its word (the write may be the user's direct choice), and only the job clears orphans.
+    /// </param>
+    public async Task<RestampReport> RestampChildAsync(
+        string childEntity, Guid childId, CancellationToken ct = default, bool clearOrphans = true)
     {
         var report = new RestampReport();
         var entity = (childEntity ?? string.Empty).Trim().ToLowerInvariant();
@@ -238,13 +271,14 @@ public sealed class CoreAncestorRestamper
                     row, CoreAncestorResolver.CarriableRootTypes(decision.Source.Intermediate), root.Stamps, host);
                 break;
 
-            case StampSourceKind.NotFiledUnderAnIntermediate:
+            case StampSourceKind.NotFiledUnderAnIntermediate when clearOrphans:
                 fields = await PlanOrphanClearAsync(row, entity, host, report, ct).ConfigureAwait(false);
                 break;
 
             default:
-                // A direct link (the user chose the root), an ambiguous or an inconsistent row: nothing here is a copy
-                // this component may overwrite. The storage resolver refuses the ambiguous / inconsistent shapes.
+                // A direct link (the user chose the root), an ambiguous or an inconsistent row — or, on the after-write
+                // path (clearOrphans false), a row filed under nothing: nothing here is a copy this component may
+                // overwrite. The storage resolver refuses the ambiguous / inconsistent shapes.
                 report.Skipped++;
                 return report;
         }
@@ -325,7 +359,7 @@ public sealed class CoreAncestorRestamper
                     Conditions = { new ConditionExpression(column, ConditionOperator.Equal, intermediateId) },
                 },
                 Orders = { new OrderExpression(childTable + "id", OrderType.Ascending) },
-                PageInfo = new PagingInfo { Count = ChildPageSize, PageNumber = 1 },
+                PageInfo = new PagingInfo { Count = ChildPageSizeInUse, PageNumber = 1 },
             };
 
             var listed = 0;
@@ -378,13 +412,13 @@ public sealed class CoreAncestorRestamper
                     break;
                 }
 
-                if (listed >= MaxChildrenPerSource)
+                if (listed >= ChildrenPerSourceBound)
                 {
                     report.Truncated = true;
                     _logger.LogWarning(
                         "{Prefix} {Entity} {Id} has more than {Max} {Child} rows filed under it; the rest are left to the "
                         + "reconciliation job (the storage resolver refuses a stale copy meanwhile).",
-                        LogPrefix, intermediate, intermediateId, MaxChildrenPerSource, childTable);
+                        LogPrefix, intermediate, intermediateId, ChildrenPerSourceBound, childTable);
                     break;
                 }
 
@@ -436,51 +470,156 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
-    /// F-051-6: the row is filed under no intermediate, but its pair names one by TYPE — the typed source column was
-    /// cleared and the copy left behind. Clear each copy that still equals that intermediate's current root.
+    /// F-051-6: the row is filed under no intermediate, but its pair names one — the typed source column was cleared and
+    /// the copy left behind. Clear each copy that still equals that intermediate's current root.
     /// </summary>
     private async Task<Dictionary<string, object>?> PlanOrphanClearAsync(
         Entity row, string entity, IReadOnlySet<string> host, RestampReport report, CancellationToken ct)
     {
-        var raw = row.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn);
-        if (string.IsNullOrWhiteSpace(raw) || !Guid.TryParse(raw.Trim(), out var pairId) || pairId == Guid.Empty
-            || row.GetAttributeValue<EntityReference>(CoreAncestorResolver.RegardingRecordTypeColumn) is not { } typeRef
-            || typeRef.Id == Guid.Empty)
+        var cleared = await FindClearedSourceAsync(entity, row, recordTypes: null, ct).ConfigureAwait(false);
+        switch (cleared.Outcome)
         {
-            return null;
+            case ClearedSourceOutcome.Found:
+                break;
+
+            case ClearedSourceOutcome.Gone:
+                // The record the pair names no longer exists, so the copy cannot be shown to be its copy: left alone
+                // (interpretation xvi) — and counted, never a failure that repeats on every run.
+                report.Skipped++;
+                _logger.LogWarning(
+                    "{Prefix} {Entity} {Id}: its pair names {PairId}, which no intermediate holds any more; its stamp is left "
+                    + "alone (it cannot be shown to be a copy).", LogPrefix, entity, row.Id, cleared.PairId);
+                return null;
+
+            case ClearedSourceOutcome.Unreadable:
+                report.Fail(entity, row.Id, cleared.Error ?? "the record its pair names could not be read");
+                return null;
+
+            default:
+                return null;
         }
 
-        string? pairEntity;
-        try
-        {
-            var typeRow = await _entityService
-                .RetrieveAsync("sprk_recordtype_ref", typeRef.Id, ["sprk_recordlogicalname"], ct)
-                .ConfigureAwait(false);
-            pairEntity = typeRow?.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
-        }
-        catch (Exception ex) when (!IsCallerCancellation(ex, ct))
-        {
-            report.Fail(entity, row.Id, $"its regarding type could not be read: {ex.Message}");
-            return null;
-        }
-
-        // Only an intermediate THIS table can be filed under by a typed column counts: that column is now empty.
-        if (pairEntity is null
-            || !CoreAncestorResolver.StampSourceColumns[entity].Any(s =>
-                string.Equals(s.Intermediate, pairEntity, StringComparison.OrdinalIgnoreCase)))
-        {
-            return null;
-        }
-
-        var root = await _coreAncestors.ResolveStampsAsync(pairEntity, pairId, ct).ConfigureAwait(false);
+        var root = await _coreAncestors.ResolveStampsAsync(cleared.Intermediate!, cleared.PairId, ct).ConfigureAwait(false);
         if (!root.Succeeded)
         {
-            // Deleted or unreadable: the copy cannot be shown to be its copy, so it is left alone — and reported.
-            report.Fail(entity, row.Id, $"its cleared {pairEntity}'s root could not be derived: {root.Error}");
+            // Unreadable: the copy cannot be shown to be its copy, so it is left alone — and reported.
+            report.Fail(entity, row.Id, $"its cleared {cleared.Intermediate}'s root could not be derived: {root.Error}");
             return null;
         }
 
-        return PlanOrphanClear(row, root.Stamps, host, pairId);
+        return PlanOrphanClear(row, root.Stamps, host, cleared.PairId);
+    }
+
+    /// <summary>
+    /// For a row filed under NO intermediate (no typed source column set): which intermediate its pair still names — the
+    /// record whose source column was cleared (task 051 F-051-6) — or why there is none. The ONE lookup the restamper
+    /// and the reconciliation job share.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>No pair, a pair that is not a GUID, or a pair equal to a root or party lookup the row carries (a direct link,
+    /// or a person) → <see cref="ClearedSourceOutcome.NotAnOrphan"/>.</item>
+    /// <item>A TYPED pair → its <c>sprk_recordtype_ref</c> names the entity; only an intermediate THIS table is filed
+    /// under by a typed column counts (anything else is <see cref="ClearedSourceOutcome.NotAnOrphan"/>).</item>
+    /// <item>An UNTYPED pair — the live shape for a communication or an agreement, which have no
+    /// <c>sprk_recordtype_ref</c> row (spaarkedev1, read-only, 2026-10-02: 14 rows, neither among them), so the client
+    /// regarding writer sets the id alone — is looked for in each intermediate this table is filed under. Exactly one hit
+    /// is the cleared record; none is <see cref="ClearedSourceOutcome.Gone"/>; two is
+    /// <see cref="ClearedSourceOutcome.Unreadable"/> (never a guess).</item>
+    /// <item>The named record missing → <see cref="ClearedSourceOutcome.Gone"/>; unreadable →
+    /// <see cref="ClearedSourceOutcome.Unreadable"/>.</item>
+    /// </list>
+    /// A row that carries no pair at all (TaskActionCore's events and the live event <c>edfef460</c>) leaves no trace of
+    /// what was cleared and cannot be found here — see the task 156 note.
+    /// </remarks>
+    /// <param name="recordTypes">The <c>sprk_recordtype_ref</c> rows (id → logical name) when the caller already holds
+    /// them (the job); <see langword="null"/> reads the one row a typed pair names.</param>
+    internal async Task<ClearedSource> FindClearedSourceAsync(
+        string childEntity,
+        Entity row,
+        IReadOnlyDictionary<Guid, string>? recordTypes,
+        CancellationToken ct)
+    {
+        if (!CoreAncestorResolver.StampSourceColumns.TryGetValue(childEntity, out var sources))
+        {
+            return ClearedSource.NotAnOrphan;
+        }
+
+        var raw = row.GetAttributeValue<string>(CoreAncestorResolver.RegardingRecordIdColumn);
+        if (string.IsNullOrWhiteSpace(raw) || !Guid.TryParse(raw.Trim(), out var pairId) || pairId == Guid.Empty)
+        {
+            return ClearedSource.NotAnOrphan;
+        }
+
+        // The pair names something the row still carries: its direct root, or a person / organization.
+        var carried = CoreAncestorResolver.CoreAncestorLookups.Select(l => l.LookupAttribute)
+            .Concat(CoreAncestorResolver.PartyRegardingColumnNames(childEntity))
+            .Any(c => row.GetAttributeValue<EntityReference>(c)?.Id == pairId);
+        if (carried)
+        {
+            return ClearedSource.NotAnOrphan;
+        }
+
+        var intermediates = sources.Select(s => s.Intermediate).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        if (row.GetAttributeValue<EntityReference>(CoreAncestorResolver.RegardingRecordTypeColumn) is { } typeRef
+            && typeRef.Id != Guid.Empty)
+        {
+            string? pairEntity;
+            if (recordTypes is not null)
+            {
+                pairEntity = recordTypes.TryGetValue(typeRef.Id, out var known) ? known : null;
+            }
+            else
+            {
+                try
+                {
+                    var typeRow = await _entityService
+                        .RetrieveAsync("sprk_recordtype_ref", typeRef.Id, ["sprk_recordlogicalname"], ct)
+                        .ConfigureAwait(false);
+                    pairEntity = typeRow?.GetAttributeValue<string>("sprk_recordlogicalname")?.Trim().ToLowerInvariant();
+                }
+                catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+                {
+                    return ClearedSource.Unreadable(pairId, $"its regarding type could not be read: {ex.Message}");
+                }
+            }
+
+            // Only an intermediate THIS table can be filed under by a typed column counts: that column is now empty.
+            if (pairEntity is null || !intermediates.Contains(pairEntity, StringComparer.OrdinalIgnoreCase))
+            {
+                return ClearedSource.NotAnOrphan;
+            }
+
+            intermediates = [pairEntity];
+        }
+
+        var hits = new List<string>(1);
+        foreach (var intermediate in intermediates)
+        {
+            try
+            {
+                // Existence only (no columns): the root is derived afterwards by the one derivation.
+                await _entityService.RetrieveAsync(intermediate, pairId, [], ct).ConfigureAwait(false);
+                hits.Add(intermediate);
+            }
+            catch (Exception ex) when (Infrastructure.Dataverse.RecordContainerResolver.IsRecordNotFound(ex))
+            {
+                // Not this table.
+            }
+            catch (Exception ex) when (!IsCallerCancellation(ex, ct))
+            {
+                return ClearedSource.Unreadable(pairId, $"the {intermediate} its pair may name could not be read: {ex.Message}");
+            }
+        }
+
+        return hits.Count switch
+        {
+            0 => ClearedSource.Gone(pairId),
+            1 => ClearedSource.Found(hits[0], pairId),
+            _ => ClearedSource.Unreadable(pairId,
+                $"its pair id names a record in more than one table ({string.Join(", ", hits)}), so which one was cleared is not known"),
+        };
     }
 
     /// <summary>
@@ -664,3 +803,31 @@ public sealed class RestampReport
 
 /// <summary>One child (or one scan, when <see cref="Id"/> is empty) a re-stamp could not complete.</summary>
 public sealed record RestampFailure(string Entity, Guid Id, string Reason);
+
+/// <summary>What <see cref="CoreAncestorRestamper.FindClearedSourceAsync"/> found for a row filed under nothing.</summary>
+internal enum ClearedSourceOutcome
+{
+    /// <summary>The row's pair names no intermediate it could have been filed under: nothing was cleared.</summary>
+    NotAnOrphan,
+
+    /// <summary>The pair names <see cref="ClearedSource.Intermediate"/>, which exists: its typed column was cleared.</summary>
+    Found,
+
+    /// <summary>The pair names a record no intermediate table holds any more (deleted): nothing to compare the copy with.</summary>
+    Gone,
+
+    /// <summary>Whether (or which) record the pair names could not be read: not guessed.</summary>
+    Unreadable,
+}
+
+/// <summary>The outcome of <see cref="CoreAncestorRestamper.FindClearedSourceAsync"/>.</summary>
+internal sealed record ClearedSource(ClearedSourceOutcome Outcome, string? Intermediate, Guid PairId, string? Error)
+{
+    public static readonly ClearedSource NotAnOrphan = new(ClearedSourceOutcome.NotAnOrphan, null, Guid.Empty, null);
+
+    public static ClearedSource Found(string intermediate, Guid pairId) => new(ClearedSourceOutcome.Found, intermediate, pairId, null);
+
+    public static ClearedSource Gone(Guid pairId) => new(ClearedSourceOutcome.Gone, null, pairId, null);
+
+    public static ClearedSource Unreadable(Guid pairId, string error) => new(ClearedSourceOutcome.Unreadable, null, pairId, error);
+}

@@ -2142,9 +2142,11 @@ public class OfficeService : IOfficeService
         // Carrying regarding (FR-14, task 035) — the open Word document or the Outlook email being filed.
         // Independent of the record regarding above: both may be written to the same sprk_todo (constraint:
         // "Setting only one when both are available is a defect, not a graceful degradation"). Does NOT touch
-        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md)
-        // and does NOT run the core-ancestor stamp (the stamp is a property of the record regarding above,
-        // unchanged by this task — a document/communication carrier alone needs no stamp of its own).
+        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md).
+        // When a record regarding was chosen above, the stamp is that record's and a carrier adds none (the pair names
+        // the record: CoreAncestorResolver.ClassifyStampSource reads every carrier as a carrier). When NO record was
+        // chosen, a single carrier IS what the To Do is filed under (ClassifyStampSource rule 5) — so it is stamped
+        // from that carrier below (unified-access-control-r2 task 156, verifier round 1 item 8).
         if (request.DocumentId is { } documentId
             && documentId != Guid.Empty
             && TodoRegardingMap.TryGetValue("Document", out var docCarrier))
@@ -2157,6 +2159,32 @@ public class OfficeService : IOfficeService
             && TodoRegardingMap.TryGetValue("Communication", out var commCarrier))
         {
             entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
+        }
+
+        // Carrier-only To Do (no record regarding): stamp it from what it is filed under, so it is BORN with the copy the
+        // storage resolver compares and the reconciliation job keeps fresh. Before this, the carrier-only To Do was
+        // created with no copy, so its first upload answered 409 container_ancestor_stale until the re-stamp landed, and
+        // until then it inherited none of the carrier's project / matter / work assignment (C10 part 2: a child of a
+        // secure record is secure). The ONE classification rule decides: exactly one carrier → that record; a document
+        // AND an email with no record → AmbiguousSource → nothing is stamped (the storage resolver refuses it as
+        // ambiguous, and it inherits nothing — fail closed). Same fail-closed contract as the record regarding above.
+        if (!entity.Contains("sprk_regardingrecordid")
+            && Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.ClassifyStampSource(
+                    "sprk_todo", entity,
+                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.PartyRegardingColumnNames("sprk_todo"))
+                is { Kind: Sprk.Bff.Api.Services.Dataverse.StampSourceKind.Source, Source: { } carrierSource })
+        {
+            var carrierStamp = await _coreAncestors
+                .StampAsync(entity, carrierSource.Intermediate, carrierSource.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!carrierStamp.Succeeded)
+            {
+                _logger.LogError(
+                    "Create To Do aborted: core-ancestor derivation failed for its {CarrierType} {CarrierId}. {Error}",
+                    carrierSource.Intermediate, carrierSource.Id, carrierStamp.Error);
+                return null;
+            }
         }
 
         // Owner (task 080, write-path invariant I-6): a business unit's DEFAULT OWNER TEAM, never the app user and
