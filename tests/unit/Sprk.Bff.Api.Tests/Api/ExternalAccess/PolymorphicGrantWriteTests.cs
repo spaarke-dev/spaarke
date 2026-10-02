@@ -376,6 +376,138 @@ public class PolymorphicGrantWriteTests
     }
 
     // =========================================================================
+    // Task 138 — the ONE write-time grant-policy decision
+    // =========================================================================
+
+    private static readonly Guid PolicyRoot = Guid.Parse("13800000-0000-0000-0000-000000000138");
+
+    private static IReadOnlyDictionary<Guid, RootRecordFlags> FlagsOf(RootRecordFlags flags)
+        => new Dictionary<Guid, RootRecordFlags> { [PolicyRoot] = flags };
+
+    /// <summary>The grantee kind is internal, so theory data carries it as a bool (a public method cannot take it).</summary>
+    private static GrantGranteeKind KindOf(bool organizationGrant)
+        => organizationGrant ? GrantGranteeKind.Organization : GrantGranteeKind.Contact;
+
+    /// <summary>
+    /// The owner's matrix (round 2, 2026-09-30): Standard admits both grantee kinds; Secure and Limited admit only
+    /// named contacts; Restricted admits neither, and wins over Secure/Limited.
+    /// </summary>
+    [Theory]
+    //          secure restricted limited organization-grant  expected reason (null = allowed)
+    [InlineData(false, false, false, false, null)]
+    [InlineData(false, false, false, true, null)]
+    [InlineData(true, false, false, false, null)]
+    [InlineData(true, false, false, true, ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode)]
+    [InlineData(false, false, true, false, null)]
+    [InlineData(false, false, true, true, ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode)]
+    [InlineData(true, false, true, true, ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode)]
+    [InlineData(false, true, false, false, ExternalGrantLifecycle.RecordRestrictedReasonCode)]
+    [InlineData(false, true, false, true, ExternalGrantLifecycle.RecordRestrictedReasonCode)]
+    [InlineData(true, true, false, false, ExternalGrantLifecycle.RecordRestrictedReasonCode)]
+    [InlineData(true, true, true, true, ExternalGrantLifecycle.RecordRestrictedReasonCode)]
+    public void DecideGrantPolicy_FollowsTheOwnersMatrix(
+        bool secure, bool restricted, bool limited, bool organizationGrant, string? expectedReason)
+    {
+        var decision = ExternalGrantLifecycle.DecideGrantPolicy(
+            FlagsOf(new RootRecordFlags(secure, restricted, limited)), PolicyRoot, KindOf(organizationGrant));
+
+        decision.IsAllowed.Should().Be(expectedReason is null);
+        decision.ReasonCode.Should().Be(expectedReason);
+        if (expectedReason is not null)
+        {
+            decision.StatusCode.Should().Be(422, "a policy refusal is a 422, never a 500");
+            decision.Detail.Should().Contain("Nothing was granted");
+        }
+    }
+
+    /// <summary>
+    /// A fault is reported as itself. <see cref="RootRecordFlags.Unreadable"/> also carries IsRestricted, so the
+    /// unreadable marker must be checked FIRST — otherwise a fault reads as "the record is Restricted".
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DecideGrantPolicy_UnreadableFlags_ArePolicyUnreadable_NotRecordRestricted(bool organizationGrant)
+    {
+        var decision = ExternalGrantLifecycle.DecideGrantPolicy(
+            FlagsOf(RootRecordFlags.Unreadable), PolicyRoot, KindOf(organizationGrant));
+
+        decision.ReasonCode.Should().Be(ExternalGrantLifecycle.PolicyUnreadableReasonCode);
+        decision.StatusCode.Should().Be(503);
+    }
+
+    /// <summary>
+    /// ABSENT KEY = UNREADABLE at write time — the opposite of the read path's "no veto". The flag reader returns an
+    /// empty map for a non-flag-bearing entity type, so a wrong name must not silently allow everything.
+    /// </summary>
+    [Fact]
+    public void DecideGrantPolicy_RootIdAbsentFromTheFlagMap_IsPolicyUnreadable()
+    {
+        var decision = ExternalGrantLifecycle.DecideGrantPolicy(
+            new Dictionary<Guid, RootRecordFlags>(), PolicyRoot, GrantGranteeKind.Contact);
+
+        decision.IsAllowed.Should().BeFalse();
+        decision.ReasonCode.Should().Be(ExternalGrantLifecycle.PolicyUnreadableReasonCode);
+    }
+
+    /// <summary>
+    /// The table the absent-key rule depends on: every grant root type's LOGICAL name is a key of the flag
+    /// sources. If a key is renamed, or <see cref="ExternalGrantRoot.LogicalNameFor"/> drifts to an entity-set name,
+    /// this fails instead of every grant on that root type being refused as unreadable (or, under a copy of the
+    /// read path's TryGetValue shape, silently allowed).
+    /// </summary>
+    [Theory]
+    [InlineData(ExternalGrantRootType.Project, "sprk_project")]
+    [InlineData(ExternalGrantRootType.Matter, "sprk_matter")]
+    [InlineData(ExternalGrantRootType.WorkAssignment, "sprk_workassignment")]
+    public void EveryGrantRootType_MapsThroughItsLogicalName_ToAFlagBearingEntityType(
+        ExternalGrantRootType rootType, string expectedLogicalName)
+    {
+        var logicalName = ExternalGrantRoot.LogicalNameFor(rootType);
+
+        logicalName.Should().Be(expectedLogicalName);
+        ExternalParticipationService.IsFlagBearingRootType(logicalName).Should().BeTrue();
+        ExternalParticipationService.IsFlagBearingRootType(ExternalGrantRoot.BindFor(rootType).EntitySet)
+            .Should().BeFalse("an entity-set name is NOT a flag-source key — passing one reads nothing");
+    }
+
+    /// <summary>
+    /// Every value of the enum is covered by the table above — a fourth root type cannot be added without a flag
+    /// source (or without this failing).
+    /// </summary>
+    [Fact]
+    public void EveryGrantRootType_IsFlagBearing()
+    {
+        foreach (var rootType in Enum.GetValues<ExternalGrantRootType>())
+        {
+            ExternalParticipationService.IsFlagBearingRootType(ExternalGrantRoot.LogicalNameFor(rootType))
+                .Should().BeTrue("{0} grants are policy-checked through the flag reader", rootType);
+        }
+    }
+
+    /// <summary>
+    /// The column → flag mapping of one READ row. A null sprk_accesspermission is Standard (today's behaviour) and
+    /// a null sprk_issecure is not secure; neither is ever unreadable — the row WAS read.
+    /// </summary>
+    [Theory]
+    //          issecure  accesspermission  secure restricted limited
+    [InlineData(null, null, false, false, false)]
+    [InlineData(false, 100000000, false, false, false)]
+    [InlineData(false, 100000001, false, false, true)]
+    [InlineData(false, 100000002, false, true, false)]
+    [InlineData(true, null, true, false, false)]
+    [InlineData(true, 100000002, true, true, false)]
+    public void FlagsFrom_MapsTheRootColumns(
+        bool? isSecure, int? accessPermission, bool secure, bool restricted, bool limited)
+    {
+        var flags = ExternalParticipationService.FlagsFrom(isSecure, accessPermission);
+
+        flags.Should().Be(new RootRecordFlags(secure, restricted, limited));
+        flags.IsUnreadable.Should().BeFalse();
+        flags.IsDirectOnly.Should().Be(secure || limited);
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

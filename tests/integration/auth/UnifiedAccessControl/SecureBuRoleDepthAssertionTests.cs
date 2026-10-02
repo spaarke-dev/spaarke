@@ -4,6 +4,7 @@ using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
 using FluentAssertions;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -11,10 +12,15 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 
 /// <summary>
 /// The spec NFR-05 STANDING assertion: no security role lets a non-administrator human reach the
-/// secure-projects business unit, the secure owner team holds no humans, and the owner role has not
-/// escaped that team.
+/// Secure Record business unit, the business unit holds no users, its NAMED owner team resolves and has no members
+/// of any kind, and the owner role has not escaped that team (clauses retargeted by task 144, #967).
 /// </summary>
 /// <remarks>
+/// <para><b>Task 144 moved the evaluator into the BFF</b> (<see cref="SecureBuRoleDepthAssertion"/>,
+/// <see cref="SecureBuRoleDepthCensusBuilder"/>) so the read-only <c>SecureRecordIsolationCensusJob</c> runs the same
+/// census on a schedule (owner decision F2). These tests still own it: the perturbations prove every FAIL direction,
+/// and the live test is the manual NFR-05 gate.</para>
+///
 /// <para><b>Standing, not an audit.</b> Design §5.2's role-depth census was true on 2026-08-20 and had
 /// drifted before it was re-read. Every clause here is a configuration property one administrator can
 /// undo in one click, in an environment nobody is watching — which is exactly how the original hole
@@ -167,11 +173,9 @@ public class SecureBuRoleDepthAssertionTests
     [Fact]
     public void Evaluate_WhenTheSecureOwnerRoleIsBasicDepthOnTheOwnerTeam_Passes()
     {
-        var census = new SecureBuRoleDepthCensus(
-            BusinessUnits,
-            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record team", isHuman: false) },
-            new[] { new SecureOwnerRoleHolder("Secure Record", IsSecureOwnerTeam: true) },
-            Array.Empty<string>());
+        var census = Census(
+            grants: new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record Owners team", isHuman: false) },
+            holders: new[] { new SecureOwnerRoleHolder($"team '{OwnerTeamName}'", IsSecureOwnerTeam: true) });
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
 
@@ -186,15 +190,13 @@ public class SecureBuRoleDepthAssertionTests
     [Fact]
     public void Evaluate_WhenTheSecureOwnerRoleIsWidenedAndGivenToAHuman_ReportsBothViolations()
     {
-        var census = new SecureBuRoleDepthCensus(
-            BusinessUnits,
-            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Local, SecureBu, "Contract Paralegal", isHuman: true) },
-            new[]
+        var census = Census(
+            grants: new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Local, SecureBu, "Contract Paralegal", isHuman: true) },
+            holders: new[]
             {
-                new SecureOwnerRoleHolder("Secure Record", IsSecureOwnerTeam: true),
+                new SecureOwnerRoleHolder($"team '{OwnerTeamName}'", IsSecureOwnerTeam: true),
                 new SecureOwnerRoleHolder("Contract Paralegal", IsSecureOwnerTeam: false)
-            },
-            Array.Empty<string>());
+            });
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
 
@@ -206,23 +208,539 @@ public class SecureBuRoleDepthAssertionTests
     }
 
     /// <summary>
-    /// The owner team owns EVERY secure project, so one human member reads all of them by ownership —
+    /// The NAMED owner team owns EVERY secure record, so one member reads all of them by ownership —
     /// no depth is involved and narrowing the role would not relax it (design §5.1a). This clause is the
-    /// half of NFR-05 that the depth model structurally cannot see.
+    /// half of NFR-05 that the depth model structurally cannot see. Task 144: ANY member fails it, human or
+    /// application user — both are seeded, and each must be named.
     /// </summary>
     [Fact]
-    public void Evaluate_WhenTheSecureOwnerTeamHasAHumanMember_ReportsOwnerTeamHasHumanMembers()
+    public void Evaluate_WhenTheNamedOwnerTeamHasAnyMember_ReportsOwnerTeamHasMembers_NamingEach()
     {
-        var census = new SecureBuRoleDepthCensus(
-            BusinessUnits,
-            new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record team", isHuman: false) },
-            new[] { new SecureOwnerRoleHolder("Secure Record", IsSecureOwnerTeam: true) },
-            new[] { "Contract Paralegal" });
+        var census = Census(
+            grants: new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record Owners team", isHuman: false) },
+            holders: new[] { new SecureOwnerRoleHolder($"team '{OwnerTeamName}'", IsSecureOwnerTeam: true) },
+            members: new[] { "Contract Paralegal (human)", "# integration-app (application user)" });
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
 
-        outcome.Verdict.Should().Be(SecureBuVerdict.OwnerTeamHasHumanMembers);
-        outcome.Message.Should().Contain("Contract Paralegal");
+        outcome.Verdict.Should().Be(SecureBuVerdict.OwnerTeamHasMembers);
+        outcome.Message.Should().Contain("Contract Paralegal").And.Contain("# integration-app");
+    }
+
+    /// <summary>The other direction of clause 2: the same census with the team empty passes.</summary>
+    [Fact]
+    public void Evaluate_WhenTheNamedOwnerTeamIsEmpty_DoesNotReportMembers()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant(SecureBuRoleDepthAssertion.SecureOwnerRoleName, PrivilegeDepth.Basic, SecureBu, "Secure Record Owners team", isHuman: false) },
+            holders: new[] { new SecureOwnerRoleHolder($"team '{OwnerTeamName}'", IsSecureOwnerTeam: true) }));
+
+        outcome.Passed.Should().BeTrue(outcome.Message);
+    }
+
+    /// <summary>
+    /// Clause 2b (task 144): the named owner team must resolve to exactly one non-default Owner team. A census of a
+    /// team that does not exist would report "no members" vacuously — so a missing or duplicated team is itself a
+    /// failure, never a pass.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void Evaluate_WhenTheNamedOwnerTeamDoesNotResolveToExactlyOne_ReportsSecureOwnerTeamNotResolved(int matches)
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            matches: matches));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureOwnerTeamNotResolved);
+        outcome.Message.Should().Contain(OwnerTeamName).And.Contain($"has {matches} non-default");
+    }
+
+    /// <summary>The other direction of clause 2b: exactly one named team, no finding.</summary>
+    [Fact]
+    public void Evaluate_WhenTheNamedOwnerTeamResolvesToExactlyOne_DoesNotReportIt()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            matches: 1));
+
+        outcome.Findings.Select(f => f.Verdict).Should().NotContain(SecureBuVerdict.SecureOwnerTeamNotResolved);
+    }
+
+    /// <summary>
+    /// Clause 4 (task 144) — the no-user business unit. A user in the secure BU reads every secure record by
+    /// business-unit DEPTH whoever owns it, which a named team alone does not prevent. Any kind fails it: a disabled
+    /// user can be re-enabled and an application user reads by depth like anyone else — each is named.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenAnySystemUserSitsInTheSecureBusinessUnit_ReportsSecureBusinessUnitHasUsers_NamingEach()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            users: new[] { "Moved Attorney (human)", "Old Paralegal (disabled)", "# sync-app (application user)" }));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureBusinessUnitHasUsers);
+        outcome.Message.Should().Contain("Moved Attorney").And.Contain("Old Paralegal").And.Contain("# sync-app");
+    }
+
+    /// <summary>The other direction of clause 4: no user in the BU, no finding.</summary>
+    [Fact]
+    public void Evaluate_WhenTheSecureBusinessUnitHoldsNoUsers_DoesNotReportUsers()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) }));
+
+        outcome.Findings.Select(f => f.Verdict).Should().NotContain(SecureBuVerdict.SecureBusinessUnitHasUsers);
+        outcome.Passed.Should().BeTrue(outcome.Message);
+    }
+
+    /// <summary>
+    /// Clause 3, retargeted (task 144): the owner role on the business unit's DEFAULT team is a finding — it keeps the
+    /// retired owner a legal assignment target. The cutover in guide §4 ends with the role on the named team alone.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTheOwnerRoleIsStillOnTheDefaultTeam_ReportsSecureOwnerRoleHeldBeyondOwnerTeam()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            holders: new[]
+            {
+                new SecureOwnerRoleHolder($"team '{OwnerTeamName}'", IsSecureOwnerTeam: true),
+                new SecureOwnerRoleHolder("team 'Secure Record' (the business unit's DEFAULT team)", IsSecureOwnerTeam: false)
+            }));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam);
+        outcome.Message.Should().Contain("DEFAULT team");
+    }
+
+    /// <summary>
+    /// Two business units carry the configured Secure Record name (task 144, verifier round 2). The census around the
+    /// FIRST one is clean, so an evaluator that graded the first match would report isolated while the second — which
+    /// could hold users or be reached by depth — went unexamined. Provisioning, the resolver and registration refuse on
+    /// this ambiguity; the assertion must too: a finding naming both, never a pass and never inert.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTwoBusinessUnitsCarryTheSecureName_ReportsAmbiguous_NeverIsolated()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            businessUnits: BusinessUnits.Append(new BusinessUnitNode(SecondSecureNamedBu, "Secure Record", SiblingBu)).ToArray()));
+
+        outcome.Passed.Should().BeFalse("which business unit holds the secure records cannot be decided");
+        outcome.IsInert.Should().BeFalse("an ambiguous secure BU is an unknown isolation state, not an absent one");
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureBusinessUnitAmbiguous);
+        outcome.Message.Should().Contain(SecureBu.ToString()).And.Contain(SecondSecureNamedBu.ToString());
+    }
+
+    // ── The shared census builder (the job and the live gate compose through it) ─────────────────────
+
+    /// <summary>
+    /// The builder's half of the ambiguity rule: with two business units carrying the secure name it lists the users
+    /// of BOTH, not of whichever came first — the census over-reports rather than hiding the second unit.
+    /// </summary>
+    [Fact]
+    public void Build_WhenTwoBusinessUnitsCarryTheSecureName_ListsUsersInEachOfThem_NotJustTheFirst()
+    {
+        var userInSecond = Guid.NewGuid();
+        var someRole = Guid.NewGuid();
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits.Append(new BusinessUnitNode(SecondSecureNamedBu, "Secure Record", SiblingBu)).ToArray(),
+            new Dictionary<(Guid, string), PrivilegeDepth> { [(someRole, "prvReadsprk_Project")] = PrivilegeDepth.Basic },
+            new[] { new CensusRole(someRole, "Spaarke Basic User", RootBu, someRole) },
+            new[] { new CensusUser(userInSecond, "Second Unit User", "second@spaarke.com", IsHuman: true, SecondSecureNamedBu, new[] { someRole }) },
+            Array.Empty<CensusTeam>(),
+            SecureRecordOwnerRoleSet.Embedded,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+
+        census.SecureBusinessUnitUsers.Should().ContainSingle().Which.Should().Contain("Second Unit User");
+        SecureBuRoleDepthAssertion.Evaluate(census).Verdict.Should().Be(SecureBuVerdict.SecureBusinessUnitAmbiguous);
+    }
+
+    /// <summary>
+    /// The builder decides which team is THE owner team: the non-default Owner team with the configured name in the
+    /// secure BU. The default team holding the owner role is therefore a stray, every member of the named team is
+    /// counted whatever its kind, and every user in the BU is listed — enabled or disabled, human or application.
+    /// </summary>
+    [Fact]
+    public void Build_MarksOnlyTheNamedTeamAsTheOwner_AndCountsEveryMemberAndEveryBusinessUnitUser()
+    {
+        var ownerRole = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var defaultTeam = Guid.NewGuid();
+        var humanMember = Guid.NewGuid();
+        var appMember = Guid.NewGuid();
+        var disabledInBu = Guid.NewGuid();
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            new Dictionary<(Guid, string), PrivilegeDepth> { [(ownerRole, "prvReadsprk_Project")] = PrivilegeDepth.Basic },
+            new[] { new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole) },
+            new[]
+            {
+                new CensusUser(humanMember, "Member Human", "member@spaarke.com", IsHuman: true, SiblingBu, Array.Empty<Guid>()),
+                new CensusUser(appMember, "# member-app", null, IsHuman: false, RootBu, Array.Empty<Guid>()),
+                new CensusUser(disabledInBu, "Disabled In Bu", "old@spaarke.com", IsHuman: false, SecureBu, Array.Empty<Guid>())
+            },
+            new[]
+            {
+                new CensusTeam(defaultTeam, "Secure Record", SecureBu, IsDefault: true, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()),
+                new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, new[] { humanMember, appMember })
+            },
+            SecureRecordOwnerRoleSet.Embedded,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(SecureRecordOwnerRoleSet.Embedded));
+
+        census.SecureOwnerTeamMatches.Should().Be(1);
+        census.SecureOwnerRoleHolders.Should().ContainSingle(h => h.IsSecureOwnerTeam)
+            .Which.PrincipalName.Should().Contain(OwnerTeamName);
+        census.SecureOwnerRoleHolders.Should().ContainSingle(h => !h.IsSecureOwnerTeam)
+            .Which.PrincipalName.Should().Contain("DEFAULT");
+        census.SecureOwnerTeamMembers.Should().HaveCount(2, "an application-user member counts exactly like a human one");
+        census.SecureBusinessUnitUsers.Should().ContainSingle().Which.Should().Contain("Disabled In Bu");
+
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
+        outcome.Findings.Select(f => f.Verdict).Should().Contain(new[]
+        {
+            SecureBuVerdict.OwnerTeamHasMembers,
+            SecureBuVerdict.SecureBusinessUnitHasUsers,
+            SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam
+        });
+    }
+
+    /// <summary>
+    /// The work-assignment Read privilege is guarded (task 144): work assignments carry <c>sprk_issecure</c> and are
+    /// provisionable, so a role reaching the secure BU on them discloses secure work just as surely. The casing is the
+    /// schema name's, verified live — the census looks depths up by exact name.
+    /// </summary>
+    [Fact]
+    public void GuardedPrivileges_CoverEveryTableThatCarriesTheSecureFlag()
+    {
+        SecureBuRoleDepthAssertion.GuardedPrivileges.Should().BeEquivalentTo(
+            "prvReadsprk_Project", "prvReadsprk_Matter", "prvReadsprk_WorkAssignment");
+    }
+
+    // ── Clause 5 (task 145, #1046): the owner role covers the codified set ───────────────────────────
+
+    /// <summary>
+    /// THE clause-5 perturbation. The owner role holds Read at Basic on every codified table but one; Dataverse would
+    /// refuse every assignment of that table's rows to the owner team, so secure children of it fail closed. The census
+    /// must name the table and its privilege — and only that table.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTheOwnerRoleLacksOneCodifiedTable_ReportsItNamingTheTable()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            coverage: CoverageOfTheWholeSet(overrides: ("sprk_todo", null))));
+
+        outcome.Passed.Should().BeFalse("a secure To Do cannot be owned by the team");
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
+        outcome.Findings.Should().ContainSingle()
+            .Which.Message.Should().Contain("prvReadsprk_Todo").And.Contain("sprk_todo").And.Contain("FAILS CLOSED");
+    }
+
+    /// <summary>The other direction: every codified table at Basic on exactly one owner role passes clause 5.</summary>
+    [Fact]
+    public void Evaluate_WhenTheOwnerRoleCoversTheWholeSetAtBasic_DoesNotReportCoverage()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            coverage: CoverageOfTheWholeSet()));
+
+        outcome.Passed.Should().BeTrue(outcome.Message);
+    }
+
+    /// <summary>
+    /// A codified table held WIDER than Basic is a finding too, as <c>-Verify</c> treats it: the team's ownership would
+    /// reach further than it owns, and the depth model of clause 1 does not see it (the team is not a human).
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenTheOwnerRoleHoldsACodifiedTableWiderThanBasic_ReportsTheDepth()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            coverage: CoverageOfTheWholeSet(overrides: ("sprk_document", PrivilegeDepth.Local))));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
+        outcome.Message.Should().Contain("prvReadsprk_Document").And.Contain("Local");
+    }
+
+    /// <summary>
+    /// No owner role in the secure BU, or two, cannot be graded — a finding, never a pass. The script refuses the same
+    /// shapes ("exactly one role of the configured name lives in it").
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void Evaluate_WhenTheSecureBuDoesNotHoldExactlyOneOwnerRole_ReportsCoverageUngradeable(int ownerRoles)
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            coverage: CoverageOfTheWholeSet(ownerRoles)));
+
+        outcome.Findings.Should().ContainSingle()
+            .Which.Message.Should().Contain($"holds {ownerRoles} role(s) named");
+    }
+
+    /// <summary>An empty coverage list is a set that was never loaded — UNKNOWN, refused as a pass.</summary>
+    [Fact]
+    public void Evaluate_WhenTheCensusCarriesNoCodifiedTables_RefusesToPassClauseFive()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) },
+            coverage: new SecureOwnerRoleCoverage(1, Array.Empty<OwnerRoleTableCoverage>())));
+
+        outcome.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
+        outcome.Message.Should().Contain("UNKNOWN");
+    }
+
+    /// <summary>
+    /// The builder grades the owner role's ROOT copy in the secure BU against the set: a role holding Basic on every
+    /// codified privilege except the invoice one yields exactly one gap, naming <c>sprk_invoice</c>.
+    /// </summary>
+    [Fact]
+    public void Build_GradesTheOwnerRoleInTheSecureBuAgainstTheCodifiedSet()
+    {
+        var ownerRole = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var set = SecureRecordOwnerRoleSet.Embedded;
+        var depths = set.Tables
+            .Where(t => t.LogicalName != "sprk_invoice")
+            .ToDictionary(t => (ownerRole, t.PrivilegeName), _ => PrivilegeDepth.Basic);
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[] { new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole) },
+            Array.Empty<CensusUser>(),
+            new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            set,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set));
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(1);
+        census.OwnerRoleCoverage.InheritedFromRootRoleId.Should().BeNull("the role was created in the secure BU");
+        census.OwnerRoleCoverage.Tables.Should().HaveCount(set.Tables.Count);
+        census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => t.HeldDepth == null)
+            .Which.LogicalName.Should().Be("sprk_invoice");
+    }
+
+    /// <summary>
+    /// Only the owner role IN the secure BU is graded. A role carrying the same name in a sibling business unit — here
+    /// one that even covers the whole set — is a different role: counting it would make the secure BU look like it holds
+    /// two owner roles, and grading it would hide the secure role's real gap.
+    /// </summary>
+    [Fact]
+    public void Build_WhenASameNamedRoleLivesInASiblingBu_GradesOnlyTheSecureBuRole()
+    {
+        var ownerRole = Guid.NewGuid();
+        var siblingRole = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var set = SecureRecordOwnerRoleSet.Embedded;
+        var depths = set.Tables
+            .Where(t => t.LogicalName != "sprk_invoice")
+            .ToDictionary(t => (ownerRole, t.PrivilegeName), _ => PrivilegeDepth.Basic);
+        foreach (var table in set.Tables)
+        {
+            depths[(siblingRole, table.PrivilegeName)] = PrivilegeDepth.Basic;
+        }
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            depths,
+            new[]
+            {
+                new CensusRole(siblingRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SiblingBu, siblingRole),
+                new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole)
+            },
+            Array.Empty<CensusUser>(),
+            new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            set,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set));
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(1, "the sibling BU's role is not in the secure BU");
+        census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => t.HeldDepth == null)
+            .Which.LogicalName.Should().Be("sprk_invoice", "the SECURE BU's role is the one graded, and it lacks invoice");
+    }
+
+    /// <summary>
+    /// A <c>Secure Record Owner</c> role created in the ROOT business unit reaches the secure BU only as a replica (its
+    /// copy there has <c>roleid != parentrootroleid</c>). The script and the provisioning handler design refuse that
+    /// shape; the census must too — a finding naming the root role, even though the root copy covers the whole set.
+    /// </summary>
+    [Fact]
+    public void Build_WhenTheSecureBuRoleIsAReplicaOfAnAncestorRole_ReportsIt_AndDoesNotGradeIt()
+    {
+        var rootCopy = Guid.NewGuid();
+        var secureCopy = Guid.NewGuid();
+        var siblingCopy = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var set = SecureRecordOwnerRoleSet.Embedded;
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            set.Tables.ToDictionary(t => (rootCopy, t.PrivilegeName), _ => PrivilegeDepth.Basic),
+            new[]
+            {
+                new CensusRole(rootCopy, SecureBuRoleDepthAssertion.SecureOwnerRoleName, RootBu, rootCopy),
+                new CensusRole(secureCopy, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, rootCopy),
+                new CensusRole(siblingCopy, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SiblingBu, rootCopy)
+            },
+            Array.Empty<CensusUser>(),
+            new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { secureCopy }, Array.Empty<Guid>()) },
+            set,
+            SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(set));
+
+        census.OwnerRoleCoverage.OwnerRoleCount.Should().Be(1);
+        census.OwnerRoleCoverage.InheritedFromRootRoleId.Should().Be(rootCopy);
+
+        var finding = SecureBuRoleDepthAssertion.Evaluate(census with
+        {
+            Grants = new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) }
+        }).Findings.Should().ContainSingle().Subject;
+        finding.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
+        finding.Message.Should().Contain("REPLICA").And.Contain(rootCopy.ToString());
+    }
+
+    /// <summary>
+    /// Clause 5 fails CLOSED, so it must never headline a run in which someone can READ secure records. Seeded with a
+    /// clause-1 exposure and a clause-5 gap together, the headline is the exposure — the verdict the job heartbeat and
+    /// the live gate's summary line print.
+    /// </summary>
+    [Fact]
+    public void Evaluate_WhenAnExposureAndACodifiedGapCoexist_HeadlinesTheExposure()
+    {
+        var outcome = SecureBuRoleDepthAssertion.Evaluate(Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, RootBu, "Test User 1", isHuman: true) },
+            coverage: CoverageOfTheWholeSet(overrides: ("sprk_invoice", null))));
+
+        outcome.Findings.Select(f => f.Verdict).Should().BeEquivalentTo(new[]
+        {
+            SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit,
+            SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege
+        });
+        outcome.Verdict.Should().Be(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit);
+    }
+
+    /// <summary>
+    /// The same ranking against EVERY verdict that means exposure or an unknown isolation state: each outranks a clause-5
+    /// finding, whichever was enumerated first.
+    /// </summary>
+    [Theory]
+    [InlineData(SecureBuVerdict.HumanPrincipalReachesSecureBusinessUnit)]
+    [InlineData(SecureBuVerdict.SecureBusinessUnitHasUsers)]
+    [InlineData(SecureBuVerdict.OwnerTeamHasMembers)]
+    [InlineData(SecureBuVerdict.AdministrativeRoleHeldByTeam)]
+    [InlineData(SecureBuVerdict.SecureOwnerRoleHeldBeyondOwnerTeam)]
+    [InlineData(SecureBuVerdict.SecureOwnerTeamNotResolved)]
+    [InlineData(SecureBuVerdict.SecureBusinessUnitAmbiguous)]
+    public void Verdict_RanksACodifiedGapBelowEveryExposure(SecureBuVerdict exposure)
+    {
+        var outcome = new SecureBuAssertionOutcome(new[]
+        {
+            new SecureBuFinding(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege, "gap"),
+            new SecureBuFinding(exposure, "exposure")
+        });
+
+        outcome.Verdict.Should().Be(exposure);
+    }
+
+    /// <summary>
+    /// The ONE list's own invariants, read through the embedded copy every runner uses: it is for the role and BU this
+    /// assertion names, and it covers every root table that carries <c>sprk_issecure</c> — a set without one of them
+    /// would let provisioning's assignment of that root fail while clause 5 reported "covered".
+    /// </summary>
+    [Fact]
+    public void EmbeddedSet_IsForThisRoleAndBu_AndCoversEveryGuardedRootTable()
+    {
+        var set = SecureRecordOwnerRoleSet.Embedded;
+
+        set.RoleName.Should().Be(SecureBuRoleDepthAssertion.SecureOwnerRoleName);
+        set.BusinessUnitName.Should().Be(SecureRecordOwnerTeam.DefaultBusinessUnitName);
+        set.Tables.Where(t => t.Kind == "root").Select(t => t.PrivilegeName)
+            .Should().BeEquivalentTo(SecureBuRoleDepthAssertion.GuardedPrivileges);
+        set.Tables.Should().OnlyContain(t => t.Kind == "root" || t.Kind == "child");
+    }
+
+    /// <summary>
+    /// The C# reader refuses what the script refuses (justified beyond the task's test list: the census now PARSES the
+    /// file, and a parse that accepted a wider access type or an empty list would grade a widened role as covered).
+    /// </summary>
+    [Theory]
+    [InlineData("""{"schemaVersion":1,"roleName":"r","businessUnitName":"b","access":"Write","depth":"Basic","tables":[{"logicalName":"a","privilegeName":"p","reason":"x","evidence":"y"}]}""", "access 'Write'")]
+    [InlineData("""{"schemaVersion":1,"roleName":"r","businessUnitName":"b","access":"Read","depth":"Deep","tables":[{"logicalName":"a","privilegeName":"p","reason":"x","evidence":"y"}]}""", "depth 'Deep'")]
+    [InlineData("""{"schemaVersion":1,"roleName":"r","businessUnitName":"b","access":"Read","depth":"Basic","tables":[]}""", "lists no tables")]
+    [InlineData("""{"schemaVersion":1,"roleName":"r","businessUnitName":"b","access":"Read","depth":"Basic","tables":[{"logicalName":"a","privilegeName":"p","reason":"x","evidence":""}]}""", "has no 'evidence'")]
+    [InlineData("""{"schemaVersion":1,"roleName":"r","businessUnitName":"b","access":"Read","depth":"Basic","tables":[{"logicalName":"a","privilegeName":"p","reason":"x","evidence":"y"},{"logicalName":"a","privilegeName":"p","reason":"x","evidence":"y"}]}""", "twice")]
+    [InlineData("""{"schemaVersion":2,"roleName":"r","businessUnitName":"b","access":"Read","depth":"Basic","tables":[{"logicalName":"a","privilegeName":"p","reason":"x","evidence":"y"}]}""", "schemaVersion")]
+    public void Parse_RefusesWhatTheScriptRefuses(string json, string reason)
+    {
+        var act = () => SecureRecordOwnerRoleSet.Parse(json);
+
+        act.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain(reason);
+    }
+
+    /// <summary>
+    /// The guarded root-table Reads drive clause 1, so a census that did not resolve each of them EXACTLY stops — a
+    /// mis-cased or missing one would under-report reach. Extra rows (the codified set's privileges) are expected.
+    /// </summary>
+    [Fact]
+    public void RequireGuardedPrivilegesResolved_WhenAGuardedNameIsMisCasedOrMissing_Throws_AndPassesWithExtraRows()
+    {
+        var misCased = () => SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved(
+            new[] { "prvReadsprk_Project", "prvReadsprk_matter", "prvReadsprk_WorkAssignment" });
+        var missing = () => SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved(
+            new[] { "prvReadsprk_Project", "prvReadsprk_WorkAssignment" });
+        var withExtras = () => SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved(
+            SecureBuRoleDepthAssertion.GuardedPrivileges.Append("prvReadsprk_Todo").ToArray());
+
+        misCased.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("missing: prvReadsprk_Matter");
+        missing.Should().Throw<InvalidOperationException>().Which.Message.Should().Contain("missing: prvReadsprk_Matter");
+        withExtras.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// A codified privilege the environment does not have by that EXACT name (a table not installed there, a rename, a
+    /// mis-cased file entry) is a clause-5 finding naming it — never a throw, which would blind clauses 1-4 (the
+    /// exposure checks) on every run in that environment.
+    /// </summary>
+    [Fact]
+    public void Build_WhenACodifiedPrivilegeIsNotInTheEnvironment_ReportsItAsAFinding_NotAThrow()
+    {
+        var ownerRole = Guid.NewGuid();
+        var namedTeam = Guid.NewGuid();
+        var set = SecureRecordOwnerRoleSet.Embedded;
+        var present = set.Tables.Where(t => t.LogicalName != "sprk_memo").ToArray();
+
+        var census = SecureBuRoleDepthCensusBuilder.Build(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            BusinessUnits,
+            present.ToDictionary(t => (ownerRole, t.PrivilegeName), _ => PrivilegeDepth.Basic),
+            new[] { new CensusRole(ownerRole, SecureBuRoleDepthAssertion.SecureOwnerRoleName, SecureBu, ownerRole) },
+            Array.Empty<CensusUser>(),
+            new[] { new CensusTeam(namedTeam, OwnerTeamName, SecureBu, IsDefault: false, TeamType: 0, new[] { ownerRole }, Array.Empty<Guid>()) },
+            set,
+            present.Select(t => t.PrivilegeName).ToArray());
+
+        var gap = census.OwnerRoleCoverage.Tables.Should().ContainSingle(t => !t.ExistsInEnvironment).Subject;
+        gap.LogicalName.Should().Be("sprk_memo");
+
+        var finding = SecureBuRoleDepthAssertion.Evaluate(census with
+        {
+            Grants = new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, SiblingBu, "Test User 1", isHuman: true) }
+        }).Findings.Should().ContainSingle().Subject;
+        finding.Verdict.Should().Be(SecureBuVerdict.SecureOwnerRoleLacksCodifiedPrivilege);
+        finding.Message.Should().Contain("prvReadsprk_Memo").And.Contain("no privilege of exactly that name");
     }
 
     /// <summary>
@@ -285,15 +803,13 @@ public class SecureBuRoleDepthAssertionTests
     [Fact]
     public void Evaluate_WhenTheSecureBusinessUnitDoesNotExist_ReportsInertWithTheLoudWarning()
     {
-        var census = new SecureBuRoleDepthCensus(
-            new[]
+        var census = Census(
+            grants: new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, RootBu, "Test User 1", isHuman: true) },
+            businessUnits: new[]
             {
                 new BusinessUnitNode(RootBu, "Spaarke", null),
                 new BusinessUnitNode(SiblingBu, "Spaarke Business Unit 1", RootBu)
-            },
-            new[] { Grant("Spaarke Basic User", PrivilegeDepth.Deep, RootBu, "Test User 1", isHuman: true) },
-            Array.Empty<SecureOwnerRoleHolder>(),
-            Array.Empty<string>());
+            });
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
 
@@ -311,11 +827,7 @@ public class SecureBuRoleDepthAssertionTests
     [Fact]
     public void Evaluate_WhenTheCensusContainsNoGrantsAtAll_RefusesToRenderAVerdict()
     {
-        var census = new SecureBuRoleDepthCensus(
-            BusinessUnits,
-            Array.Empty<EffectiveGrant>(),
-            Array.Empty<SecureOwnerRoleHolder>(),
-            Array.Empty<string>());
+        var census = Census(grants: Array.Empty<EffectiveGrant>());
 
         var outcome = SecureBuRoleDepthAssertion.Evaluate(census);
 
@@ -415,7 +927,8 @@ public class SecureBuRoleDepthAssertionTests
     // ══════════════════════════════════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Reads the live role-depth census and asserts NFR-05's three clauses.
+    /// Reads the live role-depth census and asserts every NFR-05 clause, including task 145's clause 5 (the owner role
+    /// covers <c>config/secure-record-owner-role.json</c>).
     /// </summary>
     /// <remarks>
     /// <para><b>Failure modes are not symmetric here.</b> A query error is a FAILURE (the reader throws;
@@ -534,23 +1047,16 @@ public class SecureBuRoleDepthAssertionTests
                 OptionalGuidOf(row, "_parentbusinessunitid_value")))
             .ToArray();
 
-        var privilegeFilter = string.Join(
-            " or ",
-            SecureBuRoleDepthAssertion.GuardedPrivileges.Select(name => $"name eq '{name}'"));
+        // Clause 1's guarded Reads plus every privilege of the codified owner-role set (clause 5, task 145), read from
+        // the ONE list the BFF embeds — the same composition and the same exact-name check as the scheduled job.
+        var ownerRoleSet = SecureRecordOwnerRoleSet.Embedded;
+        var privilegeNames = SecureBuRoleDepthCensusBuilder.CensusPrivilegeNames(ownerRoleSet);
+        var privilegeFilter = string.Join(" or ", privilegeNames.Select(name => $"name eq '{name}'"));
 
         var privileges = (await GetAllAsync(http, $"privileges?$select=name,privilegeid&$filter={Uri.EscapeDataString(privilegeFilter)}"))
             .ToDictionary(row => GuidOf(row, "privilegeid"), row => Text(row, "name") ?? string.Empty);
 
-        if (privileges.Count != SecureBuRoleDepthAssertion.GuardedPrivileges.Count)
-        {
-            throw new InvalidOperationException(
-                "Expected to resolve "
-                + string.Join(" / ", SecureBuRoleDepthAssertion.GuardedPrivileges)
-                + $" but the environment returned {privileges.Count} privilege row(s): "
-                + string.Join(", ", privileges.Values)
-                + ". A missing privilege means the entity is absent or renamed; grading a partial census "
-                + "would under-report reach, so this fails instead.");
-        }
+        SecureBuRoleDepthCensusBuilder.RequireGuardedPrivilegesResolved(privileges.Values.ToArray());
 
         var depthFilter = string.Join(" or ", privileges.Keys.Select(id => $"privilegeid eq {id}"));
         var rolePrivileges = await GetAllAsync(
@@ -566,147 +1072,74 @@ public class SecureBuRoleDepthAssertionTests
         }
 
         var roles = (await GetAllAsync(http, "roles?$select=name,roleid,_businessunitid_value,_parentrootroleid_value"))
-            .Select(row => new RoleCopy(
+            .Select(row => new CensusRole(
                 GuidOf(row, "roleid"),
                 Text(row, "name") ?? string.Empty,
                 GuidOf(row, "_businessunitid_value"),
                 OptionalGuidOf(row, "_parentrootroleid_value") ?? GuidOf(row, "roleid")))
-            .ToDictionary(role => role.Id);
+            .ToArray();
 
+        // _businessunitid_value is read for clause 4 (task 144): every systemuser in the secure BU, of any kind.
         var users = (await GetAllAsync(
                 http,
-                "systemusers?$select=fullname,domainname,systemuserid,accessmode,applicationid,isdisabled"
+                "systemusers?$select=fullname,domainname,systemuserid,accessmode,applicationid,isdisabled,_businessunitid_value"
                 + "&$expand=systemuserroles_association($select=roleid)"))
             .Select(ReadUser)
-            .ToDictionary(user => user.Id);
+            .ToArray();
 
+        // teamtype is read so the builder can pick the NAMED Owner team, never an access team or the default team.
         var teams = (await GetAllAsync(
                 http,
-                "teams?$select=name,teamid,isdefault,_businessunitid_value"
+                "teams?$select=name,teamid,isdefault,teamtype,_businessunitid_value"
                 + "&$expand=teamroles_association($select=roleid),teammembership_association($select=systemuserid)"))
-            .Select(row => new TeamRow(
+            .Select(row => new CensusTeam(
                 GuidOf(row, "teamid"),
                 Text(row, "name") ?? string.Empty,
                 GuidOf(row, "_businessunitid_value"),
                 Flag(row, "isdefault"),
+                Number(row, "teamtype"),
                 Ids(row, "teamroles_association", "roleid"),
                 Ids(row, "teammembership_association", "systemuserid")))
             .ToArray();
 
-        var grants = new List<EffectiveGrant>();
-
-        foreach (var user in users.Values)
-        {
-            foreach (var roleId in user.RoleIds)
-            {
-                AddGrants(grants, roles, depthByRootRole, roleId, anchorOverride: null, user, heldViaTeam: null);
-            }
-        }
-
-        foreach (var team in teams)
-        {
-            foreach (var roleId in team.RoleIds)
-            {
-                foreach (var memberId in team.MemberIds)
-                {
-                    if (users.TryGetValue(memberId, out var member))
-                    {
-                        AddGrants(grants, roles, depthByRootRole, roleId, team.BusinessUnitId, member, team.Name);
-                    }
-                }
-            }
-        }
-
-        var secureBu = businessUnits.FirstOrDefault(
-            bu => SecureBuRoleDepthAssertion.SecureBusinessUnitNames.Any(
-                name => string.Equals(bu.Name, name, StringComparison.OrdinalIgnoreCase)));
-
-        var ownerRoleCopyIds = roles.Values
-            .Where(role => string.Equals(role.Name, SecureBuRoleDepthAssertion.SecureOwnerRoleName, StringComparison.OrdinalIgnoreCase))
-            .Select(role => role.Id)
-            .ToHashSet();
-
-        var ownerRoleHolders = new List<SecureOwnerRoleHolder>();
-        foreach (var user in users.Values.Where(u => u.RoleIds.Any(ownerRoleCopyIds.Contains)))
-        {
-            ownerRoleHolders.Add(new SecureOwnerRoleHolder($"user '{user.Name}' ({user.DomainName ?? "no domain"})", IsSecureOwnerTeam: false));
-        }
-
-        var ownerTeamHumanMembers = new List<string>();
-        foreach (var team in teams)
-        {
-            var isSecureOwnerTeam = secureBu is not null && team.IsDefault && team.BusinessUnitId == secureBu.Id;
-
-            if (team.RoleIds.Any(ownerRoleCopyIds.Contains))
-            {
-                ownerRoleHolders.Add(new SecureOwnerRoleHolder($"team '{team.Name}'", isSecureOwnerTeam));
-            }
-
-            if (isSecureOwnerTeam)
-            {
-                ownerTeamHumanMembers.AddRange(team.MemberIds
-                    .Where(id => users.TryGetValue(id, out var member) && member.IsHuman)
-                    .Select(id => $"{users[id].Name} ({users[id].DomainName ?? "no domain"})"));
-            }
-        }
-
-        return new SecureBuRoleDepthCensus(businessUnits, grants, ownerRoleHolders, ownerTeamHumanMembers);
+        // ONE composition, shared with the scheduled census job (task 144): anchors, team-held grants, who counts as
+        // human and which team is THE owner team are decided in the BFF's builder, not re-derived here.
+        return SecureBuRoleDepthCensusBuilder.Build(
+            Environment.GetEnvironmentVariable(SecureBuNameVariable) ?? SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            Environment.GetEnvironmentVariable(OwnerTeamNameVariable) ?? SecureRecordOwnerTeam.DefaultOwnerTeamName,
+            businessUnits,
+            depthByRootRole,
+            roles,
+            users,
+            teams,
+            ownerRoleSet,
+            privileges.Values.ToArray());
     }
 
-    private static void AddGrants(
-        List<EffectiveGrant> grants,
-        IReadOnlyDictionary<Guid, RoleCopy> roles,
-        IReadOnlyDictionary<(Guid RoleId, string Privilege), PrivilegeDepth> depthByRootRole,
-        Guid roleId,
-        Guid? anchorOverride,
-        UserRow principal,
-        string? heldViaTeam)
-    {
-        if (!roles.TryGetValue(roleId, out var role))
-        {
-            return;
-        }
+    /// <summary>Optional override of the Secure Record BU name for a live run (default: the compiled default).</summary>
+    public const string SecureBuNameVariable = "SPAARKE_NFR05_SECURE_BU_NAME";
 
-        foreach (var privilege in SecureBuRoleDepthAssertion.GuardedPrivileges)
-        {
-            if (!depthByRootRole.TryGetValue((role.RootRoleId, privilege), out var depth))
-            {
-                continue;
-            }
-
-            grants.Add(new EffectiveGrant(
-                role.Name,
-                privilege,
-                depth,
-                anchorOverride ?? role.BusinessUnitId,
-                principal.Name,
-                principal.DomainName,
-                principal.IsHuman,
-                heldViaTeam));
-        }
-    }
+    /// <summary>Optional override of the named owner team for a live run (default: the compiled default).</summary>
+    public const string OwnerTeamNameVariable = "SPAARKE_NFR05_SECURE_OWNER_TEAM_NAME";
 
     /// <summary>
-    /// A human principal: a real, enabled, interactive person. Everything else — application users,
-    /// Microsoft platform accounts (<c>#</c>-prefixed), support and non-interactive access modes,
-    /// disabled users — is the documented Global-read exception (design §5.2).
+    /// One systemuser row. Who counts as a human is the shared rule
+    /// (<see cref="SecureBuRoleDepthCensusBuilder.IsHumanPrincipal"/>), so the job and this gate cannot disagree.
     /// </summary>
-    private static UserRow ReadUser(JsonElement row)
+    private static CensusUser ReadUser(JsonElement row)
     {
         var name = Text(row, "fullname") ?? string.Empty;
-        var accessMode = Number(row, "accessmode");
 
-        var isHuman =
-            Text(row, "applicationid") is null
-            && !Flag(row, "isdisabled")
-            && !name.StartsWith('#')
-            && accessMode is not 3 and not 4; // 3 = Support User, 4 = Non-interactive.
-
-        return new UserRow(
+        return new CensusUser(
             GuidOf(row, "systemuserid"),
             name,
             Text(row, "domainname"),
-            isHuman,
+            SecureBuRoleDepthCensusBuilder.IsHumanPrincipal(
+                hasApplicationId: Text(row, "applicationid") is not null,
+                isDisabled: Flag(row, "isdisabled"),
+                fullName: name,
+                accessMode: Number(row, "accessmode")),
+            OptionalGuidOf(row, "_businessunitid_value"),
             Ids(row, "systemuserroles_association", "roleid"));
     }
 
@@ -720,8 +1153,13 @@ public class SecureBuRoleDepthAssertionTests
             + $"{census.Grants.Count} effective grant(s) of "
             + $"{string.Join(" / ", SecureBuRoleDepthAssertion.GuardedPrivileges)} ({humanGrants} held by "
             + $"humans), {census.SecureOwnerRoleHolders.Count} holder(s) of "
-            + $"'{SecureBuRoleDepthAssertion.SecureOwnerRoleName}', {census.SecureOwnerTeamHumanMembers.Count} "
-            + $"human member(s) of the secure owner team. Verdict: {outcome.Verdict}.")
+            + $"'{SecureBuRoleDepthAssertion.SecureOwnerRoleName}', {census.SecureOwnerTeamMatches} team(s) named "
+            + $"'{census.SecureOwnerTeamName}' with {census.SecureOwnerTeamMembers.Count} member(s) of any kind, "
+            + $"{census.SecureBusinessUnitUsers.Count} systemuser(s) in '{census.SecureBusinessUnitName}', "
+            + $"{census.OwnerRoleCoverage.OwnerRoleCount} owner role(s) in it covering "
+            + $"{census.OwnerRoleCoverage.Tables.Count(t => t.HeldDepth == PrivilegeDepth.Basic)} of "
+            + $"{census.OwnerRoleCoverage.Tables.Count} codified table(s) at Basic. "
+            + $"Verdict: {outcome.Verdict}.")
             + Environment.NewLine + outcome.Message;
     }
 
@@ -793,23 +1231,16 @@ public class SecureBuRoleDepthAssertionTests
                 .ToArray()
             : Array.Empty<Guid>();
 
-    private sealed record RoleCopy(Guid Id, string Name, Guid BusinessUnitId, Guid RootRoleId);
-
-    private sealed record UserRow(Guid Id, string Name, string? DomainName, bool IsHuman, IReadOnlyList<Guid> RoleIds);
-
-    private sealed record TeamRow(
-        Guid Id,
-        string Name,
-        Guid BusinessUnitId,
-        bool IsDefault,
-        IReadOnlyList<Guid> RoleIds,
-        IReadOnlyList<Guid> MemberIds);
-
     // ── Perturbation fixture: the live dev topology as of 2026-09-09 ──────────────────────────────
+
+    private const string OwnerTeamName = SecureRecordOwnerTeam.DefaultOwnerTeamName;
 
     private static readonly Guid RootBu = Guid.Parse("00000000-0000-0000-0000-0000000000a0");
     private static readonly Guid SecureBu = Guid.Parse("00000000-0000-0000-0000-0000000000b0");
     private static readonly Guid SiblingBu = Guid.Parse("00000000-0000-0000-0000-0000000000c0");
+
+    /// <summary>A second business unit that also carries the secure name — listed AFTER the real one.</summary>
+    private static readonly Guid SecondSecureNamedBu = Guid.Parse("00000000-0000-0000-0000-0000000000d0");
 
     /// <summary>Root, with the secure BU and an ordinary BU as siblings beneath it — the live dev shape.</summary>
     private static readonly BusinessUnitNode[] BusinessUnits =
@@ -819,8 +1250,46 @@ public class SecureBuRoleDepthAssertionTests
         new(SiblingBu, "Spaarke Business Unit 1", RootBu)
     };
 
-    private static SecureBuRoleDepthCensus CensusWith(params EffectiveGrant[] grants) =>
-        new(BusinessUnits, grants, Array.Empty<SecureOwnerRoleHolder>(), Array.Empty<string>());
+    /// <summary>
+    /// A census of the dev topology in which every task-144 clause holds (one named team, no members, no BU users),
+    /// so a test perturbs exactly the one property it is about.
+    /// </summary>
+    private static SecureBuRoleDepthCensus CensusWith(params EffectiveGrant[] grants) => Census(grants: grants);
+
+    private static SecureBuRoleDepthCensus Census(
+        IReadOnlyList<EffectiveGrant> grants,
+        IReadOnlyList<SecureOwnerRoleHolder>? holders = null,
+        int matches = 1,
+        IReadOnlyList<string>? members = null,
+        IReadOnlyList<string>? users = null,
+        IReadOnlyList<BusinessUnitNode>? businessUnits = null,
+        SecureOwnerRoleCoverage? coverage = null) =>
+        new(
+            SecureRecordOwnerTeam.DefaultBusinessUnitName,
+            OwnerTeamName,
+            businessUnits ?? BusinessUnits,
+            grants,
+            holders ?? Array.Empty<SecureOwnerRoleHolder>(),
+            matches,
+            members ?? Array.Empty<string>(),
+            users ?? Array.Empty<string>(),
+            coverage ?? CoverageOfTheWholeSet());
+
+    /// <summary>
+    /// One owner role covering every table of the codified set at Basic — task 145's steady state — with the depth of
+    /// any table named in <paramref name="overrides"/> replaced (null = the role lacks it). Built FROM the embedded set,
+    /// so the fixture never carries a second copy of the list.
+    /// </summary>
+    private static SecureOwnerRoleCoverage CoverageOfTheWholeSet(
+        int ownerRoles = 1, params (string LogicalName, PrivilegeDepth? Depth)[] overrides) =>
+        new(ownerRoles, SecureRecordOwnerRoleSet.Embedded.Tables
+            .Select(t => new OwnerRoleTableCoverage(
+                t.LogicalName,
+                t.PrivilegeName,
+                overrides.Any(o => o.LogicalName == t.LogicalName)
+                    ? overrides.First(o => o.LogicalName == t.LogicalName).Depth
+                    : PrivilegeDepth.Basic))
+            .ToArray());
 
     private static EffectiveGrant Grant(
         string roleName,

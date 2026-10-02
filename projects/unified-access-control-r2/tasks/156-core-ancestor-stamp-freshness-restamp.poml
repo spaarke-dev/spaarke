@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="156" project="unified-access-control-r2">
+  <metadata>
+    <title>Keep a child's core-ancestor stamp equal to its intermediate's root: re-stamp the children whenever the intermediate is re-filed (owner round 4 item 5 = option b), and let the upload resolver use the fresh stamp, failing closed on any mismatch</title>
+    <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
+    <gate>startable after 155 is merged (it replaces 155's held branch)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which project, matter or work assignment a child record counts as being under. That decides both its access (the stamp feeds access derivation) and where its file bytes are stored (task 155). An isolation surface.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security isolation across several write paths; a server-side cascade plus a reconciliation job; fail-closed decisions on an upload path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits CoreAncestorResolver, the re-parent write paths and RecordContainerResolver's held branch (task 155). Those overlap 146-148 (child ownership).</parallel-reason>
+    <deps>155</deps>
+    <tags>bff-api, security, dataverse, spe</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>Task 155 escalation trigger 2 (notes/task-155-child-record-container-resolution.md), owner decision 2026-10-01 round 4 item 5: "(b)". Owner directives: C10 part 2 (children of a secure record are secure); ADR-003 fail closed; R3/R4 (access changes take minutes, not hours); nothing knowingly deferred.</origin>
+  </metadata>
+
+  <prompt>When a record that other records hang off is moved to a different project, matter or work assignment, move the stamp on every record hanging off it in the same operation. Repair any stale stamp written outside the BFF within minutes. Then let the upload resolver trust a stamp only after confirming it, and refuse if the stamp and the live parent disagree.</prompt>
+
+  <role>SPAARKE platform developer: the Dataverse write path (CoreAncestorResolver, the re-parent paths) and SPE container resolution.</role>
+
+  <goal>A child record's core-ancestor stamp (`sprk_regarding{project|matter|workassignment}`, written by `CoreAncestorResolver`) always equals the root of the intermediate record it hangs off. Intermediates include communication, event, document, invoice, analysis, agreement, budget and report card, per task 155's live sweep.
+(1) EVERY BFF path that changes an intermediate's root re-stamps all of its stamped children in the same operation. If a child fails, the operation reports it and leaves the intermediate's change in place. The reconciliation job then repairs it.
+(2) A reconciliation job (ADR-036 `IScheduledJob`, every 5 minutes, per owner R3/R4) finds children whose stamp differs from their intermediate's current root and re-stamps them. This covers writes made outside the BFF (ADR-002 WP-5) and clears made on a form (task 051 F-051-6).
+(3) `RecordContainerResolver`'s held branch (`container_ancestor_unverifiable`, task 155) is replaced. For a child under an intermediate, the resolver reads the intermediate's live root once and compares it with the child's stamp.
+  - If they are equal, it resolves exactly like a direct root link.
+  - If they differ, it refuses with 409 `container_ancestor_stale` and enqueues the child for re-stamping.
+  - If the intermediate is unreadable, it refuses with 503.
+The Office "carrier" to-do is in scope: it has a direct user-chosen core link plus a document or communication regarding.
+  - If the carrier's live root equals the direct link, it resolves.
+  - If they differ and either root is secure, it refuses as ambiguous.
+  - If they differ and neither root is secure, it uses the direct link, because the user chose it.</goal>
+
+  <context>
+    <background>Task 155 found that a child's core stamp is a denormalized copy that nothing refreshes (notes/task-155-child-record-container-resolution.md, "Escalation trigger 2 FIRED"). Re-filing an intermediate, for example a communication moved from an ordinary matter A to a SECURE matter B, leaves its children reading "root A". A resolver that trusts that stamp sends the child's file bytes to a shared container, which is the #1038 leak class. The same stale copy also over-grants access (task 051 §1). 155 held the fail-closed position (c), refusing these uploads. The owner chose (b): re-stamp on re-file. Point (3) of the goal is the fail-closed guard for the window between a write made outside the BFF and the reconciliation job. It costs one read per upload of a child under an intermediate, and that read is what makes a stale stamp refuse instead of misfiling.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="read">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file role="read">projects/unified-access-control-r2/notes/task-155-child-record-container-resolution.md</file>
+      <file role="read">projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Fail closed (ADR-003). An unreadable intermediate, an unreadable stamp or a mismatch REFUSES. Never fall back to a business-unit or shared container for a child whose root cannot be confirmed.</constraint>
+    <constraint source="owner">No Dataverse plugins (ADR-002 / D-1). The cascade lives in the BFF write paths. The repair for writes outside the BFF is a BFF `IScheduledJob` registered via `AddScheduledJob&lt;&gt;` (ADR-036, ADR-052: BFF, schedule). There is no hand-rolled timer.</constraint>
+    <constraint source="owner">Freshness is minutes, not hours (round 3 R3/R4). The reconciliation job runs at most every 5 minutes.</constraint>
+    <constraint source="project">Re-stamping changes ONLY the core stamp columns of children whose stamp came from the re-filed intermediate. It never changes a child's DIRECT, user-chosen core link (the Office carrier shape) or its owner. Ownership is tasks 146-148.</constraint>
+    <constraint source="project">Reuse task 155's live column sweep (its note) for the intermediate and child list. Do not re-derive it from memory. Any lookup the sweep lists as an intermediate is in scope.</constraint>
+    <constraint source="project">ADR-038 test bans. Prove each new guard bites by seeding. Drive at least one REAL route end to end (the OBO record-keyed PUT, and the Office save) for the stale-stamp refusal and the fresh-stamp success.</constraint>
+    <constraint source="project">Live Dataverse: read-only checks during development. The live gate below is run by the main session after deployment (owner round 4 item 6 approves dev live steps).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory, from code (Grep) and task 155's sweep, every BFF path that sets or changes an intermediate's root lookup (communication re-file, IncomingAssociationResolver, event/document/invoice regarding updates, Office save, agreement/budget/report-card re-parent) and every child table stamped from each intermediate. Record the inventory in notes/task-156-stamp-freshness.md.</step>
+    <step order="2">Add the cascade: after an intermediate's root changes, re-stamp its children (query children by the intermediate lookup, PATCH only the stamp columns). Make it idempotent; report partial failures; never block the intermediate's own change on a child failure (the job repairs).</step>
+    <step order="3">Add the reconciliation IScheduledJob (5-minute cadence): find stamped children whose stamp differs from their intermediate's current root (bounded, paged queries per intermediate type), re-stamp them, log counts; a failed scan is a failed run (never "0 stale").</step>
+    <step order="4">Replace 155's held branch in RecordContainerResolver with the live-root comparison (goal point 3), including the carrier shape; add the `container_ancestor_stale` reason code; enqueue a re-stamp on mismatch.</step>
+    <step order="5">Tests per the criteria; update notes, the DATAVERSE-WRITE-PATH-ARCHITECTURE invariant registry row for the core stamp, and task 155's note (held position superseded).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Re-filing an intermediate through each BFF path in the inventory re-stamps every stamped child in the same operation (asserted on the PATCHes); a child's direct user-chosen core link is never changed.</criterion>
+    <criterion testable="true">A child PATCH failure during the cascade leaves the intermediate's change in place, reports the failure, and the reconciliation job repairs the child on its next run.</criterion>
+    <criterion testable="true">The reconciliation job finds and re-stamps a child made stale out-of-band; a second run changes nothing; a failed scan reports a failed run, never zero.</criterion>
+    <criterion testable="true">Upload to a child under an intermediate whose live root equals the stamp resolves exactly as a direct root link would (secure root → the root's own container; non-secure → BU container), through the real PUT route.</criterion>
+    <criterion testable="true">Negative: stamp ≠ intermediate's live root → 409 `container_ancestor_stale`, nothing written, re-stamp enqueued; unreadable intermediate → 503; neither resolves any container.</criterion>
+    <criterion testable="true">Office carrier to-do: carrier root = direct link → resolves; differs and either is secure → ambiguity refusal; differs and neither is secure → the direct link's container. Through the real Office save path.</criterion>
+    <criterion testable="true">Each new branch is proven to bite by seeding its removal; BFF unit + NetArchTest green.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev): re-file a communication from an ordinary matter to the secure test project through the BFF; confirm (read-only) its to-do children carry the new stamp and an upload to one lands in the secure project's container; then change one child's stamp out-of-band and confirm the job repairs it within one cycle.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A re-parent path cannot re-stamp in the same operation without a transaction Dataverse does not offer, and the gap would let an upload misfile (not merely refuse) — STOP and report; the live-root comparison must still refuse in that window.</trigger>
+    <trigger>An intermediate type has so many stamped children that the cascade cannot complete within a request (count them read-only first) — STOP and propose a bounded/queued cascade rather than silently truncating.</trigger>
+  </escalation>
+
+  <notes>Owner round 4 item 5 (2026-10-01) chose option (b) for task 155's escalation trigger 2. Point (3) of the goal is the fail-closed guard for the out-of-band window (ADR-003), not option (a) as the primary mechanism: (b) keeps stamps fresh (fixing the access over-grant too), the live comparison guarantees a stale stamp refuses instead of misfiling.</notes>
+</task>

@@ -64,7 +64,7 @@ Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs:17-19, 65, 153
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 
-The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 3 (`Infrastructure/ExternalAccess/ExternalParticipationService.cs:28-34`), 60s TTL — invalidated by the grant/revoke endpoints.
+The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
 
 ---
 
@@ -81,7 +81,7 @@ The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant
 | `FinanceAuthorizationFilter` | Finance module |
 | + 18 more | Various domains |
 
-NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter:85`, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
+NOT all filters call `AuthorizeAsync` (corrected 2026-08-20). The `oid` → `AuthorizationContext`/`OperationAccessPolicy` → `AuthorizationService.AuthorizeAsync()` → 403-with-deny-code pattern is followed by 4 filters (`DocumentAuthorizationFilter:79`, `EntityAccessFilter:154`, `FinanceAuthorizationFilter` — for its document checks; since unified-access-control-r2 task 130 its matter/project/vendor-organization checks use the entity-generic `AuthorizationService.GetCallerRecordAccessAsync` + `OperationAccessPolicy.HasRequiredRights`, invoice confirm also asks the caller's Create privilege on `sprk_invoice` through `CallerRecordAccessProbe` (OBO), and each finance/scorecard route declares exactly which id it authorizes, `OfficeDocumentAccessFilter:132`); 3 more route through `IAiAuthorizationService.AuthorizeAsync` instead (`AiAuthorizationFilter:83`, `AnalysisAuthorizationFilter:140`, `VisualizationAuthorizationFilter:106`). The remaining filters apply domain-specific checks (job ownership, webhook signatures, rate limits, tenant scoping, caller-principal resolution, record∈accessible-set, etc.) without going through `AuthorizationService`.
 
 ---
 
@@ -111,6 +111,34 @@ Actual level → effective-rights mapping per `Infrastructure/ExternalAccess/Cal
 | View Only | Read | n/a — NOT IMPLEMENTED (broker-only) |
 | Collaborate | Read + Create + Write | n/a — NOT IMPLEMENTED (broker-only) |
 | Full Access | Read + Create + Write + Delete | n/a — NOT IMPLEMENTED (broker-only) |
+
+---
+
+## The Grant Model — Who May Grant, and Up To What (task 139, owner decision 2026-09-30)
+
+**The gate is Write.** `DelegationRuleFilter` admits a caller to every `/api/v1/external-access/*` route (grant, invite, share, revoke, `/can-manage-access`) only when the caller holds **Write** on the record, evaluated as the caller over OBO (owner decision B-14, retained). Share is never consulted by the gate, and the record's Access Permission / Secure flags do not change it — they govern WHICH grant types apply, at write time (task 138).
+
+**Internal (POA) share levels** — `Services/Access/RecordShareLevels.cs`, the ONE level-to-rights table, in Dataverse's own `AccessRights` numbers:
+
+| Level | Rights | Stored mask | Legacy mask (read as this level) |
+|---|---|---|---|
+| View Only | Read | 1 | — |
+| Collaborate | Read, Write, Append, AppendTo, **Share** | 262167 | 23 |
+| Full Access | Collaborate + Delete | 327703 | 65559 |
+
+No level carries Assign. Collaborate and Full Access carry Share so a Write-holder can also use the model-driven app's own **Share** command (Dataverse's native sharing rule still stops a sharer handing out a right they lack). Colleagues named at secure provisioning receive exactly the creator's rights (the Collaborate level). Shares written before 2026-09-30 still read as their level; `scripts/Upgrade-LegacyRecordShareMasks.ps1` (operator-run, dry-run by default) upgrades them.
+
+**The grantor ceiling.** Every MANUAL grant is capped at the grantor's own level — `/grant` (contact and organization-wide), `/invite-and-grant`, and `/share-user`:
+
+- The handler re-probes the caller's rights as the caller (`CallerRecordAccessProbe`), never trusting the filter's earlier answer. A probe that throws → **500** `sdap.access.grant.caller_rights_unreadable` (`/share-user`: `sdap.access.user_share.read_failed`); nothing is written or onboarded.
+- `ExternalAccessLevels.GrantCeilingFor` maps the rights to a ceiling over Read / Write / Delete only: Full Access iff Read+Write+Delete; Collaborate iff Read+Write; View Only iff Read; otherwise none (→ **403** `sdap.access.grant.caller_cannot_grant`). Create, Append, AppendTo and Share are not consulted (RetrievePrincipalAccess need not report CreateAccess on an existing record).
+- A request above the ceiling is **narrowed, not refused**: written at the ceiling, and the response says so (`grantedAccessLevel`, `narrowed: true`). `/share-user` intersects right by right (Dataverse's own rule) and reports its existing `narrowed` flag.
+- **Never silently lower.** When the request was narrowed and the grantee already holds more (a higher active grant row, or share rights the narrowed mask lacks), the write is refused with **409** `sdap.access.grant.would_lower_existing` — the grant upsert updates levels in place and ModifyAccess replaces rights, so without this a "Full Access please" capped to Collaborate would lower someone else's Full Access grant. An explicit request for a lower level (not narrowed) is a deliberate downgrade and is applied.
+- **No Access list at write time.** A contact grantee on the record's No Access list — directly, through one of its active organizations, or (org-wide grant) the organization itself — is refused with **422** `sdap.access.grant.grantee_denied`, from the same veto code the read path uses (`IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync` → `ResolveDenyVetoAsync`). A deny-list fault refuses too (fail closed). The internal-user No Access list on `/share-user` is task 143's.
+
+**Where the checks live (WP-1).** The policy (task 138), ceiling, never-lower and No Access checks run inside the one grant-writing core, `GrantExternalAccessEndpoint.CreateGrantAsync`, which takes a REQUIRED `GrantCeiling`; `/invite-and-grant` runs the same `CheckGrantAsync` BEFORE onboarding (resolving an existing contact by email read-only), so a refusal leaves no Contact or CIAM account behind. The ArchTest `GrantCeilingGuardTests` pins that the core is the only writer of a grant's level and that every call supplies a ceiling. Assigned-To auto-grants (task 142) are uncapped Collaborate (owner rule 5) and supply their own named ceiling.
+
+**A secure record always keeps someone who can see it** (owner round 3, S5): `/unshare-user` refuses to remove the last enabled user whose share can read a secure record (**409** `sdap.access.user_share.last_reader_on_secure_record`).
 
 ---
 

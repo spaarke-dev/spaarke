@@ -142,6 +142,15 @@ public static class DocumentAssociationMap
             : null;
 
     /// <summary>
+    /// Every association spelling this table accepts — for the LOCKSTEP guard only
+    /// (<c>AssociationTypeLockstepTests</c> in <c>Sprk.Bff.Api.Tests</c>, unified-access-control-r2 task 151
+    /// review), which enumerates both this table and <c>EntityAccessFilter.EntitySetByType</c> to prove they
+    /// accept the same spellings and name the same entity. Internal (<c>InternalsVisibleTo</c>); production code
+    /// asks <see cref="ToLogicalName"/>.
+    /// </summary>
+    internal static IEnumerable<string> SupportedSpellings => LogicalNameByAlias.Keys;
+
+    /// <summary>
     /// Apply <paramref name="recordId"/> to the lookup matching <paramref name="entityTypeOrAlias"/>.
     /// </summary>
     /// <returns>
@@ -942,6 +951,13 @@ public class CreateEventRequest
 
     /// <summary>Regarding record name</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>
+    /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
+    /// owner decision S1: a BFF-created event is app-only, so its Created By is the application user and cannot say
+    /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
+    /// </summary>
+    public Guid? AssignedToContactId { get; set; }
 }
 
 /// <summary>

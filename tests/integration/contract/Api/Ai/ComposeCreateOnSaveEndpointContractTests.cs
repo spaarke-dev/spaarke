@@ -840,13 +840,21 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
     /// unwrap from the loose IDataverseService stub). The REAL registry + REAL RecordContainerResolver
     /// still run — only their externally-sourced answer is arranged, same as every other boundary.
     /// </summary>
+    /// <remarks>
+    /// Task 151: the cached value is now the org's entity CATALOG (every known logical name + the securable
+    /// subset) under a versioned key, written through the registry's own serializer so this seed cannot drift
+    /// from the format the registry reads. The known set is the seeded securable names plus the entities these
+    /// tests name — a real org always knows more entities than it can secure.
+    /// </remarks>
     private async Task SeedSecurableEntitiesAsync(params string[] entityLogicalNames)
     {
         using var scope = _fixture.Services.CreateScope();
         var cache = scope.ServiceProvider.GetRequiredService<IDistributedCache>();
         await cache.SetAsync(
             SecurableEntityRegistry.CacheKey,
-            JsonSerializer.SerializeToUtf8Bytes(entityLogicalNames));
+            SecurableEntityRegistry.SerializeCacheEntry(
+                knownEntities: entityLogicalNames.Concat(["sprk_matter", "sprk_document", "systemuser", "businessunit"]),
+                securableEntities: entityLogicalNames));
     }
 
     private Task<HttpResponseMessage> PostCreateOnSaveAsync(HttpClient client, string sessionId) =>

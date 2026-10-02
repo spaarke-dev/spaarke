@@ -1,7 +1,14 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Headers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using NSubstitute;
@@ -11,6 +18,8 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -274,6 +283,82 @@ public class RecordKeyedUploadAuthorizationTests
     }
 
     // ============================================================================================
+    // TASK 151 (#1038) — an ALIAS in the route authorizes and resolves the SAME record
+    // ============================================================================================
+
+    [Theory(DisplayName = "Task 151: an alias route value authorizes AND resolves the same record — no misleading 'no container' 409")]
+    [InlineData("project", "sprk_project", "sprk_projects")]
+    [InlineData("matter", "sprk_matter", "sprk_matters")]
+    public async Task AliasRouteValue_AuthorizesAndResolvesTheSameRecord_NonSecure(
+        string routeValue, string logicalName, string entitySet)
+    {
+        // The route hands ONE string to both halves: the filter (authorization key) and the handler's resolver
+        // call (container key). Before task 151 the filter mapped the alias and the resolver did not — it read
+        // "project" as not-securable, derived no container, and the handler answered "No storage container is
+        // configured" (409) for a record whose business-unit container was derivable.
+        var probe = new StubProbe(RequiredRights);
+        var handlerRan = false;
+
+        var gate = await Invoke(probe, routeValue, RecordId, () => handlerRan = true);
+
+        handlerRan.Should().BeTrue();
+        gate.Should().Be("handler-ran");
+        probe.LastEntitySet.Should().Be(entitySet);
+        probe.LastRecordId.Should().Be(RecordId);
+
+        var entityService = Substitute.For<IGenericEntityService>();
+        StubRecordRead(entityService, isSecure: false, ownContainerId: null, withOwningBusinessUnit: true, entity: logicalName);
+        StubBusinessUnitRead(entityService, BusinessUnitContainer);
+
+        var decision = await BuildResolver(entityService).ResolveForRecordAsync(routeValue, RecordId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback,
+            "Unresolved here is exactly the misleading 409 the handler returns");
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
+
+        // The container came from the record the filter authorized: same logical entity, same id.
+        await entityService.Received(1).RetrieveAsync(
+            logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory(DisplayName = "Task 151: an alias route value for a SECURE record resolves to its OWN container")]
+    [InlineData("project", "sprk_project")]
+    [InlineData("matter", "sprk_matter")]
+    public async Task AliasRouteValue_SecureRecord_ResolvesItsOwnContainer(string routeValue, string logicalName)
+    {
+        var entityService = Substitute.For<IGenericEntityService>();
+        StubRecordRead(entityService, isSecure: true, ownContainerId: OwnContainer, withOwningBusinessUnit: true, entity: logicalName);
+        StubBusinessUnitRead(entityService, BusinessUnitContainer);
+
+        var decision = await BuildResolver(entityService).ResolveForRecordAsync(routeValue, RecordId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(OwnContainer);
+    }
+
+    [Fact(DisplayName = "Task 151: an unknown route entity is DENIED by the filter, and the resolver REFUSES it rather than answering 'no container'")]
+    public async Task UnknownRouteEntity_IsDeniedByTheFilter_AndRefusedByTheResolver()
+    {
+        const string unknown = "sprk_projectt";
+
+        var probe = new StubProbe(RequiredRights);
+        var handlerRan = false;
+
+        var gate = await Invoke(probe, unknown, RecordId, () => handlerRan = true);
+
+        handlerRan.Should().BeFalse("an unknown entity is never uploaded");
+        await AssertForbidden(gate, "entity_type_not_authorizable");
+
+        // Defence in depth: should the name ever reach the resolver, it is a typed refusal — NOT the
+        // Unresolved outcome the handler renders as "No storage container is configured".
+        var entityService = Substitute.For<IGenericEntityService>();
+        var act = async () => await BuildResolver(entityService).ResolveForRecordAsync(unknown, RecordId);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.Code.Should().Be("container_entity_unknown");
+        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+    }
+
+    // ============================================================================================
     // MACHINERY
     // ============================================================================================
 
@@ -334,12 +419,20 @@ public class RecordKeyedUploadAuthorizationTests
     private static RecordContainerResolver BuildResolver(IGenericEntityService entityService)
     {
         var registry = Substitute.For<ISecurableEntityRegistry>();
-        var securable = new HashSet<string>(StringComparer.Ordinal) { MappedEntity };
+        var securable = new HashSet<string>(StringComparer.Ordinal) { MappedEntity, "sprk_project" };
+
+        // Task 151: the org's entities by LOGICAL name only, as the real registry knows them — so an alias that
+        // the resolver failed to map would be refused here, not silently answered.
+        var known = new HashSet<string>(StringComparer.Ordinal)
+        {
+            MappedEntity, "sprk_project", "sprk_workassignment", "sprk_invoice", "sprk_event", "sprk_todo",
+            "contact", UnmappedEntity
+        };
 
         registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(securable.Contains(call.Arg<string>().ToLowerInvariant())));
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), securable, known)));
 
         return new RecordContainerResolver(
             registry, entityService, NullLogger<RecordContainerResolver>.Instance);
@@ -349,9 +442,10 @@ public class RecordKeyedUploadAuthorizationTests
         IGenericEntityService entityService,
         bool isSecure,
         string? ownContainerId,
-        bool withOwningBusinessUnit)
+        bool withOwningBusinessUnit,
+        string entity = MappedEntity)
     {
-        var row = new Entity(MappedEntity, RecordId) { ["sprk_issecure"] = isSecure };
+        var row = new Entity(entity, RecordId) { ["sprk_issecure"] = isSecure };
 
         if (ownContainerId is not null)
         {
@@ -364,7 +458,7 @@ public class RecordKeyedUploadAuthorizationTests
         }
 
         entityService
-            .RetrieveAsync(MappedEntity, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .RetrieveAsync(entity, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(row));
     }
 
@@ -424,6 +518,393 @@ public class RecordKeyedUploadAuthorizationTests
             }
 
             return Task.FromResult(_rights);
+        }
+    }
+}
+
+/// <summary>
+/// unified-access-control-r2 task 155 (#1080) — the REAL record-keyed upload route, end to end: route →
+/// <see cref="RecordRouteAccessAuthorizationFilter"/> → handler → <see cref="RecordContainerResolver"/> → the drive the
+/// bytes reach. The task 151 verifier's test-shape gap was that the filter and the resolver had only ever been
+/// composed BY HAND in a test; nothing proved the mapped route wires them together. Only module boundaries are
+/// substituted: the caller-rights probe, Dataverse rows, the securable-entity registry, and the SPE facade's upload
+/// (which records the drive it was handed — the load-bearing assertion).
+/// </summary>
+public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedUploadRouteFixture>
+{
+    private readonly RecordKeyedUploadRouteFixture _fixture;
+
+    public RecordKeyedUploadRouteChildRecordTests(RecordKeyedUploadRouteFixture fixture)
+    {
+        _fixture = fixture;
+        _fixture.Uploads.Clear();
+    }
+
+    [Fact(DisplayName = "Task 155: PUT /api/obo/records/sprk_todo/{id}/files/… for a to-do under a SECURE project stores the file in the PROJECT's own container")]
+    public async Task Put_TodoUnderASecureProject_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/files/brief.docx",
+            new ByteArrayContent([1, 2, 3]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "a child of a secure record is secure — its bytes belong in the secure project's own container");
+    }
+
+    [Fact(DisplayName = "Task 155: the same route for a to-do under a NON-secure project stores the file in the to-do's OWN business-unit container — no 409")]
+    public async Task Put_TodoUnderANonSecureProject_StoresInItsBusinessUnitContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt",
+            new ByteArrayContent([4, 5, 6]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle().Which.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer);
+    }
+
+    [Fact(DisplayName = "Task 155: a to-do filed under ANOTHER child is refused (409 container_ancestor_unverifiable) and NOTHING reaches SPE")]
+    public async Task Put_TodoFiledUnderACommunication_IsRefused_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderCommunication}/files/notes.txt",
+            new ByteArrayContent([7]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(RecordContainerResolver.AncestorUnverifiableCode);
+        _fixture.Uploads.Should().BeEmpty("a refusal is only a refusal if no bytes moved");
+    }
+
+    [Fact(DisplayName = "Task 155: a to-do under a SECURE project with NO container is refused (409 secure_record_container_missing) and NOTHING reaches SPE")]
+    public async Task Put_TodoUnderASecureProjectWithoutContainer_FailsClosed_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderUnprovisionedSecureProject}/files/x.txt",
+            new ByteArrayContent([8]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("secure_record_container_missing");
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 155: a to-do whose own row (its ancestor LINK) cannot be read answers 503 container_ancestor_unresolved — not a generic 500 — and NOTHING reaches SPE")]
+    public async Task Put_TodoWhoseRowCannotBeRead_Answers503WithAReasonCode_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoWhoseRowCannotBeRead}/files/x.txt",
+            new ByteArrayContent([9]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        body.Should().Contain(RecordContainerResolver.AncestorUnresolvedCode);
+        body.Should().NotContain("Upload failed", "the route's catch-all 500 is for faults, not for a typed refusal");
+        body.Should().NotContain(RecordKeyedUploadRouteFixture.UnreadableRowFaultText,
+            "the raw fault text belongs in the log, not the response");
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 155 f3: PUT for a to-do linked to a SECURE project ONLY through the polymorphic regarding pair stores the file in the PROJECT's own container")]
+    public async Task Put_TodoLinkedOnlyByThePolymorphicPair_ToASecureProject_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoLinkedOnlyByPairToSecureProject}/files/pair.docx",
+            new ByteArrayContent([11]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "a row whose only link is the polymorphic pair is still that project's child");
+    }
+
+    [Fact(DisplayName = "Task 155 f3: PUT for an invoice regarding an AGREEMENT is refused (409 container_ancestor_unverifiable) and NOTHING reaches SPE")]
+    public async Task Put_InvoiceRegardingAnAgreement_IsRefused_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/invoice/{RecordKeyedUploadRouteFixture.InvoiceRegardingAgreement}/files/inv.pdf",
+            new ByteArrayContent([12]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        (await response.Content.ReadAsStringAsync()).Should().Contain(RecordContainerResolver.AncestorUnverifiableCode);
+        _fixture.Uploads.Should().BeEmpty("before f3 this resolved the shared business-unit container");
+    }
+
+    [Fact(DisplayName = "Task 155 f4: PUT for an event under a NON-secure work assignment that is itself filed under a SECURE project stores the file in the PROJECT's own container — the two-hop fail-open, through the real route")]
+    public async Task Put_EventUnderANonSecureWorkAssignment_UnderASecureProject_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/event/{RecordKeyedUploadRouteFixture.EventUnderWorkAssignmentUnderSecureProject}/files/w.docx",
+            new ByteArrayContent([13]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "before f4 the event read only the work assignment's own flag and took the shared BU container");
+    }
+
+    [Fact(DisplayName = "Task 155 f4: PUT for an event under a work assignment whose pair names a project that NO LONGER EXISTS is refused (409 container_ancestor_unresolved) and NOTHING reaches SPE — the live a30254d0 shape")]
+    public async Task Put_EventUnderAWorkAssignmentWithADanglingPair_IsRefused_AndWritesNothing()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/sprk_event/{RecordKeyedUploadRouteFixture.EventUnderWorkAssignmentWithDanglingPair}/files/x.txt",
+            new ByteArrayContent([14]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain(RecordContainerResolver.AncestorUnresolvedCode);
+        _fixture.Uploads.Should().BeEmpty("before f4 this resolved the shared business-unit container");
+    }
+
+    [Fact(DisplayName = "Task 155: an event with no ancestor whose business unit has NO container answers the documented 409 with precise copy, and NOTHING reaches SPE")]
+    public async Task Put_EventWithNoAncestor_AndABusinessUnitWithoutContainer_AnswersTheDocumented409()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/event/{RecordKeyedUploadRouteFixture.EventInBusinessUnitWithoutContainer}/files/x.txt",
+            new ByteArrayContent([10]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain("No storage container is configured");
+        body.Should().Contain("No SharePoint Embedded container could be derived for this record's business unit");
+        _fixture.Uploads.Should().BeEmpty();
+    }
+}
+
+/// <summary>Test host for <see cref="RecordKeyedUploadRouteChildRecordTests"/>. See that class.</summary>
+public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
+{
+    public const string SecureProjectContainer = "b!secure-project-own-container-000";
+    public const string BusinessUnitContainer = "b!todo-business-unit-container-000";
+
+    public static readonly Guid TodoUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000001");
+    public static readonly Guid TodoUnderPlainProject = Guid.Parse("15500000-0000-0000-0000-000000000002");
+    public static readonly Guid TodoUnderCommunication = Guid.Parse("15500000-0000-0000-0000-000000000003");
+    public static readonly Guid TodoUnderUnprovisionedSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000004");
+    public static readonly Guid TodoWhoseRowCannotBeRead = Guid.Parse("15500000-0000-0000-0000-000000000005");
+    public static readonly Guid EventInBusinessUnitWithoutContainer = Guid.Parse("15500000-0000-0000-0000-000000000006");
+    public static readonly Guid TodoLinkedOnlyByPairToSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000007");
+    public static readonly Guid InvoiceRegardingAgreement = Guid.Parse("15500000-0000-0000-0000-000000000008");
+
+    public static readonly Guid EventUnderWorkAssignmentUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000009");
+    public static readonly Guid EventUnderWorkAssignmentWithDanglingPair = Guid.Parse("15500000-0000-0000-0000-000000000011");
+
+    private static readonly Guid ProjectTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
+    private static readonly Guid Agreement = Guid.Parse("15500000-0000-0000-0000-000000000010");
+    private static readonly Guid WorkAssignmentUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000012");
+    private static readonly Guid WorkAssignmentWithDanglingPair = Guid.Parse("15500000-0000-0000-0000-000000000013");
+    private static readonly Guid DeletedProject = Guid.Parse("15500000-0000-0000-0000-000000000014");
+
+    public const string UnreadableRowFaultText = "Dataverse timed out reading the to-do";
+
+    private static readonly Guid BusinessUnitWithoutContainer = Guid.Parse("15500000-0000-0000-0000-00000000000f");
+
+    private static readonly Guid SecureProject = Guid.Parse("15500000-0000-0000-0000-00000000000a");
+    private static readonly Guid PlainProject = Guid.Parse("15500000-0000-0000-0000-00000000000b");
+    private static readonly Guid UnprovisionedSecureProject = Guid.Parse("15500000-0000-0000-0000-00000000000c");
+    private static readonly Guid Communication = Guid.Parse("15500000-0000-0000-0000-00000000000d");
+    private static readonly Guid BusinessUnit = Guid.Parse("15500000-0000-0000-0000-00000000000e");
+
+    /// <summary>Every drive id an upload reached, in order. Cleared by the test class constructor.</summary>
+    public ConcurrentQueue<string> Uploads { get; } = new();
+
+    public HttpClient Client()
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+        return client;
+    }
+
+    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        base.ConfigureWebHost(builder);
+
+        builder.ConfigureTestServices(services =>
+        {
+            // The caller may append to every record: authorization has its own suite above; placement is
+            // what this host tests.
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new GrantingProbe());
+
+            services.RemoveAll<ISecurableEntityRegistry>();
+            services.AddSingleton(BuildRegistry());
+
+            services.RemoveAll<IGenericEntityService>();
+            services.AddSingleton(BuildRows());
+
+            // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
+            services.RemoveAll<SpeFileStore>();
+            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads));
+        });
+    }
+
+    private static ISecurableEntityRegistry BuildRegistry()
+    {
+        var securable = new HashSet<string>(StringComparer.Ordinal) { "sprk_project", "sprk_matter", "sprk_workassignment" };
+        var known = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_todo", "sprk_event",
+            "sprk_invoice", "sprk_communication", "contact", "businessunit", "sprk_agreement", "sprk_recordtype_ref"
+        };
+
+        var registry = Substitute.For<ISecurableEntityRegistry>();
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), securable, known)));
+        registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlySet<string>>(securable));
+        return registry;
+    }
+
+    private static IGenericEntityService BuildRows()
+    {
+        var bu = new EntityReference("businessunit", BusinessUnit);
+        var rows = new Dictionary<(string, Guid), Entity>
+        {
+            [("sprk_todo", TodoUnderSecureProject)] = new("sprk_todo", TodoUnderSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject)
+            },
+            [("sprk_todo", TodoUnderPlainProject)] = new("sprk_todo", TodoUnderPlainProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject)
+            },
+            [("sprk_todo", TodoUnderCommunication)] = new("sprk_todo", TodoUnderCommunication)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", Communication),
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject)
+            },
+            [("sprk_todo", TodoUnderUnprovisionedSecureProject)] = new("sprk_todo", TodoUnderUnprovisionedSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", UnprovisionedSecureProject)
+            },
+            [("sprk_project", SecureProject)] = new("sprk_project", SecureProject)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = SecureProjectContainer
+            },
+            [("sprk_project", PlainProject)] = new("sprk_project", PlainProject) { ["sprk_issecure"] = false },
+            [("sprk_project", UnprovisionedSecureProject)] = new("sprk_project", UnprovisionedSecureProject)
+            {
+                ["sprk_issecure"] = true
+            },
+            [("businessunit", BusinessUnit)] = new("businessunit", BusinessUnit)
+            {
+                ["sprk_containerid"] = BusinessUnitContainer
+            },
+            [("sprk_event", EventInBusinessUnitWithoutContainer)] = new("sprk_event", EventInBusinessUnitWithoutContainer)
+            {
+                ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitWithoutContainer)
+            },
+            [("businessunit", BusinessUnitWithoutContainer)] = new("businessunit", BusinessUnitWithoutContainer),
+            // Task 155 f3: every typed regarding NULL, the polymorphic pair naming the SECURE project (live shape:
+            // a STRING id, upper-case, plus a sprk_recordtype_ref lookup).
+            [("sprk_todo", TodoLinkedOnlyByPairToSecureProject)] = new("sprk_todo", TodoLinkedOnlyByPairToSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingrecordid"] = SecureProject.ToString("D").ToUpperInvariant(),
+                ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectTypeRef)
+            },
+            [("sprk_recordtype_ref", ProjectTypeRef)] = new("sprk_recordtype_ref", ProjectTypeRef)
+            {
+                ["sprk_recordlogicalname"] = "sprk_project"
+            },
+            // Task 155 f3 item 1: an invoice regarding an agreement, typed matter/project NULL.
+            [("sprk_invoice", InvoiceRegardingAgreement)] = new("sprk_invoice", InvoiceRegardingAgreement)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingagreement"] = new EntityReference("sprk_agreement", Agreement)
+            },
+            // Task 155 f4: an event under a NON-secure work assignment whose own row regards the SECURE project.
+            [("sprk_event", EventUnderWorkAssignmentUnderSecureProject)] = new("sprk_event", EventUnderWorkAssignmentUnderSecureProject)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentUnderSecureProject)
+            },
+            [("sprk_workassignment", WorkAssignmentUnderSecureProject)] = new("sprk_workassignment", WorkAssignmentUnderSecureProject)
+            {
+                ["sprk_issecure"] = false,
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject)
+            },
+            // Task 155 f4: the live a30254d0 → 9c0254d0 shape — the work assignment's only link is a pair naming a
+            // record that was deleted (the pair is a STRING; nothing clears it).
+            [("sprk_event", EventUnderWorkAssignmentWithDanglingPair)] = new("sprk_event", EventUnderWorkAssignmentWithDanglingPair)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingworkassignment"] = new EntityReference("sprk_workassignment", WorkAssignmentWithDanglingPair)
+            },
+            [("sprk_workassignment", WorkAssignmentWithDanglingPair)] = new("sprk_workassignment", WorkAssignmentWithDanglingPair)
+            {
+                ["sprk_regardingrecordid"] = DeletedProject.ToString("D").ToUpperInvariant(),
+                ["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", ProjectTypeRef)
+            },
+        };
+
+        var service = Substitute.For<IGenericEntityService>();
+        service.RetrieveAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var key = (call.ArgAt<string>(0), call.ArgAt<Guid>(1));
+                if (key == ("sprk_todo", TodoWhoseRowCannotBeRead))
+                {
+                    throw new TimeoutException(UnreadableRowFaultText);
+                }
+
+                if (key == ("sprk_project", DeletedProject))
+                {
+                    // Dataverse 0x80040217 ObjectDoesNotExist — what a deleted record's id reads as.
+                    throw new System.ServiceModel.FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = -2147220969 },
+                        new System.ServiceModel.FaultReason("sprk_project does not exist"));
+                }
+
+                return rows.TryGetValue(key, out var row)
+                    ? Task.FromResult(row)
+                    : throw new InvalidOperationException($"Unmodelled read: {key.Item1} {key.Item2}");
+            });
+        return service;
+    }
+
+    private sealed class GrantingProbe : CallerRecordAccessProbe
+    {
+        public GrantingProbe()
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+        {
+        }
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+            => Task.FromResult(OperationAccessPolicy.GetRequiredRights(
+                RecordRouteAccessAuthorizationFilter.AssociateContentOperation));
+    }
+
+    private sealed class RecordingSpeFileStore : SpeFileStore
+    {
+        private readonly ConcurrentQueue<string> _uploads;
+
+        public RecordingSpeFileStore(IServiceProvider sp, ConcurrentQueue<string> uploads)
+            : base(sp.GetRequiredService<ContainerOperations>(),
+                   sp.GetRequiredService<DriveItemOperations>(),
+                   sp.GetRequiredService<UploadSessionManager>(),
+                   sp.GetRequiredService<UserOperations>())
+        {
+            _uploads = uploads;
+        }
+
+        public override Task<FileHandleDto?> UploadSmallAsUserAsync(
+            HttpContext ctx,
+            string containerId,
+            string path,
+            Stream content,
+            ConflictBehavior conflictBehavior,
+            CancellationToken ct = default)
+        {
+            _uploads.Enqueue(containerId);
+            var now = DateTimeOffset.UtcNow;
+            return Task.FromResult<FileHandleDto?>(new FileHandleDto(
+                "item-155", path, null, 3, now, now, null, false, null, containerId));
         }
     }
 }

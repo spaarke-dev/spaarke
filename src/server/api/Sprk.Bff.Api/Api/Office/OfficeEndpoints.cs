@@ -1621,13 +1621,16 @@ public static class OfficeEndpoints
     /// for sprk_matter per event-source-inventory §3A). Fire-and-forget
     /// per FR-2P2.6 + Q2: publisher never throws; mutation succeeds even
     /// if publish fails (nightly recon job task 085 is the backstop).
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler and observes the owner
+    /// event it publishes (UAC-r2 task 152 verifier round 1, item 7).
     /// </remarks>
-    private static async Task<IResult> QuickCreateAsync(
+    internal static async Task<IResult> QuickCreateAsync(
         string entityType,
         QuickCreateRequest request,
         IOfficeService officeService,
         IMembershipEventPublisher membershipEventPublisher,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1741,41 +1744,24 @@ public static class OfficeEndpoints
             // R3 task 081 — FR-2P2.6 + Q2 fire-and-forget membership event.
             // Per event-source-inventory.md §3A + §6.3, the QuickCreate
             // matter endpoint is the ONLY BFF-side write path for sprk_matter.
-            // ⚠️ CORRECTED 2026-09-30 (task 080): ownerid is NOT the caller — the create is app-only and the
-            // row is owned by the caller's business-unit default owner TEAM. The event records the caller
-            // as the creator-member (ADR-034's call, flagged to UAC-r2); publish an Added event for it
-            // so the junction-updater (task 084) + nightly recon (task 085)
-            // observe the new association in real time when the topic is
-            // provisioned and the publisher flag is on. When disabled
-            // (default Membership:EventPublisher:Enabled=false), the
-            // NullMembershipEventPublisher peer logs + returns immediately
-            // (ADR-032 P2). Publisher contract guarantees no exceptions
-            // propagate to this site — but discard the Task explicitly to
-            // signal the fire-and-forget semantics + avoid blocking the
-            // 201 Created response on Service Bus latency.
-            if (parsedEntityType == QuickCreateEntityType.Matter
-                && Guid.TryParse(userId, out var callerOid))
+            // UAC-r2 task 152 (ADR-034 A3): the event describes the row's REAL owner — the business-unit default
+            // owner TEAM RecordCreationService wrote (read back here; the service does not return it) — as
+            // PersonIdType=Team, PersonId=teamid: the key MembershipReconciliationJob builds for the same row. Before
+            // task 152 it carried the caller's AAD oid as a User under a comment claiming the junction updater
+            // resolves oid → systemuserid; it never did (it writes PersonId verbatim). When disabled (default
+            // Membership:EventPublisher:Enabled=false), the Null peer logs + returns (ADR-032 P2). Discarded Task =
+            // fire-and-forget; the 201 never waits on Service Bus.
+            if (parsedEntityType == QuickCreateEntityType.Matter)
             {
-                var membershipEvent = new MembershipChangedEvent
-                {
-                    // PersonId here is the AAD oid (object id) of the OBO
-                    // caller — Dataverse exposes this as
-                    // `systemuser.azureactivedirectoryobjectid`. Downstream
-                    // consumers (task 084 MembershipJunctionUpdater)
-                    // resolve oid → systemuserid via Dataverse lookup. The
-                    // PersonIdType is User to flag that resolution path.
-                    PersonId = callerOid,
-                    PersonIdType = PersonIdentityType.User,
-                    EntityLogicalName = "sprk_matter",
-                    EntityRecordId = response.Id,
-                    SourceField = "ownerid",
-                    Role = "owner",
-                    MutationType = MembershipMutationType.Added,
-                    CorrelationId = traceId,
-                    OccurredOnUtc = DateTime.UtcNow,
-                };
-
-                _ = membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
+                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                    membershipEventPublisher,
+                    genericEntityService,
+                    "sprk_matter",
+                    response.Id,
+                    knownOwner: null,
+                    traceId,
+                    logger,
+                    cancellationToken);
             }
 
             // Return 201 Created with location header

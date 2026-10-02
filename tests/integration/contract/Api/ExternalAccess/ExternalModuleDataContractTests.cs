@@ -180,10 +180,68 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
         {
             var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
             var errorCode = problem.TryGetProperty("errorCode", out var code) ? code.GetString() : null;
-            new[] { "DV_FETCHXML_LINK_ENTITY_NOT_PERMITTED", "DV_FETCHXML_ENTITY_MISMATCH", "DV_FETCHXML_MALFORMED" }
+            new[]
+                {
+                    "DV_FETCHXML_LINK_ENTITY_NOT_PERMITTED", "DV_FETCHXML_ENTITY_MISMATCH", "DV_FETCHXML_MALFORMED",
+                    "DV_FETCHXML_COLUMN_NOT_PERMITTED",
+                }
                 .Should().NotContain(errorCode,
-                    "a plain single-entity read of the module's own entity must pass the FetchXML guard");
+                    "a plain single-entity read of the module's own allow-listed column must pass the FetchXML guard");
         }
+    }
+
+    // ── Column scope (task 134 · defect C6) — wiring: the ENDPOINT consults the column allow-list ──
+    // Guard semantics (every position, alias, aggregate, ordering, fail-closed) are covered against the
+    // real guard in tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs.
+    // These two prove the production registration + route actually apply it over HTTP.
+
+    [Fact]
+    public async Task ModuleFetch_WhenFetchXmlSelectsAnSpePointerColumn_Returns400ColumnNotPermitted()
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        // C6 verbatim: a granted caller asks for the Graph item id on its in-scope documents. Before task
+        // 134 this executed app-only (field security bypassed) and returned the pointer.
+        var response = await client.PostAsJsonAsync(FetchPath, new
+        {
+            entityName = "sprk_document",
+            fetchXml = "<fetch><entity name=\"sprk_document\">" +
+                       "<attribute name=\"sprk_documentid\"/><attribute name=\"sprk_project\"/>" +
+                       "<attribute name=\"sprk_graphitemid\"/></entity></fetch>",
+            pagingCookie = (string?)null,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("errorCode").GetString().Should().Be("DV_FETCHXML_COLUMN_NOT_PERMITTED");
+    }
+
+    [Fact]
+    public async Task ModuleRecord_WhenSelectNamesANonReadableColumn_Returns400ColumnNotPermitted()
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        // C6's /record half: a granted ROOT record's container pointer via $select.
+        var response = await client.GetAsync(
+            $"/api/v1/external/api/dataverse/record/sprk_project/{ProjectA}?$select=sprk_projectname,sprk_containerid");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        problem.GetProperty("errorCode").GetString().Should().Be("DV_RECORD_COLUMN_NOT_PERMITTED");
+    }
+
+    [Fact]
+    public async Task ModuleRecord_WhenSelectIsReadable_PassesTheColumnCheckAndReachesTheRead()
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
+
+        // The fixture's IDataverseService double returns no entity, so a request that clears the column
+        // check AND the Tier-2 gate surfaces as 404 from the read itself. A column check that refused
+        // everything would answer 400 here instead.
+        var response = await client.GetAsync(
+            $"/api/v1/external/api/dataverse/record/sprk_project/{ProjectA}?$select=sprk_projectname");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     // ── Tier-2 record deny (NFR-08) — a non-participant caller is denied ─────────────────────────
@@ -210,5 +268,68 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
         var response = await client.GetAsync($"/api/v1/external/api/dataverse/record/sprk_project/{ProjectA}");
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    // ── Task 136 · defect C2 — a grant row with NO level confers nothing (owner 2026-09-30) ──────────────
+    //
+    // Matter and work-assignment grant rows with a null sprk_accesslevel (only writable outside the BFF) were
+    // kept as None-rights keys, and the module scope dimensions read the KEY views — so /fetch scoped rows to
+    // that matter's documents and invoices, and /record admitted it. The dimensions now read Read-gated views
+    // (task 136 does not touch the registry or ExternalAccessModule; they change through CallerPrincipal).
+
+    private static readonly Guid NullLevelMatter = Guid.Parse("4d000000-0000-0000-0000-000000000136");
+    private static readonly Guid NullLevelWorkAssignment = Guid.Parse("4e000000-0000-0000-0000-000000000136");
+    private static readonly Guid LevelledMatter = Guid.Parse("4d000000-0000-0000-0000-000000000137");
+
+    public static TheoryData<string> BothPlanes() => new() { "ciam", "workforce" };
+
+    [Theory]
+    [MemberData(nameof(BothPlanes))]
+    public async Task ModuleFetchAndRecord_MatterAndWorkAssignmentGrantRowsWithNoLevel_ConferNothing(string plane)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: Array.Empty<Guid>(),
+            workforce: plane == "workforce",
+            nullLevelMatters: new[] { NullLevelMatter },
+            nullLevelWorkAssignments: new[] { NullLevelWorkAssignment });
+
+        foreach (var (entity, column) in new[] { ("sprk_document", "sprk_documentid"), ("sprk_invoice", "sprk_invoiceid") })
+        {
+            var fetch = await client.PostAsJsonAsync(FetchPath, new
+            {
+                entityName = entity,
+                fetchXml = $"<fetch><entity name=\"{entity}\"><attribute name=\"{column}\"/></entity></fetch>",
+                pagingCookie = (string?)null,
+            });
+
+            // 200 with 0 rows WITHOUT a query: every scope dimension is empty. Had the null-level ids reached a
+            // dimension, the scoped query would have run — and, offline, failed rather than answered 200.
+            fetch.StatusCode.Should().Be(HttpStatusCode.OK, $"{plane}: {entity} fetch with an empty accessible set");
+            var body = await fetch.Content.ReadFromJsonAsync<JsonElement>();
+            body.GetProperty("entities").GetArrayLength().Should().Be(0,
+                $"{plane}: a level-less grant row scopes no {entity} rows to its matter / work assignment");
+        }
+
+        (await client.GetAsync($"/api/v1/external/api/dataverse/record/sprk_matter/{NullLevelMatter}"))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{plane}: no level = not granted (matter)");
+        (await client.GetAsync($"/api/v1/external/api/dataverse/record/sprk_workassignment/{NullLevelWorkAssignment}"))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{plane}: no level = not granted (work assignment)");
+    }
+
+    [Theory]
+    [MemberData(nameof(BothPlanes))]
+    public async Task ModuleRecord_MatterGrantRowWithALevel_PassesTheTier2Gate(string plane)
+    {
+        // Control for the test above: the same route admits a matter whose grant row carries a level, so the
+        // 403 there is the missing level and not a route that refuses every matter.
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: Array.Empty<Guid>(), workforce: plane == "workforce");
+        client.DefaultRequestHeaders.Add("X-Test-Matters", LevelledMatter.ToString());
+
+        var response = await client.GetAsync(
+            $"/api/v1/external/api/dataverse/record/sprk_matter/{LevelledMatter}?$select=sprk_mattername");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "past the Tier-2 gate the offline read finds nothing (404); a refusal would be 403");
     }
 }

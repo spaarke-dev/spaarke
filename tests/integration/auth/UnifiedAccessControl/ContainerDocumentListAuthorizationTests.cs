@@ -312,7 +312,7 @@ public class ContainerDocumentListAuthorizationTests
         var registry = Substitute.For<ISecurableEntityRegistry>();
 
         // Only GetSecurableEntitiesAsync is stubbed: the REVERSE direction is the only one this filter
-        // uses, and it never calls IsSecurableAsync. Stubbing that too would imply a dependency the code
+        // uses, and it never calls ClassifyEntityAsync. Stubbing that too would imply a dependency the code
         // under test does not have.
         registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<string>>(securable));

@@ -25,12 +25,16 @@ public class ExternalModuleRegistryTests
     private const string ProjectEntity = "sprk_project";
     private const string ProjectIdAttr = "sprk_projectid";
 
+    // Task 134: every descriptor must declare a column allow-list (registration refuses one without).
+    // These tests are about ROW scope, so each list is the minimum registration accepts.
     private static ExternalModuleDescriptor CollaborationModule() => new()
     {
         Name = "collaboration",
         RecordEntity = ProjectEntity,
         RecordIdAttribute = ProjectIdAttr,
         AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        PrimaryNameAttribute = "sprk_projectnumber",
+        ReadableColumns = new HashSet<string> { ProjectIdAttr, "sprk_projectnumber" },
     };
 
     private static CallerPrincipal Ciam(params Guid[] projects) => new()
@@ -106,6 +110,8 @@ public class ExternalModuleRegistryTests
             RecordEntity = "sprk_matter",
             RecordIdAttribute = "sprk_matterid",
             AccessibleRecordIds = _ => new HashSet<Guid>(),
+            PrimaryNameAttribute = "sprk_matternumber",
+            ReadableColumns = new HashSet<string> { "sprk_matterid", "sprk_matternumber" },
         });
 
         registry.Modules.Should().HaveCount(2);
@@ -135,8 +141,11 @@ public class ExternalModuleRegistryTests
             RecordEntity = ProjectEntity, // same entity → a Tier-2 predicate collision is a wiring bug
             RecordIdAttribute = ProjectIdAttr,
             AccessibleRecordIds = _ => new HashSet<Guid>(),
+            PrimaryNameAttribute = "sprk_projectnumber",
+            ReadableColumns = new HashSet<string> { ProjectIdAttr, "sprk_projectnumber" },
         });
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*already registered*", "the refusal must be the duplicate-entity one, not a column-list one");
     }
 
     // ── Tier-2 fetch-row scoping (NFR-08) ───────────────────────────────────────────────────────────
@@ -254,6 +263,11 @@ public class ExternalModuleRegistryTests
             new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
             new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
+        },
+        PrimaryNameAttribute = "sprk_documentname",
+        ReadableColumns = new HashSet<string>
+        {
+            "sprk_documentid", "sprk_documentname", "sprk_project", "sprk_matter", "sprk_workassignment",
         },
     };
 

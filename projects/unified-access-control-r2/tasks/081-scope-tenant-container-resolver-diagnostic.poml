@@ -124,7 +124,7 @@ allow-list must be satisfiable ONLY by a token no interactive user can hold. The
 
 And "positive" is load-bearing: do NOT infer app-only from the *absence* of `scp`/`oid`, because a
 malformed or unexpected token then classifies as a service principal. Absence ⇒ `Indeterminate` ⇒ deny.
-`IsOnBehalfOfFlow`'s `hasDelegatedScope && hasUserOid` shape is acceptable for logging (two-valued,
+`IsOnBehalfOfFlow`'s `hasDelegatedScope &amp;&amp; hasUserOid` shape is acceptable for logging (two-valued,
 biased toward "not OBO") and is NOT acceptable here — that bias points the wrong way for authorization.
 
 ## WHY THIS IS NOT THROWN AWAY BY THE UNIFIED EVALUATOR

@@ -37,7 +37,9 @@
 // Impersonation (FR-20) is deliberately excluded — its contract lives in
 // tests/integration/auth/ImpersonationNegativeCanaryTests.cs (task 034) against live Dataverse.
 
+using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
@@ -45,6 +47,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Seam.ExternalAccess;
@@ -165,6 +168,7 @@ public sealed class UnifiedEvaluatorSeamTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(recordId).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(recordId, "task 136: absent from the answer, not present with no rights");
         set.Contains(recordId).Should().BeFalse(
             "FR-21 denies EVERY contact principal regardless of grant strength — FullAccess included");
     }
@@ -299,6 +303,9 @@ public sealed class UnifiedEvaluatorSeamTests
 
         set.RightsFor(secureRecord).Should().Be(AccessRights.None,
             "a Type 1 user must not derive access to a secure record via their linked contact's org-inherited grant");
+        // Task 136 (C2): None alone is also what a present-but-powerless key reads as. Absence is the claim.
+        set.Contains(secureRecord).Should().BeFalse("no Read, so not in the set");
+        set.Rights.Should().NotContainKey(secureRecord, "absent from the answer, not present with no rights");
         set.Contains(membershipRecord).Should().BeTrue("the user's own ADR-034 membership is untouched");
 
         dataverse.Verify(
@@ -333,6 +340,8 @@ public sealed class UnifiedEvaluatorSeamTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(orgOnly).Should().Be(AccessRights.None, "a FullAccess ORG grant confers nothing on a secure record");
+        set.Contains(orgOnly).Should().BeFalse("task 136 (C2): no Read, so not in the set");
+        set.Rights.Should().NotContainKey(orgOnly, "absent from the answer, not present with no rights");
         set.RightsFor(direct).Should().Be(
             ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate),
             "a DIRECT personal grant survives Secure suppression (FR-22 survivor case)");
@@ -395,6 +404,7 @@ public sealed class UnifiedEvaluatorSeamTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(deniedRecord).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(deniedRecord, "task 136: absent from the answer, not present with no rights");
         set.Contains(deniedRecord).Should().BeFalse(
             "a contact-subject × record-object deny entry removes exactly that record — a FullAccess " +
             "grant plus a matching deny entry resolves to None, because the veto runs AFTER the max and " +
@@ -630,6 +640,7 @@ public sealed class UnifiedEvaluatorSeamTests
         set.RecordIds.Should().BeEquivalentTo(new[] { grantedRecord },
             "only the explicit grant survives — an unchosen level confers nothing");
         set.RightsFor(record).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(record, "task 136: absent from the answer, not present with no rights");
         set.Sources.StandingGrantMembership.Should().BeFalse("provenance must not claim a term that contributed nothing");
     }
 
@@ -706,8 +717,10 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.SetGrants(SingleGrant(ProjectEntity, grantedRecord, ExternalAccessLevel.FullAccess));
 
         var dataverse = BuildDataverse(contactHeld: false);
-        // Strict: with the junction read failed, activeOrgs.OrganizationIds is empty, so the org-expansion
-        // loop must never attempt a membership walk.
+        // Strict: with the junction read failed, activeOrgs.ConferringOrganizationIds is empty, so the
+        // org-expansion loop must never attempt a membership walk. (This double throws — the token/API-url
+        // fault. The QUERY-level fault, which the real read now reports as an outcome, is driven through a
+        // real transport in OrganizationMembershipReadTests, task 109.)
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
         var sut = BuildSut(dataverse, membership.Object, participations);
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
@@ -718,6 +731,750 @@ public sealed class UnifiedEvaluatorSeamTests
             "the SAME faulted junction read must deny every queried candidate on the deny-veto axis — " +
             "the two consumers fail in opposite, deliberate directions (NFR-01)");
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 135 (defect C1) — the CIAM plane. Every test below drives CiamContactPrincipalStrategy, the
+    // external SPA's real entry, over this suite's REAL evaluator, standing-grant reader and No Access
+    // reader, and asserts the CallerPrincipal it produces — the object every /api/v1/external handler
+    // authorizes on. Before task 135 that strategy built the principal from the grant rows alone, so none
+    // of FR-21/22/23 reached a ciamlogin.com token.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task Ciam_FR21_DirectFullAccessGrantOnARestrictedRoot_IsAbsentFromTheCiamPrincipal(string entityType)
+    {
+        var restricted = RootId(entityType, 1);
+        var open = RootId(entityType, 2);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(entityType, Direct(restricted, ExternalAccessLevel.FullAccess), Direct(open, ExternalAccessLevel.FullAccess)));
+        participations.Flags[restricted] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
+        var scope = ScopeOf(principal, entityType);
+
+        scope.Should().NotContainKey(restricted,
+            $"FR-21 on CIAM: a Restricted {entityType} admits NO contact-based access, an explicit FullAccess grant included");
+        scope.Should().ContainKey(open).WhoseValue.Should().Be(Rights(ExternalAccessLevel.FullAccess),
+            "control: the same grant on an unrestricted record is untouched");
+    }
+
+    [Theory]
+    [InlineData("contact x record")]
+    [InlineData("contact x organization")]
+    [InlineData("organization x record")]
+    [InlineData("organization x organization")]
+    public async Task Ciam_FR23_NoAccessEntryOfEachKeyShape_RemovesTheFullAccessRecordFromTheCiamPrincipal(string shape)
+    {
+        var denied = RootId(ProjectEntity, 11);
+        var open = RootId(ProjectEntity, 12);
+        var referencedOrg = Guid.Parse("20000000-0000-0000-0000-0000000000f1");
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(denied, ExternalAccessLevel.FullAccess), Direct(open, ExternalAccessLevel.FullAccess)));
+        participations.ActiveOrgIds.Add(OrgA);
+        participations.ReferencedOrgs[denied] = new[] { referencedOrg };
+
+        var denyReader = new SeamNoAccessListReader();
+        var (subject, row) = shape switch
+        {
+            "contact x record" => ($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), denied)),
+            "contact x organization" => ($"sprk_subjectcontact eq {ContactId}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
+            "organization x record" => ($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), denied)),
+            "organization x organization" => ($"sprk_subjectorganization eq {OrgA}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
+            _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, "Unknown key shape."),
+        };
+        denyReader.AddEntry(subject, row);
+
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations, denyReader));
+
+        principal.HasProjectAccess(denied).Should().BeFalse(
+            $"FR-23 on CIAM: a {shape} No Access entry vetoes the record after the max, FullAccess grant included");
+        principal.GetEffectiveRights(open).Should().Be(Rights(ExternalAccessLevel.FullAccess),
+            "control: the entry names only the denied record (or an organization only it references)");
+    }
+
+    [Fact]
+    public async Task Ciam_FR23_AContactByRecordEntryNamingOneContact_LeavesAnotherContactOfTheSameOrganizationUnaffected()
+    {
+        // Task 039's amended negative control: the veto is targeted, not a blanket deny of the organization.
+        var record = RootId(ProjectEntity, 13);
+        var colleague = Guid.Parse("44444444-0000-0000-0000-0000000000c2");
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(record, ExternalAccessLevel.FullAccess)));
+        participations.ActiveOrgIds.Add(OrgA); // both contacts belong to OrgA
+
+        var denyReader = new SeamNoAccessListReader();
+        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), record));
+        var evaluator = GrantOnlySut(participations, denyReader);
+
+        var named = await ResolveCiamAsync(evaluator);
+        named.HasProjectAccess(record).Should().BeFalse("precondition: the entry denies the contact it names");
+
+        var strategy = CiamStrategy(evaluator, colleague);
+        var resolution = await strategy.ResolveAsync(CiamRequest(), CancellationToken.None);
+
+        resolution.Principal!.ContactId.Should().Be(colleague);
+        resolution.Principal.GetEffectiveRights(record).Should().Be(Rights(ExternalAccessLevel.FullAccess),
+            "a contact-by-record entry binds the contact it names, not every member of that contact's organization");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task Ciam_FR22_OnASecureRoot_AnOrgOnlyGrantConfersNothing_AndDirectViewOnlyPlusOrgCollaborateIsExactlyRead(
+        string entityType)
+    {
+        var orgOnly = RootId(entityType, 21);
+        var mixed = RootId(entityType, 22);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType,
+            OrgOnly(orgOnly, ExternalAccessLevel.FullAccess),
+            new GrantRow(mixed, ExternalAccessLevel.Collaborate, ExternalAccessLevel.ViewOnly)));
+        participations.Flags[orgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[mixed] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
+        var scope = ScopeOf(principal, entityType);
+
+        RightsIn(scope, orgOnly).Should().Be(AccessRights.None,
+            "FR-22 on CIAM: on a Secure root an organization-inherited grant confers nothing");
+        scope.Should().NotContainKey(orgOnly,
+            "task 136 (C2): the record is ABSENT from the CIAM principal — before 136 a None-rights key remained " +
+            "here and every presence-gated read admitted it");
+        RightsIn(scope, mixed).Should().Be(AccessRights.Read,
+            "EXACTLY Read — suppression runs before the max, so the org Collaborate never enters it");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task Ciam_FR22_ADirectCollaborateGrantOnASecureRoot_ConfersCollaborate(string entityType)
+    {
+        var secure = RootId(entityType, 23);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(entityType, Direct(secure, ExternalAccessLevel.Collaborate)));
+        participations.Flags[secure] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
+
+        RightsIn(ScopeOf(principal, entityType), secure).Should().Be(Rights(ExternalAccessLevel.Collaborate),
+            "a named DIRECT grant is the one thing Secure keeps for a contact (owner round 2 item 3)");
+    }
+
+    [Fact]
+    public async Task Ciam_OwnerModel_StandingGrantAndOrgExpansionContributeNothing_WhileTheWorkforceContactPlaneKeepsThem()
+    {
+        var granted = RootId(ProjectEntity, 31);
+        var viaStanding = RootId(ProjectEntity, 32);
+        var viaOrganization = RootId(ProjectEntity, 33);
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveByContactAsync(ContactId, It.IsAny<string>(), ContactWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string entity, MembershipResolveOptions? _, CancellationToken _) =>
+                entity == ProjectEntity ? Response(entity, viaStanding) : Response(entity));
+        membership.Setup(m => m.ResolveByContactAsync(ContactId, It.IsAny<string>(), OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string entity, MembershipResolveOptions? _, CancellationToken _) =>
+                entity == ProjectEntity ? Response(entity, viaOrganization) : Response(entity));
+
+        // The contact AND its organization both hold a Full Access standing grant.
+        var dataverse = BuildDataverse(
+            contactHeld: true, contactBaseline: ExternalAccessLevel.FullAccess,
+            orgs: new Dictionary<Guid, (bool Held, ExternalAccessLevel? Baseline)> { [OrgA] = (true, ExternalAccessLevel.FullAccess) });
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(granted, ExternalAccessLevel.ViewOnly)));
+        participations.ActiveOrgIds.Add(OrgA);
+
+        var evaluator = BuildSut(dataverse, membership.Object, participations);
+
+        var ciam = await ResolveCiamAsync(evaluator);
+
+        ciam.GetAccessibleProjectIds().Should().BeEquivalentTo(new[] { granted },
+            "owner model (C9): a CIAM contact gets ONLY what it is granted — no standing-grant or " +
+            "organization-expansion membership");
+        ciam.MatterAccess.Should().BeEmpty();
+        ciam.WorkAssignmentAccess.Should().BeEmpty();
+        membership.Verify(
+            m => m.ResolveByContactAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "no derived-member walk runs on the CIAM plane");
+        dataverse.Verify(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "neither the contact's nor the organization's standing grant is even read on the CIAM plane");
+
+        // The one plane difference, owner-signed (A2, round 3): the SAME world on the workforce contact plane
+        // still derives both. This is what proves the world above COULD have widened CIAM.
+        var workforce = await ResolveWorkforceContactAsync(evaluator);
+        workforce.GetAccessibleProjectIds().Should().BeEquivalentTo(new[] { granted, viaStanding, viaOrganization },
+            "owner A2: standing grants and organization access stay, as they work today, on the workforce sign-in");
+    }
+
+    public static TheoryData<string> PlaneParityScenarios => new()
+    {
+        "organization grant on an open root",
+        "restricted",
+        "secure",
+        "limited",
+        "no access entry",
+    };
+
+    [Theory]
+    [MemberData(nameof(PlaneParityScenarios))]
+    public async Task PlaneParity_SameGrantsFlagsAndNoAccessEntries_CiamAndWorkforceContactPrincipalsCarryIdenticalRights(
+        string scenario)
+    {
+        var participations = new ParticipationWorld();
+        var denyReader = new SeamNoAccessListReader();
+
+        // The contact belongs to OrgA, but OrgA (and the contact) hold NO standing grant — so there is no
+        // derived-member data, and the workforce plane's derived terms have nothing to contribute.
+        participations.ActiveOrgIds.Add(OrgA);
+
+        var rows = new List<(string EntityType, GrantRow Row)>();
+        var expected = new Dictionary<string, Dictionary<Guid, AccessRights>>();
+        foreach (var entityType in new[] { ProjectEntity, MatterEntity, WorkAssignmentEntity })
+        {
+            var first = RootId(entityType, 41);
+            var second = RootId(entityType, 42);
+            var answer = new Dictionary<Guid, AccessRights>();
+
+            switch (scenario)
+            {
+                case "organization grant on an open root":
+                    rows.Add((entityType, OrgOnly(first, ExternalAccessLevel.Collaborate)));
+                    rows.Add((entityType, new GrantRow(second, ExternalAccessLevel.Collaborate, ExternalAccessLevel.ViewOnly)));
+                    answer[first] = Rights(ExternalAccessLevel.Collaborate);  // org access stays (A2) off Secure
+                    answer[second] = Rights(ExternalAccessLevel.Collaborate); // all-sources level off Secure
+                    break;
+                case "restricted":
+                    rows.Add((entityType, Direct(first, ExternalAccessLevel.FullAccess)));
+                    rows.Add((entityType, Direct(second, ExternalAccessLevel.Collaborate)));
+                    participations.Flags[first] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+                    answer[second] = Rights(ExternalAccessLevel.Collaborate);
+                    break;
+                case "secure":
+                    rows.Add((entityType, OrgOnly(first, ExternalAccessLevel.FullAccess)));
+                    rows.Add((entityType, new GrantRow(second, ExternalAccessLevel.Collaborate, ExternalAccessLevel.ViewOnly)));
+                    participations.Flags[first] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+                    participations.Flags[second] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+                    answer[second] = AccessRights.Read;
+                    break;
+                case "limited":
+                    // Task 138: the same shape as "secure", on a Limited non-secure root — one predicate.
+                    rows.Add((entityType, OrgOnly(first, ExternalAccessLevel.FullAccess)));
+                    rows.Add((entityType, new GrantRow(second, ExternalAccessLevel.Collaborate, ExternalAccessLevel.ViewOnly)));
+                    participations.Flags[first] = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true);
+                    participations.Flags[second] = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true);
+                    answer[second] = AccessRights.Read;
+                    break;
+                case "no access entry":
+                    rows.Add((entityType, Direct(first, ExternalAccessLevel.FullAccess)));
+                    rows.Add((entityType, Direct(second, ExternalAccessLevel.Collaborate)));
+                    denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), first));
+                    answer[second] = Rights(ExternalAccessLevel.Collaborate);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(scenario), scenario, "Unknown scenario.");
+            }
+
+            expected[entityType] = answer;
+        }
+
+        participations.SetGrants(GrantsAcross(rows));
+
+        // Strict + no setups: with no derived-member data, neither plane may walk membership.
+        var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var dataverse = BuildDataverse(
+            contactHeld: false,
+            orgs: new Dictionary<Guid, (bool Held, ExternalAccessLevel? Baseline)> { [OrgA] = (false, null) });
+        var evaluator = BuildSut(dataverse, membership.Object, participations, denyReader);
+
+        var ciam = await ResolveCiamAsync(evaluator);
+        var workforce = await ResolveWorkforceContactAsync(evaluator);
+
+        foreach (var entityType in new[] { ProjectEntity, MatterEntity, WorkAssignmentEntity })
+        {
+            ScopeOf(ciam, entityType).Should().BeEquivalentTo(ScopeOf(workforce, entityType),
+                $"one rule set for every contact sign-in: {scenario} on {entityType} must answer the same on CIAM " +
+                "as on the workforce contact plane");
+            // Exact, unfiltered (task 136): the answer carries no None-rights entry to filter out any more.
+            ScopeOf(ciam, entityType)
+                .Should().BeEquivalentTo(expected[entityType],
+                    $"…and the shared answer for {scenario} on {entityType} is the right one, not merely the same one");
+        }
+    }
+
+    public static TheoryData<string> CiamFaults => new()
+    {
+        "root-flag read non-success",
+        "No Access list reader throws",
+        "subject organizations unreadable",
+    };
+
+    [Theory]
+    [MemberData(nameof(CiamFaults))]
+    public async Task Ciam_FailClosed_EachFault_RemovesEveryCandidateFromTheCiamPrincipal(string fault)
+    {
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsAcross(new[]
+        {
+            (ProjectEntity, Direct(RootId(ProjectEntity, 51), ExternalAccessLevel.FullAccess)),
+            (MatterEntity, Direct(RootId(MatterEntity, 51), ExternalAccessLevel.FullAccess)),
+            (WorkAssignmentEntity, Direct(RootId(WorkAssignmentEntity, 51), ExternalAccessLevel.FullAccess)),
+        }));
+        var denyReader = new SeamNoAccessListReader();
+        var evaluator = GrantOnlySut(participations, denyReader);
+
+        var healthy = await ResolveCiamAsync(evaluator);
+        healthy.ProjectAccess.Should().NotBeEmpty("control: the healthy world grants a project");
+        healthy.MatterAccess.Should().NotBeEmpty("control: …a matter");
+        healthy.WorkAssignmentAccess.Should().NotBeEmpty("control: …and a work assignment");
+
+        switch (fault)
+        {
+            // What the REAL flag read returns for a non-success status (task 037): every id Unreadable.
+            case "root-flag read non-success": participations.FlagsUnreadable = true; break;
+            // The REAL NoAccessListReader catches its query fault and fails closed (task 038).
+            case "No Access list reader throws": denyReader.Throws = true; break;
+            // What the REAL junction query returns for a non-success status since task 109 (#998).
+            case "subject organizations unreadable": participations.JunctionUnreadable = true; break;
+            default: throw new ArgumentOutOfRangeException(nameof(fault), fault, "Unknown fault.");
+        }
+
+        var faulted = await ResolveCiamAsync(evaluator);
+
+        faulted.ProjectAccess.Should().BeEmpty($"{fault}: fail closed on the CIAM plane — never the grants-only answer");
+        faulted.MatterAccess.Should().BeEmpty($"{fault}: fail closed on matters too");
+        faulted.WorkAssignmentAccess.Should().BeEmpty($"{fault}: fail closed on work assignments too");
+    }
+
+    [Fact]
+    public async Task Ciam_FailClosed_RootFlagReadThrows_TheCallerIsNotResolved_NeverTheGrantsOnlyAnswer()
+    {
+        var participations = new ParticipationWorld { ThrowOnFlagRead = true };
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(RootId(ProjectEntity, 52), ExternalAccessLevel.FullAccess)));
+
+        var strategy = CiamStrategy(GrantOnlySut(participations), ContactId);
+
+        var act = () => strategy.ResolveAsync(CiamRequest(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "a fault escaping the flag read fails the request (ADR-003 fail-closed); the strategy must not catch it " +
+            "and answer from the grant rows, which is the pre-C1 answer with no veto applied");
+    }
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task Ciam_Regression_PlainDirectGrantsOnOpenRoots_KeepExactlyTheirGrantedRights(string entityType)
+    {
+        var viewOnly = RootId(entityType, 61);
+        var collaborate = RootId(entityType, 62);
+        var fullAccess = RootId(entityType, 63);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType,
+            Direct(viewOnly, ExternalAccessLevel.ViewOnly),
+            Direct(collaborate, ExternalAccessLevel.Collaborate),
+            Direct(fullAccess, ExternalAccessLevel.FullAccess)));
+
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
+
+        ScopeOf(principal, entityType).Should().BeEquivalentTo(new Dictionary<Guid, AccessRights>
+        {
+            [viewOnly] = Rights(ExternalAccessLevel.ViewOnly),
+            [collaborate] = Rights(ExternalAccessLevel.Collaborate),
+            [fullAccess] = Rights(ExternalAccessLevel.FullAccess),
+        }, $"a CIAM contact with plain grants on open {entityType} records keeps exactly what it was granted");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 136 · defect C2 — a record reaches the answer and the principal ONLY with Read, on both contact
+    // sign-ins. Before 136 the two cases below each left a None-rights KEY, and every presence-gated read
+    // (project routes, module /fetch and /record, /me) admitted it. Route-level 403s are asserted through the
+    // real handlers in tests/integration/contract/Api/ExternalAccess/.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task C2_SecureRootReachedOnlyThroughAnOrganizationGrant_IsAbsentFromTheSetAndFromBothPrincipals(
+        string entityType)
+    {
+        var secureOrgOnly = RootId(entityType, 71);
+        var openDirect = RootId(entityType, 72);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType,
+            OrgOnly(secureOrgOnly, ExternalAccessLevel.FullAccess),
+            Direct(openDirect, ExternalAccessLevel.ViewOnly)));
+        participations.Flags[secureOrgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        var evaluator = GrantOnlySut(participations);
+
+        var set = await evaluator.ComposeAsync(ContactPrincipal(), entityType, CancellationToken.None);
+        set.Rights.Should().NotContainKey(secureOrgOnly, "absent from the composed answer, not present with None");
+        set.Contains(secureOrgOnly).Should().BeFalse();
+        (await evaluator.IsRecordAccessibleAsync(ContactPrincipal(), entityType, secureOrgOnly, CancellationToken.None))
+            .Should().BeFalse("IsRecordAccessibleAsync means \"holds Read\"");
+        set.Contains(openDirect).Should().BeTrue("control: the open record's direct ViewOnly grant still reads");
+
+        var workforce = await ResolveWorkforceContactAsync(evaluator);
+        var ciam = await ResolveCiamAsync(evaluator);
+        foreach (var (plane, principal) in new[] { ("workforce", workforce), ("CIAM", ciam) })
+        {
+            ScopeOf(principal, entityType).Should().Equal(
+                new Dictionary<Guid, AccessRights> { [openDirect] = AccessRights.Read },
+                $"{plane}: the Secure record is not in the principal at all — only the readable control is");
+        }
+    }
+
+    public static TheoryData<string> NullableLevelRootEntityTypes => new() { MatterEntity, WorkAssignmentEntity };
+
+    [Theory]
+    [MemberData(nameof(NullableLevelRootEntityTypes))]
+    public async Task C2_GrantRowWithNoLevel_ConfersNothing_OnBothContactSignIns(string entityType)
+    {
+        var noLevel = RootId(entityType, 73);
+        var levelled = RootId(entityType, 74);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(entityType, NoLevel(noLevel), Direct(levelled, ExternalAccessLevel.Collaborate)));
+        var evaluator = GrantOnlySut(participations);
+
+        var set = await evaluator.ComposeAsync(ContactPrincipal(), entityType, CancellationToken.None);
+        set.Rights.Should().NotContainKey(noLevel, "owner 2026-09-30: no level = not granted");
+        set.Contains(noLevel).Should().BeFalse();
+
+        var workforce = await ResolveWorkforceContactAsync(evaluator);
+        var ciam = await ResolveCiamAsync(evaluator);
+        foreach (var (plane, principal) in new[] { ("workforce", workforce), ("CIAM", ciam) })
+        {
+            ScopeOf(principal, entityType).Should().Equal(
+                new Dictionary<Guid, AccessRights> { [levelled] = Rights(ExternalAccessLevel.Collaborate) },
+                $"{plane}: the level-less {entityType} is absent; the levelled control keeps exactly its level");
+            (entityType == MatterEntity ? principal.GetAccessibleMatterIds() : principal.GetAccessibleWorkAssignmentIds())
+                .Should().BeEquivalentTo(new[] { levelled }, $"{plane}: the module scope dimension never sees the level-less record");
+        }
+    }
+
+    [Fact]
+    public async Task C2_NoComposedSetCarriesAnEntryWithoutRead_OnTheSystemUserOrTheContactPlane()
+    {
+        // The end-of-composition step, pinned on its own: whatever the terms entered at None is GONE from
+        // AccessibleRecordSet.Rights — the raw answer, which the Read-gated views would otherwise mask.
+        var secureOrgOnly = Guid.Parse("13600000-0000-0000-0000-000000000001");
+        var membershipRecord = Guid.Parse("13600000-0000-0000-0000-000000000002");
+        var noLevelMatter = Guid.Parse("13600000-0000-0000-0000-000000000003");
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, membershipRecord));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsAcross(new[]
+        {
+            (ProjectEntity, OrgOnly(secureOrgOnly, ExternalAccessLevel.FullAccess)),
+            (MatterEntity, NoLevel(noLevelMatter)),
+        }));
+        participations.Flags[secureOrgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
+
+        var compositions = new[]
+        {
+            ("systemuser / project", await evaluator.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None)),
+            ("contact / project", await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None)),
+            ("contact / matter", await evaluator.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None)),
+            ("CIAM / project", await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None)),
+            ("CIAM / matter", await evaluator.ComposeForCiamContactAsync(ContactId, MatterEntity, CancellationToken.None)),
+        };
+
+        foreach (var (name, set) in compositions)
+        {
+            set.Rights.Values.Should().NotContain(r => !r.HasFlag(AccessRights.Read),
+                $"{name}: no composed set carries an entry without Read after composition");
+            set.Rights.Should().NotContainKeys(new[] { secureOrgOnly, noLevelMatter }, $"{name}: absent, not None");
+        }
+
+        compositions[0].Item2.Contains(membershipRecord).Should().BeTrue(
+            "control: the systemuser's own membership is untouched by the step");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 138 (#1061) — Limited (sprk_accesspermission = Limited) is real. It reuses the ONE FR-22 pre-max
+    // suppression predicate (Secure OR Limited), so every term that consulted "Secure" now consults it, on
+    // every plane: the workforce contact plane (grant + standing + org expansion), the systemuser plane's
+    // contact-grants term, and — through task 135's shared contact-plane composition — CIAM, with no
+    // CIAM-specific code. The systemuser's ADR-034 membership term is never suppressed.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static RootRecordFlags Limited => new(IsSecure: false, IsRestricted: false, IsLimited: true);
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task Limited_OnTheWorkforceContactPlane_OrgGrantStandingAndOrgExpansionConferNothing_TheDirectGrantKeepsItsLevel(
+        string entityType)
+    {
+        var limitedMixed = RootId(entityType, 51);      // direct ViewOnly under an org Collaborate grant
+        var limitedOrgOnly = RootId(entityType, 52);    // org-inherited grant only
+        var limitedStanding = RootId(entityType, 53);   // reached only by the contact's standing membership
+        var limitedOrgWalk = RootId(entityType, 54);    // reached only by organization expansion
+        var openStanding = RootId(entityType, 55);      // control: Standard, standing membership
+        var openOrgWalk = RootId(entityType, 56);       // control: Standard, organization expansion
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveByContactAsync(ContactId, entityType, ContactWalk, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, limitedStanding, openStanding));
+        membership.Setup(m => m.ResolveByContactAsync(ContactId, entityType, OrgWalkFor(OrgA), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, limitedOrgWalk, openOrgWalk));
+
+        var dataverse = BuildDataverse(
+            contactHeld: true, contactBaseline: ExternalAccessLevel.Collaborate,
+            orgs: new Dictionary<Guid, (bool Held, ExternalAccessLevel? Baseline)> { [OrgA] = (true, ExternalAccessLevel.FullAccess) });
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType,
+            new GrantRow(limitedMixed, ExternalAccessLevel.Collaborate, ExternalAccessLevel.ViewOnly),
+            OrgOnly(limitedOrgOnly, ExternalAccessLevel.FullAccess)));
+        participations.ActiveOrgIds.Add(OrgA);
+        foreach (var id in new[] { limitedMixed, limitedOrgOnly, limitedStanding, limitedOrgWalk })
+        {
+            participations.Flags[id] = Limited;
+        }
+
+        var sut = BuildSut(dataverse, membership.Object, participations);
+        var set = await sut.ComposeAsync(ContactPrincipal(), entityType, CancellationToken.None);
+
+        set.RightsFor(limitedMixed).Should().Be(AccessRights.Read,
+            $"on a Limited {entityType} the DIRECT grant contributes exactly its own level (ViewOnly), and the " +
+            "org Collaborate never enters the max");
+        set.Rights.Should().NotContainKeys(new[] { limitedOrgOnly, limitedStanding, limitedOrgWalk },
+            "org-inherited grants, standing membership and organization expansion contribute nothing on a Limited record");
+        set.RightsFor(openStanding).Should().Be(Rights(ExternalAccessLevel.Collaborate), "control: standing still reaches a Standard record");
+        set.RightsFor(openOrgWalk).Should().Be(Rights(ExternalAccessLevel.FullAccess), "control: org expansion still reaches a Standard record");
+    }
+
+    [Fact]
+    public async Task Limited_OnTheSystemUserPlane_TheContactGrantsTermIsSuppressed_TheMembershipTermIsNot()
+    {
+        var limitedMember = RootId(ProjectEntity, 61);   // the systemuser's own ADR-034 membership
+        var limitedOrgOnly = RootId(ProjectEntity, 62);  // only the linked contact's organization grant
+        var limitedMixed = RootId(ProjectEntity, 63);    // linked contact: direct ViewOnly + org FullAccess
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, limitedMember));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            ProjectEntity,
+            OrgOnly(limitedOrgOnly, ExternalAccessLevel.FullAccess),
+            new GrantRow(limitedMixed, ExternalAccessLevel.FullAccess, ExternalAccessLevel.ViewOnly)));
+        participations.Flags[limitedMember] = Limited;
+        participations.Flags[limitedOrgOnly] = Limited;
+        participations.Flags[limitedMixed] = Limited;
+
+        var sut = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(limitedMember).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "internal access is unaffected by Limited — the membership term never consults the predicate");
+        set.Rights.Should().NotContainKey(limitedOrgOnly,
+            "the linked contact's org-inherited grant confers nothing on a Limited record");
+        set.RightsFor(limitedMixed).Should().Be(AccessRights.Read,
+            "the linked contact's own direct ViewOnly grant survives, at exactly its level");
+    }
+
+    /// <summary>
+    /// Criterion 2: the CIAM plane, through task 135's pipeline, gives the SAME answer on a Limited root for a
+    /// contact holding a direct grant, an org-inherited grant, or both — with no CIAM-specific Limited code.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task Ciam_Limited_DirectOrgOrBoth_TheDirectGrantAloneCounts(string entityType)
+    {
+        var directOnly = RootId(entityType, 71);
+        var orgOnly = RootId(entityType, 72);
+        var both = RootId(entityType, 73);
+        var openOrgOnly = RootId(entityType, 74); // control: an organization grant on a Standard root
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType,
+            Direct(directOnly, ExternalAccessLevel.Collaborate),
+            OrgOnly(orgOnly, ExternalAccessLevel.FullAccess),
+            new GrantRow(both, ExternalAccessLevel.FullAccess, ExternalAccessLevel.Collaborate),
+            OrgOnly(openOrgOnly, ExternalAccessLevel.Collaborate)));
+        participations.Flags[directOnly] = Limited;
+        participations.Flags[orgOnly] = Limited;
+        participations.Flags[both] = Limited;
+
+        var principal = await ResolveCiamAsync(GrantOnlySut(participations));
+        var scope = ScopeOf(principal, entityType);
+
+        RightsIn(scope, directOnly).Should().Be(Rights(ExternalAccessLevel.Collaborate));
+        scope.Should().NotContainKey(orgOnly, "an org-inherited grant confers nothing on a Limited root, on CIAM too");
+        RightsIn(scope, both).Should().Be(Rights(ExternalAccessLevel.Collaborate),
+            "direct Collaborate under an org FullAccess is EXACTLY Collaborate — the org term is suppressed before the max");
+        RightsIn(scope, openOrgOnly).Should().Be(Rights(ExternalAccessLevel.Collaborate),
+            "control: organization access stays on a Standard root (owner A2)");
+    }
+
+    /// <summary>
+    /// Criterion 4: Restricted wins over Limited (and Secure) on every plane — CIAM, the workforce contact plane
+    /// and the systemuser plane's contact-grants term — while the systemuser's membership term survives.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task RestrictedWins_WithOrWithoutSecureOrLimited_NoContactPrincipalKeepsAnything_MembershipSurvives(
+        bool secure, bool limited)
+    {
+        var restricted = RootId(ProjectEntity, 81);
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, restricted));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(restricted, ExternalAccessLevel.FullAccess)));
+        participations.Flags[restricted] = new RootRecordFlags(IsSecure: secure, IsRestricted: true, IsLimited: limited);
+
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
+
+        var ciam = await ResolveCiamAsync(evaluator);
+        var workforceContact = await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+        var systemUser = await evaluator.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        ScopeOf(ciam, ProjectEntity).Should().NotContainKey(restricted, "CIAM: Restricted admits no contact access");
+        workforceContact.Rights.Should().NotContainKey(restricted, "workforce contact: the same");
+        systemUser.RightsFor(restricted).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "systemuser plane: the direct FullAccess contact grant is vetoed (Delete absent), the membership survives");
+    }
+
+    // ── CIAM harness (task 135) ──────────────────────────────────────────────────────────────────
+
+    private const string CiamOid = "c1a00000-0000-0000-0000-0000000000c1";
+
+    /// <summary>One grant row as the grant set carries it: the all-sources level and the DIRECT level
+    /// (null when only an organization grant reaches the record). The all-sources level is null only for a
+    /// matter / work-assignment row written with no level (task 136; the real read drops such PROJECT rows).</summary>
+    private sealed record GrantRow(Guid RecordId, ExternalAccessLevel? Level, ExternalAccessLevel? DirectLevel);
+
+    private static GrantRow Direct(Guid recordId, ExternalAccessLevel level) => new(recordId, level, level);
+
+    private static GrantRow OrgOnly(Guid recordId, ExternalAccessLevel level) => new(recordId, level, null);
+
+    /// <summary>A contact's own grant row with no <c>sprk_accesslevel</c> (matter / work assignment only).</summary>
+    private static GrantRow NoLevel(Guid recordId) => new(recordId, null, null);
+
+    private static AccessRights Rights(ExternalAccessLevel level) => ExternalAccessLevels.ToAccessRights(level);
+
+    private static AccessRights RightsIn(IReadOnlyDictionary<Guid, AccessRights> scope, Guid recordId) =>
+        scope.TryGetValue(recordId, out var rights) ? rights : AccessRights.None;
+
+    /// <summary>A distinct, deterministic root id per entity type, so one world can carry all three.</summary>
+    private static Guid RootId(string entityType, int n) => Guid.Parse(
+        (entityType switch
+        {
+            ProjectEntity => "7e000001",
+            MatterEntity => "7e000002",
+            WorkAssignmentEntity => "7e000003",
+            _ => throw new ArgumentOutOfRangeException(nameof(entityType), entityType, "Unknown root entity type."),
+        }) + $"-0000-0000-0000-{n:D12}");
+
+    private static ExternalGrantSet GrantsOn(string entityType, params GrantRow[] rows) =>
+        GrantsAcross(rows.Select(r => (entityType, r)));
+
+    private static ExternalGrantSet GrantsAcross(IEnumerable<(string EntityType, GrantRow Row)> rows)
+    {
+        var all = rows.ToList();
+        IReadOnlyList<ExternalRootGrant> RootGrantsOf(string entityType) => all
+            .Where(x => x.EntityType == entityType)
+            .Select(x => new ExternalRootGrant { RecordId = x.Row.RecordId, AccessLevel = x.Row.Level, DirectAccessLevel = x.Row.DirectLevel })
+            .ToList();
+
+        return new ExternalGrantSet
+        {
+            Projects = all
+                .Where(x => x.EntityType == ProjectEntity)
+                .Select(x => new ExternalParticipation
+                {
+                    ProjectId = x.Row.RecordId,
+                    AccessLevel = x.Row.Level ?? throw new ArgumentException("A project grant row always carries a level."),
+                    DirectAccessLevel = x.Row.DirectLevel,
+                })
+                .ToList(),
+            MatterGrants = RootGrantsOf(MatterEntity),
+            WorkAssignmentGrants = RootGrantsOf(WorkAssignmentEntity),
+        };
+    }
+
+    /// <summary>An evaluator over a world with no standing grants and a membership resolver that must never be
+    /// called (Strict, no setups) — the explicit-grant world most CIAM tests need.</summary>
+    private static AccessibleRecordSetService GrantOnlySut(ParticipationWorld participations, NoAccessListReader? denyReader = null) =>
+        BuildSut(BuildDataverse(contactHeld: false), new Mock<IMembershipResolverService>(MockBehavior.Strict).Object, participations, denyReader);
+
+    private static DefaultHttpContext CiamRequest() => new()
+    {
+        User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim("oid", CiamOid), new Claim("iss", "https://spaarketest.ciamlogin.com/tid/v2.0") },
+            "Ciam")),
+    };
+
+    /// <summary>
+    /// The REAL CIAM strategy over a world where <see cref="CiamOid"/> is bound to <paramref name="contactId"/>.
+    /// Task 141 moved identity resolution to the shared <see cref="ContactIdentityBinder"/>, so the contact is
+    /// named by the identity store, not by the participation service.
+    /// </summary>
+    private static CiamContactPrincipalStrategy CiamStrategy(AccessibleRecordSetService evaluator, Guid contactId)
+    {
+        var identities = new InMemoryContactIdentityStore();
+        identities.AddContact(contactId, oid: CiamOid, plane: IdentityPlaneMarker.External);
+        return new CiamContactPrincipalStrategy(
+            IdentityBindingTestKit.Binder(identities), evaluator, NullLogger<CiamContactPrincipalStrategy>.Instance);
+    }
+
+    private static async Task<CallerPrincipal> ResolveCiamAsync(AccessibleRecordSetService evaluator)
+    {
+        var strategy = CiamStrategy(evaluator, ContactId);
+
+        var resolution = await strategy.ResolveAsync(CiamRequest(), CancellationToken.None);
+
+        resolution.IsResolved.Should().BeTrue("precondition: the CIAM contact resolves");
+        resolution.Principal!.Plane.Should().Be(CallerPrincipalPlane.CiamContact);
+        return resolution.Principal;
+    }
+
+    /// <summary>The SAME contact, signed in on a workforce token (a contact-only principal).</summary>
+    private static async Task<CallerPrincipal> ResolveWorkforceContactAsync(AccessibleRecordSetService evaluator)
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.ForContact(ContactId, Oid.ToString("D"), Tenant));
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, evaluator, NullLogger<WorkforcePrincipalStrategy>.Instance);
+
+        var resolution = await strategy.ResolveAsync(new DefaultHttpContext(), CancellationToken.None);
+
+        resolution.IsResolved.Should().BeTrue("precondition: the workforce contact resolves");
+        return resolution.Principal!;
+    }
+
+    private static IReadOnlyDictionary<Guid, AccessRights> ScopeOf(CallerPrincipal principal, string entityType) => entityType switch
+    {
+        ProjectEntity => principal.ProjectAccess.ToDictionary(p => p.ProjectId, p => p.Rights),
+        MatterEntity => principal.MatterAccess,
+        WorkAssignmentEntity => principal.WorkAssignmentAccess,
+        _ => throw new ArgumentOutOfRangeException(nameof(entityType), entityType, "Unknown root entity type."),
+    };
 
     // ── harness ──────────────────────────────────────────────────────────────────────────────────
 
@@ -875,11 +1632,19 @@ public sealed class UnifiedEvaluatorSeamTests
         /// <see cref="RootRecordFlags.Unreadable"/>, reproducing the real fail-closed contract without HTTP.</summary>
         public bool FlagsUnreadable { get; set; }
 
+        /// <summary>Task 135: the flag read itself THROWS (an exception escaping the read, not the
+        /// Unreadable outcome the real read returns for a non-success status).</summary>
+        public bool ThrowOnFlagRead { get; set; }
+
         public HashSet<Guid> ActiveOrgIds { get; } = new();
         public bool ThrowOnActiveOrgIds { get; set; }
+
+        /// <summary>Task 135: the junction read returns <see cref="ActiveOrgMemberships.Failed"/> — exactly what
+        /// the real query returns for a non-success status since task 109 (pinned on the wire by
+        /// OrganizationMembershipReadTests).</summary>
+        public bool JunctionUnreadable { get; set; }
         public Dictionary<Guid, IReadOnlyCollection<Guid>> ReferencedOrgs { get; } = new();
         public HashSet<Guid> UnreadableOrgReferences { get; } = new();
-        public Guid? ResolveContactId { get; set; }
 
         public ParticipationWorld()
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
@@ -892,23 +1657,32 @@ public sealed class UnifiedEvaluatorSeamTests
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_grantSet);
 
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult(ResolveContactId);
+        // (Task 141 removed the participation service's contact resolution — there is no email fallback left
+        // in the evaluator for this world to stub.)
 
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
         {
+            if (ThrowOnFlagRead)
+            {
+                return Task.FromException<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+                    new InvalidOperationException("simulated root-flag read fault escaping the read"));
+            }
+
             IReadOnlyDictionary<Guid, RootRecordFlags> result = recordIds.Distinct().ToDictionary(
                 id => id,
                 id => FlagsUnreadable ? RootRecordFlags.Unreadable : (Flags.TryGetValue(id, out var f) ? f : RootRecordFlags.None));
             return Task.FromResult(result);
         }
 
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
+        // ActiveOrgIds are current memberships of active organizations — in BOTH named sets (task 109).
+        // ThrowOnActiveOrgIds models the entry's token/API-url fault, the one that arrives as an exception.
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
             => ThrowOnActiveOrgIds
-                ? Task.FromException<IReadOnlyList<Guid>>(new InvalidOperationException("simulated sprk_contactorganization query failure"))
-                : Task.FromResult<IReadOnlyList<Guid>>(ActiveOrgIds.ToList());
+                ? Task.FromException<ActiveOrgMemberships>(new InvalidOperationException("simulated token/API-url acquisition failure"))
+                : JunctionUnreadable
+                    ? Task.FromResult(ActiveOrgMemberships.Failed)
+                    : Task.FromResult(new ActiveOrgMemberships(ActiveOrgIds.ToList(), ActiveOrgIds.ToList(), Unreadable: false));
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

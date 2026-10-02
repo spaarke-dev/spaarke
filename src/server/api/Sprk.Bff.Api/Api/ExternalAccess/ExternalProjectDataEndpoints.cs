@@ -28,10 +28,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   POST /workassignments/{id}/todos     — create a new to-do regarding the work assignment
 ///   PATCH /todos/{id}                    — update a to-do (scoped to its own accessible root)
 ///
-/// READ routes verify the caller holds Read on the requested record. For a project that is exactly
-/// the participation test it replaces — every participation carries a level and the lowest
-/// (ViewOnly) already maps to Read. Returns 403 if no access; NEVER an empty collection, which
-/// would be indistinguishable from "this record has no children" (ADR-003).
+/// READ routes verify the caller holds Read on the requested record (HoldsReadOnProject /
+/// ListTodosForRoot, both through RightsForRoot). Returns 403 if not; NEVER an empty collection, which
+/// would be indistinguishable from "this record has no children" (ADR-003). GET /projects lists only
+/// projects the caller can read.
+///
+/// ⚠️ Until unified-access-control-r2 task 136 (defect C2, 2026-10-01) the paragraph above was FALSE for
+/// every project read route except the to-do list: they asked HasProjectAccess, which was "the id is in
+/// the caller's map", and two live paths put ids there with no rights — a Secure project reached only
+/// through an organization grant, and a level-less grant row. Such a caller listed the project, its
+/// documents, events, contacts and organizations, and streamed document content app-only. The old note
+/// claimed "every participation carries a level", which stopped being true once the map carried the
+/// evaluator's answer rather than grant rows.
 ///
 /// MUTATING routes additionally require the specific right from the evaluator's answer FOR THAT
 /// RECORD (unified-access-control-r2 task 033 / FR-19): Create on the POSTs, Write on the PATCH.
@@ -102,8 +110,8 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
         // GET /api/v1/external/projects/{id}/documents/{documentId}/content — download document bytes.
-        // Authz-before-stream (broker-only, app-only): HasProjectAccess + document->project scoping are
-        // enforced BEFORE any SPE pointer resolution or Graph read (ADR-028 A1, NFR-03).
+        // Authz-before-stream (broker-only, app-only): Read on the project (task 136) + document->project
+        // scoping are enforced BEFORE any SPE pointer resolution or Graph read (ADR-028 A1, NFR-03).
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentContent)
             .WithName("DownloadExternalProjectDocument")
             .WithSummary("Download a Secure Project document's content (authz-before-stream, app-only)")
@@ -253,6 +261,8 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
+        // Read-bearing projects only (task 136 · C2): GetAccessibleProjectIds is a Read-filtered view, so a
+        // project the caller holds nothing on is never listed — its name and id are not disclosed.
         var projectIds = callerContext.GetAccessibleProjectIds().ToList();
         if (projectIds.Count == 0)
             return Results.Ok(new ExternalCollectionResponse<ExternalProjectDto>());
@@ -270,7 +280,7 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!callerContext.HasProjectAccess(id))
+        if (!HoldsReadOnProject(callerContext, id))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
@@ -287,7 +297,7 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!callerContext.HasProjectAccess(id))
+        if (!HoldsReadOnProject(callerContext, id))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
@@ -318,8 +328,10 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        // (1) Project-level access from the caller's participation set.
-        if (!callerContext.HasProjectAccess(id))
+        // (1) Read on the project (task 136 · C2). Presence in the caller's map is NOT enough: a Secure
+        //     project reached only through an organization grant used to sit there with no rights, and this
+        //     route then streamed its documents app-only.
+        if (!HoldsReadOnProject(callerContext, id))
         {
             logger.LogWarning("[EXT-DOWNLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
                 callerContext.ContactId, id);
@@ -446,7 +458,14 @@ public static class ExternalProjectDataEndpoints
         // The parent flows from the ROUTE — the owner's "flows from the creation context". The
         // caller cannot name a parent in the body: CreateExternalTodoRequest is a closed DTO with no
         // regarding member, so the root gated above is necessarily the root written.
-        var created = await dataService.CreateTodoAsync(rootKind, rootId, request, ct);
+        // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
+        // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
+        var created = await dataService.CreateTodoAsync(
+            rootKind,
+            rootId,
+            request,
+            callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
+            ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
 
@@ -472,6 +491,21 @@ public static class ExternalProjectDataEndpoints
             ExternalDataService.TodoRootKind.WorkAssignment => caller.GetWorkAssignmentRights(rootId),
             _ => Spaarke.Dataverse.AccessRights.None,
         };
+
+    /// <summary>
+    /// The read gate every project-scoped GET route uses (unified-access-control-r2 task 136 · defect C2):
+    /// does the caller hold <see cref="Spaarke.Dataverse.AccessRights.Read"/> on the project?
+    /// </summary>
+    /// <remarks>
+    /// The same test <see cref="ListTodosForRoot"/> already applied, through the same <see cref="RightsForRoot"/>
+    /// expression. These routes previously asked <c>HasProjectAccess</c> — "is the id in the caller's map?" — and
+    /// two live paths put ids there with no rights (a Secure project reached only through an organization grant;
+    /// a level-less grant row), so a caller holding nothing listed the project's documents and streamed their
+    /// content app-only. Absent and None-rights both deny here: <c>HasFlag(Read)</c> is false for None.
+    /// </remarks>
+    private static bool HoldsReadOnProject(CallerPrincipal caller, Guid projectId) =>
+        RightsForRoot(caller, ExternalDataService.TodoRootKind.Project, projectId)
+            .HasFlag(Spaarke.Dataverse.AccessRights.Read);
 
     private static IResult DenyRoot(ExternalDataService.TodoRootKind rootKind)
     {
@@ -670,7 +704,7 @@ public static class ExternalProjectDataEndpoints
     /// Authorization is the SAME two-stage gate as <c>DownloadDocumentContent</c>, deliberately
     /// mirrored rather than reinvented, and for the same reason: nothing touches SPE/Graph until BOTH
     /// checks pass.
-    ///   (1) project participation, and
+    ///   (1) Read on the project (task 136 — was project presence), and
     ///   (2) document→project scoping — a mismatch OR a non-existent document is a UNIFORM 403, so
     ///       this route cannot be used to probe which document ids exist.
     /// Only then are the SPE pointers resolved and the version list read APP-ONLY. It must not use
@@ -691,7 +725,7 @@ public static class ExternalProjectDataEndpoints
         if (callerContext is null) return MissingContextResult();
 
         // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
-        if (!callerContext.HasProjectAccess(id))
+        if (!HoldsReadOnProject(callerContext, id))
         {
             logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to project {ProjectId}",
                 callerContext.ContactId, id);
@@ -750,9 +784,8 @@ public static class ExternalProjectDataEndpoints
     /// GET /api/v1/external/projects/{id}/events — calendar events for a project.
     /// </summary>
     /// <remarks>
-    /// Same participation gate as every other project-scoped read: the caller must hold a
-    /// participation record for {id} (<see cref="CallerPrincipal.HasProjectAccess"/>) or this
-    /// returns 403 before any Dataverse read happens.
+    /// Same gate as every other project-scoped read: the caller must hold Read on {id}
+    /// (<see cref="HoldsReadOnProject"/>, task 136) or this returns 403 before any Dataverse read happens.
     /// </remarks>
     private static async Task<IResult> GetEvents(
         Guid id,
@@ -763,7 +796,7 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!callerContext.HasProjectAccess(id))
+        if (!HoldsReadOnProject(callerContext, id))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
@@ -820,7 +853,7 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!callerContext.HasProjectAccess(id))
+        if (!HoldsReadOnProject(callerContext, id))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
@@ -837,7 +870,7 @@ public static class ExternalProjectDataEndpoints
         var callerContext = GetCallerPrincipal(httpContext);
         if (callerContext is null) return MissingContextResult();
 
-        if (!callerContext.HasProjectAccess(id))
+        if (!HoldsReadOnProject(callerContext, id))
             return Results.Problem(statusCode: 403, title: "Forbidden",
                 detail: "You do not have access to this project");
 
@@ -920,6 +953,8 @@ public static class ExternalProjectDataEndpoints
     // (group-level) resolves EITHER a CIAM external contact OR a workforce user to a CallerPrincipal.
     // CallerPrincipal exposes the same record-scope surface the handlers use — HasProjectAccess,
     // GetAccessibleProjectIds, GetEffectiveRights — so every handler is plane-agnostic without change.
+    // Since task 136 the first two require Read as well, so the mutating routes' presence check means
+    // "holds Read" before they test Create.
     private static CallerPrincipal? GetCallerPrincipal(HttpContext httpContext) =>
         httpContext.Items[CallerPrincipal.HttpContextItemsKey] as CallerPrincipal;
 

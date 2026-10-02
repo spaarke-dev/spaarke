@@ -215,8 +215,8 @@ public class NoAccessListReader : INoAccessListReader
     /// are quoted OData string literals — the ids are always well-formed <see cref="Guid"/>
     /// <see cref="Guid.ToString()"/> output (hex + hyphens only), never caller-supplied free text,
     /// so no quote-escaping is needed (contrast
-    /// <c>ExternalParticipationService.ResolveContactByOidAsync</c>'s escaping of a genuinely
-    /// external string).
+    /// <c>DataverseContactIdentityStore.Literal</c>'s escaping of a genuinely external string, the
+    /// email in an identity-binding lookup).
     /// </summary>
     internal static string BuildRecordObjectFilter(IEnumerable<Guid> recordIds)
         => "(" + string.Join(" or ", recordIds.Select(id => $"sprk_objectrecordid eq '{id}'")) + ")";

@@ -3,6 +3,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 
@@ -12,9 +13,14 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// type is the data-fetching half plus the reverse lookup.
 ///
 /// <para><b>Forward</b> (<see cref="ResolveForRecordAsync"/>): <i>which container does this record's content
-/// belong in?</i> A secure record resolves to its own <c>sprk_containerid</c> or FAILS CLOSED; everything
-/// else resolves to the caller's existing default (the business-unit cascade on the client per INV-7,
-/// <c>Communication:ArchiveContainerId</c> for server-side ingest).</para>
+/// belong in?</i> A secure record resolves to its own <c>sprk_containerid</c> or FAILS CLOSED. A record that is
+/// not itself secure but whose own row names a SECURE project, matter or work assignment — a CHILD (to-do, event,
+/// invoice, communication), or a work assignment / project / contact whose columns can name one (task 155 f3 live
+/// sweep) — resolves to that ROOT's own container or fails closed (task 155, owner C10 part 2). Since f4 "names"
+/// is TRANSITIVE: a secure root anywhere above the record decides, however many roots sit between them, and two
+/// different secure roots anywhere above it refuse as ambiguous. Everything else resolves
+/// to the non-secure default: the RECORD's own <c>owningbusinessunit</c> container when the caller supplies no
+/// fallback, <c>Communication:ArchiveContainerId</c> for server-side ingest.</para>
 ///
 /// <para><b>Reverse</b> (<see cref="ResolveOwningRecordAsync"/>): <i>which record owns this container?</i>
 /// The authorization subject for the container-keyed routes (tasks 073 / 078). Both directions come from
@@ -29,9 +35,17 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///
 /// <para><b>Fail-closed contract.</b> Any failure to DETERMINE securability (metadata unavailable, record
 /// read failed, empty id, indeterminate ownership) throws rather than defaulting to "not secure". An unknown
-/// answer read as not-secure is the same isolation failure with an extra step. Error codes:
+/// answer read as not-secure is the same isolation failure with an extra step. The same holds for the entity
+/// NAME: an alias is mapped to its logical name, and a name that is not a real entity is refused rather than
+/// read as "not securable" (task 151, #1038). Error codes:
 /// <c>secure_record_container_missing</c> (409), <c>container_record_not_found</c> (404),
-/// <c>container_ownership_ambiguous</c> (409), <c>container_ownership_indeterminate</c> (409).</para>
+/// <c>container_entity_unknown</c> (400), <c>container_ownership_ambiguous</c> (409),
+/// <c>container_ownership_indeterminate</c> (409), <c>securable_entities_unknown</c> (409, the registry answered
+/// outside its contract — task 155 f3), and for records with root links (task 155)
+/// <c>container_ancestor_unresolved</c> (409 — a missing row above the record, or a chain longer than the walk
+/// follows; 503 when the child's own row, a regarding type or any row above it could not be read),
+/// <c>container_ancestor_ambiguous</c> (409: two different secure roots anywhere above it, or a row's typed and
+/// polymorphic regarding disagree) and <c>container_ancestor_unverifiable</c> (409).</para>
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
 /// <see cref="IDocumentStorageResolver"/>). Unconditional registration is deliberate: a feature-gated
@@ -113,7 +127,17 @@ public sealed class RecordContainerResolver
     /// <para><b>Cost</b>: <c>owningbusinessunit</c> rides along on the record read that already
     /// happens, so a SECURE record costs zero extra round trips (its own container wins and the
     /// business unit is never consulted). A non-secure record costs one additional read of the
-    /// business unit row.</para>
+    /// business unit row. A record with root links (task 155) adds one read per root ABOVE it — the root's flag,
+    /// container and own links ride on that one read, and the walk continues from it (f4; bounded at
+    /// <see cref="MaxRootChainDepth"/> deep and <see cref="MaxRootReads"/> rows) — plus, on any row where the
+    /// polymorphic regarding pair is the sole thing naming a record, one read of its <c>sprk_recordtype_ref</c> row
+    /// (task 155 f3); it skips the business unit when a root is secure. The full per-shape table is in
+    /// <c>notes/task-155-child-record-container-resolution.md</c> "Round f3" / "Round f4".</para>
+    ///
+    /// <para><b>Holds for EVERY entity as of task 155.</b> Before it, a non-securable entity (to-do, event,
+    /// contact) returned Unresolved without reading the record, so this overload's promise was true only for
+    /// securable entities and the record-keyed upload routes answered "No storage container is configured" for
+    /// records whose container was derivable.</para>
     /// </summary>
     public Task<ContainerDecision> ResolveForRecordAsync(
         string entityLogicalName,
@@ -129,103 +153,235 @@ public sealed class RecordContainerResolver
     /// <paramref name="nonSecureFallbackContainerId"/> is null the resolver derives the fallback from
     /// the record's own <c>owningbusinessunit</c> — see the parameterless overload.</para>
     /// </summary>
-    public async Task<ContainerDecision> ResolveForRecordAsync(
+    public Task<ContainerDecision> ResolveForRecordAsync(
         string entityLogicalName,
         Guid recordId,
         string? nonSecureFallbackContainerId,
         CancellationToken ct = default)
+        => ResolveCoreAsync(
+            entityLogicalName, recordId, nonSecureFallbackContainerId, deriveBusinessUnitFallback: true, ct);
+
+    /// <summary>
+    /// Resolve the container for a record whose non-secure default is FIXED by the caller — the explicit
+    /// <paramref name="nonSecureFallbackContainerId"/>, or nothing at all — and never derived from the record's
+    /// business unit (task 155 f4).
+    /// </summary>
+    /// <remarks>
+    /// <para>For <see cref="Sprk.Bff.Api.Services.Communication.Engine.CommunicationContainerResolver"/>, whose
+    /// non-secure default is <c>Communication:ArchiveContainerId</c>. When that is unconfigured the adapter's contract
+    /// has always been "no container — skip", never "the communication's business-unit container"; the public
+    /// four-argument overload reads a null fallback as "derive it from the business unit", which would have changed
+    /// that. Everything that DECIDES — the secure answer, every refusal, the transitive root walk — is the same code
+    /// as <see cref="ResolveForRecordAsync(string, Guid, string?, CancellationToken)"/>.</para>
+    /// </remarks>
+    internal Task<ContainerDecision> ResolveForRecordWithFixedFallbackAsync(
+        string entityLogicalName,
+        Guid recordId,
+        string? nonSecureFallbackContainerId,
+        CancellationToken ct = default)
+        => ResolveCoreAsync(
+            entityLogicalName, recordId, nonSecureFallbackContainerId, deriveBusinessUnitFallback: false, ct);
+
+    private async Task<ContainerDecision> ResolveCoreAsync(
+        string entityLogicalName,
+        Guid recordId,
+        string? nonSecureFallbackContainerId,
+        bool deriveBusinessUnitFallback,
+        CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
         {
             throw new ArgumentException("Entity logical name is required.", nameof(entityLogicalName));
         }
 
-        var normalizedEntity = entityLogicalName.Trim().ToLowerInvariant();
+        // ALIASES FIRST (task 151, #1038). A caller may name an association type by its friendly alias
+        // ("project") rather than its logical name ("sprk_project"); the securable registry is keyed on logical
+        // names only, so before this mapping "project" read as "not securable" and a SECURE project's content
+        // resolved to a shared container. DocumentAssociationMap is THE alias table — the record-keyed upload
+        // filter's EntitySetByType is held in lockstep with it (pinned key-by-key and entity-by-entity by
+        // AssociationTypeLockstepTests) — so the record the route AUTHORIZED and the record this resolver READS
+        // are the same record. A name that is not an alias passes through lower-cased, exactly as before. The
+        // alias table WINS for a name that is both an alias and a real logical name ("invoice") — see
+        // NormalizeEntityName.
+        var normalizedEntity = NormalizeEntityName(entityLogicalName);
 
-        // An entity that cannot carry sprk_issecure cannot be secure, so there is nothing to read and no
-        // decision to make beyond the fallback. Note this also means a non-securable entity costs ZERO extra
-        // Dataverse round trips, which is what keeps the seam cheap enough to put on every upload path.
+        // ONE registry question, ONE catalog lookup (task 151 review): "is this an entity at all, and can it be
+        // secure?" answered together. Until task 151 the only question was "is it securable?", and "no" was
+        // also the answer for a name that is NOT AN ENTITY AT ALL — a misspelling, an entity SET name
+        // ("sprk_projects"), an unmapped alias — so a secure record named any of those ways got a non-secure
+        // decision. Asking the two halves as two calls fixed that but fetched the catalog twice, so with Redis
+        // down every ordinary non-securable upload paid for two full-org metadata round trips. Keep it one call.
         //
-        // A metadata failure here PROPAGATES rather than being read as "not securable" — see
+        // A metadata failure here PROPAGATES rather than being read as "not an entity" or "not securable" — see
         // ISecurableEntityRegistry's fail-closed contract.
-        if (!await _securableEntities.IsSecurableAsync(normalizedEntity, ct).ConfigureAwait(false))
+        var securability = await _securableEntities
+            .ClassifyEntityAsync(normalizedEntity, ct)
+            .ConfigureAwait(false);
+
+        if (securability == EntitySecurability.NotAnEntity)
         {
+            // REFUSE rather than guess: an unknown answer is never "not secure".
+            throw UnknownEntity(entityLogicalName);
+        }
+
+        if (securability is not (EntitySecurability.NotSecurable or EntitySecurability.Securable))
+        {
+            // Any value outside the registry's contract (task 155 f3). Before f3 such a value computed
+            // isSecurable = false and — for an entity with no ancestor concept — took the NOT-securable branch
+            // straight to a shared container, while the comment below claimed it took the secure path. An
+            // answer the code does not understand is an unknown answer, and unknown is refused.
+            throw SecurabilityIndeterminate(normalizedEntity, recordId, securability);
+        }
+
+        var isSecurable = securability == EntitySecurability.Securable;
+
+        // CHILD records (task 155, owner C10 part 2: "every child of a secure record is secure"). A to-do, event
+        // or invoice filed under a SECURE project / matter / work assignment must store its content in that
+        // root's OWN container — whether or not the child's entity can carry sprk_issecure itself. Until task
+        // 155 a non-securable entity short-circuited here with no record read, so a to-do's upload resolved
+        // Unresolved (the misleading "No storage container is configured" 409 on the record-keyed routes) and
+        // an Office save to it fell through to a SHARED default container: the #1038 class, reached through
+        // the child instead of the root.
+        //
+        // Task 155 f3: the links table now covers EVERY entity this resolver can be asked about whose own row can
+        // name a project / matter / work assignment, directly or through another record — not only the child
+        // taxonomy. A work assignment filed regarding a matter, a project carrying the polymorphic regarding pair
+        // and a contact carrying an invoice lookup are read the same way (live sweep: ChildAncestorLinks).
+        //
+        // Task 155 f4: the walk is TRANSITIVE — every root above the record is read with its own links in turn
+        // (ResolveSecureAncestorAsync) — and sprk_communication has an entry, so the communication pipeline's
+        // container decision is this same resolution (CommunicationContainerResolver).
+        var isChild = CoreAncestorResolver.IsChildRecordEntity(normalizedEntity);
+        var ancestorLinks = ChildAncestorLinks.For(normalizedEntity);
+
+        if (isChild && ancestorLinks is null)
+        {
+            // A CHILD entity whose link to its root this component does not know (task 155 escalation trigger
+            // 1). Guessing "no ancestor" is how a secure root's content would reach a shared container, so the
+            // answer is a refusal until the entity's links are verified and added to ChildAncestorLinks.
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"'{normalizedEntity}' is a child record type whose link to its project, matter or work "
+                + "assignment is not known to the storage resolver, so it cannot be determined whether it sits "
+                + "under a secure record.",
+                statusCode: 409);
+        }
+
+        if (!isSecurable && ancestorLinks is null)
+        {
+            // An entity that cannot carry sprk_issecure AND whose own row names no project / matter / work
+            // assignment by any column (account, …) cannot be secure by any route, so there is no securability
+            // question to answer. (contact is NOT in this set as of f3: its sprk_invoice lookup names a record that
+            // can belong to a matter — ChildAncestorLinks.)
+            if (!string.IsNullOrWhiteSpace(nonSecureFallbackContainerId))
+            {
+                // Explicit fallback (server-side ingest): unchanged — ZERO record round trips.
+                return SecureContainerDecision.Decide(
+                    isSecure: false, ownContainerId: null, fallbackContainerId: nonSecureFallbackContainerId);
+            }
+
+            if (!deriveBusinessUnitFallback)
+            {
+                // Fixed-fallback caller with no fallback: nothing to derive, nothing secure to find — Unresolved.
+                return SecureContainerDecision.Decide(isSecure: false, ownContainerId: null, fallbackContainerId: null);
+            }
+
+            // Two-argument overload: the documented contract — the non-secure default comes from the RECORD's
+            // own owningbusinessunit. Before task 155 this branch returned Unresolved without reading the record,
+            // so the overload's documentation was true only for SECURABLE entities, and every upload to such a
+            // record answered "No storage container is configured" even when its business unit had one.
+            var plainRecord = await ReadRecordAsync(
+                normalizedEntity, recordId, [OwningBusinessUnitColumn], ct).ConfigureAwait(false);
+
+            var plainFallback = await ResolveOwningBusinessUnitContainerAsync(
+                plainRecord, normalizedEntity, recordId, ct).ConfigureAwait(false);
+
             return SecureContainerDecision.Decide(
-                isSecure: false, ownContainerId: null, fallbackContainerId: nonSecureFallbackContainerId);
+                isSecure: false, ownContainerId: null, fallbackContainerId: plainFallback);
         }
 
-        // Guid.Empty cannot identify a record. A securable entity with an unusable id is an
-        // indeterminate-securability case, so it refuses rather than falling through to the fallback.
-        if (recordId == Guid.Empty)
+        // Securable (its own flag is read), or an entity whose own row can name a root (its links are read). Only
+        // those two classifications reach here: NotAnEntity and every value outside the registry's contract were
+        // refused above, and a NotSecurable entity with no links returned above.
+        var columns = new List<string>(capacity: 20) { OwningBusinessUnitColumn };
+        if (isSecurable)
         {
-            throw new SdapProblemException(
-                code: "container_record_not_found",
-                title: "Cannot resolve a storage container",
-                detail: $"An empty record id was supplied for securable entity '{normalizedEntity}', so it "
-                        + "cannot be determined whether the record is secure. Refusing rather than using a "
-                        + "shared container.",
-                statusCode: 404);
+            columns.Add(SecurableEntityRegistry.SecureFlagAttribute);
+            columns.Add(ContainerColumn);
         }
 
-        // A read failure means securability is UNKNOWN, and unknown must never resolve to the shared
-        // fallback. `IGenericEntityService.RetrieveAsync` returns a non-nullable Entity and the production
-        // implementation THROWS a FaultException on not-found rather than returning null — so the null branch
-        // below is defensive only, and the not-found case is normalized here so callers get the documented
-        // 404 instead of a raw SDK fault surfacing as a 500 or an unwinnable Service Bus retry.
-        Entity? record;
+        if (ancestorLinks is not null)
+        {
+            // ONE record read carries the child's links too (task 155 constraint: no extra round trip for them).
+            columns.AddRange(ancestorLinks.AllColumns);
+        }
+
+        Entity record;
         try
         {
-            record = await _entityService
-                .RetrieveAsync(
-                    normalizedEntity,
-                    recordId,
-                    [SecurableEntityRegistry.SecureFlagAttribute, ContainerColumn, OwningBusinessUnitColumn],
-                    ct)
-                .ConfigureAwait(false);
+            record = await ReadRecordAsync(normalizedEntity, recordId, [.. columns], ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (IsRecordNotFound(ex))
+        catch (Exception ex) when (
+            isChild && ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
         {
-            _logger.LogWarning(
-                ex,
-                "[SECURE-CONTAINER] {Entity} {RecordId} does not exist; refusing to resolve a container for it.",
-                normalizedEntity, recordId);
+            // For a CHILD this read IS its link to its root, so an unreadable row is an unreadable ancestor link
+            // (task 155 AC4). It already failed closed — nothing below ran — but as a raw fault the record-keyed
+            // routes rendered it as a generic 500 "Upload failed" carrying the exception text. Same posture and
+            // code as an unreadable ROOT: unknown never becomes "not secure", and 503 because a retry may succeed.
+            // Not-found (404) and the resolver's own refusals pass through untouched; a non-child (a root, a
+            // contact — including those that gained links in f3) keeps the original propagate-raw contract, which
+            // is equally fail-closed: nothing below runs.
+            _logger.LogError(ex,
+                "[SECURE-CONTAINER] Could not read {Entity} {RecordId}, whose row carries its link to its project, "
+                + "matter or work assignment. Refusing rather than treating it as having no secure root ({Code}).",
+                normalizedEntity, recordId, AncestorUnresolvedCode);
 
-            throw new SdapProblemException(
-                code: "container_record_not_found",
-                title: "Cannot resolve a storage container",
-                detail: $"Record '{recordId}' of type '{normalizedEntity}' does not exist, so it cannot be "
-                        + "determined whether it is secure. Refusing rather than using a shared container.",
-                statusCode: 404);
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"This {normalizedEntity} could not be read, so its link to a project, matter or work assignment — "
+                + "and whether its content belongs in a secure container — cannot be determined. Try again.",
+                statusCode: 503,
+                logDetail: "child row read failed");
         }
 
-        if (record is null)
+        var isSecure = false;
+        string? ownContainerId = null;
+
+        if (isSecurable)
         {
-            throw new SdapProblemException(
-                code: "container_record_not_found",
-                title: "Cannot resolve a storage container",
-                detail: $"Record '{recordId}' of type '{normalizedEntity}' was not found, so it cannot be "
-                        + "determined whether it is secure. Refusing rather than using a shared container.",
-                statusCode: 404);
+            // ABSENT is not the same as FALSE, and the distinction is worth a log line even though it is not
+            // (yet) an error. Dataverse omits null-valued properties from Web API responses, and FIELD-LEVEL
+            // SECURITY on sprk_issecure returns the row with the attribute masked out rather than failing — both
+            // yield "absent", and GetAttributeValue<bool> maps absent to false, i.e. the shared container. A
+            // blanket throw would be wrong (a securable entity legitimately has NULL rows and that must not fail
+            // every upload), so this is logged distinguishably and the live assertion that sprk_issecure is
+            // neither field-secured nor NULL on any securable row belongs with task 047.
+            if (!record.Contains(SecurableEntityRegistry.SecureFlagAttribute))
+            {
+                _logger.LogWarning(
+                    "[SECURE-CONTAINER] '{Attribute}' was ABSENT (not false) on {Entity} {RecordId}. Treating as "
+                    + "non-secure. Absent means either an unset column or FIELD-LEVEL SECURITY masking the value "
+                    + "for this caller — the latter would silently route content to the shared container.",
+                    SecurableEntityRegistry.SecureFlagAttribute, normalizedEntity, recordId);
+            }
+
+            isSecure = record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute);
+            ownContainerId = record.GetAttributeValue<string>(ContainerColumn);
         }
 
-        // ABSENT is not the same as FALSE, and the distinction is worth a log line even though it is not
-        // (yet) an error. Dataverse omits null-valued properties from Web API responses, and FIELD-LEVEL
-        // SECURITY on sprk_issecure returns the row with the attribute masked out rather than failing — both
-        // yield "absent", and GetAttributeValue<bool> maps absent to false, i.e. the shared container. A
-        // blanket throw would be wrong (a securable entity legitimately has NULL rows and that must not fail
-        // every upload), so this is logged distinguishably and the live assertion that sprk_issecure is
-        // neither field-secured nor NULL on any securable row belongs with task 047.
-        if (!record.Contains(SecurableEntityRegistry.SecureFlagAttribute))
+        // A record that is not itself secure but hangs off a SECURE root takes the root's own container — or
+        // refuses. Consulted BEFORE any fallback is derived, for the same reason the business unit is skipped for
+        // a secure record: a usable shared container must never be in scope at the point a secure root decides.
+        if (!isSecure && ancestorLinks is not null)
         {
-            _logger.LogWarning(
-                "[SECURE-CONTAINER] '{Attribute}' was ABSENT (not false) on {Entity} {RecordId}. Treating as "
-                + "non-secure. Absent means either an unset column or FIELD-LEVEL SECURITY masking the value "
-                + "for this caller — the latter would silently route content to the shared container.",
-                SecurableEntityRegistry.SecureFlagAttribute, normalizedEntity, recordId);
-        }
+            var viaAncestor = await ResolveSecureAncestorAsync(
+                record, normalizedEntity, recordId, ancestorLinks, ct).ConfigureAwait(false);
 
-        var isSecure = record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute);
-        var ownContainerId = record.GetAttributeValue<string>(ContainerColumn);
+            if (viaAncestor is not null)
+            {
+                return viaAncestor;
+            }
+        }
 
         // Derive the non-secure default from the RECORD's owning business unit when the caller did not
         // supply one (task 076). Deliberately skipped for a secure record: its own container wins, so
@@ -233,7 +389,7 @@ public sealed class RecordContainerResolver
         // fallback in scope at the decision point. Skipping it means the fail-closed path cannot
         // accidentally acquire one.
         var fallbackContainerId = nonSecureFallbackContainerId;
-        if (!isSecure && string.IsNullOrWhiteSpace(fallbackContainerId))
+        if (!isSecure && string.IsNullOrWhiteSpace(fallbackContainerId) && deriveBusinessUnitFallback)
         {
             fallbackContainerId = await ResolveOwningBusinessUnitContainerAsync(
                 record, normalizedEntity, recordId, ct).ConfigureAwait(false);
@@ -274,6 +430,1071 @@ public sealed class RecordContainerResolver
         }
 
         return decision;
+    }
+
+    /// <summary>
+    /// Read the record being resolved, normalizing "does not exist" to the documented 404.
+    /// </summary>
+    /// <remarks>
+    /// A read failure means the answer is UNKNOWN, and unknown must never resolve to a shared fallback.
+    /// <c>IGenericEntityService.RetrieveAsync</c> returns a non-nullable Entity and the production implementation
+    /// THROWS a FaultException on not-found rather than returning null — so the null branch is defensive only,
+    /// and the not-found case is normalized here so callers get the documented 404 instead of a raw SDK fault
+    /// surfacing as a 500 or an unwinnable Service Bus retry. Every other failure PROPAGATES.
+    /// </remarks>
+    private async Task<Entity> ReadRecordAsync(
+        string normalizedEntity,
+        Guid recordId,
+        string[] columns,
+        CancellationToken ct)
+    {
+        // Guid.Empty cannot identify a record. A record with an unusable id is an indeterminate case, so it
+        // refuses rather than falling through to the fallback.
+        if (recordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "container_record_not_found",
+                title: "Cannot resolve a storage container",
+                detail: $"An empty record id was supplied for entity '{normalizedEntity}', so it cannot be "
+                        + "determined whether the record is secure. Refusing rather than using a shared container.",
+                statusCode: 404);
+        }
+
+        Entity? record;
+        try
+        {
+            record = await _entityService
+                .RetrieveAsync(normalizedEntity, recordId, columns, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            _logger.LogWarning(
+                ex,
+                "[SECURE-CONTAINER] {Entity} {RecordId} does not exist; refusing to resolve a container for it.",
+                normalizedEntity, recordId);
+
+            throw new SdapProblemException(
+                code: "container_record_not_found",
+                title: "Cannot resolve a storage container",
+                detail: $"Record '{recordId}' of type '{normalizedEntity}' does not exist, so it cannot be "
+                        + "determined whether it is secure. Refusing rather than using a shared container.",
+                statusCode: 404);
+        }
+
+        return record ?? throw new SdapProblemException(
+            code: "container_record_not_found",
+            title: "Cannot resolve a storage container",
+            detail: $"Record '{recordId}' of type '{normalizedEntity}' was not found, so it cannot be "
+                    + "determined whether it is secure. Refusing rather than using a shared container.",
+            statusCode: 404);
+    }
+
+    // =============================================================================================
+    // CHILD RECORDS — the secure ROOT decides (task 155, owner C10 part 2)
+    // =============================================================================================
+
+    /// <summary>Problem code: a child's root could not be read or is not known (task 155).</summary>
+    internal const string AncestorUnresolvedCode = "container_ancestor_unresolved";
+
+    /// <summary>Problem code: a child links to MORE than one secure root (task 155).</summary>
+    internal const string AncestorAmbiguousCode = "container_ancestor_ambiguous";
+
+    /// <summary>
+    /// Problem code: the child is filed under another CHILD record, so its root comes from a DENORMALIZED stamp
+    /// that can be stale (task 155 escalation trigger 2 — see <see cref="ResolveSecureAncestorAsync"/>).
+    /// </summary>
+    internal const string AncestorUnverifiableCode = "container_ancestor_unverifiable";
+
+    /// <summary>
+    /// How many root hops ABOVE the record the walk follows (task 155 f4). The deepest live shape spaarkedev1 can hold
+    /// is three — a to-do → its work assignment → that work assignment's project → (through the project's polymorphic
+    /// pair) a matter — so four leaves one hop of slack. A chain that needs more is REFUSED, never truncated into "no
+    /// secure root above it".
+    /// </summary>
+    internal const int MaxRootChainDepth = 4;
+
+    /// <summary>
+    /// How many distinct rows above the record one resolution may read (task 155 f4): the cost bound across BRANCHES,
+    /// where <see cref="MaxRootChainDepth"/> bounds each branch's length. A to-do can name a project, a matter and a work
+    /// assignment at once, and that work assignment a project and a matter of its own, so breadth is real; eight is well
+    /// above any live shape (the commonest costs one). Exceeding it is refused, like the depth bound.
+    /// </summary>
+    internal const int MaxRootReads = 8;
+
+    /// <summary>
+    /// A record the walk follows: its entity and id, and the column path that named it. <see cref="Via"/> holds
+    /// column and entity NAMES only, so it may reach a response body; ids go to the log.
+    /// </summary>
+    private readonly record struct RootHop(string Entity, Guid Id, string Via);
+
+    /// <summary>
+    /// For a record that is not itself secure, decide whether a SECURE root (project / matter / work assignment) owns
+    /// its content — ANYWHERE above it. Returns that root's own container
+    /// (<see cref="ContainerDecisionOutcome.ResolvedSecure"/>), or <see langword="null"/> when no root above it is
+    /// secure — the caller then derives the non-secure default exactly as before. Every indeterminate answer THROWS;
+    /// none returns <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The walk is transitive (task 155 f4).</b> Until f4 a root link was followed ONE hop: a to-do regarding
+    /// a work assignment read only that work assignment's own flag. But f3 made a NON-secure work assignment that is
+    /// filed regarding a SECURE matter store its own files in the matter's container (interpretation iii), so its to-do
+    /// — which read "work assignment, not secure" — went to the shared business-unit container: the chain disagreed
+    /// with itself, and the disagreement was a fail-open (live: event <c>a30254d0</c> under work assignment
+    /// <c>9c0254d0</c>). Now every row the walk reads names the records above IT, through the same table the record's
+    /// own row uses (<see cref="ChildAncestorLinks"/>), and those are read in turn:</para>
+    /// <list type="bullet">
+    /// <item>ANY secure root in the chain → the content goes to that root's own container (or refuses if it has none);
+    /// never a shared container while a secure root is anywhere above.</item>
+    /// <item>Two DIFFERENT secure roots anywhere in the chain → <see cref="AncestorAmbiguousCode"/>. The walk continues
+    /// PAST a secure root to find out (a secure work assignment filed regarding a different secure matter is two). The
+    /// same record reached twice (a diamond) is one root, not two.</item>
+    /// <item>An unreadable hop → <see cref="AncestorUnresolvedCode"/> 503 (retryable); a missing hop, a null row or a
+    /// type the org does not know → 409.</item>
+    /// <item>A hop whose own row names an intermediate is the held path (<see cref="AncestorUnverifiableCode"/>): the
+    /// record cannot be placed, exactly as the hop itself cannot.</item>
+    /// <item>Bounded (<see cref="MaxRootChainDepth"/>, <see cref="MaxRootReads"/>) and cycle-guarded (a record already
+    /// on the walk, including the record being resolved, is not read again). A chain past the bound refuses, 409.</item>
+    /// </list>
+    ///
+    /// <para><b>Why a child filed under another CHILD is refused rather than resolved (escalation trigger 2,
+    /// recorded in <c>notes/task-155-child-record-container-resolution.md</c>).</b> When a to-do's regarding is a
+    /// project, its <c>sprk_regardingproject</c> IS the link the user chose. When its regarding is a
+    /// communication, event, invoice, document or analysis, its <c>sprk_regarding{core}</c> value is a
+    /// DENORMALIZED copy of that intermediate's root, written once by <see cref="CoreAncestorResolver"/> and never
+    /// refreshed: nothing re-stamps a to-do when its communication is re-filed (one-hop by design, ADR-034), and a
+    /// native form clear leaves the copy behind (task 051 F-051-6). Re-file the communication under a SECURE
+    /// matter and the to-do still reads "non-secure root" — its bytes would go to a shared container, the exact
+    /// #1038 leak this task closes. Resolving from that copy would be papering over it, so this refuses, with a
+    /// code of its own so the owner's eventual choice (task 156: option b, cascade re-stamps on re-file) can replace
+    /// exactly this branch. The walk above follows only ROOTS (and an entry's explicitly followed records — the
+    /// communication's invoice); it never reads an intermediate live, which would be option (a).</para>
+    ///
+    /// <para>The same refusal covers every other record that belongs to a root without the row carrying that root
+    /// (task 155 f2/f3/f4): an AGREEMENT, BUDGET or REPORT CARD and a SERVICE REQUEST (each hangs off a matter /
+    /// project / work assignment, none is a CHILD that gets stamped — a service request is a CORE record that
+    /// cannot carry <c>sprk_issecure</c>), an invoice's <c>sprk_regardingagreement</c>, a work assignment's
+    /// communication / event / invoice regarding, a contact's <c>sprk_invoice</c>, a communication's service request /
+    /// event / analysis / budget / report card regarding, and a polymorphic regarding pair that names any of those
+    /// types. Resolving one would read "no root" and pick a shared container even when the root is secure.</para>
+    ///
+    /// <para><b>The polymorphic regarding pair</b> (<c>sprk_regardingrecordid</c> + <c>sprk_regardingrecordtype</c>,
+    /// task 155 f3) is read on every row that carries it — the record's and every hop's: see
+    /// <see cref="ResolvePolymorphicRegardingAsync"/>. A root it names joins the walk like a typed link.</para>
+    ///
+    /// <para><b>Cost</b> (task 155 constraint): the record's links rode on the record read the caller already made;
+    /// each row above it costs ONE read carrying its flag, its container AND its own links — so a to-do under a project
+    /// or matter still costs one root read (neither carries a link live); a to-do under a work assignment that regards
+    /// a matter costs two. The pair costs one <c>sprk_recordtype_ref</c> read per row only when it is the sole thing
+    /// on that row naming a record. A root type that cannot carry <c>sprk_issecure</c> AND names nothing above it is
+    /// never read. The classification it asks is the registry's scope-memoized catalog, so no extra metadata round
+    /// trip.</para>
+    /// </remarks>
+    private async Task<ContainerDecision?> ResolveSecureAncestorAsync(
+        Entity record,
+        string normalizedEntity,
+        Guid recordId,
+        ChildAncestorLinks links,
+        CancellationToken ct)
+    {
+        // The record itself is on the walk: a root that names it back (a project whose pair names a work assignment
+        // that regards that project) is a cycle, not another root.
+        var visited = new HashSet<(string Entity, Guid Id)> { (normalizedEntity, recordId) };
+        var secureRoots = new List<(RootHop Hop, string? Container)>();
+        var rootReads = 0;
+
+        // Level 0: the record's OWN row (already read by the caller) names the first hops. A held column here refuses
+        // before any root is read.
+        var frontier = await NextHopsAsync(
+                record, normalizedEntity, links, viaPrefix: null, normalizedEntity, recordId, ct)
+            .ConfigureAwait(false);
+
+        for (var depth = 1; frontier.Count > 0; depth++)
+        {
+            var next = new List<RootHop>();
+
+            foreach (var hop in frontier)
+            {
+                if (!visited.Add((hop.Entity, hop.Id)))
+                {
+                    // Reached twice — a diamond (the to-do names matter M directly AND through its work assignment) or a
+                    // cycle. That record is already on the walk, so it adds nothing; it is not a second root.
+                    continue;
+                }
+
+                var classification = await _securableEntities
+                    .ClassifyEntityAsync(hop.Entity, ct)
+                    .ConfigureAwait(false);
+
+                var hopLinks = ChildAncestorLinks.For(hop.Entity);
+
+                if (classification == EntitySecurability.NotSecurable && hopLinks is null)
+                {
+                    // Cannot carry sprk_issecure in this org (reading the flag would fault) AND its row names nothing
+                    // above it, so it can be neither a secure root nor the way to one: never read. Derived from
+                    // metadata, so a root type that GAINS the flag is read without a code change. (Live, all three
+                    // roots carry it.)
+                    continue;
+                }
+
+                if (classification is not (EntitySecurability.NotSecurable or EntitySecurability.Securable))
+                {
+                    throw AncestorUnresolved(
+                        normalizedEntity, recordId,
+                        $"It is filed under a '{hop.Entity}', which this environment does not know as an entity, so "
+                        + "whether that record is secure cannot be determined.",
+                        statusCode: 409,
+                        logDetail: $"{hop.Via} -> {hop.Entity} {hop.Id} (classified {(int)classification})");
+                }
+
+                if (depth > MaxRootChainDepth || rootReads >= MaxRootReads)
+                {
+                    throw AncestorUnresolved(
+                        normalizedEntity, recordId,
+                        "The chain of records it is filed under is longer than the storage resolver follows, so "
+                        + "whether a secure project, matter or work assignment sits above it cannot be determined.",
+                        statusCode: 409,
+                        logDetail: $"{hop.Via} -> {hop.Entity} {hop.Id} (depth {depth}, {rootReads} rows read; limits "
+                                   + $"{MaxRootChainDepth} deep, {MaxRootReads} rows)");
+                }
+
+                var isSecurableHop = classification == EntitySecurability.Securable;
+                var columns = new List<string>(capacity: 12);
+                if (isSecurableHop)
+                {
+                    columns.Add(SecurableEntityRegistry.SecureFlagAttribute);
+                    columns.Add(ContainerColumn);
+                }
+
+                if (hopLinks is not null)
+                {
+                    // ONE read of the hop carries its own links too — the same rule as the record's own read.
+                    columns.AddRange(hopLinks.AllColumns);
+                }
+
+                rootReads++;
+                var row = await ReadHopAsync(hop, [.. columns], normalizedEntity, recordId, ct).ConfigureAwait(false);
+
+                if (isSecurableHop)
+                {
+                    if (!row.Contains(SecurableEntityRegistry.SecureFlagAttribute))
+                    {
+                        // Same posture as the record path: NULL flags are legitimate and common (live dev 2026-10-01: 9
+                        // projects and 18 matters carry NULL sprk_issecure — a Two Options column is not back-filled),
+                        // so absent reads as non-secure, but distinguishably. The walk still continues above it.
+                        _logger.LogWarning(
+                            "[SECURE-CONTAINER] '{Attribute}' was ABSENT (not false) on {Ancestor} {AncestorId}, above "
+                            + "{Entity} {RecordId} ({Via}). Treating it as non-secure.",
+                            SecurableEntityRegistry.SecureFlagAttribute, hop.Entity, hop.Id, normalizedEntity, recordId,
+                            hop.Via);
+                    }
+
+                    if (row.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute))
+                    {
+                        secureRoots.Add((hop, row.GetAttributeValue<string>(ContainerColumn)));
+                    }
+                }
+
+                if (hopLinks is not null)
+                {
+                    // Followed even when THIS hop is secure: a different secure root above it is an ambiguity (there
+                    // is no single correct container), and the only way to see one is to keep walking.
+                    next.AddRange(await NextHopsAsync(
+                            row, hop.Entity, hopLinks, hop.Via, normalizedEntity, recordId, ct)
+                        .ConfigureAwait(false));
+                }
+            }
+
+            frontier = next;
+        }
+
+        if (secureRoots.Count == 0)
+        {
+            return null;
+        }
+
+        if (secureRoots.Count > 1)
+        {
+            // Consistent with the communication pipeline's ambiguity refusal: two secure roots means no single correct
+            // destination, and either choice places the content where the other root's members can read it.
+            var secureRootList = string.Join(
+                ", ", secureRoots.Select(r => $"{r.Hop.Entity}:{r.Hop.Id} via {r.Hop.Via}"));
+
+            _logger.LogError(
+                "[SECURE-CONTAINER] {Entity} {RecordId} has {Count} SECURE records above it [{Roots}]. There is no "
+                + "single correct container for its content. Refusing ({Code}).",
+                normalizedEntity, recordId, secureRoots.Count, secureRootList, AncestorAmbiguousCode);
+
+            throw new SdapProblemException(
+                code: AncestorAmbiguousCode,
+                title: "Ambiguous secure destination",
+                detail: $"This {normalizedEntity} is linked to more than one secure record, so its content has no "
+                        + "single correct storage container.",
+                statusCode: 409);
+        }
+
+        var (secureRoot, secureContainer) = secureRoots[0];
+        var decision = SecureContainerDecision.Decide(
+            isSecure: true, ownContainerId: secureContainer, fallbackContainerId: null);
+
+        if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
+        {
+            _logger.LogError(
+                "[SECURE-CONTAINER] REFUSED {Entity} {RecordId}: {Ancestor} {AncestorId} above it ({Via}) is SECURE but "
+                + "has no sprk_containerid. Its content belongs with the secure root, and no shared container may stand "
+                + "in for it.",
+                normalizedEntity, recordId, secureRoot.Entity, secureRoot.Id, secureRoot.Via);
+
+            throw new SdapProblemException(
+                code: "secure_record_container_missing",
+                title: "Secure record has no storage container",
+                detail: $"This {normalizedEntity} belongs to a secure {secureRoot.Entity}, which has no container of "
+                        + "its own. Its content cannot be stored in a shared container, so this operation is refused. "
+                        + "Provision the secure record's container first.",
+                statusCode: 409);
+        }
+
+        _logger.LogInformation(
+            "[SECURE-CONTAINER] Resolved {Entity} {RecordId} to the OWN container of the secure {Ancestor} {AncestorId} "
+            + "above it ({Via}; not a business-unit container).",
+            normalizedEntity, recordId, secureRoot.Entity, secureRoot.Id, secureRoot.Via);
+
+        return decision;
+    }
+
+    /// <summary>
+    /// The records one row names ABOVE it, to be read next (task 155 f4): its followed links that are set — every
+    /// root link, plus the records its entry follows live (the communication's invoice) — and, when the row carries
+    /// it, the record its polymorphic regarding pair names. Used for the record's own row (level 0) and for every row
+    /// the walk reads.
+    /// </summary>
+    /// <remarks>
+    /// A held column (<see cref="ChildAncestorLinks.IntermediateColumns"/>) THROWS
+    /// <see cref="AncestorUnverifiableCode"/>, and so does every answer the pair cannot give. These MUST ride on the
+    /// row's read: Dataverse returns only the requested columns, so a column left out reads as "not set".
+    /// </remarks>
+    /// <param name="viaPrefix"><see langword="null"/> for the record's own row; the path that reached the row otherwise.</param>
+    private async Task<List<RootHop>> NextHopsAsync(
+        Entity row,
+        string rowEntity,
+        ChildAncestorLinks rowLinks,
+        string? viaPrefix,
+        string normalizedEntity,
+        Guid recordId,
+        CancellationToken ct)
+    {
+        var held = rowLinks.IntermediateColumns
+            .Where(column => row.GetAttributeValue<EntityReference>(column) is { } r && r.Id != Guid.Empty)
+            .ToList();
+
+        if (held.Count > 0)
+        {
+            throw Unverifiable(
+                normalizedEntity, recordId, Via(viaPrefix, rowEntity, string.Join(", ", held)),
+                heldBy: viaPrefix is null ? null : rowEntity);
+        }
+
+        var hops = rowLinks.FollowedLinks
+            .Select(l => (l.Target, l.LinkColumn,
+                Id: row.GetAttributeValue<EntityReference>(l.LinkColumn)?.Id ?? Guid.Empty))
+            .Where(l => l.Id != Guid.Empty)
+            .Select(l => new RootHop(l.Target, l.Id, Via(viaPrefix, rowEntity, l.LinkColumn)))
+            .ToList();
+
+        if (rowLinks.HasPolymorphicRegarding)
+        {
+            var named = await ResolvePolymorphicRegardingAsync(
+                    row, rowEntity, rowLinks, viaPrefix, hops, normalizedEntity, recordId, ct)
+                .ConfigureAwait(false);
+
+            if (named is { } pairHop)
+            {
+                hops.Add(pairHop);
+            }
+        }
+
+        return hops;
+    }
+
+    /// <summary>The column path for logs and the response: names only, never ids.</summary>
+    private static string Via(string? viaPrefix, string rowEntity, string columns)
+        => viaPrefix is null ? columns : $"{viaPrefix} > {rowEntity}.{columns}";
+
+    /// <summary>
+    /// Read one row above the record — its flag and container when its type can be secure, and its own links —
+    /// normalizing every failure to the typed refusal (missing / null row 409, unreadable 503).
+    /// </summary>
+    private async Task<Entity> ReadHopAsync(
+        RootHop hop, string[] columns, string normalizedEntity, Guid recordId, CancellationToken ct)
+    {
+        Entity? row;
+        try
+        {
+            row = await _entityService
+                .RetrieveAsync(hop.Entity, hop.Id, columns, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            // The ids go to the log (via AncestorUnresolved's logDetail), never to the response body.
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"It is linked to a {hop.Entity} that does not exist, so whether its content belongs in a secure "
+                + "container cannot be determined.",
+                statusCode: 409,
+                logDetail: $"{hop.Via} -> {hop.Entity} {hop.Id} (not found)");
+        }
+        catch (Exception ex) when (ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
+        {
+            // Unreadable is UNKNOWN, and unknown never becomes "not secure" (ADR-003). 503: retryable.
+            _logger.LogError(ex,
+                "[SECURE-CONTAINER] Could not read {Ancestor} {AncestorId}, above {Entity} {RecordId} ({Via}). Refusing "
+                + "rather than treating it as non-secure ({Code}).",
+                hop.Entity, hop.Id, normalizedEntity, recordId, hop.Via, AncestorUnresolvedCode);
+
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"Its {hop.Entity} could not be read, so whether its content belongs in a secure container "
+                + "cannot be determined. Try again.",
+                statusCode: 503,
+                logDetail: $"{hop.Via} -> {hop.Entity} {hop.Id} (read failed)");
+        }
+
+        return row ?? throw AncestorUnresolved(
+            normalizedEntity, recordId,
+            $"Its {hop.Entity} returned no row, so whether its content belongs in a secure container "
+            + "cannot be determined.",
+            statusCode: 409,
+            logDetail: $"{hop.Via} -> {hop.Entity} {hop.Id} (null row)");
+    }
+
+    /// <summary>
+    /// True only when the CALLER cancelled (task 155 f2). A Dataverse HTTP timeout also surfaces as a
+    /// <see cref="TaskCanceledException"/>, but with the caller's token still live — that is an unreadable row, and
+    /// it gets the typed, retryable 503 rather than escaping as a generic 500.
+    /// </summary>
+    private static bool IsCallerCancellation(Exception ex, CancellationToken ct)
+        => ex is OperationCanceledException && ct.IsCancellationRequested;
+
+    /// <param name="reason">Response-safe: names entity TYPES only, never another record's id.</param>
+    /// <param name="logDetail">Ids and columns for the operator; logged, never returned to the caller.</param>
+    private SdapProblemException AncestorUnresolved(
+        string normalizedEntity, Guid recordId, string reason, int statusCode, string? logDetail = null)
+    {
+        _logger.LogWarning(
+            "[SECURE-CONTAINER] REFUSED {Entity} {RecordId} ({Code}): {Reason} {Detail}",
+            normalizedEntity, recordId, AncestorUnresolvedCode, reason, logDetail ?? string.Empty);
+
+        return new SdapProblemException(
+            code: AncestorUnresolvedCode,
+            title: "Cannot resolve a storage container",
+            detail: $"{reason} Refusing rather than using a shared container.",
+            statusCode: statusCode);
+    }
+
+    /// <summary>
+    /// The held-path refusal (escalation trigger 2): the record — or a record above it — is filed under another record
+    /// that belongs to a root, and that row cannot say which root: a denormalized stamp at best, nothing at all at worst.
+    /// </summary>
+    /// <param name="via">The column path that named the intermediate — names only, for the log and the response.</param>
+    /// <param name="heldBy">
+    /// <see langword="null"/> when the record's OWN row is filed under the intermediate; otherwise the type of the record
+    /// ABOVE it that is (task 155 f4) — the advice then names that record, since the record itself is filed correctly.
+    /// </param>
+    private SdapProblemException Unverifiable(string normalizedEntity, Guid recordId, string via, string? heldBy = null)
+    {
+        _logger.LogWarning(
+            "[SECURE-CONTAINER] REFUSED {Entity} {RecordId}: {Holder} is filed under another record that belongs to a "
+            + "project/matter/work assignment ({Via}), so that row carries at most a denormalized stamp of that root "
+            + "(not refreshed when the record is re-filed) and, for an agreement, budget, report card or service "
+            + "request, no root link at all. It cannot be verified that it does not sit under a SECURE record ({Code}).",
+            normalizedEntity, recordId, heldBy is null ? "it" : $"the {heldBy} above it", via, AncestorUnverifiableCode);
+
+        var detail = heldBy is null
+            ? $"This {normalizedEntity} is filed under another record ({via}), so whether it belongs to a secure "
+              + "project, matter or work assignment cannot be verified. Its content is not stored in a shared "
+              + "container on an unverified answer. File it directly against its project, matter or work "
+              + "assignment to upload to it."
+            : $"This {normalizedEntity} belongs to a {heldBy} that is itself filed under another record ({via}), so "
+              + "whether it belongs to a secure project, matter or work assignment cannot be verified. Its content is "
+              + $"not stored in a shared container on an unverified answer. File the {heldBy} directly against its "
+              + "project, matter or work assignment to upload to this record.";
+
+        return new SdapProblemException(
+            code: AncestorUnverifiableCode,
+            title: "Cannot resolve a storage container",
+            detail: detail,
+            statusCode: 409);
+    }
+
+    /// <summary>The polymorphic regarding pair's record id column (a STRING, no referential integrity).</summary>
+    internal const string RegardingRecordIdColumn = "sprk_regardingrecordid";
+
+    /// <summary>The polymorphic regarding pair's type column (Lookup → <c>sprk_recordtype_ref</c>).</summary>
+    internal const string RegardingRecordTypeColumn = "sprk_regardingrecordtype";
+
+    private const string RecordTypeRefEntity = "sprk_recordtype_ref";
+    private const string RecordTypeLogicalNameColumn = "sprk_recordlogicalname";
+
+    /// <summary>
+    /// Read the polymorphic regarding pair on one row (task 155 f3; on every row the walk reads since f4, ADR-024
+    /// resolver fields). Returns the record above it that the pair alone names — to be followed like a typed link —
+    /// or <see langword="null"/> when the pair adds nothing. Every answer the pair cannot give THROWS.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why it is read at all.</b> Live spaarkedev1 (read-only, 2026-10-01) holds events whose typed regarding
+    /// lookups are all NULL but whose pair names a <c>sprk_matter</c>; 161 of 276 communications carry it (f4). A
+    /// resolver that reads only the typed columns sees "no root" on such a row and picks a shared container — even when
+    /// the matter is secure.</para>
+    ///
+    /// <para><b>The rules</b>, in order:</para>
+    /// <list type="number">
+    /// <item>No record id → the pair names no record and adds nothing. (A TYPE with no id — 21 events and 1 to-do
+    /// live — names no record either.)</item>
+    /// <item>An id that is not a GUID → refused (<see cref="AncestorUnresolvedCode"/>, 409).</item>
+    /// <item>The id is the id of a followed link set on the same row → the pair names THAT record: agreement by
+    /// identity, nothing new, no read. The typed lookup is referentially enforced, so it — not the pair's type
+    /// label — says what the record is; a mislabelled type (1 live event) cannot hide a second record. The same
+    /// holds for the row's typed PARTY regarding lookups (<see cref="ChildAncestorLinks.PartyRegardingColumns"/>,
+    /// task 155 f5): an id equal to the row's own <c>sprk_regardingperson</c> / <c>…contact</c> /
+    /// <c>…organization</c> / <c>…account</c> names that person or organization, which is not ownership, so the pair
+    /// adds nothing. This is the shape the OUTBOUND sender writes for every email regarding a person, organization or
+    /// account (<c>CommunicationService.MapAssociationFieldsAsync</c> sets the typed lookup and the pair id, and never
+    /// the pair's type); without it rule 5 refused every one of them as "no type" and lost its <c>.eml</c> archive.</item>
+    /// <item>A followed link is set and the pair names a DIFFERENT record → the row says two things about what it
+    /// is filed under → refused as ambiguous (<see cref="AncestorAmbiguousCode"/>, 409). Neither is picked.</item>
+    /// <item>The pair is the only thing naming a record → its type decides, read from <c>sprk_recordtype_ref</c>: a
+    /// type the row's entry FOLLOWS (a root; the communication's invoice) is returned and walked like a typed link (a
+    /// record that does not exist refuses there, 409); an INTERMEDIATE is the held path
+    /// (<see cref="AncestorUnverifiableCode"/>); a PARTY (contact, account, organization) is not ownership and adds
+    /// nothing, exactly like the typed party columns; a missing type, an unreadable type row (503) or a type this
+    /// table does not classify → refused (<see cref="AncestorUnresolvedCode"/>).</item>
+    /// </list>
+    /// </remarks>
+    /// <param name="followedHops">The followed links already set on the same row (rules 3 and 4).</param>
+    private async Task<RootHop?> ResolvePolymorphicRegardingAsync(
+        Entity row,
+        string rowEntity,
+        ChildAncestorLinks rowLinks,
+        string? viaPrefix,
+        IReadOnlyList<RootHop> followedHops,
+        string normalizedEntity,
+        Guid recordId,
+        CancellationToken ct)
+    {
+        // Response-safe phrasing: the record's own row ("Its"), or the TYPE of the row above it — never an id.
+        var possessive = viaPrefix is null ? "Its" : $"Its {rowEntity}'s";
+        var subject = viaPrefix is null ? "It" : $"Its {rowEntity}";
+        var via = Via(viaPrefix, rowEntity, RegardingRecordIdColumn);
+
+        var rawId = row.GetAttributeValue<string>(RegardingRecordIdColumn);
+
+        if (string.IsNullOrWhiteSpace(rawId))
+        {
+            return null;
+        }
+
+        if (!Guid.TryParse(rawId.Trim(), out var pairId) || pairId == Guid.Empty)
+        {
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"{possessive} '{RegardingRecordIdColumn}' does not hold a valid record identifier, so the record it is "
+                + "filed under cannot be determined.",
+                statusCode: 409,
+                logDetail: $"{via} = '{SanitizeForMessage(rawId)}'");
+        }
+
+        // Rule 3: agreement by identity — with a followed link, or (f5) with the row's own typed PARTY regarding. Both
+        // are referentially enforced lookups on the same row, so the pair names that record; a party is not ownership.
+        if (followedHops.Any(h => h.Id == pairId) || NamesTypedParty(row, rowLinks, pairId))
+        {
+            return null;
+        }
+
+        if (followedHops.Count > 0)
+        {
+            var typed = string.Join(", ", followedHops.Select(h => $"{h.Via} -> {h.Entity}:{h.Id}"));
+
+            _logger.LogError(
+                "[SECURE-CONTAINER] REFUSED {Entity} {RecordId}: the typed link(s) [{Typed}] and the polymorphic "
+                + "regarding ({Via} = {PairId}) on the same {RowEntity} row name DIFFERENT records. Neither is picked "
+                + "({Code}).",
+                normalizedEntity, recordId, typed, via, pairId, rowEntity, AncestorAmbiguousCode);
+
+            throw new SdapProblemException(
+                code: AncestorAmbiguousCode,
+                title: "Ambiguous secure destination",
+                detail: viaPrefix is null
+                    ? $"This {normalizedEntity}'s regarding fields disagree about which record it is filed under, so "
+                      + "its content has no single correct storage container."
+                    : $"The regarding fields of the {rowEntity} this {normalizedEntity} belongs to disagree about which "
+                      + "record it is filed under, so its content has no single correct storage container.",
+                statusCode: 409);
+        }
+
+        if (row.GetAttributeValue<EntityReference>(RegardingRecordTypeColumn) is not { } typeRef
+            || typeRef.Id == Guid.Empty)
+        {
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                $"{subject} names the record it is filed under without that record's type, so whether that record is "
+                + "secure cannot be determined.",
+                statusCode: 409,
+                logDetail: $"{via} = {pairId}, {RegardingRecordTypeColumn} not set");
+        }
+
+        var pairEntity = await ReadRegardingTypeAsync(typeRef.Id, normalizedEntity, recordId, pairId, ct)
+            .ConfigureAwait(false);
+
+        if (rowLinks.Follows(pairEntity))
+        {
+            return new RootHop(pairEntity, pairId, via);
+        }
+
+        switch (ChildAncestorLinks.KindOf(pairEntity))
+        {
+            case ChildAncestorLinks.RecordKind.Intermediate:
+                throw Unverifiable(
+                    normalizedEntity, recordId, $"{via} -> {pairEntity}",
+                    heldBy: viaPrefix is null ? null : rowEntity);
+
+            case ChildAncestorLinks.RecordKind.Party:
+                return null;
+
+            default:
+                throw AncestorUnresolved(
+                    normalizedEntity, recordId,
+                    $"It is filed under a '{SanitizeForMessage(pairEntity)}', a record type the storage resolver does "
+                    + "not classify, so whether it belongs to a secure project, matter or work assignment cannot be "
+                    + "determined.",
+                    statusCode: 409,
+                    logDetail: $"{via} = {pairId}, type {pairEntity}");
+        }
+    }
+
+    /// <summary>
+    /// Whether the pair's id is the id of one of the row's typed PARTY regarding lookups (rule 3, task 155 f5). Those
+    /// columns ride on the row's read whenever the row carries the pair (<see cref="ChildAncestorLinks.AllColumns"/>).
+    /// Identity only: a party that is set with a DIFFERENT id leaves the pair to rules 4 and 5.
+    /// </summary>
+    private static bool NamesTypedParty(Entity row, ChildAncestorLinks rowLinks, Guid pairId)
+        => rowLinks.PartyRegardingColumns.Any(column =>
+            row.GetAttributeValue<EntityReference>(column) is { } party && party.Id == pairId);
+
+    /// <summary>The entity logical name a <c>sprk_recordtype_ref</c> row stands for — or a refusal.</summary>
+    private async Task<string> ReadRegardingTypeAsync(
+        Guid typeRefId, string normalizedEntity, Guid recordId, Guid pairId, CancellationToken ct)
+    {
+        Entity? typeRow;
+        try
+        {
+            typeRow = await _entityService
+                .RetrieveAsync(RecordTypeRefEntity, typeRefId, [RecordTypeLogicalNameColumn], ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                "The type of the record it is filed under does not exist, so whether that record is secure cannot be "
+                + "determined.",
+                statusCode: 409,
+                logDetail: $"{RegardingRecordTypeColumn} -> {RecordTypeRefEntity} {typeRefId} (not found); pair id {pairId}");
+        }
+        catch (Exception ex) when (ex is not SdapProblemException && !IsCallerCancellation(ex, ct))
+        {
+            _logger.LogError(ex,
+                "[SECURE-CONTAINER] Could not read {TypeEntity} {TypeId}, the regarding type of {Entity} {RecordId}. "
+                + "Refusing rather than treating the record as having no root ({Code}).",
+                RecordTypeRefEntity, typeRefId, normalizedEntity, recordId, AncestorUnresolvedCode);
+
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                "The type of the record it is filed under could not be read, so whether that record is secure cannot "
+                + "be determined. Try again.",
+                statusCode: 503,
+                logDetail: $"{RegardingRecordTypeColumn} -> {RecordTypeRefEntity} {typeRefId} (read failed)");
+        }
+
+        var logicalName = typeRow?.GetAttributeValue<string>(RecordTypeLogicalNameColumn);
+
+        if (string.IsNullOrWhiteSpace(logicalName))
+        {
+            throw AncestorUnresolved(
+                normalizedEntity, recordId,
+                "The type of the record it is filed under could not be determined, so whether that record is secure "
+                + "cannot be determined.",
+                statusCode: 409,
+                logDetail: $"{RegardingRecordTypeColumn} -> {RecordTypeRefEntity} {typeRefId} "
+                           + (typeRow is null ? "(null row)" : "(no logical name)"));
+        }
+
+        return logicalName.Trim().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// The registry answered with a value outside its contract (neither NotAnEntity, NotSecurable nor Securable).
+    /// Unknown is refused — the same code the communication pipeline uses when securability cannot be determined.
+    /// </summary>
+    private SdapProblemException SecurabilityIndeterminate(
+        string normalizedEntity, Guid recordId, EntitySecurability securability)
+    {
+        _logger.LogError(
+            "[SECURE-CONTAINER] REFUSED {Entity} {RecordId}: the securable-entity registry classified the entity as "
+            + "'{Securability}', which is not a defined answer. Refusing rather than treating it as not securable.",
+            normalizedEntity, recordId, (int)securability);
+
+        return new SdapProblemException(
+            code: "securable_entities_unknown",
+            title: "Securability could not be determined",
+            detail: $"Whether a {normalizedEntity} can be secure could not be determined, so its content is not stored "
+                    + "in a shared container. Refusing rather than guessing.",
+            statusCode: 409);
+    }
+
+    /// <summary>
+    /// How each record type this resolver can be asked about names its ROOT (project / matter / work assignment),
+    /// directly or through another record — from the task 155 f3 live metadata sweep, extended in f4 to
+    /// <c>sprk_communication</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The sweep (spaarkedev1, read-only, 2026-10-01; communication 2026-10-02).</b> For every entity in this
+    /// table AND every entity the record-keyed upload routes, the Office save path, Compose and the communication
+    /// adapter can resolve (<c>sprk_todo</c>, <c>sprk_event</c>, <c>sprk_invoice</c>, <c>sprk_workassignment</c>,
+    /// <c>sprk_project</c>, <c>sprk_matter</c>, <c>contact</c>, <c>sprk_communication</c>), EVERY Lookup / Customer /
+    /// Owner column was enumerated with its targets
+    /// (<c>EntityDefinitions(LogicalName='x')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata</c>), and
+    /// every target was classified by its OWN lookups. The full table is in
+    /// <c>notes/task-155-child-record-container-resolution.md</c> "Round f3" / "Round f4", and the literal list is
+    /// pinned by <c>ChildRecordContainerResolutionTests.ChildRecordRead_RequestsEveryLinkAndIntermediateColumn</c>.</para>
+    ///
+    /// <para><b>The rule.</b> Every column whose target IS a root is FOLLOWED (read, flag- and container-checked, and
+    /// its own row walked in turn — f4); every column whose target can HANG OFF a root
+    /// (<see cref="RecordKind.Intermediate"/>) is the held path, unless the entry explicitly follows that target (only
+    /// the communication's invoice); party targets (contact, account, organization) and reference / principal /
+    /// grouping targets (systemuser, team, businessunit, currency, the <c>*_ref</c> tables, eventset, AI search index,
+    /// triage category, communication thread) are not ownership and are not FOLLOWED. A <c>sprk_regardingrecordid</c>
+    /// column means the row carries the polymorphic pair, which is read too — and with it the row's typed PARTY
+    /// REGARDING columns (<see cref="PartyRegardingColumns"/>, f5), on the same read, for one purpose only: the pair's
+    /// rule 3 (an id equal to the row's own typed party names that party). They never move content.</para>
+    ///
+    /// <para><b>The same table serves every row the walk reads</b> (task 155 f4): the record's own row AND each root
+    /// above it — so a work assignment's links are read whether the work assignment is the record or the root of a
+    /// to-do. A root type with no entry (<c>sprk_matter</c>) names nothing above itself.</para>
+    ///
+    /// <para><b>An entity the child taxonomy names but this table does not is refused</b> (task 155 escalation
+    /// trigger 1): <c>sprk_document</c> and <c>sprk_analysis</c> reach no caller of this resolver today. Add an entry —
+    /// swept against live metadata — before routing one of them here. A column missing from the live entity makes the
+    /// row read FAULT, which fails closed.</para>
+    /// </remarks>
+    internal sealed class ChildAncestorLinks
+    {
+        /// <summary>What a record of a given type is, for the question "can it be or hang off a root?".</summary>
+        internal enum RecordKind
+        {
+            /// <summary>A project, matter or work assignment: it carries <c>sprk_issecure</c> and its own container.</summary>
+            Root,
+
+            /// <summary>A record that itself has (or can have) a root: following it needs a read this resolver does not make.</summary>
+            Intermediate,
+
+            /// <summary>A person or organization: referenced, never an owner of content.</summary>
+            Party,
+        }
+
+        /// <summary>
+        /// Every record type a link — typed or polymorphic — can name, classified from the live sweep. A type not in
+        /// this table is UNKNOWN, and a polymorphic regarding naming one is refused.
+        /// </summary>
+        /// <remarks>
+        /// Intermediate, each with its live evidence: analysis / communication / document / event / invoice / to-do are
+        /// the CHILD taxonomy (stamped once, never refreshed — trigger 2); agreement and report card carry
+        /// <c>sprk_regardingmatter</c> / <c>sprk_regardingproject</c>; budget carries typed <c>sprk_matter</c> /
+        /// <c>sprk_project</c>; service request carries <c>sprk_regarding{matter,project,workassignment}</c> and cannot
+        /// carry <c>sprk_issecure</c> itself. Party: contact, account and sprk_organization have no lookup to a root (the
+        /// <c>sprk_invoice</c> lookup on contact and organization is a reference to an invoice, not an owner of the party;
+        /// a contact RESOLVED here still has that column read — see the contact entry below).
+        /// </remarks>
+        private static readonly IReadOnlyDictionary<string, RecordKind> KindByEntity =
+            new Dictionary<string, RecordKind>(StringComparer.Ordinal)
+            {
+                ["sprk_project"] = RecordKind.Root,
+                ["sprk_matter"] = RecordKind.Root,
+                ["sprk_workassignment"] = RecordKind.Root,
+
+                ["sprk_analysis"] = RecordKind.Intermediate,
+                ["sprk_communication"] = RecordKind.Intermediate,
+                ["sprk_document"] = RecordKind.Intermediate,
+                ["sprk_event"] = RecordKind.Intermediate,
+                ["sprk_invoice"] = RecordKind.Intermediate,
+                ["sprk_todo"] = RecordKind.Intermediate,
+                ["sprk_agreement"] = RecordKind.Intermediate,
+                ["sprk_budget"] = RecordKind.Intermediate,
+                ["sprk_reportcard"] = RecordKind.Intermediate,
+                ["sprk_servicerequest"] = RecordKind.Intermediate,
+
+                ["contact"] = RecordKind.Party,
+                ["account"] = RecordKind.Party,
+                ["sprk_organization"] = RecordKind.Party,
+            };
+
+        /// <summary>
+        /// The regarding columns <c>sprk_todo</c> and <c>sprk_event</c> share whose target is a root or can hang off
+        /// one. <c>sprk_regardingservicerequest</c> is here as an INTERMEDIATE (f3): a service request is a core record
+        /// for ACCESS, but it cannot carry <c>sprk_issecure</c> and it hangs off a matter / project / work assignment
+        /// — and because it is core, <see cref="CoreAncestorResolver"/> stamps nothing above it on the child.
+        /// </summary>
+        private static readonly (string Column, string Target)[] SharedRegardingLinks =
+        [
+            ("sprk_regardingproject", "sprk_project"),
+            ("sprk_regardingmatter", "sprk_matter"),
+            ("sprk_regardingworkassignment", "sprk_workassignment"),
+            ("sprk_regardingservicerequest", "sprk_servicerequest"),
+            ("sprk_regardinganalysis", "sprk_analysis"),
+            ("sprk_regardingcommunication", "sprk_communication"),
+            ("sprk_regardingevent", "sprk_event"),
+            ("sprk_regardinginvoice", "sprk_invoice"),
+            ("sprk_regardingagreement", "sprk_agreement"),
+            ("sprk_regardingbudget", "sprk_budget"),
+            ("sprk_regardingreportcard", "sprk_reportcard"),
+        ];
+
+        /// <summary>
+        /// The typed PARTY regarding lookups (f5), from the f3 / f4 live sweeps. Read only on a row that carries the
+        /// pair, and only for the pair's rule 3: the regarding builders write the typed regarding column and the pair id
+        /// together, and the outbound sender writes NO type (<c>CommunicationService.MapAssociationFieldsAsync</c>), so
+        /// for a party the typed column is the only thing on the row that says what the pair id is. sprk_invoice,
+        /// sprk_workassignment and sprk_project have no regarding-party lookup (their party columns are assignees and
+        /// vendors, which no builder pairs with the pair id), so they have none here.
+        /// </summary>
+        private static readonly (string Column, string Target)[] TodoPartyRegarding =
+        [
+            ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+        ];
+
+        private static readonly (string Column, string Target)[] EventPartyRegarding =
+        [
+            ("sprk_regardingcontact", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+            ("sprk_regardingaccount", "account"),
+        ];
+
+        private static readonly (string Column, string Target)[] CommunicationPartyRegarding =
+        [
+            ("sprk_regardingperson", "contact"), ("sprk_regardingorganization", "sprk_organization"),
+            ("sprk_regardingaccount", "account"),
+        ];
+
+        private static readonly IReadOnlyDictionary<string, ChildAncestorLinks> ByEntity =
+            new Dictionary<string, ChildAncestorLinks>(StringComparer.Ordinal)
+            {
+                ["sprk_todo"] = new(polymorphic: true,
+                    [.. SharedRegardingLinks, ("sprk_regardingdocument", "sprk_document")],
+                    parties: TodoPartyRegarding),
+                ["sprk_event"] = new(polymorphic: true, SharedRegardingLinks, parties: EventPartyRegarding),
+                // Typed sprk_project / sprk_matter are its OWN root links; sprk_regardingagreement is an intermediate
+                // (f3: the f2 table gave the invoice no intermediates at all, so an invoice regarding an agreement of a
+                // SECURE matter resolved a shared container).
+                ["sprk_invoice"] = new(polymorphic: true,
+                [
+                    ("sprk_project", "sprk_project"), ("sprk_matter", "sprk_matter"),
+                    ("sprk_regardingagreement", "sprk_agreement"),
+                ]),
+                // A ROOT that is itself filed regarding a matter / project (live: 9 of 22 work assignments) or a
+                // communication / event / invoice (live: 1). Its own sprk_issecure still decides first when it is the
+                // record; as a root above a to-do / event / invoice its links are walked too (f4).
+                ["sprk_workassignment"] = new(polymorphic: true,
+                [
+                    ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),
+                    ("sprk_regardingcommunication", "sprk_communication"), ("sprk_regardingevent", "sprk_event"),
+                    ("sprk_regardinginvoice", "sprk_invoice"),
+                ]),
+                // A ROOT whose only root-capable column is the polymorphic pair (live: 0 projects carry it).
+                // sprk_matter has a sprk_regardingrecordtype but NO sprk_regardingrecordid, so its row can name no
+                // record and it has no entry.
+                ["sprk_project"] = new(polymorphic: true, []),
+                // A PARTY whose own sprk_invoice lookup names a record that can belong to a matter (live: 0 contacts
+                // set it). Read and held rather than trusted as "a person is never under a matter" (f2's reading).
+                ["contact"] = new(polymorphic: false, [("sprk_invoice", "sprk_invoice")]),
+                // f4: the communication pipeline's own row (live sweep 2026-10-02, 24 lookups). Roots are followed;
+                // service request / event / analysis / budget / report card are HELD (live: 1 event, 1 analysis);
+                // the pair is read (live: 161 of 276). The INVOICE is FOLLOWED live — read for its own flag, container
+                // and links — because that is what the communication path has done since task 155 r0 (it resolved
+                // the invoice as a record), and an invoice's typed sprk_project / sprk_matter are its OWN links, not
+                // a CoreAncestorResolver stamp. Not ownership, not read: sprk_regardingperson / organization /
+                // account (party — not FOLLOWED; read for the pair's rule 3, f5); sprk_communicationthread (a GROUPING
+                // whose anchor is COPIED from its messages' regarding — IThreadResolver — and which every message gets
+                // by the 3-tier ladder, so holding on it would refuse every threaded message); sprk_triagecategory,
+                // sprk_sentby and the system columns.
+                ["sprk_communication"] = new(polymorphic: true,
+                [
+                    ("sprk_regardingproject", "sprk_project"), ("sprk_regardingmatter", "sprk_matter"),
+                    ("sprk_regardingworkassignment", "sprk_workassignment"),
+                    ("sprk_regardinginvoice", "sprk_invoice"),
+                    ("sprk_regardingservicerequest", "sprk_servicerequest"), ("sprk_regardingevent", "sprk_event"),
+                    ("sprk_regardinganalysis", "sprk_analysis"), ("sprk_regardingbudget", "sprk_budget"),
+                    ("sprk_regardingreportcard", "sprk_reportcard"),
+                ], followed: ["sprk_invoice"], parties: CommunicationPartyRegarding),
+            };
+
+        private readonly IReadOnlySet<string> _followedTargets;
+
+        private ChildAncestorLinks(
+            bool polymorphic,
+            IReadOnlyList<(string Column, string Target)> links,
+            IReadOnlyCollection<string>? followed = null,
+            IReadOnlyList<(string Column, string Target)>? parties = null)
+        {
+            HasPolymorphicRegarding = polymorphic;
+            _followedTargets = new HashSet<string>(followed ?? [], StringComparer.Ordinal);
+            FollowedLinks = links
+                .Where(l => Follows(l.Target))
+                .Select(l => (l.Target, l.Column))
+                .ToArray();
+            IntermediateColumns = links
+                .Where(l => !Follows(l.Target) && KindOf(l.Target) == RecordKind.Intermediate)
+                .Select(l => l.Column)
+                .ToArray();
+
+            // A party column is only ever an identity witness for the pair, never an ownership link: a non-party target
+            // here would let rule 3 swallow a pair that names a ROOT, so it is a defect in this table, not data.
+            var partyLinks = parties ?? [];
+            var notParty = partyLinks.Where(p => KindOf(p.Target) != RecordKind.Party).Select(p => p.Column).ToArray();
+            if (notParty.Length > 0 || (partyLinks.Count > 0 && !polymorphic))
+            {
+                throw new ArgumentException(
+                    "Party regarding columns must target a party and belong to a row that carries the polymorphic pair: "
+                    + string.Join(", ", partyLinks.Select(p => p.Column)),
+                    nameof(parties));
+            }
+
+            PartyRegardingColumns = partyLinks.Select(p => p.Column).ToArray();
+        }
+
+        /// <summary>
+        /// Target entity → the column on this row that names it, for every link the walk FOLLOWS: each root link, and
+        /// each link to a type this entry explicitly follows (the communication's invoice).
+        /// </summary>
+        public IReadOnlyList<(string Target, string LinkColumn)> FollowedLinks { get; }
+
+        /// <summary>
+        /// Columns that point at a record which ITSELF belongs (or can belong) to a root — another child (whose root
+        /// is only a denormalized stamp here) or a root-owned non-child record (agreement, budget, report card,
+        /// service request: no stamp at all). Any of them set means this row cannot answer "which root?", so the
+        /// record is refused. These MUST ride on the row's read: Dataverse returns only the requested columns, so a
+        /// column left out of <see cref="AllColumns"/> reads as "not set" and silently disables the refusal.
+        /// </summary>
+        public IReadOnlyList<string> IntermediateColumns { get; }
+
+        /// <summary>The row carries the polymorphic regarding pair (<c>sprk_regardingrecordid</c> + type).</summary>
+        public bool HasPolymorphicRegarding { get; }
+
+        /// <summary>
+        /// The row's typed PARTY regarding lookups (task 155 f5): read with the pair, used only by its rule 3 — an id
+        /// equal to one of them names that party, which is not ownership. Never followed.
+        /// </summary>
+        public IReadOnlyList<string> PartyRegardingColumns { get; }
+
+        /// <summary>Every column the row's read must carry for the decision.</summary>
+        public IEnumerable<string> AllColumns => FollowedLinks.Select(l => l.LinkColumn)
+            .Concat(IntermediateColumns)
+            .Concat(HasPolymorphicRegarding
+                ? PolymorphicColumns.Concat(PartyRegardingColumns)
+                : Array.Empty<string>());
+
+        /// <summary>
+        /// Whether a link from this row to <paramref name="target"/> is walked: every root, plus a type this entry
+        /// explicitly follows. Also decides the polymorphic pair's rule 5.
+        /// </summary>
+        public bool Follows(string target)
+            => KindOf(target) == RecordKind.Root || _followedTargets.Contains(target);
+
+        private static readonly string[] PolymorphicColumns = [RegardingRecordIdColumn, RegardingRecordTypeColumn];
+
+        /// <summary>The links for <paramref name="entity"/>, or <see langword="null"/> when its row names no root.</summary>
+        public static ChildAncestorLinks? For(string entity)
+            => ByEntity.TryGetValue(entity, out var links) ? links : null;
+
+        /// <summary>The kind of record <paramref name="entity"/> is, or <see langword="null"/> when it is not classified.</summary>
+        internal static RecordKind? KindOf(string entity)
+            => KindByEntity.TryGetValue(entity, out var kind) ? kind : null;
+
+        /// <summary>The entities with known links — for the pin test.</summary>
+        internal static IEnumerable<string> KnownChildEntities => ByEntity.Keys;
+    }
+
+    /// <summary>
+    /// The stable problem code for a name that is neither a <see cref="DocumentAssociationMap"/> alias nor a
+    /// real entity logical name (task 151, #1038). 400, distinct from <c>container_record_not_found</c> (404)
+    /// and <c>secure_record_container_missing</c> (409), which existing clients branch on: a name that is not
+    /// an entity is a malformed request, not a missing record or a missing container.
+    /// </summary>
+    internal const string UnknownEntityCode = "container_entity_unknown";
+
+    /// <summary>
+    /// The logical name for <paramref name="entityName"/>: the <see cref="DocumentAssociationMap"/> alias
+    /// mapping when it is one, otherwise the trimmed, lower-cased input. Deliberately NOT a second alias table
+    /// (CLAUDE.md §11) — anything the shared map does not know passes through and is then checked against the
+    /// org's real entities.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>THE ALIAS TABLE WINS — the one stated exception to "a real logical name resolves byte-for-byte as
+    /// before".</b> The alias lookup runs FIRST and is not second-guessed by the org's entity catalog. For every
+    /// alias but one that is moot, because the alias is not also a real logical name (<c>project</c>,
+    /// <c>matter</c>, <c>workassignment</c>, <c>event</c>, <c>todo</c>) or maps to itself (<c>contact</c>). The
+    /// exception is the bare name <c>invoice</c>: it is ALSO the logical name of the out-of-the-box Dynamics 365
+    /// Sales Invoice entity, which exists in any org with Sales installed. Here it resolves to
+    /// <c>sprk_invoice</c>, never to the OOB entity.</para>
+    ///
+    /// <para>That is correct, not merely tolerated: every Spaarke caller that says <c>invoice</c> means
+    /// <c>sprk_invoice</c> (it is the Office save / association wire's friendly type, and the record-keyed route
+    /// filter's <c>EntityAccessFilter.EntitySetByType</c> authorizes <c>invoice</c> against <c>sprk_invoices</c>
+    /// — so resolving it anywhere else would read a DIFFERENT record from the one the caller was authorized
+    /// on). No caller passes the OOB Sales invoice: it has no <c>sprk_document</c> lookup and no container
+    /// semantics. spaarkedev1 has no <c>invoice</c> entity at all (read-only metadata check, 2026-09-30:
+    /// <c>EntityDefinitions(LogicalName='invoice')</c> → 404). Pinned by
+    /// <c>RecordContainerResolverTests.BareInvoice_ResolvesAsSprkInvoice_EvenWhenTheOrgHasTheOobInvoiceEntity</c>.
+    /// Any NEW alias that collides with a real OOB logical name joins this exception and needs the same
+    /// justification.</para>
+    /// </remarks>
+    private static string NormalizeEntityName(string entityName)
+        => DocumentAssociationMap.ToLogicalName(entityName) ?? entityName.Trim().ToLowerInvariant();
+
+    private SdapProblemException UnknownEntity(string suppliedName)
+    {
+        var safeName = SanitizeForMessage(suppliedName);
+
+        // Warning, not Error: the content was REFUSED, so nothing was mis-stored — but a caller passing a name
+        // that is not an entity is a defect at that call site, and the supplied spelling is what finds it.
+        _logger.LogWarning(
+            "[SECURE-CONTAINER] REFUSED to resolve a storage container: '{SuppliedEntity}' is neither a known "
+            + "association alias nor an entity logical name in this org ({Code}). Not read as 'not "
+            + "securable' — a secure record named this way would otherwise land in a shared container.",
+            safeName, UnknownEntityCode);
+
+        return new SdapProblemException(
+            code: UnknownEntityCode,
+            title: "Unknown entity",
+            detail: $"'{safeName}' is not an entity this service recognises, so it cannot be determined whether "
+                    + "the record is secure. Name the record's entity by its logical name (for example "
+                    + "'sprk_project') or a supported association type (for example 'project').",
+            statusCode: 400);
+    }
+
+    /// <summary>
+    /// The supplied name is caller-controlled (a route segment on the record-keyed upload routes), so it is
+    /// reduced to identifier characters and bounded before it reaches a log line or a response body.
+    /// </summary>
+    private static string SanitizeForMessage(string value)
+    {
+        const int maxLength = 64;
+
+        var trimmed = value.Trim();
+        var chars = trimmed
+            .Take(maxLength)
+            .Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '?')
+            .ToArray();
+
+        return trimmed.Length > maxLength ? new string(chars) + "…" : new string(chars);
     }
 
     /// <summary>

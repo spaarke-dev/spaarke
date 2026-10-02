@@ -169,8 +169,10 @@ public interface IMembershipResolverService
 /// <para>
 /// ⚠️ <b>Supplied by the caller, deliberately not read here.</b> The ids come from the
 /// <c>sprk_contactorganization</c> junction, which lives behind
-/// <c>Infrastructure/ExternalAccess/ExternalParticipationService.QueryActiveOrgIdsAsync</c> — a read the
-/// accessible-record-set composer ALREADY performs for the FR-23 deny veto. Resolving them here instead
+/// <c>Infrastructure/ExternalAccess/ExternalParticipationService.ReadOrganizationMembershipsAsync</c> — a
+/// read the accessible-record-set composer ALREADY performs for the FR-23 deny veto (since task 109 it
+/// passes the read's CONFERRING set here — date-bounded, active organizations only — and keeps the
+/// statecode-only WALL set for the veto). Resolving them here instead
 /// would invert the layering (<c>Services/Ai/Membership</c> depending on
 /// <c>Infrastructure/ExternalAccess</c>) and add a SECOND, separately-cached junction read that could
 /// disagree with the first mid-composition. The pre-existing
@@ -188,6 +190,35 @@ public interface IMembershipResolverService
 /// is an over-grant that the returned id list cannot reveal.
 /// </para>
 /// </param>
+/// <param name="PeopleTargeting">
+/// ADR-034 Amendment A3 — the PEOPLE-TARGETING consumption surface (unified-access-control-r2 task 152; owner
+/// decisions round 2 item 9 + Q8, round 3 D1). The third surface beside AI scoping (the default) and authorization
+/// (<see cref="AccessConferringOnly"/>). It answers "which records are FOR this person" — the Daily Briefing, the
+/// Workspace top-priority matter and every notification playbook's LookupUserMembership node — and it binds ONLY
+/// person terms:
+/// <list type="bullet">
+/// <item><c>createdby</c> = the caller, and only when the caller is a HUMAN systemuser (<c>applicationid</c> null).
+/// The BFF application user never receives "everything it created" through this surface. Admitted on this surface
+/// only — the global <c>createdby</c> exclusion stays for AI scoping and authorization.</item>
+/// <item>The user-valued owner: <c>ownerid</c> / <c>owninguser</c> = the caller. On a team-owned row <c>ownerid</c>
+/// holds the team's id, so the condition never matches it.</item>
+/// <item>The registry-listed CONTACT-typed "Assigned *" columns = the caller's LINKED contact
+/// (<see cref="Models.PersonIdentity.ContactId"/>, task 141). No contact → the term binds nothing; never an email,
+/// UPN or name match.</item>
+/// </list>
+/// <c>owningteam</c>, <c>owningbusinessunit</c> and every Team-, BusinessUnit-, Organization- or Account-typed
+/// descriptor select NOTHING here: team and BU ownership are ACCESS facts, not attention facts — a team-owned record
+/// never fans out to the team's members. This surface selects; it does not authorize. Callers that show the rows
+/// MUST read them under the caller's Dataverse security (owner D1: Created By decides who a record is FOR, never who
+/// can open it).
+/// <para>
+/// Mutually exclusive with <see cref="AccessConferringOnly"/>: requesting both throws
+/// <see cref="ArgumentException"/> — the two surfaces answer different questions and are never merged. Default
+/// <c>false</c> leaves every existing caller byte-identical (descriptors, FetchXML, cache key). Ignored by
+/// <see cref="IMembershipResolverService.ResolveByContactAsync"/>, whose contact plane is always registry-filtered
+/// and has no Created By (a contact never creates a Dataverse row).
+/// </para>
+/// </param>
 public sealed record MembershipResolveOptions(
     IReadOnlyList<string>? Roles = null,
     IReadOnlyList<string>? IdentityTypes = null,
@@ -195,10 +226,17 @@ public sealed record MembershipResolveOptions(
     int Limit = MembershipResolveOptions.DefaultLimit,
     string? ContinuationToken = null,
     bool AccessConferringOnly = false,
-    IReadOnlyList<Guid>? OrganizationIds = null)
+    IReadOnlyList<Guid>? OrganizationIds = null,
+    bool PeopleTargeting = false)
 {
     /// <summary>Default per-page row limit when not specified by caller.</summary>
     public const int DefaultLimit = 500;
+
+    /// <summary>
+    /// The people-targeting surface (ADR-034 A3) with every other option at its default. The one value the
+    /// briefing, the top-priority matter and LookupUserMembership <c>targeting: "people"</c> pass.
+    /// </summary>
+    public static MembershipResolveOptions People { get; } = new(PeopleTargeting: true);
 
     /// <summary>
     /// Hard ceiling enforced server-side regardless of caller request.

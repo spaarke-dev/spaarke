@@ -17,9 +17,12 @@
  *            CLIENT lookup and must NEVER be written by provisioning.
  *
  *   NOW      1. Resolve the canonical `Secure Record` BU by name
- *            2. Assign the project to that BU's DEFAULT OWNER TEAM (verified by read-back)
- *            3. Create the project's own SPE container
- *            4. Record it on `sprk_containerid` — and FAIL LOUDLY if that write does not land
+ *            2. Resolve that BU's NAMED, non-default owner team (`Secure Record Owners`, task 144 — never the
+ *               BU's default team), and refuse unless it has no members and the BU holds no users
+ *            3. Assign the record to that team (verified by read-back) — a project, matter or work
+ *               assignment (`recordType` + `recordId`, or the legacy `projectId`)
+ *            4. Create the record's own SPE container
+ *            5. Record it on `sprk_containerid` — and FAIL LOUDLY if that write does not land
  *
  * Cases that exercised a deleted mechanism are `test.skip`ped below with a per-case reason rather
  * than rewritten. They need re-authoring against a live environment, which is the only place this
@@ -37,7 +40,7 @@
  * Tests validate the end-to-end secure project creation pipeline:
  *   1. Create project record with sprk_issecure = true (via Dataverse API)
  *   2. Call POST /api/v1/external-access/provision-project
- *   3. Verify the project is owned by the Secure Record BU's default owner team
+ *   3. Verify the project is owned by the Secure Record BU's NAMED owner team — not its default team
  *   4. Verify SPE container provisioned and ID returned
  *   5. Verify the project record's sprk_containerid points at it
  *   6. Clean up all test data after verification
@@ -88,6 +91,13 @@ const EXTERNAL_ACCESS_BASE = `${BFF_API_BASE}/api/v1/external-access`;
  */
 const SECURE_BU_NAME = process.env.SECURE_RECORD_BU_NAME || 'Secure Record';
 
+/**
+ * The NAMED owner team that owns every secure record (task 144, #967; owner decision F9). Must match the
+ * BFF's `SecureRecord:OwnerTeamName` (default `Secure Record Owners`). Deliberately NOT the business unit's
+ * default team, which carries the BU's own name and whose membership follows every user placed in the BU.
+ */
+const SECURE_OWNER_TEAM_NAME = process.env.SECURE_RECORD_OWNER_TEAM_NAME || 'Secure Record Owners';
+
 // ============================================================================
 // Test data helpers
 // ============================================================================
@@ -134,10 +144,13 @@ interface ProvisionProjectResponse {
   /** The canonical Secure Record BU — resolved by name, not created. */
   businessUnitId: string;
   businessUnitName: string;
-  /** That BU's default owner team, which now owns the project. */
+  /** That BU's NAMED owner team (task 144 — never its default team), which now owns the record. */
   ownerTeamId: string;
   ownerTeamName: string;
   speContainerId: string;
+  /** Task 144: `project` | `matter` | `workassignment`, and the record's id. */
+  recordType: string;
+  recordId: string;
 }
 
 /**
@@ -399,9 +412,14 @@ test.describe('Secure Project Creation Flow @e2e @secure-project', () => {
     expect(buRecord!.name).toBe(SECURE_BU_NAME);
     expect(buRecord!.name).not.toContain('SP-'); // no per-project BU was created
 
-    // ── Assert: the project is OWNED by that BU's default owner team ──────────
+    // ── Assert: the project is OWNED by that BU's NAMED owner team ─────────────
     // This is the security-relevant outcome. Ownership is what puts the record in the Secure Record
-    // business unit, and per design.md §5.1a no human holds access through it.
+    // business unit, and per design.md §5.1a no human holds access through it. Task 144: the owner is
+    // the NAMED team, never the BU's default team (whose membership is every user placed in the BU).
+    expect(response.ownerTeamName).toBe(SECURE_OWNER_TEAM_NAME);
+    expect(response.ownerTeamName).not.toBe(SECURE_BU_NAME);
+    expect(response.recordType).toBe('project');
+    expect(response.recordId).toBe(projectId);
     const projectRecord = await queryProject(projectId);
     expect(projectRecord).not.toBeNull();
     expect(projectRecord!.sprk_issecure).toBe(true);

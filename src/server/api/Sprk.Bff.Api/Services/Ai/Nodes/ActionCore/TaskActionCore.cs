@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
@@ -23,13 +24,25 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 // ---------------------------------------------------------------------------
 
 /// <summary>Session-agnostic input for a task create — all values pre-rendered/typed.</summary>
+/// <param name="ActingUserId">
+/// unified-access-control-r2 task 152: the systemuser on whose behalf the task is created (the playbook's acting user,
+/// the confirming user). Their LINKED contact (task 141) is the triggering person written to
+/// <c>sprk_event.sprk_assignedto</c> when no assignee is supplied — the create is app-only, so Created By cannot say
+/// who the task is for.
+/// </param>
+/// <param name="AssignedToContactId">A supplied assignee (contact). Never overwritten.</param>
 internal sealed record TaskActionInput(
     string Subject,
     string? Description,
     DateTime? ScheduledEnd,
     Guid? RegardingObjectId,
     string? RegardingObjectType,
-    Guid? OwnerId);
+    Guid? OwnerId,
+    Guid? ActingUserId = null,
+    Guid? AssignedToContactId = null,
+    /// <summary><c>sprk_finalduedate</c> — the OUTER bound, where <paramref name="ScheduledEnd"/>
+    /// (<c>sprk_duedate</c>) is the target. Optional; defaulted so existing call sites are unaffected.</summary>
+    DateTime? FinalDueDate = null);
 
 /// <summary>
 /// Session-agnostic core that builds a <c>sprk_event</c> (event type = Task) and creates it, preserving the
@@ -45,6 +58,14 @@ internal sealed class TaskActionCore
     /// Setting this lookup is what makes the created <c>sprk_event</c> a Task.</summary>
     private const string EventTypeRefEntity = "sprk_eventtype_ref";
     private static readonly Guid EventTypeTaskId = new("124f5fc9-98ff-f011-8406-7c1e525abd8b");
+
+    /// <summary>
+    /// <c>sprk_event.statuscode</c> = Open. MUST match <c>DailyBriefingCollector</c>'s own
+    /// <c>EventStatusOpen</c> — the briefing's Upcoming/Overdue task channels filter on exactly this value,
+    /// so a task created with any other status cannot be surfaced. Live option set: Draft(1) /
+    /// Open(659490001) / Completed(659490002) / Cancelled(659490004).
+    /// </summary>
+    private const int EventStatusOpen = 659490001;
 
     /// <summary>
     /// A caller-supplied regarding (polymorphic on the OOB task) maps to <c>sprk_event</c>'s TYPED regarding
@@ -82,15 +103,18 @@ internal sealed class TaskActionCore
 
     private readonly IGenericEntityService _entityService;
     private readonly CoreAncestorResolver _coreAncestors;
+    private readonly IIdentityNormalizationService _identity;
     private readonly ILogger _logger;
 
     public TaskActionCore(
         IGenericEntityService entityService,
         CoreAncestorResolver coreAncestors,
+        IIdentityNormalizationService identity,
         ILogger logger)
     {
         _entityService = entityService;
         _coreAncestors = coreAncestors;
+        _identity = identity;
         _logger = logger;
     }
 
@@ -105,12 +129,26 @@ internal sealed class TaskActionCore
         entity["sprk_eventname"] = input.Subject;
         // Event type = Task — the discriminator that makes this sprk_event a task.
         entity["sprk_eventtype_ref"] = new EntityReference(EventTypeRefEntity, EventTypeTaskId);
+        // 🔴 Added 2026-09-29 (spaarke-ontology-platform-r1): set the status EXPLICITLY to Open.
+        // Without this the row took sprk_event's default statuscode of 1 (Draft), and
+        // DailyBriefingCollector's task channels filter `sprk_eventtype_ref = Task AND statuscode = Open
+        // (659490001)` — so EVERY task this core created was invisible to the briefing that exists to
+        // surface it. 49 sprk_event rows in spaarkedev1 were sitting in Draft when this was found.
+        // "Draft" means a task whose authoring is unfinished; a task the system creates FOR someone to act
+        // on is Open by definition. Open pairs with statecode 0 (Active) — verified against the live
+        // option set, which is Draft(1) / Open(659490001) / Completed(659490002) / Cancelled(659490004).
+        entity["statuscode"] = new OptionSetValue(EventStatusOpen);
 
         if (input.Description is not null)
             entity["sprk_description"] = input.Description;
 
         if (input.ScheduledEnd.HasValue)
             entity["sprk_duedate"] = input.ScheduledEnd.Value;
+
+        // sprk_finalduedate is the OUTER bound. DailyBriefingCollector reads it FIRST and falls back to
+        // sprk_duedate, and its task channels filter by date -- a task with neither set cannot surface.
+        if (input.FinalDueDate.HasValue)
+            entity["sprk_finalduedate"] = input.FinalDueDate.Value;
 
         if (input.RegardingObjectId.HasValue && !string.IsNullOrWhiteSpace(input.RegardingObjectType))
         {
@@ -153,6 +191,24 @@ internal sealed class TaskActionCore
         if (input.OwnerId.HasValue)
             entity["ownerid"] = new EntityReference("systemuser", input.OwnerId.Value);
 
+        // Task 152 (#1044 split agreed with word-add-in-r1): the task names the PERSON it is for. A supplied assignee
+        // wins; otherwise the acting user's linked contact; otherwise the regarding parent's responsible internal
+        // contact; otherwise blank + todo_unassigned. Never a team, never an email match.
+        if (input.AssignedToContactId is { } supplied && supplied != Guid.Empty)
+        {
+            entity[AssignedToDefaults.AssignedToAttribute] = new EntityReference("contact", supplied);
+        }
+
+        var triggeringContactId = await ResolveLinkedContactAsync(input.ActingUserId, cancellationToken).ConfigureAwait(false);
+        await AssignedToDefaults.ApplyAsync(
+            _entityService,
+            entity,
+            triggeringContactId,
+            input.RegardingObjectType,
+            input.RegardingObjectId,
+            _logger,
+            cancellationToken).ConfigureAwait(false);
+
         try
         {
             return await _entityService.CreateAsync(entity, cancellationToken);
@@ -167,6 +223,35 @@ internal sealed class TaskActionCore
             // Return a degraded success — the task payload was assembled correctly
             // but Dataverse rejected it.
             return Guid.Empty;
+        }
+    }
+
+    /// <summary>
+    /// The acting user's LINKED contact (task 141's <c>PersonIdentity.ContactId</c> — never an email match), or null
+    /// when there is no acting user, no link, or the identity read failed.
+    /// </summary>
+    private async Task<Guid?> ResolveLinkedContactAsync(Guid? actingUserId, CancellationToken ct)
+    {
+        if (actingUserId is not { } userId || userId == Guid.Empty)
+        {
+            return null;
+        }
+
+        try
+        {
+            var identity = await _identity.ResolveAsync(userId, ct).ConfigureAwait(false);
+            return identity.ContactId;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "CreateTask: the acting user's linked contact could not be resolved for {ActingUserId}; falling back to the parent's responsible contact",
+                userId);
+            return null;
         }
     }
 }

@@ -1,0 +1,469 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="152" project="unified-access-control-r2">
+  <metadata>
+    <title>Notifications and Daily Briefing target PEOPLE (Created By, Assigned To), never owner teams or business units; server to-do writers set Assigned To; membership events state the row's real owner</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; owner round-2 item 9 "Notifications" and Q8, the membership half of GitHub #1044 plus the #1044 split agreed with word-add-in-r1, ADR-034 event semantics)</phase>
+    <gate>after-141 (the systemuser-to-contact link) AND after origin/master (with word-add-in-r1 PR #1045) is merged into this branch; the ADR-034 amendment approved by the owner before merge (CLAUDE.md §6.5 path B)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an attention/disclosure surface (the Daily Briefing reads app-only today), the membership resolver that the authorization plane also consumes, four event publishers, the reconciliation backstop and three server to-do writers; tags bff-api/auth; ADR amendment.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adds a third consumption surface to ADR-034's canonical resolver (whose options hash is a known disclosure hazard, see HashOptions remarks), closes an org-wide app-only disclosure in the High Priority section, and changes a versioned event contract's semantics. Security-sensitive and architectural.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/adr/ADR-034-user-record-membership.md (main-session-only), which tasks 036 and 142 also amend, so the amendments must be numbered and merged in sequence. Edits MembershipResolverService.cs, which 036 (C9) and 141 also touch, and IdentityNormalizationService consumers owned by 141. DailyBriefingCollector.QueryTodosAsync may also be touched by word-add-in-r1 PR #1045. Merge serially and run /conflict-check first.</parallel-reason>
+    <deps>141</deps>
+    <tags>bff-api, auth, security, dataverse, ai, testing</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <origin>Owner decision round 2, item 9 (2026-09-30): "target Created By and Assigned To. A team-owned record does not fan out to team members." Q8: the to-do "for" person is the existing sprk_todo.sprk_assignedto (CONTACT lookup) plus Created By. The #1044 split agreed with word-add-in-r1 on 2026-09-30 (session27 notes, "Peer follow-through"): UAC 152 matches Assigned To to the user's contact, counts Created By only for a HUMAN creator, and makes the server generators set Assigned To; word-add-in-r1 task 083 owns the Office CreateTodoAsync default only. Session 27 notifications research. GitHub #1044 (filed by word-add-in-r1; the membership-widening half stays with UAC).</origin>
+  </metadata>
+
+  <prompt>Make every Daily Briefing channel, the Workspace top-priority-matter briefing, and the LookupUserMembership notification path select records by the PEOPLE named on them. Those people are the human creator (Created By), the caller's own user ownership, and the "Assigned *" contact columns matched through the caller's linked contact from task 141. Never select by owner team, business unit or organization. Make the briefing show only rows the caller can read. Make the server-side to-do writers UAC owns fill Assigned To, so a server-created to-do reaches a person. Make the four MembershipChangedEvent publishers, and the reconciliation backstop, describe the row's actual owner instead of asserting "the caller owns it".</prompt>
+
+  <role>SPAARKE platform developer on the ADR-034 membership resolver, the Daily Briefing collector and the notification spine. Expert in Dataverse ownership semantics (polymorphic ownerid, default owner teams, app-only createdby) and in the repo's impersonated-read seam.</role>
+
+  <goal>(1) IMembershipResolverService supports a PEOPLE-TARGETING consumption surface, selected by an explicit option. It binds only person terms: a human `createdby`, the user-valued owner, and registry Contact-typed "Assigned *" columns through the linked contact. It never binds `owningteam`, `owningbusinessunit`, or any Team-, BusinessUnit-, Organization- or Account-typed descriptor.
+(2) These surfaces use it: DailyBriefingCollector (all six channels plus High Priority, render and email legs), BriefingService.GetTopPriorityMatterAsync, and every live notification playbook's LookupUserMembership node.
+(3) Every briefing row the caller receives is one Dataverse lets the caller read, with no app-only fallback.
+(4) TodoGenerationService, TaskActionCore and the external-portal to-do create set Assigned To when the request names no assignee. They use the triggering person's contact, else the parent's responsible internal contact.
+(5) The MembershipChangedEvent publishers and MembershipReconciliationJob key each event on the row's real owner (team or user), in the same identity space.
+(6) ADR-034 is amended (path B) to name the third surface and its human-createdby exception. docs/architecture/membership-resolution-pattern.md and the node-author guides match.</goal>
+
+  <context>
+    <background>WHAT IS WRONG TODAY (verified 2026-09-30 against this branch; anchors re-verified by the reviewer the same day).
+
+1. BRIEFING TO-DOS VANISH WHEN TEAM-OWNED. `Services/Ai/Narrators/DailyBriefingCollector.cs:1027` filters `owninguser = systemUserId`, so a to-do owned by a team matches nobody. Server-created rows become team-owned once RecordOwnershipResolver is wired (see C10 and word-add-in-r1 task 080). The High Priority to-do spec does the same: `:427-432`, with `ScopeToOwner: true` threaded to `:502-505`. The collector's own docstring (`:987-989`) says it skipped `sprk_assignedto` because that column is a contact lookup and matching needed an identity round-trip. GitHub #1044 records this. The owner chose `sprk_todo.sprk_assignedto` (CONTACT, verified live) plus Created By.
+
+2. MATTERS, PROJECTS AND EVENTS FAN OUT TO THE WHOLE BUSINESS UNIT. The collector resolves candidates with `_membershipResolver.ResolveAsync(systemUserId, entity, options: null, ct)` (`:627-629`).
+   - With `options: null`, `AccessConferringOnly` is false and ALL discovered descriptors are used (`MembershipResolverService.cs:255-257`). That includes the platform ownership columns (`PlatformOwnershipColumns = { ownerid, owningteam, owningbusinessunit }`, `:595-596`).
+   - `owningteam` binds every id in `identity.TeamIds` (`:904-909`). `IdentityNormalizationService` loads TeamIds from `teammembership` with no `isdefault` exclusion (`IdentityNormalizationService.cs:656-707`), so a BU DEFAULT team matches, and that team contains every user in the BU.
+   - `owningbusinessunit` binds the caller's BU id (`:911-916`).
+   - Result: a team- or BU-owned matter, project or event surfaces in the briefing of every user in that BU.
+   - The same resolver call shape feeds two other surfaces. One is the Workspace briefing's top-priority matter (`Services/Workspace/BriefingService.cs:291-292`, `options: null`). The other is the `LookupUserMembership` playbook node (`Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs:261-265`, `Roles` only), which ADR-034 names as the notification playbooks' membership source.
+
+3. HIGH PRIORITY IS AN ORG-WIDE APP-ONLY DISCLOSURE (found while tracing; added per the no-deferral directive).
+   - `CollectHighPriorityAsync` (`DailyBriefingCollector.cs:337-383`) queries six entity types with `ScopeToOwner: false` (`:405-426`): matter, project, invoice, document, work assignment and event. It returns every flagged (`sprk_highpriority` or `sprk_monitor`) record of those types in the tenant, with names and descriptions, to every caller.
+   - The seventh type, to-do, uses `owninguser`.
+   - The reads go through the app-only `IGenericEntityService` (`:163`, `:507`).
+   - The collector's own comment (`:321-325`) calls owner scoping "a follow-up refinement".
+   - The same list also grounds `DailyBriefingSuggestionProducer` (`DailyBriefingCompositeService.cs:130-133`).
+
+4. THE BRIEFING NEVER ASKS DATAVERSE WHETHER THE CALLER MAY READ A ROW.
+   - Every channel query runs app-only (`:773`, `:842`, `:898`, `:953`, `:1032`).
+   - Narrowing to people does not by itself guarantee readability. A creator or an assignee can lose read access. Two examples: a child re-owned into the Secure Record BU by the C10 work, or an internal user named in an Assigned field on a secure record with no share.
+   - ADR-047's privacy invariant says a notification must carry nothing the recipient could not re-fetch through the auth-checked BFF.
+   - A generic caller-context seam already exists. `IImpersonatedCommunicationQuery` (`Services/Communication/IImpersonatedCommunicationQuery.cs:21`) is a singleton, registered unconditionally (`Infrastructure/DI/CommunicationModule.cs:279`). It wraps `DataverseWebApiService.RetrieveMultipleImpersonatedAsync` (`src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs:1014`) with a fully generic (entitySet, odataQuery, callerSystemUserId) contract. `ExternalAccessModule.cs:187-193` records the decision NOT to declare a second impersonated-query interface.
+
+5. MEMBERSHIP EVENTS MISSTATE OWNERSHIP AND USE THE WRONG IDENTITY SPACE (ADR-034 publishers are ours). Four publishers publish `PersonId = caller AAD oid, PersonIdType = User, SourceField = "ownerid", Role = "owner"` unconditionally:
+   - `Api/DataverseDocumentsEndpoints.cs:60-77` (POST /api/v1/documents);
+   - `Api/Events/EventEndpoints.cs:400-418` (POST /api/v1/events);
+   - `Api/Office/OfficeEndpoints.cs:1931-1954` (quick-create matter);
+   - `Services/Office/OfficeService.cs:940-956` (Office save).
+
+   Three things are wrong:
+   - (a) When the row is team-owned the event is false. Office save already passes `OwningTeamId` (`OfficeDocumentPersistence.cs:252-257`), and POST /api/v1/documents writes a client- or server-chosen owner team (#1043).
+   - (b) The writers disagree on identity. The comment at `OfficeEndpoints.cs:1936-1941` claims the junction updater resolves the oid to a systemuserid. It does not: `MembershipJunctionUpdater.cs:122-133` writes `evt.PersonId` verbatim into the natural key. Meanwhile `MembershipReconciliationJob.cs:531-546` keys on the lookup VALUE (a systemuserid or teamid), so the two writers produce different junction keys for the same membership. The comments at `DataverseDocumentsEndpoints.cs:55` and `EventEndpoints.cs:393-394` ("defaulted by Dataverse to the OBO caller") are also false. Both creates run on app-only singletons (`IDocumentDataverseService`/`IDataverseService`, `GraphModule.cs:47,95`; `IEventDataverseService` = `DataverseWebApiService`, `GraphModule.cs:100`).
+   - (c) The backstop has its own typing defect. `ReadLookupAsIdentity` (`MembershipReconciliationJob.cs:742-776`) types the id from `descriptor.IdentityType`, and a polymorphic Owner descriptor always binds as SystemUser (ADR-034 A1.1, `MembershipFieldDiscoveryService` OwnerAttributeTargets). A team-owned row's team id is therefore recorded as `PersonIdType = User`.
+
+   The reconciliation orphan scan (`MembershipReconciliationJob.cs:412-419`) removes junction rows that are not in the expected set. Oid-keyed rows written by the old publishers are therefore removed once both writers agree.
+
+6. NOTIFICATIONS THEMSELVES.
+   - `NotificationService.CreateNotificationAsync` (`Services/NotificationService.cs:55-81`) writes one `appnotification` per explicit systemuser (`ownerid = systemuser(userId)`).
+   - Nothing notifies on document or to-do creation, and no producer expands a team into its members. `CommunicationFanOutTargetingService` targets message participants only.
+   - So "a team-owned record notifies nobody" is true for the direct producers. The fan-out risk is the membership-driven path in item 2: LookupUserMembership feeding CreateNotification in per-user playbooks.
+   - The owner's round-1 direction is that the Daily Briefing, not a team fan-out, is the surface for team-owned records.
+
+7. SERVER-CREATED TO-DOS NAME NO PERSON (the #1044 split agreed with word-add-in-r1, session27 "Peer follow-through").
+   - Created By is the BFF APPLICATION user for every BFF-created to-do. For example, "Invoice Pending: INV-005" has createdby = `# mi-bff-api-dev`. Matching Created By therefore cannot find the human, so the agreement makes Assigned To carry the person.
+   - `TodoGenerationService.CreateTodoAsync` (`Services/Workspace/TodoGenerationService.cs:798`) writes no `sprk_assignedto`, and none of its five rule call sites (`:408`, `:483`, `:581`, `:655`, `:722`) passes an owner. Its to-dos are therefore app-owned, app-created and unassigned, and reach NO user's briefing today.
+   - `TaskActionCore.CreateAsync` (`Services/Ai/Nodes/ActionCore/TaskActionCore.cs:102-158`) creates an `sprk_event` of type Task. It sets `ownerid` only from `input.OwnerId` (`:153-154`) and never sets `sprk_assignedto`, which is a registry Contact column on sprk_event.
+   - The external-portal to-do create (`Infrastructure/ExternalAccess/ExternalDataService.cs:649`, payload built by `BuildTodoCreatePayload` at `:727`) writes no `sprk_assignedto`.
+   - The Office `CreateTodoAsync` (`OfficeService.cs:2745`, assignee written at `:2788-2791`) is word-add-in-r1 task 083's. It is NOT this task's.
+
+8. APP-ONLY CREATES ALSO LOSE THE HUMAN CREATOR FOR NON-TO-DO RECORDS. POST /api/v1/documents, POST /api/v1/events, Office save and quick-create matter all create app-only (item 5b). Their `createdby` is the application user, so the Created By term alone cannot surface them for the person who made them. Documents still reach that person through the parent-set path (a document on a matter or project the person is named on). Events and quick-created matters need a decision (see escalation).
+
+THE OWNER'S RULE (binding): a record is "for" a person when that person CREATED it (a human createdby) or is NAMED in one of its "Assigned *" person columns. Team, business-unit and organization ownership are access facts, not attention facts. They keep granting ACCESS (ADR-034 A1.1, untouched here) but never select a record for someone's briefing or notification. Personal user ownership (`owninguser`) is kept as a third person term pending owner confirmation (escalation (a)).
+
+THE USER-CONTACT LINK.
+- The "Assigned *" columns are CONTACT lookups. The registry is `MembershipOptions.cs:300-372`, e.g. `sprk_todo.sprk_assignedto` at `:361-364`. `sprk_document` has no registry entry.
+- Matching these columns to an internal caller needs the caller's contact. `IdentityNormalizationService.cs:139-150` uses `sprk_primarycontact`, else `contact.azureactivedirectoryobjectid`. That second column does not exist in dev (C7), and only 1 of 8 active interactive dev users has `sprk_primarycontact` set (session 27).
+- Task 141 builds the reliable link (`systemuser.azureactivedirectoryobjectid` to `contact.sprk_externalobjectid`, then sets `sprk_primarycontact`), and `IdentityNormalizationService` exposes it as `PersonIdentity.ContactId`. This task consumes that and nothing else.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (DailyBriefingCollector factory :743-745 and :864 — ctor gains the existing IImpersonatedCommunicationQuery)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/BriefingService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ActionCore/TaskActionCore.cs (and its callers CreateTaskNodeExecutor.cs:219, PublicContracts/ActionSeam.cs:90 if the acting user must be plumbed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipChangedEvent.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Events/EventEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (publisher block :940-956 only; CreateTodoAsync belongs to word-add-in-r1 task 083)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs</file>
+      <file role="modify">.claude/adr/ADR-034-user-record-membership.md (main session only)</file>
+      <file role="modify">docs/adr/ADR-034-user-record-membership.md</file>
+      <file role="modify">docs/architecture/membership-resolution-pattern.md</file>
+      <file role="modify">docs/guides/MEMBERSHIP-RESOLUTION-GUIDE.md, docs/guides/PLAYBOOK-AUTHOR-GUIDE.md, docs/guides/JPS-AUTHORING-GUIDE.md (LookupUserMembership `targeting` config key)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/LookupUserMembershipNodeExecutorTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/TodoGenerationServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/CreateTaskNodeExecutorTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalDataServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipReconciliationJobTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/Events/MembershipChangedEventTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/Events/EventEndpointsMembershipPublishingTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/Documents/DataverseDocumentsEndpointsMembershipPublishingTests.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipOptions.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipJunctionUpdater.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCompositeService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/NullDailyBriefingCollector.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/NotificationService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationFanOutTargetingService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/IImpersonatedCommunicationQuery.cs (the generic caller-context read seam to REUSE — do not declare another)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (RetrieveMultipleImpersonatedAsync, :1014)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (word-add-in-r1 task 062 impersonated per-type fan-out: all impersonated reads failed means throw, never return empty)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="141">C7 identity binding: the systemuser-to-contact link (Entra oid in contact.sprk_externalobjectid, surfaced through sprk_primarycontact / PersonIdentity.ContactId). The Assigned-To term, and the generators' "triggering person's contact", bind through it. Re-derive 141's status from its own POML; if it has not merged, this task is blocked (see escalation).</dependency>
+      <dependency task="cross-project word-add-in-r1 PR #1045">Brings RecordOwnershipResolver wiring and the #1043 fix to master, and may touch QueryTodosAsync. Merge origin/master into this branch before starting.</dependency>
+      <dependency task="cross-project word-add-in-r1 task 083">Defaults `sprk_assignedto` to the caller's contact on the Office CreateTodoAsync path only (after 141). Not a blocker. Do not implement it here, and do not duplicate it.</dependency>
+      <dependency task="036, 142 (sequencing only)">Both also amend ADR-034. Number this task's amendment as the next free number at merge time, and never reuse a number another task has claimed (036 calls its owningbusinessunit removal "Amendment 2").</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-30 round 2, item 9 + Q8">Scope: every surface this task touches. A record is selected for a person ONLY by one of these:
+(a) `createdby` equal to the caller's systemuserid, when the caller is a HUMAN systemuser (`applicationid` null);
+(b) a registry-listed CONTACT-typed "Assigned *" column (`MembershipOptions.CanonicalAccessConferringRegistry`) equal to the caller's linked contact;
+(c) personal user ownership (`ownerid`/`owninguser` equal to the caller's systemuserid), pending escalation (a).
+`owningteam`, `owningbusinessunit`, a team-valued `ownerid`, and every Team-, BusinessUnit-, Organization- or Account-typed descriptor select NOTHING on this surface. A team-owned record never fans out to team members.</constraint>
+    <constraint source="#1044 split agreed with word-add-in-r1 (session27 Peer follow-through)">Scope: the createdby term. It binds only for a human caller. When the resolved systemuser is an application user, the createdby term binds nothing and a structured warning is logged. The BFF application user must never receive, through this surface, the set of everything it created.</constraint>
+    <constraint source="#1044 split agreed with word-add-in-r1 (session27 Peer follow-through)">Scope: TodoGenerationService (all five rules), TaskActionCore, and the external-portal to-do create (`ExternalDataService.BuildTodoCreatePayload`). When the request or rule supplies no assignee, write `sprk_assignedto` (sprk_todo; on sprk_event for TaskActionCore) with the first of these that exists:
+(1) the TRIGGERING person's contact: the playbook's acting user's linked contact for TaskActionCore; the calling contact for the external portal; the source event's assigned contact for TodoGenerationService rule 5;
+(2) the regarding parent's responsible internal contact: `sprk_assignedtointernal`, then `sprk_assignedattorney1`.
+If neither exists, leave the column blank and log a structured `todo_unassigned` warning. Never fall back to a team, and never to an email/name match. A supplied assignee is NEVER overwritten. Impersonated creates were rejected by the owner (they widen roles), so do not create as the user. The Office CreateTodoAsync is word-add-in-r1 task 083's; do not touch it.</constraint>
+    <constraint source="ADR-034 A1 / A1.1 (unchanged)">Scope: the authorization surface. Do NOT change what `AccessConferringOnly: true` returns or what `AccessibleRecordSetService.ComposeForSystemUserAsync` composes. Platform ownership stays access-conferring there; the BU over-grant is C9 / task 036's work, not this task's. The new surface is a separate opt-in option. The default (`options: null`) AI-scoping behavior of `ResolveAsync` stays byte-identical for callers this task does not switch (`MembershipEndpoints`, AI scoping). The people option and `AccessConferringOnly: true` are mutually exclusive: requesting both is rejected with an ArgumentException, never silently merged.</constraint>
+    <constraint source="ADR-034 MUST (single mechanism)">Scope: the people-targeting surface. Implement it INSIDE `MembershipResolverService` as an option on `MembershipResolveOptions` (neighbor: `AccessConferringOnly`, `IMembershipResolverService.cs:197`). Do NOT add ad-hoc `createdby`/`owninguser` query conditions in the collector or BriefingService. That is the A1/D5 anti-pattern the ADR exists to prevent. The existing to-do/High Priority `owninguser` conditions (`DailyBriefingCollector.cs:1027`, `:502-505`) are REMOVED in favor of the resolver.</constraint>
+    <constraint source="MembershipResolverService.HashOptions remarks (:1574-1601)">Scope: the new option. It MUST be added to `HashOptions` (`:1602-1616`). A cache key narrower than the query lets a people-targeted call and an AI-scoping call for the same user share one 5-minute entry, which is the exact disclosure task 043 fixed for `AccessConferringOnly`. A test pins that the two option values produce different cache keys.</constraint>
+    <constraint source="CLAUDE.md §6.5 + ADR-034 MUST (global field exclusions, .claude/adr/ADR-034-user-record-membership.md:63)">Scope: `createdby`. ADR-034 requires excluding `createdby` as touch-history, and the owner's rule requires targeting it. Resolve by path B (see adr-tensions): amend ADR-034 (concise and full) with a "people-targeting surface" amendment that admits a HUMAN `createdby` on that surface ONLY. The global exclusion still holds for AI scoping and authorization. The executor drafts the amendment, and the MAIN SESSION applies it to `.claude/adr/`. The code MUST NOT merge until the owner approves the amendment.</constraint>
+    <constraint source="C7 / task 141 (owner Q3)">Scope: the Assigned-To term and the generators' contact lookups. Bind ONLY through `PersonIdentity.ContactId` as task 141 leaves it. NEVER fall back to matching an email, UPN or display name; that is the C7 hijack path. When the caller has no linked contact, the Assigned-To term binds nothing and a structured warning is logged, in the same shape as the existing `member_skipped` log at `MembershipResolverService.cs:894-900`. Created By and personal ownership still apply.</constraint>
+    <constraint source="ADR-003 fail closed + ADR-047 privacy invariant">Scope: every row returned by the Daily Briefing (render and email legs), the High Priority list and the Workspace top-priority matter.
+- The final projection is read under the CALLER's Dataverse security, so Dataverse trims unreadable rows. Reuse `IImpersonatedCommunicationQuery` (MSCRMCallerID = caller systemuserid), or the delegated `IDataverseUserClient` where a user token exists. Do NOT declare a new impersonated-query interface.
+- NO app-only fallback. If a channel's caller-context read fails, the channel is reported as FAILED in the collected payload (a marker distinguishable from zero rows), never as an app-only answer or a silent empty array.
+- If every channel fails, throw, mirroring the OfficeService task-062 rule.
+- Candidate-id lists are chunked so each impersonated request stays under Dataverse's URL limit. A failed chunk fails the channel; it never silently shrinks it.</constraint>
+    <constraint source="project (discovered scope, no-deferral directive)">Scope: `CollectHighPriorityAsync`. It MUST stop returning flagged records org-wide. For each of the seven entity types, its result is the flagged records in the caller's people-targeted set, each readable by the caller. For `sprk_document`, which has no registry entry, the people-targeted set is the document's own person terms UNION documents whose `sprk_matter`/`sprk_project` is in the caller's people-targeted parent set. This matches the documents channel. `DailyBriefingSuggestionProducer` consumes the narrowed list unchanged.</constraint>
+    <constraint source="project">Scope: the documents channel. A document is selected when its own person terms match OR its `sprk_matter`/`sprk_project` is in the caller's people-targeted matter/project set. The events channels keep the event-side OR regarding-parent structure (`DailyBriefingCollector.cs:754-768`), with every candidate set now people-targeted.</constraint>
+    <constraint source="owner round 2 item 9 (binding)">Scope: LookupUserMembership. Add a `targeting` config key (`"people"` or omitted). EVERY live playbook in dev whose LookupUserMembership output reaches a CreateNotification, SendEmail or briefing node MUST be set to `"people"`; that is not optional. The node's default for non-notification consumers stays unchanged. The dev playbook edit is a configuration change recorded in notes, performed through the existing playbook deploy path (`scripts/Deploy-Playbook.ps1`) or the Dataverse MCP, never by hand-editing unrecorded rows.</constraint>
+    <constraint source="ADR-034 (ours): event contract">Scope: the four publishers and `MembershipReconciliationJob.ReadLookupAsIdentity`.
+- An event describes the row's ACTUAL owner after the write. Team-owned means `PersonIdType = Team, PersonId = teamid`. User-owned means `PersonIdType = User, PersonId = systemuserid`.
+- Both writers (publisher and reconciliation) key the junction in the SAME identity space: Dataverse ids, not the AAD oid.
+- The polymorphic owner is typed from `EntityReference.LogicalName`, never from `descriptor.IdentityType`.
+- Both writers treat an application-user owner identically. Recommended: both skip it, because an application user is not a person. A divergence re-creates the key mismatch.
+- Keep the wire contract's closed enums and property names. Do not bump `schemaVersion` unless the executor finds a consumer that parses the old semantics; in that case, escalate.
+- Keep fire-and-forget (ADR-034 Q2).
+- Do NOT add `createdby` events: the junction stores association, and the people-targeting surface resolves `createdby` live.
+- Remove the false comments at `OfficeEndpoints.cs:1936-1941`, `DataverseDocumentsEndpoints.cs:55` and `EventEndpoints.cs:393-394`.</constraint>
+    <constraint source="project">Scope: `POST /api/v1/documents`. `TargetEntity` stays optional, because a document-only save with no related record is a required use case. Do not relax the alternate key on the SPE item id. Do not re-fix the owner/id hole (#1043); word-add-in-r1 owns it. Consume whatever owner the row actually has.</constraint>
+    <constraint source="project">Scope: #1044 coordination. word-add-in-r1 owns #1044 and PR #1045. Before editing `QueryTodosAsync`, check `origin/master` for their change. If they changed it, build on their version and reconcile it to the owner's rule rather than overwriting it.</constraint>
+    <constraint source="owner (binding)">Scope: live verification. No Dataverse test in CI. Live behavior is proven by the MANUAL gate below, using the existing non-admin test users in the correct BU. Do NOT propose relocating users between BUs.</constraint>
+    <constraint source="owner (binding)">Scope: this task's deliverable. No scope cuts and nothing deferred. Scope discovered during execution (another to-do writer, another consumer of the options hash, another notification playbook shape) is added to this task, not pushed to a follow-up.</constraint>
+    <constraint source="ADR-038">Scope: tests added or changed. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no constructor null-check tests. Cover the stated contract plus the negative and edge cases named in the acceptance criteria; anything beyond that needs a one-line justification in the task notes.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR.
+- State the placement decision: all changes extend existing BFF components. There is no new endpoint, service, interface, DI registration, package or Dataverse column; only the DailyBriefingCollector factory's constructor arguments change.
+- Measure publish size against a FRESH master build from a short path with Compress-Archive. Report both sizes, the file counts and the delta. Ceiling: 60 MB.
+- Run `dotnet list package --vulnerable --include-transitive`: no new HIGH CVE.</constraint>
+    <constraint source="ADR-028 A4">Scope: any Dataverse client touched. Do not add a new `.WithClientSecret(...)`.</constraint>
+  </constraints>
+
+  <adr-tensions>
+    <tension adr="ADR-034" rule="MUST apply the 4 global field exclusions (createdby, modifiedby, createdonbehalfby, modifiedonbehalfby) — these are touch-history, not association (.claude/adr/ADR-034-user-record-membership.md:63)" path="B">
+- Conflict: the owner (round 2 item 9, Q8) requires Created By to select a record for a person's briefing and notifications.
+- Proposed path: B. Amend ADR-034 with a people-targeting surface that admits a HUMAN createdby there only; the exclusion stays for AI scoping and authorization.
+- Path A (project exception) rejected: the briefing and notification surfaces are repo-wide and permanent, so every future reader would meet the contradiction.
+- Path C (comply) rejected: no compliant shape expresses "the person who made it" once createdby is excluded. `createdonbehalfby` is also excluded, and it is empty for app-only creates.
+- Numbering: take the next free amendment number at merge; 036 and 142 also amend ADR-034.
+    </tension>
+  </adr-tensions>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/membership-resolution-pattern.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+    </files>
+    <patterns>
+      <pattern name="opt-in resolver surface" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs (:247-258, FilterToAccessConferringRoles :614-704)">How AccessConferringOnly narrows descriptors before FilterDescriptors while leaving the default path byte-identical. Mirror it for the people-targeting option.</pattern>
+      <pattern name="caller-context read via the existing seam" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationThreadReadService.cs (IImpersonatedCommunicationQuery consumer)">Impersonated read with a no-app-only-fallback refusal.</pattern>
+      <pattern name="impersonated fan-out, no app-only fallback" location="src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs (word-add-in-r1 task 062 search fan-out)">Per-type impersonated reads with a partial-failure policy; all failed means throw.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Merge origin/master (with PR #1045) into this branch. Confirm task 141 has merged, and read how it exposes the linked contact. Re-verify every anchor in the background against current source; the collector and publishers are also touched by word-add-in-r1.</step>
+    <step order="1">Draft the ADR-034 people-targeting amendment. It covers: the surface; human createdby admitted on it only; platform team/BU ownership and group-typed descriptors never select; event semantics are the real owner, in one identity space. Hand it to the main session for the `.claude/adr/` edit and owner approval, and apply the full-version edit in `docs/adr/`.</step>
+    <step order="2">Add the people-targeting option to `MembershipResolveOptions` and implement it in `MembershipResolverService`:
+- bind human createdby and user ownership to the caller's systemuserid;
+- bind registry Contact-typed columns to the linked contact;
+- drop everything else;
+- reject the combination with AccessConferringOnly;
+- add the option to `HashOptions`;
+- log the no-linked-contact and application-user cases.</step>
+    <step order="3">Switch `DailyBriefingCollector` (events, matters, projects, and the documents channel's parent and own-person sets) and `BriefingService.GetTopPriorityMatterAsync` to the option. Rewrite `QueryTodosAsync` and the High Priority to-do spec to use the resolver. Scope `CollectHighPriorityAsync` for all seven entity types to the people-targeted set, including invoice and work assignment, which have registry entries.</step>
+    <step order="4">Route the final projection of every briefing channel, the High Priority list and the top-priority matter through the caller's Dataverse security, using the existing `IImpersonatedCommunicationQuery` or a delegated client. Chunk the id lists, add the failed-channel marker, and allow no app-only fallback. Update the collector factory in `AnalysisServicesModule.cs`.</step>
+    <step order="5">Server to-do writers: TodoGenerationService (five rules), TaskActionCore (sprk_event.sprk_assignedto from the acting user's contact; plumb the acting user if the input lacks it), and the external-portal to-do create. Fill Assigned To per the constraint, never overwriting a supplied assignee.</step>
+    <step order="6">Add the `targeting` config key to the LookupUserMembership node. Inventory the live dev playbooks whose LookupUserMembership output reaches a notification, email or briefing node (read-only query first). Switch each one to people targeting through the deploy path, re-query to prove none remain on the default, and record the inventory in the notes. Document the key in the node-author guides.</step>
+    <step order="7">Fix event semantics:
+- extend `MembershipChangedEvent` with a factory that builds an owner event from the written row's owner `EntityReference`;
+- use the factory at the four publishers, reading the owner back where the create path does not already hold it;
+- fix `ReadLookupAsIdentity` to type the polymorphic owner from `EntityReference.LogicalName`;
+- apply the same application-user rule in both writers;
+- remove the three false comments.</step>
+    <step order="8">Write the tests listed in the acceptance criteria. Update `docs/architecture/membership-resolution-pattern.md` (third surface, consumers table), the collector's header comment (`DailyBriefingCollector.cs:16-31`, `:318-325`), and the `QueryTodosAsync` docstring (`:970-990`).</step>
+    <step order="9">Build, run the unit suite and NetArchTest, then run the publish-size and CVE checks per §10.</step>
+    <step order="10">Run the manual live gate and record the results (users, record ids, what each user saw) in `projects/unified-access-control-r2/notes/task-152-people-targeting.md`.</step>
+    <step order="11">Update TASK-INDEX.md, setting this task's status to `✅ [done]`. Comment on #1044 with the outcome for the membership half and the generator half.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Task 141's user-contact link is not merged, or does not surface the linked contact as `PersonIdentity.ContactId`. STOP. Do not substitute email/UPN matching, and do not accept coverage of only the 1-of-8 users who already have `sprk_primarycontact` as the finished state.</trigger>
+    <trigger>(a) OPEN OWNER QUESTION: is personal user ownership (`owninguser` = caller) a person target alongside Created By and Assigned To? The owner named only those two. RECOMMENDATION: keep it. It names exactly one person, and dropping it would remove user-owned records that were reassigned to the caller in MDA and that the caller did not create. Proceed on the recommendation, but raise it in the PR and get confirmation before merge. If the owner declines, remove term (c).</trigger>
+    <trigger>(b) OPEN OWNER QUESTION: High Priority scope. RECOMMENDATION: flagged records in the caller's people-targeted set that the caller can read, which is what this task implements. The alternative, "every flagged record the caller can read", would re-create a team/BU-wide list for broad-role users. Confirm before merge.</trigger>
+    <trigger>(c) OPEN OWNER QUESTION: app-only creates lose the human creator (background item 8). Quick-create matters (Office) and POST /api/v1/events rows have createdby = the BFF application user, so under the owner's rule they reach their maker only if an Assigned column names the maker. RECOMMENDATION: events follow the agreed to-do rule (default `sprk_event.sprk_assignedto` to the acting user's contact when blank). Quick-create matters get NO automatic default here, because `sprk_assignedtointernal` on a root is grant-bearing under task 142. Record the gap and ask the owner whether quick-create should default an Assigned column (coordinate with 142 and word-add-in-r1). Do not silently add an owner-derived or createdonbehalfby term.</trigger>
+    <trigger>(d) The external-portal "triggering person's contact" is the external contact itself. If task 142's Assigned-access materializer (or any Q5 auto-grant function) treats `sprk_todo.sprk_assignedto` as grant-bearing, defaulting it on external creates would issue grants. STOP and reconcile with 142 before merging that part.</trigger>
+    <trigger>The owner declines the ADR-034 amendment or asks for path A instead. STOP before merge; the createdby term cannot ship silently against the ADR's global exclusion (CLAUDE.md §6.5).</trigger>
+    <trigger>The impersonated or delegated read cannot serve a channel, for example because the environment lacks prvActOnBehalfOfAnotherUser on the BFF app user, the scheduled email leg cannot impersonate, or the seam cannot express the channel's filter. STOP and escalate; never keep the app-only read "for now".</trigger>
+    <trigger>word-add-in-r1's #1044 change on master implements a different "for whom" rule from the owner's (human Created By plus `sprk_assignedto`). Surface the conflict; do not overwrite it in either direction.</trigger>
+    <trigger>A live notification playbook turns out to INTEND team-wide notification (for example, a team-queue alert). That is a product decision against the owner's rule. Surface it rather than silently narrowing it or keeping it.</trigger>
+    <trigger>A consumer of `MembershipChangedEvent` or of `sprk_userentityassociation` (topic subscription, junction reader, analytics) is found to rely on the old caller-oid semantics. Surface it before changing the wire meaning or bumping `schemaVersion`.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>
+- Resolver option: its neighbor is `MembershipResolveOptions.AccessConferringOnly` (`IMembershipResolverService.cs:197`) with its filter `FilterToAccessConferringRoles` (`MembershipResolverService.cs:614-704`). Grepping `Services/Ai/Membership` for a "people"/"attention"/createdby-targeting option found none.
+- Event factory: its neighbor is the `MembershipChangedEvent` record itself (`Events/MembershipChangedEvent.cs:68`), built inline at four sites today (`DataverseDocumentsEndpoints.cs:63`, `EventEndpoints.cs:404`, `OfficeEndpoints.cs:1934`, `OfficeService.cs:942`) plus `MembershipReconciliationJob.cs:873`.
+- Caller-context read: `IImpersonatedCommunicationQuery` (`Services/Communication/IImpersonatedCommunicationQuery.cs:21`, singleton, unconditional at `CommunicationModule.cs:279`) is reused; `ExternalAccessModule.cs:187-193` already forbids a second such interface.
+- To-do Assigned To: the column already exists (`MembershipOptions.cs:361-364`), and the Office writer sets it (`OfficeService.cs:2788-2791`).
+- Nothing new is added: no service, interface, endpoint, DI registration, package or Dataverse column.</existing>
+    <extension>Yes, extend. The additions are:
+- one optional parameter on the existing options record, plus one branch in the existing descriptor filter;
+- one static factory on the existing event record;
+- one constructor argument (an existing registered seam) on the collector;
+- a column value at three existing create sites.
+A separate "attention resolver" would be the second membership mechanism that ADR-034 forbids.</extension>
+    <cost-of-doing-nothing>
+- Team-owned to-dos disappear from the briefing (#1044).
+- Server-generated to-dos reach no one.
+- Every user in a BU sees every team- or BU-owned matter, project and event in their briefing and in LookupUserMembership-driven notifications.
+- Every user sees every flagged record in the tenant in High Priority, read app-only.
+- The membership junction records a team-owned row as owned by whoever created it, under an identity the reconciliation job never matches.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs, Infrastructure/DI/AnalysisServicesModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/BriefingService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs, Services/Ai/Nodes/ActionCore/TaskActionCore.cs, Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Events/MembershipChangedEvent.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipReconciliationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs, Api/Events/EventEndpoints.cs, Api/Office/OfficeEndpoints.cs, Services/Office/OfficeService.cs</output>
+    <output type="test">The test files listed under relevant-files, plus new publishing tests for Office save and quick-create (which have none today).</output>
+    <output type="docs">.claude/adr/ADR-034-user-record-membership.md (main session), docs/adr/ADR-034-user-record-membership.md, docs/architecture/membership-resolution-pattern.md, docs/guides/MEMBERSHIP-RESOLUTION-GUIDE.md, docs/guides/PLAYBOOK-AUTHOR-GUIDE.md, docs/guides/JPS-AUTHORING-GUIDE.md, projects/unified-access-control-r2/notes/task-152-people-targeting.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. Resolver, positive and negative:
+- With the people option, a record whose only link to the caller is `owningteam` (including a BU default team the caller is in) or `owningbusinessunit` is NOT returned.
+- A record with a human `createdby` = the caller, user-valued `ownerid` = the caller, or a registry Contact-typed "Assigned *" column = the caller's linked contact IS returned.
+- Team-, BusinessUnit-, Organization- and Account-typed descriptors emit zero conditions; the test asserts on the emitted FetchXML.</criterion>
+    <criterion testable="true">2. Resolver regression: with `options: null` and with `AccessConferringOnly: true`, the returned rows and the emitted FetchXML are unchanged from pre-task behavior. Existing tests stay green with no edits to their assertions.</criterion>
+    <criterion testable="true">3. Resolver cache: the people option changes the cache key. A people-targeted call and a default call for the same user and entity never share a cache entry (test).</criterion>
+    <criterion testable="true">4. Resolver, no linked contact: a caller with NO linked contact gets Created By and personal-ownership matches only. The Assigned term binds nothing and a structured warning is logged. No email, UPN or name match is attempted; the test asserts the email path is not called.</criterion>
+    <criterion testable="true">5. Resolver, application user: for an application-user caller (`applicationid` set), the createdby term emits no condition and a warning is logged.</criterion>
+    <criterion testable="true">6. Resolver, invalid combination: requesting the people option together with `AccessConferringOnly: true` throws an ArgumentException.</criterion>
+    <criterion testable="true">7. Briefing to-dos: a team-owned open to-do due today appears for its human creator and for the user whose linked contact is in `sprk_assignedto`. It does NOT appear for another member of the owning team who is neither. The same holds for the High Priority to-do list. No `owninguser` condition remains in the collector's own query code (grep).</criterion>
+    <criterion testable="true">8. Briefing entities: for matters, projects, events, documents and the Workspace top-priority matter, a team- or BU-owned record appears only for users it names (human Created By, Assigned, personal owner). A same-BU user it does not name gets nothing for it. A document the caller created on a parent that does not name the caller appears. A document created app-only on a parent naming no one appears for no one.</criterion>
+    <criterion testable="true">9. High Priority: a flagged record outside the caller's people-targeted set is not returned for any of the seven entity types.</criterion>
+    <criterion testable="true">10. Readability: a record in the caller's people-targeted set that Dataverse denies the caller is absent from every briefing channel, from High Priority and from the top-priority matter. The collector issues no app-only (`IGenericEntityService`) read for any row it returns. The test asserts zero projection reads on the app-only mock, and asserts that every projection read on the impersonated seam carries the caller's systemuserid.</criterion>
+    <criterion testable="true">11. Fail closed:
+- When a channel's caller-context read (or any chunk of it) fails, that channel returns no app-only results and carries the failed-channel marker, which a test distinguishes from an empty channel.
+- When every channel fails, the collector throws rather than returning an empty briefing.</criterion>
+    <criterion testable="true">12. Generators:
+- Each of TodoGenerationService's five rules writes `sprk_assignedto` per the precedence rule.
+- TaskActionCore writes `sprk_event.sprk_assignedto` = the acting user's linked contact when the input names no assignee.
+- The external-portal create writes the calling contact.
+- A supplied assignee is never overwritten.
+- With no triggering person and no parent internal contact, the column stays blank and `todo_unassigned` is logged.
+- No generator writes a team or matches by email.
+- The Office CreateTodoAsync is unchanged by this task (diff check).</criterion>
+    <criterion testable="true">13. LookupUserMembership:
+- `targeting: "people"` passes the option through, and omitting it leaves node behavior unchanged (tests).
+- The live dev inventory is recorded in the task notes: every playbook whose LookupUserMembership output reaches a notification, email or briefing node, and the change made to each.
+- A re-query after the change shows zero such playbooks on the default.</criterion>
+    <criterion testable="true">14. Events:
+- For a team-owned row, each of the four publishers emits `PersonIdType = Team, PersonId = the owning team id, SourceField = "ownerid"`.
+- For a user-owned row, the publisher emits `PersonIdType = User, PersonId = that systemuserid`.
+- No publisher emits an AAD oid.
+- An application-user owner is handled identically by the publisher and by reconciliation.
+- Office save and quick-create gain publishing tests.</criterion>
+    <criterion testable="true">15. Reconciliation:
+- `ReadLookupAsIdentity` types a team-valued `ownerid` as Team and a user-valued one as User.
+- The key it builds for a row equals the key the publisher builds for the same row (round-trip test).
+- A pre-existing oid-keyed junction row for that row is returned by the orphan scan as a Removed event.</criterion>
+    <criterion testable="true">16. Authorization untouched: `AccessibleRecordSetServiceTests`, and the `MembershipResolverServiceTests` for `AccessConferringOnly`, pass unchanged.</criterion>
+    <criterion testable="true">17. Docs:
+- The ADR-034 concise and full versions carry the people-targeting amendment under a number no other task has used.
+- The owner's approval, and the answers to escalations (a), (b) and (c), are cited in the PR.
+- `docs/architecture/membership-resolution-pattern.md` lists the third surface and its consumers.
+- The node-author guides document `targeting`.</criterion>
+    <criterion testable="true">18. MANUAL LIVE GATE (dev, existing non-admin test users in the correct BU, no user relocation):
+(1) A to-do owned by the BU default team, created by user A in MDA, with `sprk_assignedto` = user B's linked contact, shows in A's and B's briefing and not in user C's (same BU, not named).
+(2) A team-owned matter with B's contact as an assigned attorney shows for B and not for C.
+(3) A flagged record naming nobody shows in no user's High Priority.
+(4) A record naming B that B cannot open in MDA does not show in B's briefing.
+(5) A TodoGenerationService to-do on a matter whose `sprk_assignedtointernal` is B's contact shows for B and not for C.
+(6) A user with no linked contact still sees what they created and personally own, and nothing via Assigned.
+(7) The scheduled email leg for B contains the same rows as B's rendered briefing.
+Record the results in the notes with record ids.</criterion>
+    <criterion testable="true">19. Build and supply chain: the BFF unit suite and NetArchTest are green. Publish size is reported against a fresh master build (both sizes, file counts, delta, zip tool) and is at most 60 MB. There is no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect linkage: this is not one of C1-C12. It covers:
+- the owner's "Notifications" item (session 27 round 1, round 2 item 9, Q8);
+- the membership-widening half of GitHub #1044, plus the generator half agreed with word-add-in-r1 (session27 "Peer follow-through": human-only Created By, and generators set Assigned To; word-add-in-r1 task 083 keeps the Office path);
+- the ADR-034 publisher semantics, which this project owns.
+
+Adjacent work:
+- C9, the BU over-grant on the AUTHORIZATION plane. That is task 036, deliberately not touched here; 036 also amends ADR-034 (its "Amendment 2").
+- Task 142, Assigned-field auto-grants, which also amends ADR-034.
+- C10, team ownership of server-created rows, which makes item 1 bite more often.
+- C7 / task 141, the user-contact link this task depends on.
+
+Open owner confirmations (escalations (a), (b), (c)): the task proceeds on the stated recommendations, and they are confirmed before merge.
+
+Not changed here:
+- `NotificationService` and `CommunicationFanOutTargetingService` already target explicit systemusers or message participants and never expand teams.
+- No new create-time notifications are added; the owner named the Daily Briefing as the surface for team-owned records.
+- `GET /api/users/me/memberships` keeps its AI-scoping default.
+
+Reviewer repair (2026-09-30), made against current code:
+- Added the agreed generator half and the human-only Created By rule, which the first draft omitted.
+- Made the owner questions into escalation triggers with recommendations.
+- Replaced "A2" with next-free numbering, to avoid colliding with 036's Amendment 2.
+- Named the existing `IImpersonatedCommunicationQuery` seam instead of leaving room for a new interface.
+- Fixed the reconciliation anchor (`:531-546`).
+- Added the false OBO comments, the invalid option combination, chunking, the failed-channel marker, the document own-person term, the playbook re-query, the guides, and live-gate cases 5-7.
+
+References: projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md ("Notifications research", round 2 items 9 and 10 Q8, the 1-of-8 primary-contact fact, "Peer follow-through" #1044 split); notes/session26-uac-defects-and-synopsis.md (C7, C9, C10).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. The `.claude/adr/` edit is main-session-only; a sub-agent drafts it and returns the text.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-152">
+CODE-COMPLETE; MERGE GATED; LIVE GATES PENDING. Full record: notes/task-152-people-targeting.md (§1 owner decisions to code, §2 change map + placement + justification, §3 escalation triggers, §4 read-only live facts, §5 tests + §5.1 perturbations, §6 decisions, §7 manual gates, §8 concise ADR text for the main session, §9 coordination, §10 read-only findings).
+
+BRANCH: task/uac-r2-152 from task/uac-r2-141-f3 (carries task 141's link and #1045). origin/master NOT merged (only the #1083 merge commit differed).
+
+OWNER ANSWERS APPLIED: round 2 item 9 / Q8 (Created By + Assigned To; a team-owned record never fans out); round 3 D1 (Created By decides who a record is FOR, never who can open it — every shown row is read as the caller); S1 (POST /api/v1/events defaults sprk_assignedto to the acting user's linked contact); A7 reversed (Office quick-create defaults the matter/project sprk_assignedtointernal to the maker's linked contact unless a field mapping set it); round 4 items 1-7 (test users usable as-is; more can be created on request).
+
+ESCALATION TRIGGERS: 141 link — not fired (branch carries it; ContactId surfaced). (a) personal ownership — kept [CORRECTED in verifier round 2: not pending — answered by owner round 3 B1, option (1)]. (b) High Priority scope — people-targeted set the caller can read [CORRECTED in verifier round 2: not pending — answered by round 2 item 9, raw/session27-owner-questions.json droppedAsAnswered "152(b)"]. (c) answered by S1 + A7, both implemented. (d) not fired (no grant path treats sprk_todo.sprk_assignedto as grant-bearing; reconcile if task 142's escalation (f) reverses). ADR approval — ADR-034 Amendment A3 (path B, numbering provisional; 036 holds "Amendment 2") applied to docs/adr; concise text in notes §8 for the main session [CORRECTED in verifier round 2: not pending — the owner approved path B in round 3 D1, "Path B for both"; only the main session's .claude/adr application remains]. Impersonation — not fired (the email leg is an authenticated request). #1044 conflict — not fired. Team-wide playbook intent — not fired (four live nodes, all per-user). Old event semantics consumer — not fired (MembershipJunctionUpdater writes PersonId verbatim; the other junction reader reads Contact rows).
+
+PLACEMENT (CLAUDE.md §10, bff-extensions.md §A): every change extends an existing BFF component (resolver, collector, BriefingService, node executor, to-do/task writers, publishers, reconciliation). No new endpoint, package, option class, Dataverse column, interface, DI registration or plugin. TodoGenerationService registration changed AddHostedService -&gt; AddScheduledJob (ADR-036; ADR-052 §1 migrates a timer service when its behaviour changes; stays in the BFF: B2 uses BFF domain code TodoRegardingBuilder/CoreAncestorResolver, B3 daily low volume; now once per schedule across instances via the distributed lease). WorkloadPlacementGuardTests ratchet 14 -&gt; 13. No AI-internal type injected into CRUD code (ADR-013).
+
+THREE-QUESTION JUSTIFICATIONS (CLAUDE.md §11), new internal static helpers, no DI:
+- ApplicationUserCheck — existing: nothing reads systemuser.applicationid (grep); IdentityNormalizationService's PersonIdentity is cached and serialized on GET /api/users/me/memberships; extension: no, adding the flag there changes that endpoint's JSON and cache shape for one surface; cost: publishers and reconciliation decide "is this a person" separately (the oid-vs-id key mismatch this task fixes) and the resolver binds the BFF app user's Created By to everything it created.
+- AssignedToDefaults — existing: Office CreateTodoAsync writes an assignee from its request only (word-add-in-r1's, untouched); no precedence rule exists; extension: one rule used by TodoGenerationService and TaskActionCore, inlining twice lets them diverge; cost: server-created to-dos/tasks name nobody and reach no one's briefing (#1044).
+- MembershipOwnerEvents — existing: four publishers each built the event inline with the caller's AAD oid; extension: MembershipChangedEvent.ForRowOwner is the factory, this is the read-back + app-user rule around it shared by four sites; cost: four copies of the rule, the divergence that produced oid-vs-id keys.
+Changed constructors (existing registrations, auto-wired): DailyBriefingCollector (IGenericEntityService -&gt; existing IImpersonatedCommunicationQuery), BriefingService (+IImpersonatedCommunicationQuery), CreateTaskNodeExecutor / ActionSeam / TaskActionCore / RecordCreationService (+existing IIdentityNormalizationService), EventEndpoints / DataverseDocumentsEndpoints / OfficeEndpoints handler parameters.
+
+DISCOVERED DEFECT FIXED: BriefingService's top-matter detail query selected sprk_name, sprk_overdueeventcount, sprk_totalspend, sprk_duedate — none exist on sprk_matter (verified read-only) — so the top matter was always null. Now sprk_mattername / sprk_totalspendtodate / sprk_totalbudget, overdue Task events counted from sprk_event (due on or before yesterday), read as the caller.
+
+STEP 9.5: code-review + adr-check over every changed file. Fixed: two XML doc blocks orphaned by inserted members (ExternalDataService BuildTodoCreatePayload's docs had attached to the new AssignedToBindKey const; EventEndpoints CreateEventInDataverseAsync's docs had attached to ResolveActingUserContactAsync). Accepted with reasons (notes §5.1/§6): TodoGeneration IntervalHours &gt; 24 now compiles to daily (cron), and non-divisors of 24 leave a short wrap gap — documented on BuildCronSchedule; Rules 1/3 target the event's responsible contact, not its sprk_assignedto (owner observation). ADR tensions: ADR-034 global createdby exclusion — PATH B (Amendment A3; approved by owner round 3 D1 — corrected in verifier round 2). ADR-052 — PATH C (migrated to IScheduledJob). Every new guard shown to bite: 30 seeded violations (resolver P1-P5, collector C1-C8, workspace W1-W3, reconciliation R1-R3, publisher O1/E1, defaults A1-A3, executor X1, external T1-T2, node L1, quick-create Q1, generator G1), each RED, sources restored and touched.
+
+TESTS: full BFF unit suite 13,858 passed / 0 failed / 54 skipped (13,912); NetArchTest 341 passed / 0 failed / 0 skipped; affected filters (BriefingService|DailyBriefing) 106 / 0. Client: Spaarke.DailyBriefing.Components tsc --noEmit clean, failedSections.test.ts 5 / 0; the consuming src/solutions/DailyBriefing production build (npm run build) succeeded with 0 surface-owned tsc errors. No package changes (no CVE delta). Publish size NOT measured (instructed to skip).
+
+PENDING MANUAL GATES (exact commands in notes §7): G1 deploy the BFF after merge approval; G2 switch the four live notification playbook nodes to targeting "people" (Deploy-Playbook.ps1 -DryRun then apply, or MCP update of sprk_playbooknode configjson for nodes 99f9ee9c…, b1d94997…, 4bd19f94…, e7b7e6a0…; re-query shows zero on the default); G3 task 141's gates (link coverage); G4 criterion 18 seven-case live gate with dev test users. Main session: apply notes §8 to .claude/adr/ADR-034-user-record-membership.md (owner approval already given: round 3 D1; renumber if 142 lands first) and comment on #1044.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-152-r1" round="verifier-1">
+VERIFIER ROUND 1 CLOSED; status unchanged (code-complete-live-gates-pending). Full record: notes/task-152-people-targeting.md §12.
+
+ITEMS:
+- 2/14 S1 untested: CLOSED. EventEndpoints.CreateEventAsync is internal and the tests RUN it (linked contact written; no link and unresolved caller both leave it blank). DataverseWebApiService.BuildCreateEventPayload was extracted (internal), and the sprk_AssignedTo@odata.bind is asserted.
+- 3/13 markers untested past the collector: CLOSED. Five DailyBriefingCompositeServiceTests cover the render response and the ledger, the EmptyResponse on both legs, and the email failure line (and its absence when nothing failed).
+- 4/13 500-row silent shrink: CLOSED. New internal static PeopleTargetedSet reads at MaxLimit (5,000) plus one confirmation read when that page is full. An oversize set is FAILED in the collector and Unavailable in the portfolio and top matter, never truncated.
+- 5/17 PortfolioService deferred: CLOSED IN THIS TASK. Matters FOR the user come from the people surface (PeopleTargetedSet). They are read as the caller (IImpersonatedCommunicationQuery, chunked) using the live columns sprk_mattername, sprk_totalspendtodate and sprk_totalbudget; overdue Task events are counted from sprk_event. The ad-hoc ownerid filter and the app-only client are gone. The read is shared with BriefingService through internal ReadMattersForSystemUserAsync. A failed read keeps the pre-existing graceful empty portfolio; whether to add a marker is an owner observation.
+- 6/16 doc row: CLOSED. The membership-resolution-pattern.md row is now 4 cells and current; a PortfolioService row and a read-the-whole-set rule were added. docs/adr A3 gains the read-to-completion MUST, and the notes §8 concise text was updated.
+- 7/15 sites not run: CLOSED for documents, events and quick-create. The documents handler was extracted to internal CreateDocumentAsync; EventEndpoints.CreateEventAsync and OfficeEndpoints.QuickCreateAsync are internal; the tests run each real handler. NARROWED for Office save: SaveAsync has no unit harness (a dozen concrete collaborators). Its owner decision was extracted to internal static OfficeService.PublishSavedDocumentOwnerAsync, which the tests run. One whitespace-insensitive guard pins the (documentId, owningTeamId) call. The whitespace-exact grep was removed.
+- 8 create-task names the confirmer: CLOSED. ActingUserId = request.AssignedTo ?? caller on both the apply and ad-hoc paths; seam tests cover both cases on both paths.
+- 9 no sprk_todo resolver test: CLOSED. A resolver test on sprk_todo descriptors asserts the creator/assignee gets both team-owned to-dos and another member of the same BU default team gets none, with FetchXML assertions.
+- 10 observations: no change. Raise in the PR: (1) a 403 on an entity shows a permanent "could not be loaded"; (2) and (3) failed or unknown results are cached; (4) the ADR-052 AddScheduledJob migration (ratchet 14 -&gt; 13) MUST be called out; (5) NEW: a failed portfolio read still returns the cached zero portfolio.
+- 1, 11: acknowledged. 12/18/19/20: still pending gates, unchanged.
+
+PLACEMENT (CLAUDE.md §10): this round adds no new endpoint, DI registration, package, option, job, interface or Dataverse column.
+- Three existing handlers changed from private/lambda to internal static; routes, filters and authorization are unchanged.
+- Existing auto-wired constructors changed: PortfolioService swaps IGenericEntityService for IMembershipResolverService + IImpersonatedCommunicationQuery; BriefingService drops both.
+
+JUSTIFICATION (CLAUDE.md §11):
+- PeopleTargetedSet. Existing: AccessibleRecordSetService.WalkMembershipPagesAsync is private to the authorization composer and tied to its options and capped policy. Extension: reusing it would couple the attention surfaces to authorization infrastructure, which A3 keeps apart. Cost: an arbitrary 500-row subset is served silently.
+- PortfolioMatterRead (internal record). Cost: without it, "could not be determined" and "no matters" are indistinguishable.
+- BuildCreateEventPayload and PublishSavedDocumentOwnerAsync are extractions of existing code. Cost: without them these paths are testable only via HttpMessageHandler (ADR-038 B1) or via text.
+
+PERTURBATIONS: 17 seeded (S1, S2, S3a-c, S4a-c, S5a-c, S7a-d, S8, S9). All went RED, and every source was restored and touched (table in notes §12).
+
+TESTS (2026-10-02, after the round-1 changes):
+- Full BFF unit suite: 13,887 passed / 0 failed / 54 skipped (13,941). That is +29 against round 0's 13,858 / 0 / 54.
+- NetArchTest: 341 passed / 0 failed / 0 skipped.
+- Affected classes, run before the perturbations: 324 / 0.
+- No client change. No package change, so no CVE delta. Publish size not measured (the main session measures it).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-152-r1-r2" round="verifier-2">
+VERIFIER ROUND 2 CLOSED; status unchanged (code-complete-live-gates-pending). Full record: notes/task-152-people-targeting.md §13. No src/ file changed this round.
+
+OWNER STATUS (corrects rounds 0 and 1, which wrongly said "PENDING / CONFIRM BEFORE MERGE"): nothing is re-asked of the owner. ADR-034 Amendment A3 approval = owner round 3 D1 ("Path B for both" ADR-034 amendments; (2) is human Created By for briefings and notifications only), accepted as recommended and clarified. Escalation (a) = round 3 B1, option (1), keep personal ownership. Escalation (b) = raw/session27-owner-questions.json droppedAsAnswered "152(b)", answered by round 2 item 9. Escalation (c) = round 3 S1 + A7. Escalation (d) = round 3 A6, option (a). Deploy order with 146 = round 3 B2, option (1): an interim to-do drop-out is accepted; announce it in the PR (round 3 consolidated B2, not round 4's alternate-key B2). The round-0 outcome text was corrected in place. docs/adr A3 status is now Accepted. The ONLY remaining criterion-17 step: the main session applies notes §8 to .claude/adr/ADR-034-user-record-membership.md and cites it in the PR.
+
+ITEMS:
+- 5/18 A7 field-mapped keep untested: CLOSED. RecordCreationAssignedInternalTests.QuickCreate_AFieldMappedAssignedToInternal_IsKept_NotOverwrittenByTheMaker (Matter and Project) runs the real field-mapping path and asserts the mapped contact survives and the maker's contact is never looked up. The verifier's seed (early return never fires) turned both rows RED; restored and touched.
+- 6 publisher unknown case untested: CLOSED. MembershipOwnerKeyParityTests.ApplicationUserCheckUnreadable_PublisherPublishesNothing (systemuser read throws / returns no row) asserts nothing is published. The verifier's seed (isApplicationUser == true) turned both rows RED; restored and touched.
+- 7/14 record inaccuracy: CLOSED (see OWNER STATUS).
+- 8 read-to-completion MUST vs the LookupUserMembership node: CLOSED by scoping the MUST to the Daily Briefing and Workspace consumers (docs/adr A3, membership-resolution-pattern.md, notes §8 iii). The node keeps its pre-existing single 500-row page and continuationToken, because its ids feed a downstream FetchXML "in" list and SQL Server refuses more than 2,100 parameters. Known limitation (pre-existing, recorded for the PR): a person with more than 500 people-targeted matters gets notifications for a subset only.
+- 9 HP 50-per-chunk cap: recorded as PRE-EXISTING (owner observation 6).
+- 10 TopPriorityMatterUnavailable unread by any client; failed portfolio = cached zeros: kept for the PR (observations 5 and 7).
+- 11 source-text tests: flagged for the 090 /test-diet (QuickCreate_FalseOwnerCommentIsGone, DocumentCreateEndpoint_FalseOwnerCommentIsGone, EventCreateEndpoint_FalseOwnerCommentIsGone, OfficeSave_CallsItsPublishWithTheSavedDocumentAndTheResolvedTeam). Not deleted here.
+- 12 stale playbook descriptions: CLOSED. The seven "Lookup My Matters" node descriptions now describe the people-targeting surface. All seven files still parse as JSON.
+- 15 (criterion 19): publish size and the CVE command are still the main session's. This round changes no package and no src/ file.
+- 16 (criterion 13): pending live gate G2. 17 (criterion 18): pending G4, which depends on G3. Per owner round 4 item 1, ask the owner for test users at specific access levels.
+- 1-4, 13: acknowledged.
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job, package, interface or Dataverse column. Two test methods were added to existing test classes; the rest is docs and playbook-source description strings.
+
+TESTS (2026-10-02, after the round-2 changes):
+- Affected classes (RecordCreationAssignedInternalTests + MembershipOwnerKeyParityTests): 14 / 0. With the two seeds applied: 4 failed / 10 passed. After restoring: green in the full run.
+- Full BFF unit suite: 13,891 passed / 0 failed / 54 skipped (13,945). That is +4 against round 1's 13,887.
+- NetArchTest: 341 passed / 0 failed / 0 skipped.
+    </outcome>
+  </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(A7 REVERSED) Office quick-create defaults the internal Assigned-To field to the maker's contact (editable), so the record is "for" the maker in the briefing; coordinate with 142 and word-add-in-r1. (D1) "Created By" (when human) decides who a record is FOR — never who can open it; the briefing only lists records the user can access in Dataverse.</amendment>
+  </amendments>
+</task>

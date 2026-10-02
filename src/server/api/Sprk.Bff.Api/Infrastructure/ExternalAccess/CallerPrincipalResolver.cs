@@ -11,7 +11,8 @@
 // branches on if(ciam)…else…. The principal carries the caller's Tier-2 RECORD SCOPE (the set of
 // projects the caller may access), composed per plane:
 //
-//   CIAM contact  → sprk_externalrecordaccess participations (the existing model, unchanged)
+//   CIAM contact  → the common accessible-record-set, contact plane, explicit grants only
+//                   (unified-access-control-r2 task 135: the same grant term + veto pipeline as below)
 //   Workforce     → the common accessible-record-set (task 022): systemuser → ADR-034 membership;
 //                   contact → grants ∪ standing-grant membership. NEVER "all projects" (R2 NFR-08).
 //
@@ -46,9 +47,17 @@ public enum CallerPrincipalPlane
 
 /// <summary>
 /// A single project the caller may access, with the <see cref="AccessRights"/> that govern what they
-/// may do on it. Both planes now source these from the ONE evaluator's <c>(recordId → rights)</c>
-/// answer (unified-access-control-r2 task 033 / FR-19).
+/// may do on it, taken from the ONE evaluator's <c>(recordId → rights)</c> answer on both planes
+/// (unified-access-control-r2 task 033 / FR-19 for the shape): the workforce plane through
+/// <see cref="IAccessibleRecordSetService.ComposeAsync"/>, the CIAM plane through
+/// <see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>, which share one contact-plane
+/// composition and one veto pipeline.
 /// </summary>
+/// <remarks>
+/// ⚠️ Until task 135 (defect C1, 2026-10-01) this summary claimed both planes already sourced these from the
+/// evaluator. Only the workforce plane did: the CIAM strategy built them from the grant rows directly, so no
+/// Restricted, Secure or No Access rule ran on a CIAM token.
+/// </remarks>
 /// <remarks>
 /// <b>Rights are stored; the level is derived.</b> This class used to hold an
 /// <see cref="ExternalAccessLevel"/> and map it to rights on demand. That direction cannot represent
@@ -76,9 +85,15 @@ public sealed class CallerProjectAccess
     public ExternalAccessLevel? AccessLevel => ExternalAccessLevels.ToDisplayLevel(Rights);
 
     /// <summary>
-    /// Builds an entry from a grant row's level. The single conversion point for level-sourced
-    /// construction, so the mapping table stays in <see cref="ExternalAccessLevels"/>.
+    /// Builds an entry from a level. The single conversion point for level-sourced construction, so the
+    /// mapping table stays in <see cref="ExternalAccessLevels"/>.
     /// </summary>
+    /// <remarks>
+    /// ⚠️ No authorization path may build a principal from grant rows with this: a grant's level is not its
+    /// effective rights until the evaluator has applied Secure suppression and the vetoes (task 135 removed
+    /// the CIAM strategy's use of it for exactly that reason). Test fixtures that state a principal directly
+    /// are its remaining callers.
+    /// </remarks>
     public static CallerProjectAccess FromLevel(Guid projectId, ExternalAccessLevel? level) =>
         new() { ProjectId = projectId, Rights = ExternalAccessLevels.ToAccessRights(level) };
 }
@@ -114,7 +129,11 @@ public sealed class CallerPrincipal
     /// transitional email-only CIAM resolution.</summary>
     public string? Oid { get; init; }
 
-    /// <summary>The caller's Tier-2 record scope: the projects they may access, with levels.</summary>
+    /// <summary>
+    /// The caller's Tier-2 record scope: the projects they may access, with rights. Both strategies put only
+    /// Read-bearing entries here (task 136); readers that list or gate should still use
+    /// <see cref="ReadableProjects"/> / <see cref="HasProjectAccess"/>, which require Read on their own.
+    /// </summary>
     public required IReadOnlyList<CallerProjectAccess> ProjectAccess { get; init; }
 
     /// <summary>
@@ -137,28 +156,68 @@ public sealed class CallerPrincipal
     private IReadOnlySet<Guid>? _matterIds;
     private IReadOnlySet<Guid>? _workAssignmentIds;
 
+    // ── Every read view below requires Read (unified-access-control-r2 task 136 · defect C2) ─────────────
+    //
+    // These views used to be key views: "the id is in the map". Two live paths put ids in the map with no
+    // rights — a Secure root reached only through an organization grant, and a matter or work-assignment grant
+    // row with no level — and every /api/v1/external read route, the module /fetch and /record scope, and /me
+    // treated presence as authorization. Both strategies now drop such entries when they build the principal
+    // (FromReadBearing), and the views ALSO require Read: two independent layers, so a future construction
+    // path that forgets to prune still fails closed here.
+    //
+    // ⚠️ Test HasFlag(AccessRights.Read), never HasFlag(None): AccessRights is [Flags], so HasFlag(None) is
+    // true for every value, including None itself.
+
     /// <summary>
-    /// Accessible matter ids. A DERIVED VIEW over <see cref="MatterAccess"/> as of task 033 — not a
-    /// second stored collection, so ids and rights cannot disagree. Read-scope injection
-    /// (<c>Tier2ScopeFilterInjector</c>, the module <c>ScopeDimension</c>s) consumes this shape unchanged.
+    /// Matter ids the caller may READ. A DERIVED VIEW over <see cref="MatterAccess"/> (task 033) — not a second
+    /// stored collection, so ids and rights cannot disagree. Read-scope injection (<c>Tier2ScopeFilterInjector</c>,
+    /// the module <c>ScopeDimension</c>s) consumes this shape unchanged; since task 136 an entry without Read is
+    /// not in it.
     /// </summary>
-    public IReadOnlySet<Guid> AccessibleMatterIds => _matterIds ??= MatterAccess.Keys.ToHashSet();
+    public IReadOnlySet<Guid> AccessibleMatterIds => _matterIds ??= ReadableIdsOf(MatterAccess);
 
-    /// <summary>Accessible work-assignment ids — a DERIVED VIEW over <see cref="WorkAssignmentAccess"/>.</summary>
+    /// <summary>Work-assignment ids the caller may READ — a DERIVED VIEW over <see cref="WorkAssignmentAccess"/>.</summary>
     public IReadOnlySet<Guid> AccessibleWorkAssignmentIds =>
-        _workAssignmentIds ??= WorkAssignmentAccess.Keys.ToHashSet();
+        _workAssignmentIds ??= ReadableIdsOf(WorkAssignmentAccess);
 
-    /// <summary>All project ids the caller can access (for list construction).</summary>
-    public IEnumerable<Guid> GetAccessibleProjectIds() => ProjectAccess.Select(p => p.ProjectId);
+    /// <summary>
+    /// The projects the caller may READ, with their rights — the entries /me lists and the project list returns.
+    /// An entry on <see cref="ProjectAccess"/> without Read is not one of them (task 136).
+    /// </summary>
+    public IEnumerable<CallerProjectAccess> ReadableProjects =>
+        ProjectAccess.Where(p => p.Rights.HasFlag(AccessRights.Read));
 
-    /// <summary>All matter ids the caller can access (task 028).</summary>
+    /// <summary>All project ids the caller can READ (for list construction).</summary>
+    public IEnumerable<Guid> GetAccessibleProjectIds() => ReadableProjects.Select(p => p.ProjectId);
+
+    /// <summary>All matter ids the caller can READ (task 028; Read-gated by task 136).</summary>
     public IReadOnlySet<Guid> GetAccessibleMatterIds() => AccessibleMatterIds;
 
-    /// <summary>All work-assignment ids the caller can access (task 028).</summary>
+    /// <summary>All work-assignment ids the caller can READ (task 028; Read-gated by task 136).</summary>
     public IReadOnlySet<Guid> GetAccessibleWorkAssignmentIds() => AccessibleWorkAssignmentIds;
 
-    /// <summary>Whether the caller can access the specified project (the record∈set check).</summary>
-    public bool HasProjectAccess(Guid projectId) => ProjectAccess.Any(p => p.ProjectId == projectId);
+    /// <summary>
+    /// Whether the caller holds <see cref="AccessRights.Read"/> on the specified project. Until task 136 this was
+    /// "the id is in <see cref="ProjectAccess"/>", which a None-rights entry satisfied.
+    /// </summary>
+    public bool HasProjectAccess(Guid projectId) => GetEffectiveRights(projectId).HasFlag(AccessRights.Read);
+
+    /// <summary>
+    /// The entries of an evaluator answer that carry <see cref="AccessRights.Read"/> — the construction-time
+    /// half of task 136's two layers. Both plane strategies build <see cref="ProjectAccess"/>,
+    /// <see cref="MatterAccess"/> and <see cref="WorkAssignmentAccess"/> through this, so neither can admit a
+    /// record the caller holds nothing on, whatever the evaluator returned.
+    /// </summary>
+    public static IReadOnlyDictionary<Guid, AccessRights> FromReadBearing(IReadOnlyDictionary<Guid, AccessRights> rights)
+    {
+        ArgumentNullException.ThrowIfNull(rights);
+        return rights
+            .Where(kvp => kvp.Value.HasFlag(AccessRights.Read))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+    }
+
+    private static IReadOnlySet<Guid> ReadableIdsOf(IReadOnlyDictionary<Guid, AccessRights> rights) =>
+        rights.Where(kvp => kvp.Value.HasFlag(AccessRights.Read)).Select(kvp => kvp.Key).ToHashSet();
 
     /// <summary>
     /// The DISPLAY level for the specified project, or null if the caller has no access.
@@ -314,21 +373,39 @@ public sealed class CallerPrincipalResolver : ICallerPrincipalResolver
 }
 
 /// <summary>
-/// CIAM contact strategy — the EXISTING external-SPA resolution, unchanged (ADR-028 A1). Resolves the
-/// Dataverse contact by stable <c>oid</c> (email as first-login fallback) and loads its
-/// sprk_externalrecordaccess participations. Reproduces <c>ExternalCallerAuthorizationFilter</c>'s
-/// deny semantics byte-for-byte (R1 FR-15 / R2 guardrail #3).
+/// CIAM contact strategy — the external SPA's caller (ADR-028 A1). Resolves the Dataverse contact by the
+/// stable <c>oid</c> bound to <c>contact.sprk_externalobjectid</c> (task 141), then takes the Tier-2 record
+/// scope from the unified evaluator (<see cref="IAccessibleRecordSetService.ComposeForCiamContactAsync"/>), so
+/// the Restricted veto (FR-21), Secure direct-only suppression (FR-22) and the No Access List (FR-23) apply
+/// to a ciamlogin.com token exactly as they do to the same contact on a workforce token (task 135 · defect C1).
+/// The email bind survives only as the repair path for an invite whose oid write failed; the CIAM plane never
+/// creates a contact (task 141).
 /// </summary>
+/// <remarks>
+/// <para>Task 141: resolution moved from <c>ExternalParticipationService</c> (the grant-data reader) to
+/// <see cref="ContactIdentityBinder"/>, which runs the one binding decision both planes share. Each deny now
+/// carries the decision's OWN code — ambiguity, collision, unreadable binding, inactive contact — instead of
+/// one <c>contact_not_found</c> for all of them, so the audit trail can tell an outage from a hijack attempt.</para>
+/// <para>Task 135: before it this strategy built the principal from <c>ExternalParticipationService.GetGrantSetAsync</c>
+/// alone, on each grant's all-sources level: none of the three rules ran, so a contact on the No Access
+/// List, holding a grant on a Restricted record, or inheriting an organization grant on a Secure record kept
+/// full access here. The strategy now holds no authorization logic of its own — it maps the evaluator's
+/// <c>(recordId → rights)</c> answer onto the principal, the same way <see cref="WorkforcePrincipalStrategy"/>
+/// does. An evaluator fault propagates (the request fails); there is no grants-only fallback.</para>
+/// </remarks>
 public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
 {
-    private readonly ExternalParticipationService _participations;
+    private readonly ContactIdentityBinder _binder;
+    private readonly IAccessibleRecordSetService _accessibleSet;
     private readonly ILogger<CiamContactPrincipalStrategy> _logger;
 
     public CiamContactPrincipalStrategy(
-        ExternalParticipationService participations,
+        ContactIdentityBinder binder,
+        IAccessibleRecordSetService accessibleSet,
         ILogger<CiamContactPrincipalStrategy> logger)
     {
-        _participations = participations ?? throw new ArgumentNullException(nameof(participations));
+        _binder = binder ?? throw new ArgumentNullException(nameof(binder));
+        _accessibleSet = accessibleSet ?? throw new ArgumentNullException(nameof(accessibleSet));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -359,74 +436,91 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1"));
         }
 
-        var contactId = await _participations
-            .ResolveExternalContactAsync(oid, email, httpContext.RequestAborted)
+        var binding = await _binder
+            .ResolveCiamCallerAsync(oid, email, httpContext.RequestAborted)
             .ConfigureAwait(false);
 
-        if (!contactId.HasValue)
+        if (!binding.IsResolved)
         {
+            var code = binding.DenyCode ?? ContactBindingDecision.DenyContactNotFound;
             _logger.LogWarning(
-                "[EXT-AUTH] Cannot resolve Dataverse Contact (oid present: {HasOid}, email present: {HasEmail})",
-                !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
-            return CallerPrincipalResolution.Denied(
-                ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found"));
+                "[EXT-AUTH] Cannot resolve Dataverse Contact ({DenyCode}; oid present: {HasOid}, email present: {HasEmail})",
+                code, !string.IsNullOrEmpty(oid), !string.IsNullOrEmpty(email));
+            return CallerPrincipalResolution.Denied(ProblemDetailsHelper.Forbidden(code, CiamDenyDetail(code)));
         }
 
-        // Outside-counsel access is GRANT-ONLY and explicit (task 028 / design §2): the caller sees
-        // exactly the roots granted via sprk_externalrecordaccess — projects (with level), matters, and
-        // work assignments. No membership/assignment/rollup-derived access for a CIAM partner.
-        var grantSet = await _participations
-            .GetGrantSetAsync(contactId.Value, httpContext.RequestAborted)
+        var contactId = binding.ContactId!.Value;
+
+        // Outside-counsel access is GRANT-ONLY and explicit (task 028 / design §2): the caller sees the
+        // roots granted via sprk_externalrecordaccess — projects, matters and work assignments, each at
+        // its granted level — and NO membership/assignment/rollup-derived access.
+        //
+        // Task 135 (C1): that grant term, and the three rules that narrow it, come from the ONE contact-
+        // plane composition the workforce contact also uses. Nothing here reads a grant's level: the
+        // evaluator decides which level counts (DirectAccessLevel on a Secure root) and which records
+        // survive (deny list, then Restricted).
+        var reqCt = httpContext.RequestAborted;
+        var accessibleProjects = await _accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.ProjectEntity, reqCt)
+            .ConfigureAwait(false);
+        var accessibleMatters = await _accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.MatterEntity, reqCt)
+            .ConfigureAwait(false);
+        var accessibleWorkAssignments = await _accessibleSet
+            .ComposeForCiamContactAsync(contactId, AccessibleRecordSetService.WorkAssignmentEntity, reqCt)
             .ConfigureAwait(false);
 
-        _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — grants: {Projects} project / {Matters} matter / {Was} work-assignment",
-            contactId.Value, !string.IsNullOrEmpty(oid), grantSet.Projects.Count, grantSet.Matters.Count, grantSet.WorkAssignments.Count);
-
-        var projectAccess = grantSet.Projects
-            .Select(p => CallerProjectAccess.FromLevel(p.ProjectId, p.AccessLevel))
+        // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does. Only entries
+        // carrying Read reach the principal (task 136 · C2): a record the caller holds nothing on is not one
+        // of its records, whatever map it came in.
+        var projectAccess = CallerPrincipal.FromReadBearing(accessibleProjects.Rights)
+            .Select(kvp => new CallerProjectAccess { ProjectId = kvp.Key, Rights = kvp.Value })
             .ToList();
+        var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
+        var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
+
+        _logger.LogInformation(
+            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
+            contactId, !string.IsNullOrEmpty(oid), projectAccess.Count,
+            matterAccess.Count, workAssignmentAccess.Count);
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
             Plane = CallerPrincipalPlane.CiamContact,
-            ContactId = contactId.Value,
+            ContactId = contactId,
             SystemUserId = null,
             Email = email ?? string.Empty,
             Oid = oid,
             ProjectAccess = projectAccess,
-            // Task 033 / FR-19: matter + WA grants carry THEIR OWN level (task 032 added
-            // MatterGrants/WorkAssignmentGrants as the source of truth). Before this, both arrived as
-            // bare id sets and every downstream check treated membership as implying write — which is
-            // how a deliberate ViewOnly matter grant permitted edits.
-            MatterAccess = RightsFromGrants(grantSet.MatterGrants),
-            WorkAssignmentAccess = RightsFromGrants(grantSet.WorkAssignmentGrants),
+            MatterAccess = matterAccess,
+            WorkAssignmentAccess = workAssignmentAccess,
         });
     }
 
     /// <summary>
-    /// Projects root grants to <c>(recordId → rights)</c>, unioning duplicates HIGHEST-WINS.
+    /// The ProblemDetails detail for a CIAM deny. States only what the decision established (FR-B03) — and
+    /// says so plainly where the fix is an administrator's, so a refused external user is not left guessing.
     /// </summary>
-    /// <remarks>
-    /// The union is not defensive padding: two grant rows CAN target the same record (e.g. a direct
-    /// grant plus one inherited from a different path), and <c>ToDictionary</c> would throw on the
-    /// second. Unioning matches how the evaluator composes terms, so the two agree by construction
-    /// rather than by coincidence. A null level contributes <see cref="AccessRights.None"/>, which
-    /// keeps the id in the set without widening anything (see <c>ExternalRootGrant</c>).
-    /// </remarks>
-    private static IReadOnlyDictionary<Guid, AccessRights> RightsFromGrants(
-        IReadOnlyList<ExternalRootGrant> grants)
+    internal static string CiamDenyDetail(string code) => code switch
     {
-        var map = new Dictionary<Guid, AccessRights>();
-        foreach (var grant in grants)
-        {
-            var rights = ExternalAccessLevels.ToAccessRights(grant.AccessLevel);
-            map[grant.RecordId] = map.TryGetValue(grant.RecordId, out var existing)
-                ? existing | rights
-                : rights;
-        }
-        return map;
-    }
+        ContactBindingDecision.DenyContactNotFound =>
+            "No contact is registered for this sign-in. External users are added by invitation.",
+        ContactBindingDecision.DenyContactInactive =>
+            "The contact for this sign-in has been deactivated.",
+        ContactBindingDecision.DenyContactOidAmbiguous or ContactBindingDecision.DenyContactEmailAmbiguous =>
+            "More than one contact matches this sign-in, so access cannot be resolved. An administrator has been "
+            + "alerted through an identity-collision flag.",
+        ContactBindingDecision.DenyContactBoundToDifferentOid or ContactBindingDecision.DenyContactLinkedToOtherUser =>
+            "The contact for this email belongs to another sign-in. An administrator has been alerted through an "
+            + "identity-collision flag.",
+        ContactBindingDecision.DenyContactBindingUnreadable =>
+            "The contact for this sign-in carries an identity binding that cannot be read. An administrator has "
+            + "been alerted through an identity-collision flag.",
+        ContactBindingDecision.DenyContactKeyConflict =>
+            "Another contact holds the identity key for this sign-in, so it cannot be bound. An administrator has been "
+            + "alerted through an identity-collision flag.",
+        _ => "Access could not be resolved for this sign-in. Please try again.",
+    };
 }
 
 /// <summary>
@@ -523,27 +617,31 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         var accessibleWorkAssignments = await _accessibleSet
             .ComposeAsync(principal, WorkAssignmentEntity, reqCt).ConfigureAwait(false);
 
-        // Per-record rights, straight from the evaluator — no stamp, no per-plane default.
-        var projectAccess = accessibleProjects.Rights
+        // Per-record rights, straight from the evaluator — no stamp, no per-plane default. Only entries
+        // carrying Read reach the principal (task 136 · C2); until then this copied every key, a None-rights
+        // one included, and every presence-gated read admitted it.
+        var projectAccess = CallerPrincipal.FromReadBearing(accessibleProjects.Rights)
             .Select(kvp => new CallerProjectAccess { ProjectId = kvp.Key, Rights = kvp.Value })
             .ToList();
+        var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
+        var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
 
         _logger.LogInformation(
             "[WF-AUTH] Workforce {Kind} (systemuser={SystemUserId}, contact={ContactId}) resolved with " +
             "{Projects} project / {Matters} matter / {Was} work-assignment accessible roots (project sources: {Sources}).",
             principal.Kind, principal.SystemUserId, principal.ContactId, projectAccess.Count,
-            accessibleMatters.Count, accessibleWorkAssignments.Count, accessibleProjects.Sources);
+            matterAccess.Count, workAssignmentAccess.Count, accessibleProjects.Sources);
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
             Plane = CallerPrincipalPlane.Workforce,
             ContactId = principal.ContactId ?? Guid.Empty,
             SystemUserId = principal.SystemUserId,
-            Email = WorkforcePrincipalResolver.ExtractVerifiedEmail(httpContext.User) ?? string.Empty,
+            Email = WorkforcePrincipalResolver.ExtractTokenEmail(httpContext.User) ?? string.Empty,
             Oid = principal.Oid,
             ProjectAccess = projectAccess,
-            MatterAccess = accessibleMatters.Rights,
-            WorkAssignmentAccess = accessibleWorkAssignments.Rights,
+            MatterAccess = matterAccess,
+            WorkAssignmentAccess = workAssignmentAccess,
         });
     }
 }

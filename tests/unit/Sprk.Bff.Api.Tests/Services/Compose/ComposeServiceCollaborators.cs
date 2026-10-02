@@ -76,13 +76,20 @@ internal static class ComposeServiceCollaborators
     {
         var registry = new Mock<ISecurableEntityRegistry>();
 
-        registry.Setup(r => r.IsSecurableAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(securable);
+        var securableSet = securable
+            ? new HashSet<string>(StringComparer.Ordinal) { "sprk_matter" }
+            : new HashSet<string>(StringComparer.Ordinal);
 
         registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(securable
-                ? new HashSet<string>(StringComparer.Ordinal) { "sprk_matter" }
-                : new HashSet<string>(StringComparer.Ordinal));
+            .ReturnsAsync(securableSet);
+
+        // Task 151: the resolver asks ONE question — "is this an entity, and can it be secure?" — and refuses a
+        // name that is not an entity. Compose resolves the constant logical name sprk_matter, which the real
+        // registry knows; without it in the known set the documented `securable: false` → business-unit path
+        // would be a refusal instead.
+        var knownSet = new HashSet<string>(StringComparer.Ordinal) { "sprk_matter" };
+        registry.Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(name, securableSet, knownSet));
 
         return new RecordContainerResolver(
             registry.Object, dataverse, NullLogger<RecordContainerResolver>.Instance);

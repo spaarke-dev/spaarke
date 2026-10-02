@@ -47,8 +47,21 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// which carries an expiry and reminders. An unreadable value counts as the refusing one (ADR-003). Unsharing checks
 /// only that the user exists: a share must stay removable after its holder is disabled.</para>
 ///
-/// <para><b>Levels.</b> <see cref="RecordShareLevels"/> is the one level-to-rights table (View Only, Collaborate, Full
-/// Access; no level carries Share or Assign).</para>
+/// <para><b>Levels.</b> <see cref="RecordShareLevels"/> is the one level-to-rights table: View Only = Read; Collaborate =
+/// Read, Write, Append, AppendTo and Share; Full Access = Collaborate + Delete; no level carries Assign. Collaborate and
+/// Full Access carry Share since the owner's 2026-09-30 rule (task 139): a person with Write may pass access on — through
+/// the model-driven app's own Share command as well as Manage Access — and only a View holder may not.</para>
+///
+/// <para><b>You may grant only what you hold.</b> A share is the INTERSECTION of the requested level with the caller's
+/// own rights, re-probed as the caller (owner 2026-09-16; Dataverse's own rule, which an app-only POA write cannot apply
+/// for us). It is narrowed, never refused, unless nothing grantable remains (403 <c>caller_cannot_grant</c>). A narrowed
+/// request never LOWERS an existing share that holds more (409 <c>sdap.access.grant.would_lower_existing</c>, task 139);
+/// an explicit request for a lower level is a deliberate downgrade and is applied. The No Access list for internal users
+/// is task 143's (owner Q4), not checked here.</para>
+///
+/// <para><b>A secure record always keeps someone who can see it</b> (owner round 3, S5; task 139 amendment R3):
+/// <c>/unshare-user</c> refuses to remove the last enabled user whose share can read a secure record (409
+/// <c>last_reader_on_secure_record</c>).</para>
 ///
 /// <para>ADR-001 Minimal API · ADR-008 authorization by the group's endpoint filter · ADR-019 every refusal is
 /// ProblemDetails with a stable reason code and the trace id · ADR-009 the affected user's impersonated root-set cache
@@ -91,6 +104,12 @@ public static class InternalShareEndpoints
     /// <summary>A write was sent and its result could not be confirmed.</summary>
     internal const string WriteNotConfirmedReasonCode = "sdap.access.user_share.write_not_confirmed";
 
+    /// <summary>
+    /// Removing this share would leave a SECURE record with nobody who can open it (owner round 3, S5; task 139
+    /// amendment R3), so nothing was removed. 409.
+    /// </summary>
+    internal const string LastReaderOnSecureRecordReasonCode = "sdap.access.user_share.last_reader_on_secure_record";
+
     // ── Share outcomes ──────────────────────────────────────────────────────
 
     /// <summary>The user held no share; one now exists at the level.</summary>
@@ -129,6 +148,9 @@ public static class InternalShareEndpoints
     /// <summary>The columns the share list reads for names.</summary>
     internal const string SystemUserNameSelect = "systemuserid,fullname";
 
+    /// <summary>What the secure-record last-reader check reads: whether each other sharer is enabled (task 139, S5).</summary>
+    internal const string SystemUserEnabledSelect = "systemuserid,isdisabled";
+
     /// <summary>
     /// The last access mode that is a person: 0 Read-Write, 1 Administrative, 2 Read. Not 3 Support User,
     /// 4 Non-interactive or 5 Delegated Admin.
@@ -156,6 +178,8 @@ public static class InternalShareEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            // 409 (task 139): the request was narrowed to the caller's own rights and the user already holds more.
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -170,6 +194,8 @@ public static class InternalShareEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            // 409 (task 139, S5): removing the last person who can open a secure record.
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapGet("/user-shares", ListAsync)
@@ -325,6 +351,24 @@ public static class InternalShareEndpoints
                 ReadFailedReasonCode, "The shares on this record could not be read, so nothing was changed. Try again.");
         }
 
+        // ── Never silently lower (task 139) ─────────────────────────────────────
+        // ModifyAccess REPLACES the rights. When the caller's own rights narrowed the request, writing the narrowed
+        // mask over a share that holds MORE would take rights away while the caller asked for more — lowering access
+        // somebody else gave. Refused instead, with nothing written. An explicit request for a lower level (not
+        // narrowed) is a deliberate downgrade by a Write-holder and is still applied below.
+        if (narrowed && RecordShareLevels.WouldRemoveRights(current, granted.AccessRightsMask))
+        {
+            logger.LogWarning(
+                "[USER-SHARE] Refused: {SystemUserId} holds mask {Current} on {RootType} {RootId}; the request for {Level} " +
+                "was narrowed to {Granted} by the caller's own rights {CallerRights}, and writing it would remove rights " +
+                "(caller {CallerOid}).",
+                systemUserId, current, root.Type, root.Id, level, granted.AccessRightsMask, callerRights, callerOid);
+            return Refused(httpContext, StatusCodes.Status409Conflict, NotSharedTitle,
+                ExternalGrantLifecycle.WouldLowerExistingReasonCode,
+                "They already have more access than you can grant on this record. Nothing was changed, so their " +
+                "existing access stays as it is.");
+        }
+
         if (current == granted.AccessRightsMask)
         {
             logger.LogInformation(
@@ -389,13 +433,15 @@ public static class InternalShareEndpoints
     /// <summary>Handles <c>POST /api/v1/external-access/unshare-user</c>.</summary>
     /// <returns>
     /// 200 with <c>removed = true</c> when a share existed and is confirmed gone, or <c>removed = false</c> when the user
-    /// held none (nothing was written). 400 for a missing record or user. 404 for an unknown user. 500 when the user or
-    /// the shares could not be read (nothing was written), or when the removal could not be confirmed.
+    /// held none (nothing was written). 400 for a missing record or user. 404 for an unknown user. 409 when the record is
+    /// secure and this user is the last one who can open it (task 139, S5). 500 when the user or the shares could not be
+    /// read (nothing was written), or when the removal could not be confirmed.
     /// </returns>
     internal static async Task<IResult> UnshareAsync(
         UnshareRecordWithUserRequest request,
         IDataverseRecordShareService recordShare,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -454,6 +500,15 @@ public static class InternalShareEndpoints
                 "[USER-SHARE] {SystemUserId} holds no share on {RootType} {RootId}; nothing to remove (caller {CallerOid}).",
                 systemUserId, root.Type, root.Id, callerOid);
             return TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: false));
+        }
+
+        // ── S5 (owner round 3, task 139 amendment R3): a secure record always keeps someone who can see it ──
+        if (RecordShareLevels.CanRead(current)
+            && await LastReaderRefusalAsync(
+                root, systemUserId, recordShare, dataverseClient, participations, httpContext, logger, callerOid, ct)
+                is { } lastReader)
+        {
+            return lastReader;
         }
 
         var entitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
@@ -554,6 +609,95 @@ public static class InternalShareEndpoints
             .ToList();
 
         return TypedResults.Ok(new RecordUserSharesResponse(listed));
+    }
+
+    /// <summary>
+    /// The refusal when removing <paramref name="systemUserId"/>'s share would leave a SECURE record with nobody who can
+    /// see it — or <c>null</c> when the removal may proceed (owner round 3, S5: "a secure record MUST always have at
+    /// least one user who can see it"; task 139 amendment R3).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Secure, or could not tell.</b> A secure record is owned by a memberless team, so its people are exactly
+    /// its direct user shares. An unreadable flag read counts as secure — the fail-closed direction is to keep the
+    /// share. A non-secure record is visible through its owner's business unit, so the rule does not apply.</para>
+    /// <para><b>Who counts as "someone else who can see it".</b> Another SYSTEM USER with a direct share carrying Read,
+    /// who is enabled. Team shares are not counted: a team's membership is not read here, and counting one could let
+    /// the last person go from a record only an empty team can reach. Over-refusing is the safe direction; an
+    /// administrator can always share the record with someone else first.</para>
+    /// <para>Any read that fails refuses (500 <c>read_failed</c>) rather than guessing that someone else remains.</para>
+    /// </remarks>
+    private static async Task<IResult?> LastReaderRefusalAsync(
+        GrantExternalAccessEndpoint.GrantRootResolution root,
+        Guid systemUserId,
+        IDataverseRecordShareService recordShare,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        HttpContext httpContext,
+        ILogger logger,
+        string? callerOid,
+        CancellationToken ct)
+    {
+        var logicalName = ExternalGrantRoot.LogicalNameFor(root.Type);
+
+        bool isSecure;
+        try
+        {
+            var flags = await participations.GetRootRecordFlagsAsync(logicalName, new[] { root.Id }, ct);
+            isSecure = !flags.TryGetValue(root.Id, out var f) || f.IsUnreadable || f.IsSecure;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[USER-SHARE] Could not read whether {RootType} {RootId} is secure; treating it as secure (fail closed).",
+                root.Type, root.Id);
+            isSecure = true;
+        }
+
+        if (!isSecure)
+            return null;
+
+        List<Guid> otherReaders;
+        try
+        {
+            var shares = await recordShare.GetPrincipalAccessOrThrowAsync(logicalName, root.Id, ct);
+            otherReaders = shares
+                .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser
+                            && s.Principal.Id != systemUserId
+                            && RecordShareLevels.CanRead(s.AccessRightsMask))
+                .Select(s => s.Principal.Id)
+                .Distinct()
+                .ToList();
+
+            foreach (var batch in otherReaders.Chunk(NameBatchSize))
+            {
+                var rows = await dataverseClient.QueryAsync<SystemUserRow>(
+                    SystemUserEntitySet,
+                    filter: string.Join(" or ", batch.Select(id => $"systemuserid eq {id}")),
+                    select: SystemUserEnabledSelect,
+                    top: batch.Length,
+                    cancellationToken: ct);
+
+                if (rows.Any(r => batch.Contains(r.Id) && r.IsDisabled is false))
+                    return null;
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[USER-SHARE] Could not confirm that someone else keeps access to secure {RootType} {RootId}; nothing " +
+                "was removed (caller {CallerOid}).", root.Type, root.Id, callerOid);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotUnsharedTitle,
+                ReadFailedReasonCode,
+                "Could not confirm that someone else keeps access to this secure record, so no share was removed. Try again.");
+        }
+
+        logger.LogWarning(
+            "[USER-SHARE] Refused to remove {SystemUserId}'s share on secure {RootType} {RootId}: nobody else enabled holds " +
+            "a share that can read it ({OtherReaders} other reader share(s) found) (caller {CallerOid}).",
+            systemUserId, root.Type, root.Id, otherReaders.Count, callerOid);
+        return Refused(httpContext, StatusCodes.Status409Conflict, NotUnsharedTitle, LastReaderOnSecureRecordReasonCode,
+            "This is the last person who can open this secure record, so their access cannot be removed. Share the " +
+            "record with someone else first, then remove this share.");
     }
 
     // =========================================================================

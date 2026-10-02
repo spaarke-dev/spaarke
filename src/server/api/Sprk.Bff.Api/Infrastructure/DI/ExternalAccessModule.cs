@@ -1,5 +1,7 @@
+using Azure.Core;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -49,8 +51,8 @@ public static class ExternalAccessModule
         // Registered HERE so the grant routes do not depend on an unrelated module having been added.
         services.TryAddSingleton(TimeProvider.System);
 
-        // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL).
-        // Resolves Contact by email and loads their project access grants.
+        // Participation service — queries sprk_externalrecordaccess with Redis caching (60s TTL): the
+        // grant-DATA reader. (Contact resolution moved to ContactIdentityBinder below — task 141.)
         services.AddHttpClient<ExternalParticipationService>((sp, client) =>
         {
             var config = sp.GetRequiredService<IConfiguration>();
@@ -122,13 +124,43 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // ── Identity binding (unified-access-control-r2 task 141, defect C7) ──────────────────────────
+        // Placement: in the BFF (bff-extensions.md §A) — it runs inside the authorization path of every
+        // Teams/SPA request (B4, latency-coupled), over BFF-owned identity data, under the BFF identity.
+        //
+        // The customer-workforce-tenant list (owner decision I1 = (b)): EMPTY = DENY every email bind and
+        // creation; never defaults to AzureAd:TenantId. Malformed entries fail startup (ADR-010 ValidateOnStart).
+        services.AddOptions<WorkforceIdentityOptions>()
+            .BindConfiguration(WorkforceIdentityOptions.SectionName)
+            .ValidateOnStart();
+        services.AddSingleton<IValidateOptions<WorkforceIdentityOptions>, WorkforceIdentityOptionsValidator>();
+
+        // The one binding store for THIS environment (Dataverse:ServiceUrl), app-only under the BFF's managed
+        // identity. Named client from IHttpClientFactory (pooled; safe in a singleton). The interface is the
+        // testing seam (ADR-010): HTTP doubles are banned (ADR-038 B1), so tests run the binder over an
+        // in-memory store.
+        services.AddHttpClient(DataverseContactIdentityStore.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddSingleton<IContactIdentityStore>(sp => DataverseContactIdentityStore.ForDefaultEnvironment(
+            sp.GetRequiredService<IHttpClientFactory>(),
+            sp.GetRequiredService<TokenCredential>(),
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<DataverseContactIdentityStore>>()));
+
+        // The one binding writer, shared by the workforce resolver, the CIAM strategy, the invite endpoints and
+        // the reconciliation job. Concrete (ADR-010). Its factory builds a binder over ANOTHER environment for
+        // RegistrationDataverseService (a new systemuser's link goes to the environment it was created in).
+        services.AddSingleton<ContactIdentityBinder>();
+        services.AddSingleton<ContactIdentityBinderFactory>();
+
         // Workforce-token → principal resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04, task 020).
         // Composes the existing AAD-oid→systemuser conversion (MembershipEndpoints.ResolveSystemUserIdAsync)
-        // with the AAD-oid/verified-email→contact conversion (IIdentityNormalizationService) into one
-        // principal (systemuser / contact-only / deny). Singleton is safe: all deps
-        // (IIdentityNormalizationService, IDataverseService, ITenantCache) are singletons. The interface
-        // is the testing seam (ADR-010, matching the IIdentityNormalizationService precedent). No Graph
-        // SDK / AI-internal types are injected (broker-only, NFR-02).
+        // with the oid BINDING (ContactIdentityBinder, task 141) into one principal (systemuser / contact-only
+        // / deny). Singleton is safe: all deps (IIdentityNormalizationService, IDataverseService, ITenantCache,
+        // ContactIdentityBinder) are singletons. The interface is the testing seam (ADR-010). No Graph SDK /
+        // AI-internal types are injected (broker-only, NFR-02).
         services.AddSingleton<IWorkforcePrincipalResolver, WorkforcePrincipalResolver>();
 
         // Standing-grant flag reader (teams-app-r1 task 022 — the task-051 composition seam). Reads the
@@ -221,12 +253,36 @@ public static class ExternalAccessModule
         // (CIAM → sprk_externalrecordaccess participations; workforce → accessible-record-set). Task 016
         // registers the remaining outside-counsel modules (matter/document/invoice/work-assignment) the
         // same way — AddExternalModule with one descriptor each, no framework change.
+        //
+        // COLUMN allow-lists (unified-access-control-r2 task 134, defect C6). Every descriptor declares the
+        // exact columns an external caller may read; the read seam refuses anything else before execution
+        // and strips it from the result afterwards (ExternalModuleDataEndpoints). Each list was DERIVED
+        // FROM LIVE DATA on 2026-09-30, never written from memory — a guessed list either leaks or blanks a
+        // grid. Derivation rule: (a) every attribute the module's sprk_gridconfiguration record references
+        // (attribute / condition / order); (b) every attribute of a sibling saved view the grid's
+        // ViewSelector offers AND that can render rows today, i.e. one that projects a scope-dimension
+        // attribute (a view that projects none returns 0 rows after ScopeRows, so it shows nothing today
+        // and contributes no column); (c) the scope-dimension attributes; (d) the /record default
+        // projection (primary id + primary name, from EntityDefinitions — each descriptor DECLARES its
+        // PrimaryNameAttribute and Register refuses a list missing either). No live grid or view references
+        // a pointer column, an alias or an aggregate. Full table: projects/unified-access-control-r2/
+        // notes/task-134-external-module-column-allow-list.md. ⚠️ Changing a grid configuration or a main
+        // view to show a new column now REQUIRES adding the column here — otherwise that grid gets a 400.
+        //
+        // sprk_project: grid 61711823 + views "Active Projects" 195ab203, "My Projects" 0e36d0a4.
+        // Primary name = sprk_projectnumber.
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "collaboration",
             RecordEntity = "sprk_project",
             RecordIdAttribute = "sprk_projectid",
             AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            PrimaryNameAttribute = "sprk_projectnumber",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
+                "modifiedon", "createdon", "ownerid", "sprk_practicearea", "sprk_projecttype_ref",
+            },
         });
 
         // Task 028 (2026-08-10) — POLYMORPHIC Tier-2 scoping. Supersedes task 016's single-parent
@@ -251,6 +307,16 @@ public static class ExternalAccessModule
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
             },
+            // Grid 3af4102c only: none of the four sprk_document main views projects a scope lookup, so
+            // each renders 0 rows today and contributes no column (they would add AI-triage columns —
+            // classification, invoice hints — that no external caller can currently see). Primary name =
+            // sprk_documentname. No pointer column (sprk_graphdriveid / sprk_graphitemid / sprk_filepath …).
+            PrimaryNameAttribute = "sprk_documentname",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
+                "sprk_project", "sprk_matter", "sprk_workassignment",
+            },
         });
 
         // Invoices — visible when attached to an accessible matter OR project (invoices carry both
@@ -265,6 +331,15 @@ public static class ExternalAccessModule
                 new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
                 new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
             },
+            // Grid 3ff4102c + view "Invoice - Matter Context" b9f6d045 (the only sprk_invoice main view that
+            // projects a scope lookup, sprk_matter). Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+                "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon",
+                "statecode",
+            },
         });
 
         // Work Assignments — a FIRST-CLASS ROOT (task 028): a standalone WA (no project/matter) can be
@@ -277,6 +352,15 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_workassignment",
             RecordIdAttribute = "sprk_workassignmentid",
             AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
+            // Grid 42f4102c + views "Active Work Assignments" c8391ddf, "Inactive Work Assignments"
+            // d73b2239, "My Work to Assign" b7cf5593. Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
+                "sprk_responseduedate", "statuscode", "statecode", "sprk_regardingproject", "createdon",
+                "ownerid", "sprk_assignedto",
+            },
         });
 
         // Matters — a first-class ROOT (task 028; supersedes the D-016-1 always-empty stub). Scoped by
@@ -289,6 +373,14 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_matter",
             RecordIdAttribute = "sprk_matterid",
             AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
+            // Grid 583a2a33 + views "Active Matters" 3ba2301f, "My Matters" 6c3c5d88, "All Matters"
+            // 694cd4b7. Primary name = sprk_matternumber.
+            PrimaryNameAttribute = "sprk_matternumber",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "statecode",
+                "createdon", "sprk_mattertype", "sprk_practicearea",
+            },
         });
 
         // Service Requests (task 028) — INTERNAL-ONLY. Shows the caller's OWN submitted requests
@@ -305,6 +397,15 @@ public static class ExternalAccessModule
                 p.Plane == CallerPrincipalPlane.Workforce && p.ContactId != Guid.Empty
                     ? new HashSet<Guid> { p.ContactId }
                     : EmptyRecordIds,
+            // Grid 403e5d37 only: the one sprk_servicerequest main view ("Inactive Service Requests")
+            // does not project the scope attribute sprk_requestedby, so it renders 0 rows today.
+            // Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
+                "sprk_requestedby",
+            },
         });
 
         // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own
@@ -321,6 +422,15 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_gridconfiguration",
             RecordIdAttribute = "sprk_gridconfigurationid",
             AccessibleRecordIds = _ => OutsideCounselGridConfigurationIds,
+            // The only external read of this entity is the shared DataGrid's config load,
+            // `retrieveRecord('sprk_gridconfiguration', configId, ['sprk_configjson'])`
+            // (Spaarke.UI.Components DataGrid.tsx fetchConfigRecord) + the /record default projection.
+            // No external grid lists grid configurations. Primary name = sprk_name.
+            PrimaryNameAttribute = "sprk_name",
+            ReadableColumns = new HashSet<string>
+            {
+                "sprk_gridconfigurationid", "sprk_name", "sprk_configjson",
+            },
         });
 
         // Accessible-record-set composition + enforcement gate (teams-app-r1 task 022, spec FR-06 /
@@ -370,6 +480,29 @@ public static class ExternalAccessModule
         // exactly what § F.1's asymmetric-registration anti-pattern asks for.
         services.AddScheduledJob<ExternalAccessReconciliationJob>(
             ExternalAccessReconciliationJob.DefaultCronSchedule, enabled: false);
+
+        // Task 141 — the identity-link reconciliation (every licensed systemuser linked to its contact, or
+        // flagged). Systemusers are created outside the product (Entra / PPAC sync), so this is the safety net
+        // behind the inline link (WP-5). Same host and seam as the two jobs above (ADR-036 A1 rule 6; ADR-052
+        // places it in the BFF). ENABLED but REPORT-ONLY: writes need IdentityLink:Reconciliation:WritesEnabled
+        // = true — absent, empty or unparseable writes nothing. The switch is a rollout guard, not a deferral:
+        // the dev live gate runs report-only, the report is reviewed, then writes are enabled.
+        // It reconciles this BFF's own environment AND every environment it provisions users into (DATAVERSE_URL
+        // and the active sprk_dataverseenvironment rows, through RegistrationDataverseService's per-environment
+        // token path), so a registration link that did not land in a target is retried (task 141, third fix round).
+        // UNCONDITIONAL (ADR-032): every dependency is registered unconditionally above; the registration services
+        // (RegistrationModule) are resolved per run and only when DATAVERSE_URL is configured.
+        services.AddScheduledJob<IdentityLinkReconciliationJob>(IdentityLinkReconciliationJob.DefaultCronSchedule);
+
+        // unified-access-control-r2 task 144 (C10 part 1, #967; owner decision F2 = a) — the read-only Secure Record
+        // isolation census: no role reaches the Secure Record BU by depth, the BU holds no users, its named owner team
+        // resolves with no members and alone holds the owner role. Logs CRITICAL per finding; writes nothing. Provisioning
+        // checks the same invariants only when something is provisioned; a Change-BU between provisioning calls cannot
+        // be blocked from the BFF (no plugins, ADR-002), so this bounds how long it goes unseen. ADR-052 places it in
+        // the BFF on the in-process scheduler (ADR-036 A1 rule 6). ENABLED: it has no side effect to gate.
+        // UNCONDITIONAL registration (ADR-032): IServiceScopeFactory, IConfiguration and TimeProvider are all
+        // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
+        services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
 
         return services;
     }
