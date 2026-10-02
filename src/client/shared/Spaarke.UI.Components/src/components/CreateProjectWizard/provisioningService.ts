@@ -62,7 +62,7 @@ export interface IProvisionProjectResponse {
   /** The canonical Secure Record business unit — resolved by name, not created. */
   businessUnitId: string;
   businessUnitName: string;
-  /** The business unit's default owner team, which now owns the project. */
+  /** The business unit's NAMED owner team (task 144 — never its default team), which now owns the project. */
   ownerTeamId: string;
   ownerTeamName: string;
   /** The project's own SPE container, recorded on sprk_containerid. */
@@ -87,10 +87,11 @@ export interface IProvisionProjectResponse {
  */
 export type ProvisioningFailureKind =
   /**
-   * The environment has not been set up for secure projects: no `Secure Project` business unit,
-   * more than one, or its default owner team is missing/ambiguous. Expected in pre-UAT environments.
-   * Nothing was created and the project is NOT in a wrong business unit — the endpoint fails closed
-   * before it assigns anything.
+   * The environment is not set up — or not in a safe state — for secure projects: no `Secure Record`
+   * business unit, more than one, its NAMED owner team is missing/ambiguous, that team has members, the
+   * business unit holds users, or either of the last two could not be read (task 144). Expected in
+   * pre-UAT environments. Nothing was created and the project is NOT in a wrong business unit — the
+   * endpoint fails closed before it assigns anything.
    */
   | 'environment-not-configured'
   /** The project was already provisioned, or a previous run claimed it. Re-running would orphan a container. */
@@ -136,17 +137,23 @@ export interface IProvisionProjectResult {
 // ---------------------------------------------------------------------------
 
 /**
- * The four reasons that mean "this environment has no secure-project topology yet".
+ * The reasons that mean "this environment's secure-record topology is missing or not safe to use".
  *
- * All four are returned as HTTP 500 by the endpoint, NOT 4xx — the server treats a missing
- * environment as a server-side configuration fault. So status code cannot classify these; the
- * `reasonCode` extension is the only reliable discriminator, which is why this client reads it.
+ * All are returned as HTTP 500 by the endpoint, NOT 4xx — the server treats them as server-side
+ * configuration faults. So status code cannot classify these; the `reasonCode` extension is the only
+ * reliable discriminator, which is why this client reads it. Every one of them is raised BEFORE any
+ * mutation (task 144 checks the named owner team's members and the business unit's users first), so
+ * "nothing was moved" is true of each.
  */
 const ENVIRONMENT_REASON_CODES: ReadonlySet<string> = new Set([
   'sdap.provision.secure_bu_not_found',
   'sdap.provision.secure_bu_ambiguous',
   'sdap.provision.secure_owner_team_not_found',
   'sdap.provision.secure_owner_team_ambiguous',
+  'sdap.provision.secure_owner_team_has_members',
+  'sdap.provision.secure_owner_team_membership_unreadable',
+  'sdap.provision.secure_bu_has_users',
+  'sdap.provision.secure_bu_users_unreadable',
 ]);
 
 const SHARE_REASON_CODES: ReadonlySet<string> = new Set([
@@ -155,6 +162,13 @@ const SHARE_REASON_CODES: ReadonlySet<string> = new Set([
 ]);
 
 const REASON_ALREADY_PROVISIONED = 'sdap.provision.already_provisioned';
+/**
+ * Task 144: the record is already owned inside the Secure Record business unit by a team other than the
+ * named owner team — in practice secured before task 144, under the retired default team. It IS already
+ * claimed as secure, and re-securing it would create a second container, so it reads exactly like
+ * `already_provisioned` to the person in front of the wizard.
+ */
+const REASON_OWNED_BY_OTHER_SECURE_TEAM = 'sdap.provision.owned_by_other_secure_team';
 const REASON_LEGACY_PER_PROJECT_BU = 'sdap.provision.legacy_per_project_bu';
 const REASON_CONTAINER_NOT_RECORDED = 'sdap.provision.container_not_recorded';
 
@@ -198,11 +212,11 @@ export function classifyProvisioningFailure(reasonCode?: string): {
     return {
       failureKind: 'environment-not-configured',
       errorMessage:
-        'Secure projects are not set up in this environment yet — the Secure Record business unit and its owner team have to exist before a project can be secured. The project was created as a normal project and nothing was moved; an administrator can secure it once the setup is in place.',
+        'Secure projects cannot be set up in this environment right now — the Secure Record business unit and its owner team are missing or not in a safe state. The project was created as a normal project and nothing was moved; an administrator can secure it once the setup is fixed.',
     };
   }
 
-  if (reasonCode === REASON_ALREADY_PROVISIONED) {
+  if (reasonCode === REASON_ALREADY_PROVISIONED || reasonCode === REASON_OWNED_BY_OTHER_SECURE_TEAM) {
     // Deliberately hedged. This code covers TWO states the client cannot tell apart, because the
     // endpoint's idempotency marker is the owner-team assignment (step 5) — which lands BEFORE the
     // creator share (5.5) and the container (6). So a retry after `creator_share_failed` reaches

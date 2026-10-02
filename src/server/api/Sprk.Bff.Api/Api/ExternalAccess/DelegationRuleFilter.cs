@@ -237,16 +237,21 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                     return FromProjectId(close.ProjectId);
 
                 // ── /provision-project ────────────────────────────────────────
+                // Task 144: a project, matter OR work assignment. The target comes from the SAME resolver the
+                // handler uses (recordType + recordId, else the legacy projectId), so the record whose Write is
+                // checked here is the record the handler re-owns — a request cannot authorize against a project
+                // it can write and then re-own a matter it cannot. An unknown recordType resolves to nothing and
+                // is denied by the null path below.
                 case ProvisionProjectRequest provision:
-                    return FromProjectId(provision.ProjectId);
+                    return FromGrantRoot(ProvisionProjectEndpoint.ResolveRoot(provision));
 
-                // ── /unsecure-project (task 061) ──────────────────────────────
+                // ── /unsecure-project (task 061; three root types since task 144) ──
                 // Removing the secure designation is at least as consequential as applying it, so it
-                // is gated by the same Write-on-the-project check, evaluated as the caller. Omitting
-                // this case would not have opened a hole — an unresolved target denies — but it would
-                // have made the route permanently 403, which reads as a bug rather than a gate.
+                // is gated by the same Write-on-the-record check, evaluated as the caller, on the root the
+                // handler's own resolver names. Omitting this case would not have opened a hole — an
+                // unresolved target denies — but it would have made the route permanently 403.
                 case UnsecureProjectRequest unsecure:
-                    return FromProjectId(unsecure.ProjectId);
+                    return FromGrantRoot(UnsecureProjectEndpoint.ResolveRoot(unsecure));
 
                 // ── /set-record-share-expiry (task 098, FR-33) ────────────────
                 // Changing when every share on a record ends changes who can access it, so it takes the same

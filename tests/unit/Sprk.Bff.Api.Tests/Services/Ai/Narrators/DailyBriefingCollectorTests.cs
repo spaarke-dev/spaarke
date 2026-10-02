@@ -896,7 +896,13 @@ public sealed class DailyBriefingCollectorTests
             new[] { "sprk_workassignmentid", "sprk_name", "sprk_description", "sprk_responseduedate" }, stateFiltered: true, ownerScoped: false);
         // Event: NOT state-filtered (includeStateFilter:false) and carries BOTH due-date columns.
         AssertHighPriorityQuery(byEntity["sprk_event"],
-            new[] { "sprk_eventid", "sprk_eventname", "sprk_eventdescription", "sprk_finalduedate", "sprk_duedate" }, stateFiltered: false, ownerScoped: false);
+            // 🔴 2026-09-29: was "sprk_eventdescription", which DOES NOT EXIST on sprk_event — the real
+            // column is "sprk_description". This assertion PINNED the defect: Dataverse rejected the whole
+            // retrieve at runtime, the channel threw on every briefing run, and this test stayed green because
+            // it only compares the column LIST the collector builds, never whether those columns are real.
+            // A shape-only assertion cannot catch a wrong column name (cf. FAILURE-MODES AP-11 — no compiler
+            // and no test spans the seam). Verified against the live entity: sprk_event has sprk_description.
+            new[] { "sprk_eventid", "sprk_eventname", "sprk_description", "sprk_finalduedate", "sprk_duedate" }, stateFiltered: false, ownerScoped: false);
         // To Do: owner-scoped to SystemUserId (R7 W12 per-user scoping preserved by ScopeToOwner).
         AssertHighPriorityQuery(byEntity["sprk_todo"],
             new[] { "sprk_todoid", "sprk_name", "sprk_description", "sprk_duedate" }, stateFiltered: true, ownerScoped: true);

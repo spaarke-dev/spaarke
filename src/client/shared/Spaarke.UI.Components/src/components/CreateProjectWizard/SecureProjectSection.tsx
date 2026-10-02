@@ -179,16 +179,18 @@ interface IProvisioningItem {
  */
 const PROVISIONING_ITEMS: IProvisioningItem[] = [
   {
-    // Endpoint steps 2, 3 and 5: resolve the ONE canonical `Secure Project`
-    // business unit BY NAME from configuration, resolve its default owner team,
-    // assign the project to that team, and verify the assignment took effect.
-    // Nothing is created — no business unit per project, and no account.
+    // Endpoint steps 2, 3 and 5: resolve the ONE canonical `Secure Record`
+    // business unit BY NAME from configuration, resolve its NAMED owner team
+    // (task 144 — never the BU's default team), assign the project to that team,
+    // and verify the assignment took effect. Nothing is created — no business unit
+    // per project, and no account.
     //
-    // "by design has no people in it" is deliberate hedging. Provisioning resolves
-    // the BU's DEFAULT owner team and never asserts it is empty; a Dataverse default
-    // owner team tracks BU membership, so emptiness holds only while no user is
-    // placed in that BU. That is an environment invariant, not a guarantee this code
-    // makes — and copy must not state it as one.
+    // "by design has no people in it" stays deliberately hedged. Since task 144
+    // provisioning REFUSES unless the named team has no members and the business
+    // unit holds no users — but only at the moment it runs. An administrator can
+    // add someone later (the scheduled census job reports it), so emptiness is an
+    // enforced-at-provisioning, monitored-afterwards invariant, not a permanent
+    // guarantee — and copy must not state it as one.
     icon: <BuildingRegular fontSize={16} />,
     title: 'Moved into the Secure Record business unit',
     description:

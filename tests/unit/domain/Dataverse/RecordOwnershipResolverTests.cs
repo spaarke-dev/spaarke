@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
@@ -35,7 +36,15 @@ public class RecordOwnershipResolverTests
 
     private static readonly Guid GeneralTeam = Guid.Parse("09fbf21c-1872-f011-b4cb-7c1e52671ad0");
     private static readonly Guid ChildTeam = Guid.Parse("cf15f587-baa0-f111-aaac-000d3a99d1d7");
-    private static readonly Guid SecureTeam = Guid.Parse("d9ec0b6f-0000-4000-8000-000000000002");
+
+    /// <summary>The Secure Record BU's DEFAULT team — what this resolver answered before task 144, and must never again.</summary>
+    private static readonly Guid SecureDefaultTeam = Guid.Parse("d9ec0b6f-0000-4000-8000-000000000002");
+
+    /// <summary>The Secure Record BU's NAMED owner team (task 144) — the owner of every secure record and its children.</summary>
+    private static readonly Guid SecureNamedTeam = Guid.Parse("d9ec0b6f-0000-4000-8000-000000000003");
+
+    private const string SecureBuName = "Secure Record";
+    private const string SecureOwnerTeamName = "Secure Record Owners";
 
     private static readonly Guid CallerUserId = Guid.Parse("8d7bad7a-e39e-f011-bbd3-7c1e5217cd7c");
     private static readonly Guid CallerOid = Guid.Parse("5a5a5a5a-0000-4000-8000-00000000cafe");
@@ -66,11 +75,12 @@ public class RecordOwnershipResolverTests
     }
 
     [Fact]
-    public async Task ResolveOwningTeam_WhenFiledToASecureRecord_OwnsItInTheSecureUnit_NeverTheCallersGeneralUnit()
+    public async Task ResolveOwningTeam_WhenFiledToASecureRecord_OwnsItByTheNamedSecureTeam_NeverTheDefaultOrTheCallers()
     {
         // The cross-business-unit case that matters: a caller in the general unit files to a SECURE project. The
-        // child must land in the secure unit's team — owned by the general team it would be readable there by
-        // everyone, which is exactly the isolation a secure record exists to provide.
+        // child must land with the team that owns the secure record itself — the Secure Record BU's NAMED owner team
+        // (task 144). Owned by the general team it would be readable by everyone there; owned by the Secure Record
+        // BU's DEFAULT team it would follow that team's uncurated membership, the hole #967 closes.
         var directory = Directory().WithRecord("sprk_project", SecureProjectId, SecureBu);
 
         var team = await Build(directory).ResolveOwningTeamAsync(
@@ -82,7 +92,79 @@ public class RecordOwnershipResolverTests
             },
             CancellationToken.None);
 
-        team.Should().Be(SecureTeam).And.NotBe(GeneralTeam);
+        team.Should().Be(SecureNamedTeam).And.NotBe(SecureDefaultTeam).And.NotBe(GeneralTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwningTeam_WhenTheSecureRecordsNamedTeamIsMissing_Refuses_NeverFallsBackToTheDefaultTeam()
+    {
+        var directory = Directory(withNamedSecureTeam: false).WithRecord("sprk_project", SecureProjectId, SecureBu);
+
+        var team = await Build(directory).ResolveOwningTeamAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_project", TargetRecordId = SecureProjectId },
+            CancellationToken.None);
+
+        team.Should().BeNull("the Secure Record BU's default team is present in the directory and must not be chosen");
+    }
+
+    [Fact]
+    public async Task ResolveOwningTeam_WhenTwoNamedSecureTeamsMatch_Refuses()
+    {
+        var directory = Directory()
+            .WithTeam(Guid.NewGuid(), SecureBu, isDefault: false, teamType: 0, SecureOwnerTeamName)
+            .WithRecord("sprk_matter", MatterId, SecureBu);
+
+        var team = await Build(directory).ResolveOwningTeamAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_matter", TargetRecordId = MatterId },
+            CancellationToken.None);
+
+        team.Should().BeNull("two teams answering one name is ambiguous; the resolver never picks one");
+    }
+
+    [Fact]
+    public async Task ResolveOwningTeam_WhenOnlyTheDefaultSecureTeamCarriesTheOwnerTeamName_Refuses()
+    {
+        // The case only `isdefault = false` defends: the default team bears the configured owner-team name and no
+        // named team exists. Dropping that predicate would hand every secure child to the default team.
+        var directory = new FakeDirectory()
+            .WithBusinessUnit(SecureBu, SecureBuName)
+            .WithTeam(SecureDefaultTeam, SecureBu, isDefault: true, teamType: 0, SecureOwnerTeamName)
+            .WithRecord("sprk_project", SecureProjectId, SecureBu);
+
+        var team = await Build(directory).ResolveOwningTeamAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_project", TargetRecordId = SecureProjectId },
+            CancellationToken.None);
+
+        team.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ResolveOwningTeam_WhenTheSecureBusinessUnitNameIsAmbiguous_Refuses()
+    {
+        var directory = Directory()
+            .WithBusinessUnit(Guid.NewGuid(), SecureBuName) // a second BU with the configured name
+            .WithRecord("sprk_matter", MatterId, ChildBu);
+
+        var team = await Build(directory).ResolveOwningTeamAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = "sprk_matter", TargetRecordId = MatterId },
+            CancellationToken.None);
+
+        team.Should().BeNull("whether this business unit is the Secure Record BU cannot be decided");
+    }
+
+    [Fact]
+    public async Task ResolveOwningTeam_WhenTheActingUserSitsInTheSecureBusinessUnit_StillNeverAnswersTheDefaultTeam()
+    {
+        // Should never happen — the Secure Record BU holds no users, and provisioning plus the census job report
+        // otherwise — but if it does, an unfiled record is owned by the named team, never the retired default team.
+        var userInSecureBuOid = Guid.Parse("5a5a5a5a-0000-4000-8000-0000000005ec");
+        var directory = Directory().WithUser(Guid.NewGuid(), userInSecureBuOid, SecureBu);
+
+        var team = await Build(directory).ResolveOwningTeamAsync(
+            new RecordOwnershipContext { CallerObjectId = userInSecureBuOid },
+            CancellationToken.None);
+
+        team.Should().Be(SecureNamedTeam).And.NotBe(SecureDefaultTeam);
     }
 
     [Fact]
@@ -258,19 +340,46 @@ public class RecordOwnershipResolverTests
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression query, CancellationToken _) => directory.Answer(query));
-        return new RecordOwnershipResolver(entities.Object, NullLogger<RecordOwnershipResolver>.Instance);
+
+        // The configured names are set explicitly, so a test proves the CONFIGURED names are honoured.
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["SecureRecord:BusinessUnitName"] = SecureBuName,
+            ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
+        }).Build();
+
+        return new RecordOwnershipResolver(entities.Object, configuration, NullLogger<RecordOwnershipResolver>.Instance);
     }
 
-    /// <summary>One caller in the general unit; each unit's default Owner team present unless told otherwise.</summary>
-    private static FakeDirectory Directory(bool withDefaultTeams = true)
+    /// <summary>
+    /// One caller in the general unit; three named business units; each unit's default Owner team present unless told
+    /// otherwise; and in the Secure Record BU the NAMED owner team plus two near-miss decoys (task 144) — an ACCESS team
+    /// with the right name and an OWNER team with the wrong name — inserted BEFORE the named team, so a named-team
+    /// query that dropped <c>teamtype</c> or <c>name</c> matches two rows (or a decoy first) and refuses.
+    /// </summary>
+    private static FakeDirectory Directory(bool withDefaultTeams = true, bool withNamedSecureTeam = true)
     {
-        var directory = new FakeDirectory().WithUser(CallerUserId, CallerOid, GeneralBu);
+        var directory = new FakeDirectory()
+            .WithUser(CallerUserId, CallerOid, GeneralBu)
+            .WithBusinessUnit(GeneralBu, "Spaarke")
+            .WithBusinessUnit(ChildBu, "Spaarke Business Unit 1")
+            .WithBusinessUnit(SecureBu, SecureBuName);
+
         if (withDefaultTeams)
         {
             directory
-                .WithTeam(GeneralTeam, GeneralBu, isDefault: true, teamType: 0)
-                .WithTeam(ChildTeam, ChildBu, isDefault: true, teamType: 0)
-                .WithTeam(SecureTeam, SecureBu, isDefault: true, teamType: 0);
+                .WithTeam(GeneralTeam, GeneralBu, isDefault: true, teamType: 0, "Spaarke")
+                .WithTeam(ChildTeam, ChildBu, isDefault: true, teamType: 0, "Spaarke Business Unit 1")
+                .WithTeam(SecureDefaultTeam, SecureBu, isDefault: true, teamType: 0, SecureBuName);
+        }
+
+        directory
+            .WithTeam(Guid.NewGuid(), SecureBu, isDefault: false, teamType: 1, SecureOwnerTeamName)
+            .WithTeam(Guid.NewGuid(), SecureBu, isDefault: false, teamType: 0, SecureOwnerTeamName + " Extra");
+
+        if (withNamedSecureTeam)
+        {
+            directory.WithTeam(SecureNamedTeam, SecureBu, isDefault: false, teamType: 0, SecureOwnerTeamName);
         }
 
         return directory;
@@ -284,7 +393,8 @@ public class RecordOwnershipResolverTests
         private readonly Dictionary<(string Entity, Guid Id), Guid?> _records = new();
         private readonly HashSet<string> _unreadable = new(StringComparer.OrdinalIgnoreCase);
         private readonly List<(Guid SystemUserId, Guid ObjectId, Guid BusinessUnit)> _users = new();
-        private readonly List<(Guid TeamId, Guid BusinessUnit, bool IsDefault, int TeamType)> _teams = new();
+        private readonly List<(Guid TeamId, Guid BusinessUnit, bool IsDefault, int TeamType, string Name)> _teams = new();
+        private readonly List<(Guid BusinessUnitId, string Name)> _businessUnits = new();
 
         public List<string> QueriedEntities { get; } = new();
         public List<string> UserKeyColumns { get; } = new();
@@ -307,9 +417,15 @@ public class RecordOwnershipResolverTests
             return this;
         }
 
-        public FakeDirectory WithTeam(Guid teamId, Guid businessUnit, bool isDefault, int teamType)
+        public FakeDirectory WithTeam(Guid teamId, Guid businessUnit, bool isDefault, int teamType, string name = "")
         {
-            _teams.Add((teamId, businessUnit, isDefault, teamType));
+            _teams.Add((teamId, businessUnit, isDefault, teamType, name));
+            return this;
+        }
+
+        public FakeDirectory WithBusinessUnit(Guid businessUnitId, string name)
+        {
+            _businessUnits.Add((businessUnitId, name));
             return this;
         }
 
@@ -325,8 +441,12 @@ public class RecordOwnershipResolverTests
                 "team" => _teams
                     .Where(t => Matches(conditions, "businessunitid", t.BusinessUnit)
                                 && Matches(conditions, "isdefault", t.IsDefault)
-                                && Matches(conditions, "teamtype", t.TeamType))
+                                && Matches(conditions, "teamtype", t.TeamType)
+                                && MatchesName(conditions, t.Name))
                     .Select(t => new Entity("team", t.TeamId)),
+                "businessunit" => _businessUnits
+                    .Where(b => MatchesName(conditions, b.Name))
+                    .Select(b => new Entity("businessunit", b.BusinessUnitId)),
                 _ => RecordsMatching(query.EntityName, conditions),
             };
 
@@ -376,5 +496,10 @@ public class RecordOwnershipResolverTests
         /// <summary>An ABSENT condition matches everything — so a dropped predicate widens the match.</summary>
         private static bool Matches(IReadOnlyDictionary<string, object> conditions, string attribute, object value) =>
             !conditions.TryGetValue(attribute, out var expected) || expected.Equals(value);
+
+        /// <summary>Dataverse compares names case-insensitively; an absent name condition matches everything.</summary>
+        private static bool MatchesName(IReadOnlyDictionary<string, object> conditions, string name) =>
+            !conditions.TryGetValue("name", out var expected)
+            || string.Equals(expected as string, name, StringComparison.OrdinalIgnoreCase);
     }
 }

@@ -93,6 +93,46 @@ Live fact relevant to Q8, Q4 and Q5: only **1 of 8** active interactive systemus
 - **F11:** the owner will change the hotmail #EXT# account themselves ("this is in dev and we'll change this"). There is NO census exception; clause 1 must pass once the owner changes it.
 - **#1037** is word-add-in-r1 task 084 (option A).
 
+## Owner answers, round 4 (2026-10-01). BINDING.
+
+These answer the seven questions raised after batch 2 (tasks 141, 144, 145, 155, 134). They are recorded verbatim in substance.
+
+1. **Root-BU users with Deep read (144 escalation b; F11's premise).** "Let's not worry about these users. This is dev and these are test users. If you need other test users at different access levels, we can create them."
+   - **How to apply:**
+     - No role, depth or BU change is made for Chelsea Friez, Lori Witkin or the hotmail guest.
+     - The census job and the NFR-05 live test will keep REPORTING them. In dev that is an accepted, known finding, not a failure to chase. The census code still treats it as a finding everywhere; no exception is coded.
+     - When a live gate needs a user at a specific access level, ask the owner to create one rather than reusing these.
+   - **Mechanics, for the record:** "Spaarke" is the ROOT business unit. Secure Record, Spaarke Business Unit 1, Demo, Dev 1 and Test 1 are its children, so Deep read held at the root reaches the Secure Record BU. The owner places users by hand.
+2. **Project 65a3fab2 "Test New Matter via Workspace" (144 escalation c).** "It is just a test record, but you can provision it to test the secure project capability."
+   - Provision it into isolation as the live fixture for 144.
+3. **Assign cascade (144 escalation a).** Accepted: team, sharepointdocumentlocation and sharepointdocument. The migration passes `-AcceptedAssignCascade team,sharepointdocumentlocation,sharepointdocument`.
+4. **Alternate key vs FLS on contact.sprk_externalobjectid (141 notes §9).** **B2**:
+   - FLS stays on `sprk_externalobjectid`.
+   - The alternate key moves to a new unsecured mirror column, `sprk_externalobjectidkey`, written with the same oid in the same request as every bind and create.
+   - Every read keeps using the secured column.
+5. **Stale core-ancestor stamp on a child filed under another child (155 escalation trigger 2).** **(b)**: re-stamp the children whenever the intermediate record is re-filed. This is a server-side cascade in the re-parent paths, plus fix-up for writes outside the BFF (ADR-002 WP-5). It also closes the access over-grant from the same stale copy (task 051 §1). The fail-closed refusal (c) remains the holding position only until (b) lands. Scope includes the Office to-do "carrier" shape (a direct core link plus a document/communication regarding) and the agreement, budget and report-card intermediates.
+6. **Live steps on dev.** "Yes, can run it." Approved for 141, 144 and 145's live gates:
+   - **141:** schema, FLS, the acct optional claim on the BFF app registration, the workforce tenant setting, and the reconciliation job.
+   - **144:** create the named team, migrate, and provision 65a3fab2.
+   - **145:** the role apply, the §5.4 strip, and the probes.
+   Each step runs its dry run and its verify mode.
+7. **External grids (134 open item D1).** Yes: set `showViewSelector=false` on the external SPA grids, so the column allow-lists can shrink to what the grids show.
+
+## Owner answers, round 5 (2026-10-02). BINDING.
+
+1. **Root-BU reach is a dev data artifact, not designed behaviour.** Owner, verbatim in substance: "In production we will NOT assign new users to the root Spaarke business unit; we will assign them to the customer's named child business unit. BUT the key is that when new records are created they have to be assigned to the creating user's business unit/team, including if created server side by the BFF API (whose Dataverse app registration will be assigned to the customer business unit)."
+   - **How to apply.** In dev, take no action on the root default team's "Spaarke Basic User" link, the root-BU users, or the root-BU BFF application users. The census and NFR-05 clause-1 findings they cause are accepted dev findings. No census exception is coded: in production the census must flag any of them.
+   - **Production invariants this rests on** (routed to customer-provisioning-orchestration-r1 in `handoffs/INCOMING-145-secure-setup-handler.md` §6):
+     - users live in the customer's child BU;
+     - the Secure Record BU is a direct child of the root and a sibling of the customer BU, never beneath it;
+     - the BFF application user lives in the customer BU. **Gap today:** `DataverseWebApiAppUserCreator` creates it in the ROOT BU;
+     - the root default team holds no Deep or Global read role.
+   - **Ownership rule as implemented** (`RecordOwnershipResolver`, task 080 / write-path I-6):
+     - **record-first:** a record filed under a parent is owned by the parent's business-unit default team;
+     - otherwise it is owned by the caller's business-unit default team (for the BFF's app-only creates, the app user's BU);
+     - a secure parent → the named "Secure Record Owners" team (C10 part 2).
+     - With one customer BU per environment, "the creating user's BU" and "the parent's BU" are the same unit.
+
 ## Live facts verified this session
 
 - `sprk_accesspermission` is **Standard 100000000 / Limited 100000001 / Restricted 100000002** on sprk_project, and identical on sprk_matter and sprk_workassignment.
