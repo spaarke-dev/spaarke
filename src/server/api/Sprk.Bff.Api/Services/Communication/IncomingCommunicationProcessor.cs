@@ -1075,7 +1075,7 @@ public sealed class IncomingCommunicationProcessor
     /// transitively), and that path can refuse with the ancestor codes. Three of them are permanent data shapes,
     /// exactly like the two original codes: <c>container_ancestor_ambiguous</c> (two different secure roots above
     /// it, or its regarding fields disagree), <c>container_ancestor_unverifiable</c> (filed under a service request,
-    /// event, analysis, budget or report card, or an invoice regarding an agreement), and
+    /// or an intermediate on a row that carries no copy to compare — task 156 narrowed it), and
     /// <c>container_ancestor_unresolved</c> at <b>409</b> (a record above it does not exist, its type is unknown, or
     /// the chain is longer than the walk follows). Left out, they fell into the transient path — the retry loop that
     /// can never succeed and loses the message capture. (<c>communication_secure_container_ambiguous</c> is no longer
@@ -1084,6 +1084,10 @@ public sealed class IncomingCommunicationProcessor
     /// <para><c>container_ancestor_unresolved</c> at <b>503</b> is the opposite case — the communication's row, a
     /// regarding type or a row above it could not be READ — so it stays transient and propagates. The status code
     /// is what separates them, so the predicate checks it rather than the code alone.</para>
+    ///
+    /// <para><c>container_ancestor_stale</c> (task 156) is TRANSIENT and deliberately absent: the row's copy of the
+    /// root of the record it is filed under is out of date, the resolver has enqueued its re-stamp, and a retry
+    /// succeeds once that lands (the reconciliation job repairs it within one cycle otherwise).</para>
     /// </remarks>
     internal static bool IsPermanentContainerRefusal(Infrastructure.Exceptions.SdapProblemException ex)
         => ex.Code is "secure_record_container_missing"

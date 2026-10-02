@@ -20,6 +20,8 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -538,6 +540,7 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
     {
         _fixture = fixture;
         _fixture.Uploads.Clear();
+        _fixture.RestampQueue.Children.Clear();
     }
 
     [Fact(DisplayName = "Task 155: PUT /api/obo/records/sprk_todo/{id}/files/… for a to-do under a SECURE project stores the file in the PROJECT's own container")]
@@ -564,16 +567,34 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.Uploads.Should().ContainSingle().Which.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer);
     }
 
-    [Fact(DisplayName = "Task 155: a to-do filed under ANOTHER child is refused (409 container_ancestor_unverifiable) and NOTHING reaches SPE")]
-    public async Task Put_TodoFiledUnderACommunication_IsRefused_AndWritesNothing()
+    [Fact(DisplayName = "Task 156: a to-do whose copy of its communication's root is STALE (the communication now regards the SECURE project) is refused 409 container_ancestor_stale, NOTHING reaches SPE, and the to-do is enqueued for re-stamping")]
+    public async Task Put_TodoFiledUnderACommunication_WithAStaleCopy_IsRefused_WritesNothing_AndIsEnqueued()
     {
+        // Task 155 refused every to-do under a communication (unverifiable). Task 156 reads the communication live: its
+        // root is the SECURE project, the to-do's copy still says the plain one — trusting it was the #1038 leak.
         var response = await _fixture.Client().PutAsync(
             $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderCommunication}/files/notes.txt",
             new ByteArrayContent([7]));
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await response.Content.ReadAsStringAsync()).Should().Contain(RecordContainerResolver.AncestorUnverifiableCode);
+        (await response.Content.ReadAsStringAsync()).Should().Contain(RecordContainerResolver.AncestorStaleCode);
         _fixture.Uploads.Should().BeEmpty("a refusal is only a refusal if no bytes moved");
+        _fixture.RestampQueue.Children.Should().ContainSingle()
+            .Which.Should().Be(("sprk_todo", RecordKeyedUploadRouteFixture.TodoUnderCommunication));
+    }
+
+    [Fact(DisplayName = "Task 156: a to-do whose copy EQUALS its communication's live root (the SECURE project) stores the file in the PROJECT's own container")]
+    public async Task Put_TodoFiledUnderACommunication_WithAFreshCopy_StoresInTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderCommunicationFreshCopy}/files/fresh.docx",
+            new ByteArrayContent([15]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "resolved exactly as a direct link to the secure project would be");
+        _fixture.RestampQueue.Children.Should().BeEmpty();
     }
 
     [Fact(DisplayName = "Task 155: a to-do under a SECURE project with NO container is refused (409 secure_record_container_missing) and NOTHING reaches SPE")]
@@ -687,6 +708,7 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
 
     public static readonly Guid EventUnderWorkAssignmentUnderSecureProject = Guid.Parse("15500000-0000-0000-0000-000000000009");
     public static readonly Guid EventUnderWorkAssignmentWithDanglingPair = Guid.Parse("15500000-0000-0000-0000-000000000011");
+    public static readonly Guid TodoUnderCommunicationFreshCopy = Guid.Parse("15600000-0000-0000-0000-000000000015");
 
     private static readonly Guid ProjectTypeRef = Guid.Parse("ca68b3bb-8600-f111-8407-7c1e520aa4df");
     private static readonly Guid Agreement = Guid.Parse("15500000-0000-0000-0000-000000000010");
@@ -706,6 +728,9 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
 
     /// <summary>Every drive id an upload reached, in order. Cleared by the test class constructor.</summary>
     public ConcurrentQueue<string> Uploads { get; } = new();
+
+    /// <summary>Task 156: every stale row the resolver enqueued for re-stamping (no Service Bus is reached).</summary>
+    internal RecordingRestampQueue RestampQueue { get; } = new();
 
     public HttpClient Client()
     {
@@ -734,6 +759,10 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
             services.RemoveAll<SpeFileStore>();
             services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads));
+
+            // Task 156: where a container_ancestor_stale refusal enqueues the stale row.
+            services.RemoveAll<CoreAncestorRestampQueue>();
+            services.AddSingleton<CoreAncestorRestampQueue>(RestampQueue);
         });
     }
 
@@ -773,7 +802,20 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             {
                 ["owningbusinessunit"] = bu,
                 ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", Communication),
-                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject)
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", PlainProject),
+                ["sprk_regardingrecordid"] = Communication.ToString()
+            },
+            // Task 156: the communication was re-filed to the SECURE project — the to-do above still copies the plain one.
+            [("sprk_communication", Communication)] = new("sprk_communication", Communication)
+            {
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject)
+            },
+            [("sprk_todo", TodoUnderCommunicationFreshCopy)] = new("sprk_todo", TodoUnderCommunicationFreshCopy)
+            {
+                ["owningbusinessunit"] = bu,
+                ["sprk_regardingcommunication"] = new EntityReference("sprk_communication", Communication),
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", SecureProject),
+                ["sprk_regardingrecordid"] = Communication.ToString()
             },
             [("sprk_todo", TodoUnderUnprovisionedSecureProject)] = new("sprk_todo", TodoUnderUnprovisionedSecureProject)
             {

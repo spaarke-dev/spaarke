@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -35,6 +35,14 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// access error. No app-only client is reachable from this class (task-012 audit).
 /// </para>
 /// <para>
+/// <b>Core-ancestor re-stamp (unified-access-control-r2 task 156)</b>: an update can change what a to-do / event /
+/// communication / analysis is filed under, or the matter / project of a record others are filed under, which leaves
+/// copies of that root stale. The re-stamp is a SERVER-owned invariant written app-only, so it is not done here — that
+/// would put an app-only client in reach of this class. It is ENQUEUED (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue"/>,
+/// ADR-004) and runs as the BFF's background job seconds later; the storage resolver refuses a stale copy in that
+/// window (<c>container_ancestor_stale</c>) and the reconciliation job is the backstop.
+/// </para>
+/// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,
 /// outcome, duration — never column values.
 /// </para>
@@ -47,13 +55,16 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue _restampQueue;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
 
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue restampQueue,
         ILogger<DataverseUpdateRecordHandler> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _restampQueue = restampQueue ?? throw new ArgumentNullException(nameof(restampQueue));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -172,6 +183,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             {
                 // Privilege-denied update surfaces the USER's own access error — never escalates.
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
+            }
+
+            // Task 156: a write that moved what a record is filed under, or its root, enqueues the re-stamp of the copies
+            // that depend on it (see the class remarks). Best effort and never thrown; the user's update stands.
+            if (Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.WriteCanMoveAStamp(tablename, mapped.Item!.Columns))
+            {
+                await _restampQueue
+                    .EnqueueAfterWriteAsync(tablename, recordId, mapped.Item.Columns, CancellationToken.None)
+                    .ConfigureAwait(false);
             }
 
             var result = ToolResult.Ok(

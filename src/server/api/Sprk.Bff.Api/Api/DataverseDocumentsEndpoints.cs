@@ -3,11 +3,11 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Telemetry;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -204,6 +204,7 @@ public static class DataverseDocumentsEndpoints
             string id,
             [FromBody] UpdateDocumentRequest request,
             IDocumentDataverseService dataverseService,
+            [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -233,6 +234,14 @@ public static class DataverseDocumentsEndpoints
                 }
 
                 await dataverseService.UpdateDocumentAsync(id, request);
+
+                // Task 156 (owner round 4 item 5, option b): a document re-filed to another matter / project / work
+                // assignment re-stamps every to-do and analysis filed under it, in this same request. Never thrown: a
+                // child that fails is logged and the reconciliation job repairs it; the document's own update stands.
+                await restamper.AfterWriteAsync(
+                    "sprk_document", Guid.Parse(id),
+                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.DocumentColumnsWritten(request),
+                    CancellationToken.None);
 
                 var updatedDocument = await dataverseService.GetDocumentAsync(id);
 

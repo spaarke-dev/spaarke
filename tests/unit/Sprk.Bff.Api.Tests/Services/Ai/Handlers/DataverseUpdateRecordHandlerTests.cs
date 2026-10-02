@@ -1,11 +1,11 @@
 using System.Text.Json;
 using FluentAssertions;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Handlers;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Xunit;
-using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
@@ -23,7 +23,7 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
     private readonly Mock<IDataverseUserClient> _dataverse = new();
 
     private DataverseUpdateRecordHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<DataverseUpdateRecordHandler>());
+        new(_dataverse.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordingRestampQueue(), CreateLogger<DataverseUpdateRecordHandler>());
 
     private static AnalysisTool BuildUpdateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseUpdateRecordHandler), name: "SYS-Dataverse Update Record");
@@ -115,6 +115,58 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
         var citations = (IEnumerable<ToolResultCitation>)result.Metadata![ToolResultMetadataKeys.Citations]!;
         citations.Should().ContainSingle(c =>
             c.ChunkId == $"tables/account/records/{recordId:D}" && c.SourceName == "account" && c.SourceType == "dataverse");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // unified-access-control-r2 task 156 — a write that moves a core-ancestor copy ENQUEUES the re-stamp
+    // (the handler is user-OBO-only: no app-only client may be reachable from it, so the cascade runs as the job)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ExecuteChatAsync_WriteThatRefilesAChild_EnqueuesTheRestamp_AfterTheUsersUpdate()
+    {
+        var recordId = Guid.Parse("15600000-0000-0000-0000-0000000000f1");
+        var queue = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordingRestampQueue();
+        _dataverse
+            .Setup(d => d.GetAsync(
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_todo')?$select=EntitySetName")),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson(
+                """{ "EntitySetName": "sprk_todos", "PrimaryIdAttribute": "sprk_todoid" }""")));
+        _dataverse
+            .Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(204, body: null));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: $$$"""
+            {"tablename":"sprk_todo","recordId":"{{{recordId:D}}}","item":{"sprk_regardingrecordid":"{{{Guid.NewGuid():D}}}"}}
+            """);
+        var result = await new DataverseUpdateRecordHandler(_dataverse.Object, queue, CreateLogger<DataverseUpdateRecordHandler>())
+            .ExecuteChatAsync(ctx, BuildUpdateTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        queue.AfterWrites.Should().ContainSingle();
+        queue.AfterWrites[0].Entity.Should().Be("sprk_todo");
+        queue.AfterWrites[0].Id.Should().Be(recordId);
+        queue.AfterWrites[0].Columns.Should().Equal("sprk_regardingrecordid");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_WriteThatCannotMoveACopy_EnqueuesNothing()
+    {
+        var queue = new Sprk.Bff.Api.Tests.TestInfrastructure.RecordingRestampQueue();
+        SetupAccountMetadata();
+        _dataverse
+            .Setup(d => d.PatchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(204, body: null));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: $$$"""
+            {"tablename":"account","recordId":"{{{Guid.NewGuid():D}}}","item":{"name":"x"}}
+            """);
+        var result = await new DataverseUpdateRecordHandler(_dataverse.Object, queue, CreateLogger<DataverseUpdateRecordHandler>())
+            .ExecuteChatAsync(ctx, BuildUpdateTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        queue.AfterWrites.Should().BeEmpty();
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

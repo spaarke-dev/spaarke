@@ -1,12 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
+using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
-using FluentAssertions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
@@ -242,6 +242,10 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
         "sprk_regardingservicerequest",
         "sprk_regardingdocument",
         "sprk_regardingcommunication",
+        // Task 156: an invoice names its root through TYPED sprk_matter / sprk_project (live), and since task 156 the
+        // derivation reads those — so they must be present for the invoice read (and its deliberate failure) to happen.
+        "sprk_matter",
+        "sprk_project",
     };
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

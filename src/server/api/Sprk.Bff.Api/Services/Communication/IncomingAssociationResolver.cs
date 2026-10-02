@@ -4,8 +4,8 @@ using System.Text.Json;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Engine;
-using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Communication;
 
@@ -373,8 +373,10 @@ public sealed class IncomingAssociationResolver
             if (target is not EntityReference reference || reference.Id == Guid.Empty)
                 continue;
 
-            if (!CoreAncestorResolver.IsChildRecordEntity(reference.LogicalName))
-                continue; // core target = its own stamp; unclassified target confers nothing here
+            // Task 156: every type a child's stamp is copied from (the child taxonomy plus agreement, budget and report
+            // card — CoreAncestorResolver.IntermediateRootColumns), not only the child taxonomy.
+            if (!CoreAncestorResolver.IsStampSourceEntity(reference.LogicalName))
+                continue; // core target = its own stamp; a party confers nothing here
 
             var outcome = await _coreAncestors
                 .DeriveForHostAsync("sprk_communication", reference.LogicalName, reference.Id, ct)

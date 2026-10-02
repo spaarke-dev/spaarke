@@ -1,10 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Communication;
@@ -177,6 +177,24 @@ public class ServerWriterAncestorStampingTests
         updates[0]["sprk_regardingmatter"].Should().BeOfType<EntityReference>()
             .Which.Id.Should().Be(MatterId,
                 "an email filed against an invoice must still reach the invoice's matter holders");
+    }
+
+    [Fact]
+    public async Task ApplyDecision_WhenTheCoreWritableSetIsWidenedToBudgets_StampsTheBudgetsMatter()
+    {
+        // Task 156: a budget is not a CHILD (access taxonomy) but a child's copy comes from it, so an email filed against
+        // a budget is stamped with the budget's matter too (CoreAncestorResolver.IsStampSourceEntity). Before task 156 the
+        // engine skipped every non-child target and the email inherited nothing from the budget's matter.
+        var (resolver, updates) = BuildAssociationResolver(
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+            coreWritableEntities: ["sprk_matter", "sprk_project", "sprk_servicerequest", "sprk_budget"]);
+
+        await ResolveWithCallerSuppliedRegardingAsync(resolver, "sprk_budget", InvoiceId);
+
+        updates.Should().ContainSingle();
+        updates[0].Should().ContainKey("sprk_regardingbudget");
+        updates[0]["sprk_regardingmatter"].Should().BeOfType<EntityReference>()
+            .Which.Id.Should().Be(MatterId, "an email filed against a budget must reach the budget's matter holders");
     }
 
     [Fact]
