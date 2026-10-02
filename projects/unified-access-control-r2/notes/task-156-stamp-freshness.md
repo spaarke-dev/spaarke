@@ -254,6 +254,17 @@ unwired BFF path). Its findings, and what this round did with each:
   the server's invariant (WP-1), children the user cannot write would stay stale, and a partial OBO cascade is harder to
   reason about than a complete deferred one.
 - **Owner action:** accept A (AC1 is then met by documented exception) or choose B.
+- **Correction (verifier round 3, item 4).** Path A's premise is weaker than stated above. The handler already holds
+  `CoreAncestorRestampQueue`, and the queue holds the root `IServiceProvider` (it resolves `JobSubmissionService` lazily). An
+  app-only `IGenericEntityService` can be resolved from that provider, so "no app-only client is reachable from this class"
+  is already true only by convention, not by construction. Two consequences for the choice:
+  - **Path B costs less than it looked.** A narrow, write-only facade onto the restamper changes the audit property
+    about as much as the queue already has.
+  - **Path A can be made true again** with a small change, if the owner prefers A: give the queue a
+    `Func<JobSubmissionService>` (or `Lazy<>`) in place of the provider, so nothing in the handler's reach can resolve a
+    Dataverse client. Not done here, because it is only worth doing if the owner chooses A.
+  - Owner round 7 item 3 approved path B for `DataverseCreateRecordHandler` and `EmailDraftToolHandler` only. It does
+    not cover this update handler, so this block stays open.
 
 🔔 **Owner decision — F-051-6 for rows written with no pair** (item 5 residual)
 
@@ -446,6 +457,82 @@ it. The comparison with master is not a clean isolation: master moved on (#1093)
 The whole of task 156 remains +0.04 MB (round 1's base-to-branch measurement). Code only: no package, project reference
 or new assembly, so there is no new CVE surface.
 
+## Verifier round 3 (2026-10-02, branch `task/uac-r2-156-r1-r1`)
+
+This round first merged `work/unified-access-control-r2` (origin/master `93634db58` plus integrated batch 3: tasks 138,
+139, 141, 152, 155 and the Office save fix `0ecbf09fa`). Every `.cs` file auto-merged. The two text conflicts were
+resolved by hand:
+- `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: both sides' registry rows are kept. The core-ancestor row and
+  I-1 keep this task's text; the record-owner row and I-2 keep the integration branch's (task 144).
+- The 156 POML (add/add): this branch's version is kept, because the integration branch held only the pending stub.
+
+Merge commit (`baseSha`): `8a98ddd5a`. It builds, and the affected suites pass.
+
+A third verifier re-ran round 2 at `57e0bfca0` on a fresh worktree. The suites matched the round-2 report exactly. Its
+findings, and what this round did with each:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Suites reproduced (affected 499 / 499; full BFF 13 527 / 0 / 54; NetArchTest 337 / 337); POML well-formed | Confirmed; nothing to change. |
+| 2 | **AC7 overclaimed: seeds K8, K7, K5 survived** the affected suites | **Closed.** Six new tests (below); each seed now turns tests red (seed table below). |
+| 3 | Seeds K1, K2, K4, K6, K11 bit; no misfile path | Confirmed; nothing to change. |
+| 4 | AC1 not met: the user-OBO AI update tool enqueues its cascade. The "no app-only client reachable" argument for path A is weaker than stated | **Not closable here** (the owner's). The 🔔 ADR block in the verifier round 1 section now carries the correction: the queue already holds the root `IServiceProvider`. It also states what each path costs now, and how path A could be made true again. Owner round 7 item 3 approved path B for the two CREATE handlers only, not this one. |
+| 5 | Every inventory path wired and tested through its own entry point | Confirmed; nothing to change. |
+| 6 | AC2-AC6 met (AC3's "failed repair = not ok" was the K8 gap) | Confirmed. The K8 gap is closed under item 2. |
+| 7 | Merge readiness: two text conflicts; after the merge, the Office save marks a `container_ancestor_stale` refusal (409) NOT retryable, although its text says "try again in a minute" | **Closed.** The merge is done; the conflicts are resolved as the verifier advised. `OfficeService.SaveAsync`'s `SdapProblemException` catch now sets `Retryable` for a 5xx **or** `container_ancestor_stale`. The refusal itself enqueued the re-stamp that makes the same save succeed, and the response cache replays only successes (`IdempotencyFilter`), so a retry reaches the resolver again. Every other 4xx refusal stays not retryable. The two stale Office-save route tests now assert `retryable: true`; the ambiguous carrier test asserts `retryable: false`, so "every 409 is retryable" fails too. Seed O1. |
+| 8 | Pre-existing, not task 156: (a) `UpdateEventAsync` writes `sprk_regardingrecordtype` as an integer on a Lookup column; (b) `PUT /api/v1/events/{id}` checks sign-in only and updates app-only | **Carried forward, unchanged** (already recorded under verifier round 2, item 8). Both belong to the event endpoint's owner; (a) is unverified live, because checking it would be a write. Recommended: file both as issues against the events endpoint. |
+| 9 | Hygiene: an abandoned verifier worktree `C:\wtv156` (detached at `57e0bfca0`) holds an uncommitted K8 seed | **For the main session.** Still present at this round (`git worktree list`). Not this run's to remove: `git worktree remove --force C:/wtv156`. |
+| 10 | ADR-038 / ADR-036 / ADR-052 / ADR-002 / §10 checks: no finding | Confirmed; nothing to change. |
+| 11 | AC1 not met | As item 4: the owner's. |
+| 12 | AC7 not met (K8, K7, K5) | **Closed** under item 2. |
+| 13 | AC8: the manual dev live gate is pending | The main session's, after deploy. |
+
+### The three guards, and what now pins each
+
+- **K8 — a failed repair makes the run partial** (`CoreAncestorStampReconciliationJob.RepairAsync`, `counts.RepairFailures++`).
+  The only failing-write job test healed the write before the job ran, so nothing ran the job with a repair that fails.
+  New test `RepairWhosePatchFails_IsAPartialRun_NeverOk`: the PATCH is refused for the whole run. It asserts that the repair
+  was attempted, that the stale copy remains, `Success == false`, `status == partial`, `repairFailures == 1` and
+  `repaired == 0`.
+- **K7 — an untyped pair found in two tables is never guessed** (`CoreAncestorRestamper.FindClearedSourceAsync`, the
+  multi-hit arm). New tests in the restamper (`UntypedPairFoundInTwoIntermediateTables_IsNeverGuessed`) and the job
+  (`UntypedPairFoundInTwoIntermediateTables_IsUnverified_NothingCleared`). The same id is a communication AND an agreement,
+  and both name the copy's matter, so any guess would "match" and clear it. They assert no PATCH, the copy intact, a
+  failure naming "more than one table" (restamper), and `unverified == 1` / `partial` / `Success == false` (job).
+- **K5 — a stamp column the host table lacks is never planned** (`CoreAncestorRestamper.PlanStamp`). `StampWorld` gained
+  `WithoutColumn(entity, column)`: an org whose table lacks a column, so the probe stops reporting it. Three tests:
+  - `PlanStamp_SkipsAStampColumnTheHostLacks` (direct, with a with-the-column control);
+  - the cascade (`StampColumnTheChildTableLacks_IsNeverWrittenByTheCascade`): a communication re-filed to a work
+    assignment in an org whose to-do has no work-assignment column. The PATCH clears the stale matter copy and names
+    nothing else;
+  - the job (`StampColumnTheChildTableLacks_IsNeverPlannedOrWritten`): a row whose ONLY difference is on the missing
+    column is not stale, and the other row's repair writes the matter only.
+
+### Seeds this round (each restored byte-identical from a backup, then touched; SHA-256 re-verified)
+
+The seed runner refuses to report on a failed build. Every seed below compiled. Each ran against the affected-suite filter
+(the round 2 filter).
+
+| Seed | Removed guard | Bit (affected suites, 513 tests) |
+|---|---|---|
+| K8 | `CoreAncestorStampReconciliationJob.RepairAsync`: `counts.RepairFailures++` → `+= 0` | 1 red: `RepairWhosePatchFails_IsAPartialRun_NeverOk` |
+| K7 | `CoreAncestorRestamper.FindClearedSourceAsync`: the multi-hit arm → `ClearedSource.Found(hits[0], pairId)` | 2 red: the restamper and job `UntypedPairFoundInTwoIntermediateTables_…` tests |
+| K5 | `CoreAncestorRestamper.PlanStamp`: `if (!hostColumns.Contains(column))` made runtime-false | 3 red: `PlanStamp_SkipsAStampColumnTheHostLacks`, the cascade test and the job test |
+| O1 | `OfficeService.SaveAsync`: the `container_ancestor_stale` retryable clause removed | 2 red: both stale Office-save route tests |
+
+### Tests this round
+
+Six new test cases: restamper 3 (K7, K5 cascade, K5 PlanStamp), job 3 (K8, K7, K5). Assertions were added to three
+existing Office-save route tests (retryable true on both stale refusals, false on the ambiguous one). The test-only
+`StampWorld.WithoutColumn` was added. No ADR-038 banned pattern.
+
+Results, on the merged tree:
+- Affected suites (the round 2 filter): **513 / 513**. That is 499 + 6 new + 8 brought in by the merge.
+- Office + RecordOwnership suites: **Passed 483 / Failed 0 / Skipped 8 (Total 491)**.
+- Full BFF unit suite, once at the end: **Passed 14388 / Failed 0 / Skipped 54 (Total 14442)**. It grew from 13581
+  because of the merge.
+- NetArchTest: **345 / 345**. It grew from 337, also because of the merge.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
 All four new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
@@ -483,6 +570,9 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
     whose name the truncated console output did not keep. The re-run on its own was clean, and so was the run at the
     commit `aafe12ee7`, after the pre-commit formatter (13527 / 0 / 54 in 11 m 13 s; NetArchTest 337 / 337). Nothing in
     this round's diff is timing-dependent.
+- **Verifier round 3** (on the tree merged with `work/unified-access-control-r2`): 6 new test cases (restamper 3, job 3)
+  plus retryable assertions on 3 Office-save route tests. Affected suites **513 / 513**; full BFF unit **Passed 14388 /
+  Failed 0 / Skipped 54 (Total 14442)**; NetArchTest **345 / 345**; 4 seeds (K8, K7, K5, O1), each red.
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,

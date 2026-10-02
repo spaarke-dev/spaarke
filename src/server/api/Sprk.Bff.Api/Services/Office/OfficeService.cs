@@ -1097,7 +1097,11 @@ public class OfficeService : IOfficeService
                 {
                     Code = refusal.Code,
                     Message = refusal.Detail ?? refusal.Title,
+                    // A 5xx refusal is transient. So is container_ancestor_stale (task 156), although it is a 409: the
+                    // refusal itself enqueued the re-stamp that makes the same save succeed, and its text tells the user
+                    // to try again in a minute. Every other 4xx refusal is permanent until the data changes.
                     Retryable = refusal.StatusCode >= 500
+                        || string.Equals(refusal.Code, RecordContainerResolver.AncestorStaleCode, StringComparison.Ordinal)
                 }
             };
         }

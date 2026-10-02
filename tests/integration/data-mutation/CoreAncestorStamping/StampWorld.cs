@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 /// </remarks>
 internal sealed class StampWorld
 {
-    /// <summary>Columns each table has in this world (the probe answers from here).</summary>
+    /// <summary>Columns each table has in a new world (the probe answers from <see cref="_columns"/>, a copy of these).</summary>
     private static readonly Dictionary<string, string[]> Columns = new(StringComparer.OrdinalIgnoreCase)
     {
         ["sprk_todo"] =
@@ -70,6 +70,10 @@ internal sealed class StampWorld
         ["sprk_reportcard"] = ["sprk_regardingmatter", "sprk_regardingproject"],
         ["sprk_budget"] = ["sprk_matter", "sprk_project"],
     };
+
+    /// <summary>This world's columns per table: <see cref="Columns"/>, less any <see cref="WithoutColumn"/> dropped.</summary>
+    private readonly Dictionary<string, HashSet<string>> _columns = Columns.ToDictionary(
+        c => c.Key, c => new HashSet<string>(c.Value, StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
 
     private readonly Dictionary<(string Entity, Guid Id), Entity> _rows = new();
     private readonly Dictionary<(string Entity, Guid Id), Exception> _readFaults = new();
@@ -152,7 +156,8 @@ internal sealed class StampWorld
         Resolver = new CoreAncestorResolver(
             Service,
             (entity, _) => Task.FromResult<IReadOnlySet<string>>(
-                new HashSet<string>(Columns.TryGetValue(entity, out var c) ? c : [], StringComparer.OrdinalIgnoreCase)),
+                new HashSet<string>(
+                    _columns.TryGetValue(entity, out var c) ? c : Enumerable.Empty<string>(), StringComparer.OrdinalIgnoreCase)),
             NullLogger<CoreAncestorResolver>.Instance);
 
         Restamper = new CoreAncestorRestamper(Service, Resolver, NullLogger<CoreAncestorRestamper>.Instance);
@@ -212,6 +217,16 @@ internal sealed class StampWorld
         _scanFaults.Clear();
         Patches.Clear();
         FetchXml.Clear();
+    }
+
+    /// <summary>
+    /// An org whose <paramref name="entity"/> table lacks <paramref name="column"/>: the column probe stops reporting it, so
+    /// the restamper and the job must neither select nor write it (verifier round 3, seed K5).
+    /// </summary>
+    public StampWorld WithoutColumn(string entity, string column)
+    {
+        _columns[entity].Remove(column);
+        return this;
     }
 
     public StampWorld FailWrite(string entity, Guid id, Exception? fault = null)

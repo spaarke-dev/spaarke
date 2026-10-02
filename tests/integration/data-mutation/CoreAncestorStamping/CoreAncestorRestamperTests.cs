@@ -438,6 +438,73 @@ public class CoreAncestorRestamperTests
         world.Patches.Should().BeEmpty();
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Verifier round 3 (AC7): the two restamper guards seeds K7 and K5 removed with the suite still green
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact(DisplayName = "Task 156 (verifier round 3, K7): an untyped pair whose id is found in TWO intermediate tables is never guessed — nothing is cleared, and the row is reported as a failure")]
+    public async Task UntypedPairFoundInTwoIntermediateTables_IsNeverGuessed()
+    {
+        // The same id in a communication AND an agreement (both have no sprk_recordtype_ref row live, so the pair carries no
+        // type). Both name matter A, so whichever one a guess picked, the copy would "match" and be cleared.
+        var shared = Guid.Parse("15600000-0000-0000-0000-00000000aa03");
+        var world = new StampWorld()
+            .Row("sprk_communication", shared, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_agreement", shared, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_todo", TodoUnderComm, [("sprk_regardingmatter", "sprk_matter", MatterA)], pairId: shared.ToString());
+
+        var report = await world.Restamper.RestampChildAsync("sprk_todo", TodoUnderComm);
+
+        world.Patches.Should().BeEmpty("which record was cleared is not known, so the copy is not shown to be its copy");
+        world.Lookup("sprk_todo", TodoUnderComm, "sprk_regardingmatter").Should().Be(MatterA);
+        report.Complete.Should().BeFalse("an undecidable row is reported, never passed as repaired");
+        report.Failures.Should().ContainSingle().Which.Should().Match<RestampFailure>(f =>
+            f.Entity == "sprk_todo" && f.Id == TodoUnderComm && f.Reason.Contains("more than one table"));
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 3, K5): a stamp column the org's child table LACKS is never written by the cascade — the other copies are still refreshed")]
+    public async Task StampColumnTheChildTableLacks_IsNeverWrittenByTheCascade()
+    {
+        // The communication was re-filed from matter A to a work assignment, in an org whose to-do has no
+        // sprk_regardingworkassignment column. The to-do's stale matter copy is cleared; the work assignment cannot be
+        // copied onto a column that does not exist (Dataverse would refuse the whole PATCH).
+        var world = new StampWorld()
+            .WithoutColumn("sprk_todo", "sprk_regardingworkassignment")
+            .Row("sprk_communication", Communication, [("sprk_regardingworkassignment", "sprk_workassignment", WorkAssignment)])
+            .Row("sprk_todo", TodoUnderComm,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+
+        var report = await world.Restamper.AfterWriteAsync(
+            "sprk_communication", Communication, ["sprk_regardingworkassignment", "sprk_regardingmatter"]);
+
+        report.Complete.Should().BeTrue();
+        var patch = world.PatchesTo("sprk_todo", TodoUnderComm).Should().ContainSingle().Subject;
+        patch.Fields.Keys.Should().BeEquivalentTo(["sprk_regardingmatter"],
+            "only a column the table HAS may be planned — the work assignment column does not exist on this org's to-do");
+        patch.Fields["sprk_regardingmatter"].Should().Be(DBNull.Value);
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 3, K5): PlanStamp skips a root type whose stamp column the host table lacks")]
+    public void PlanStamp_SkipsAStampColumnTheHostLacks()
+    {
+        var row = new Entity("sprk_todo", TodoUnderComm);
+        IReadOnlyList<CoreAncestorStamp> root =
+        [
+            new("sprk_workassignment", "sprk_regardingworkassignment", WorkAssignment),
+        ];
+        var carriable = CoreAncestorResolver.CarriableRootTypes("sprk_communication");
+        var withoutTheColumn = new HashSet<string>(
+            ["sprk_regardingproject", "sprk_regardingmatter", "sprk_regardingservicerequest"], StringComparer.OrdinalIgnoreCase);
+
+        CoreAncestorRestamper.PlanStamp(row, carriable, root, withoutTheColumn).Should().BeNull(
+            "the only difference is on a column this table does not have");
+
+        var withTheColumn = new HashSet<string>(withoutTheColumn, StringComparer.OrdinalIgnoreCase) { "sprk_regardingworkassignment" };
+        CoreAncestorRestamper.PlanStamp(row, carriable, root, withTheColumn).Should().ContainKey("sprk_regardingworkassignment",
+            "control: with the column present the same difference IS planned");
+    }
+
     /// <summary>
     /// A communication filed under <paramref name="communicationMatter"/> (or nothing), with a to-do, an event and an
     /// analysis filed under it whose copies say <paramref name="childCopy"/> — the pair names the communication, as the

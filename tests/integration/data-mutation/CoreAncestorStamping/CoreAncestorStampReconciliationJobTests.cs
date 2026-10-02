@@ -423,6 +423,79 @@ public class CoreAncestorStampReconciliationJobTests
         Counts(run).GetProperty("orphanSourceGone").GetInt32().Should().Be(0);
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Verifier round 3 (AC7): the job's guards that seeds K8, K7 and K5 removed with the suite still green
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact(DisplayName = "Task 156 (verifier round 3, K8): a repair whose PATCH FAILS is a PARTIAL run (Success false) — the stale copy left behind is never reported as a clean run")]
+    public async Task RepairWhosePatchFails_IsAPartialRun_NeverOk()
+    {
+        // The write never heals: the job's own repair fails, so the stale copy is still there when the run ends.
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_todo", Todo,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString())
+            .FailWrite("sprk_todo", Todo);
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        world.PatchesTo("sprk_todo", Todo).Should().ContainSingle("the repair was attempted");
+        world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterA, "the PATCH was refused");
+        run.Success.Should().BeFalse("a stale copy the run could not repair is not a reconciled table");
+        Counts(run).GetProperty("status").GetString().Should().Be(CoreAncestorStampReconciliationJob.StatusPartial);
+        Counts(run).GetProperty("repairFailures").GetInt32().Should().Be(1);
+        Counts(run).GetProperty("repaired").GetInt32().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 3, K7): an untyped pair whose id is found in TWO intermediate tables is UNVERIFIED — never guessed, nothing cleared, a PARTIAL run")]
+    public async Task UntypedPairFoundInTwoIntermediateTables_IsUnverified_NothingCleared()
+    {
+        // Both candidates name matter A, so a guess at either one would "match" the copy and clear it.
+        var shared = Guid.Parse("15600000-0000-0000-0000-00000000aa03");
+        var world = new StampWorld()
+            .Row("sprk_communication", shared, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_agreement", shared, [("sprk_regardingmatter", "sprk_matter", MatterA)])
+            .Row("sprk_todo", Todo, [("sprk_regardingmatter", "sprk_matter", MatterA)], pairId: shared.ToString());
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        world.Patches.Should().BeEmpty("which record's regarding was cleared is not known — never a guess");
+        world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterA);
+        run.Success.Should().BeFalse("a row the job could not decide is not a verified row");
+        Counts(run).GetProperty("status").GetString().Should().Be(CoreAncestorStampReconciliationJob.StatusPartial);
+        Counts(run).GetProperty("unverified").GetInt32().Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 3, K5): in an org whose child table LACKS a stamp column, the job never plans or writes that column — and a row whose only difference is there is not stale")]
+    public async Task StampColumnTheChildTableLacks_IsNeverPlannedOrWritten()
+    {
+        // Todo: its copy of the communication's matter is stale (A, the communication is now under B) — repaired, matter
+        // only. OnlyDifferenceTodo: its matter copy is fresh; the communication's work assignment has no column to land on.
+        var onlyDifferenceTodo = Guid.Parse("15600000-0000-0000-0000-000000000106");
+        var otherCommunication = Guid.Parse("15600000-0000-0000-0000-000000000c02");
+        var world = new StampWorld()
+            .WithoutColumn("sprk_todo", "sprk_regardingworkassignment")
+            .Row("sprk_communication", Communication,
+                [("sprk_regardingmatter", "sprk_matter", MatterB), ("sprk_regardingworkassignment", "sprk_workassignment", Guid.Parse("d0000000-0000-0000-0000-00000000000d"))])
+            .Row("sprk_communication", otherCommunication,
+                [("sprk_regardingmatter", "sprk_matter", MatterA), ("sprk_regardingworkassignment", "sprk_workassignment", Guid.Parse("d0000000-0000-0000-0000-00000000000e"))])
+            .Row("sprk_todo", Todo,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString())
+            .Row("sprk_todo", onlyDifferenceTodo,
+                [("sprk_regardingcommunication", "sprk_communication", otherCommunication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: otherCommunication.ToString());
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        Counts(run).GetProperty("stale").GetInt32().Should().Be(1, "only the matter copy differs on a column the table has");
+        world.PatchesTo("sprk_todo", onlyDifferenceTodo).Should().BeEmpty();
+        world.PatchesTo("sprk_todo", Todo).Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo(["sprk_regardingmatter"]);
+        world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterB);
+    }
+
     private static CoreAncestorStampReconciliationJob Job(
         StampWorld world,
         string? writesEnabled = null,

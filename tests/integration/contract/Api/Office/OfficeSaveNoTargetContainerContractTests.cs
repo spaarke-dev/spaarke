@@ -384,6 +384,9 @@ public class OfficeSaveNoTargetContainerContractTests
         // (OfficeService.SaveAsync's catch); the CODE is what identifies the refusal.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_stale");
+        (await RetryableAsync(response)).Should().BeTrue(
+            "verifier round 3 item 7: the refusal enqueued the re-stamp that makes this save succeed, and its text says "
+            + "'try again in a minute' — the pane must be allowed to offer the retry");
         factory.UploadedToContainers.Should().BeEmpty(
             "the report card's matter is SECURE; neither the to-do's business unit nor the tenant default may stand in "
             + "for it");
@@ -465,6 +468,7 @@ public class OfficeSaveNoTargetContainerContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_stale");
+        (await RetryableAsync(response)).Should().BeTrue("a stale copy is transient: the re-stamp it enqueued lands in seconds");
         factory.UploadedToContainers.Should().BeEmpty();
         factory.RestampQueue.Children.Should().ContainSingle().Which.Should().Be(("sprk_todo", TodoId));
     }
@@ -493,8 +497,17 @@ public class OfficeSaveNoTargetContainerContractTests
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_ambiguous");
+        (await RetryableAsync(response)).Should().BeFalse(
+            "an ambiguous filing is permanent until a person re-files it — only the STALE 409 is retryable");
         factory.UploadedToContainers.Should().BeEmpty();
         factory.RestampQueue.Children.Should().BeEmpty("the user chose the matter — nothing is a stale copy");
+    }
+
+    /// <summary>The refusal body's <c>retryable</c> extension (the save's ProblemDetails shape).</summary>
+    private static async Task<bool> RetryableAsync(HttpResponseMessage response)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("retryable").GetBoolean();
     }
 
     [Fact]
