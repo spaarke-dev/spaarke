@@ -172,7 +172,9 @@
       Runtime guard: the new src/client/external-spa/src/widgets/ExternalDataGrid.tsx renders the shared grid as
       DataGrid {...props} showViewSelector={false}, with the forced false AFTER the caller's props. Its props type
       omits showViewSelector. A clone or createElement of ExternalDataGrid sets the wrapper's props, and the forced
-      false still wins. GridWidgetBody.tsx now mounts ExternalDataGrid; its header comment was updated. The bundle
+      false still wins. [Corrected in fix round b2-r1: that holds for an ExternalDataGrid ELEMENT only. Called as a
+      plain function, the wrapper returns the inner grid element, which can be cloned or whose .type can be mounted
+      with the picker on (Q1/Q2); see the b2-r1 outcome.] GridWidgetBody.tsx now mounts ExternalDataGrid; its header comment was updated. The bundle
       (dist/assets/app.js) shows e=&gt;u.jsx(ole,{...e,showViewSelector:!1}), and showViewSelector:!0 occurs
       nowhere in it.
       Scan: ExternalSpaGridViewSelectorGuardTests now enforces six rules.
@@ -248,6 +250,8 @@
       - V1: import.meta.glob is refused.
       - V2: a grid import outside the wrapper is refused, and so is a \u escape.
       - V3: neutralised at runtime by ExternalDataGrid, and cloneElement is refused in a grid-binding file.
+        [Corrected in fix round b2-r1: neutralised only for a clone of an ExternalDataGrid ELEMENT. A clone of the
+        element the wrapper RETURNS when called as a function (Q1) was neither caught nor documented.]
       - The production fact is red on all three seeds.
       NEW in b2, a fourth compiled bypass (V4). A side-effect import '../../zzoutside/gridGlobal' of a module
       outside src/ imported the grid and set window.SprkGrid, and a src file then mounted window.SprkGrid. vite
@@ -282,6 +286,74 @@
       test file plus documentation. ExternalDataGrid.tsx (b1) keeps the round-3 justification above.
       Runs: guard class 81/81; NetArchTest Passed 426, Failed 0, Total 426; BFF unit Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 18m54s); SPA npm run
       build exit 0; npx tsc --noEmit 6 errors, all pre-existing, none in a changed file.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b2-r1" round="review-4-fix-b2-r1" base="a2d6ffd48">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, note section 5) and the owner decision on F1 (note section 8).
+      BLOCKING item 1 (criterion 1; Q1-Q5 compiled into live picker-on mounts and the guard passed them): CLOSED,
+      with one documented residual. Before any change, the 5 verifier shapes plus 3 of mine were re-seeded and wired
+      into main.tsx. vite build compiled all 8 into a live mount (Q1-Q5 and Q7 onto the shared grid; Q6 onto a SECOND
+      instance of the grid module; Q8 onto the shared grid). The guard stayed 81/81 green.
+      - Q1/Q2 (the wrapper called as a plain function): outside the wrapper, every import of the wrapper module, by any
+        path-like spelling (./, ../, @/, /src/, with or without a script extension, any letter case), binds names that
+        may appear only as a JSX tag, after typeof, or as a member name. This is the verifier's fix (a). In such a
+        file, cloneElement, createElement and \u are refused. A namespace import, a re-export, an unattributed import
+        (string-named or side-effect) and a dynamic import()/require() of the wrapper module are refused too.
+        GridWidgetBody.tsx needed comment-only rewording: its JSDoc named the wrapper three times outside a tag, and
+        comments are scanned as code.
+      - Q3/Q4 (a carrier beside src/, or in a __* / test path): this is the verifier's fix (b). A specifier that names
+        the shared library must resolve into the library's src, directly or through the npm link. It may not resolve
+        into a __* segment or a .test/.spec/.stories file, with or without the extension. The fan-in fact also gained
+        a rule (SharedEscapes): every shipped library file, the allowed carriers included, is refused if it loads a
+        module outside src/ or from a test / __* path. Without it, a shipped file could re-export a __* carrier past
+        both checks. Q4 class: the fan-in's test exclusion is now sound, because nothing shipped can reach a test path.
+      - Q5 (@spaarke/ui-components/../...): this is the verifier's fix (c). The alias is now resolved to the
+        library's src, then checked by the same rule. It is no longer trusted by prefix.
+      - Q6 (found here): import Table from '@spaarke/ui-components/components/DataGrid/DataGrid?v=1'. Vite loads a
+        second module instance, and the default-export rule read the last segment 'DataGrid?v=1' as a non-grid name.
+        A ?query or #fragment in any specifier is now refused (static, side-effect and dynamic).
+      - Q7 (found here): import { Grid } from 'react-window/../../zzoutside/gridAlias2'. react-window is a declared
+        package with no exports map, so the subpath stepped out to any file. A bare specifier with a '.' or '..'
+        segment is now refused.
+      - Q8 (found here, NOT closed, documented residual 5): element-tree peeling with no wrapper reference. In a file
+        that never names the wrapper: const outer = (createGridWidgetBody('x') as any)({}).props.children; then
+        outer.type(outer.props).type is the shared grid, mounted with the picker on. It compiled. No fixed spelling
+        identifies it (computed keys, Object.values, a helper in another file). Refusing every .type read would refuse
+        ordinary code (event.type, file.type). No wrapper in the same JavaScript realm can hide the element it must
+        hand to React; every layer peels the same way. Residual 5, previously "React-internals fiber walk", is widened
+        to this class, with the compiled example. The BFF allow-list still returns 400 for every internal-view column.
+      Proof the guard bites, all re-seeded in this worktree and wired into main.tsx for the build:
+      - With the fix, the production fact went red on exactly Q1-Q7: Q1 (cloneElement + non-JSX reference), Q2, Q3,
+        Q4, Q5, Q6 and Q7. Q8 was not flagged; it is the residual.
+      - SharedEscapes seeds: a new shipped file components/ZzSeed/ZzSeed.ts re-exporting from ../../../zzoutside and
+        ../DataGrid/__zz__ made the fan-in fact red with 2 entries. A line appended to the allowed carrier src/index.ts
+        (export from ../zzoutside) made it red with 1 entry, which shows the allowed carriers are not exempt.
+      - Every seed was deleted. main.tsx and src/index.ts were restored with git checkout and touched. The npm-touched
+        package-lock.json was reverted.
+      MINOR item 2 (overclaims): CLOSED.
+      - ExternalDataGrid.tsx JSDoc, which is pinned: it now says the runtime guard covers every JSX mount (caller prop,
+        spread, clone or re-creation of an ExternalDataGrid ELEMENT) and does NOT protect the element it returns when
+        called as a function. That is why the guard refuses any non-JSX use, and peeling is a residual.
+        PinnedWrapperSource was updated in the same change. The code tokens are unchanged.
+      - Guard remarks: the runtime item says the same. Two scan items were added (the wrapper's binding; shipped
+        library source only). The fan-in paragraph gained the escape rule, and residual 5 is widened.
+      - POML: b1 and b2 overclaims are annotated in place ("[Corrected in fix round b2-r1 ...]").
+      - Note: section 1 row, G5 and section 7 were corrected.
+      CONFIRMED / CLEAN / INFO items 3-7: no change needed. F1 stays OPEN for the owner. Items 8/9 are re-stated
+      above.
+      Live: none performed (no deploy, no Dataverse access). Deploy order is unchanged:
+      1. SPA first: gh workflow run deploy-external-spa.yml --ref &lt;branch-or-master-containing-157&gt;. The
+         workflow runs npm install --legacy-peer-deps --no-audit --no-fund and then npm run build.
+      2. Then the BFF: pwsh scripts/Deploy-BffApi.ps1.
+      3. Then the note section 6 gate.
+      b2-r1 changes no BFF file. Publish size was not measured; the main session measures.
+      Section 10/11: no new service, DI registration, endpoint, option, job, column or package. Changes: one test
+      file, comment-only edits to two client files (ExternalDataGrid.tsx JSDoc, GridWidgetBody.tsx JSDoc), and
+      documentation.
+      Runs: guard class 109/109 (81 + 26 round-5 Theory rows + 2 controls); NetArchTest Passed 454, Failed 0, Total
+      454; BFF unit Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 19m56s); SPA npm install
+      --legacy-peer-deps --no-audit --no-fund + npx vite build exit 0 (bundle: nle=e=&gt;u.jsx(ole,{...e,showViewSelector:!1}),
+      showViewSelector:!0 occurs 0 times); npx tsc --noEmit 6 errors, all pre-existing, none in a changed file.
     </outcome>
   </execution>
 </task>

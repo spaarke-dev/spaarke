@@ -34,13 +34,17 @@ namespace Spaarke.ArchTests;
 /// </para>
 /// <list type="number">
 /// <item><b>Runtime:</b> <c>src/client/external-spa/src/widgets/ExternalDataGrid.tsx</c> mounts the shared grid
-/// with <c>showViewSelector={false}</c> AFTER the caller's props, so no caller prop, spread,
-/// <c>cloneElement</c> or <c>createElement</c> of <c>ExternalDataGrid</c> can turn the picker on. Its text is
-/// PINNED (whitespace-insensitive) by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>.</item>
-/// <item><b>Scan:</b> no OTHER file under <c>src/client/external-spa/src</c> may reach the shared grid. The rules
-/// are written to refuse what they cannot attribute, but a regex scan is not a proof — each review round
-/// so far has found a compiled bypass of the previous version. So the scan's job is narrow (keep every path to the
-/// grid going through the pinned wrapper), and the known residuals are listed below.</item>
+/// with <c>showViewSelector={false}</c> AFTER the caller's props, so for every JSX mount of the wrapper no caller
+/// prop or spread, and no <c>cloneElement</c> / <c>createElement</c> of an <c>&lt;ExternalDataGrid&gt;</c> ELEMENT,
+/// can turn the picker on. It does NOT protect the element it RETURNS (review round 5, Q1/Q2): the wrapper has no
+/// hooks, so <c>ExternalDataGrid(props)</c> called as a plain function returns the inner grid element, which can
+/// be cloned with the picker on or whose <c>.type</c> (the shared grid) can be mounted. Its text is PINNED
+/// (whitespace-insensitive) by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>.</item>
+/// <item><b>Scan:</b> no OTHER file under <c>src/client/external-spa/src</c> may reach the shared grid, and
+/// (round 5) no other file may use the wrapper except as a JSX tag. The rules are written to refuse what they
+/// cannot attribute, but a regex scan is not a proof — each review round so far has found a compiled bypass of the
+/// previous version. So the scan's job is narrow (keep every path to the grid going through a JSX mount of the
+/// pinned wrapper), and the known residuals are listed below.</item>
 /// </list>
 /// <para><b>Scan rules</b> (every script file under <c>src/client/external-spa/src</c>):</para>
 /// <list type="number">
@@ -72,13 +76,29 @@ namespace Spaarke.ArchTests;
 /// anything.</item>
 /// <item><b>Build entry (round 4).</b> Every <c>&lt;script&gt;</c> in <c>external-spa/index.html</c> must load a file
 /// under <c>src/</c> and hold no inline code. Vite bundles each entry, and the scan reads only <c>src/</c>.</item>
+/// <item><b>The wrapper's binding (round 5, Q1/Q2).</b> Outside the wrapper, any import of the wrapper module (by
+/// any path-like spelling, extension and case ignored) binds names that may appear only as a JSX tag, after
+/// <c>typeof</c>, or as a member name; in such a file <c>cloneElement</c>, <c>createElement</c> and <c>\u</c> are
+/// refused. A namespace import, a re-export, an unattributed (string-named or side-effect) import and a dynamic
+/// <c>import()</c> / <c>require()</c> of the wrapper module are refused.</item>
+/// <item><b>Shipped library source only (round 5, Q3–Q5).</b> A specifier that names the shared library must
+/// resolve into its <c>src</c> (directly or through the npm link) and not into a <c>__*</c> segment or a
+/// <c>.test</c> / <c>.spec</c> / <c>.stories</c> file: a carrier beside <c>src/</c> or in a test path is not read
+/// by the fan-in fact. <c>@spaarke/ui-components/…</c> is resolved through the Vite alias, not trusted, so
+/// <c>@spaarke/ui-components/../…</c> cannot step out. A bare package specifier may not hold a <c>.</c> /
+/// <c>..</c> segment (<c>react-window/../../x</c> compiled into a live mount: the package has no
+/// <c>exports</c> map). A <c>?query</c> or <c>#fragment</c> in a specifier is refused (<c>…/DataGrid?v=1</c>
+/// compiled into a second instance of the grid module, whose default import no name rule could attribute).</item>
 /// </list>
 /// <para><b>Shared-library fan-in (round 3).</b> The scan refuses <c>DataGridPageShell</c> by name, which is
 /// only enough while it is the one shared component that mounts the grid.
 /// <see cref="SharedLibrary_OnlyKnownModulesCarryTheGrid"/> pins that: inside the shared library (tests
 /// excluded) only <c>DataGrid/index.ts</c>, <c>DataGrid/DataGridPageShell.tsx</c>, <c>components/index.ts</c>
 /// and <c>src/index.ts</c> may import or re-export the grid. A new shared component that embeds it fails that
-/// fact until it is reviewed (refuse it here by name, like the shell, or prove it switches the picker off).</para>
+/// fact until it is reviewed (refuse it here by name, like the shell, or prove it switches the picker off).
+/// <b>Round 5:</b> the test exclusion is sound only while nothing ships a test path, so every shipped library file
+/// (the allowed carriers included) is refused if it loads a module outside <c>src/</c> or from a test /
+/// <c>__*</c> path, and the external SPA may not import one either (rule above).</para>
 /// <para><b>Comments are NOT stripped.</b> Inside JSX children a line reading <c>// &lt;X /&gt;</c> is TEXT
 /// followed by a live element (round 2, S2/S3), so every comment is scanned as code. In a file that holds a
 /// grid binding, a comment must not quote a mount, name the binding, or spell an element-cloning API.</para>
@@ -93,9 +113,16 @@ namespace Spaarke.ArchTests;
 /// fan-in fact reads the call's own argument text only, because the library's prose says "import (" in many
 /// comments).</item>
 /// <item>Edits to the shared library's own <c>DataGrid.tsx</c> (e.g. ignoring the prop).</item>
-/// <item>Reflection over React internals at runtime (a fiber walk from a rendered <c>ExternalDataGrid</c> to the
-/// inner component type, then <c>createElement</c> of it). That is deliberate obfuscation, not a regression a
-/// developer makes while fixing a column error, and no fixed spelling identifies it.</item>
+/// <item>Peeling an element tree by hand (round 5, widened from "React internals"): starting from ANY element that
+/// holds an <c>&lt;ExternalDataGrid&gt;</c>, reading <c>.props.children</c> / <c>.type</c> and calling the component
+/// functions it finds returns the inner grid element, whose <c>.type</c> is the shared grid. Example (compiled with
+/// <c>vite build</c> in fix round b2-r1 and NOT caught): in a file that never names the wrapper,
+/// <c>const outer = createGridWidgetBody('x')({}).props.children; const T = outer.type(outer.props).type;</c> then
+/// <c>&lt;T configId="x" /&gt;</c>. A fiber walk over React internals is the same class. No fixed spelling identifies
+/// it (computed keys, <c>Object.values</c>, a helper in another file), a scan that refused every <c>.type</c> read
+/// would refuse ordinary code (<c>event.type</c>, <c>file.type</c>), and no wrapper written in the same JavaScript
+/// realm can hide the element it must hand to React. It is deliberate obfuscation, not a regression a developer
+/// makes while fixing a column error.</item>
 /// </list>
 /// <para>Items 1–4 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still
 /// refuses every column the picker's views would need, with a 400: this guard removes the pressure to widen that
@@ -131,13 +158,17 @@ public class ExternalSpaGridViewSelectorGuardTests
          * ExternalDataGrid — the ONLY way the external SPA mounts the shared Spaarke grid
          * (unified-access-control-r2 task 157, owner round 4 item 7).
          *
-         * It switches the view picker off at RUNTIME: `showViewSelector={false}` comes AFTER the caller's props,
-         * so no caller prop, spread or cloned element can turn the picker back on. With the picker on, the grid
-         * would offer the entity's internal MDA views, whose columns the BFF's external allow-lists
-         * (ExternalAccessModule.cs) do not admit.
+         * It switches the view picker off at RUNTIME for every JSX mount: `showViewSelector={false}` comes AFTER
+         * the caller's props, so no caller prop or spread, and no clone or re-creation of an <ExternalDataGrid>
+         * element, can turn the picker back on. With the picker on, the grid would offer the entity's internal MDA
+         * views, whose columns the BFF's external allow-lists (ExternalAccessModule.cs) do not admit.
          *
+         * It does NOT protect the element it RETURNS. Called as a plain function, it hands back the inner grid
+         * element, which can be cloned, or whose `.type` can be mounted, with the picker on. So
          * ExternalSpaGridViewSelectorGuardTests refuses every other import of the shared grid under
-         * src/client/external-spa/src and pins this file's text, so a change here is a change to that guard.
+         * src/client/external-spa/src, refuses any use of ExternalDataGrid there except as a JSX tag, and pins this
+         * file's text, so a change here is a change to that guard. Walking an element tree by hand to reach the
+         * inner element is a documented residual of that guard.
          */
         import * as React from 'react';
         import { DataGrid, type DataGridProps } from '@spaarke/ui-components/components/DataGrid/DataGrid';
@@ -175,6 +206,14 @@ public class ExternalSpaGridViewSelectorGuardTests
     private static readonly Regex ReExport = new(
         @"\bexport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""]" + SharedModule + @"['""]",
         RegexOptions.Compiled);
+
+    // Round 5: `import <clause> from '<any module>'` / `export <clause> from '<any module>'`, used to find the
+    // bindings and re-exports of the WRAPPER (whose specifier does not name the shared library).
+    private static readonly Regex AnyStaticImport = new(
+        @"\bimport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""](?<module>[^'""\n]*)['""]", RegexOptions.Compiled);
+
+    private static readonly Regex AnyReExport = new(
+        @"\bexport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""](?<module>[^'""\n]*)['""]", RegexOptions.Compiled);
 
     // Every `from '<specifier>'` in the file, whatever precedes it (round 3: the specifier rules), and every
     // side-effect `import '<specifier>'` (round 4: such a module can hand the grid over through a global).
@@ -311,6 +350,84 @@ public class ExternalSpaGridViewSelectorGuardTests
             }
         }
 
+        // ── Round 5 (fix round b2-r1): bindings of the WRAPPER. ExternalDataGrid has no hooks, so calling it as a
+        // plain function returns the INNER `<DataGrid … showViewSelector={false} />` element; cloning that element
+        // (Q1) or mounting its `.type` (Q2) turns the picker on. So outside the wrapper, its binding may appear only
+        // as a JSX tag (or after `typeof`), exactly like a grid binding inside the wrapper; and the wrapper module
+        // may not be namespace-imported, re-exported or loaded dynamically. ──
+        var wrapperLocals = new List<string>();
+        var parsedWrapperSpans = new List<(int Start, int End)>();
+        if (!isWrapper)
+        {
+            foreach (Match import in AnyStaticImport.Matches(text))
+            {
+                var module = import.Groups["module"].Value;
+                if (!IsWrapperModule(module, fileName))
+                {
+                    continue;
+                }
+                importSpans.Add((import.Index, import.Index + import.Length));
+                parsedWrapperSpans.Add((import.Index, import.Index + import.Length));
+                var clauseText = import.Groups["clause"].Value.Trim();
+                if (IsTypeOnlyClause(clauseText))
+                {
+                    continue; // `import type { … }` binds no runtime value
+                }
+                var clause = ImportClause.Match(clauseText);
+                if (!clause.Success)
+                {
+                    violations.Add($"{Where(import.Index)}: import clause from '{module}' (the ExternalDataGrid wrapper) could "
+                                   + "not be parsed. Import it with a plain named import.");
+                    continue;
+                }
+                if (clause.Groups["ns"].Success)
+                {
+                    violations.Add($"{Where(import.Index)}: namespace import of '{module}' (the ExternalDataGrid wrapper). "
+                                   + "Import ExternalDataGrid by name so every reference to it can be checked.");
+                }
+                if (clause.Groups["default"].Success)
+                {
+                    wrapperLocals.Add(clause.Groups["default"].Value);
+                }
+                if (clause.Groups["names"].Success)
+                {
+                    foreach (var raw in clause.Groups["names"].Value.Split(','))
+                    {
+                        if (string.IsNullOrWhiteSpace(raw) || IsTypeOnlyClause(raw.Trim()))
+                        {
+                            continue; // trailing comma, or `type ExternalDataGridProps`
+                        }
+                        var specifier = ImportSpecifier.Match(raw);
+                        if (!specifier.Success)
+                        {
+                            violations.Add($"{Where(import.Index)}: import specifier '{raw.Trim()}' from '{module}' (the "
+                                           + "ExternalDataGrid wrapper) could not be parsed.");
+                            continue;
+                        }
+                        wrapperLocals.Add(specifier.Groups["local"].Success
+                            ? specifier.Groups["local"].Value
+                            : specifier.Groups["imported"].Value);
+                    }
+                }
+            }
+
+            foreach (Match reExport in AnyReExport.Matches(text))
+            {
+                var module = reExport.Groups["module"].Value;
+                if (!IsWrapperModule(module, fileName))
+                {
+                    continue;
+                }
+                importSpans.Add((reExport.Index, reExport.Index + reExport.Length));
+                parsedWrapperSpans.Add((reExport.Index, reExport.Index + reExport.Length));
+                if (!IsTypeOnlyClause(reExport.Groups["clause"].Value.Trim()))
+                {
+                    violations.Add($"{Where(reExport.Index)}: re-exports from '{module}' (the ExternalDataGrid wrapper). Another "
+                                   + "file could then reference ExternalDataGrid under a name this scan cannot attribute.");
+                }
+            }
+        }
+
         // ── Round 3: module specifiers. A module the scan does not see could re-export the grid under any name. ──
         // Round 4: side-effect imports get the same rules (a module outside the SPA source can import the grid
         // and park it on `window`, with no binding name for this scan to see).
@@ -323,6 +440,21 @@ public class ExternalSpaGridViewSelectorGuardTests
                                + "shared library without naming it; write the specifier plainly.");
                 continue;
             }
+            if (HasQueryOrFragment(spec))
+            {
+                // Round 5: `…/DataGrid?v=1` is a SECOND instance of the grid module whose default import the
+                // default-export rule could not name (it compiled into a live picker-on mount).
+                violations.Add($"{Where(fromClause.Index)}: a query or fragment in a module specifier ('{spec}'). Vite loads "
+                               + "it as another instance of the module, under a name this scan cannot attribute.");
+                continue;
+            }
+            if (!isWrapper && IsWrapperModule(spec, fileName)
+                && !parsedWrapperSpans.Any(span => fromClause.Index >= span.Start && fromClause.Index < span.End))
+            {
+                violations.Add($"{Where(fromClause.Index)}: import of '{spec}' (the ExternalDataGrid wrapper) is not attributed "
+                               + "to a parsed import (e.g. a string-named specifier, or a side-effect import). Import "
+                               + "ExternalDataGrid with a plain named import.");
+            }
             if (NamesSharedLibrary.IsMatch(spec))
             {
                 if (!parsedSharedSpans.Any(span => fromClause.Index >= span.Start && fromClause.Index < span.End))
@@ -333,8 +465,9 @@ public class ExternalSpaGridViewSelectorGuardTests
                 }
                 if (ResolvesOutsideSanctionedRoots(spec, fileName, allowSharedLibrary: true) is { } where)
                 {
-                    violations.Add($"{Where(fromClause.Index)}: '{spec}' names the shared library but resolves to {where}, "
-                                   + "outside the external SPA source and the shared library.");
+                    violations.Add($"{Where(fromClause.Index)}: '{spec}' names the shared library but resolves to {where}. A "
+                                   + "shared-library specifier must resolve into the library's shipped src (not beside "
+                                   + "it, not a test or __* path).");
                 }
                 continue;
             }
@@ -358,7 +491,14 @@ public class ExternalSpaGridViewSelectorGuardTests
                 continue;
             }
             var spec = arg.Groups["spec"].Value;
-            if (NamesSharedLibrary.IsMatch(spec)
+            if (!isWrapper && IsWrapperModule(spec, fileName))
+            {
+                violations.Add($"{Where(call.Index)}: dynamic import/require of '{spec}' (the ExternalDataGrid wrapper). The "
+                               + "loaded module's ExternalDataGrid could be called as a plain function; import it statically "
+                               + "by name and mount it only as JSX.");
+                continue;
+            }
+            if (NamesSharedLibrary.IsMatch(spec) || HasQueryOrFragment(spec)
                 || ResolvesOutsideSanctionedRoots(spec, fileName, allowSharedLibrary: false) is not null)
             {
                 violations.Add($"{Where(call.Index)}: dynamic import/require of '{spec}' (e.g. React.lazy). Only a "
@@ -435,9 +575,7 @@ public class ExternalSpaGridViewSelectorGuardTests
             }
 
             // Any reference that is not a JSX tag, a `typeof`, or a member name lets the binding escape this file.
-            var escapePattern = new Regex(
-                $@"(?<![\w$])(?<!<\s*)(?<!</\s*)(?<!\btypeof\s+)(?<!(?<!\.)\.){name}(?![\w$])");
-            foreach (Match reference in escapePattern.Matches(text))
+            foreach (Match reference in NonJsxReference(local).Matches(text))
             {
                 if (importSpans.Any(span => reference.Index >= span.Start && reference.Index < span.End))
                 {
@@ -446,6 +584,37 @@ public class ExternalSpaGridViewSelectorGuardTests
                 violations.Add($"{Where(reference.Index)}: '{local}' (the shared DataGrid) is referenced outside a JSX "
                                + "tag (createElement, aliasing, re-export, HOC …). Mount it only as JSX in this file, "
                                + "with showViewSelector={false}.");
+            }
+        }
+
+        // Round 5: the wrapper's binding, outside the wrapper. Same reference rule as a grid binding (a JSX tag, a
+        // `typeof`, or a member name), plus the element-API and escape refusals; no mount check is needed, because
+        // the wrapper forces the picker off for every prop a JSX mount can pass.
+        var distinctWrapperLocals = wrapperLocals.Distinct(StringComparer.Ordinal).ToList();
+        if (distinctWrapperLocals.Count > 0 && distinctLocals.Count == 0)
+        {
+            foreach (Match api in CloneOrCreate.Matches(text))
+            {
+                violations.Add($"{Where(api.Index)}: '{api.Value}' in a file that holds ExternalDataGrid. A cloned or created "
+                               + "element of the grid the wrapper returns can switch showViewSelector back on.");
+            }
+            foreach (Match escape in UnicodeEscape.Matches(text))
+            {
+                violations.Add($"{Where(escape.Index)}: unicode escape in a file that holds ExternalDataGrid. An escaped "
+                               + "identifier can reference the wrapper under a spelling this scan cannot see.");
+            }
+        }
+        foreach (var local in distinctWrapperLocals)
+        {
+            foreach (Match reference in NonJsxReference(local).Matches(text))
+            {
+                if (importSpans.Any(span => reference.Index >= span.Start && reference.Index < span.End))
+                {
+                    continue;
+                }
+                violations.Add($"{Where(reference.Index)}: '{local}' (ExternalDataGrid) is referenced outside a JSX tag. "
+                               + "Called as a plain function it returns the INNER shared-grid element, which can be cloned "
+                               + "or whose .type can be mounted with the picker on. Mount it only as <ExternalDataGrid … />.");
             }
         }
 
@@ -471,53 +640,146 @@ public class ExternalSpaGridViewSelectorGuardTests
     }
 
     /// <summary>
+    /// Any reference to <paramref name="local"/> that is NOT a JSX tag (<c>&lt;X</c> / <c>&lt;/X</c>), a
+    /// <c>typeof X</c>, or a member name (<c>obj.X</c>); a spread <c>...X</c> IS a reference.
+    /// </summary>
+    private static Regex NonJsxReference(string local) =>
+        new($@"(?<![\w$])(?<!<\s*)(?<!</\s*)(?<!\btypeof\s+)(?<!(?<!\.)\.){Regex.Escape(local)}(?![\w$])");
+
+    /// <summary>The Vite alias for the shared library (<c>vite.config.ts</c> maps it to <c>Spaarke.UI.Components/src</c>).</summary>
+    private const string SharedAlias = "@spaarke/ui-components";
+
+    private static bool IsSharedAlias(string spec) =>
+        spec == SharedAlias || spec.StartsWith(SharedAlias + "/", StringComparison.Ordinal);
+
+    private static bool IsTypeOnlyClause(string clause) =>
+        clause.StartsWith("type ", StringComparison.Ordinal) || clause.StartsWith("type{", StringComparison.Ordinal);
+
+    private static bool HasQueryOrFragment(string spec) => spec.Contains('?') || spec.IndexOf('#', 1) >= 0;
+
+    /// <summary>
+    /// The full path a path-like specifier resolves to, mirroring the Vite config: <c>@/</c> → the SPA's
+    /// <c>src</c>, <c>@spaarke/ui-components</c> → the shared library's <c>src</c> (round 5: resolved, not
+    /// trusted, so <c>@spaarke/ui-components/../…</c> cannot step out — Q5), a leading <c>/</c> → the project root,
+    /// <c>./</c> / <c>../</c> → relative to <paramref name="fileName"/>. <c>null</c> for any other bare specifier.
+    /// </summary>
+    private static string? ResolveSpecifier(string spec, string fileName)
+    {
+        if (spec == "@" || spec.StartsWith("@/", StringComparison.Ordinal))
+        {
+            return Path.GetFullPath(Path.Combine(ExternalSpaSource, spec.Length > 2 ? spec[2..] : "."));
+        }
+        if (IsSharedAlias(spec))
+        {
+            return Path.GetFullPath(Path.Combine(SharedLibrarySource, spec.Length > SharedAlias.Length + 1 ? spec[(SharedAlias.Length + 1)..] : "."));
+        }
+        if (spec.StartsWith('/'))
+        {
+            return Path.GetFullPath(Path.Combine(ExternalSpaRoot, spec.TrimStart('/')));
+        }
+        if (spec.StartsWith('.'))
+        {
+            var directory = Path.GetDirectoryName(fileName.Replace('/', Path.DirectorySeparatorChar)) ?? string.Empty;
+            return Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, directory, spec));
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="spec"/> loads the wrapper module, by any path-like spelling (<c>./ExternalDataGrid</c>,
+    /// <c>@/widgets/ExternalDataGrid.tsx</c>, <c>/src/widgets/externaldatagrid</c> …). Compared without the script
+    /// extension and case-insensitively, as the Windows file system and Vite's extension resolution see it.
+    /// </summary>
+    private static bool IsWrapperModule(string spec, string fileName)
+    {
+        var full = ResolveSpecifier(spec.Split('?', '#')[0], fileName);
+        if (full is null)
+        {
+            return false;
+        }
+        var wrapper = Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, WrapperFile.Replace('/', Path.DirectorySeparatorChar)));
+        return string.Equals(WithoutScriptExtension(full), WithoutScriptExtension(wrapper), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string WithoutScriptExtension(string path) =>
+        ScriptExtensions.FirstOrDefault(ext => path.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) is { } ext
+            ? path[..^ext.Length]
+            : path;
+
+    /// <summary>
+    /// A path (relative to a library <c>src</c> root, with or without its extension) that is test or tooling code:
+    /// a <c>__*</c> segment, or a <c>.test</c> / <c>.spec</c> / <c>.stories</c> file. The fan-in fact skips these, so
+    /// (round 5, Q4) the external SPA may not import them and no other library file may either.
+    /// </summary>
+    private static bool IsTestPath(string relative) =>
+        relative.Split('/', '\\').Any(segment => segment.StartsWith("__", StringComparison.Ordinal))
+        || Regex.IsMatch(relative, @"\.(?:test|spec|stories)(?:\.[cm]?[jt]sx?)?$", RegexOptions.IgnoreCase);
+
+    /// <summary>The roots a shared-library specifier may resolve into: the library's <c>src</c>, directly or via the npm link.</summary>
+    private static IEnumerable<string> SharedSourceRoots =>
+        [SharedLibrarySource, Path.Combine(ExternalSpaRoot, "node_modules", "@spaarke", "ui-components", "src")];
+
+    /// <summary>
+    /// Why <paramref name="full"/> is not shipped shared-library source (outside <c>src</c>, or a test path);
+    /// <c>null</c> when it is.
+    /// </summary>
+    private static string? NotSharedLibrarySource(string full)
+    {
+        foreach (var root in SharedSourceRoots)
+        {
+            if (IsUnder(full, root))
+            {
+                var relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+                return IsTestPath(relative) ? $"a test or __* path in the shared library ({relative})" : null;
+            }
+        }
+        return $"{Path.GetRelativePath(SourceScan.RepoRoot, full).Replace('\\', '/')} (outside the shared library's src)";
+    }
+
+    /// <summary>
     /// Where a module specifier resolves, when that is OUTSIDE the external SPA source (and, when
-    /// <paramref name="allowSharedLibrary"/>, outside the shared library and its node_modules link too);
-    /// <c>null</c> when it stays inside, or when it is a bare npm package other than an <c>@spaarke/…</c> one.
-    /// Mirrors the Vite config: <c>@/</c> → <c>src</c>, a leading <c>/</c> → the project root, and
-    /// <c>@spaarke/ui-components</c> → the shared library.
+    /// <paramref name="allowSharedLibrary"/>, outside the shared library's shipped <c>src</c> too); <c>null</c>
+    /// when it stays inside, or when it is a bare package the SPA's <c>package.json</c> declares.
     /// </summary>
     private static string? ResolvesOutsideSanctionedRoots(string spec, string fileName, bool allowSharedLibrary)
     {
-        string full;
-        if (spec == "@" || spec.StartsWith("@/", StringComparison.Ordinal))
+        if (spec.StartsWith("@spaarke/", StringComparison.Ordinal) && !IsSharedAlias(spec))
         {
-            full = Path.GetFullPath(Path.Combine(ExternalSpaSource, spec.Length > 2 ? spec[2..] : "."));
+            return "a @spaarke package other than the shared library";
         }
-        else if (spec.StartsWith('/'))
-        {
-            full = Path.GetFullPath(Path.Combine(ExternalSpaRoot, spec.TrimStart('/')));
-        }
-        else if (spec.StartsWith('.'))
-        {
-            var directory = Path.GetDirectoryName(fileName.Replace('/', Path.DirectorySeparatorChar)) ?? string.Empty;
-            full = Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, directory, spec));
-        }
-        else if (spec.StartsWith("@spaarke/", StringComparison.Ordinal))
-        {
-            var isSharedAlias = spec == "@spaarke/ui-components" || spec.StartsWith("@spaarke/ui-components/", StringComparison.Ordinal);
-            return allowSharedLibrary && isSharedAlias ? null : "a @spaarke package other than the shared library";
-        }
-        else
+
+        var full = ResolveSpecifier(spec, fileName);
+        if (full is null)
         {
             // Round 4: a bare specifier must name a package the SPA's package.json declares. Anything else — a
             // `#…` subpath import, a resolve alias, `node:…` — can point at any file, the shared grid included.
-            // A declared third-party package is a residual (see the class remarks).
+            // Round 5: and it may not hold a `.` / `..` segment: `react-window/../../x` steps out of a package
+            // with no `exports` map to any file (it compiled into a live picker-on mount). A declared third-party
+            // package is otherwise a residual (see the class remarks).
+            if (spec.Split('/').Any(segment => segment is "." or ".."))
+            {
+                return "a bare specifier with a '.' or '..' segment (it can step out of the package to any file)";
+            }
             return DeclaredPackages.Value.Contains(PackageNameOf(spec))
                 ? null
                 : "an undeclared bare specifier: not a package in external-spa/package.json (a resolve alias, a '#' "
                   + "subpath import or a builtin can point at any file)";
         }
 
+        if (IsSharedAlias(spec))
+        {
+            // Round 5 (Q5): the alias is resolved, so `@spaarke/ui-components/../…` must stay in shipped library source.
+            return allowSharedLibrary ? NotSharedLibrarySource(full) : "the shared library";
+        }
         if (IsUnder(full, ExternalSpaSource))
         {
             return null;
         }
-        if (allowSharedLibrary
-            && (IsUnder(full, SharedLibraryRoot)
-                || IsUnder(full, Path.Combine(ExternalSpaRoot, "node_modules", "@spaarke", "ui-components"))))
+        if (allowSharedLibrary)
         {
-            return null;
+            // Round 5 (Q3/Q4): into the library's src, not its root (a carrier beside src/ is not fan-in scanned) and
+            // not a test or `__*` path (the fan-in fact skips those).
+            return NotSharedLibrarySource(full);
         }
         return Path.GetRelativePath(SourceScan.RepoRoot, full).Replace('\\', '/');
     }
@@ -873,6 +1135,36 @@ public class ExternalSpaGridViewSelectorGuardTests
         return found;
     }
 
+    /// <summary>
+    /// Round 5 (Q3/Q4): the fan-in fact reads only the library's <c>src</c> and skips test and <c>__*</c> paths, so a
+    /// shipped library file may not load a module from either place — such a module could carry the grid unread.
+    /// Returns a description per offending specifier. Reported for EVERY file, the allowed carriers included.
+    /// </summary>
+    internal static IReadOnlyList<string> SharedEscapes(string source, string fileName)
+    {
+        var found = new List<string>();
+        string Where(int index) => $"{fileName}:{LineOf(source, index)}";
+        var literalSpecs = AnyFrom.Matches(source).Concat(SideEffectImport.Matches(source))
+            .Select(m => (m.Index, Spec: m.Groups["spec"].Value))
+            .Concat(DynamicCall.Matches(source)
+                .Select(call => (call.Index, Arg: DynamicLiteralArgAt.Match(source, call.Index + call.Length)))
+                .Where(x => x.Arg.Success)
+                .Select(x => (x.Index, Spec: x.Arg.Groups["spec"].Value)));
+        foreach (var (index, spec) in literalSpecs)
+        {
+            if (!spec.StartsWith('.') && !IsSharedAlias(spec))
+            {
+                continue; // a bare package: residual 1 (see the class remarks)
+            }
+            var full = ResolveSpecifier(spec.Split('?', '#')[0], fileName)!;
+            if (NotSharedLibrarySource(full) is { } where)
+            {
+                found.Add($"{Where(index)}: loads '{spec}' ({where}), a module this fact does not read");
+            }
+        }
+        return found;
+    }
+
     private static bool IsGridCarryingModule(string module, string fileName)
     {
         if (!module.StartsWith('.'))
@@ -886,9 +1178,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         return GridCarryingModules.Contains(withoutExtension, StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool IsSharedLibraryTestFile(string relative) =>
-        relative.Split('/').Any(segment => segment.StartsWith("__", StringComparison.Ordinal))
-        || Regex.IsMatch(relative, @"\.(?:test|spec|stories)\.[cm]?[jt]sx?$", RegexOptions.IgnoreCase);
+    private static bool IsSharedLibraryTestFile(string relative) => IsTestPath(relative);
 
     [Fact(DisplayName = "Inside the shared library, only the known barrels and DataGridPageShell import or re-export the grid")]
     public void SharedLibrary_OnlyKnownModulesCarryTheGrid()
@@ -905,7 +1195,9 @@ public class ExternalSpaGridViewSelectorGuardTests
             {
                 continue; // tests are not bundled; DataGrid.tsx is the grid itself
             }
-            var hits = SharedFanIn(File.ReadAllText(file), relative);
+            var source = File.ReadAllText(file);
+            unexpected.AddRange(SharedEscapes(source, relative)); // round 5: always reported
+            var hits = SharedFanIn(source, relative);
             if (hits.Count == 0)
             {
                 continue;
@@ -924,7 +1216,8 @@ public class ExternalSpaGridViewSelectorGuardTests
             "A shared-library module now imports or re-exports the shared DataGrid (or DataGridPageShell). If the "
             + "external SPA can import it, it may mount the grid with the view picker on, and the external-SPA scan "
             + "would not see it. Review it: add it to ShellNames (refused for the external SPA) or prove it switches "
-            + "the picker off, then add it to SharedFanInAllowed." + Environment.NewLine
+            + "the picker off, then add it to SharedFanInAllowed. A shipped library file that loads a module outside "
+            + "src/ or from a test / __* path is refused outright: this fact does not read that module." + Environment.NewLine
             + string.Join(Environment.NewLine, unexpected));
         // Not vacuous: every allowed carrier still carries the grid (the detector reads the real barrels).
         Assert.Equal(SharedFanInAllowed.OrderBy(f => f, StringComparer.Ordinal), carriersSeen.OrderBy(f => f, StringComparer.Ordinal));
@@ -1157,7 +1450,7 @@ public class ExternalSpaGridViewSelectorGuardTests
     [InlineData("W2-alias-escaping-src", OtherSpaFile, "import { Grid } from '@/../../../solutions/Other/src/grid';", "outside the external SPA")]
     [InlineData("W3-root-relative", OtherSpaFile, "import { Grid } from '/../shared/Other/grid';", "outside the external SPA")]
     [InlineData("W4-other-spaarke-package", OtherSpaFile, "import { Grid } from '@spaarke/legal-workspace';", "outside the external SPA")]
-    [InlineData("W5-library-name-elsewhere", OtherSpaFile, "import { Grid } from '../../../../solutions/Spaarke.UI.Components-fork/grid';", "outside the external SPA source and the shared library")]
+    [InlineData("W5-library-name-elsewhere", OtherSpaFile, "import { Grid } from '../../../../solutions/Spaarke.UI.Components-fork/grid';", "names the shared library but resolves to")]
     // Dynamic loads: a variable, a template, a concatenation, a module outside the SPA
     [InlineData("X1-dynamic-variable", OtherSpaFile, "const p = '@spaarke/ui-components/components/DataGrid/DataGrid';\nconst G = React.lazy(() => import(p));", "dynamic import")]
     [InlineData("X2-dynamic-template", OtherSpaFile, "const G = React.lazy(() => import(`../../../shared/Spaarke.UI.Components/src/components/${n}/DataGrid`));", "dynamic import")]
@@ -1183,6 +1476,74 @@ public class ExternalSpaGridViewSelectorGuardTests
         Assert.True(
             result.Violations.Any(v => v.Contains(expected, StringComparison.Ordinal)),
             $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, result.Violations)}");
+    }
+
+    // ── Review round 5 (task 157 fix round b2-r1): five shapes compiled (vite build) into a live mount with the picker
+    // on past the round-4 scan (Q1–Q5), two more found while fixing them (Q6 `?query`, Q7 bare `..`), and their
+    // neighbours. Each one MUST be reported. Files are scanned as OtherSpaFile (src/widgets/Seeded.tsx). ──
+
+    private const string WrapperImport = "import { ExternalDataGrid } from './ExternalDataGrid';\n";
+    private const string NotAJsxTag = "(ExternalDataGrid) is referenced outside a JSX tag";
+
+    [Theory(DisplayName = "Control: every evasion shape seeded in review round 5 is reported")]
+    // Q1 / Q2: the wrapper called as a plain function returns the INNER grid element
+    [InlineData("Q1-clone-of-returned-element", WrapperImport + "const A = () => React.cloneElement(ExternalDataGrid({ configId: 'q1' } as any) as any, { showViewSelector: true });", NotAJsxTag)]
+    [InlineData("Q1b-clone-in-wrapper-file", WrapperImport + "const A = () => React.cloneElement(<ExternalDataGrid configId=\"x\" />, {});", "in a file that holds ExternalDataGrid")]
+    [InlineData("Q2-type-of-returned-element", WrapperImport + "const Inner = (ExternalDataGrid({} as any) as any).type;\nconst A = () => <Inner configId=\"q2\" />;", NotAJsxTag)]
+    [InlineData("Q2b-alias-at-alias-with-extension", "import { ExternalDataGrid as E } from '@/widgets/ExternalDataGrid.tsx';\nconst I = E({}).type;", NotAJsxTag)]
+    [InlineData("Q2c-root-relative-other-case", "import { ExternalDataGrid as E } from '/src/widgets/externaldatagrid';\nconst f = E;", NotAJsxTag)]
+    [InlineData("Q2d-default-import", "import E from './ExternalDataGrid.js';\nconst f = E;", NotAJsxTag)]
+    [InlineData("Q2e-spread", WrapperImport + "const p = { ...ExternalDataGrid };", NotAJsxTag)]
+    [InlineData("Q2f-local-reexport", WrapperImport + "export { ExternalDataGrid as Grid };", NotAJsxTag)]
+    [InlineData("Q2g-escaped-identifier", WrapperImport + "const f = External\\u0044ataGrid;", "unicode escape in a file that holds ExternalDataGrid")]
+    [InlineData("Q2h-namespace", "import * as W from './ExternalDataGrid';\nconst I = W.ExternalDataGrid({}).type;", "namespace import of")]
+    [InlineData("Q2i-reexport", "export { ExternalDataGrid as Grid } from './ExternalDataGrid';", "re-exports from")]
+    [InlineData("Q2j-reexport-star", "export * from '../widgets/ExternalDataGrid';", "re-exports from")]
+    [InlineData("Q2k-dynamic", "const m = import('./ExternalDataGrid');", "(the ExternalDataGrid wrapper)")]
+    [InlineData("Q2l-require", "const { ExternalDataGrid: E } = require('./ExternalDataGrid');", "(the ExternalDataGrid wrapper)")]
+    [InlineData("Q2m-string-named", "import { \"ExternalDataGrid\" as E } from './ExternalDataGrid';\nconst I = E({}).type;", "(the ExternalDataGrid wrapper) is not attributed")]
+    // Q3: a carrier in the library ROOT, beside src/ (directly, or through the npm link)
+    [InlineData("Q3-beside-src", "import { Grid } from '../../../shared/Spaarke.UI.Components/zzoutside/gridAlias';\n<Grid configId=\"q3\" />", "outside the shared library's src")]
+    [InlineData("Q3b-beside-src-via-link", "import { Grid } from '../../node_modules/@spaarke/ui-components/zzoutside/gridAlias';", "outside the shared library's src")]
+    // Q4: a carrier in a test or __* path inside src/ (the fan-in fact skips those)
+    [InlineData("Q4-dunder-folder", "import { Grid } from '@spaarke/ui-components/components/DataGrid/__zz__/grid';\n<Grid configId=\"q4\" />", "a test or __* path")]
+    [InlineData("Q4b-test-file", "import { Grid } from '@spaarke/ui-components/components/DataGrid/DataGrid.test';", "a test or __* path")]
+    [InlineData("Q4c-stories-file", "import { Grid } from '../../../shared/Spaarke.UI.Components/src/components/X/X.stories.tsx';", "a test or __* path")]
+    // Q5: the alias, resolved, steps out of the library with `..`
+    [InlineData("Q5-alias-escape", "import { Grid } from '@spaarke/ui-components/../../../external-spa/zzoutside/gridAlias2';\n<Grid configId=\"q5\" />", "names the shared library but resolves to")]
+    [InlineData("Q5b-alias-into-the-spa", "import { X } from '@spaarke/ui-components/../../../external-spa/src/widgets/Other';", "names the shared library but resolves to")]
+    // Q6: a query or fragment makes another module instance whose default import no name rule attributes
+    [InlineData("Q6-query", "import Table from '@spaarke/ui-components/components/DataGrid/DataGrid?v=1';\n<Table configId=\"q6\" />", "a query or fragment")]
+    [InlineData("Q6b-fragment", "import T from './Other#x';", "a query or fragment")]
+    [InlineData("Q6c-dynamic-query", "const m = import('./Other?x');", "dynamic import")]
+    // Q7: a declared bare package whose subpath steps out with `..`
+    [InlineData("Q7-bare-dotdot", "import { Grid } from 'react-window/../../zzoutside/gridAlias2';\n<Grid configId=\"q7\" />", "'.' or '..' segment")]
+    public void Scan_WhenARound5EvasionShapeIsSeeded_ReportsIt(string shape, string source, string expected)
+    {
+        var result = Scan(source, OtherSpaFile);
+
+        Assert.True(
+            result.Violations.Any(v => v.Contains(expected, StringComparison.Ordinal)),
+            $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, result.Violations)}");
+    }
+
+    [Fact(DisplayName = "Control: sanctioned uses of the wrapper pass — JSX tags, typeof, type-only imports and re-exports, a comment quoting the tag")]
+    public void Scan_WhenTheWrapperIsUsedOnlyAsJsx_Passes()
+    {
+        var text = "import * as React from 'react';\n" +
+                   "import { ExternalDataGrid, type ExternalDataGridProps } from './ExternalDataGrid';\n" +
+                   "import type { ExternalDataGridProps as P2 } from '@/widgets/ExternalDataGrid';\n" +
+                   "export type { ExternalDataGridProps } from './ExternalDataGrid';\n" +
+                   "import { resolveCodePageTheme } from '@spaarke/ui-components';\n" +
+                   "import { setUserThemePreference } from '@spaarke/ui-components/components/../utils/themeStorage';\n" +
+                   "// mounted as <ExternalDataGrid> only\n" +
+                   "type P = React.ComponentProps<typeof ExternalDataGrid>;\n" +
+                   "const A = (p: ExternalDataGridProps) => <ExternalDataGrid {...p} configId=\"x\"></ExternalDataGrid>;";
+
+        var result = Scan(text, OtherSpaFile);
+
+        Assert.Empty(result.Violations);
+        Assert.Equal(0, result.CompliantMounts);
     }
 
     [Fact(DisplayName = "Control: sanctioned external-SPA neighbours pass — the wrapper's consumer, local dynamic imports, @/ and npm imports")]
@@ -1245,5 +1606,24 @@ public class ExternalSpaGridViewSelectorGuardTests
             "// No `@spaarke/auth` import (ADR-028); pdfjs is a dynamic import() below.\n" +
             "const pdf = import('pdfjs-dist');\n" +
             "import { tokens } from '../DataGrid/tokens';", NewWidget));
+    }
+
+    [Fact(DisplayName = "Control: a shipped library file may not load a module outside src/ or from a test / __* path (round 5)")]
+    public void SharedEscapes_ReportsALoadOutsideShippedSourceAndIgnoresNeighbours()
+    {
+        const string NewWidget = "src/client/shared/Spaarke.UI.Components/src/components/NewWidget/NewWidget.tsx";
+
+        Assert.Single(SharedEscapes("export { Grid } from '../../../zzoutside/gridAlias';", NewWidget));
+        Assert.Single(SharedEscapes("export { Grid } from '../DataGrid/__zz__/grid';", NewWidget));
+        Assert.Single(SharedEscapes("import { x } from '../Foo/Foo.test';", NewWidget));
+        Assert.Single(SharedEscapes("import '@spaarke/ui-components/../zzoutside/x';", NewWidget));
+        Assert.Single(SharedEscapes("const m = import('../../../zzoutside/x');", NewWidget));
+
+        Assert.Empty(SharedEscapes(
+            "import { tokens } from '../DataGrid/tokens';\n" +
+            "import '@spaarke/ui-components/utils/themeStorage';\n" +
+            "import { Button } from '@fluentui/react-components';\n" +
+            "import type { AuthenticatedFetchFn } from '@spaarke/auth';\n" +
+            "const pdf = import('pdfjs-dist');", NewWidget));
     }
 }

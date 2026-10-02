@@ -5,7 +5,7 @@
  * is a one-line call to `createGridWidgetBody(CONFIG_ID)` — this file is the ONE shared
  * implementation, not five hand-rolled grids (§11).
  *
- * Deliberately mounts the shared grid (through `ExternalDataGrid`) rather than `<DataGridPageShell>` — the shell injects a
+ * Deliberately mounts the shared grid (through `<ExternalDataGrid>`) rather than `<DataGridPageShell>` — the shell injects a
  * GLOBAL `html/body { overflow:hidden; height:100% }` CSS reset intended for a standalone Custom
  * Page's own document (see DataGridPageShell.tsx file header: "the shell's canonical Custom Page
  * mount"). This SPA embeds the grid as ONE TAB inside the larger workspace shell (tab strip +
@@ -23,14 +23,16 @@
  * consistent with "widgets are READ-ONLY (broker)". See notes/task-016-deviations.md.
  *
  * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). The grid is mounted through
- * `ExternalDataGrid`, which forces `showViewSelector={false}` at runtime. That is a SECURITY setting, not a
+ * `<ExternalDataGrid>`, which forces `showViewSelector={false}` at runtime. That is a SECURITY setting, not a
  * cosmetic one. With the selector on, the grid offered the entity's INTERNAL MDA main views
  * (`/savedqueries/{entity}`), and the BFF had to admit every column those views project. With it off, the
  * grid only ever runs its own `sprk_gridconfiguration` FetchXML, so each external module's server column
  * allow-list (ExternalAccessModule.cs) is that config's columns plus the scope and /record default columns,
  * and nothing more. Turning the selector back on would make every sibling view error with
  * DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard ExternalSpaGridViewSelectorGuardTests refuses any import
- * of the shared grid outside `ExternalDataGrid.tsx`.
+ * of the shared grid outside the wrapper's own file, and any use of `<ExternalDataGrid>` here other than as a
+ * JSX tag: called as a plain function, the wrapper returns the inner grid element, which could be cloned with
+ * the picker on.
  */
 import * as React from 'react';
 import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';
