@@ -141,6 +141,34 @@ describe('provisionSecureProject — failure classification', () => {
     expect(result.retryable).toBe(true);
   });
 
+  // Task 133 verifier round 2: an unverified owner move's copy follows the server's `creatorShareConfirmed`. Only a
+  // share read back on the record may be asserted; an unconfirmed (or unreported) one names the administrator, because
+  // if the move landed and the share did not take, the caller's own retry is refused at the Write gate.
+  it.each([
+    [true, /read back, so you can open it/i, /administrator/i],
+    [false, /administrator needs to finish/i, /can open it either way/i],
+    [undefined, /administrator needs to finish/i, /can open it either way/i],
+  ])(
+    'reads creatorShareConfirmed=%s from the problem body for owner_assignment_unverified',
+    async (confirmed, says, neverSays) => {
+      const authFetch = jest.fn().mockResolvedValue(
+        problemResponse(500, {
+          detail: 'operator text',
+          reasonCode: 'sdap.provision.owner_assignment_unverified',
+          ...(confirmed === undefined ? {} : { creatorShareConfirmed: confirmed }),
+        })
+      );
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe('interrupted');
+      expect(result.retryable).toBe(true);
+      expect(result.errorMessage).toMatch(says);
+      expect(result.errorMessage).not.toMatch(neverSays);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+    }
+  );
+
   it('does not leak the server ProblemDetails detail or status into what the user is shown', async () => {
     const authFetch = jest.fn().mockResolvedValue(
       problemResponse(500, {
@@ -194,7 +222,8 @@ describe('provisionSecureProject — failure classification', () => {
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
     ['sdap.provision.owner_assignment_failed', 'not-secured', false],
     ['sdap.provision.owner_assignment_not_applied', 'not-secured', false],
-    // Task 133: the creator's share is in place, so the next call resumes or restarts by the observed state.
+    // Task 133: a share to the creator was issued (confirmed or not — copy pinned above), so the next call resumes or
+    // restarts by the observed state.
     ['sdap.provision.owner_assignment_unverified', 'interrupted', true],
     // Task 133: secured and shared, no container recorded — the next call resumes.
     ['sdap.provision.container_creation_failed', 'storage-incomplete', true],

@@ -311,6 +311,47 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       creator column for app-created rows, before task 150) and whether the round-4 Assign-cascade acceptance extends to
       COMPENSATION (POML trigger options a/b/c) - recorded, not decided here.
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-r1-r2" round="verifier-2">
+      COMPLETED-WITH-ESCALATION (unchanged): every verifier-2 code/test item closed; the Assign-cascade-under-compensation
+      confirmation, the F8 creator-column decision, the (e) replay acceptance, the live gate and publish size remain open.
+      Full record: notes/task-133-provision-creator-lockout.md section 12.
+
+      (3) Resume creator-share failure branch now tested: creator_share_failed, resumed=true, no container created or
+          recorded, SomeoneCanOpen unchanged, next call finishes (seed V6 bites).
+      (4/14) Round-1 holder path WITHDRAWN (path C - comply): an unusable createdby (absent/disabled/application-user =
+          409, unreadable = 500) is refused with resume_creator_unavailable, zero grants, zero containers, even when
+          another person holds a Read share - the closed AC and F8's interim default. FindPersonHoldingAShareAsync,
+          ReadMask, ProvisionProjectResponse.CreatorUnavailable and its TS mirror removed (DTO back to its pre-round-1
+          bytes). Recovery text rewritten to paths that work, each tested: retry once the read works (unreadable);
+          re-enable the creator (disabled); an administrator assigns the record to the intended person, whose own call
+          runs from the start. If the owner wants the holder path, it is an AC amendment (code in fb4b70fdf).
+      (5) V5 null isdisabled = disabled, and V11 createdby-not-a-colleague on resume, now tested (both bite); V1/V2
+          guarded removed code.
+      (6) shareIssued |= creatorShareProven (V3) and the colleague skip-existing branch (V4) now tested (both bite).
+      (7) "No branch widens" narrowed to "no compensated branch"; the unverified-move widening named in the code remarks
+          and note section 4.
+      (8) Client reads creatorShareConfirmed: confirmed copy asserts the share was read back; unconfirmed/absent copy
+          names the administrator. classifyProvisioningFailure gains an optional extensions parameter.
+      (9) Closed by (4): unreadable createdby is refused before any colleague share (tested).
+      (10/16) additionalPrincipalsShared asserted (two colleagues, one failing: count 1).
+      Perturbation sweep round 2: 11/11 bite (V6, V3, V4, V5, V11, R1, R2, R3, C11, C12, C13).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11): server surface REMOVED, none added. Client: exported type
+      IProvisioningFailureExtensions + optional parameter on the existing classifyProvisioningFailure (extends the
+      existing function; without it the wizard asserts access the server says is unconfirmed). No new endpoint,
+      service, DI registration, option, job, package or column.
+
+      TESTS: full BFF unit suite 13,613 passed / 0 failed / 54 skipped (13,667); NetArchTest 341/341; affected classes
+      153/153; Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 84/84 (8 suites); package build
+      (tsc) clean; prettier/eslint clean on changed TS; dotnet format whitespace clean on changed C#.
+
+      NOT CLOSED: (11/17) Assign cascade under COMPENSATION - owner round 4 item 3 accepted the cascade for 144's
+      migration and forward assignment; whether it covers compensation's reverse assign needs the owner's explicit
+      confirmation or a choice of (a) snapshot+restore children / (b) no compensation for project and matter /
+      (c) coordinate with 148 - STOP item, no code changed. (12) Owner items: F8 creator column (urgent before 150),
+      acceptance of the (e) replay method. (13/19) Manual live gate (a)-(f): pending 144 cutover + BFF deploy.
+      (18) Publish size: main session.
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>

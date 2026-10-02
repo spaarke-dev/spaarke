@@ -411,6 +411,33 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
     }
 
     /// <summary>
+    /// Share-first PROVED the creator's share, the owner move is unverified, and after it neither the read nor a fresh
+    /// grant works: the share proven before the move still counts as issued, so the response is
+    /// <c>owner_assignment_unverified</c> with <c>creatorShareConfirmed: false</c> (the caller may retry) — not the
+    /// administrator-only <c>creator_share_failed_resumable</c> with a CRITICAL log (task 133 verifier round 2).
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheMoveIsUnverifiedAndNoShareCanBeIssuedAfterIt_TheShareFirstGrantStillCounts()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.OwnerReadBackFails = true;
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("creatorShareConfirmed").GetBoolean().Should().BeFalse();
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask, "share-first's grant was proven before the move");
+        _fixture.Logs.Entries.Should().NotContain(e => e.Level == LogLevel.Critical);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
     /// The share AND the compensating move both fail: the record is owned by the memberless team without a creator
     /// share. A distinct reason code, a detail that names that state, never "nothing moved" and never "retry" (the
     /// creator no longer passes the Write gate), and a CRITICAL log line for the operator.
@@ -556,23 +583,31 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         _fixture.Grants.Should().NotContain(g => g.Principal.Id == colleague);
     }
 
+    /// <summary>
+    /// A colleague share failure still leaves a 200 WITH THE COUNT REPORTED (task 061 behaviour; task 133 acceptance):
+    /// two colleagues named, one fails, <c>additionalPrincipalsShared</c> is 1.
+    /// </summary>
     [Fact]
     public async Task Provisioning_WhenAColleaguesShareFails_StillSucceeds()
     {
         var projectId = Guid.NewGuid();
         var colleague = Guid.NewGuid();
+        var reachableColleague = Guid.NewGuid();
         _fixture.SeedProject(projectId);
         _fixture.FailShareForPrincipal = colleague;
         var client = _fixture.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
-            ProvisionRoute, new { projectId, sharePrincipalIds = new[] { colleague } });
+            ProvisionRoute, new { projectId, sharePrincipalIds = new[] { colleague, reachableColleague } });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             "a mistyped colleague id must not throw away a provision whose creator share succeeded");
 
         _fixture.Grants.Select(g => g.Principal.Id).Should()
-            .BeEquivalentTo(new[] { ProvisionProjectTestFixture.CallerSystemUserId });
+            .BeEquivalentTo(new[] { ProvisionProjectTestFixture.CallerSystemUserId, reachableColleague });
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("additionalPrincipalsShared").GetInt32().Should().Be(1,
+            "the count reports the colleagues actually shared, not the colleagues named");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

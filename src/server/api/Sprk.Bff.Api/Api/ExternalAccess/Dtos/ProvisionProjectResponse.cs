@@ -42,8 +42,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="SharedToCreatorSystemUserId">
 /// The creating user the record was explicitly shared to (task 061). Because the owner team has no members, this share
-/// is what makes the record reachable at all — a successful response always carries it. On a resume with
-/// <c>CreatorUnavailable</c> it is the person who already held a share (no share was issued by the call).
+/// is what makes the record reachable at all — a successful response always carries it.
 /// </param>
 /// <param name="AdditionalPrincipalsShared">
 /// How many of the request's optional <c>SharePrincipalIds</c> were also shared to (best-effort).
@@ -53,14 +52,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="Resumed">
 /// True when this call FINISHED an earlier run that stopped after the owner move (task 133): the record was already
 /// owned by the owner team with no container recorded. <c>SharedToCreatorSystemUserId</c> is then the record's
-/// <c>createdby</c> user (except with <c>CreatorUnavailable</c>), not necessarily the caller. Additive to the JSON
-/// contract.
-/// </param>
-/// <param name="CreatorUnavailable">
-/// True on a resume whose <c>createdby</c> could not be used (absent, disabled, an application user, unreadable) and
-/// which completed because a person ALREADY held a share on the record — one an administrator made through Manage
-/// Access (task 133 verifier round 1). <c>SharedToCreatorSystemUserId</c> is then THAT person, and this call issued no
-/// share to anyone. Additive to the JSON contract.
+/// <c>createdby</c> user, not necessarily the caller. Additive to the JSON contract.
 /// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
@@ -72,5 +64,4 @@ public record ProvisionProjectResponse(
     int AdditionalPrincipalsShared,
     string RecordType,
     Guid RecordId,
-    bool Resumed = false,
-    bool CreatorUnavailable = false);
+    bool Resumed = false);

@@ -164,8 +164,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool OwnerReadBackFails { get; set; }
 
-    /// <summary>Systemusers a resume may look up by id, as (disabled, application user). The caller is seeded by Reset.</summary>
-    public Dictionary<Guid, (bool IsDisabled, bool IsApplicationUser)> SystemUsers { get; } = new();
+    /// <summary>
+    /// Systemusers a resume may look up by id, as (disabled, application user). The caller is seeded by Reset. A null
+    /// <c>IsDisabled</c> is emitted as a JSON null — a row that does not prove the user enabled.
+    /// </summary>
+    public Dictionary<Guid, (bool? IsDisabled, bool IsApplicationUser)> SystemUsers { get; } = new();
 
     /// <summary>When false, a systemuser read by id throws (task 133: an unreadable createdby).</summary>
     public bool SystemUserByIdReadSucceeds { get; set; } = true;

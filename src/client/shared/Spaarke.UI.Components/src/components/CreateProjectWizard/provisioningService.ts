@@ -89,12 +89,6 @@ export interface IProvisionProjectResponse {
    * went to the record's `createdby` user. Optional because the server added it.
    */
   resumed?: boolean;
-  /**
-   * Task 133 (verifier round 1): true on a resume whose `createdby` could not be used and which completed because a
-   * person already held a share (an administrator's, via Manage Access). `sharedToCreatorSystemUserId` is then that
-   * person and the call issued no share. Optional because the server added it.
-   */
-  creatorUnavailable?: boolean;
 }
 
 /**
@@ -136,14 +130,17 @@ export type ProvisioningFailureKind =
    */
   | 'storage-incomplete'
   /**
-   * The owner move could not be read back; a share to the caller was issued (read back when the read works —
-   * `creatorShareConfirmed` on the server's response). The next call resumes or restarts. Retryable.
+   * The owner move could not be read back; a share to the caller was issued — read back on the record only when the
+   * server's `creatorShareConfirmed` extension is true (task 133 verifier round 2: the copy follows it). The next call
+   * resumes or restarts. Retryable; when the share is unconfirmed and the caller can no longer open the record, that
+   * call is refused at the Write gate and an administrator finishes, which the unconfirmed copy says.
    */
   | 'interrupted'
   /**
    * Only an administrator can finish: the share AND the undo failed (the record may be owned by the memberless team
-   * with no share — its creator no longer passes the Write gate), or a resume found the record's creator unusable and
-   * nobody else holding a share (an administrator shares it through Manage Access, then calls again).
+   * with no share — its creator no longer passes the Write gate), or a resume found the record's creator unusable
+   * (absent, disabled, an application user, unreadable). For the latter an administrator re-enables the creator, or
+   * assigns the record to the person who should hold it, who then secures it (task 133 verifier round 2).
    */
   | 'needs-administrator'
   /** Anything else — transport failure, unexpected 5xx, or an unrecognised or absent reason code. */
@@ -269,10 +266,12 @@ const REASON_STATES: Readonly<
       'The project was created but not secured: the move to the secure owner did not take effect, and its ownership did not change. Documents cannot be added to it until it is secured; an administrator needs to check the secure setup.',
     retryable: false,
   },
+  // The copy for this code follows the server's `creatorShareConfirmed` extension: the message here is the
+  // UNCONFIRMED one (also used when the extension is absent); classifyProvisioningFailure swaps in the confirmed one.
   'sdap.provision.owner_assignment_unverified': {
     failureKind: 'interrupted',
     errorMessage:
-      'Securing the project was interrupted: it could not be confirmed whether its ownership changed. A share to you was issued so that you can open it either way.',
+      'Securing the project was interrupted: it could not be confirmed whether its ownership changed, and a share to you was issued but could not be confirmed. If you cannot open the project, an administrator needs to finish securing it.',
     retryable: true,
   },
   'sdap.provision.container_creation_failed': {
@@ -302,13 +301,31 @@ const REASON_STATES: Readonly<
 };
 
 /**
+ * `owner_assignment_unverified` with `creatorShareConfirmed: true` (task 133 verifier round 2). Only a share the server
+ * read back on the record lets the copy say the project can be opened. Unconfirmed, the copy names the administrator:
+ * if the move DID land and the unconfirmed share did not take, the caller no longer passes the Write gate and their
+ * own retry is refused.
+ */
+const OWNER_UNVERIFIED_SHARE_CONFIRMED =
+  'Securing the project was interrupted: it could not be confirmed whether its ownership changed. Your share on it was read back, so you can open it either way.';
+
+/** The ProblemDetails extensions besides `reasonCode` that change the designed state a code maps to. */
+export interface IProvisioningFailureExtensions {
+  /** `owner_assignment_unverified` only: whether the creator's share was read back on the record. */
+  creatorShareConfirmed?: boolean;
+}
+
+/**
  * Maps a reason code to the designed state to render, with its authored copy and whether the same caller can retry.
  *
  * The environment message names the missing setup ("secure-record setup") because that is the one thing an
  * administrator needs to hear to fix it — and because "provisioning failed: HTTP 500" tells the person in front of
  * the wizard nothing they can act on.
  */
-export function classifyProvisioningFailure(reasonCode?: string): {
+export function classifyProvisioningFailure(
+  reasonCode?: string,
+  extensions?: IProvisioningFailureExtensions
+): {
   failureKind: ProvisioningFailureKind;
   errorMessage: string;
   retryable: boolean;
@@ -320,6 +337,10 @@ export function classifyProvisioningFailure(reasonCode?: string): {
         'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created and marked secure, but nothing about its ownership changed and documents cannot be added to it until it is secured; an administrator can secure it once the setup is fixed.',
       retryable: false,
     };
+  }
+
+  if (reasonCode === 'sdap.provision.owner_assignment_unverified' && extensions?.creatorShareConfirmed === true) {
+    return { ...REASON_STATES[reasonCode], errorMessage: OWNER_UNVERIFIED_SHARE_CONFIRMED };
   }
 
   if (reasonCode != null && Object.prototype.hasOwnProperty.call(REASON_STATES, reasonCode)) {
@@ -394,16 +415,20 @@ export async function provisionSecureProject(
     if (!response.ok) {
       let reasonCode: string | undefined;
       let serverDetail: string | undefined;
+      const extensions: IProvisioningFailureExtensions = {};
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const problem: any = await response.json();
         reasonCode = typeof problem?.reasonCode === 'string' ? problem.reasonCode : undefined;
         serverDetail = problem?.detail ?? problem?.title;
+        if (typeof problem?.creatorShareConfirmed === 'boolean') {
+          extensions.creatorShareConfirmed = problem.creatorShareConfirmed;
+        }
       } catch {
         /* ignore JSON parse failure — classification falls through to 'error' */
       }
 
-      const { failureKind, errorMessage, retryable } = classifyProvisioningFailure(reasonCode);
+      const { failureKind, errorMessage, retryable } = classifyProvisioningFailure(reasonCode, extensions);
 
       // The server's detail goes to the console for support, and ONLY there. It is written for an
       // operator reading a log; putting it in front of the user is the raw-ProblemDetails failure

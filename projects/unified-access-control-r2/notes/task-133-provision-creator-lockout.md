@@ -70,8 +70,9 @@ Script: session scratchpad `task133/census.ps1` (GET only, operator `az` token, 
 ## 4. ADR-003 path C (adr-tensions)
 
 Compensation moves a secure-flagged record back from the memberless team to its pre-call owner — the access state every
-earlier refusal (and the record since creation) already has. No branch gives anyone access they lacked: a share this
-call issued is removed when the move is undone; `sprk_issecure` is never cleared, so uploads still fail closed. The
+earlier refusal (and the record since creation) already has. No COMPENSATED branch gives anyone access they lacked: a
+share this call issued is removed when the move is undone (the one widening on this path is the UNVERIFIED owner move,
+the first residual below — verifier round 2 narrowed this sentence, which had claimed "no branch"); `sprk_issecure` is never cleared, so uploads still fail closed. The
 "no rollback" principle now reads: rollback is for ownership and shares only; container failures are never rolled back
 (moving a record out of the Secure BU because storage failed would turn a storage failure into a disclosure). **Path C
 (comply)** — the reviewer confirms in the PR.
@@ -138,8 +139,8 @@ Task 143's census cites `:726` / `:754`, which this task moved. Every POA write 
 | `RestoreCreatorShareAsync` | RevokeAccess / GrantAccess / ModifyAccess back to the PRE-CALL mask | compensation only — never widens beyond the pre-call state |
 | `ShareToColleaguesAsync` | GrantAccess (Collaborate) to named colleagues | after the creator share is proven; on a RESUME only when the caller is the record's `createdby` (verifier round 1) |
 
-A resume whose `createdby` is unusable but where a person already holds a share (verifier round 1) issues NO share — it
-reads the shares and the sharee's systemuser only.
+A resume whose `createdby` is unusable issues NO share and creates nothing — it is refused (verifier round 2 withdrew the
+round-1 path that completed when another person already held a share; §12).
 
 On RESUME, a `createdby` on the record's No Access list must be refused before `EnsureCreatorShareAsync` (comment
 marks the spot in `EnsureResumeCreatorShareAsync`). N6 (refuse provisioning with a message when the creator is walled)
@@ -316,3 +317,65 @@ affected classes 153/153; Spaarke.UI.Components jest CreateProjectWizard + Summa
 | C10 | `record_owner_unreadable` retryable again | BITES (1) |
 
 **13/13 bite.**
+
+---
+
+## 12. Verifier round 2 (2026-10-02, branch `task/uac-r2-133-r1-r2`)
+
+A second adversarial verifier re-ran everything green, then seeded guards; several seeds survived and two contracts were
+named open. Each item, and what closed it (or why it is not closed):
+
+| # | Finding | Closed by |
+|---|---|---|
+| 3 / 15 | The resume's `creator_share_failed` branch was untested (seed V6 left all green). Regressed, a resume records a container on a team-owned record nobody holds a share on — permanent, because the next call answers 409 | Test `ProvisionProject_WhenTheResumesCreatorShareFails_StopsBeforeTheContainer`: `creator_share_failed`, `resumed: true`, no container created, no `sprk_containerid` update, `SomeoneCanOpen` unchanged, and the next call (fault cleared) finishes. V6 now BITES (1) |
+| 4 / 14 | Round 1's holder path (unusable `createdby` + someone else holding a Read share → 200) contradicted the closed AC ("refused with its own reasonCode, zero grants, zero containers") and owner decision F8's interim default, and turned a transient `unreadable` into a permanent completion | **Withdrawn — path C (comply with the owner-decided contract).** An unusable `createdby` is refused again whoever holds a share: 409 for `absent` / `disabled` / `application-user`, **500 for `unreadable`** (transient). `FindPersonHoldingAShareAsync`, `ReadMask`, `ProvisionProjectResponse.CreatorUnavailable` and its TS mirror are removed (the DTO is byte-identical to its pre-round-1 version). The stated recovery is rewritten to paths that work against this code, each driven by a test: `unreadable` → the same caller calls again once the read works; `disabled` → an administrator re-enables the creator and calls again (`…WhenTheCreatorIsDisabled_ReEnablingThemLetsTheResumeComplete`); any state → an administrator ASSIGNS the record to the person who should hold it (it leaves the owner team), and that person's own call runs from the start and shares to them (`…WhenTheCreatorIsAnApplication_AssigningTheRecordToAPersonLetsThemProvisionIt`). The refusal theory now seeds another enabled person's Read share and asserts zero grants and containers anyway. 🔔 If the owner prefers the round-1 holder path, it is an AC amendment for the owner to accept; that code is in `fb4b70fdf` |
+| 5 / 15 | Holder-path filters (V1 Read bit, V2 SystemUser kind) unproven; V5 (null `isdisabled` treated as enabled) and V11 (`createdby` not excluded from the resume colleague list) survived | V1/V2: the code they guarded is gone (item 4). V5: the fixture now emits a null `isdisabled`; test `…WhenResumingAndTheCreatorsDisabledFlagIsNull_TreatsThemAsDisabled` — BITES (1). V11: test `…WhenANonCreatorResumeNamesOnlyTheCreator_CompletesWithTheCreatorShareOnly` (200, one grant to the creator at `CreatorAccessRights`, `additionalPrincipalsShared: 0`) — BITES (1) |
+| 6 / 15 | `shareIssued \|= creatorShareProven;` removable (V3); `ShareToColleaguesAsync`'s skip-existing branch removable (V4) | V3: `Provisioning_WhenTheMoveIsUnverifiedAndNoShareCanBeIssuedAfterIt_TheShareFirstGrantStillCounts` — share-first proven, move unverified, post-move read and grant both fail → `owner_assignment_unverified`, `creatorShareConfirmed: false`, no CRITICAL log, share in place — BITES (1). V4: `ProvisionProject_WhenAColleagueAlreadyHoldsAShare_IsNotSharedAgain` (no grant to that colleague, their View-only mask unchanged, counted) — BITES (1) |
+| 7 | `MoveWithCreatorShareAsync` remarks and note §4 said "no branch gives anyone access they lacked", contradicted by the unverified branch | Narrowed to "no COMPENSATED branch", and the unverified-move widening is named in place (code remarks and §4) |
+| 8 | Client mapped `owner_assignment_unverified` to "A share to you was issued so that you can open it either way" without reading `creatorShareConfirmed` | `provisionSecureProject` reads `creatorShareConfirmed` from the problem body and passes it to `classifyProvisioningFailure(reasonCode, extensions)`. Confirmed → "Your share on it was read back, so you can open it either way." Unconfirmed or absent → "…a share to you was issued but could not be confirmed. If you cannot open the project, an administrator needs to finish securing it." `retryable` stays true: if the move did not land, or the share took, the retry works; if not, the retry is refused at the Write gate and the generic copy names the administrator too. Tests pin all three (true / false / absent); client seeds C11–C13 BITE |
+| 9 | `unreadable` + caller IS `createdby` + some holder → named colleagues shared with no creator share proven | Gone with item 4 (unreadable is refused before colleagues). Test `…WhenResumingWithAnUnreadableCreator_SharesNoColleague` (500, zero grants, zero containers) |
+| 10 / 16 | No test asserted `additionalPrincipalsShared` | `Provisioning_WhenAColleaguesShareFails_StillSucceeds` now names two colleagues, one failing: 200, grants = creator + the reachable colleague, `additionalPrincipalsShared == 1`. Seed R3 (count failures too) BITES (1) |
+
+**Perturbation sweep (round 2)** — seed → build → run the five affected classes → restore the original bytes + touch:
+
+| # | Seeded violation | Result |
+|---|---|---|
+| V6 | resume's creator-share failure ignored | BITES (1) |
+| V3 | `shareIssued \|= creatorShareProven` neutralised | BITES (1) |
+| V4 | colleague skip-existing removed | BITES (1) |
+| V5 | null `isdisabled` treated as enabled | BITES (1) |
+| V11 | `createdby` not excluded from the resume colleague list | BITES (1) |
+| R1 | unusable `createdby` not refused (resume continues) | BITES (8) |
+| R2 | `unreadable` reported as 409 | BITES (2) |
+| R3 | colleague count includes failed shares | BITES (1) |
+| C11 | client: absent `creatorShareConfirmed` treated as confirmed | BITES (1) |
+| C12 | client: the extension not read from the problem body | BITES (1) |
+| C13 | client: unconfirmed copy asserts access again | BITES (2) |
+
+**11/11 bite.**
+
+**New surface (CLAUDE.md §10/§11)**: none on the server — round 2 REMOVES surface (`CreatorUnavailable`, the holder
+helper). Client: `IProvisioningFailureExtensions` (exported type) plus an optional second parameter on the existing
+`classifyProvisioningFailure` — existing: the `REASON_STATES` table and that function; extension: yes, one optional
+parameter on it; cost of doing nothing: the wizard asserts "you can open it either way" when the server says the share
+is NOT confirmed (finding 8). No new endpoint, service, DI registration, option, job, package or column.
+
+**Runs (round 2)**: BFF unit suite 13,613 passed / 0 failed / 54 skipped (13,667; +7 net: 8 new, the holder-path test
+removed); NetArchTest 341/341; affected classes (ProvisionProject*, SecureProjectShareTests, RecordShareRightsMaskTests,
+DelegationRule*, SecureNamedOwnerTeam*) 153/153; Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard
+84/84 (8 suites); package build (`tsc`) clean; prettier clean and eslint 0 errors on the changed TS files;
+`dotnet format whitespace --verify-no-changes` clean on the changed C# files.
+
+**Not closed here, and why**
+- **Items 11 / 17 — Assign cascade under COMPENSATION** (POML trigger: STOP, options (a)/(b)/(c)). Owner round 4 item 3
+  ("Accepted: team, sharepointdocumentlocation and sharepointdocument") answered task 144's escalation (a) — the
+  migration and the forward assignment. It does not say whether compensation's reverse assign, which can re-own a child
+  whose own prior owner differed from the root's to the root's pre-call owner, is covered. 🔔 **Owner confirmation
+  required before merge**: confirm the extension, or pick (a) snapshot and restore each re-owned child / (b) no
+  compensation for cascading roots (project, matter) / (c) coordinate with task 148. No code changed for this (0 such
+  rows in dev; work assignments have no cascade).
+- **Item 12 — owner items** (not defects): the F8 follow-up (a persisted human creator column for app-created rows;
+  `createdonbehalfby` is empty), urgent before task 150 — round 2's assign-to-a-person recovery is the working interim
+  path for those rows; the owner's explicit acceptance of the (e) replay method; `sharetopreviousowneronassign` False.
+- **Items 13 / 19 — MANUAL LIVE GATE (a)–(f)**: pending — read-only run; needs task 144's cutover and a BFF deploy (§9).
+- **Item 18 — publish size**: the main session measures by instruction. CVE: no package changed in round 2.

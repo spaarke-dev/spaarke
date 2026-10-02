@@ -486,81 +486,240 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
 
     /// <summary>
     /// A resume whose <c>createdby</c> is not a usable person refuses with its own reason code — and shares to nobody,
-    /// least of all the caller — creating nothing.
+    /// least of all the caller — creating nothing. That holds even when ANOTHER enabled person already holds a Read
+    /// share (task 133 verifier round 2): the closed acceptance criterion and owner decision F8's interim default are a
+    /// refusal, so a share someone else holds does not turn it into a completion. An unreadable <c>createdby</c> is a
+    /// 500 (a read failed — transient), the other states a 409.
     /// </summary>
     [Theory]
-    [InlineData("disabled")]
-    [InlineData("application-user")]
-    [InlineData("absent")]
-    [InlineData("unreadable")]
-    public async Task ProvisionProject_WhenResumingAndTheCreatorIsNotAUsablePerson_RefusesAndSharesToNobody(string state)
+    [InlineData("disabled", HttpStatusCode.Conflict)]
+    [InlineData("application-user", HttpStatusCode.Conflict)]
+    [InlineData("absent", HttpStatusCode.Conflict)]
+    [InlineData("unreadable", HttpStatusCode.InternalServerError)]
+    public async Task ProvisionProject_WhenResumingAndTheCreatorIsNotAUsablePerson_RefusesAndSharesToNobody(
+        string state, HttpStatusCode expectedStatus)
     {
         var projectId = Guid.NewGuid();
         var creator = Guid.NewGuid();
+        var otherPerson = Guid.NewGuid();
         switch (state)
         {
             case "disabled": _fixture.SystemUsers[creator] = (true, false); break;
             case "application-user": _fixture.SystemUsers[creator] = (false, true); break;
             case "unreadable": _fixture.SystemUsers[creator] = (false, false); _fixture.SystemUserByIdReadSucceeds = false; break;
         }
+        _fixture.SystemUsers[otherPerson] = (false, false);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
+        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(otherPerson),
+            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(expectedStatus);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("creatorState").GetString().Should().Be(state);
+        _fixture.Grants.Should().BeEmpty("it is never shared to the caller as a substitute");
+        _fixture.Modifies.Should().BeEmpty();
+        _fixture.Updates.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty(
+            "another person's share does not complete the resume (F8 interim default: refusal)");
+    }
+
+    /// <summary>
+    /// A <c>createdby</c> whose <c>isdisabled</c> reads as null is not proven enabled, so it is treated as disabled —
+    /// only a user read back as enabled is someone a secure record is kept open for (task 133 verifier round 2).
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenResumingAndTheCreatorsDisabledFlagIsNull_TreatsThemAsDisabled()
+    {
+        var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (null, false);
         _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
         using var client = _fixture.CreateEntitledClient();
 
         var response = await ProvisionAsync(client, projectId);
 
-        response.IsSuccessStatusCode.Should().BeFalse();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
         using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        problem.RootElement.GetProperty("creatorState").GetString().Should().Be(state);
-        _fixture.Grants.Should().BeEmpty("it is never shared to the caller as a substitute");
-        _fixture.Updates.Should().BeEmpty();
+        problem.RootElement.GetProperty("creatorState").GetString().Should().Be("disabled");
+        _fixture.Grants.Should().BeEmpty();
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
     }
 
     /// <summary>
-    /// The recovery that <c>resume_creator_unavailable</c> states is real (task 133 verifier round 1): an administrator
-    /// shares the record to a person through Manage Access, then calls again — and the resume completes WITHOUT
-    /// sharing to anyone. A share held only by a person who could not open the record anyway (disabled) does not count.
-    /// Before the fix the second call was refused the same way forever.
+    /// A recovery <c>resume_creator_unavailable</c> states is real (task 133 verifier round 2), driven against the
+    /// endpoint: a DISABLED creator, re-enabled by an administrator, lets the next call resume and share to them.
     /// </summary>
     [Fact]
-    public async Task ProvisionProject_WhenTheCreatorIsUnusable_TheAdministratorsManageAccessShareLetsTheResumeComplete()
+    public async Task ProvisionProject_WhenTheCreatorIsDisabled_ReEnablingThemLetsTheResumeComplete()
     {
         var projectId = Guid.NewGuid();
-        var appCreator = Guid.NewGuid();
-        var disabledSharee = Guid.NewGuid();
-        var intendedHolder = Guid.NewGuid();
-        _fixture.SystemUsers[appCreator] = (false, true);
-        _fixture.SystemUsers[disabledSharee] = (true, false);
-        _fixture.SystemUsers[intendedHolder] = (false, false);
-        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: appCreator);
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (true, false);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
         using var client = _fixture.CreateEntitledClient(); // an administrator: Write through their role
 
         (await ReasonCodeOf(await ProvisionAsync(client, projectId)))
             .Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        (await ProvisionAsync(client, projectId)).StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "calling again without the stated recovery repeats the refusal");
 
-        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(disabledSharee),
-            ProvisionProjectEndpoint.CollaboratorAccessRights);
-        (await ReasonCodeOf(await ProvisionAsync(client, projectId)))
-            .Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable,
-                "a disabled sharee cannot open the record, so it does not satisfy S5");
-
-        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(intendedHolder),
-            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        _fixture.SystemUsers[creator] = (false, false); // the administrator re-enables the creator
         var response = await ProvisionAsync(client, projectId);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        _fixture.Grants.Should().BeEmpty("a resume whose creator is unusable shares to nobody — least of all the caller");
-        _fixture.Modifies.Should().BeEmpty();
+        _fixture.Grants.Should().ContainSingle().Which.Principal.Id.Should().Be(creator);
         _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0);
         _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
-        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
         _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
 
+    /// <summary>
+    /// An app-created record (Office quick-create: <c>createdby</c> is the BFF application user) cannot be resumed —
+    /// and the stated recovery works: an administrator assigns it to the person who should hold it, which takes it out
+    /// of the owner team, and THAT person's call provisions it from the start, sharing it to them.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheCreatorIsAnApplication_AssigningTheRecordToAPersonLetsThemProvisionIt()
+    {
+        var projectId = Guid.NewGuid();
+        var appCreator = Guid.NewGuid();
+        _fixture.SystemUsers[appCreator] = (false, true);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: appCreator);
+        using var client = _fixture.CreateEntitledClient();
+
+        (await ReasonCodeOf(await ProvisionAsync(client, projectId)))
+            .Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        _fixture.Grants.Should().BeEmpty();
+
+        // The administrator's Assign: the record is owned by the intended person (here, the next caller).
+        _fixture.SeedProject(projectId, owningUserId: ProvisionProjectTestFixture.CallerSystemUserId, createdBy: appCreator);
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
-        body.RootElement.GetProperty("creatorUnavailable").GetBoolean().Should().BeTrue();
-        body.RootElement.GetProperty("sharedToCreatorSystemUserId").GetGuid().Should().Be(intendedHolder);
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeFalse("it ran from the start");
+        body.RootElement.GetProperty("sharedToCreatorSystemUserId").GetGuid()
+            .Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+        _fixture.ShareMaskOf(projectId, appCreator).Should().Be(0, "nothing is ever shared to the application user");
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// The resume's share to <c>createdby</c> cannot be written: the run stops with <c>creator_share_failed</c>
+    /// (<c>resumed: true</c>) BEFORE any container is created or recorded (task 133 verifier round 2). Continuing would
+    /// create and record a container on a team-owned record nobody holds a share on — the C11 locked box, made
+    /// permanent, because the next call would then answer 409 <c>already_provisioned</c>.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheResumesCreatorShareFails_StopsBeforeTheContainer()
+    {
+        var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (false, false);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
+        _fixture.FailShareWhileSecureOwned = creator;
+        var openableBefore = _fixture.SomeoneCanOpen(projectId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        using (var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            problem.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        }
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty("no container on a record nobody can open");
+        _fixture.Updates.Should().NotContain(u => u.Payload.ContainsKey("sprk_containerid"));
+        _fixture.ContainerIdOf(projectId).Should().BeNull("an unrecorded container keeps the record resumable");
+        _fixture.SomeoneCanOpen(projectId).Should().Be(openableBefore);
+
+        _fixture.FailShareWhileSecureOwned = null;
+        var retry = await ProvisionAsync(client, projectId);
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, "the record stayed resumable, so the next call finishes it");
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// <c>createdby</c> unreadable and the caller IS <c>createdby</c>, naming a colleague, while another person holds a
+    /// share: refused before any write — no colleague is shared while the creator's share is unproven (task 133
+    /// verifier round 2).
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenResumingWithAnUnreadableCreator_SharesNoColleague()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        var otherPerson = Guid.NewGuid();
+        _fixture.SystemUsers[otherPerson] = (false, false);
+        _fixture.SystemUserByIdReadSucceeds = false;
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId); // createdby = caller
+        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(otherPerson),
+            ProvisionProjectEndpoint.CollaboratorAccessRights);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await client.PostAsJsonAsync(Route, new { projectId, sharePrincipalIds = new[] { colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The record's own creator, named in <c>sharePrincipalIds</c> by a caller who is NOT the creator, is not a
+    /// colleague: the resume is not refused, and the creator receives only the creator share (task 133 verifier
+    /// round 2).
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenANonCreatorResumeNamesOnlyTheCreator_CompletesWithTheCreatorShareOnly()
+    {
+        var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (false, false);
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
+        using var client = _fixture.CreateEntitledClient(); // the caller is NOT the creator
+
+        var response = await client.PostAsJsonAsync(Route, new { projectId, sharePrincipalIds = new[] { creator } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().ContainSingle().Which.Should().Match<ProvisionProjectTestFixture.RecordedShare>(g =>
+            g.Principal.Id == creator && g.AccessRightsCsv == ProvisionProjectEndpoint.CreatorAccessRights);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("additionalPrincipalsShared").GetInt32().Should().Be(0);
+    }
+
+    /// <summary>
+    /// A colleague who already holds a share (an earlier run got that far) is not shared to again — a second
+    /// GrantAccess would union Collaborate into whatever they hold — and is counted as shared.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenAColleagueAlreadyHoldsAShare_IsNotSharedAgain()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId); // createdby = caller
+        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(colleague),
+            Sprk.Bff.Api.Services.Access.RecordShareLevels.ViewOnlyRights);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await client.PostAsJsonAsync(Route, new { projectId, sharePrincipalIds = new[] { colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == colleague);
+        _fixture.ShareMaskOf(projectId, colleague).Should().Be(
+            Sprk.Bff.Api.Services.Access.RecordShareLevels.MaskForRightsCsv(
+                Sprk.Bff.Api.Services.Access.RecordShareLevels.ViewOnlyRights));
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("additionalPrincipalsShared").GetInt32().Should().Be(1);
     }
 
     /// <summary>
