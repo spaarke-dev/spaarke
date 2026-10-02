@@ -49,7 +49,7 @@
 // BREAKING CHANGE (caller migration required)
 //   This refactor REMOVES `enableManagedIdentity` (SA-MI toggle) and
 //   `keyVaultName` (SA-MI-tied KV access policy) parameters. Existing callers
-//   (`platform.bicep`, `stacks/model1-shared.bicep`, `stacks/model2-full.bicep`)
+//   (`platform.bicep`, `stacks/model2-full.bicep`; `stacks/model1-shared.bicep` was retired by task 225a)
 //   still pass these params and will FAIL `az bicep build` at the stack level
 //   until they are migrated to pass `userAssignedIdentityResourceId` instead.
 //   Follow-on task will migrate the callers atomically (see

@@ -14,9 +14,9 @@
 // AUDIT REFERENCE (customer-provisioning-orchestration-r1 task 203b,
 //                  punch list row A21 / task 201 "Deferred #1")
 //   customer.bicep already provisions the per-customer BFF App Service (bffApi
-//   module) but never grants any RBAC to the L2 UAMI. Same "Deferred #1"
-//   surface as the Model 1 shared BFF (model1-shared-l2-rbac.bicep A21) --
-//   this module is the per-customer parallel for Model 2 Dedicated stamps.
+//   module) but never grants any RBAC to the L2 UAMI. This module grants it, on
+//   every customer stamp (Model 1 and Model 2 — D-12). Its former Model 1 shared
+//   parallel (model1-shared-l2-rbac.bicep) was retired with that stack by task 225a.
 //
 // WHY A MODULE (BCP139 forces the split)
 //   customer.bicep uses `targetScope = 'subscription'`. A role assignment

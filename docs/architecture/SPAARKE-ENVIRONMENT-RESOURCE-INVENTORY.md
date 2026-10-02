@@ -116,11 +116,11 @@ the choice is recorded per environment. ⚠️ This amends
 Everything in this section is created by **H2a** deploying [`infrastructure/bicep/customer.bicep`](../../infrastructure/bicep/customer.bicep)
 into the customer's own subscription (`targetScope = 'subscription'`), unless another handler is named.
 
-🔲 **T225a + T225b — today Model 1 runs do not use `customer.bicep`.** `ArmDeploymentRunner.ResolveArmTemplateAsync`
-maps `Model1` to the `model1-shared` template (task 224 renamed the enum only), and
-`model1-shared.bicep` has not compiled since 2026-08-17. T225a retires the `model1-*` Bicep surfaces; T225b points
-Model 1 at `customer.bicep`. Every ✅ below means "`customer.bicep` already does this", which becomes true for
-Model 1 once T225b lands.
+✅ **T225a (2026-10-01) — the `model1-*` Bicep surfaces are deleted**, and H2a **fails closed** for Model 1
+(nothing deployed) instead of building a stamp in a non-dedicated subscription. 🔲 **T225b** converges the rest of the
+Model 1 code path (H2b's Model 1 branch, H12c's shared OpenAI endpoint, Worker config) and points H2a's Model 1 arm at
+`customer`; 🔲 **T228** gives every Model 1 run its own subscription. Every ✅ below means "`customer.bicep` does this",
+which becomes true for Model 1 once both land.
 
 | Area | Resource | Deployment | Naming (`{env}` = `prod`) | Created by | Status vs target |
 |---|---|---|---|---|---|
@@ -221,10 +221,10 @@ they are defects, not options.
 | Retired resource | Where it still appears | Retiring task |
 |---|---|---|
 | One shared Azure subscription for all Model 1 customers | intake auto-inject + ISH-02 exemption; `controlplane-subscription-rbac.bicep` fleet assumption | T228 |
-| `rg-spaarke-shared-{env}` and the per-tenant RGs of `model1-shared.bicep` | `stacks/model1-shared.bicep`, `prereqs.yaml` | T225a |
-| `sprkshared{env}-*` / `sprksharedprod-*` services (plan, OpenAI, AI Search, Redis, Service Bus, Storage, DocIntel) | `model1-shared.bicep` (the `manifest.yaml` `service_ref`s and H4-shared were removed by T226 ✅) | T225a |
-| `sprk-{env}-shared-bff-uami` | `modules/bff-runtime-rbac.bicep` | T225a |
-| Shared BFF App Service `spaarke-bff-{env}` in `rg-spaarke-{env}` as a customer runtime | `spaarke-constants.yaml` `bffAppServiceRg`; `prereqs.yaml` | T225a, T227 |
+| `rg-spaarke-shared-{env}` and the per-tenant RGs of `model1-shared.bicep` | Bicep + `prereqs.yaml` cleared ✅ T225a. Live: `rg-spaarke-shared-prod` (`sprksharedprod-api` stopped 2026-09-30) | T225a ✅ · decommission T241 |
+| `sprkshared{env}-*` / `sprksharedprod-*` services (plan, OpenAI, AI Search, Redis, Service Bus, Storage, DocIntel) | none in code (stack deleted ✅ T225a; `service_ref`s + H4-shared removed ✅ T226) | T225a ✅ · decommission T241 |
+| `sprk-{env}-shared-bff-uami` | none (caller stack deleted; `bff-runtime-rbac.bicep` names only the stamp UAMI) | T225a ✅ |
+| Shared BFF App Service `spaarke-bff-{env}` in `rg-spaarke-{env}` as a customer runtime | `spaarke-constants.yaml` `bffAppServiceRg` / `bffAppServiceName` → the skill's `{bffAppServiceId}` token (no prereq recipe uses it since T225a re-pointed PRQ-E-05 at the stamp) | T227 |
 | Shared BFF app registrations `Spaarke BFF - Trial 1` / `Spaarke BFF - Model 1` | `Register-EntraAppRegistrations.ps1:1243-1272`; `spaarke-constants.yaml:101-124` | T227 |
 | H0 `shared-trial` cost tier; `Model1MarginalEnvelopeUsd` (marginal-on-shared-platform) | `H0Options`, `H13AcceptanceOptions` | T229 |
 | H13 I2 probe against a shared AI Search `tenantId`-filter template | `AiSearchTenantFilterInvariantProbe` Model 1 branch | T230 |

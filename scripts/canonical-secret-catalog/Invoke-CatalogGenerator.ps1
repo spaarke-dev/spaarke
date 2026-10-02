@@ -1161,7 +1161,7 @@ function New-BicepArtifact {
 // upstream resource modules, or existing KV resource references).
 //
 // Consumers (task 086 — IaC alignment): reference this module from
-// customer.bicep / model2-full.bicep / model1-shared.bicep instead of
+// customer.bicep / model2-full.bicep instead of
 // declaring KV secrets inline. This is the single canonical source.
 //
 // SKIP-IF-ABSENT semantics (G-8 Batch 1 defect #15): a secret resource is

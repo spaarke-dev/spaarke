@@ -96,20 +96,16 @@
 //   exactly the two systemuser rows named by whatever bffAppRegId/miClientId/
 //   miObjectId InterStepState carries, without branching on run.TenancyModel.
 //   The Model 1 vs Model 2 SHAPE is established upstream, not here:
-//     - Model 1 (shared trial/SMB tier): H3 is a no-op for the BFF app-reg
-//       itself — the SAME shared multitenant app-reg + SAME shared UAMI
-//       (sprk-{env}-shared-bff-uami, model1-shared.bicep) are registered once
-//       per DV environment across every Model 1 customer sharing that
-//       platform tier. ZERO per-customer app-reg objects are ever created
-//       (§5.1 Reading 1, owner-decided 2026-08-25 per open question Q1) — so
-//       H10's per-customer dispatch for a Model 1 customer writes systemuser
-//       rows whose applicationid values are IDENTICAL to every other Model 1
-//       customer on the same DV env (that IS the "shared" contract; H10's own
-//       idempotent find-by-applicationid make this a safe no-op past the
-//       first Model 1 customer on a given env).
+//     - Model 1 (dedicated stamp in Spaarke's Azure tenant — D-12/D-13, 2026-09-28):
+//       the same shape as Model 2 below — a per-customer BFF app-reg (H3) and a
+//       per-stamp UAMI (H2a), so H10 writes this customer's own systemuser rows.
+//       (H2a refuses Model 1 runs until tasks 225b + 228 land — task 225a.)
+//       The former shared shape (one multitenant app-reg + `sprk-{env}-shared-bff-uami`
+//       registered once per DV environment for every Model 1 customer) is retired:
+//       H3's shared branch by task 222, the shared stack by task 225a.
 //     - Model 2 (dedicated stamp): H3 provisions a per-customer BFF app-reg +
 //       federated identity credential per customer, and H2a's uami.bicep
-//       provisions a per-stamp UAMI (`sprk-{env}-{customerId}-uami`) — see
+//       provisions a per-stamp UAMI (`mi-spaarke-{customerId}-{env}`, customer.bicep) — see
 //       GraphRegistrationProvisioner.cs:547-557 (task 130) for the per-profile
 //       issuer derivation that makes the Model 2 app-reg's identity genuinely
 //       per-customer. H10's dispatch for a Model 2 customer therefore writes

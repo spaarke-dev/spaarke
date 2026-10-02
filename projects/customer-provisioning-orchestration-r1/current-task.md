@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-01 SESSION 30 — **T245b ✅ + T245c ✅** (G25 closed). **Next: T225a.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G28).
+> **Last Updated**: 2026-10-02 SESSION 30 — T245b ✅ + T245c ✅ (G25 closed) + **T225a ✅**. **Next: T225b.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G28).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,10 +40,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **225a — Item 4 (D-12): retire `model1-*.bicep` across all seven surfaces** · `tasks/225a-item4-retire-model1-bicep-seven-surfaces.poml` · **not started** (FULL / sonnet @ xhigh) |
+| **Task** | **225b — Converge Model 1 onto the dedicated code path** · see plan §7 T225b (POML may need filing via task-create) · **not started** |
 | **Step** | none yet |
-| **Next Action** | `task-execute tasks/225a-item4-retire-model1-bicep-seven-surfaces.poml`. Then plan §7: T225b → T243 → T242 → T244 → T227 → T228 → T229/T230 → T232 → T233 → T240 → T218 → T235 → 213.7/207/208/209 → T186. |
-| **Verified state (end of T245c)** | ControlPlane.Tests **2141 pass / 6 fail (T221 baseline) / 1 skip**; ArchTests **337/337**; Api, Worker, LoadTests build 0/0; generator `-Verify` OK; prereqs validate OK (33); drift check exit 0. |
+| **Next Action** | Check `tasks/` for a T225b POML; if none, file it (task-create) from plan §7 T225b (H2b Model 1 branch + tenant-filter template → dedicated; H12c SharedPlatformOpenAiEndpoint; Seed-PlatformKeyVault.ps1:402-403; worker Bicep config; ArmDeploymentRunner Model 1 arm → `customer` (fails closed since T225a); tenancy × profile pairing G6; Model1SharedDagParityTests rename G13; G21 secret-free default incl. the two PinnedManifestGaps). Then `task-execute`. Plan §7 after: T243 → T242 → T244 → T227 → T228 → … → T186. |
+| **Verified state (end of T225a)** | Branch merged with master (`5de91f095`). ControlPlane.Tests **2141 pass / 6 fail (T221 baseline) / 1 skip**; ArchTests **340/340**; all Bicep stacks build, checked-in JSON = fresh compile; dry-run PASS (3 stacks); prereqs validate OK (manifest v4); catalog -Verify OK. |
 | **🔔 Open with the owner** | (a) **G28** — no SPE owning-app certificate in any readable vault; H0 rejects every run until the topology runbook creates it + an `speContainerTypeOwners` entry. (b) ADR-028 E-1 scope for L2 H0/H8/T6 — spec row PROPOSED (path B recommended). (c) ADR-020 registry-column semantics — spec row PROPOSED. (d) Vendor keys must be seeded into the platform vault (`Seed-PlatformKeyVault.ps1` does not); ContentSafety → T246. (e) H9 (and H10–H14) now wait on H5. (f) H0's 24 h cert-age gate vs the observed near-instant SPE wait. T245c decisions D14/D15 are recorded (plan §2). |
 | **Branch** | T245b committed + pushed. master ahead; merge master when the owner asks or before a PR. No open PR. |
 | **Owner decisions in force** | D13 keyless stamps; G23 `spaarke-demo` → later; **"if a fix is required and you can make it, do not defer"**; user (2026-10-01): "commit and /push-to-github; then continue with next tasks". |
@@ -55,6 +55,13 @@ decisions D14 / D15). `RunContextContractTests` has an empty known-gap list; the
 T246 (ContentSafety), T225b (secret-free default) and T227 (SPE container ids).
 
 ## 📁 Files Modified This Session
+
+### SESSION 30 (2026-10-02) — T225a (retire Model 1 shared Bicep) — committed
+
+See the T225a POML `<notes>`. Deleted 8 Bicep files; edited bff-runtime-rbac.bicep, bicep-e2e-dry-run.ps1, both
+provisioning workflows + manifest schema, prereqs.yaml (+ context-defaults, prereqs guide), ArmDeploymentRunner (Model 1
+fails closed) + test, L2/Bicep comments, READMEs, deployment guide / inventory / CI docs, `.claude` patterns + skills +
+CHANGELOG, spec ADR-027 row (superseded), plan §3/§4/§7, projects/INDEX.md + project CLAUDE.md (ci-cd-r1 CLOSED per owner).
 
 ### SESSION 30 (2026-10-01) — T245c (operator intake) — committed
 

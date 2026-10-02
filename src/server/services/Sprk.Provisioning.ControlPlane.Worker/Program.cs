@@ -206,9 +206,9 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 // timebomb; handler adds ARM read post-condition).
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
-//   - ADR-027 Path A: Model 1 shared-tier is documented exception —
-//     TenancyModel drives stack selection (Model1Shared → stacks/model1-shared.bicep;
-//     Model2Dedicated → customer.bicep). Full rationale: project spec.md § ADR Tensions.
+//   - ADR-027: no longer an exception (amended 2026-09-28 — one subscription per customer
+//     in both models). Model 2 deploys customer.bicep; Model 1 fails closed at H2a until
+//     tasks 225b + 228 (task 225a retired stacks/model1-shared.bicep). See project spec.md § ADR Tensions.
 //   - ADR-028 UAMI outbound: ArmDeploymentRunner / ArmKeyVaultRefProbe /
 //     ArmWhatIfDriftDetector all use DefaultAzureCredential pinned to the L2
 //     UAMI (via the shared TokenCredential singleton) — no account keys, no

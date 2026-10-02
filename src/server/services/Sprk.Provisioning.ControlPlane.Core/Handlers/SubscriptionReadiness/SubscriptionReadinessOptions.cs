@@ -17,8 +17,8 @@
 // into the readiness gate). The provider list content matches the punchlist
 // intent exactly.
 //
-// DEFAULT PROVIDER LIST — derived from the customer.bicep / model1-shared.bicep
-// template composition (the modules those two templates compose):
+// DEFAULT PROVIDER LIST — derived from the customer.bicep template composition
+// (the modules it composes):
 //   - Microsoft.KeyVault       (task 044 kv module, spec §7.9)
 //   - Microsoft.Storage        (task 044 storage module)
 //   - Microsoft.ServiceBus     (task 044 service-bus module, spec §11 R1)

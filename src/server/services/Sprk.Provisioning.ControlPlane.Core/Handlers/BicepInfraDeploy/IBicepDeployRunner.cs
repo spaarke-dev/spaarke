@@ -70,9 +70,9 @@ public interface IBicepDeployRunner
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>
 /// <param name="SubscriptionId">Target subscription id (ADR-027 D4 — customer subscription, never platform).</param>
 /// <param name="TenancyModel">
-/// <c>Model1Shared</c> or <c>Model2Dedicated</c> per <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
-/// Selects the Bicep stack: Model1Shared → <c>stacks/model1-shared.bicep</c>;
-/// Model2Dedicated → <c>customer.bicep</c> (or <c>stacks/model2-full.bicep</c>).
+/// <c>Model1</c> or <c>Model2</c> per <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
+/// Model 2 deploys <c>customer.bicep</c>. Model 1 fails closed (ArmDeploymentRunner) until tasks 225b + 228
+/// converge it onto the same dedicated stamp — task 225a retired <c>stacks/model1-shared.bicep</c> (D-12).
 /// </param>
 /// <param name="Template">
 /// Task 245b: the ARM template this run deploys, resolved once by
@@ -117,10 +117,10 @@ public sealed record BicepDeployRequest(
 }
 
 /// <summary>
-/// Task 245b: the ARM template H2a deploys — the compiled <c>customer.bicep</c> /
-/// <c>model1-shared.bicep</c> artifact CI publishes (<c>publish-provisioning-arm-artifacts.yml</c>).
+/// Task 245b: the ARM template H2a deploys — the compiled <c>customer.bicep</c> artifact CI publishes
+/// (<c>publish-provisioning-arm-artifacts.yml</c>).
 /// </summary>
-/// <param name="TemplateKey">The manifest's template key (<c>customer</c> | <c>model1-shared</c>).</param>
+/// <param name="TemplateKey">The manifest's template key (<c>customer</c> — the only key published since task 225a).</param>
 /// <param name="ArmJsonBlobName">The immutable per-build blob the manifest pointed at.</param>
 /// <param name="Json">The template JSON, exactly as downloaded.</param>
 /// <param name="Version">

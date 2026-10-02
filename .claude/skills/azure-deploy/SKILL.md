@@ -120,8 +120,8 @@ az account show --query "{Name:name, Id:id}" -o table
 | Stack | Path | Purpose |
 |-------|------|---------|
 | AI Foundry | `infrastructure/bicep/stacks/ai-foundry-stack.bicep` | AI Hub, Project, Storage, KV |
-| ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12)** — do not deploy. The shared tier does not exist, and this stack has not compiled since 2026-08-17. |
-| Customer stamp (**both models**) | `infrastructure/bicep/stacks/model2-full.bicep` | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). |
+| ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12); file deleted by task 225a (2026-10-01)** with `model1-customer.bicep` and `parameters/{dev,staging,prod}.bicepparam`. Model 1 customers are dedicated stamps built by the L2 control plane (H2a refuses Model 1 runs until tasks 225b + 228). |
+| Customer stamp (**both models**) | `infrastructure/bicep/customer.bicep` (deployed by L2 handler H2a) · `infrastructure/bicep/stacks/model2-full.bicep` (deployed by `deploy-infrastructure.yml`) | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). ⚠️ Two full-stamp templates exist and are not reconciled (recorded for T235). |
 
 ### Deploy Infrastructure
 

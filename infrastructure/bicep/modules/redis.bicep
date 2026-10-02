@@ -4,7 +4,7 @@
 //
 // FR-09 (spaarke-redis-cache-remediation-r1, task 020): parameter audit complete
 // 2026-06-25. SKU shape retained as string+int (NOT migrated to object) because
-// 3 in-tree callers (customer.bicep, stacks/model1-shared.bicep, stacks/model2-full.bicep)
+// the in-tree callers (customer.bicep, stacks/model2-full.bicep; model1-shared.bicep retired by task 225a)
 // already pass sku+capacity as separate args; the object decomposition is computed
 // internally below (family derived via skuFamilies map). See
 // projects/spaarke-redis-cache-remediation-r1/notes/redis-bicep-audit.md for the

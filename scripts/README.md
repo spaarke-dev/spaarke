@@ -1168,7 +1168,7 @@ pwsh scripts/Test-SpeContainerPermissionPaging.ps1 -ContainerId 'b!...' -AccessT
 ---
 
 ### `tests/bicep-e2e-dry-run.ps1`
-**Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 4 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep, stacks/model1-shared.bicep) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.
+**Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 3 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep — stacks/model1-shared.bicep was retired by task 225a) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.
 **Usage:** 🟡 Occasional - Before any PR that modifies infrastructure/bicep/** or after Wave C2 changes land; recurring pre-Phase F gate per customer-provisioning-orchestration-r1 spec FR-04.
 **Lifecycle:** ✅ Maintained (added 2026-08-17 by customer-provisioning-orchestration-r1 task 034)
 **Dependencies:** Azure CLI (`az login`), Bicep CLI (`az bicep install`), dev subscription context (for `-Mode DryRun/Full`)
@@ -1177,12 +1177,12 @@ pwsh scripts/Test-SpeContainerPermissionPaging.ps1 -ContainerId 'b!...' -AccessT
 **When to Use:**
 - Before merging any PR that touches `infrastructure/bicep/**`
 - After any Wave C2 task lands (027-033), to verify composition coherence
-- As Phase F gate to confirm the 4-stack composition still dry-runs cleanly
+- As Phase F gate to confirm the 3-stack composition still dry-runs cleanly
 - Nightly / scheduled runs (Phase H CI-wiring coordinated PR)
 
 **Command:**
 ```powershell
-# Tier 1 only: fast build check on all 4 stacks (no dev sub needed)
+# Tier 1 only: fast build check on all 3 stacks (no dev sub needed)
 pwsh scripts/tests/bicep-e2e-dry-run.ps1
 
 # Tier 1 + Tier 2: adds live what-if against dev subscription
@@ -1194,7 +1194,7 @@ pwsh scripts/tests/bicep-e2e-dry-run.ps1 -Mode Full
 
 **Related**: `projects/customer-provisioning-orchestration-r1/tasks/034-integration-test-bicep-dry-run.poml` (task POML); `projects/customer-provisioning-orchestration-r1/spec.md` FR-04; `projects/customer-provisioning-orchestration-r1/notes/bicep-e2e-dry-run-*.md` (per-run notes artifacts).
 
-**Known deferred failure**: `stacks/model1-shared.bicep` build fails as of 2026-08-17 (unmigrated caller of task-029 UAMI-only app-service.bicep). Marked `ExpectedBuild: EXPECTED_FAILURE` in the script — test still PASSES overall. Follow-on task recommended: migrate the `sharedBffApi` module invocation to the new UAMI-only param signature.
+**Retired stack**: `stacks/model1-shared.bicep` was retired by customer-provisioning-orchestration-r1 task 225a (2026-10-01, D-12); the script now builds 3 stacks and must be green (no `EXPECTED_FAILURE` mechanism any more). The old "build fails since 2026-08-17" deferral was a Windows artifact — `az bicep build --stdout` crashing on non-ASCII output — not a broken stack (the script now builds to a temp file).
 
 ---
 

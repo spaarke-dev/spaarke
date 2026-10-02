@@ -159,13 +159,11 @@ Infrastructure is organized into two parallel packaging tracks:
 **Azure (Bicep)**:
 - `infrastructure/bicep/modules/` — Reusable Bicep modules per resource type
 - `infrastructure/bicep/stacks/` — Composed deployments. The **full per-customer stack** (`model2-full.bicep`) is the only customer-facing shape; it deploys the same set of dedicated resources in both models. Plus `ai-foundry-stack.bicep`.
-  > 🔴 **Retired artifacts**: `model1-shared.bicep` (+ its manifest entry), `model1-customer.bicep`,
-  > `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam`. These encoded the shared-then-overlay shape and
-  > have no successor. Retirement is a **coordinated multi-surface change** (the stacks, the parameter files
-  > that `using` them, `scripts/tests/bicep-e2e-dry-run.ps1`'s polarity-inverted assertion, the
-  > `provisioning-arm-manifest.json` `required` key, and the publish workflow) — tracked in D-12 §6, not
-  > done here.
-- `infrastructure/bicep/parameters/` — One parameter file **per customer**, plus environment files: `dev.bicepparam`, `staging.bicepparam`, `prod.bicepparam`, `customer-template.bicepparam`, `model2-customer-template.bicepparam`, `demo-customer.bicepparam`
+  > 🔴 **Retired and deleted** (task 225a, 2026-10-01): `model1-shared.bicep` (+ its manifest entry),
+  > `model1-customer.bicep`, `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam` and the
+  > `parameters/{dev,staging,prod}.bicepparam` that `using` them. They encoded the shared-then-overlay shape
+  > and have no successor.
+- `infrastructure/bicep/parameters/` — One parameter file **per customer**: `customer-template.bicepparam`, `model2-customer-template.bicepparam`, `demo-customer.bicepparam` (plus `platform-*` / `redis-*` files for non-customer infrastructure; Model 2 per-env files live in `stacks/{env}.bicepparam`)
 
 **Power Platform**:
 - `power-platform/solutions/SpaarkeCore/` — Core entities, forms, views (managed solution ZIP)

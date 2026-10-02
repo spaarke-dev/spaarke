@@ -43,7 +43,7 @@ The key design decision is separating the PR gate from deployment and from provi
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
 | **Deploy Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch | Validate Bicep -> what-if preview (PR comment) -> deploy on approval. Deploys the **full per-customer stack**, which is the same in both deployment models (see the note below) |
-| **Publish Provisioning ARM Artifacts** | `publish-provisioning-arm-artifacts.yml` | Push to master (bicep paths), manual dispatch | Compiles `customer.bicep` + `stacks/model1-shared.bicep` to ARM JSON and publishes them for the H2a Azure-stamp deploy handler |
+| **Publish Provisioning ARM Artifacts** | `publish-provisioning-arm-artifacts.yml` | Push to master (bicep paths), manual dispatch | Compiles `customer.bicep` to ARM JSON and publishes it for the H2a Azure-stamp deploy handler (`model1-shared` retired by task 225a) |
 
 > **`deploy-platform.yml` removed** 2026-06-01 (commit `902bebc49c`, D-05). Spaarke's own non-customer-serving platform infrastructure is now deployed by running `scripts/Deploy-Platform.ps1` directly from an operator shell (`az`/`pwsh`) — it is no longer wrapped in a GitHub Actions workflow; see the script's own header comment for current usage.
 >
@@ -56,9 +56,9 @@ The key design decision is separating the PR gate from deployment and from provi
 > customer's). **Every Azure resource is dedicated per customer in both**, in that customer's own Azure
 > subscription and resource group, so infrastructure CI deploys **one full stack per customer** — there is
 > no shared-platform step to run first and no per-customer overlay on top of it. The `model1-shared.bicep`
-> and `model1-customer.bicep` stacks are **retired artifacts**; retiring them is a coordinated
-> multi-surface change (stacks, parameter files, `bicep-e2e-dry-run.ps1`, the provisioning ARM manifest
-> schema and the publish workflow) tracked in D-12 §6. The only model-dependent CI behaviour is that
+> and `model1-customer.bicep` stacks were **deleted by `customer-provisioning-orchestration-r1` task 225a
+> (2026-10-01)** together with their parameter files, the `bicep-e2e-dry-run.ps1` assertion, the provisioning
+> ARM manifest's `model1-shared` entry and the publish / deploy-infrastructure workflow steps. The only model-dependent CI behaviour is that
 > **Model 2 additionally requires H0.5 admin consent and Azure Lighthouse delegation**; Model 1 requires
 > neither.
 

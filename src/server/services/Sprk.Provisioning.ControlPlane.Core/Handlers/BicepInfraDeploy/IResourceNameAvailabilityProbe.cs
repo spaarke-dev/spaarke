@@ -3,7 +3,7 @@
 //
 // HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10 verbatim
 // absorption. Checks the globally-namespaced Azure resource names H2a's
-// customer.bicep + model1-shared.bicep templates deploy — Storage account,
+// customer.bicep template deploys — Storage account,
 // Key Vault, App Service, Service Bus, Cosmos, Azure OpenAI account, AI
 // Search — BEFORE the ~20 min Bicep deploy fires and burns the window on
 // a name collision (F10 verbatim: "burned 16m35s on the Session 2 first

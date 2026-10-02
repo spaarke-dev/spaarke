@@ -1179,9 +1179,8 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 
 **Symptom**: `model2-full.bicep` (or any stack that consumes the `ai-search` module) fails to compile
 
-> The original symptom also named `model1-shared.bicep`. That stack is a **retired artifact** (D-12 — the
-> "Model 1 = shared trial/SMB tier" no longer exists) and has not compiled since 2026-08-17. Do not treat a
-> failure there as this error.
+> The original symptom also named `model1-shared.bicep`. That stack was retired (D-12 — the "Model 1 =
+> shared trial/SMB tier" no longer exists) and deleted by task 225a (2026-10-01).
 
 **Resolution**: Change `listQueryKeys()[0].key` to `listQueryKeys().value[0].key`
 

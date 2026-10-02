@@ -1,7 +1,10 @@
 name: Deploy Bicep Infrastructure
 
 # Deploys Azure infrastructure via Bicep IaC with what-if preview and OIDC auth.
-# Supports Model 1 (shared multi-tenant) and Model 2 (customer-dedicated) stacks.
+# Deploys the Model 2 full stack (stacks/model2-full.bicep). The Model 1 shared
+# multi-tenant stack was retired by customer-provisioning-orchestration-r1 task
+# 225a (2026-10-01, D-12): every customer stamp is customer.bicep, provisioned by
+# the L2 control plane (H2a) — not by this workflow.
 #
 # Usage:
 #   - Push to master: validates Bicep only (no deployment)
@@ -32,7 +35,6 @@ on:
         required: true
         type: choice
         options:
-          - model1-shared
           - model2-full
       deploy:
         description: 'Actually deploy (false = what-if only)'
@@ -133,14 +135,6 @@ jobs:
           MISSING=0
 
           for env_name in dev staging prod; do
-            # Model 1 shared params
-            if [ -f "infrastructure/bicep/parameters/${env_name}.bicepparam" ]; then
-              echo "| Model 1 - ${env_name} | Found |" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "| Model 1 - ${env_name} | **MISSING** |" >> $GITHUB_STEP_SUMMARY
-              MISSING=$((MISSING + 1))
-            fi
-
             # Model 2 full params
             if [ -f "infrastructure/bicep/stacks/${env_name}.bicepparam" ]; then
               echo "| Model 2 - ${env_name} | Found |" >> $GITHUB_STEP_SUMMARY
@@ -181,17 +175,10 @@ jobs:
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           STACK="${{ github.event.inputs.stack || 'model2-full' }}"
 
-          if [ "$STACK" = "model1-shared" ]; then
-            TEMPLATE="infrastructure/bicep/stacks/model1-shared.bicep"
-            PARAMS="infrastructure/bicep/parameters/${ENV}.bicepparam"
-            SCOPE="subscription"
-            LOCATION="eastus"
-          else
-            TEMPLATE="infrastructure/bicep/stacks/model2-full.bicep"
-            PARAMS="infrastructure/bicep/stacks/${ENV}.bicepparam"
-            SCOPE="subscription"
-            LOCATION="eastus"
-          fi
+          TEMPLATE="infrastructure/bicep/stacks/model2-full.bicep"
+          PARAMS="infrastructure/bicep/stacks/${ENV}.bicepparam"
+          SCOPE="subscription"
+          LOCATION="eastus"
 
           echo "template=$TEMPLATE" >> $GITHUB_OUTPUT
           echo "params=$PARAMS" >> $GITHUB_OUTPUT
@@ -314,13 +301,8 @@ jobs:
           ENV="${{ github.event.inputs.environment }}"
           STACK="${{ github.event.inputs.stack }}"
 
-          if [ "$STACK" = "model1-shared" ]; then
-            TEMPLATE="infrastructure/bicep/stacks/model1-shared.bicep"
-            PARAMS="infrastructure/bicep/parameters/${ENV}.bicepparam"
-          else
-            TEMPLATE="infrastructure/bicep/stacks/model2-full.bicep"
-            PARAMS="infrastructure/bicep/stacks/${ENV}.bicepparam"
-          fi
+          TEMPLATE="infrastructure/bicep/stacks/model2-full.bicep"
+          PARAMS="infrastructure/bicep/stacks/${ENV}.bicepparam"
 
           echo "template=$TEMPLATE" >> $GITHUB_OUTPUT
           echo "params=$PARAMS" >> $GITHUB_OUTPUT
@@ -347,15 +329,11 @@ jobs:
 
           echo "### Deployment Verification" >> $GITHUB_STEP_SUMMARY
 
-          if [ "$STACK" = "model1-shared" ]; then
-            RG="rg-spaarke-shared-${ENV}"
-          else
-            # Model 2 RG naming from model2-full.bicep: rg-spaarke-{customerId}-{environment}
-            RG=$(az deployment sub show \
-              --name "bicep-${ENV}-*" \
-              --query "properties.outputs.resourceGroupName.value" \
-              --output tsv 2>/dev/null || echo "unknown")
-          fi
+          # Model 2 RG naming from model2-full.bicep: rg-spaarke-{customerId}-{environment}
+          RG=$(az deployment sub show \
+            --name "bicep-${ENV}-*" \
+            --query "properties.outputs.resourceGroupName.value" \
+            --output tsv 2>/dev/null || echo "unknown")
 
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY

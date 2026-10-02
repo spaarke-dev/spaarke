@@ -32,7 +32,8 @@
 //       BicepDeployOutputs (including the honest-empty fields for outputs
 //       customer.bicep does not currently produce — see ArmDeploymentRunner.cs
 //       file-header "BLOCKING DISCOVERY" note).
-//   T2  Model1Shared routes the manifest lookup to the "model1-shared" key
+//   T2  Model 1 fails closed (task 225a): its shared stack is retired and the dedicated
+//       Model 1 path is tasks 225b + 228 — no template is resolved or downloaded
 //       (ResolveTemplateAsync — task 245b split template resolution from deploy).
 //   T3  RG-ensure ARM rejection (403) -> BicepDeployOutcome.Failure, domain
 //       result (does NOT throw).
@@ -162,12 +163,12 @@ public sealed class ArmDeploymentRunnerTests
         ArmDeploymentRunner.ServiceBusFullyQualifiedNamespaceFromEndpoint(endpoint).Should().Be(expected);
     }
 
-    // ---------- T2 Model1Shared template routing ----------
+    // ---------- T2 Model 1 fails closed (task 225a) ----------
 
     [Fact]
-    public async Task ResolveTemplateAsync_Model1_ResolvesModel1SharedTemplateFromManifest()
+    public async Task ResolveTemplateAsync_Model1_FailsClosed_DownloadsNoTemplate()
     {
-        var requestedTemplateBlob = string.Empty;
+        var templateRequests = 0;
         var handler = ArmSdkTestFakes.NewHandler(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
@@ -175,22 +176,18 @@ public sealed class ArmDeploymentRunnerTests
             {
                 return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmManifestBody());
             }
-            if (path.EndsWith("model1-shared-arm-2026.08.19-1.json"))
-            {
-                requestedTemplateBlob = path;
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
-            }
-            throw new InvalidOperationException("unexpected request: " + path);
+            templateRequests++;
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
         });
 
         var runner = NewRunner(handler);
 
-        var template = await runner.ResolveTemplateAsync(
+        var resolve = () => runner.ResolveTemplateAsync(
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1, CancellationToken.None);
 
-        template.TemplateKey.Should().Be("model1-shared");
-        template.ArmJsonBlobName.Should().Be("model1-shared-arm-2026.08.19-1.json");
-        requestedTemplateBlob.Should().Contain("model1-shared-arm-2026.08.19-1.json");
+        (await resolve.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*not deployable yet*225b*228*");
+        templateRequests.Should().Be(0, "no customer.bicep template may be deployed for Model 1 before tasks 225b + 228");
     }
 
     // ---------- T3 RG-ensure ARM rejection ----------
@@ -368,8 +365,7 @@ internal static partial class ArmSdkTestFakes
         {
           "buildId": "2026.08.19-1",
           "templates": {
-            "customer": { "armJsonBlobName": "customer-arm-2026.08.19-1.json" },
-            "model1-shared": { "armJsonBlobName": "model1-shared-arm-2026.08.19-1.json" }
+            "customer": { "armJsonBlobName": "customer-arm-2026.08.19-1.json" }
           }
         }
         """;

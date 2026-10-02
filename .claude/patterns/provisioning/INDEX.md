@@ -31,8 +31,8 @@ src/
 infrastructure/
 ├── bicep/
 │   ├── modules/                              # single-resource Bicep modules
-│   ├── stacks/                               # tier-level compositions (model1-shared, model2-full, platform-controlplane)
-│   ├── customer.bicep                        # per-customer stamp (Model 2)
+│   ├── stacks/                               # tier-level compositions (model2-full; model1-shared retired by T225a — the customer stamp is customer.bicep)
+│   ├── customer.bicep                        # per-customer stamp — the template H2a deploys (Model 2; Model 1 after T225b + T228)
 scripts/
 ├── canonical-secret-catalog/manifest.yaml    # single source of truth for secrets (task 084 / FR-36)
 ├── provisioning-prereqs/prereqs.yaml         # single source of truth for manual prereqs (task 202)

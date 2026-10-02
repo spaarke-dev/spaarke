@@ -2731,7 +2731,7 @@ Before r1 can claim E2E-no-human-interaction:
 
 1. **Absorb F1-F20 into automated Step 2.5 + H4/H4b handlers + H6 solution-import handler + H9 BFF-deploy handler** (currently mostly informational)
 2. **Codify Spaarke canonical region defaults**: westus2 platform + westus3 OpenAI (baked into `Model 1 Prod` profile in `pac admin create`)
-3. **Parameterize `sharedOpenAiDeployments`** in `stacks/model1-shared.bicep` so skill can compute the deployment set at runtime (auto-quota compatible → full P5 progressive upgrade)
+3. **Parameterize the OpenAI deployment set** in `customer.bicep` (it passes none today — `openai.bicep` defaults apply) so the skill can compute the deployment set at runtime (auto-quota compatible → full P5 progressive upgrade). The original item named `stacks/model1-shared.bicep`, retired by T225a.
 4. **Auto-registration retry-verify** for all `Microsoft.*` providers
 5. **Auto-support-ticket flow** for cases where auto-grant path doesn't exist (advanced, gated on operator having Support Plan)
 6. **Introduce `Required Applications` manifest** on H6 solution-import handler (F13): config-driven list of AppSource apps that MUST be pre-installed on any Spaarke target env before SpaarkeMaster import. Initial list: `msft_PowerBI_Anchor`. Pre-import intersect + auto-install via `pac application install` loop.

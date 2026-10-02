@@ -331,8 +331,8 @@ module serviceBus 'modules/service-bus.bicep' = {
 // COSMOS DB (Per-customer AI platform state — Wave C2 prep, task 014)
 // Per spec §5.3 + FR-04 + R11 + § MUST rules: Cosmos MUST be per-customer (BFF prereq —
 // BFF will not start without it, R11). Unconditional invocation (no feature gate).
-// Wave C2 (task 032) will refactor into the multi-stack composition (model1-shared /
-// model2-full); this scaffold ensures the module is wired so C2 lands cleanly.
+// (Wave C2's multi-stack plan is moot: this is the template H2a deploys — Model 2 today, Model 1
+// with tasks 225b + 228 (D-12); task 225a retired stacks/model1-shared.bicep.)
 // Redis IS now provisioned per-customer (task 128b, E2 reconciliation) -- see the
 // REDIS CACHE section below + the updated header note. Redis is not co-located
 // with Cosmos DB in this file; it is grouped with the other supporting-infra
@@ -575,12 +575,12 @@ module bffApi 'modules/app-service.bicep' = {
     // G-8 Batch 1 defect #14: this invocation previously passed ZERO appSettings
     // — the Model 2 BFF booted with no config and no AZURE_CLIENT_ID UAMI pin,
     // so DefaultAzureCredential could not resolve the UAMI and the H9 health
-    // probe 404'd post-zip-deploy. Mirrors the model1-shared.bicep sharedBffApi
-    // pattern, adapted per-customer:
+    // probe 404'd post-zip-deploy. Mirrored the (since retired, task 225a)
+    // model1-shared.bicep sharedBffApi pattern, adapted per-customer:
     //   - KV references target the CUSTOMER vault using the CANONICAL secret
     //     names written by the kvSecrets module below (kv-secrets.generated.bicep
-    //     / manifest.yaml) — NOT the legacy lowercase names model1-shared still
-    //     carries for Redis/ServiceBus/Storage.
+    //     / manifest.yaml) — NOT the legacy lowercase names the retired shared
+    //     stack carried for Redis/ServiceBus/Storage.
     //   - Only secrets in this file's resolvable kvSecretValues set get KV refs. An
     //     unresolvable KV ref surfaces the literal @Microsoft.KeyVault(...) string as the
     //     setting value, which the BFF would then send as a key.
@@ -660,8 +660,7 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
 // / task 201 "Deferred #1"). Enables H4b Kudu docker-log fetch + H9 zip-deploy
 // from the L2 Worker. Split into modules/customer-l2-bff-rbac.bicep because
 // this stack (targetScope='subscription') cannot inline RG-scoped role
-// assignments (BCP139) -- same pattern as modules/model1-shared-l2-rbac.bicep
-// for the Model 1 tier.
+// assignments (BCP139) -- same pattern as modules/bff-runtime-rbac.bicep.
 // ============================================================================
 
 module customerL2BffRbac 'modules/customer-l2-bff-rbac.bicep' = {

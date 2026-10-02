@@ -168,7 +168,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `office-addins-tests.yml` | Office Add-ins Tests (Gate) | PR/push (scoped); reports only | Gated jest ratchet (56 of 56 suites), production-only TypeScript typecheck, office-scope C# server suites, ESLint |
 | `provisioning-prereqs-validate.yml` | provisioning-prereqs-validate | PR/push/merge_group; advisory | Validates `prereqs.yaml` + `intake.schema.json` shape and parser parity with the `/provision-environment` skill |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time) | Locates the 8 canonical pre-built managed-solution ZIPs, uploads them, and publishes the manifest H6 reads |
-| `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` + `stacks/model1-shared.bicep` to ARM JSON and publishes them for H2a |
+| `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
 | `redis-key-rotation.yml` | Redis Key Rotation | Scheduled (quarterly) / manual | Rotates the Redis access key per environment with safe-window rollback |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
 | `sdap-ci-docs-only.yml` | SDAP CI - Docs-Only Fallback | Legacy, PR-scoped | No-op success check pairing with `sdap-ci.yml`'s `paths-ignore` gap |
@@ -626,9 +626,9 @@ One job builds the external Secure Project Workspace SPA (Vite production build 
 
 #### `publish-provisioning-arm-artifacts.yml` — Publish Provisioning ARM Artifacts
 
-**Triggers**: `push` → `master` (paths: `infrastructure/bicep/customer.bicep`, `infrastructure/bicep/stacks/model1-shared.bicep`, `infrastructure/bicep/modules/**`), `workflow_dispatch`
+**Triggers**: `push` → `master` (paths: `infrastructure/bicep/customer.bicep`, `infrastructure/bicep/modules/**`, `scripts/canonical-secret-catalog/generated/**`), `workflow_dispatch`
 
-Installs the `az bicep` CLI, compiles `customer.bicep` and `stacks/model1-shared.bicep` to flattened ARM JSON (both templates compose only local-relative `module` references, so a single ARM JSON file results), computes SHA-256 + size for each, and uploads both plus a versioned-and-`-latest` manifest pair to the `provisioning-artifacts` blob container for the H2a Azure-stamp deploy handler. **Secrets/vars**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC), repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`.
+Installs the `az bicep` CLI, compiles `customer.bicep` to flattened ARM JSON (it composes only local-relative `module` references, so a single ARM JSON file results), computes its SHA-256 + size, and uploads it plus a versioned-and-`-latest` manifest pair to the `provisioning-artifacts` blob container for the H2a Azure-stamp deploy handler. **Secrets/vars**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC), repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT`.
 
 #### `publish-dataverse-solutions-manifest.yml` — Publish Dataverse Solutions Manifest
 

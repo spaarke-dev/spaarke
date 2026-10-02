@@ -250,12 +250,14 @@ App Service Plan — an App Service app cannot use a plan in a different subscri
 single per-customer fixed cost.
 
 **Bicep stack**: `infrastructure/bicep/customer.bicep` / `stacks/model2-full.bicep` — the same per-customer
-stamp for both models. ⚠️ `stacks/model1-shared.bicep`, `stacks/model1-customer.bicep`,
-`modules/model1-shared-l2-rbac.bicep` and `parameters/model1-prod.bicepparam` are **retired artifacts**;
-`model1-shared.bicep` has not compiled since 2026-08-17. Retiring them is a **coordinated multi-surface
-change** (parameter files bound by `using`, an inverted-polarity assertion in `bicep-e2e-dry-run.ps1` that
-passes only while the build fails, and a GitHub workflow whose manifest schema declares `model1-shared` a
-**required** key) — not yet done.
+stamp for both models. ✅ The Model 1 shared-tier templates — `stacks/model1-shared.bicep` (+ its checked-in
+JSON), `stacks/model1-customer.bicep`, `modules/model1-shared-l2-rbac.bicep`, `parameters/model1-prod.bicepparam`
+and `parameters/{dev,staging,prod}.bicepparam` — were **deleted by task 225a (2026-10-01)**, together with the
+inverted-polarity assertion in `bicep-e2e-dry-run.ps1` (now green with 3 stacks), the `model1-shared` compile +
+upload in `publish-provisioning-arm-artifacts.yml` (its manifest schema requires only `customer`) and the
+`model1-shared` option of `deploy-infrastructure.yml`. H2a deploys `customer` for Model 2; for Model 1 it **fails closed**
+(`arm-template-unavailable`, nothing deployed) until T225b converges the Model 1 code path and T228 gives each Model 1
+run its own subscription.
 
 ### 3.3 Handler behaviour — what differs
 
@@ -587,7 +589,7 @@ Failure diagnostic surfaces to operator; run does not start until resolved.
 
 **H2a** deploys the per-customer Bicep stack — **the same stack in both models** (D-12):
 - `customer.bicep` — 15 resources per §7.2 of design.md, into the customer's own subscription + resource group
-- ⚠️ `model1-shared.bicep` is a **retired artifact** (§3.2) and is not deployed
+- `model1-shared.bicep` was deleted by task 225a (§3.2); until T225b + T228, H2a **refuses** Model 1 runs (fails closed) rather than deploy `customer.bicep` into a non-dedicated subscription
 
 Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + report on drift (per FR-34).
 
@@ -976,8 +978,8 @@ If PATCH landed but startup still fails: RBAC hasn't propagated — check that t
 
 **The dual-row contract**: every provisioned environment needs **TWO** `systemuser` rows on the target Dataverse environment, not one:
 
-1. **App-reg row** (for OBO tokens) — `applicationid` = the BFF app-registration's client ID (Model 1: the single shared multitenant app-reg; Model 2: the per-customer app-reg). `azureactivedirectoryobjectid` is left to Dataverse's own AAD auto-resolution — reliable for a standard Entra app registration.
-2. **UAMI row** (for app-only calls) — `applicationid` = the UAMI's client ID **AND** `azureactivedirectoryobjectid` = the UAMI's **principalId (service principal object id) — NEVER its clientId**. Model 1: the shared `sprk-{env}-shared-bff-uami`. Model 2: the per-stamp `mi-spaarke-{customerId}-{env}`.
+1. **App-reg row** (for OBO tokens) — `applicationid` = the stamp's own BFF app-registration client ID (one per customer in **both** models — D-13; the former single shared multitenant Model 1 app-reg is retired). `azureactivedirectoryobjectid` is left to Dataverse's own AAD auto-resolution — reliable for a standard Entra app registration.
+2. **UAMI row** (for app-only calls) — `applicationid` = the UAMI's client ID **AND** `azureactivedirectoryobjectid` = the UAMI's **principalId (service principal object id) — NEVER its clientId**. Both models: the per-stamp `mi-spaarke-{customerId}-{env}` (the former shared Model 1 `sprk-{env}-shared-bff-uami` was retired with its stack by task 225a).
 
 **The trap**: both the UAMI's clientId and its principalId are valid-shaped GUIDs. A row created with `azureactivedirectoryobjectid` set to the clientId **still passes every existence + count check** — `pac admin application list`, the §12.3 T2 verification, and (pre-task-205d) H13's own T2 probe all reported the row as present and correct. The only symptom is that Dataverse rejects the token: the app-only Dataverse call's `oid` claim (the UAMI's real principalId) never matches a row registered under the wrong value.
 

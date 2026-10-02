@@ -9,8 +9,8 @@
 //      (H2b, H3, H4, H5, H12c per design.md §6.2).
 //
 // PARITY WITH BICEP OUTPUTS:
-//   Property names mirror the output names in <c>customer.bicep</c> +
-//   <c>stacks/model1-shared.bicep</c> + <c>modules/uami.bicep</c> +
+//   Property names mirror the output names in <c>customer.bicep</c> (the one
+//   customer-stamp template since task 225a) + <c>modules/uami.bicep</c> +
 //   <c>modules/openai.bicep</c> so the runner (shell-out to Provision-Customer.ps1
 //   or SDK-based) can map by string key without a translation layer. Required
 //   outputs (throw on missing) vs optional outputs (nullable) reflect the

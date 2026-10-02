@@ -4,7 +4,7 @@
     <title>Item 4 (D-12) — retire `model1-*.bicep` across all seven surfaces atomically, plus the shared-UAMI branch in `bff-runtime-rbac.bicep`, the shared entries in `prereqs.yaml`, and the Redis Bicep default (Basic C0 → Standard C1)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T225a (INCOMING §5 Item 4 + §6 bullets for bff-runtime-rbac / prereqs.yaml; gap G7)</phase>
     <gate>startable — master merged 2026-09-30 (40c4b2a02)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes Bicep stacks/modules/params and edits a CI workflow + JSON schema + a test script; seven surfaces must move together or the build breaks; deploy-adjacent (H2a reads the ARM-artifact manifest at provisioning time).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,62 @@
     <criterion>Every remaining stack + `customer.bicep` compiles; ControlPlane builds 0/0; ArchTest 337/337; ControlPlane.Tests ≤ 23 baseline failures, zero new.</criterion>
     <criterion>`controlplane-subscription-rbac.bicep` untouched (T228); no control-plane refactor beyond a minimal template-key repoint if the build required it (recorded).</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETION (2026-10-02). Verified: every remaining stack + customer.bicep builds and each checked-in ARM JSON matches
+    a fresh compile; bicep-e2e-dry-run.ps1 Build mode OVERALL PASS with 3 stacks; ControlPlane Api/Worker/Tests/LoadTests
+    0/0; ControlPlane.Tests 2141 pass / 6 fail (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip;
+    ArchTests 340/340 (master added 3); prereqs validate.ps1 OK (manifest v4); catalog -Verify OK.
+
+    Step 0: master re-merged (5de91f095 — 93 behind → 0; only conflict .claude/CHANGELOG.md, both kept).
+    ESCALATION TRIGGER 1 — should have fired and was escalated late: ci-cd-unit-test-remediation-r1 was REACTIVATED
+    2026-08-27 (projects/INDEX.md); I checked its stale branch tip and called it dormant, so the workflow edits (and
+    T245b's trigger-path edit) were made before asking. Raised at Step 9.5 (adr-check F1); OWNER 2026-10-02: "we need to
+    resolve this here; the ci-cd-r1 project is closed" → edits kept; INDEX.md + project CLAUDE.md updated.
+    TRIGGER 2 — not fired: parameters/{dev,staging,prod}.bicepparam deploy only the shared tier (rg-spaarke-shared-{env},
+    sprkshared{env}-*), not spaarke-bff-dev; read-only check: rg-spaarke-shared-prod exists in "Spaarke Model 1
+    Production" with sprksharedprod-api STOPPED (owner Q4, decommission T241); dev/staging shared RGs do not exist.
+    TRIGGER 3 — the first run was red for customer.bicep, but not because of the stack: `az bicep build --stdout` crashes
+    on Windows (cp1252, non-ASCII in the compiled template — pre-existing, HEAD's customer.json already carried 'Δ'/'→').
+    Harness fixed to --outfile; green with 3 stacks; no inverted assertion re-added.
+
+    DEVIATIONS / ADDITIONS:
+    - parameters/{dev,staging,prod}.bicepparam DELETED (not repointed): they parameterize only the retired shared tier;
+      Model 2's per-env files are stacks/{env}.bicepparam.
+    - deploy-infrastructure.yml edited (not in INCOMING's list): it builds stacks/*.bicep on every push/PR and offered a
+      model1-shared dispatch option bound to the deleted parameter files.
+    - Control plane: the POML permitted a minimal `customer` repoint only if a lookup failed at test time; it did not.
+      adr-check F2 (ADR-027): repointing made a Model 1 run deploy customer.bicep into a non-dedicated subscription,
+      half-wired to shared services. Pivoted to comply (path C): ArmDeploymentRunner's Model 1 arm FAILS CLOSED (H2a →
+      Resumable arm-template-unavailable, nothing deployed) until T225b (code path) + T228 (subscription per customer);
+      T2 test pins the throw. Model 1 runs stay blocked until both land (G28 blocks every run today anyway).
+    - Manifest schema keeps `model1-shared` as an OPTIONAL deprecated property (ADR-020: manifests published before
+      2026-10-02 still validate); no longer required or published. H2a never reads it.
+    - bff-runtime-rbac.bicep: no code branch existed — comments + parameter descriptions name only the stamp UAMI; the
+      DEPLOYED role-assignment description is kept verbatim (code-review CR-1: changing it makes every existing stamp's
+      upgrade what-if report a Modify, which ArmWhatIfDriftDetector rejects as drift).
+    - PRQ-E-05 rescoped once_per_env → once_per_customer and pointed at the stamp's own BFF (it is an H2a postcondition;
+      new tokens {stampSubscriptionId} / {stampEnvironment} documented). PRQ-E-06 / E-10 / C-02 reworded. prereqs.yaml
+      manifest_version 3 → 4 (also covers T245c's PRQ-C-08).
+    - bicep-e2e-dry-run.ps1: EXPECTED_FAILURE mechanism removed (zero users; a free-text build-failure mask), MISSING now
+      fails the verdict, Assertion 7 (checked the working tree's git status, not the Bicep) removed.
+    - Recompiled stale checked-in JSON: modules/bff-runtime-rbac.json, customer.json, stacks/model2-full.json (gpt-4o pin
+      drifted after the master merge), platform.json.
+    - RECORD CORRECTED: "model1-shared.bicep has not compiled since 2026-08-17" was false (caller migrated 6ff75702a
+      2026-08-18; deployed live 2026-08-22) — it only failed on Windows via the --stdout crash. For T241: the stack is
+      last present at 5de91f095 and was last modified in 1bc049e4c.
+    - Redis default unchanged (D12/T242); controlplane-subscription-rbac.bicep untouched (T228).
+
+    FOR T235 (references left, non-breaking): BFF comment-only references — CustomerIdResolver.cs:107,
+    ConfigurationModule.cs:42, SessionFileBlobStore.cs:146, appsettings.template.json:432, CustomerIdResolverTests.cs
+    (the reserved 'shared' id is intentional); AZURE-RESOURCE-NAMING-CONVENTION.md; docs/assessments (dated, historical);
+    the two unreconciled full-stamp templates (customer.bicep via H2a vs stacks/model2-full.bicep via
+    deploy-infrastructure.yml, which deploys into the single secrets.AZURE_SUBSCRIPTION_ID — also a T228 concern); the
+    infrastructure README's legacy keyed-secret post-deploy steps.
+
+    Test-scope justification: ArmDeploymentRunnerTests T2 rewritten to pin the fail-closed behaviour (the changed
+    production behaviour); no other test added.
+  </notes>
 
   <outputs>
     <output type="file-deleted">infrastructure/bicep/stacks/model1-shared.bicep, model1-shared.json, model1-customer.bicep; modules/model1-shared-l2-rbac.bicep; parameters/model1-prod.bicepparam</output>

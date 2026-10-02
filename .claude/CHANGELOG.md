@@ -7,6 +7,25 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-02 — provisioning: Model 1 shared-tier Bicep retired (T225a, D-12)
+
+`customer-provisioning-orchestration-r1` T225a.
+
+- **`.claude/patterns/provisioning/{INDEX,openai-quota-region-composition,operator-rbac-bootstrap,keyvault-reference-identity-invariant}.md`**:
+  no longer point at the deleted `stacks/model1-shared.bicep` / `model1-shared-l2-rbac.bicep`. The OpenAI pattern
+  points at `customer.bicep`'s `openAiLocation` + `openai.bicep`'s `deployments` default; the two recovery recipes
+  use stamp placeholders (`{stampSubscriptionId}`, `rg-spaarke-{customerId}-{env}`, …) instead of the retired shared
+  subscription and names — the original incident is named once, as history.
+- **`.claude/skills/azure-deploy/SKILL.md`**: the Model 1 Shared row records the deletion; the customer-stamp row names
+  both full-stamp templates (`customer.bicep` via H2a, `model2-full.bicep` via `deploy-infrastructure.yml`) and flags
+  that they are not reconciled (T235).
+- **`.claude/skills/provision-environment/SKILL.md`**: roadmap item 3 parameterizes the OpenAI deployment set in
+  `customer.bicep` (it named the deleted stack).
+- The mechanism: the Model 1 shared stacks, the shared RBAC module and the four parameter files bound to them are
+  deleted; the ARM-artifact workflow publishes only `customer`; `ArmDeploymentRunner` fails closed for Model 1 until
+  T225b + T228; `bicep-e2e-dry-run.ps1` builds to a file (Windows `--stdout` crash) and has no EXPECTED_FAILURE mask.
+
+---
 ###### 2026-10-01 — provisioning: operator intake validated at the edge with the handlers' own rules (T245c, G25 closed)
 
 `customer-provisioning-orchestration-r1` T245c.

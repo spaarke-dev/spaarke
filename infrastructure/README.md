@@ -8,8 +8,11 @@ Spaarke supports two deployment models:
 
 | Model | Description | Use Case |
 |-------|-------------|----------|
-| **Model 1** | Spaarke-hosted multi-tenant | SaaS customers, shared infrastructure |
-| **Model 2** | Customer-hosted dedicated | Enterprise customers, dedicated resources |
+| **Model 1** | Dedicated stamp in **Spaarke's** Azure tenant (D-12) | Customers Spaarke hosts — every resource dedicated, own subscription |
+| **Model 2** | Dedicated stamp in the **customer's** Azure tenant | Enterprise customers hosting in their own tenant |
+
+Both models deploy the same per-customer stamp (`bicep/customer.bicep`, via the L2 control plane); there is no shared
+Model 1 infrastructure.
 
 ## Directory Structure
 
@@ -28,19 +31,15 @@ infrastructure/
 │   │   ├── doc-intelligence.bicep
 │   │   └── monitoring.bicep
 │   │
+│   ├── customer.bicep     # The customer stamp — Model 1 AND Model 2 (D-12); deployed by L2 H2a
 │   ├── stacks/            # Composed deployments
-│   │   ├── model1-shared.bicep    # Model 1: Shared services
-│   │   ├── model1-customer.bicep  # Model 1: Per-customer resources
 │   │   └── model2-full.bicep      # Model 2: Complete deployment
+│   │                              # (model1-shared / model1-customer retired by task 225a, 2026-10-01)
 │   │
 │   └── parameters/        # Environment-specific parameters
-│       ├── dev.bicepparam
-│       ├── prod.bicepparam
 │       └── customer-template.bicepparam
 │
 ├── scripts/               # Deployment automation (TODO)
-│   ├── Deploy-Model1-Shared.ps1
-│   ├── Deploy-Model1-Customer.ps1
 │   └── Deploy-Model2-Full.ps1
 │
 └── docs/                  # Deployment documentation (TODO)
@@ -60,25 +59,14 @@ infrastructure/
    - Contributor on subscription (for resource group creation)
    - User Access Administrator (for RBAC assignments)
 
-### Deploy Model 1 (Shared Infrastructure)
+### Model 1 (no shared infrastructure)
 
-```powershell
-# Login to Azure
-az login
-az account set --subscription "Your Subscription Name"
-
-# Deploy shared infrastructure (dev)
-az deployment sub create \
-  --location eastus \
-  --template-file bicep/stacks/model1-shared.bicep \
-  --parameters bicep/parameters/dev.bicepparam
-
-# Deploy shared infrastructure (prod)
-az deployment sub create \
-  --location eastus \
-  --template-file bicep/stacks/model1-shared.bicep \
-  --parameters bicep/parameters/prod.bicepparam
-```
+There is no shared Model 1 tier any more (D-12, 2026-09-28): a Model 1 customer is a **dedicated stamp** in
+Spaarke's Azure tenant, built from `bicep/customer.bicep` by the L2 control plane (handler H2a) — run
+`/provision-environment`, see `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`. (Until tasks 225b + 228 land,
+H2a refuses Model 1 runs — fails closed — rather than deploy into a non-dedicated subscription.) The former
+`stacks/model1-shared.bicep` / `model1-customer.bicep` and their `parameters/{dev,staging,prod}.bicepparam` were
+retired by `customer-provisioning-orchestration-r1` task 225a (2026-10-01).
 
 ### Deploy Model 2 (Customer Deployment)
 
@@ -87,10 +75,11 @@ az deployment sub create \
 cp bicep/parameters/customer-template.bicepparam bicep/parameters/contoso.bicepparam
 # Edit contoso.bicepparam with customer-specific values
 
-# 2. Deploy
+# 2. Deploy (customer-template.bicepparam is `using '../customer.bicep'`, so the template must match).
+#    Normal path: the L2 control plane deploys this via /provision-environment (handler H2a).
 az deployment sub create \
   --location eastus \
-  --template-file bicep/stacks/model2-full.bicep \
+  --template-file bicep/customer.bicep \
   --parameters bicep/parameters/contoso.bicepparam
 
 # 3. Store secrets in Key Vault (from deployment outputs)

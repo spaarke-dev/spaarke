@@ -1,9 +1,14 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 3 · **Last Updated**: 2026-10-01
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 3)
+> **Version**: 4 · **Last Updated**: 2026-10-02
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 4)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v4 (2026-10-02, `customer-provisioning-orchestration-r1` T225a)**: the Model 1 shared stack is retired (files
+> deleted). `PRQ-E-05` moved `once_per_env` → `once_per_customer` and now targets the stamp's own BFF — it is an H2a
+> postcondition (`customer.bicep` emits the grant), documented for operators, not run by Step 0.5b. `PRQ-E-06`,
+> `PRQ-E-10` and `PRQ-C-02` no longer name the retired stack (PRQ-C-02's pins live in `modules/openai.bicep`).
 >
 > **v3 addendum (2026-10-01, `customer-provisioning-orchestration-r1` T245c)**: `PRQ-C-08` **added** — the
 > Exchange mail-enabled security group that scopes H14a's ApplicationAccessPolicy. The Exchange admin of the
@@ -58,8 +63,8 @@ Prereqs are grouped by **scope**:
 |---|---|---|
 | `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
-| `once_per_env` | 11 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12`; ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 9 | `PRQ-C-01` … `PRQ-C-08`, `PRQ-E-13` (id kept; scope corrected 2026-09-30) |
+| `once_per_env` | 10 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`; ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
+| `once_per_customer` | 10 | `PRQ-C-01` … `PRQ-C-08`, `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
 | **Total** | **33** (31 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
@@ -122,7 +127,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-S-04 | L2 UAMI subscription Contributor | Spaarke admin | H2a `ArmDeploymentRunner` 403s |
 | PRQ-S-05 | Operator has Owner OR Contributor+UAA on sub | Sub owner | F15/F18 — operator KV data-plane bootstrap 403 |
 
-### Once-per-env (11 active + 1 retired)
+### Once-per-env (10 active + 1 retired)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -130,7 +135,6 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-02 | Platform ACR (for L2 sidecar image) | Spaarke admin | Sidecar image cannot be pushed; H14a permanently blocked |
 | PRQ-E-03 | L2 UAMI Storage Blob Data Reader on artifacts storage | Spaarke admin | H2a/H9 artifact download 403 |
 | PRQ-E-04 | L2 UAMI AcrPull on platform ACR | Spaarke admin | Sidecar image pull fails at H14a dispatch |
-| PRQ-E-05 | L2 UAMI Website Contributor on target BFF App Service | Spaarke admin | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | ~~PRQ-E-06~~ | 🔴 **RETIRED 2026-09-30 (T226)** — was *"L2 UAMI service-specific RBAC on 6 shared source services"* (for the H4-shared handler) | — | **None.** No handler reads a shared service's keys; H4b never depended on these roles. |
 | PRQ-E-07 | L2 UAMI Graph app-role grants | Spaarke admin (script) | L2 H7/H10/H11/H12c 403 silently on every Graph call |
 | PRQ-E-08 | L2 UAMI Dataverse App User (Path X) on admin env | Spaarke admin | L2 cannot read/write `sprk_dataverseenvironment` registry rows |
@@ -139,7 +143,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-E-11 | L2 UAMI SB Data Sender + Data Receiver | Spaarke admin (Bicep) | Dispatcher DOA — cannot enqueue or dequeue |
 | PRQ-E-12 | Provisioning SB queue with sessions + dedup | Spaarke admin (Bicep + ceremony) | Session receiver throws on `StartProcessingAsync`; §4C retries lost |
 
-### Once-per-customer (8)
+### Once-per-customer (10)
 
 | ID | Prereq | Owner | Consequence of absence |
 |---|---|---|---|
@@ -151,6 +155,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
 | PRQ-C-08 | Exchange mail-enabled security group scoping the Spaarke ApplicationAccessPolicy — its id is the intake value `exchangePolicyScopeGroupId` (T245c) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
+| PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 
 ---
