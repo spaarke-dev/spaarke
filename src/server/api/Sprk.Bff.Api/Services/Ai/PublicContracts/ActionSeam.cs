@@ -96,6 +96,7 @@ public sealed class ActionSeam : IActionSeam
                 Subject: request.Subject,
                 Description: request.Description,
                 ScheduledEnd: request.DueDate?.ToUniversalTime(),
+                FinalDueDate: request.FinalDueDate?.ToUniversalTime(),
                 RegardingObjectId: request.RegardingObjectId,
                 RegardingObjectType: request.RegardingObjectType,
                 OwnerId: request.OwnerId,

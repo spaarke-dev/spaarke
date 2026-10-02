@@ -465,7 +465,12 @@ public class DailyBriefingCollector : ICodedWorkflow
             IncludeStateFilter: true),
         // Event has both sprk_duedate and sprk_finalduedate; use sprk_finalduedate first,
         // fall back to sprk_duedate. This mirrors QueryUpcomingTasksAsync's precedence.
-        new(EntityEvent, "sprk_events", "sprk_eventid", "sprk_eventname", "sprk_eventdescription",
+        // 🔴 Fixed 2026-09-29 (spaarke-ontology-platform-r1, master #1032): the description column was
+        // "sprk_eventdescription", which DOES NOT EXIST on sprk_event — the real column is "sprk_description", exactly
+        // as every sibling entry in this list already uses. The bad column made Dataverse reject the whole retrieve, so
+        // this channel threw on every briefing run and the briefing could not see tasks at all (AP-14). Merged with task
+        // 152's people-targeting spec shape (entity set, no per-spec owner switch).
+        new(EntityEvent, "sprk_events", "sprk_eventid", "sprk_eventname", "sprk_description",
             DueDateColumn: "sprk_finalduedate", FallbackDueDateColumn: "sprk_duedate", KindLabel: "Task",
             IncludeStateFilter: false),
         new(EntityTodo, "sprk_todos", "sprk_todoid", "sprk_name", "sprk_description",

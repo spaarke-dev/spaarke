@@ -685,6 +685,24 @@ public sealed class DailyBriefingCollectorTests
         request.TotalNotificationCount.Should().Be(1);
     }
 
+    [Fact]
+    public async Task CollectHighPriorityAsync_EventQuery_SelectsTheRealDescriptionColumn()
+    {
+        // master #1032 (spaarke-ontology-platform-r1): "sprk_eventdescription" does NOT exist on sprk_event, so selecting
+        // it made Dataverse reject the whole retrieve and the briefing could see no tasks at all. The real column is
+        // "sprk_description". Pinned here against task 152's impersonated, people-targeted query shape.
+        var eventId = Guid.Parse("66666666-6666-6666-6666-66666666666e");
+        var query = new FakeCallerQuery();
+        query.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", eventId, "Task"), eventId);
+
+        await Sut(query, PeopleResolver(new Dictionary<string, Guid[]> { ["sprk_event"] = new[] { eventId } }))
+            .CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        var eventCalls = query.Calls.Where(c => c.EntitySet == "sprk_events").ToList();
+        eventCalls.Should().NotBeEmpty();
+        eventCalls.Should().OnlyContain(c => c.Query.Contains("sprk_description") && !c.Query.Contains("sprk_eventdescription"));
+    }
+
     private static int CountOf(string haystack, string needle)
     {
         var count = 0;
