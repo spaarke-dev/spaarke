@@ -7,6 +7,30 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-01 — provisioning: operator intake validated at the edge with the handlers' own rules (T245c, G25 closed)
+
+`customer-provisioning-orchestration-r1` T245c.
+
+- **`.claude/constraints/provisioning.md`** + **`.claude/patterns/provisioning/run-context-contract.md`**: new rule — an
+  intake value a handler has rules for is validated at `POST /api/runs` with the same rules: shared code where the
+  rule is non-trivial (`UserProvisioningIntake` serves both H11 and the endpoint), the handler's own rejection code
+  where it has one. The prerequisite-registry sentence no longer names a `tenancyModel` field that does not exist.
+- **`/provision-environment` SKILL.md**: new **Step 1e-bis** (before 1f, so a bad value stops the skill before the
+  registry placeholder is written) collects `identityPreset`, the user list (NativeAccount: names; B2BGuest: email),
+  the Exchange scope group (prerequisite `PRQ-C-08` — created by the stamp tenant's Exchange admin; the skill never
+  creates it), the Graph subscription resources and the Communication default mailbox; batch mode hard-stops on any of
+  them. Step 1.0 refuses a batch intake file git would track (it carries personal data — owner decision D15;
+  `runs/*-intake.json` is git-ignored). Step 4.0 sends the values (`usersJson` = `ConvertTo-Json -InputObject
+  @($users)` — `-AsArray` double-nests; `@($null).Count` is 1, so `$users` is normalised first), sends
+  `estimatedMonthlyUsd` as a string (a JSON number fails binding against the string map), and posts with
+  `charset=utf-8`. Also fixed: the handler catalog row and the Step 3 plan said Model 2 skips H11 — nothing skips it.
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `Communication-DefaultMailbox` is
+  `from-intake-parameter`; only `ContentSafety-ApiKey` (T246) is left on the writer-less run-parameter channel.
+- The mechanism: five intake keys required; H11's diagnostics and the Graph collaborators' logs identify users by
+  position / Entra object id, never by name, email or UPN; `POST /api/runs` releases the I5 run guard when the run-store
+  write fails; `RunContextContractTests`' known-gap list is empty and its catalog-member map derived by reflection.
+
+---
 ###### 2026-10-01 — provisioning: values L2 owns are configuration or computed, never run parameters (T245b, G25)
 
 `customer-provisioning-orchestration-r1` T245b.

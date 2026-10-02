@@ -172,12 +172,8 @@ Write-Host '  SKIP: BingSearch-ApiKey (value_source=from-platform-vault; copied 
 
 # ---- Communication-DefaultMailbox (communication) ----
 # Purpose: Default mailbox address for Communication module (outbound + Approved-Senders default).
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Communication-DefaultMailbox' -Value 'placeholder-from-run-parameter' -Description 'Default mailbox address for Communication module (outbound + Approved-Senders default).' -Category 'communication'
-} else {
-    Write-Host '  SKIP: Communication-DefaultMailbox (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-intake-parameter
+Write-Host '  SKIP: Communication-DefaultMailbox (value_source=from-intake-parameter; written by H4 from the intake value)' -ForegroundColor Gray
 
 # ---- Communication-Webhook-SigningKey (communication) ----
 # Purpose: HMAC-SHA256 signing key for /api/communications/incoming-webhook (X-Hub-Signature-256 header). Kebab canonical per §7.9 R2 (new secrets are kebab-case; the drift form `compose-webhook-signingkey` run-together is a Phase H alias-collapse target on the sibling Compose secret, not this one — the two just look similar).

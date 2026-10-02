@@ -331,7 +331,7 @@ parameters: `POST /api/runs` rejects them. A missing or malformed value stops th
 | Setting (`Worker` app setting) | What it is | Read by |
 |---|---|---|
 | `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId` | Object id of L2's own UAMI — the principal H4 grants **Key Vault Secrets Officer** on each customer vault before writing it. Never the stamp's BFF UAMI (that one only reads its vault). | H4 |
-| `KvSecretsPopulationOptions__PlatformVaultName` | Spaarke platform vault holding the Spaarke-shared vendor keys (`BingSearch-ApiKey`, `LlamaParse-ApiKey`) under their canonical names; H4 copies them into each customer vault. | H4 |
+| `KvSecretsPopulationOptions__PlatformVaultName` | Spaarke platform vault holding the Spaarke-shared vendor keys (`BingSearch-ApiKey`, `LlamaParse-ApiKey`) under their canonical names; H4 copies them into each customer vault. Defaults to the Worker's platform vault, where Bicep grants the Worker UAMI Key Vault Secrets User — **any other vault must grant it itself**. | H4 |
 | `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId`, `OwnerAppId` (the container type's **owning** app), `OwnerCertKeyVaultName` + `OwnerCertSecretName` (its certificate, base64 PFX — canonical `SPE-OwnerCert-Pfx`). The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run until the topology runbook has created a container type + owning app and its entry is added. | H0 (SpeCertBootstrap), H8, H13 (T6) |
 | `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
 
@@ -342,6 +342,20 @@ Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrinc
 Artifact versions in idempotency keys (`bicepVer`, `indexVer`, `secretsVer`) are computed by L2 from the artifact each
 handler applies — the ARM template H2a deploys, the index schemas H2b PUTs, the secret-catalog manifest H4 / H4b read —
 so the same artifact gives the same key and a changed artifact is re-applied.
+
+**Operator intake — required at `POST /api/runs`** (task 245c). Values only the operator knows. `POST /api/runs`
+refuses a run that breaks a rule, **with the handler's own rule and rejection code** (H11's through the same
+`UserProvisioningIntake` code H11 runs), before the run guard, the registry lookup, any Cosmos write or enqueue — intake
+is fixed once the run exists. `/provision-environment` Step 1e-bis collects them; `intake.schema.json` carries the
+same rules for batch mode.
+
+| Intake key | Read by | Rule (400 `errorCode`) |
+|---|---|---|
+| `identityPreset` | H11 | `B2BGuest` \| `NativeAccount`, exact case (`userprov-missing-identity-preset` / `userprov-invalid-identity-preset`) |
+| `usersJson` | H11 | JSON array, 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName`; `B2BGuest`: `email` (`userprov-missing-users` / `userprov-malformed-users-payload` / `userprov-invalid-user-entry` / `userprov-too-many-users`). Personal data: stored in the L2 run document (owner decision D15); never in git; diagnostics and logs identify users by position / Entra object id. |
+| `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group scoping the Exchange ApplicationAccessPolicy — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
+| `communicationGraphResource` / `emailGraphResource` | H14b | at least one non-blank (`h14b-no-webhook-targets-configured`) |
+| `communicationDefaultMailbox` | H4 → KV `Communication-DefaultMailbox` | `local@domain.tld` (`intake-communication-default-mailbox-invalid`) |
 
 **API surface** (per FR-21):
 

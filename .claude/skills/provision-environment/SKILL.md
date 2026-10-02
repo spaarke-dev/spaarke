@@ -39,7 +39,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 | L2 REST surface | `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/clear-quarantine` |
 | L2 audience (token) | `api://spaarke.com/provisioning-controlplane-{env}` |
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
-| Handler catalog | 20 handlers per run (Model 1 Shared: 19 — skips H0.5; Model 2 Dedicated: 19 — skips H11): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14 — the 20 ids in `HandlerIds.Dispatchable` (`Sprk.Provisioning.ControlPlane.Core`), H0 included. H4-shared was retired by T226 (2026-09-30). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
+| Handler catalog | 20 handlers per run (Model 1: 19 — skips H0.5; Model 2: 20 — H11 runs on EVERY run, both models; it was once documented as skipped for Model 2, but `DagAdvancer` has no such skip and H12a/H12b depend on it): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14 — the 20 ids in `HandlerIds.Dispatchable` (`Sprk.Provisioning.ControlPlane.Core`), H0 included. H4-shared was retired by T226 (2026-09-30). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
 | Trap catalog | 7 traps T1-T7 (see design §4B) — each handler asserts its trap clear before reporting success |
 | Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests + verified at H13 acceptance |
 | Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
@@ -606,6 +606,19 @@ if ($BatchIntakeFile) {
     exit 1
   }
 
+  # T245c / owner decision D15: the intake carries personal data (the H11 user list). It may live in the L2 run
+  # document, never in git — so refuse a file git would track. Inside a repo it must be ignored (`runs/*-intake.json`
+  # is); `git check-ignore` exits 1 for a tracked file and for an untracked-but-not-ignored one.
+  $intakeFullPath = (Resolve-Path $BatchIntakeFile).Path
+  $intakeDir = Split-Path -Parent $intakeFullPath
+  if ((git -C $intakeDir rev-parse --is-inside-work-tree 2>$null) -eq 'true') {
+    git -C $intakeDir check-ignore -q -- $intakeFullPath
+    if ($LASTEXITCODE -ne 0) {
+      Write-Error "[skill] Batch intake HARD STOP: '$BatchIntakeFile' is inside a git repository and not ignored, and it carries personal data (users). Keep it outside the repo, or name it runs/{customerId}-intake.json (ignored). If it is already tracked: git rm --cached it."
+      exit 1
+    }
+  }
+
   # Pre-fill from validated intake (skips 1a-1e interactive prompts)
   $intake         = Get-Content $BatchIntakeFile -Raw | ConvertFrom-Json -Depth 10
   $customerId     = $intake.customerId
@@ -622,6 +635,13 @@ if ($BatchIntakeFile) {
   $tier           = $intake.tier                # optional
   $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # COMP-10 (SESSION 17) + Bucket A HIGH#8 (SESSION 18): consumed by Step 4.0 nonSecretParameters + H0 cost-envelope gate. Null in interactive mode → H0 log-only skips (unchanged interactive behavior).
   $notes          = $intake.notes               # optional
+  # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
+  $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case)
+  $users                       = if ($null -ne $intake.users) { @($intake.users) } else { @() }   # sent as nonSecretParameters.usersJson (Step 4.0); never @($null) — its Count is 1
+  $exchangePolicyScopeGroupId  = $intake.exchangePolicyScopeGroupId   # created by the stamp tenant's Exchange admin (PRQ-C-08)
+  $communicationGraphResource  = $intake.communicationGraphResource   # at least one of these two
+  $emailGraphResource          = $intake.emailGraphResource
+  $communicationDefaultMailbox = $intake.communicationDefaultMailbox
   $operatorUpn    = az ad signed-in-user show --query userPrincipalName -o tsv  # NEVER trust an operatorUpn field in the JSON (would risk NFR-11 spoof)
   $script:SkipInteractiveIntake = $true         # gates 1a-1e prompts below
   $script:SkipStep0_5 = [bool]$intake.skipExternalPrereqs  # honors batch opt-in
@@ -658,7 +678,7 @@ if ($BatchIntakeFile) {
 }
 ```
 
-**Semantics**: when `-BatchIntakeFile` is passed, sub-steps 1a-1e are non-interactive (values already assigned from the validated JSON). Sub-step 1f (environmentId auto-create via Dataverse MCP / `pac data create`) still runs when `intake.environmentId` was omitted or null. The `--batch` path also honors `intake.skipExternalPrereqs` as a batch-native `-SkipStep0_5` equivalent (see Step 0.5c) — recorded in Step 7 lessons-learned.md when set.
+**Semantics**: when `-BatchIntakeFile` is passed, sub-steps 1a-1e and 1e-bis are non-interactive (values already assigned from the validated JSON; a missing or invalid value is a HARD STOP — the schema refuses it, and 1e-bis re-checks it in case a fallback validator skipped a conditional rule). Sub-step 1f (environmentId auto-create via Dataverse MCP / `pac data create`) still runs when `intake.environmentId` was omitted or null. The `--batch` path also honors `intake.skipExternalPrereqs` as a batch-native `-SkipStep0_5` equivalent (see Step 0.5c) — recorded in Step 7 lessons-learned.md when set.
 
 Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) `examples` block for full-fidelity sample):
 
@@ -674,7 +694,12 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "tier": "dedicated",
   "estimatedMonthlyUsd": 900,
   "confirmationAcknowledgment": "proceed with provisioning",
-  "costEnvelopePolicy": "abortOnOverrun"
+  "costEnvelopePolicy": "abortOnOverrun",
+  "identityPreset": "B2BGuest",
+  "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
+  "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
+  "communicationGraphResource": "users/legal-comms@acme.example/messages",
+  "communicationDefaultMailbox": "legal-comms@acme.example"
 }
 ```
 
@@ -856,6 +881,100 @@ Cross-check: `tenancyModel` × `profile` MUST be consistent. **Currently**: `Mod
 
 ⚠️ **This cross-check is the mechanism behind the P-2 defect** (D-12 §5): one `tenancyModel` value spanning two profiles with **opposite subscription ownership** is exactly why `H1SubscriptionReadinessHandler` cannot tell them apart and demands Lighthouse for Spaarke-owned subscriptions. After the enum migration the mapping becomes **1:1** — Model 1 ↔ Spaarke tenant, Model 2 ↔ customer tenant — and the defect closes.
 
+#### 1e-bis. Users, Exchange scope group, Graph resources, default mailbox (required — T245c)
+
+Five values only the operator knows. `POST /api/runs` refuses a run without them, using **the handlers' own rules
+and codes** (H11's through the same `UserProvisioningIntake` code H11 runs), so collect them correctly here — intake
+is fixed once the run exists. This step runs **before 1f**, so a bad value stops the skill before it writes the
+registry placeholder (the same "validate everything, then write" order `POST /api/runs` follows):
+
+| Value | Read by | Rule (same at `POST /api/runs`) |
+|---|---|---|
+| `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case |
+| `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
+| `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group scoping the Exchange ApplicationAccessPolicy (email address or object id). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
+| `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
+| `communicationDefaultMailbox` | H4 (KV `Communication-DefaultMailbox`) | `local@domain.tld`, ≤ 254 characters — use a shared/service mailbox |
+
+**Personal data.** The user list (names, emails) is stored in the L2 run document, as the owner accepted on
+2026-10-01 (D15). It never goes into git: Step 1.0 refuses a batch intake file git would track, and
+`provisioning-runs/{run}/intake.md` (committed) records the user **count** only. Prefer shared/service mailboxes for
+the Graph resources and the default mailbox — those values ARE recorded in `intake.md`.
+
+```powershell
+# T245c — interactive: prompt until valid. Batch: Step 1.0 already validated against the schema; any failure here
+# means a fallback validator skipped a rule, so HARD STOP instead of prompting.
+function Stop-IfBatch([string]$message) {
+  if ($script:SkipInteractiveIntake) { Write-Error "[skill] Batch HARD STOP: $message Fix the intake file."; exit 1 }
+  Write-Host $message -ForegroundColor Yellow
+}
+
+while ($identityPreset -cnotin @('B2BGuest', 'NativeAccount')) {
+  if ($identityPreset -or $script:SkipInteractiveIntake) { Stop-IfBatch "identityPreset '$identityPreset' must be B2BGuest or NativeAccount (exact case)." }
+  $identityPreset = Read-Host 'identityPreset (B2BGuest = invite guests; NativeAccount = create users in the stamp tenant)'
+}
+
+# @($null).Count is 1 in PowerShell — normalise first, or an unassigned $users looks like one (null) entry.
+$users = @($users | Where-Object { $null -ne $_ })
+if (-not $script:SkipInteractiveIntake -and $users.Count -eq 0) {
+  while ($true) {
+    $isGuest = $identityPreset -ceq 'B2BGuest'
+    $prompt  = if ($isGuest) { "User $($users.Count + 1) email (blank to finish)" } else { "User $($users.Count + 1) first name (blank to finish)" }
+    $key     = Read-Host $prompt
+    if ([string]::IsNullOrWhiteSpace($key)) {
+      if ($users.Count -ge 1) { break }
+      Write-Host 'At least one user is required.' -ForegroundColor Yellow; continue
+    }
+    if ($isGuest) {
+      $email = $key
+      $first = Read-Host '  first name (optional — display name only)'
+      $last  = Read-Host '  last name (optional)'
+    } else {
+      $first = $key
+      $last  = Read-Host '  last name'
+      $email = Read-Host '  email (optional)'
+      if ([string]::IsNullOrWhiteSpace($last)) { Write-Host '  Not added: NativeAccount needs a last name (UPN).' -ForegroundColor Yellow; continue }
+    }
+    $company = Read-Host '  company (optional)'
+    $entry = [ordered]@{}
+    if ($first)   { $entry.firstName = $first }
+    if ($last)    { $entry.lastName = $last }
+    if ($email)   { $entry.email = $email }
+    if ($company) { $entry.companyName = $company }
+    $users += [pscustomobject]$entry
+    if ($users.Count -ge 500) { Write-Host 'Reached the 500-user limit for one run.' -ForegroundColor Yellow; break }
+  }
+}
+if ($users.Count -eq 0)  { Stop-IfBatch 'users needs at least one entry.'; exit 1 }
+if ($users.Count -gt 500) { Stop-IfBatch "users has $($users.Count) entries — at most 500 per run."; exit 1 }
+$position = 0
+foreach ($u in $users) {
+  $position++
+  $bad = if ($identityPreset -ceq 'B2BGuest') { [string]::IsNullOrWhiteSpace($u.email) }
+         else { [string]::IsNullOrWhiteSpace($u.firstName) -or [string]::IsNullOrWhiteSpace($u.lastName) }
+  if ($bad) {
+    Write-Error "[skill] HARD STOP: users entry $position needs $(if ($identityPreset -ceq 'B2BGuest') { 'an email' } else { 'firstName + lastName' })."
+    exit 1
+  }
+}
+
+while ([string]::IsNullOrWhiteSpace($exchangePolicyScopeGroupId)) {
+  Stop-IfBatch 'exchangePolicyScopeGroupId is required — the Exchange admin creates the group before the run (PRQ-C-08).'
+  $exchangePolicyScopeGroupId = Read-Host 'exchangePolicyScopeGroupId (mail-enabled security group email or object id — PRQ-C-08)'
+}
+
+while ([string]::IsNullOrWhiteSpace($communicationGraphResource) -and [string]::IsNullOrWhiteSpace($emailGraphResource)) {
+  Stop-IfBatch 'at least one of communicationGraphResource / emailGraphResource is required.'
+  $communicationGraphResource = Read-Host 'communicationGraphResource (e.g. users/{mailbox}/messages; blank to skip)'
+  $emailGraphResource         = Read-Host 'emailGraphResource (blank to skip)'
+}
+
+while ($communicationDefaultMailbox -cnotmatch '^[^@\s]+@[^@\s]+\.[^@\s]+\z' -or $communicationDefaultMailbox.Length -gt 254) {
+  if ($communicationDefaultMailbox -or $script:SkipInteractiveIntake) { Stop-IfBatch "communicationDefaultMailbox '$communicationDefaultMailbox' must be a mailbox address (local@domain.tld, at most 254 characters)." }
+  $communicationDefaultMailbox = Read-Host 'communicationDefaultMailbox (local@domain.tld)'
+}
+```
+
 #### 1f. `environmentId` — create placeholder `sprk_dataverseenvironment` record (required — per punch list rows A10 + A11 / DS-5 c6-2 + c6-3)
 
 The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvironment` record GUID). L2 returns 400 without it (per DS-5 c6-2). This step creates the placeholder record BEFORE the POST so the GUID is available.
@@ -965,6 +1084,11 @@ INTAKE SUMMARY
   controlPlaneEnv: dev
   profile:         spaarke-hosted-model2
   environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
+  identityPreset:  B2BGuest
+  users:           3 entries          (names/emails are NOT printed or written to intake.md)
+  exchange group:  spaarke-mail-scope@acme.example  (PRQ-C-08)
+  graph resources: communication=users/legal-comms@acme.example/messages  email=(none)
+  default mailbox: legal-comms@acme.example
   L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
 Proceed to preflight (H0)? (yes/no)
@@ -1199,7 +1323,7 @@ RUN PLAN
     H8        SPE container-type creation (empirically near-instant, 25h fallback ceiling; H8.a re-verifies)
     H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4 + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)
     H10       Dataverse App User creation (UAMI-based)
-    H11       demo user provisioning (Model 1 only — trial users; skipping for Model 2)
+    H11       user provisioning — identityPreset + users from Step 1e-bis (every run, both models)
     H12a      AI seed chain (playbooks + embeddings)
     H12b      playbook consumers seed
     H12c      agents seed
@@ -1297,10 +1421,17 @@ $body = @{
     intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
     region                      = $region                 # primary platform region (e.g. westus2) — distinct from openAiLocation
     tier                        = $tier                   # COMP-10 gate input (H0Options.GetCeilingUsd lookup key)
-    estimatedMonthlyUsd         = $estimatedMonthlyUsd    # COMP-10 gate input (Bucket A HIGH#8 SESSION 18); null → H0 log-only skips
+    estimatedMonthlyUsd         = if ($null -ne $estimatedMonthlyUsd) { [string]$estimatedMonthlyUsd } else { $null }   # COMP-10 gate input; a STRING — nonSecretParameters is a string map, and a JSON number fails request binding (400 before CreateRun runs; found 2026-10-01 T245c review). null → H0 log-only skips
     costEnvelopePolicy          = $script:BatchCostEnvelopePolicy  # COMP-10 gate policy (Bucket A HIGH#8 SESSION 18); default 'abortOnOverrun' in batch loader. Interactive mode leaves $script:BatchCostEnvelopePolicy null → H0 treats null as abortOnOverrun-equivalent per its default branch.
     operatorUpn                 = $operatorUpn
     containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4 writes SPE-ContainerTypeId from it; H8 creates the container with it. Missing → both fail (T226, 2026-09-30: was read but never sent)
+    # T245c (Step 1e-bis) — required; L2 refuses the run with the handler's own code when a rule is broken
+    identityPreset              = $identityPreset         # H11 — userprov-missing/invalid-identity-preset
+    usersJson                   = (ConvertTo-Json -InputObject @($users) -Compress -Depth 4)   # H11 — always a JSON array (do NOT add -AsArray: it double-nests)
+    exchangePolicyScopeGroupId  = $exchangePolicyScopeGroupId   # H14a — h14a-missing-policy-scope-group-id
+    communicationGraphResource  = $communicationGraphResource   # H14b — at least one of these two,
+    emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured
+    communicationDefaultMailbox = $communicationDefaultMailbox  # H4 → KV Communication-DefaultMailbox
     # CLOSED SET (task 245a): L2 accepts ONLY the keys in IntakeParameterCatalog
     # (src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs).
     # Any other key — a typo, `notes`, a value some handler produces — is a 400 with
@@ -1321,7 +1452,7 @@ $response = Invoke-RestMethod `
   -Uri "$l2Base/api/runs" `
   -Method POST `
   -Headers @{ Authorization = "Bearer $token" } `
-  -Body $body -ContentType "application/json"
+  -Body $body -ContentType "application/json; charset=utf-8"   # names may be non-ASCII (pwsh < 7.4 does not default to UTF-8)
 
 $runId = $response.runId  # response shape: { runId, customerId, status:"NotStarted", location:"/api/runs/{runId}?customerId=..." }
 ```

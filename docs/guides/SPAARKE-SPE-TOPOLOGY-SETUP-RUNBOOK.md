@@ -276,7 +276,7 @@ curl -sf -H "Authorization: Bearer $token" \
 echo "✅ BFF app-reg $bffApiAppId is granted on the container-type"
 ```
 
-**If all three checks PASS**: the topology is set up correctly. `/provision-environment trial1 --batch runs/trial1-intake.json` should now progress past SKILL Step 0.5c topology-verify (added by task 213.6).
+**If all three checks PASS**: the topology is set up correctly. `/provision-environment trial1 --batch runs/trial1-intake.json` should now progress past SKILL Step 0.5c topology-verify (added by task 213.6). The batch intake is git-ignored (`runs/*-intake.json`) because it carries the H11 user list — build it from the `intake.schema.json` examples; the skill refuses an intake file git would track (T245c).
 
 ---
 

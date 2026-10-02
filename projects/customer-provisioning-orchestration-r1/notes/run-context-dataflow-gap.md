@@ -109,6 +109,12 @@ Plus:
 Probably two tasks (split decided at `task-create`): **T245a** contract + test + H2a outputs + consumers + L2
 configuration + DAG; **T245b** intake additions (schema, API validation, skill).
 
+## 4. Effect on the plan
+
+- **T238** (`Customer__Id` via H4b) depends on H4b being able to run at all; its `customer_id` source is one entry
+  in the T245 catalog. Recommended order: T245a → T238 → T245b → rest of plan §7.
+- **T186** (first live E2E) is blocked by this gap independently of every other gap in plan §4.
+
 ## 5. Status after T245a (2026-10-01)
 
 **Fixed**
@@ -204,8 +210,36 @@ nothing writes.
 read (checked by name only, 2026-10-01). The topology runbook must create it, import it as `SPE-OwnerCert-Pfx`, and add the
 `speContainerTypeOwners` entry before H0 will pass.
 
-## 4. Effect on the plan
+## 7. Status after T245c (2026-10-01) — G25 closed
 
-- **T238** (`Customer__Id` via H4b) depends on H4b being able to run at all; its `customer_id` source is one entry
-  in the T245 catalog. Recommended order: T245a → T238 → T245b → rest of plan §7.
-- **T186** (first live E2E) is blocked by this gap independently of every other gap in plan §4.
+**Fixed — the operator-owned values are required intake, validated at the edge**
+- Five keys are required at `POST /api/runs`: `identityPreset`, `usersJson` (H11), `exchangePolicyScopeGroupId`,
+  `communicationGraphResource` / `emailGraphResource` — at least one (H14), and `communicationDefaultMailbox` (H4 → KV
+  `Communication-DefaultMailbox`, now `from-intake-parameter`). Each rule is the handler's rule and returns the
+  handler's code, before the run guard, the registry lookup, any Cosmos write or enqueue.
+- H11's rules live in one place, `UserProvisioningIntake`, called by both H11 and the endpoint. Two latent defects went
+  with the move: H11 checked a B2BGuest entry's email while inviting (a list whose second entry had none failed after
+  the first invitation went out), and a NativeAccount entry without a name threw inside UPN building after the earlier
+  users were created. The whole list is now checked before the first Graph call; NativeAccount entries need both
+  names, B2BGuest entries an email (names optional — they only set the guest's display name); at most 500 users.
+- Owner decisions (both escalation triggers fired): **D14** — the Exchange scope group is an operator prerequisite
+  (`PRQ-C-08`, created by the stamp tenant's Exchange admin; L2 never creates it). **D15** — the user list is stored in
+  the run document as accepted; never in git (the skill refuses a batch intake file git would track; run-folder
+  templates record counts only). Diagnostics (intake and H11's own, which reach `run.ErrorDetail`) and the Graph
+  collaborators' logs identify users by position / Entra object id, never by name, email or UPN.
+- Found by the T245c quality gates and fixed: `POST /api/runs` left the I5 run guard held when the run-store write
+  failed with anything but an id collision (the customer was blocked until the guard went stale); the skill sent
+  `estimatedMonthlyUsd` as a JSON number, which cannot bind to the string map (every batch run with a cost estimate
+  got a 400).
+- `intake.schema.json` carries the same rules (required set, enum, mailbox pattern, "at least one Graph resource",
+  "B2BGuest users need an email"), pinned by `IntakeSchemaProfileParityTests`; ajv compile + 13 sample intakes checked.
+- `/provision-environment` Step 1e-bis collects them (batch hard-stops); Step 4.0 sends them. The skill's claim that
+  Model 2 skips H11 was wrong — nothing skips it.
+- `RunContextContractTests`: known-gap list **empty**; its catalog-member map is now derived by reflection.
+
+**Still pinned (manifest, not run inputs)**
+| Gap | Owner |
+|---|---|
+| `ContentSafety-ApiKey` — stamps have no Content Safety resource (plan G26) | T246 |
+| `Dataverse-ClientSecret`, `BFF-API-ClientSecret` (secret-free default, G21) | T225b |
+| `SPE-DefaultContainerId`, `SPE-CommunicationArchiveContainerId` (G18) | T227 |

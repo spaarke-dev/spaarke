@@ -72,6 +72,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Api;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Xunit;
@@ -208,7 +209,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     // An accepted intake key (IntakeParameterCatalog, task 245a) — proves intake
                     // values reach the stored run.
@@ -216,7 +217,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                     // ISH-01 (Wave 2 pre-dispatch remediation): tenantId is the
                     // canonical propagation path (Wave 0 Decision 1).
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -289,11 +290,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                     environmentId = "env-1",
                     tenancyModel = "Model1",
                     profile = "spaarke-hosted-model1-trial",
-                    nonSecretParameters = new Dictionary<string, string>
+                    nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                     {
                         // ISH-01 — tenantId required (Wave 0 Decision 1).
                         ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                    },
+                    }),
                 }),
             };
             AttachAuth(r, roles: new[] { "Operator" });
@@ -924,12 +925,163 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["costEnvelopePolicy"] = "abortOnOverrun",
             ["operatorUpn"] = "operator@spaarke.com",
             ["containerTypeId"] = "33333333-3333-3333-3333-333333333333",
+            // T245c: the operator intake H11 / H14 / H4 need.
+            ["identityPreset"] = "NativeAccount",
+            ["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"companyName\":\"Contoso\"}]",
+            ["exchangePolicyScopeGroupId"] = "spaarke-mail-scope@contoso.com",
+            ["communicationGraphResource"] = "users/comms@contoso.com/messages",
+            ["emailGraphResource"] = null!,   // Step 4.0 always sends the key; null when the intake omits it
+            ["communicationDefaultMailbox"] = "comms@contoso.com",
         };
 
         var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         factory.Repository.CreatedRuns.Should().ContainSingle();
+    }
+
+    // -------------------------------------------------------------------------
+    // Task 245c (G25): the operator intake H11 / H14 / H4 need is validated at
+    // POST /api/runs with the handlers' own rules — H11's through the same
+    // UserProvisioningIntake code H11 runs — and the handlers' own codes.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("identityPreset", null, "userprov-missing-identity-preset")]
+    [InlineData("identityPreset", "nativeaccount", "userprov-invalid-identity-preset")]   // exact case, as H11
+    [InlineData("usersJson", null, "userprov-missing-users")]
+    [InlineData("usersJson", "[]", "userprov-missing-users")]
+    [InlineData("usersJson", "{\"firstName\":\"Ada\"}", "userprov-malformed-users-payload")]   // an object, not an array
+    [InlineData("usersJson", "[{\"firstName\":\"Ada\"", "userprov-malformed-users-payload")]  // truncated
+    [InlineData("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\" \"}]", "userprov-invalid-user-entry")]
+    [InlineData("exchangePolicyScopeGroupId", null, "h14a-missing-policy-scope-group-id")]
+    [InlineData("exchangePolicyScopeGroupId", "  ", "h14a-missing-policy-scope-group-id")]
+    [InlineData("communicationDefaultMailbox", null, "intake-communication-default-mailbox-invalid")]
+    [InlineData("communicationDefaultMailbox", "Contoso Communications", "intake-communication-default-mailbox-invalid")]
+    public async Task PostRuns_OperatorIntakeBreaksAHandlerRule_Returns400_BeforeGuardRegistryCosmosOrEnqueue(
+        string key, string? value, string expectedErrorCode)
+    {
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        if (value is null) nonSecret.Remove(key); else nonSecret[key] = value;
+
+        await AssertRejectedBeforeAnySideEffectAsync(nonSecret, expectedErrorCode);
+    }
+
+    [Fact]
+    public async Task PostRuns_B2BGuestUserWithoutEmail_Returns400_NamingTheEntryNotThePerson()
+    {
+        // H11 used to find this mid-loop, after inviting the users before it.
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret["identityPreset"] = "B2BGuest";
+        nonSecret["usersJson"] =
+            "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\"},{\"firstName\":\"Grace\",\"lastName\":\"Hopper\"}]";
+
+        var detail = await AssertRejectedBeforeAnySideEffectAsync(nonSecret, "userprov-invalid-user-entry");
+
+        detail.Should().Contain("entry 2").And.NotContain("Grace", "diagnostics identify an entry by position, not by personal data");
+    }
+
+    [Fact]
+    public async Task PostRuns_NoGraphResource_Returns400_WithH14bCode()
+    {
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret.Remove("communicationGraphResource");
+        nonSecret["emailGraphResource"] = " ";
+
+        await AssertRejectedBeforeAnySideEffectAsync(nonSecret, "h14b-no-webhook-targets-configured");
+    }
+
+    [Theory]
+    [InlineData("NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email optional for NativeAccount
+    [InlineData("B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
+    public async Task PostRuns_CompleteOperatorIntake_Returns202_AndStoresTheValues(
+        string identityPreset, string usersJson, string graphResourceKey)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret.Remove("communicationGraphResource");
+        nonSecret[graphResourceKey] = "users/comms@contoso.com/messages";
+        nonSecret["identityPreset"] = identityPreset;
+        nonSecret["usersJson"] = usersJson;
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Single().Parameters.NonSecret.Should().Contain(new Dictionary<string, string>
+        {
+            ["identityPreset"] = identityPreset,
+            ["usersJson"] = usersJson,
+            [graphResourceKey] = "users/comms@contoso.com/messages",
+            ["exchangePolicyScopeGroupId"] = nonSecret["exchangePolicyScopeGroupId"],
+            ["communicationDefaultMailbox"] = nonSecret["communicationDefaultMailbox"],
+        });
+    }
+
+    [Fact]
+    public async Task PostRuns_MoreUsersThanTheCap_Returns400()
+    {
+        // The list is stored in the Cosmos run document (D15); an unbounded one could exceed the 2 MB item limit.
+        var nonSecret = WithOperatorIntake(new Dictionary<string, string> { ["tenantId"] = "11111111-1111-1111-1111-111111111111" });
+        nonSecret["usersJson"] = "[" + string.Join(",", Enumerable.Repeat(
+            "{\"firstName\":\"A\",\"lastName\":\"B\"}", UserProvisioningIntake.MaxUsers + 1)) + "]";
+
+        await AssertRejectedBeforeAnySideEffectAsync(nonSecret, "userprov-too-many-users");
+    }
+
+    [Fact]
+    public async Task PostRuns_RunStoreWriteFails_ReleasesTheRunGuard()
+    {
+        // Found in the T245c review: only an id collision released the guard, so any other run-store failure left the
+        // customer blocked until the guard went stale.
+        using var factory = new L2WebApplicationFactory();
+        var guard = new SpyCustomerRunGuard();
+        factory.ReplaceCustomerRunGuard(guard);
+        factory.Repository.CreateFailure = new HttpRequestException("run store unavailable");
+        var client = factory.CreateClient();
+
+        var send = () => client.SendAsync(BuildValidCreateRunRequest("testcust"));
+
+        await send.Should().ThrowAsync<HttpRequestException>();
+        guard.AcquireCalls.Should().ContainSingle();
+        guard.ReleaseCalls.Should().ContainSingle().Which.Should().Be(guard.AcquireCalls.Single());
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    private static async Task<string> AssertRejectedBeforeAnySideEffectAsync(
+        Dictionary<string, string> nonSecret, string expectedErrorCode)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var registry = new StubRegistryClient();
+        factory.ReplaceRegistryClient(registry);
+        var guard = new SpyCustomerRunGuard();
+        factory.ReplaceCustomerRunGuard(guard);
+        var client = factory.CreateClient();
+
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        ReadProblemErrorCode(body).Should().Be(expectedErrorCode);
+        guard.AcquireCalls.Should().BeEmpty("operator intake is checked before the I5 run guard is acquired");
+        registry.LookupCount.Should().Be(0, "operator intake is checked before the REG-07 registry lookup");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+        return ReadProblemDetail(body);
+    }
+
+    /// <summary>
+    /// Adds a complete, valid T245c operator intake (H11 preset + users, H14 scope group + Graph resource, H4 mailbox)
+    /// to <paramref name="nonSecret"/> — every run must carry it to get past POST /api/runs.
+    /// </summary>
+    internal static Dictionary<string, string> WithOperatorIntake(Dictionary<string, string> nonSecret)
+    {
+        nonSecret.TryAdd("identityPreset", "NativeAccount");
+        nonSecret.TryAdd("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]");
+        nonSecret.TryAdd("exchangePolicyScopeGroupId", "spaarke-mail-scope@contoso.com");
+        nonSecret.TryAdd("communicationGraphResource", "users/comms@contoso.com/messages");
+        nonSecret.TryAdd("communicationDefaultMailbox", "comms@contoso.com");
+        return nonSecret;
     }
 
     // ProblemDetails JSON escapes ' as ', so assert on the parsed detail, not the raw body.
@@ -941,10 +1093,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         => System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("errorCode").GetString() ?? string.Empty;
 
     private static HttpRequestMessage BuildValidCreateRunRequest(string customerId)
-        => BuildCreateRunRequest(customerId, new Dictionary<string, string>
+        => BuildCreateRunRequest(customerId, WithOperatorIntake(new Dictionary<string, string>
         {
             ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-        });
+        }));
 
     private static HttpRequestMessage BuildCreateRunRequest(string customerId, Dictionary<string, string> nonSecretParameters)
     {
@@ -989,11 +1141,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel,
                 profile,
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
                     ["subscriptionId"] = "abcdef01-2345-6789-abcd-ef0123456789",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1025,10 +1177,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model3Foo",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1064,11 +1216,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model2",
                 profile = "customer-owned-model2",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     // ISH-02: tenantId supplied but subscriptionId absent → 400 for Model 2.
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1104,11 +1256,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
                     // NO subscriptionId — Model 1 exemption per ISH-02.
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1134,11 +1286,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model2",
                 profile = "customer-owned-model2",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
                     ["subscriptionId"] = "   ",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1166,11 +1318,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model2",
                 profile = "customer-owned-model2",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
                     ["subscriptionId"] = expectedSubscriptionId,
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1200,11 +1352,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     // ISH-01: present but whitespace-only → still fail-fast.
                     ["tenantId"] = "   ",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1250,10 +1402,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1296,10 +1448,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1330,10 +1482,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = "11111111-1111-1111-1111-111111111111",
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1360,10 +1512,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 environmentId = "env-1",
                 tenancyModel = "Model1",
                 profile = "spaarke-hosted-model1-trial",
-                nonSecretParameters = new Dictionary<string, string>
+                nonSecretParameters = WithOperatorIntake(new Dictionary<string, string>
                 {
                     ["tenantId"] = expectedTenantId,
-                },
+                }),
             }),
         };
         AttachAuth(request, roles: new[] { "Operator" });
@@ -1582,6 +1734,9 @@ public sealed class InMemoryProvisioningRunRepository : IProvisioningRunReposito
     public List<ProvisioningRun> CreatedRuns { get; } = new();
     public List<(string CustomerId, string RunId)> ReadCalls { get; } = new();
 
+    /// <summary>When set, <see cref="CreateRunAsync"/> throws it (a run-store failure other than an id collision).</summary>
+    public Exception? CreateFailure { get; set; }
+
     public void Seed(ProvisioningRun run)
     {
         _store[(run.CustomerId, run.RunId)] = (run, "\"seed-etag\"");
@@ -1601,6 +1756,10 @@ public sealed class InMemoryProvisioningRunRepository : IProvisioningRunReposito
     public Task<ProvisioningRunReadResult> CreateRunAsync(
         ProvisioningRun run, CancellationToken cancellationToken)
     {
+        if (CreateFailure is not null)
+        {
+            throw CreateFailure;
+        }
         var key = (run.CustomerId, run.RunId);
         if (_store.ContainsKey(key))
         {

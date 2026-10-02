@@ -28,7 +28,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `BFF-API-ClientId` | identity | N/A | - | written-by-h3 |
 | `BFF-API-ClientSecret` | auth | 90-days | YES | from-existing-kv |
 | `BingSearch-ApiKey` | ai | 90-days | - | from-platform-vault |
-| `Communication-DefaultMailbox` | communication | N/A | - | from-run-parameter |
+| `Communication-DefaultMailbox` | communication | N/A | - | from-intake-parameter |
 | `Communication-Webhook-SigningKey` | communication | 90-days-or-on-incident | - | generated |
 | `Communication-WebhookClientState` | communication | 90-days | - | generated |
 | `Communication-WebhookUrl` | communication | N/A | - | from-bicep-output |
@@ -161,8 +161,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Default mailbox address for Communication module (outbound + Approved-Senders default).
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-intake-parameter
 - **Tags**: communication, public
+- **Exception note**: value_source from-intake-parameter since task 245c (2026-10-01): H4 writes the intake communicationDefaultMailbox (POST /api/runs, required). It was from-run-parameter — a KV reference in RunParameters.Secrets that nothing ever supplied.
 - **Consumers**:
   - BFF: Communication:DefaultMailbox / Communication:ApprovedSenders[0]:Email
 - **App-setting keys**:

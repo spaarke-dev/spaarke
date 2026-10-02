@@ -462,9 +462,13 @@ secrets:
       - 'BFF: Communication:DefaultMailbox / Communication:ApprovedSenders[0]:Email'
     rotation_cadence: 'N/A'
     never_delete: false
-    exception_note: ''
+    exception_note: >-
+      value_source from-intake-parameter since task 245c (2026-10-01): H4 writes
+      the intake communicationDefaultMailbox (POST /api/runs, required). It was
+      from-run-parameter — a KV reference in RunParameters.Secrets that nothing
+      ever supplied.
     aliases: []
-    value_source: 'from-run-parameter'
+    value_source: 'from-intake-parameter'
     app_settings:
       - 'Communication__DefaultMailbox'
     tags: ['communication', 'public']

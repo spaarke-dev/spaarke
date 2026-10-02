@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "10736487036248916844"
+      "templateHash": "18137635863876211050"
     }
   },
   "parameters": {
@@ -3653,7 +3653,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10028135150353172885"
+              "templateHash": "5827967201281677018"
             }
           },
           "parameters": {
@@ -3802,7 +3802,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-intake-parameter"
               },
               "tags": {
                 "canonicalName": "Communication-DefaultMailbox",

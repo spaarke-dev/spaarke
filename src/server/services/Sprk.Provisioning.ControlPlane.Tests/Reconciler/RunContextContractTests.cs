@@ -25,7 +25,8 @@
 // `InterStepState.{Property}` (reads; `= ` after it = a write), the same
 // through an alias — a local bound to it (`var s = run.InterStepState;`) or a
 // parameter typed as it (`Foo(InterStepState s)`) — plus `const string
-// *ParameterKey = "..."` (intake keys) and `IntakeParameterCatalog.{Member}`.
+// *ParameterKey = "..."` (intake keys) and `IntakeParameterCatalog.{Member}` (every
+// catalog constant naming an accepted key, found by reflection).
 // LIMITATION: state handed whole to another type (`helper.Use(run.InterStepState)`
 // where the helper lives outside the folder) or read by reflection is not seen.
 //
@@ -33,8 +34,8 @@
 //   - New handler input → declare it in HandlerRunInputs with its real source.
 //     A failure here means the data flow is wrong; fix the flow, not the table.
 //   - New handler folder → add it to FolderToHandler below.
-//   - The KnownGaps list shrinks as T245c lands (T245b emptied its entries); it may not grow
-//     without an owner-visible reason in the task notes.
+//   - The KnownGaps list is empty since T245c (G25 closed); a new entry needs an owner-visible
+//     reason in the owning task's notes.
 //
 // Fitness-function rules per tests/CLAUDE.md: each rule (a)–(e) and (g) runs
 // through a checker that takes its tables as arguments, and has a negative
@@ -94,14 +95,7 @@ public sealed class RunContextContractTests
     /// defects, not ADR exemptions: the record is projects/customer-provisioning-orchestration-r1/
     /// notes/run-context-dataflow-gap.md (G25) §5, and each owning task's POML.
     /// </summary>
-    private static readonly string[] PinnedKnownGaps =
-    [
-        "H11:identityPreset→T245c",              // operator choice → required intake field
-        "H11:usersJson→T245c",
-        "H14:exchangePolicyScopeGroupId→T245c",
-        "H14:communicationGraphResource→T245c",
-        "H14:emailGraphResource→T245c",
-    ];
+    private static readonly string[] PinnedKnownGaps = [];   // T245c made the last five (H11 / H14) required intake
 
     // ------------------------------------------------------------------ (a)
 
@@ -202,7 +196,7 @@ public sealed class RunContextContractTests
             [HandlerIds.H0] =
             [
                 RunInput.Intake(IntakeParameterCatalog.TenantId),
-                RunInput.Gap("identityPreset", "T245c"),
+                RunInput.Gap("identityPreset", "T999"),
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),   // an Output is not an intake key
             ],
         };
@@ -442,7 +436,7 @@ public sealed class RunContextContractTests
         [
             RunInput.Output(nameof(InterStepState.CosmosEndpoint)),
             RunInput.Intake(IntakeParameterCatalog.TenantId),
-            RunInput.Gap("usersJson", "T245c"),
+            RunInput.Gap("usersJson", "T999"),
         ];
 
         var problems = FindUnreadDeclarations("BffDeploy", HandlerIds.H9, Scan("var x = 1;"), declared);
@@ -509,7 +503,6 @@ public sealed class RunContextContractTests
         // vendor key — stamps have no Content Safety resource and D13 keeps Key Vault for keys with no MI
         // alternative (plan G26).
         "ContentSafety-ApiKey→T246",
-        "Communication-DefaultMailbox→T245c",  // per-customer mailbox → operator intake
         "SPE-DefaultContainerId→T227",                 // from-bicep-output, but containers are created at runtime (H8,
         "SPE-CommunicationArchiveContainerId→T227",    // after H4) — customer.bicep has no value to write (plan G18)
         "Dataverse-ClientSecret→T225b",        // from-existing-kv; new stamps are not secret-free by default yet (G21)
@@ -702,22 +695,31 @@ public sealed class RunContextContractTests
     {
         // Hands the whole map to the KV writer, which consults it only for manifest entries that still
         // need a ref (FromRunParameters / FromExistingKvSecret) — each pinned with an owner in
-        // PinnedManifestGaps (rule g). Retires with those gaps (T245c / T246 / T225b).
+        // PinnedManifestGaps (rule g). Retires with those gaps (T246 / T227 / T225b).
         [HandlerIds.H4] = "manifest secrets pinned in PinnedManifestGaps",
     };
 
     private static readonly IReadOnlySet<string> InterStepStatePropertyNames =
         typeof(InterStepState).GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>IntakeParameterCatalog members that name an intake key a handler reads.</summary>
-    private static readonly IReadOnlyDictionary<string, string> CatalogMemberToKey = new Dictionary<string, string>(StringComparer.Ordinal)
+    /// <summary>
+    /// IntakeParameterCatalog members that name an intake key a handler reads: every <c>const string</c> whose value
+    /// is an accepted key (by reflection — a new catalog constant is seen without editing this test; until T245c the
+    /// list was hand-kept, so a handler reading a newer constant was invisible to the scan), plus
+    /// <c>ResolveEnvironmentName</c>.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> CatalogMemberToKey = BuildCatalogMemberToKey();
+
+    private static Dictionary<string, string> BuildCatalogMemberToKey()
     {
-        [nameof(IntakeParameterCatalog.TenantId)] = IntakeParameterCatalog.TenantId,
-        [nameof(IntakeParameterCatalog.SubscriptionId)] = IntakeParameterCatalog.SubscriptionId,
-        [nameof(IntakeParameterCatalog.ContainerTypeId)] = IntakeParameterCatalog.ContainerTypeId,
-        [nameof(IntakeParameterCatalog.EnvironmentName)] = IntakeParameterCatalog.EnvironmentName,
-        [nameof(IntakeParameterCatalog.ResolveEnvironmentName)] = IntakeParameterCatalog.EnvironmentName,
-    };
+        var map = typeof(IntakeParameterCatalog).GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.IsLiteral && f.FieldType == typeof(string))
+            .Select(f => (f.Name, Value: (string)f.GetRawConstantValue()!))
+            .Where(f => IntakeParameterCatalog.IsKnown(f.Value))
+            .ToDictionary(f => f.Name, f => f.Value, StringComparer.Ordinal);
+        map[nameof(IntakeParameterCatalog.ResolveEnvironmentName)] = IntakeParameterCatalog.EnvironmentName;
+        return map;
+    }
 
     private static readonly IReadOnlySet<string> DictionaryKeyMethods =
         new HashSet<string>(StringComparer.Ordinal) { "TryGetValue", "ContainsKey", "GetValueOrDefault", "Remove" };

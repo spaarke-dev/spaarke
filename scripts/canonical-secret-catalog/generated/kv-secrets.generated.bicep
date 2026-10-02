@@ -178,7 +178,7 @@ resource kv_communication_DefaultMailbox 'Microsoft.KeyVault/vaults/secrets@2023
     attributes: {
       enabled: true
     }
-    contentType: 'from-run-parameter'
+    contentType: 'from-intake-parameter'
   }
   tags: {
     canonicalName: 'Communication-DefaultMailbox'

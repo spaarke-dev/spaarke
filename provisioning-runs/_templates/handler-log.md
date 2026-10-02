@@ -133,14 +133,15 @@
 - `sprk_dataverseenvironment.sprk_setupstatus`: `Ready`
 - Notes: {timestamp of Ready state per FR-18}
 
-## Handler H11 (Optional user provisioning)
+## Handler H11 (User provisioning — every run)
 
 - Started: `{ts}`
-- Gate opened: `{ts}` — operator asked whether to bootstrap first admin user
-- Gate closed: `{ts}` — operator provided UPN / license / skipped
-- Status: `{Success | Failed | Skipped}`
-- Users created: `{N}`
-- Notes: {UPN(s), license SKU(s)}
+- Identity preset: `{B2BGuest | NativeAccount}` (intake, Step 1e-bis)
+- B2B consent gate (B2BGuest only): opened `{ts}` / verified `{ts}`
+- Status: `{Success | Failed | WaitingOnGate}`
+- Users provisioned: `{N}` of `{userCount}`
+- Notes: {failure code + usersJson entry position if failed, license SKU(s)} — 🔒 **no names, emails or UPNs** here:
+  this folder is committed to git (owner decision D15 — the user list lives only in the L2 run document).
 
 ## Handler H12a/b/c (AI seed chain)
 

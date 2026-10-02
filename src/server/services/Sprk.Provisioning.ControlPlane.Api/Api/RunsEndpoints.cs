@@ -114,6 +114,8 @@ using System.Text.Json.Serialization;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -523,6 +525,15 @@ public static class RunsEndpoints
                 "Model1 runs are exempt — the skill auto-injects the Spaarke shared sub-id.");
         }
 
+        // Task 245c (G25): the operator-owned values H11, H14 and H4 need, checked with the handlers' own rules.
+        // Intake is fixed here (there is no add-parameter endpoint), so a value a handler would refuse must be
+        // refused now — before the run guard, the registry lookup, any Cosmos write or enqueue — not after
+        // H0–H10 have built the stamp.
+        if (ValidateOperatorIntake(request.NonSecretParameters) is { } intakeViolation)
+        {
+            return BadRequest(httpContext, intakeViolation.ErrorCode, intakeViolation.Detail);
+        }
+
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
 
@@ -703,6 +714,17 @@ public static class RunsEndpoints
                 run.CustomerId, run.RunId);
             _ = await runGuard.ReleaseAsync(run.CustomerId, run.RunId, cancellationToken).ConfigureAwait(false);
             return Conflict(httpContext, ControlPlaneErrorCodes.RunIdCollision, $"A run with id '{runId}' already exists.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Any other run-store failure (throttling, an item over Cosmos's size limit, an outage) left the I5 guard
+            // held, blocking every new run for this customer until the guard went stale (found in the T245c review).
+            // Release it, then let the failure surface as before.
+            logger.LogError(ex,
+                "CreateRun: run-store write failed — releasing the run guard (customerId={CustomerId}, runId={RunId})",
+                run.CustomerId, run.RunId);
+            _ = await runGuard.ReleaseAsync(run.CustomerId, run.RunId, CancellationToken.None).ConfigureAwait(false);
+            throw;
         }
 
         // Enqueue H0 preflight. Deterministic MessageId (FR-22 level-1) dedup's
@@ -1199,6 +1221,52 @@ public static class RunsEndpoints
         }
         failure = Results.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// Task 245c: H11's identity preset + user list (<see cref="UserProvisioningIntake"/> — the code H11 itself
+    /// runs), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
+    /// H4's Communication default mailbox. <c>null</c> when the values are usable.
+    /// </summary>
+    internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(IDictionary<string, string> parameters)
+    {
+        parameters.TryGetValue(IntakeParameterCatalog.IdentityPreset, out var identityPreset);
+        parameters.TryGetValue(IntakeParameterCatalog.UsersJson, out var usersJson);
+        if (UserProvisioningIntake.Validate(identityPreset, usersJson) is UserProvisioningIntakeOutcome.Invalid users)
+        {
+            return (users.RejectionCode, $"nonSecretParameters: {users.Diagnostic}");
+        }
+
+        if (IsBlank(parameters, IntakeParameterCatalog.ExchangePolicyScopeGroupId))
+        {
+            return (H14aRejections.MissingPolicyScopeGroupId,
+                $"nonSecretParameters['{IntakeParameterCatalog.ExchangePolicyScopeGroupId}'] is required — the " +
+                "mail-enabled security group that scopes the Exchange ApplicationAccessPolicy H14a creates. The " +
+                "Exchange admin of the stamp's tenant (the customer's for Model 2, Spaarke's for Model 1) creates it " +
+                "before the run (prerequisite PRQ-C-08).");
+        }
+
+        if (IsBlank(parameters, IntakeParameterCatalog.CommunicationGraphResource)
+            && IsBlank(parameters, IntakeParameterCatalog.EmailGraphResource))
+        {
+            return (H14bRejections.NoWebhookTargetsConfigured,
+                $"nonSecretParameters needs at least one of '{IntakeParameterCatalog.CommunicationGraphResource}' " +
+                $"and '{IntakeParameterCatalog.EmailGraphResource}' — the Graph subscription resources H14b subscribes to.");
+        }
+
+        parameters.TryGetValue(IntakeParameterCatalog.CommunicationDefaultMailbox, out var mailbox);
+        if (!IntakeParameterCatalog.IsMailboxAddress(mailbox))
+        {
+            return (ControlPlaneErrorCodes.CommunicationDefaultMailboxInvalid,
+                $"nonSecretParameters['{IntakeParameterCatalog.CommunicationDefaultMailbox}'] is required and must be " +
+                $"a mailbox address (local@domain.tld, at most {IntakeParameterCatalog.MaxMailboxAddressLength} characters) — " +
+                "H4 writes it to the customer vault as Communication-DefaultMailbox.");
+        }
+
+        return null;
+
+        static bool IsBlank(IDictionary<string, string> values, string key)
+            => !values.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value);
     }
 
     private static IResult BadRequest(HttpContext httpContext, string errorCode, string detail) =>

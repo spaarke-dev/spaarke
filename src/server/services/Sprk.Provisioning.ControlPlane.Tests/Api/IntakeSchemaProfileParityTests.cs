@@ -31,6 +31,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Sprk.Provisioning.ControlPlane.Api;
 using Sprk.Provisioning.ControlPlane.Core.Models;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
+using Sprk.Provisioning.ControlPlane.Models;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Api;
@@ -106,6 +108,143 @@ public sealed class IntakeSchemaProfileParityTests
         pattern.Should().Be(CustomerIdStandard.Pattern,
             "intake.schema.json customerId.pattern and CustomerIdStandard.Pattern (enforced at POST /api/runs) " +
             "MUST be the same rule — see AZURE-RESOURCE-NAMING-CONVENTION.md § \"The customerId standard\".");
+    }
+
+    // -------------------------------------------------------------------------
+    // Task 245c (G25): batch intake (ajv) and POST /api/runs apply the same
+    // operator-intake rules — H11's (UserProvisioningIntake), H14's and H4's.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void IdentityPresetEnum_MatchesUserProvisioningIntake_Exactly()
+    {
+        ReadEnumFromSchema("properties.identityPreset.enum").Should().BeEquivalentTo(
+            UserProvisioningIntake.IdentityPresets,
+            "intake.schema.json identityPreset.enum and the presets H11 / POST /api/runs accept MUST be the same set");
+    }
+
+    [Fact]
+    public void CommunicationDefaultMailboxPattern_MatchesIntakeParameterCatalog_Exactly()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+
+        doc.RootElement.GetProperty("properties").GetProperty("communicationDefaultMailbox").GetProperty("pattern").GetString()
+            .Should().Be(IntakeParameterCatalog.MailboxAddressPattern,
+                "the schema pattern and IntakeParameterCatalog.MailboxAddressPattern (POST /api/runs) MUST be the same rule");
+    }
+
+    /// <summary>
+    /// The schema states each POST /api/runs operator-intake rule. It may be STRICTER than the API (e.g. it refuses a
+    /// blank optional Graph resource the API ignores), never looser — a value ajv accepts must not be refused by
+    /// POST /api/runs. (Known residue: ECMA and .NET disagree on a few exotic whitespace code points, e.g. U+0085,
+    /// for the `\S` non-blank pattern.)
+    /// </summary>
+    [Fact]
+    public void OperatorIntakeRules_AreStatedByTheSchema()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var root = doc.RootElement;
+        var properties = root.GetProperty("properties");
+
+        ReadStringArrayFromSchema("required").Should().Contain(
+            ["identityPreset", "users", "exchangePolicyScopeGroupId", "communicationDefaultMailbox"],
+            "POST /api/runs refuses a run without any of these");
+
+        var users = properties.GetProperty("users");
+        users.GetProperty("minItems").GetInt32().Should().Be(1, "H11 requires at least one user");
+        users.GetProperty("maxItems").GetInt32().Should().Be(UserProvisioningIntake.MaxUsers);
+        var userFields = users.GetProperty("items").GetProperty("properties");
+        foreach (var field in new[] { "firstName", "lastName", "email" })
+        {
+            userFields.GetProperty(field).GetProperty("pattern").GetString().Should().Be(@"\S",
+                $"a blank users[].{field} is refused by POST /api/runs (IsNullOrWhiteSpace), so ajv must refuse it too");
+        }
+        foreach (var key in new[] { "exchangePolicyScopeGroupId", "communicationGraphResource", "emailGraphResource" })
+        {
+            properties.GetProperty(key).GetProperty("pattern").GetString().Should().Be(@"\S", $"{key} must be non-blank");
+        }
+        properties.GetProperty("communicationDefaultMailbox").GetProperty("maxLength").GetInt32()
+            .Should().Be(IntakeParameterCatalog.MaxMailboxAddressLength);
+
+        var allOf = root.GetProperty("allOf").EnumerateArray().ToList();
+        allOf.Any(IsAtLeastOneGraphResourceRule).Should().BeTrue("at least one Graph resource — H14b's rule");
+        allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.NativeAccount, ["firstName", "lastName"]))
+            .Should().BeTrue("NativeAccount users need both names — H11's rule");
+        allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.B2BGuest, ["email"]))
+            .Should().BeTrue("B2BGuest users need an email — H11's rule");
+
+        static IEnumerable<string> Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!);
+
+        static bool IsAtLeastOneGraphResourceRule(JsonElement rule)
+            => rule.TryGetProperty("anyOf", out var anyOf)
+                && anyOf.EnumerateArray().Select(a => string.Join(",", Strings(a.GetProperty("required")))).Order()
+                    .SequenceEqual(["communicationGraphResource", "emailGraphResource"]);
+
+        static bool IsPresetUsersRule(JsonElement rule, string preset, string[] requiredFields)
+            => rule.TryGetProperty("if", out var condition)
+                && condition.GetProperty("properties").TryGetProperty("identityPreset", out var presetRule)
+                && presetRule.GetProperty("const").GetString() == preset
+                && Strings(rule.GetProperty("then").GetProperty("properties").GetProperty("users")
+                    .GetProperty("items").GetProperty("required")).SequenceEqual(requiredFields);
+    }
+
+    /// <summary>
+    /// The other direction: each schema example passes POST /api/runs' operator-intake rules, and dropping any
+    /// operator value the schema requires is refused by POST /api/runs too — so the schema cannot require something
+    /// the API silently lets through.
+    /// </summary>
+    [Fact]
+    public void SchemaExamples_PassTheEndpointRules_AndEachSchemaRequiredOperatorValueIsEnforcedThere()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var examples = doc.RootElement.GetProperty("examples").EnumerateArray().ToList();
+        examples.Should().NotBeEmpty();
+        var schemaRequired = ReadStringArrayFromSchema("required").ToHashSet(StringComparer.Ordinal);
+
+        foreach (var example in examples)
+        {
+            var nonSecret = ToOperatorNonSecret(example);
+            RunsEndpoints.ValidateOperatorIntake(nonSecret).Should().BeNull(
+                "a schema example ({0}) is a complete intake", example.GetProperty("customerId").GetString());
+
+            foreach (var (schemaKey, apiKey) in OperatorKeys.Where(k => schemaRequired.Contains(k.SchemaKey)))
+            {
+                var without = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
+                without.Remove(apiKey);
+                RunsEndpoints.ValidateOperatorIntake(without).Should().NotBeNull(
+                    "the schema requires '{0}', so POST /api/runs must refuse a run without '{1}'", schemaKey, apiKey);
+            }
+
+            var noGraphResource = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
+            noGraphResource.Remove("communicationGraphResource");
+            noGraphResource.Remove("emailGraphResource");
+            RunsEndpoints.ValidateOperatorIntake(noGraphResource).Should().NotBeNull(
+                "the schema requires at least one Graph resource, so POST /api/runs must too");
+        }
+    }
+
+    /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
+    private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
+    [
+        ("identityPreset", "identityPreset"),
+        ("users", "usersJson"),
+        ("exchangePolicyScopeGroupId", "exchangePolicyScopeGroupId"),
+        ("communicationGraphResource", "communicationGraphResource"),
+        ("emailGraphResource", "emailGraphResource"),
+        ("communicationDefaultMailbox", "communicationDefaultMailbox"),
+    ];
+
+    private static Dictionary<string, string> ToOperatorNonSecret(JsonElement example)
+    {
+        var nonSecret = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (schemaKey, apiKey) in OperatorKeys)
+        {
+            if (example.TryGetProperty(schemaKey, out var value))
+            {
+                nonSecret[apiKey] = value.ValueKind == JsonValueKind.String ? value.GetString()! : value.GetRawText();
+            }
+        }
+        return nonSecret;
     }
 
     // -------------------------------------------------------------------------

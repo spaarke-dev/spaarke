@@ -116,6 +116,7 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 ## Run-context contract — every handler input has ONE producer (BINDING, task 245a / G25)
 
 - `run.Parameters.NonSecret` holds **intake values only** — the closed set in `Models/IntakeParameterCatalog.cs`; `POST /api/runs` rejects any other key. **NEVER read a value another handler produces from `NonSecret`** — nothing writes it there.
+- An intake value a handler has rules for is validated at `POST /api/runs` with **the same rules** — shared code where the rule is non-trivial (T245c: `UserProvisioningIntake` is called by both H11 and the endpoint), and the handler's own rejection code where it has one (H14a / H14b; an API-owned code otherwise, e.g. the mailbox shape). There is no add-parameter endpoint, so a value the handler would refuse must be refused before the run guard / registry / Cosmos / enqueue — not after H0–H10 have built the stamp. The handler keeps its guard as defence in depth.
 - A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
 - A value L2 owns (its own principal, a platform vault, the SPE owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
 - Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
@@ -149,7 +150,7 @@ Global-namespace resources (Service Bus, Storage, Cognitive Services, ACR, Front
 
 ## Prerequisites — `docs/guides/PROVISIONING-PREREQUISITES.md`
 
-Every provisioning task MUST honor the prereq registry. `/provision-environment` Step 0.5 verifies via `scripts/provisioning-prereqs/prereqs.yaml`. Adding a new manual prereq → add to both files with `scope`, `tenancyModel`, `check_recipe`, `consequence-if-absent`.
+Every provisioning task MUST honor the prereq registry. `/provision-environment` Step 0.5 verifies via `scripts/provisioning-prereqs/prereqs.yaml`. Adding a new manual prereq → add to both files with `scope`, `owner`, `check_recipe`, `consequence_of_absence`, `remediation` (the fields `validate.ps1` checks); state in `name` / `remediation` when it applies to one tenancy model only (there is no `tenancyModel` field — corrected 2026-10-01, T245c).
 
 Task 202 established the registry with 27 prereqs across 4 scopes (once_per_tenant, once_per_subscription, once_per_env, once_per_customer). Do NOT bypass Step 0.5.
 

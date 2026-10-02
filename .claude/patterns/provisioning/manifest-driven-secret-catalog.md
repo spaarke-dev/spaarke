@@ -28,11 +28,11 @@ Load this pattern when:
 | `value_source` | Where the value comes from | Examples |
 |---|---|---|
 | `from-bicep-output` | Written by `customer.bicep`'s `kvSecrets` module from the customer's **own** resources at H2a; H4 checks that it exists | `Redis-ConnectionString`, `DocumentIntelligence-ApiKey`, the service endpoints |
-| `from-intake-parameter` | An intake value (`IntakeParameterCatalog`) H4 maps in `IntakeValueParameterKeys` | `TenantId` |
+| `from-intake-parameter` | An intake value (`IntakeParameterCatalog`) H4 maps in `IntakeValueParameterKeys` | `TenantId`; `Communication-DefaultMailbox` (T245c) |
 | `from-topology-constants` | A Spaarke-tier constant carried as an intake value (from `spaarke-constants.yaml`); same map | `SPE-ContainerTypeId` |
 | `written-by-h3` | H3 writes it to the customer vault itself; H4 (which runs before H3) **skips** the entry | `BFF-API-ClientId`, `BFF-API-Audience` |
 | `generated` | A cryptographically random value created by H4 | webhook signing keys |
-| `from-run-parameter` | A KV reference on the run (`RunParameters.Secrets`). 🔴 **Nothing writes that map since task 245a** — every entry here is a pinned gap with an owning task | `Dataverse-ServiceUrl`, `BingSearch-ApiKey`, `LlamaParse-ApiKey`, `ContentSafety-ApiKey` (T245b); `Communication-DefaultMailbox` (T245c) |
+| `from-run-parameter` | A KV reference on the run (`RunParameters.Secrets`). 🔴 **Nothing writes that map since task 245a** — every entry here is a pinned gap with an owning task | `ContentSafety-ApiKey` only (T246). T245b moved `Dataverse-ServiceUrl` to per-env settings and the two Spaarke vendor keys to `from-platform-vault`; T245c moved `Communication-DefaultMailbox` to `from-intake-parameter` |
 | `from-existing-kv` | Copied from another vault through a run reference — same writer-less channel | `Dataverse-ClientSecret`, `BFF-API-ClientSecret` (T225b) |
 
 A new entry should not use `from-run-parameter` / `from-existing-kv`: there is no producer for them.

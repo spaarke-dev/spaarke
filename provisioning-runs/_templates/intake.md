@@ -11,6 +11,11 @@
 | `tenantId` | `{tenantId}` | operator | **explicit per NFR-11 (I1)** — never inferred |
 | `environmentId` | `{environmentId}` | operator | `sprk_dataverseenvironment` GUID placeholder created in skill Step 1 pre-POST |
 | `tenancyModel` | `Model1 \| Model2` | operator | drives the **Lighthouse-delegation + admin-consent** requirement (Model 2 only). *Amended 2026-09-28 (D-12): was "H4-per-tenant vs H4-shared handler branching" — there is no shared handler surface.* |
+| `identityPreset` | `B2BGuest \| NativeAccount` | operator | H11 (design.md D6). Exact case. T245c. |
+| `users` | **`{userCount}` entries — count only** | operator | H11. 🔒 Names and emails are personal data: they live in the L2 run document (owner decision 2026-10-01) and are **never** written here — this folder is committed to git. |
+| `exchangePolicyScopeGroupId` | `{exchangePolicyScopeGroupId}` | operator (group created by the stamp tenant's Exchange admin — PRQ-C-08) | H14a ApplicationAccessPolicy scope. T245c. |
+| `communicationGraphResource` / `emailGraphResource` | `{communicationGraphResource}` / `{emailGraphResource}` | operator | H14b; at least one. T245c. |
+| `communicationDefaultMailbox` | `{communicationDefaultMailbox}` | operator | H4 → KV `Communication-DefaultMailbox`. T245c. Use a shared/service mailbox — this file is committed, so a personal mailbox (here or in the Graph resources above) would put an individual's address in git. |
 | `profile` | `spaarke-tenant-model1 \| customer-tenant-model2` | operator | L2 enum-validated (drift → 400). ⚠️ **Pending the enum migration** (D-12 §6 items 2–3) — the live L2 still validates the old three-value set; `spaarke-hosted-model1-trial` is retired, `spaarke-hosted-model2` → Model 1, `customer-owned-model2` → Model 2. |
 
 ## Optional inputs

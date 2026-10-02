@@ -896,13 +896,14 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     /// <summary>
     /// Manifest canonical name → the INTAKE parameter (IntakeParameterCatalog) that carries its value, for
     /// manifest <c>value_source: from-topology-constants</c> (T226 — SPE-ContainerTypeId; H8 reads the same
-    /// key) and <c>value_source: from-intake-parameter</c> (task 245a — TenantId).
+    /// key) and <c>value_source: from-intake-parameter</c> (task 245a — TenantId; task 245c — Communication-DefaultMailbox).
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, string> IntakeValueParameterKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["SPE-ContainerTypeId"] = IntakeParameterCatalog.ContainerTypeId,
             ["TenantId"] = IntakeParameterCatalog.TenantId,
+            ["Communication-DefaultMailbox"] = IntakeParameterCatalog.CommunicationDefaultMailbox,   // task 245c
         };
 
     /// <summary>

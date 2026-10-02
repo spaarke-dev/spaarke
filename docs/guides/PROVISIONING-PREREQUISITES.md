@@ -1,9 +1,14 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 3 · **Last Updated**: 2026-09-30
+> **Version**: 3 · **Last Updated**: 2026-10-01
 > **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 3)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v3 addendum (2026-10-01, `customer-provisioning-orchestration-r1` T245c)**: `PRQ-C-08` **added** — the
+> Exchange mail-enabled security group that scopes H14a's ApplicationAccessPolicy. The Exchange admin of the
+> stamp's tenant creates it before the run (owner decision 2026-10-01: its membership is the customer's access
+> decision, so L2 never creates it); its id is the required intake value `exchangePolicyScopeGroupId`.
 >
 > **v3 (2026-09-30, `customer-provisioning-orchestration-r1` T226)**: `PRQ-E-06` **retired** — it granted the L2
 > identity key-reading roles on the shared source services for the H4-shared handler, which T226 retired
@@ -47,17 +52,15 @@ Prereqs are grouped by **scope**:
 
 ---
 
-## Summary — 27 prereqs across 4 scopes
+## Summary — 33 prereqs across 4 scopes (31 active)
 
 | Scope | Count | IDs |
 |---|---|---|
 | `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_subscription` | 5 | `PRQ-S-01` … `PRQ-S-05` |
 | `once_per_env` | 11 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12`; ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 8 | `PRQ-C-01` … `PRQ-C-07`, `PRQ-E-13` (id kept; scope corrected 2026-09-30) |
-| **Total** | **32** | |
-
-*(N.B. count is 32 not 27 in the sum — table above lists actual prereq IDs; some scopes have more entries than the 27-headline count. Authoritative count is the YAML.)*
+| `once_per_customer` | 9 | `PRQ-C-01` … `PRQ-C-08`, `PRQ-E-13` (id kept; scope corrected 2026-09-30) |
+| **Total** | **33** (31 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -147,6 +150,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-05 | Customer admin consent for that customer's BFF app registration (**Model 2 only** — Model 1 requires no H0.5 consent) | Customer tenant admin | H0.5 timeout; H10 verification fails |
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
+| PRQ-C-08 | Exchange mail-enabled security group scoping the Spaarke ApplicationAccessPolicy — its id is the intake value `exchangePolicyScopeGroupId` (T245c) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 
 ---

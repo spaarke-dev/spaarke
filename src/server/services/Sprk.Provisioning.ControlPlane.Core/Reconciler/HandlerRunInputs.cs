@@ -8,9 +8,10 @@
 //             (written once, at POST /api/runs)
 //   Output  — a typed InterStepState property, written by its [ProducedBy]
 //             handler
-//   Gap     — an input whose source is still being fixed by a named task
-//             (T245c: operator intake additions). The set of gaps is pinned by
-//             RunContextContractTests, so it can only change deliberately.
+//   Gap     — an input whose source is still being fixed by a named task.
+//             None remain since task 245c; the (empty) set is pinned by
+//             RunContextContractTests, so a new one can only be added
+//             deliberately.
 //
 // NOT run inputs (task 245b): L2 configuration (validated options — e.g. the SPE
 // owning-app credentials, the L2 principal H4 grants, the vendor-key vault) and
@@ -67,8 +68,6 @@ public sealed record RunInput(RunInputSource Source, string Name, bool Required,
 /// <summary>The declared inputs of every provisioning handler (task 245a run-context contract).</summary>
 public static class HandlerRunInputs
 {
-    private const string T245c = "T245c";
-
     // Intake keys used by many handlers.
     private static readonly RunInput Tenant = RunInput.Intake(IntakeParameterCatalog.TenantId);
     private static readonly RunInput Subscription = RunInput.Intake(IntakeParameterCatalog.SubscriptionId);
@@ -126,6 +125,7 @@ public static class HandlerRunInputs
             [
                 Tenant, Subscription,
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
+                RunInput.Intake(IntakeParameterCatalog.CommunicationDefaultMailbox),   // T245c: KV Communication-DefaultMailbox
                 RunInput.Intake("provisionedOn", required: false),
                 RunInput.Intake("rotate", required: false),
                 RunInput.Intake("ficOmitSecretNames", required: false),
@@ -206,8 +206,9 @@ public static class HandlerRunInputs
             [HandlerIds.H11] =
             [
                 Tenant,
-                RunInput.Gap("identityPreset", T245c),
-                RunInput.Gap("usersJson", T245c),
+                // T245c: required intake, validated at POST /api/runs by UserProvisioningIntake (H11's own rules).
+                RunInput.Intake(IntakeParameterCatalog.IdentityPreset),
+                RunInput.Intake(IntakeParameterCatalog.UsersJson),
             ],
             [HandlerIds.H12a] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
             [HandlerIds.H12b] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
@@ -239,9 +240,11 @@ public static class HandlerRunInputs
             [
                 Tenant, Subscription,
                 RunInput.Output(nameof(InterStepState.BffApiUrl)),   // T245b: webhook receiver base (H9)
-                RunInput.Gap("exchangePolicyScopeGroupId", T245c),
-                RunInput.Gap("communicationGraphResource", T245c),
-                RunInput.Gap("emailGraphResource", T245c),
+                // T245c: required intake (scope group created by the customer's Exchange admin, PRQ-C-08); the two
+                // Graph resources are each optional, but POST /api/runs requires at least one (H14b's rule).
+                RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId),
+                RunInput.Intake(IntakeParameterCatalog.CommunicationGraphResource, required: false),
+                RunInput.Intake(IntakeParameterCatalog.EmailGraphResource, required: false),
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),

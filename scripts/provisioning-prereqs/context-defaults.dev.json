@@ -130,6 +130,12 @@
       "populatedBy": "spaarke-constants.yaml name_templates.registryDvUrl.dev",
       "note": "Registry env — per operator memory feedback_no_central_managing_env_yet, spaarkedev1 doubles as dev + registry until a central-managing env exists."
     },
+    "exchangePolicyScopeGroupId": {
+      "source": "intake",
+      "shape": "Email address or object id of a mail-enabled security group",
+      "populatedBy": "intake.schema.json exchangePolicyScopeGroupId property (skill Step 1e-bis); the group is created by the stamp tenant's Exchange admin (PRQ-C-08)",
+      "note": "PRQ-C-08 is once_per_customer — documented for the Exchange admin, not run by Step 0.5b."
+    },
     "pinnedVer": {
       "source": "recipe-internal",
       "shape": "OpenAI model:version tuple string",
