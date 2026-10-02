@@ -121,11 +121,37 @@ public sealed class EmailUploadCaptureService
                 return null;
             }
 
+            // Task 146 r2 (verifier item 9): a capture OWNED from its filing is created WITH that filing — written
+            // separately and non-fatally, a failure left a secure team's email filed under nothing, which nobody can
+            // see. A failure to build the filing skips the capture (this writer's refusal shape).
+            Dictionary<string, object>? filingFields = null;
+            if (owner.IsOwned)
+            {
+                try
+                {
+                    filingFields = await _associationResolver.BuildNewRecordFieldsAsync(decision, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Upload email capture SKIPPED for message {MessageId}: its filing could not be built, so it is not "
+                        + "captured owned by its records' team and filed under nothing ({Code}, task 146).",
+                        email.InternetMessageId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined);
+                    return null;
+                }
+            }
+
             // Message-level dedup (FR-C1 / NFR-02): the race-proof create keys on the UNIQUE
             // sprk_internetmessageid alternate key. A same-email save (already captured from a mailbox, or
             // saved by another user) reconciles to the canonical row (WasDuplicate=true) instead of inserting
             // a duplicate — the SINGLE dedup authority. A null/blank internet-message-id creates unguarded.
             var communication = BuildCommunicationEntity(email, envelope);
+            foreach (var (field, value) in filingFields ?? new Dictionary<string, object>())
+            {
+                communication[field] = value;
+            }
+
             if (owner.IsOwned)
             {
                 communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
@@ -146,18 +172,21 @@ public sealed class EmailUploadCaptureService
                 return communicationId;
             }
 
-            // ── Association: apply the decision evaluated above to the row just created with its owner.
-            //    Non-fatal — the record already exists. ──
-            try
+            // ── Association: apply the decision evaluated above to the row just created with its owner — only when it
+            //    kept its creator (E1); one owned from its filing was created with it. Non-fatal — the record exists. ──
+            if (filingFields is null)
             {
-                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
-                    communicationId);
+                try
+                {
+                    await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
+                        communicationId);
+                }
             }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture

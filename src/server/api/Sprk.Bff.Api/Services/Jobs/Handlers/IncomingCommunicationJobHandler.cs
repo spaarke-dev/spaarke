@@ -154,11 +154,14 @@ public class IncomingCommunicationJobHandler : IJobHandler
         JobContract job, Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException hold, TimeSpan elapsed,
         CancellationToken ct)
     {
-        if (!job.IsAtMaxAttempts)
+        // r2 (verifier item 11): the LAST delivery is the processor's dead-letter condition — attempts exhausted OR the
+        // broker's delivery count reached. A redelivered message keeps its Attempt, so keying on attempts alone let the
+        // processor dead-letter the email by delivery count while this answered "retry", and no administrator was told.
+        if (!job.IsFinalDelivery)
         {
             _logger.LogWarning(
-                "Incoming communication job {JobId} HELD on attempt {Attempt}/{MaxAttempts}: {Error}. Retrying.",
-                job.JobId, job.Attempt, job.MaxAttempts, hold.Message);
+                "Incoming communication job {JobId} HELD on attempt {Attempt}/{MaxAttempts} (delivery {DeliveryCount}/{MaxDeliveryCount}): {Error}. Retrying.",
+                job.JobId, job.Attempt, job.MaxAttempts, job.DeliveryCount, JobContract.MaxDeliveryCount, hold.Message);
             return JobOutcome.Failure(job.JobId, JobType, hold.Message, job.Attempt, elapsed);
         }
 

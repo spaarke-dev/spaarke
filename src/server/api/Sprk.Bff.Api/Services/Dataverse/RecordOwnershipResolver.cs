@@ -78,7 +78,9 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// <para>
 /// <b>Secure-if-any (task 146).</b> A child names every parent it has (<see cref="RecordOwnershipContext.Parents"/>).
 /// If ANY of them is owned in the Secure Record business unit, the child is the named Secure team's. If any root
-/// parent is FLAGGED <c>sprk_issecure</c> but is not owned there, the resolver refuses — never an ordinary team.
+/// parent is FLAGGED <c>sprk_issecure</c> but is not owned there, the resolver refuses — never an ordinary team. A parent
+/// that is itself a child and is NOT team-owned (a run-as-user, client-created or pre-146 row) is looked through to the
+/// records it is filed under, so a grandchild of a secure root is secure even while its parent awaits backfill (r2).
 /// </para>
 /// <para>
 /// Setting <c>ownerid</c> to that team makes <c>owningbusinessunit</c> <b>derive</b> from it —
@@ -497,6 +499,14 @@ public sealed record RecordOwnerResolution(
 
     /// <summary>True when the writer must not write.</summary>
     public bool IsRefused => Outcome == RecordOwnerOutcome.Refused;
+
+    /// <summary>
+    /// True when the team is the Secure Record business unit's NAMED owner team — the row is a child of a secure record
+    /// (task 146 r2). Lets a writer that may not re-own a row itself (a run-as-user tool writing a table outside the
+    /// ownership set) refuse rather than leave a secure record's child in an ordinary business unit, without computing a
+    /// team of its own.
+    /// </summary>
+    public bool IsSecureOwner { get; init; }
     /// <summary>A resolved team.</summary>
     public static RecordOwnerResolution Owned(Guid teamId) => new(RecordOwnerOutcome.Owned, teamId, null, null);
 
@@ -946,6 +956,24 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 inherited, context with { KeepCreatorUnlessTargetIsTeamOwned = false }, ct).ConfigureAwait(false);
         }
 
+        // A parent that is itself a CHILD and is NOT team-owned (a run-as-user, client-created or pre-146 row) says nothing
+        // about secrecy through its own business unit — a user-owned document filed to a secure matter sits in its
+        // creator's ordinary unit. Its filing is read, transitively, so a secure ancestor makes THIS row secure and a
+        // flagged-but-not-isolated one refuses (task 146 r2, verifier item 10 — the look-through ContentOf already did,
+        // now for every context: an analysis of such a document, a Compose promote, a grandchild of any writer). The
+        // ancestors only take part in the secure decision; an ordinary row still takes the PRIMARY parent's unit, so
+        // nothing changes for a child of ordinary records.
+        var lineage = await ReadUnownedChildLineageAsync(facts, ct).ConfigureAwait(false);
+        if (lineage.Unresolved is { } unresolved)
+        {
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.ParentUnresolved,
+                $"the parent {unresolved.EntityLogicalName} {unresolved.RecordId:D} (an ancestor of this record) does not "
+                + "exist or has no owning business unit");
+        }
+
+        var decisive = facts.Concat(lineage.Facts).ToList();
+
         var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
@@ -956,7 +984,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
 
         // A root flagged secure but not owned in the Secure Record BU is a failed or interrupted provisioning (C11).
         // Its ownership says "ordinary"; its flag says "secure". Fail closed: refuse, never the ordinary team.
-        var notIsolated = facts.FirstOrDefault(f => f.FlaggedSecure && f.BusinessUnitId != secureBu.Id);
+        var notIsolated = decisive.FirstOrDefault(f => f.FlaggedSecure && f.BusinessUnitId != secureBu.Id);
         if (notIsolated is not null)
         {
             _logger.LogError(
@@ -970,12 +998,67 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "but is not isolated (its provisioning did not complete); re-run Make Secure on it, then retry");
         }
 
-        if (secureBu.Id is { } secureBuId && facts.Any(f => f.BusinessUnitId == secureBuId))
+        if (secureBu.Id is { } secureBuId && decisive.Any(f => f.BusinessUnitId == secureBuId))
         {
             return await ResolveNamedSecureOwnerTeamAsync(secureBuId, ct).ConfigureAwait(false);
         }
 
         return await ResolveDefaultOwnerTeamAsync(facts[0].BusinessUnitId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>How many filing levels <see cref="ReadUnownedChildLineageAsync"/> follows above a parent.</summary>
+    internal const int MaxLineageDepth = 4;
+
+    /// <summary>
+    /// The ancestors that decide whether a row is secure when one of its parents cannot say so itself: for every parent
+    /// that is a CHILD table (<see cref="IsReparentableChild"/>) and is not team-owned, the records it is filed under —
+    /// and, when one of those is again an un-team-owned child, the records IT is filed under, up to
+    /// <see cref="MaxLineageDepth"/> levels (task 146 r2, verifier item 10). A team-owned parent is not followed: its
+    /// owner already IS the resolver's answer for its own filing. <c>Unresolved</c> names an ancestor that could not be
+    /// read; a Dataverse fault propagates.
+    /// </summary>
+    private async Task<(IReadOnlyList<ParentFacts> Facts, RecordOwnershipParent? Unresolved)> ReadUnownedChildLineageAsync(
+        IReadOnlyList<ParentFacts> facts, CancellationToken ct)
+    {
+        var lineage = new List<ParentFacts>();
+        var seen = new HashSet<RecordOwnershipParent>(facts.Select(f => f.Parent));
+        var frontier = facts.Where(IsUnownedChild).Select(f => f.Parent).ToList();
+
+        for (var depth = 0; depth < MaxLineageDepth && frontier.Count > 0; depth++)
+        {
+            var next = new List<RecordOwnershipParent>();
+            foreach (var child in frontier)
+            {
+                var filing = await ReadOwnershipParentsOfAsync(child, ct).ConfigureAwait(false);
+                if (filing is null)
+                {
+                    return (lineage, child);
+                }
+
+                foreach (var ancestor in filing.Select(p => p with { EntityLogicalName = p.EntityLogicalName.ToLowerInvariant() }))
+                {
+                    if (!seen.Add(ancestor))
+                        continue;
+
+                    var fact = await ReadParentAsync(ancestor, ct).ConfigureAwait(false);
+                    if (fact is null)
+                    {
+                        return (lineage, ancestor);
+                    }
+
+                    lineage.Add(fact);
+                    if (IsUnownedChild(fact))
+                        next.Add(ancestor);
+                }
+            }
+
+            frontier = next;
+        }
+
+        return (lineage, null);
+
+        static bool IsUnownedChild(ParentFacts fact) =>
+            !fact.HasOwningTeam && IsReparentableChild(fact.Parent.EntityLogicalName);
     }
 
     /// <summary>
@@ -1183,7 +1266,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 $"the secure record's owner team '{teamName}' is missing or not unique in the Secure Record business unit");
         }
 
-        return RecordOwnerResolution.Owned(teams.Entities[0].Id);
+        return RecordOwnerResolution.Owned(teams.Entities[0].Id) with { IsSecureOwner = true };
     }
 
     /// <summary>

@@ -28,12 +28,20 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// confirmation logic lives in this handler; when invoked, it executes.
 /// </para>
 /// <para>
-/// <b>User-OBO ONLY (spec MUST rule)</b>: the insert executes through
+/// <b>User-OBO (spec MUST rule)</b>: the insert executes through
 /// <see cref="IDataverseUserClient"/> under the CALLING USER's exchanged token. A create the
 /// user lacks privileges for fails with the user's own access error (403 →
 /// <see cref="DataverseUserClientErrorCodes.AccessDenied"/>); a table invisible to the user
-/// 404s at metadata resolution BEFORE any write is attempted. No app-only client is reachable
-/// from this class (task-012 audit).
+/// 404s at metadata resolution BEFORE any write is attempted.
+/// </para>
+/// <para>
+/// <b>One exception, by owner decision S1 / G5 (unified-access-control-r2 task 146 r2; CLAUDE.md §6.5 path A recorded
+/// in the task note).</b> A row of a CHILD table FILED under a project, matter or work assignment is owned by that
+/// record's team — the named Secure team for a secure one — never the caller. The handler checks AS THE CALLER that
+/// they could create it themselves (Create/Append, AppendTo on every record named, no field-secured or owner column),
+/// then the APPLICATION creates it owned by the team the one <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/>
+/// names (<see cref="OwnedChildWrite"/>). A row of any other table that would be filed under a SECURE record is refused:
+/// it cannot be re-owned here and must not sit in the caller's ordinary business unit.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, column COUNT, outcome,
@@ -100,15 +108,23 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseCreateRecordHandler> _logger;
     private readonly HandoffUrlBuilder _handoffUrlBuilder;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+    private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
 
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseCreateRecordHandler> logger,
-        HandoffUrlBuilder handoffUrlBuilder)
+        HandoffUrlBuilder handoffUrlBuilder,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Spaarke.Dataverse.IFieldMappingDataverseService appOnly)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
+        // Task 146 r2 (S1 / G5): both unconditionally registered (MetadataServiceExtensions / GraphModule), so this
+        // handler's tool-framework registration gains no asymmetric dependency (CLAUDE.md §10 F.1).
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
     }
 
     /// <inheritdoc />
@@ -240,6 +256,24 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // Task 146 r2 (owner S1 / G5, verifier item 6): a CHILD row filed under a record is owned by that record's
+            // team, created by the application after an as-the-caller check — never left owned by the caller.
+            if (OwnedChildWrite.AppliesTo(tablename, mapped.Item!))
+            {
+                var owned = await OwnedChildWrite.CreateAsync(
+                    _dataverse, _ownership, _appOnly, tablename, mapped.Item!, serverSetLookupColumns: null,
+                    CallerObjectId(context), cancellationToken).ConfigureAwait(false);
+                return LogOutcome(context, tablename, OwnedCreateResult(tool, tablename, mapped.Item!, owned, startedAt), stopwatch);
+            }
+
+            // Any other table filed under a SECURE record cannot be re-owned here, and must not sit in the caller's
+            // ordinary business unit: refused (fail closed). Filed under ordinary records it stays a run-as-user create.
+            if (await RefuseSecureFilingAsync(tool, tablename, mapped.Item!, context, startedAt, cancellationToken)
+                    .ConfigureAwait(false) is { } refusal)
+            {
+                return LogOutcome(context, tablename, refusal, stopwatch);
+            }
+
             // Prefer: return=representation so the created row (incl. primary id) comes back
             // without a second GET — task-008 review knob on PostAsync.
             var response = await _dataverse.PostAsync(
@@ -324,6 +358,94 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>The caller's Entra object id (the chat context's <c>oid</c>), when known.</summary>
+    private static Guid? CallerObjectId(ChatInvocationContext context) =>
+        Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : null;
+
+    /// <summary>The tool result of an owned (S1) create: the same success shape as a run-as-user create, or the
+    /// caller's denial, the owner refusal (its stable code and reason — reached only after AppendTo on every record the
+    /// row names), or the caller's own Dataverse error.</summary>
+    private ToolResult OwnedCreateResult(
+        AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, OwnedChildWrite.Outcome owned,
+        DateTimeOffset startedAt)
+    {
+        if (owned.ClientFailure is { } failure)
+            return MapClientError(tool, failure, startedAt);
+        if (owned.Denied is { } denied)
+            return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
+        if (owned.OwnerRefusal is not null || owned.CreatedId is not { } createdId)
+        {
+            var reason = owned.OwnerRefusal;
+            return Error(tool,
+                $"The record was NOT created: its owner could not be decided — {reason?.Reason} ({reason?.RefusalCode}).",
+                reason?.RefusalCode ?? ToolErrorCodes.InternalError, startedAt);
+        }
+
+        return ToolResult.Ok(
+            HandlerId, tool.Id, tool.Name,
+            data: new
+            {
+                tool = DataverseToolNames.CreateRecord,
+                tablename,
+                recordId = createdId.ToString("D"),
+                path = DataverseRecordCitations.RecordPath(tablename, createdId),
+                columnsSet = item.Columns,
+                columnCount = item.Columns.Count
+            },
+            summary: $"Created record {createdId:D} in '{tablename}' ({item.Columns.Count} columns set). It is filed under " +
+                     "another record, so it is owned by that record's team (checked against the calling user's permissions).",
+            confidence: 1.0,
+            execution: Timed(startedAt)) with
+        {
+            Metadata = new Dictionary<string, object?>
+            {
+                [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, createdId) },
+                [ToolResultMetadataKeys.UserSummary] = $"Record created in '{tablename}' (id {createdId:D}).",
+                [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord(tablename, createdId)
+            }
+        };
+    }
+
+    /// <summary>
+    /// For a row this handler cannot re-own (a table outside the ownership set, or a root) that names a project, matter
+    /// or work assignment: AppendTo on each named record AS THE CALLER, then the one resolver's answer — refused when it
+    /// is the Secure team (or a refusal), so the row never sits in the caller's ordinary business unit under a secure
+    /// record (task 146 r2). <c>null</c> = proceed as a run-as-user create.
+    /// </summary>
+    private async Task<ToolResult?> RefuseSecureFilingAsync(
+        AnalysisTool tool, string tablename, DataverseWriteItemMapper.MappedItem item, ChatInvocationContext context,
+        DateTimeOffset startedAt, CancellationToken ct)
+    {
+        var parents = OwnedChildWrite.ParentsOf(item);
+        if (parents.Count == 0)
+            return null;
+
+        var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, ct).ConfigureAwait(false);
+        if (me.Failure is { } failure)
+            return MapClientError(tool, failure, startedAt);
+
+        var appendTo = await OwnedChildWrite.CheckCallerMayAppendToAsync(
+            _dataverse, me.SystemUserId,
+            item.Lookups.Where(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable)),
+            ct).ConfigureAwait(false);
+        if (appendTo.Denied is { } denied)
+            return Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt);
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(parents, CallerObjectId(context), me.SystemUserId),
+            ct).ConfigureAwait(false);
+        if (owner.IsRefused || owner.IsSecureOwner)
+        {
+            return Error(tool,
+                $"A '{tablename}' record cannot be filed under a secure record from chat, and was NOT created" +
+                (owner.IsRefused ? $" ({owner.RefusalCode})." : ".") +
+                " Create it from the record itself.",
+                owner.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        return null;
+    }
 
     private ToolResult LogOutcome(ChatInvocationContext context, string tablename, ToolResult result, Stopwatch stopwatch)
     {

@@ -23,7 +23,8 @@ public sealed class DataverseUpdateRecordHandlerTests : TypedToolHandlerTestFixt
     private readonly Mock<IDataverseUserClient> _dataverse = new();
 
     private DataverseUpdateRecordHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<DataverseUpdateRecordHandler>());
+        new(_dataverse.Object, CreateLogger<DataverseUpdateRecordHandler>(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     private static AnalysisTool BuildUpdateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseUpdateRecordHandler), name: "SYS-Dataverse Update Record");

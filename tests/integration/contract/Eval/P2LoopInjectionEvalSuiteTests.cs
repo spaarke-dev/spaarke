@@ -601,7 +601,9 @@ public class P2LoopInjectionEvalSuiteTests
         var handler = new Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler(
             dataverse.Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance,
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"));
+            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object);
 
         var adapter = new ToolHandlerToAIFunctionAdapter(
             toolRow, handler,

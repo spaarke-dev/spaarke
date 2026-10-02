@@ -108,20 +108,25 @@ public sealed class EmailTriageSeamTests
 
     /// <summary>Build the triage-trigger fixture: the provenance read fires the triage step, the triage facade
     /// returns <paramref name="category"/>, and RetrieveMultiple returns the litigation team for a `team`
-    /// name query (empty for any other lookup). The captured <see cref="Mock{T}"/> lets the caller assert the
-    /// persist <c>UpdateAsync</c>.</summary>
-    private static Mock<IGenericEntityService> RoutingFixture(string category)
+    /// name query, the communication row itself for the routing gate's filing read (task 146 r2 — UNFILED unless
+    /// <paramref name="communicationRow"/> says otherwise; <c>null</c> = the row cannot be read), and nothing for any
+    /// other lookup. The captured <see cref="Mock{T}"/> lets the caller assert the persist <c>UpdateAsync</c>.</summary>
+    private static Mock<IGenericEntityService> RoutingFixture(string category, Func<Guid, Entity?>? communicationRow = null)
     {
+        communicationRow ??= id => new Entity(CommunicationEntity, id) { ["sprk_name"] = "Email: unfiled" };
         var entityService = new Mock<IGenericEntityService>(MockBehavior.Loose);
         entityService
             .Setup(s => s.RetrieveAsync(CommunicationEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(RecordWithProvenance(SamplePersistedProvenanceJson));
         entityService
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
-                q.EntityName == "team"
-                    ? new EntityCollection(new List<Entity> { new("team") { Id = LitigationTeamId } })
-                    : new EntityCollection());
+            .ReturnsAsync((QueryExpression q, CancellationToken _) => q.EntityName switch
+            {
+                "team" => new EntityCollection(new List<Entity> { new("team") { Id = LitigationTeamId } }),
+                CommunicationEntity when communicationRow((Guid)q.Criteria.Conditions[0].Values[0]) is { } row
+                    => new EntityCollection(new List<Entity> { row }),
+                _ => new EntityCollection(),
+            });
         return entityService;
     }
 
@@ -177,6 +182,57 @@ public sealed class EmailTriageSeamTests
         await sut.EnrichAsync(Guid.NewGuid(), CommunicationDirection.Incoming, Message(), archivedDocumentId: null, CancellationToken.None);
 
         // The triage update still ran, but WITHOUT an ownerid.
+        entityService.Verify(s => s.UpdateAsync(
+            CommunicationEntity,
+            It.IsAny<Guid>(),
+            It.Is<Dictionary<string, object>>(f => !f.ContainsKey("ownerid")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // Task 146 r2 (verifier item 1): a communication FILED under a record is a child of it — its owner is the
+    // record-ownership resolver's (the named Secure team for a secure matter). Category routing, which finds a team by
+    // NAME in any business unit, must not override it. The triage fields still persist.
+    [Fact]
+    public async Task EnrichAsync_WhenTheCommunicationIsFiledToASecureMatter_NeverRoutesItsOwner()
+    {
+        var secureMatter = Guid.NewGuid();
+        var entityService = RoutingFixture("Court / Filing", id => new Entity(CommunicationEntity, id)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", secureMatter),
+            ["ownerid"] = new EntityReference("team", Guid.NewGuid()), // the Secure team the resolver chose at create
+        });
+        var gate = TestRoutingGate.From(new CategoryRoutingOptions
+        {
+            Enabled = true,
+            CategoryToTeam = { ["Court / Filing"] = "Litigation Team" },
+        });
+        var sut = CreateService(entityService.Object, TriageReturning("Court / Filing").Object, gate);
+
+        await sut.EnrichAsync(Guid.NewGuid(), CommunicationDirection.Incoming, Message(), archivedDocumentId: null, CancellationToken.None);
+
+        entityService.Verify(s => s.UpdateAsync(
+            CommunicationEntity,
+            It.IsAny<Guid>(),
+            It.Is<Dictionary<string, object>>(f => !f.ContainsKey("ownerid") && f.ContainsKey("sprk_triagesummary")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // Fail closed: when the communication's filing cannot be read, it is not routed.
+    [Fact]
+    public async Task EnrichAsync_WhenTheCommunicationsFilingCannotBeRead_NeverRoutesItsOwner()
+    {
+        var entityService = RoutingFixture("Court / Filing", _ => null);
+        var gate = TestRoutingGate.From(new CategoryRoutingOptions
+        {
+            Enabled = true,
+            CategoryToTeam = { ["Court / Filing"] = "Litigation Team" },
+        });
+        var sut = CreateService(entityService.Object, TriageReturning("Court / Filing").Object, gate);
+
+        await sut.EnrichAsync(Guid.NewGuid(), CommunicationDirection.Incoming, Message(), archivedDocumentId: null, CancellationToken.None);
+
         entityService.Verify(s => s.UpdateAsync(
             CommunicationEntity,
             It.IsAny<Guid>(),

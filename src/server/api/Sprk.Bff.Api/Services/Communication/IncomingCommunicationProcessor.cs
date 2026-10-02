@@ -302,15 +302,16 @@ public sealed class IncomingCommunicationProcessor
         envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
 
         // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
-        var (decision, owner) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
+        var (decision, owner, filingFields) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
 
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
         // CommunicationType = Email (100000000)
         // StatusCode = Delivered (659490003)
-        // Note: Regarding fields are set in step 4.5 by IncomingAssociationResolver (from the decision above)
+        // An email OWNED from its filing is created WITH that filing (task 146 r2, verifier item 9); an unfiled one has
+        // its (non-ownership) association fields set in step 4.5 by IncomingAssociationResolver, as before.
         var (communicationId, wasDuplicate) = await CreateCommunicationRecordAsync(
-            message, mailboxEmail, graphMessageId, owner, ct);
+            message, mailboxEmail, graphMessageId, owner, filingFields, ct);
 
         if (wasDuplicate)
         {
@@ -353,20 +354,25 @@ public sealed class IncomingCommunicationProcessor
             communicationId, graphMessageId);
 
         // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
-        // The row was created with the owner this decision resolved (task 146), so this writes only the regarding
-        // fields, status and provenance — no reparent re-derivation is needed.
-        try
+        // Only for an email that kept its creator (E1): one owned from its filing was created WITH the filing (task 146
+        // r2 — written separately, a failed write left a secure team's email filed under nothing, which nobody can see).
+        // The row was created with the owner this decision resolved, so this writes only the association fields, status
+        // and provenance — no reparent re-derivation is needed.
+        if (filingFields is null)
         {
-            await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
-        }
-        catch (Exception ex)
-        {
-            // Association resolution failure is non-fatal
-            _logger.LogWarning(
-                ex,
-                "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
-                "GraphMessageId: {GraphMessageId}",
-                communicationId, graphMessageId);
+            try
+            {
+                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+            }
+            catch (Exception ex)
+            {
+                // Association resolution failure is non-fatal
+                _logger.LogWarning(
+                    ex,
+                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                    "GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
         }
 
         // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
@@ -641,7 +647,14 @@ public sealed class IncomingCommunicationProcessor
     /// email in an ordinary business unit — the exposure R3 forbids. Individual rungs stay defensive (a rung that
     /// throws is a non-match, NFR-06); a Dataverse fault while resolving the owner itself propagates as a fault.
     /// </exception>
-    internal async Task<(AssociationDecision Decision, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Owner)>
+    /// <returns>
+    /// The decision, the owner, and — when the owner is a TEAM decided from the filing — the filing fields the email is
+    /// CREATED with (task 146 r2, verifier item 9: an email owned by a secure record's memberless team must never exist
+    /// filed under nothing, which a separate, non-fatal filing write allowed). <c>null</c> fields when the email keeps its
+    /// creator (E1). A failure to build them HOLDS the email like an undeterminable filing.
+    /// </returns>
+    internal async Task<(AssociationDecision Decision, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Owner,
+            Dictionary<string, object>? FilingFields)>
         ResolveInboundFilingAsync(
             NormalizedMessage envelope, CommunicationAccount? account, string graphMessageId, CancellationToken ct)
     {
@@ -674,16 +687,41 @@ public sealed class IncomingCommunicationProcessor
             throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", owner);
         }
 
-        return (decision, owner);
+        if (!owner.IsOwned)
+        {
+            return (decision, owner, null);
+        }
+
+        try
+        {
+            return (decision, owner, await _associationResolver.BuildNewRecordFieldsAsync(decision, ct));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "The email's filing could not be built, so it is HELD rather than created owned by its records' team and "
+                + "filed under nothing (task 146 r2 / R3) | GraphMessageId: {GraphMessageId}",
+                graphMessageId);
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(
+                "sprk_communication",
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                    $"the records the email is filed to could not be written with it ({ex.GetType().Name})"),
+                ex);
+        }
     }
 
     /// <summary>
     /// Creates a sprk_communication record for the incoming email.
-    /// Sets all required fields per schema; does NOT set any regarding fields.
+    /// Sets all required fields per schema; the regarding fields only when <paramref name="filingFields"/> carries them
+    /// (an email owned from its filing — task 146 r2). Otherwise step 4.5 writes them. <c>internal</c> so the create
+    /// itself is driven by the writer tests from a Graph <see cref="Message"/> (task 146 r2, verifier item 14).
     /// </summary>
-    private async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRecordAsync(
+    internal async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRecordAsync(
         Message message, string mailboxEmail, string graphMessageId,
-        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, Dictionary<string, object>? filingFields,
+        CancellationToken ct)
     {
         // Determine body content: prefer the FULL body (the complete conversation thread) over
         // Graph's uniqueBody, which strips all quoted reply/forward content and reduces a multi-
@@ -727,8 +765,8 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
             ["sprk_receiveddate"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
 
-            // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization,
-            // sprk_regardingperson) are set in step 4.5 by IncomingAssociationResolver.
+            // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson) come
+            // from the filing fields below when the email is owned from its filing (task 146 r2), else step 4.5.
         };
 
         // Set CC if present
@@ -747,6 +785,13 @@ public sealed class IncomingCommunicationProcessor
             {
                 communication["sprk_attachmentcount"] = attachmentCount;
             }
+        }
+
+        // Task 146 r2 (verifier item 9): an email owned from its filing carries that filing ON the create — never a
+        // team-owned row filed under nothing.
+        foreach (var (field, value) in filingFields ?? new Dictionary<string, object>())
+        {
+            communication[field] = value;
         }
 
         // Task 146: the owner the evaluated association resolved — set ON the create, so a secure email is never

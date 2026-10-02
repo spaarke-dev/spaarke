@@ -157,9 +157,51 @@ public class SecureChildOwnershipWriterTests
             World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)),
             FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice));
 
-        var (_, owner) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-1", CancellationToken.None);
+        var (_, owner, _) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-1", CancellationToken.None);
 
         owner.OwningTeamId.Should().Be(Directory.SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task Inbound_OwnedFromItsFiling_IsCreatedWithThatFiling_NeverFiledUnderNothing()
+    {
+        // r2 (verifier item 9): the email used to be created owned by the Secure team and filed in a SEPARATE, non-fatal
+        // write — a failure there left a row owned by a memberless team, filed under nothing, that nobody can see. The
+        // create itself now carries the regarding lookups and the FR-26 stamp beside the owner.
+        var created = new List<DataverseEntity>();
+        var communications = new Mock<ICommunicationDataverseService>(MockBehavior.Strict);
+        communications
+            .Setup(c => c.CreateCommunicationRaceProofAsync(It.IsAny<DataverseEntity>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<DataverseEntity, string?, CancellationToken>((e, _, _) => created.Add(e))
+            .ReturnsAsync((Guid.NewGuid(), false));
+        var processor = InboundProcessor(
+            World().Resolver(), CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", SecureMatter)),
+            FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice), communications.Object);
+
+        var (_, owner, filing) = await processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-4", CancellationToken.None);
+        await processor.CreateCommunicationRecordAsync(
+            new Microsoft.Graph.Models.Message { Subject = "Invoice 1042", InternetMessageId = "<m-146@vendor.example>" },
+            "intake@contoso.com", "graph-4", owner, filing, CancellationToken.None);
+
+        var row = created.Should().ContainSingle().Subject;
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(Directory.SecureNamedTeam);
+        row.GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(OrdinaryInvoice);
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(SecureMatter);
+    }
+
+    [Fact]
+    public async Task Inbound_WhenItsFilingCannotBeBuiltForTheCreate_IsHeld_AndNothingIsCreated()
+    {
+        // The owner was decided (the first stamp derivation succeeded); building the filing the create carries failed.
+        // R3: held — never a team-owned email filed under nothing.
+        var processor = InboundProcessor(
+            World().Resolver(), AncestorsOnceThenFailing(("sprk_regardingmatter", SecureMatter)),
+            FiledTo("sprk_regardinginvoice", "sprk_invoice", OrdinaryInvoice));
+
+        var act = () => processor.ResolveInboundFilingAsync(Envelope(), account: null, "graph-5", CancellationToken.None);
+
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUndetermined);
     }
 
     [Fact]
@@ -203,8 +245,26 @@ public class SecureChildOwnershipWriterTests
         var id = await capture.CaptureAsync(EmailSave("invoice", OrdinaryInvoice), "user-1", CancellationToken.None);
 
         id.Should().NotBeNull();
-        created.Should().ContainSingle().Which.GetAttributeValue<EntityReference>("ownerid").Id
+        var row = created.Should().ContainSingle().Subject;
+        row.GetAttributeValue<EntityReference>("ownerid").Id
             .Should().Be(Directory.SecureNamedTeam, "the stamp's secure matter reaches the resolver (verifier item 4)");
+        // r2 (verifier item 9): a capture owned from its filing is created WITH that filing. (Asserted as present first —
+        // a null-conditional `?.Id.Should()` would skip the assertion entirely when the column is missing.)
+        row.Attributes.Should().ContainKey("sprk_regardinginvoice");
+        row.GetAttributeValue<EntityReference>("sprk_regardinginvoice").Id.Should().Be(OrdinaryInvoice);
+        row.Attributes.Should().ContainKey("sprk_regardingmatter");
+        row.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(SecureMatter);
+    }
+
+    [Fact]
+    public async Task UploadCapture_WhenItsFilingCannotBeBuiltForTheCreate_IsSkipped_AndNothingIsCreated()
+    {
+        var (capture, created) = UploadCapture(World().Resolver(), AncestorsOnceThenFailing(("sprk_regardingmatter", SecureMatter)));
+
+        var id = await capture.CaptureAsync(EmailSave("invoice", OrdinaryInvoice), "user-1", CancellationToken.None);
+
+        id.Should().BeNull();
+        created.Should().BeEmpty("never a team-owned capture filed under nothing (r2, verifier item 9)");
     }
 
     [Fact]
@@ -734,6 +794,33 @@ public class SecureChildOwnershipWriterTests
     private static IAssociationRung FiledTo(string field, string entity, Guid id) => new FilingRung(field, entity, id);
 
     /// <summary>
+    /// A core-ancestor resolver whose FIRST derivation succeeds (so the owner is decided from the stamp) and whose
+    /// later ones fault — the case where the owner is known but the filing the create carries cannot be built (r2).
+    /// </summary>
+    private static CoreAncestorResolver AncestorsOnceThenFailing(params (string LookupAttribute, Guid RecordId)[] ancestors)
+    {
+        var reads = 0;
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        entityService
+            .Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string logicalName, Guid id, string[] _, CancellationToken __) =>
+            {
+                if (Interlocked.Increment(ref reads) > 1)
+                    return Task.FromException<DataverseEntity>(new TimeoutException("throttled on the second read"));
+
+                var row = new DataverseEntity(logicalName, id);
+                foreach (var (lookupAttribute, recordId) in ancestors)
+                    row[lookupAttribute] = new EntityReference("sprk_matter", recordId);
+                return Task.FromResult(row);
+            });
+
+        return new CoreAncestorResolver(
+            entityService.Object,
+            CoreAncestorResolverFixtures.ProbeReturning(CoreAncestorResolverFixtures.AllCoreAncestorColumns),
+            NullLogger<CoreAncestorResolver>.Instance);
+    }
+
+    /// <summary>
     /// The association mapper for a tenant whose auto-writable set includes INVOICES
     /// (<see cref="AutoFileOptions.CoreWritableEntities"/> is tenant configuration; the default writes only matter,
     /// project and service request, whose stamps are themselves). With a CHILD type writable, the engine files an email
@@ -766,9 +853,10 @@ public class SecureChildOwnershipWriterTests
 
     /// <summary>The processor with only what its filing step uses; Graph, SPE and the job pipeline are never reached.</summary>
     private static IncomingCommunicationProcessor InboundProcessor(
-        IRecordOwnershipResolver ownership, CoreAncestorResolver ancestors, IAssociationRung rung) =>
+        IRecordOwnershipResolver ownership, CoreAncestorResolver ancestors, IAssociationRung rung,
+        ICommunicationDataverseService? communications = null) =>
         new(
-            graphClientFactory: null!, communicationService: null!, genericEntityService: null!, accountService: null!,
+            graphClientFactory: null!, communicationService: communications!, genericEntityService: null!, accountService: null!,
             associationResolver: Association(ancestors, rung), messageNormalizer: new GraphMessageNormalizer(),
             emlConverter: null!, scopeFactory: null!, jobSubmissionService: null!, notificationService: null!,
             enrichmentService: null!, options: Options.Create(new CommunicationOptions()), textExtractor: null!,

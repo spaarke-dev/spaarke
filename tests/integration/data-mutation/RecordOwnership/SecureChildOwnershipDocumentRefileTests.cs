@@ -31,11 +31,15 @@ public sealed class SecureChildOwnershipDocumentRefileTests : IClassFixture<Docu
         _fixture.Reset();
     }
 
+    // The caller's rights are stated per token for every record: Write on the document (the route's filter) and — r2,
+    // verifier items 7/8 — AppendTo on the record it is filed under.
+    private const string RefileRights = "ReadAccess,WriteAccess,AppendToAccess";
+
     [Fact]
     public async Task DocumentPut_FilingUnderASecureMatter_ReownsTheDocumentToTheNamedTeam_ReadBack()
     {
         var documentId = DocumentRefileOwnershipTestFixture.OrdinaryDocument;
-        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
+        using var client = _fixture.CreateClientWithRights(RefileRights);
 
         var response = await client.PutAsJsonAsync(
             $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.SecureMatter });
@@ -51,15 +55,50 @@ public sealed class SecureChildOwnershipDocumentRefileTests : IClassFixture<Docu
     public async Task DocumentPut_FilingUnderAFlaggedButNotIsolatedProject_Is409WithTheStableCode_AndWritesNothing()
     {
         var documentId = DocumentRefileOwnershipTestFixture.OrdinaryDocument;
-        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
+        using var client = _fixture.CreateClientWithRights(RefileRights);
 
         var response = await client.PutAsJsonAsync(
             $"/api/v1/documents/{documentId}", new { projectLookup = DocumentRefileOwnershipTestFixture.FlaggedProject });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        JsonNode.Parse(await response.Content.ReadAsStringAsync())?["reasonCode"]?.GetValue<string>()
+        (JsonNode.Parse(await response.Content.ReadAsStringAsync())?["reasonCode"]?.GetValue<string>())
             .Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
         _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty("a refused re-file writes nothing");
+    }
+
+    // r2 (verifier item 8): Write on the document is not enough to pull it under a record — AppendTo on that record is
+    // asked AS THE CALLER first. Without it: 403, nothing written, no owner reassigned.
+    [Fact]
+    public async Task DocumentPut_FilingUnderASecureMatterWithoutAppendToOnIt_Is403_AndWritesAndReassignsNothing()
+    {
+        var documentId = DocumentRefileOwnershipTestFixture.OrdinaryDocument;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.SecureMatter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty();
+        _fixture.World.Assignments.Should().BeEmpty();
+    }
+
+    // r2 (verifier item 7): the 409's detail names the target and why it is refused. A caller without AppendTo on the
+    // target must not reach it — they get the uniform 403, which names neither the record nor its state.
+    [Fact]
+    public async Task DocumentPut_OntoAFlaggedProjectWithoutAppendToOnIt_Is403_NotTheRefusalOracle()
+    {
+        var documentId = DocumentRefileOwnershipTestFixture.OrdinaryDocument;
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { projectLookup = DocumentRefileOwnershipTestFixture.FlaggedProject });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(DocumentRefileOwnershipTestFixture.FlaggedProject.ToString());
+        body.Should().NotContain(RecordOwnerRefusal.SecureParentNotIsolated);
+        body.Should().NotContainEquivalentOf("secure");
+        _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty();
     }
 }
 

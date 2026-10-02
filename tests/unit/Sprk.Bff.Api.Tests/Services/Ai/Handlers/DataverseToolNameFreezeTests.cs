@@ -124,7 +124,9 @@ public sealed class DataverseToolNameFreezeTests
         var handler = new DataverseCreateRecordHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance,
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"));
+            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object);
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().HaveCount(2, because: "GA MCP create_record takes exactly two arguments");
@@ -140,7 +142,8 @@ public sealed class DataverseToolNameFreezeTests
         // GA: update_record(tablename, recordId, item) — all required.
         var handler = new DataverseUpdateRecordHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
-            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance);
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().HaveCount(3, because: "GA MCP update_record takes exactly three arguments");
@@ -172,8 +175,10 @@ public sealed class DataverseToolNameFreezeTests
         var mock = new Moq.Mock<IDataverseUserClient>().Object;
         IToolHandler[] handlers =
         {
-            new DataverseCreateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance, new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com")),
-            new DataverseUpdateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance),
+            new DataverseCreateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance, new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object),
+            new DataverseUpdateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble()),
             new DataverseDeleteRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDeleteRecordHandler>.Instance)
         };
 

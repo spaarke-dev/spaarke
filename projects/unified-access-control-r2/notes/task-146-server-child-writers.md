@@ -2,7 +2,7 @@
 
 > Branch `task/uac-r2-146` (base `integ/uac-r2-batch2` @ `2a9b4b26c`). Status: **code complete, not deployed**.
 > Ships together with task 149. Deploy order with task 152 accepted as B2. Live steps are manual gates (§7, §11d).
-> Verifier round 1 fixes (branch `task/uac-r2-146-r1`): §11.
+> Verifier round 1 fixes (branch `task/uac-r2-146-r1`): §11. Verifier round 2 fixes (branch `task/uac-r2-146-r1-r2`): §12.
 
 ## 1. Outcome
 
@@ -117,7 +117,7 @@ must call the resolver. Each guard was proven to bite by seeding (§8, §11b).
 | Workers/Office/UploadFinalizationWorker.cs:137 | seam caller + artifacts | carried team wins |
 | Office (task 080, verified not redone): OfficeService.cs:405, 1788; RecordCreationService.cs:223 | — | invoice quick-create names no parent → acting user's team |
 
-### 3c. Not routed. Escalated, see §5.
+### 3c. Not routed in r0/r1. Escalated, see §5. **Superseded by r2 (§12a items 2 and 6): all three chat tools now route.**
 
 | Writer | Why |
 |---|---|
@@ -164,7 +164,9 @@ its children. This is the reason this task exists.
   Dataverse will refuse a review-log row owned by an ordinary communication's team. **Deploy gate G146-2** (§7) must
   run first. Without it, enrichment and the apply endpoints fail to write audit rows for ordinary mail. The data is
   not exposed.
-- **Run-as-user AI handlers.** The handlers are DataverseCreateRecordHandler and EmailDraftToolHandler (trigger 5).
+- **Run-as-user AI handlers — CLOSED in r2 (§12a item 6): owner S1 option (1) was already answered (round 3) and G5
+  (round 3b) defines the shape; implemented.** The r0/r1 record follows for history.
+  The handlers are DataverseCreateRecordHandler and EmailDraftToolHandler (trigger 5).
   - Owner S1 chose app-only creates owned by the Secure team, with the person recorded in a "for" column.
   - Both handlers carry a spec **"User-OBO ONLY" MUST** rule.
   - Switching them needs two things: an as-user authorization pre-check, because an app-only create bypasses the
@@ -401,3 +403,159 @@ hold a role with Read on every census "fix" table before it owns children (re-ru
 - Pre-existing, observed while fixing item 2: the event create and update write `sprk_regardingrecordtype` as an int, but
   live metadata types it as a lookup (`sprk_recordtype_ref`) — the events API write path may fail live. Not task 146's
   scope; recorded.
+
+## 12. Verifier round 2 (r2, 2026-10-02, branch `task/uac-r2-146-r1-r2`)
+
+The adversarial verifier reported 20 items (4, 5 and 12 informational). Every code item is closed below; what stays open
+is a live gate, the publish size, #1034, or an escalation the owner has not answered (§12e).
+
+### 12a. Code fixes
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 (HIGH) | `CommunicationEnrichmentService.AssignOwningTeamAsync` (FR-E7 category routing) set `ownerid` to a team found by NAME in any business unit, re-owning a secure record's email out of isolation; the census could not see an owner OVERRIDE | Routing now applies only to a communication filed under NOTHING: `IsFiledOrUnreadableAsync` reads the row (every column, through the resolver's own `RecordOwnershipContext.ParentsOf` — no per-table list) and skips routing when the row is filed or cannot be read (fail closed). A row filed AFTER routing is re-owned by the resolver when it is filed (the `IncomingAssociationResolver` reparent). **New owner-write census** in `RecordOwnerAssignmentCensusTests`: every server member that WRITES an owner (`["ownerid"] =`, `ownerid@odata.bind`, or a const holding either) is listed by member with its count and kind — Resolver / Seam / Routed (the file must call the resolver) / Root / PerUser / UnfiledOnly (the member must call the filing gate before its write); 41 members. Behaviour change, recorded: FR-E7 no longer routes FILED communications (it would contradict I-2/I-6 for every filed child, not only secure ones). |
+| 2 (HIGH) | `DataverseUpdateRecordHandler` (AI `dataverse.update_record`, run-as-user PATCH of any table, lookups allowed) re-filed children with no owner re-derivation; the run-as-user classification scanned POST only | For a CHILD table (`IsReparentableChild`), a set or cleared lookup is a re-file. As the caller, the row must be visible (`GET`) and AppendTo must be held on every record it is moved under — asked BEFORE any owner decision, so a refusal never describes a record the caller cannot see. Then `ReparentAsync` decides the owner, runs the caller's OWN PATCH (Dataverse authorizes it), assigns the owner separately and reads it back. A refusal writes nothing (tool error with the stable code); a Dataverse refusal of the PATCH assigns no owner. A table outside the ownership set moved under a SECURE record is refused (it cannot be re-owned here). Roots re-own nothing (S6). Census: `EveryRunAsUserWriteIsClassified` now covers POST **and PATCH**; `WorkProductRecordPersister` is classified (it patches one text column). |
+| 3 (MEDIUM) | Dropping `body[OwnerBindKey] = …` from an external payload builder passed every test | `SecureChildOwnershipExternalTests`' recorder now records the owner the REAL builder BOUND (`ownerid@odata.bind`), not the argument it was handed; a new test pins each of the three builders' bind; the census seam guard for the builders now requires `RequireOwner(owningTeamId…)` AND `[OwnerBindKey] = $"/teams({owningTeamId})"`; the owner-write census lists each builder's write. |
+| 6 | The two run-as-user CREATE tools were escalated although owner S1 option (1) (round 3) and G5 (round 3b) had answered | Implemented **S1 option (1), G5-refined**, in one shared path `Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs`. For a CHILD-table row filed under an ownership parent, AS THE CALLER (through `IDataverseUserClient`: the identity is the credential): `WhoAmI`; the table's Create privilege (and Append when it sets a lookup) by the names the table's metadata declares (activity tables share `prvCreateActivity`); AppendTo on every record a lookup names (`RetrievePrincipalAccess`); no field-secured column (`IsSecured` — an app-only write would pass column security); no owner/audit column (`ownerid`, `createdby`, `overriddencreatedon`, …). Then the owner from the ONE resolver (secure-if-any; a refusal creates nothing), then the APPLICATION creates the row owned by that team by PATCHing a fresh id (`IFieldMappingDataverseService.UpdateRecordFieldsAsync` — the create-by-upsert `InvoiceReviewService` already uses for the G5 invoice). `email.draft` records the drafter as `sprk_sentby` (S1's "for" person; Created By is then the application). Unfiled rows, non-child tables and roots are unchanged (run as the user); a non-child table filed under a SECURE record is refused. **CLAUDE.md §6.5 path A**: §12c. |
+| 7 / 8 (LOW) | `PUT /api/v1/documents/{id}` checked Write on the document only: its 409 detail was an oracle about a record the caller may not see, and a caller could pull their document under a secure record they cannot see | Before any owner decision the route asks AS THE CALLER for AppendTo (`entity.associate_document`) on every record the update files the document under — the same check the event re-file and `associate-record` make. Denied → a uniform 403 naming no record. The 409 is now reachable only by a caller authorized on every target. No client PUTs a lookup on this route today (grep of `src/`), so the tightening breaks no caller. |
+| 9 (LOW) | Inbound mail was created owned by the (memberless) Secure team, then filed by a separate NON-FATAL write: a failure left a record nobody can see, filed under nothing | An email (inbound or upload capture) OWNED from its filing is now CREATED WITH that filing. `IncomingAssociationResolver.BuildNewRecordFieldsAsync` returns exactly the fields the apply would write (regarding, status, provenance, resolver fields, FR-26 stamps — the builder was extracted from the apply, not copied) and they are merged into the create. A failure to build them HOLDS inbound mail (`record_owner_parent_undetermined`, R3) and SKIPS an upload capture. An unfiled (creator-owned, E1) email keeps the old create-then-apply. |
+| 10 (LOW) | The transitive look-through applied only to content rows (`ContentOf`): an analysis of a user-owned document filed to a secure matter took an ordinary team | In the resolver, for EVERY context: a parent that is a CHILD table and NOT team-owned is followed to the records it is filed under, transitively (at most `MaxLineageDepth` = 4 levels, cycle-safe). Those ancestors take part in the SECURE decision and the flagged-not-isolated refusal only; an ordinary row still takes the primary parent's own unit (no change for ordinary data). An unreadable ancestor refuses. A team-owned parent is not followed: its owner already is the resolver's answer. |
+| 11 (LOW) | A failed delivery is abandoned and redelivered as the SAME message, so `Attempt` never advances; the processor dead-letters at `DeliveryCount >= 5` while the hold answered "retry" — no administrator alert | `JobContract.DeliveryCount` (set by `ServiceBusJobProcessor`, `[JsonIgnore]`, not on the wire) and `JobContract.IsFinalDelivery` (attempts exhausted OR the delivery count reached) — the ONE definition the processor's dead-letter branch and the hold now share. The hold alerts on the final delivery. Processor behaviour is unchanged (the same condition, now named). |
+
+### 12b. Tests (r2)
+
+New (all over the REAL resolver and `OwnershipDirectory` unless stated):
+
+- `SecureChildOwnershipAiToolTests` (19):
+  - create_record: a filed to-do is app-created, named team, never as the user; an ordinary matter → its unit's team;
+    flagged → refused, nothing created; no Create privilege → denied; no AppendTo → denied before any owner decision (no
+    oracle); an owner column → refused; a field-secured column → refused; unfiled → still as the user; a `task` filed to a
+    secure matter → refused, to an ordinary matter → as the user; a resolver fault → an error, nothing created.
+  - email.draft: regarding a secure matter → app-created, named team, sender = the drafter, still a draft.
+  - update_record: a re-file → named team, read back; flagged → refused, the caller's PATCH never sent; no AppendTo →
+    denied; Dataverse refuses the PATCH → no owner assigned; an invisible row → the caller's 404, no oracle; a non-child
+    table under a secure matter → refused; a change that files nothing → an ordinary update.
+- `SecureChildOwnershipComposeTests` (3): a Compose promote inheriting a secure matter → upserted owned by the named team
+  (alternate key kept); inheriting a flagged project → refused before the upsert; unfiled → the saving user's unit team.
+  Closes "Compose promoter not driven".
+- `SecureChildOwnershipAnalysisForkTests` / `SecureChildOwnershipAnalysisPromoteTests` (2 + 2): fork and promote ask the
+  resolver with the document and create owned by its answer; a refusal → 409 + stable code, nothing created, archived or
+  bound. Closes "fork and promote not tested".
+- `SecureChildOwnershipWriterTests` (+4): the inbound CREATE itself (`CreateCommunicationRecordAsync`, now `internal`,
+  driven from a Graph `Message` POCO) carries owner + regarding + stamp; an inbound filing that cannot be built → HOLD;
+  upload capture created with its filing; an unbuildable upload-capture filing → skipped.
+- `SecureChildOwnershipDocumentRefileTests` (+2): PUT without AppendTo → 403, nothing written or reassigned; onto a
+  flagged project without AppendTo → 403 naming neither the record nor its state.
+- `SecureChildOwnershipExternalTests` (+1, plus the recorder change above).
+- `SecureChildOwnershipTests` (+2): the hold on the broker's last delivery (attempt 1) → dead-letter + alert; one
+  delivery earlier → retry, no alert.
+- `RecordOwnershipResolverTests` (+6): a child of a user-owned document filed to a secure matter → named team; two levels
+  through un-team-owned children → named team; ordinary filing → the primary parent's unit (unchanged); a flagged
+  ancestor → refused; a missing ancestor → refused; a team-owned parent is not followed.
+- `EmailTriageSeamTests` (+2): filed to a secure matter → never routed; filing unreadable → never routed.
+- `RecordOwnerAssignmentCensusTests` (14 in all): the owner-write census, its kind check and its negative control (+3);
+  run-as-user POST/PATCH classification and its negative control (replacing the POST-only pair); the builder bind guard.
+
+Updated where the contract changed: the upload-capture seam test reads the filing from the create (no separate update);
+the `DataverseCreateRecordHandlerTests` / `EmailDraftToolHandlerTests` lookup tests were retargeted to a NON-ownership
+lookup (a reference table / an organization) so they still pin the run-as-user mapping (the filed case is the owned path,
+above); the handler constructions gained the resolver (and the app-only seam).
+
+**Still not driven end to end, reason unchanged:** the inbound `.eml`/attachment ROWS (behind the Graph message fetch),
+`SpendSnapshotService` (unwrapped `ServiceClient`) and `DocumentCheckoutService` (raw `HttpClient`). Their only offline
+doubles are transport doubles that ADR-038 B1 rules out ("transport-level mock — encodes wire format"). Each is pinned by
+the per-site census AND the owner-write census.
+
+### 12c. CLAUDE.md §6.5 path A — S1 against the AI tool plane's "user-OBO" MUST
+
+- **Spec rule in question**: spaarke-ai-architecture-redesign-r1, MUST "run user-OBO for all Dataverse tool access"
+  (FR-P0-10: "no app-only Dataverse path reachable from AI").
+- **Conflict**: a run-as-user create of a child of a secure record leaves it owned by the caller in an ordinary business
+  unit, readable by every colleague with ordinary depth (C10, CRITICAL). The owner decided S1 option (1) on exactly these
+  tools ("AI email draft, AI create-record"): app-only creation owned by the team, the person in the "for" column. G5
+  (round 3b) fixed the shape: as-the-user checks, then the APP creates the row owned by the team.
+- **Path**: A (project-scoped exception), decided by the owner (S1, G5). Scope: ONLY a row of a child table filed under
+  an ownership parent (the create), and the owner ASSIGNMENT of a child the caller re-files (the update — the PATCH itself
+  still runs as the caller). Everything else in the tool plane stays user-OBO.
+- **Why it is not an escalation**: the four as-the-caller questions in §12a item 6 (Create/Append privileges, AppendTo on
+  every record named, no field-secured column, no owner/audit column) — everything Dataverse would have checked for a
+  run-as-user create except the owner itself, which is the point.
+- **Alternatives rejected** (S1's own): create-then-assign (option 2) leaves the row readable in an ordinary unit for the
+  gap; widening user roles with prvAssign (option 3) is forbidden.
+
+**S1 "for" column per table** (S1: "name it per table in the task note"):
+
+| Table | "for" column | Status |
+|---|---|---|
+| `sprk_communication` (email.draft) | `sprk_sentby` (systemuser) | Set to the drafter on the owned path (r2). |
+| `sprk_todo` | `sprk_assignedto` (CONTACT) | Kept when the model supplies it. The default "the caller's contact" needs task 141's user↔contact link (not merged), so it is not defaulted. |
+| `sprk_event`, `sprk_memo`, `sprk_analysis`, `sprk_agreement`, `sprk_budget`, `sprk_invoice`, others | none found in code | Created By is the application. A NEW column needs a §11 justification and a live schema change — an owner / task 152 decision (§12e). Owner B2 already accepted the interim drop-out of team-owned to-dos/tasks from `owninguser = caller` surfaces. |
+
+### 12d. Seed-and-bite (r2)
+
+Every plant was made in a backed-up copy, built, run, and restored from the backup (files touched). Each failed the tests
+named below and passed again once restored.
+
+| Plant | Item | What failed |
+|---|---|---|
+| A1: category routing's filing gate removed | 1 | 2 `EmailTriageSeamTests` (filed / unreadable); census `EveryOwnerWriteKeepsItsKind` (UnfiledOnly) |
+| A2: `body[OwnerBindKey] = …` deleted from `BuildTodoCreatePayload` (the verifier's plant) | 3 | 4 external to-do tests + `ExternalCreatePayloads_EachBindTheResolvedOwnerTeam`; census `EverySeamRefusesAnOwnerlessCreate` and `EveryOwnerWriteIsCensused` |
+| A3: PUT re-file AppendTo check removed | 7/8 | 2 `SecureChildOwnershipDocumentRefileTests` (403 cases) |
+| A4: inbound create without its filing | 9 | `Inbound_OwnedFromItsFiling_IsCreatedWithThatFiling_NeverFiledUnderNothing` |
+| A5: upload capture without its filing | 9 | `EmailUploadCaptureSeamTests` save-pane test, and — after fixing a vacuous assertion this plant exposed (`?.Id.Should()` short-circuits when the column is missing; now asserted present first; the same pattern fixed in three `reasonCode` reads) — `UploadCapture_FiledToAnInvoiceUnderASecureMatter…` |
+| A6: resolver lineage disabled | 10 | 4 `RecordOwnershipResolverTests` (secure, two levels, flagged, missing) |
+| A7: hold keyed on `IsAtMaxAttempts` again | 11 | `InboundHold_OnTheBrokersLastDelivery…` |
+| A8: AppendTo check skipped | 2/6 | create + update AppendTo-denied tests |
+| A9: update-tool re-file disabled | 2 | update re-file, flagged, invisible-row, non-child tests |
+| B1: privilege check skipped | 6 | `CreateRecord_WhenTheCallerLacksCreateOnTheTable…` |
+| B2: owner-column check skipped | 6 | `CreateRecord_SettingTheOwnerColumn…` |
+| B3: field-security check skipped | 6 | `CreateRecord_SettingAFieldSecuredColumn…` |
+| B4: draft sender not recorded | 6 | `EmailDraft_RegardingASecureMatter…` |
+| B5: non-child secure refusal skipped | 6 | `CreateRecord_ATableOutsideTheOwnershipSetFiledToASecureMatter…` |
+| B6: an extra (unreachable) owner write in `PersistTriageResultAsync` | 1/15 | census `EveryOwnerWriteIsCensused` ("UNLISTED owner write") |
+| B7: `DataverseUpdateRecordHandler` removed from the census lists | 2 | census `EveryRunAsUserWriteIsClassified` (PATCH) |
+| C1: owned path switched off (`AppliesTo` false) | 6 | 5 owned-path tests (secure / ordinary to-do, draft, privilege, field security); the remaining filed cases are still refused by the fail-closed fallback — defence in depth, by design |
+
+### 12e. Still not closed (and why)
+
+- **AC1 — work assignment S6 b** (verifier item 5, correctly stopped): inline secure provisioning at creation needs task
+  144's provisioning as a service, and the endpoint writes `sprk_matterid`, which the table lacks. Unchanged.
+- **E1, E2, E3/G146-2, trigger 3** (verifier item 5): unchanged, awaiting the owner / task 149.
+- **S1 "for" column** for tables other than communications and to-dos (§12c): owner / task 152; the to-do default needs
+  task 141.
+- **AC11 (G146-4)**: the live gate after deploy with task 149 — not run (no live writes from this session).
+- **AC13**: publish size is measured by the main session (task brief); #1034 closes after merge (main session).
+- **AC14 (G146-1, G146-2, G146-5)**: the live role / default-team gates — not run (live writes are the main session's;
+  round 4 approved live steps for 141/144/145 only).
+- **AC16**: no PR may be opened from this session; the PR description is ready in §12f.
+
+### 12f. PR description (ready to paste)
+
+> **Task 146 — server child writers own their rows through the one resolver (C10 part 2; closes #1034 with
+> word-add-in-r1).**
+>
+> Every BFF create and re-file of a child of a project, matter or work assignment decides `ownerid` through
+> `IRecordOwnershipResolver`: the named `Secure Record Owners` team when ANY parent is secure, else the primary parent's
+> business-unit default team; refuse (in each writer's own contract) when unresolved; a Dataverse fault propagates.
+> Census: `RecordOwnerAssignmentCensusTests` (creates per site, owner writes per member, run-as-user POST/PATCH).
+>
+> **SHIP-TOGETHER with task 149** (sharee mirror): once a child is owned by the memberless Secure team, internal sharees
+> of the parent lose sight of it until 149 mirrors them. **Do not deploy to spaarke-bff-dev or any shared environment
+> before 149 merges.**
+>
+> **Ordering with task 152** (Assigned To / human Created By targeting): filed AI, external and Office to-dos, tasks and
+> drafts become team-owned and drop out of `owninguser = caller` surfaces (Daily Briefing) until 152 deploys — **owner B2
+> accepted this interim drop-out.**
+>
+> **§6.5 path A (owner S1 / G5):** the chat tools `dataverse.create_record` and `email.draft` create a FILED child
+> app-only, owned by the team, after an as-the-caller check (Create/Append, AppendTo, no field-secured or owner column);
+> `dataverse.update_record` re-files through `ReparentAsync`. An exception to the AI tool plane's user-OBO MUST, scoped to
+> filed children (task note §12c).
+>
+> **Placement (bff-extensions.md):** no new service, endpoint, DI registration, package, option or job in r2; one new
+> internal static helper (`OwnedChildWrite`, §11 justification in its remarks and the POML) beside the existing write-item
+> mapper.
+>
+> **Deploy gates (main session):** G146-1 (Secure Record Owner role: the census tables), G146-2 + G146-5 (BU default
+> teams' Read on `sprk_emailreviewlog`; the Dev 1 / Test 1 default teams' roles), G146-3 (hold-alert recipients), G146-4
+> (the live check after deploy with 149). Publish size: measured by the main session against a fresh master build.

@@ -33,8 +33,13 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     private readonly Mock<IDataverseUserClient> _dataverse = new();
     private readonly HandoffUrlBuilder _handoffUrlBuilder = new(TestDataverseBaseUrl);
 
+    /// <summary>The app-only seam of the owned (S1) create — strict: a run-as-user create must never reach it
+    /// (task 146 r2; the owned path is covered in SecureChildOwnershipAiToolTests).</summary>
+    private readonly Mock<Spaarke.Dataverse.IFieldMappingDataverseService> _appOnly = new(MockBehavior.Strict);
+
     private DataverseCreateRecordHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(), _handoffUrlBuilder);
+        new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(), _handoffUrlBuilder,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), _appOnly.Object);
 
     private static AnalysisTool BuildCreateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseCreateRecordHandler), name: "SYS-Dataverse Create Record");
@@ -420,6 +425,8 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
 
         // Navigation-property metadata: custom lookup casing differs from the column logical
         // name — the mapper must use ReferencingEntityNavigationPropertyName, never guess.
+        // (task 146 r2: a reference-table lookup — a row filed under a matter/project/work assignment takes the owned
+        // path instead, covered by SecureChildOwnershipAiToolTests.)
         _dataverse
             .Setup(d => d.GetAsync(
                 It.Is<string>(p => p.Contains("ManyToOneRelationships")),
@@ -428,15 +435,15 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
                 {
                   "LogicalName": "sprk_event",
                   "ManyToOneRelationships": [
-                    { "ReferencingAttribute": "sprk_matterid", "ReferencingEntityNavigationPropertyName": "sprk_MatterId", "ReferencedEntity": "sprk_matter" }
+                    { "ReferencingAttribute": "sprk_eventtype_ref", "ReferencingEntityNavigationPropertyName": "sprk_EventType_Ref", "ReferencedEntity": "sprk_eventtype_ref" }
                   ]
                 }
                 """)));
         _dataverse
             .Setup(d => d.GetAsync(
-                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')")),
+                It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_eventtype_ref')")),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_matters" }""")));
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "EntitySetName": "sprk_eventtype_refs" }""")));
 
         string? postedBody = null;
         _dataverse
@@ -447,17 +454,17 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
         var ctx = BuildChatInvocationContext(toolArgumentsJson: $$$"""
             {"tablename":"sprk_event","item":{
               "sprk_name":"Follow up",
-              "sprk_matterid":{"relatedTable":"sprk_matter","name":"Ignored Display Name","recordId":"{{{relatedId:D}}}"}
+              "sprk_eventtype_ref":{"relatedTable":"sprk_eventtype_ref","name":"Ignored Display Name","recordId":"{{{relatedId:D}}}"}
             }}
             """);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
 
         result.Success.Should().BeTrue();
         using var bodyDoc = JsonDocument.Parse(postedBody!);
-        bodyDoc.RootElement.GetProperty("sprk_MatterId@odata.bind").GetString()
-            .Should().Be($"/sprk_matters({relatedId:D})",
+        bodyDoc.RootElement.GetProperty("sprk_EventType_Ref@odata.bind").GetString()
+            .Should().Be($"/sprk_eventtype_refs({relatedId:D})",
                 because: "lookups bind via the metadata-resolved navigation property + related entity set");
-        bodyDoc.RootElement.TryGetProperty("sprk_matterid", out _).Should().BeFalse(
+        bodyDoc.RootElement.TryGetProperty("sprk_eventtype_ref", out _).Should().BeFalse(
             because: "the raw lookup object must not pass through as a column value");
     }
 

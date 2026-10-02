@@ -700,6 +700,15 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// mis-assignment). Tenant-scoped resolution activates when a tenant key is plumbed; the global map applies
     /// today (single-org default, mirroring <see cref="AutoFileOptions"/>).
     /// </summary>
+    /// <remarks>
+    /// <b>Only an UNFILED communication is routed</b> (unified-access-control-r2 task 146 r2, verifier item 1). A
+    /// communication filed under a record is a CHILD of it, and its owner is the one the record-ownership resolver
+    /// decided — the named Secure team for a secure record, the record's business-unit team otherwise (write-path
+    /// invariant I-2; "no writer computes a team itself"). A category team found by NAME, in any business unit, would
+    /// move a secure record's email out of isolation. So a filed row — or one whose filing cannot be read — keeps its
+    /// owner, and routing applies only to a row filed under nothing (which keeps its creator otherwise, E1). A row filed
+    /// AFTER it was routed is re-owned by the resolver when it is filed (the reparent in IncomingAssociationResolver).
+    /// </remarks>
     private async Task AssignOwningTeamAsync(
         string? category, Dictionary<string, object> fields, Guid communicationId, CancellationToken ct)
     {
@@ -708,6 +717,16 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             var teamName = _routingGate.ResolveTeamName(category, tenantKey: null);
             if (string.IsNullOrWhiteSpace(teamName))
                 return;
+
+            if (await IsFiledOrUnreadableAsync(communicationId, ct).ConfigureAwait(false))
+            {
+                _logger.LogInformation(
+                    "Enrichment[email-triage] routing: category {Category} maps to team {Team}, but the communication is "
+                    + "filed under a record (or its filing could not be read) — its owner is the record-ownership resolver's, "
+                    + "leaving ownerid unset (task 146) | CommunicationId: {CommunicationId}.",
+                    category, teamName, communicationId);
+                return;
+            }
 
             var teamId = await ResolveTeamIdByNameAsync(teamName, ct).ConfigureAwait(false);
             if (teamId.HasValue)
@@ -732,6 +751,26 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                 "Enrichment[email-triage] routing: category→team assignment failed (non-fatal; triage fields still persist) | Category: {Category}, CommunicationId: {CommunicationId}.",
                 category, communicationId);
         }
+    }
+
+    /// <summary>
+    /// True when the communication is filed under any ownership parent — every lookup it carries to a record the
+    /// resolver files children under (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf"/>,
+    /// the resolver's own definition, read over every column: no per-table column list) — or when the row cannot be
+    /// read at all (fail closed: an unknown filing is never routed). Task 146 r2.
+    /// </summary>
+    private async Task<bool> IsFiledOrUnreadableAsync(Guid communicationId, CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet(true),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_communicationid", ConditionOperator.Equal, communicationId);
+
+        var row = (await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        return row is null
+               || Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row.Attributes).Count > 0;
     }
 
     /// <summary>Resolves a team NAME to its <c>teamid</c> via the SAME name-lookup read path

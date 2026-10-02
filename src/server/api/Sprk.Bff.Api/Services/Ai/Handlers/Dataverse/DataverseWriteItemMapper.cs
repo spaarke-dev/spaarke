@@ -45,7 +45,21 @@ internal static partial class DataverseWriteItemMapper
     private static partial Regex LogicalNameRegex();
 
     /// <summary>Successful mapping: the OData JSON body + the column logical names it sets (identifiers only — safe to log counts/names per NFR-07).</summary>
-    internal sealed record MappedItem(string JsonBody, IReadOnlyList<string> Columns);
+    internal sealed record MappedItem(string JsonBody, IReadOnlyList<string> Columns)
+    {
+        /// <summary>
+        /// Every lookup the body binds — column, target table, target entity set, target id (unified-access-control-r2
+        /// task 146 r2: the records a row is FILED under decide its owner, and each costs the caller AppendTo).
+        /// </summary>
+        public IReadOnlyList<MappedLookup> Lookups { get; init; } = Array.Empty<MappedLookup>();
+
+        /// <summary>The columns the body sets to <c>null</c> — a clear, which for a lookup column moves the row OUT of
+        /// that record (task 146 r2).</summary>
+        public IReadOnlyList<string> ClearedColumns { get; init; } = Array.Empty<string>();
+    }
+
+    /// <summary>One lookup a mapped body binds.</summary>
+    internal sealed record MappedLookup(string Column, string RelatedTable, string RelatedEntitySet, Guid RecordId);
 
     /// <summary>
     /// Tri-state outcome: exactly one of <see cref="Item"/> (success),
@@ -121,6 +135,7 @@ internal static partial class DataverseWriteItemMapper
 
         // Resolve lookup navigation properties + related entity sets only when needed.
         var lookupBinds = new List<(string NavigationProperty, string RelatedEntitySet, Guid RecordId)>();
+        var mappedLookups = new List<MappedLookup>();
         if (lookups.Count > 0)
         {
             var relationshipsResponse = await dataverse.GetAsync(
@@ -162,6 +177,7 @@ internal static partial class DataverseWriteItemMapper
                 }
 
                 lookupBinds.Add((navigationProperty, relatedEntitySet, recordId));
+                mappedLookups.Add(new MappedLookup(column, relatedTable, relatedEntitySet, recordId));
             }
         }
 
@@ -183,7 +199,11 @@ internal static partial class DataverseWriteItemMapper
             writer.WriteEndObject();
         }
 
-        return MapOutcome.Ok(new MappedItem(Encoding.UTF8.GetString(stream.ToArray()), columns));
+        return MapOutcome.Ok(new MappedItem(Encoding.UTF8.GetString(stream.ToArray()), columns)
+        {
+            Lookups = mappedLookups,
+            ClearedColumns = simpleValues.Where(v => v.Value.ValueKind == JsonValueKind.Null).Select(v => v.Column).ToArray(),
+        });
     }
 
     private static bool TryParseLookup(

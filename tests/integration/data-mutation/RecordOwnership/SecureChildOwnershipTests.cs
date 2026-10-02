@@ -345,6 +345,47 @@ public class SecureChildOwnershipTests
     }
 
     [Fact]
+    public async Task InboundHold_OnTheBrokersLastDelivery_DeadLettersUnprocessed_AndAlerts_EvenOnTheFirstAttempt()
+    {
+        // r2 (verifier item 11): a failed delivery is ABANDONED and redelivered as the same message, so its Attempt never
+        // advances; ServiceBusJobProcessor dead-letters it by delivery count. The hold keyed on attempts alone answered
+        // "retry" on that last delivery, and the email was dead-lettered with no administrator alert.
+        var admins = new[] { Guid.NewGuid() };
+        var (handler, notifications) = InboundHandler(admins);
+        var job = new JobContract
+        {
+            JobType = IncomingCommunicationJobHandler.JobTypeName,
+            Attempt = 1,
+            MaxAttempts = 3,
+            DeliveryCount = JobContract.MaxDeliveryCount,
+        };
+
+        job.IsFinalDelivery.Should().BeTrue("this is the delivery the processor dead-letters");
+        var outcome = await handler.HoldAsync(job, Refused(), TimeSpan.Zero, CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Poisoned);
+        notifications.Select(n => n.GetAttributeValue<EntityReference>("ownerid").Id).Should().BeEquivalentTo(admins);
+    }
+
+    [Fact]
+    public async Task InboundHold_BeforeTheBrokersLastDelivery_RetriesWithoutAlerting()
+    {
+        var (handler, notifications) = InboundHandler(admins: new[] { Guid.NewGuid() });
+        var job = new JobContract
+        {
+            JobType = IncomingCommunicationJobHandler.JobTypeName,
+            Attempt = 1,
+            MaxAttempts = 3,
+            DeliveryCount = JobContract.MaxDeliveryCount - 1,
+        };
+
+        var outcome = await handler.HoldAsync(job, Refused(), TimeSpan.Zero, CancellationToken.None);
+
+        outcome.Status.Should().Be(JobStatus.Failed);
+        notifications.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task InboundHold_AtTheLastAttempt_WithNoAdministratorsConfigured_StillDeadLetters()
     {
         var (handler, notifications) = InboundHandler(admins: Array.Empty<Guid>());

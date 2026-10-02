@@ -205,6 +205,7 @@ public static class DataverseDocumentsEndpoints
             [FromBody] UpdateDocumentRequest request,
             IDocumentDataverseService dataverseService,
             Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+            Spaarke.Core.Auth.AuthorizationService authorization,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -244,6 +245,16 @@ public static class DataverseDocumentsEndpoints
                 }
                 else
                 {
+                    // r2 (verifier items 7 and 8): filing the document under a record costs AppendTo on THAT record, asked
+                    // AS THE CALLER before anything is resolved or written — the Write filter above covers the document
+                    // only. Without it a caller could pull their document under a secure record they cannot see (and lose
+                    // it to that record's team), and the owner refusal's detail answered questions about such a record.
+                    var denial = await AuthorizeRefileTargetsAsync(authorization, context, Guid.Parse(id), parentChanges, logger);
+                    if (denial is not null)
+                    {
+                        return denial;
+                    }
+
                     var reparent = await ownershipResolver.ReparentAsync(
                         new Sprk.Bff.Api.Services.Dataverse.RecordReparent
                         {
@@ -670,5 +681,74 @@ public static class DataverseDocumentsEndpoints
         .RequireAuthorization();
 
         return app;
+    }
+
+    /// <summary>The right filing a document under a record costs on that record: AppendTo (the key the record-keyed
+    /// upload, Office save, associate-record and event re-file routes use).</summary>
+    internal const string RefileTargetOperation = "entity.associate_document";
+
+    /// <summary>
+    /// Authorizes a RE-FILE of a document AS THE CALLER on every record the update files it under (task 146 r2, verifier
+    /// items 7 and 8): AppendTo (<see cref="RefileTargetOperation"/>) on each new parent, asked of Dataverse through the
+    /// caller's own rights before the owner is resolved or anything is written. Write on the document itself is the
+    /// route's filter. <c>null</c> when allowed; otherwise a 403 ProblemDetails that names no target and no reason about
+    /// it — a caller without AppendTo learns nothing about the record (the owner refusal's detail is reached only by a
+    /// caller authorized on every target). Fails closed: an unsupported type, an unanswerable question or a fault denies.
+    /// </summary>
+    private static async Task<IResult?> AuthorizeRefileTargetsAsync(
+        Spaarke.Core.Auth.AuthorizationService authorization,
+        HttpContext httpContext,
+        Guid documentId,
+        IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> parentChanges,
+        ILogger logger)
+    {
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
+        var token = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        var ct = httpContext.RequestAborted;
+
+        foreach (var (column, target) in parentChanges)
+        {
+            if (target is null)
+                continue; // this route's updates only SET lookups (RecordReparent.ParentChangesOf)
+
+            var entitySet = EntityAccessFilter.TryResolveEntitySet(target.LogicalName, out var resolved)
+                ? resolved
+                : string.Equals(target.LogicalName, "sprk_document", StringComparison.OrdinalIgnoreCase)
+                    ? FinanceAuthorizationFilter.DocumentEntitySet
+                    : null;
+
+            string? denyReason;
+            if (entitySet is null || string.IsNullOrEmpty(userId))
+            {
+                denyReason = FinanceAuthorizationFilter.NoTargetReasonCode;
+            }
+            else
+            {
+                try
+                {
+                    var snapshot = await authorization.GetCallerRecordAccessAsync(userId, entitySet, target.Id, token, ct);
+                    denyReason = Spaarke.Core.Auth.OperationAccessPolicy.HasRequiredRights(snapshot.AccessRights, RefileTargetOperation)
+                        ? null
+                        : FinanceAuthorizationFilter.InsufficientRightsReasonCode;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogError(ex, "Document re-file authorization faulted on {EntitySet}({RecordId}); denying",
+                        entitySet, target.Id);
+                    denyReason = FinanceAuthorizationFilter.SystemFailureReasonCode;
+                }
+            }
+
+            if (denyReason is not null)
+            {
+                logger.LogWarning(
+                    "Document re-file DENIED: caller may not file document {DocumentId} under {Column} → {Entity}({RecordId}) ({Reason})",
+                    documentId, column, target.LogicalName, target.Id, denyReason);
+                return ProblemDetailsHelper.Forbidden(
+                    denyReason, "You do not have permission to file this document under that record.", httpContext.TraceIdentifier);
+            }
+        }
+
+        return null;
     }
 }

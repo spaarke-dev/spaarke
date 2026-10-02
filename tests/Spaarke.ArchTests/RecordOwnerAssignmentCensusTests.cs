@@ -230,6 +230,19 @@ public class RecordOwnerAssignmentCensusTests
             "Filing a communication under a record re-derives its owner before the regarding is written."),
         new UnscannedWriter("CommunicationService.cs", "explicit respond-into-thread stamp",
             "Joining a record thread files the message under the thread's record (shared ThreadResolver step)."),
+
+        // ── task 146 r2: the chat tools that write AS THE USER (verifier items 2 and 6) ──────────────────────────────
+        new UnscannedWriter("DataverseCreateRecordHandler.cs", "run-as-user POST to a computed entity set (any table)",
+            "Owner S1 (1) / G5: a CHILD row filed under a record is checked as the caller, then created by the APPLICATION "
+            + "owned by the resolver's team (OwnedChildWrite); any other table filed under a SECURE record is refused."),
+        new UnscannedWriter("EmailDraftToolHandler.cs", "run-as-user POST of a sprk_communication draft",
+            "Owner S1 (1) / G5: a draft filed under a record is created by the APPLICATION owned by the resolver's team, the "
+            + "drafter recorded as sprk_sentby; an unfiled draft is still created as the user (E1)."),
+        new UnscannedWriter("OwnedChildWrite.cs", "app-only create-by-upsert of a filed child (S1 / G5)",
+            "The one owned-create path of the chat tools: as-the-caller checks, the resolver's owner, the app-only create."),
+        new UnscannedWriter("DataverseUpdateRecordHandler.cs", "run-as-user PATCH of any table (lookups allowed)",
+            "A lookup change on a CHILD table is a re-file (ReparentAsync: the caller's PATCH, then the owner assigned and "
+            + "read back); any other table moved under a SECURE record is refused."),
     };
 
     /// <summary>Seams that must refuse an owner-less create, by the method that builds the row.</summary>
@@ -244,9 +257,11 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "RequireArtifactOwner", Refusal),
         new OwnerSeam("DataverseWebApiService.cs", "CreateEventAsync", Refusal),
-        new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", Calls("RequireOwner")),
-        new OwnerSeam("ExternalDataService.cs", "BuildEventCreatePayload", Calls("RequireOwner")),
-        new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", Calls("RequireOwner")),
+        // r2 (verifier items 3 and 15): a builder must REFUSE an empty team AND BIND the team it was handed — dropping the
+        // bind used to pass every test, leaving the external create owned by the BFF application user.
+        new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", RefusesAndBindsTheOwner),
+        new OwnerSeam("ExternalDataService.cs", "BuildEventCreatePayload", RefusesAndBindsTheOwner),
+        new OwnerSeam("ExternalDataService.cs", "BuildTodoCreatePayload", RefusesAndBindsTheOwner),
         new OwnerSeam("ExternalDataService.cs", "RequireOwner", Refusal),
     };
 
@@ -256,10 +271,267 @@ public class RecordOwnerAssignmentCensusTests
 
     private static Regex Calls(string helper) => new(@"\b" + Regex.Escape(helper) + @"\s*\(");
 
+    // =============================================================================================
+    // THE OWNER-WRITE CENSUS (task 146 r2, verifier items 1 and 15)
+    // ---------------------------------------------------------------------------------------------
+    // Every member of the server that WRITES an owner — `x["ownerid"] =`, `["ownerid@odata.bind"] =`, or the same through
+    // a const holding either key — listed with its count and kind. The create census above sees creates; it could not see
+    // an owner OVERRIDE on an existing row: CommunicationEnrichmentService.AssignOwningTeamAsync (FR-E7 category routing)
+    // set ownerid to a team looked up by NAME in any business unit, re-owning a secure record's email out of isolation,
+    // inside a file the census already listed as Routed. A new owner write anywhere now fails until it is classified.
+    // MAINTENANCE: a failure is not a prompt to bump a count. A child's owner comes from IRecordOwnershipResolver.
+    // =============================================================================================
 
-    /// <summary>A resolver call — the ONE owner (task 146 constraint: no writer computes a team itself).</summary>
+    private enum OwnerWriteKind
+    {
+        /// <summary>The resolver itself (ApplyTo, the reparent's assignment).</summary>
+        Resolver,
+
+        /// <summary>A shared create that writes the team its caller resolved and refuses an empty one (<see cref="Seams"/>).</summary>
+        Seam,
+
+        /// <summary>Writes a team the resolver answered — asserted: the file calls the resolver.</summary>
+        Routed,
+
+        /// <summary>A ROOT's own ownership — provisioning's (task 144 / owner S6), not a child's.</summary>
+        Root,
+
+        /// <summary>A per-user artifact owned by its user by design (task 146 constraint "per-user artifacts").</summary>
+        PerUser,
+
+        /// <summary>An owner set only on a row filed under NOTHING — asserted: the member checks the filing first.</summary>
+        UnfiledOnly,
+    }
+
+    private sealed record OwnerWriteEntry(string FileName, string Member, int Writes, OwnerWriteKind Kind, string Reason);
+
+    private static readonly IReadOnlyList<OwnerWriteEntry> OwnerWrites = new[]
+    {
+        new OwnerWriteEntry("RecordOwnershipResolver.cs", "ApplyTo", 1, OwnerWriteKind.Resolver,
+            "Writes the resolved team onto a row about to be created; refuses to apply a refusal."),
+        new OwnerWriteEntry("RecordOwnershipResolver.cs", "ReparentAsync", 1, OwnerWriteKind.Resolver,
+            "The re-file's separate owner assignment, read back."),
+
+        new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateDocumentAsync", 1, OwnerWriteKind.Seam,
+            "CreateDocumentRequest.OwningTeamId — throws without it."),
+        new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAnalysisAsync", 1, OwnerWriteKind.Seam,
+            "The caller's resolved team — throws without it."),
+        new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAnalysisOutputAsync", 1, OwnerWriteKind.Seam,
+            "AnalysisOutputEntity.OwningTeamId — throws without it."),
+        new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", 1, OwnerWriteKind.Seam,
+            "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
+        new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", 1, OwnerWriteKind.Seam,
+            "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
+        new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventAsync", 1, OwnerWriteKind.Seam,
+            "CreateEventRequest.OwningTeamId — throws without it."),
+        new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventLogAsync", 1, OwnerWriteKind.Seam,
+            "The owner EventEndpoints resolved as content of the event; null only when the resolver answered Unchanged."),
+        new OwnerWriteEntry("ExternalDataService.cs", "BuildDocumentCreatePayload", 1, OwnerWriteKind.Seam,
+            "The team the external route resolved from the project — RequireOwner refuses an empty one."),
+        new OwnerWriteEntry("ExternalDataService.cs", "BuildEventCreatePayload", 1, OwnerWriteKind.Seam,
+            "The team the external route resolved from the project — RequireOwner refuses an empty one."),
+        new OwnerWriteEntry("ExternalDataService.cs", "BuildTodoCreatePayload", 1, OwnerWriteKind.Seam,
+            "The team the external route resolved from the root — RequireOwner refuses an empty one."),
+
+        new OwnerWriteEntry("DocumentCheckoutService.cs", "CreateFileVersionAsync", 1, OwnerWriteKind.Routed,
+            "A file version is content of its document (ContentOf)."),
+        new OwnerWriteEntry("TodoGenerationService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
+            "Generated to-dos owned from their source event."),
+        new OwnerWriteEntry("SpendSnapshotService.cs", "GenerateAsync", 1, OwnerWriteKind.Routed,
+            "Matter spend snapshots — owned by the matter's team."),
+        new OwnerWriteEntry("SpendSnapshotService.cs", "GenerateForProjectAsync", 1, OwnerWriteKind.Routed,
+            "Project spend snapshots — owned by the project's team."),
+        new OwnerWriteEntry("SignalEvaluationService.cs", "UpsertSignalAsync", 1, OwnerWriteKind.Routed,
+            "Owned by the matter's team."),
+        new OwnerWriteEntry("DataverseObservationMirror.cs", "MirrorAsync", 1, OwnerWriteKind.Routed,
+            "ForChild over the mirrored analysis row."),
+        new OwnerWriteEntry("InvoiceReviewService.cs", "BuildInvoiceCreateFields", 1, OwnerWriteKind.Routed,
+            "The invoice owned by the matter's team (task 130 / G5), resolved by the caller of the builder."),
+        new OwnerWriteEntry("ComposeCreateOnSavePromoter.cs", "PromoteIfEphemeralAsync", 1, OwnerWriteKind.Routed,
+            "Owned from the inherited filing links or the caller."),
+        new OwnerWriteEntry("OfficeService.cs", "QuickCreateAsync", 1, OwnerWriteKind.Routed,
+            "Office invoice quick-create — the resolver's team (task 080)."),
+        new OwnerWriteEntry("OfficeService.cs", "CreateTodoAsync", 1, OwnerWriteKind.Routed,
+            "Office to-do — secure-if-any over regarding, stamps and carriers."),
+        new OwnerWriteEntry("EmailUploadCaptureService.cs", "CaptureAsync", 1, OwnerWriteKind.Routed,
+            "Upload capture — the team the evaluated filing resolved."),
+        new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "CreateCommunicationRecordAsync", 1, OwnerWriteKind.Routed,
+            "Inbound email — the team the evaluated filing resolved."),
+        new OwnerWriteEntry("IncomingCommunicationProcessor.cs", "ApplyOwner", 1, OwnerWriteKind.Routed,
+            "Inbound .eml / attachment rows — owned like the email."),
+        new OwnerWriteEntry("ThreadResolver.cs", "CreateRecordThreadAsync", 1, OwnerWriteKind.Routed,
+            "A thread created for a message — its anchor record's team (S6); a Direct thread keeps its creator (E2)."),
+        new OwnerWriteEntry("ThreadResolver.cs", "CreateThreadAsync", 1, OwnerWriteKind.Routed,
+            "A thread created on request — the record's team for an ownership parent (409 on refusal), else the caller."),
+        new OwnerWriteEntry("ThreadResolver.cs", "FindOrCreateDefaultThreadAsync", 1, OwnerWriteKind.Routed,
+            "A record's default thread — its record's team; the per-user master thread keeps its user (E2)."),
+        new OwnerWriteEntry("TaskActionCore.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
+            "AI create-task — ForChild over the stamped parents."),
+        new OwnerWriteEntry("OwnedChildWrite.cs", "CreateAsync", 1, OwnerWriteKind.Routed,
+            "The chat tools' owned create (owner S1 / G5) — the resolver's team, after the as-the-caller checks."),
+        new OwnerWriteEntry("RecordCreationService.cs", "CreateMatterAsync", 1, OwnerWriteKind.Root,
+            "Office quick-create of a MATTER (a root) — owned by the resolver's team for the acting user (task 080)."),
+        new OwnerWriteEntry("RecordCreationService.cs", "CreateProjectAsync", 1, OwnerWriteKind.Root,
+            "Office quick-create of a PROJECT (a root) — owned by the resolver's team for the acting user (task 080)."),
+
+        new OwnerWriteEntry("ProvisionProjectEndpoint.cs", "AssignOwnerToSecureTeamAsync", 1, OwnerWriteKind.Root,
+            "Secure provisioning assigns the ROOT to the named Secure team (task 144)."),
+        new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
+            "Un-securing hands the ROOT back to a user (task 144 / F3)."),
+        new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,
+            "A work assignment (a ROOT) created owned by its assignee; S6 b (inline secure provisioning) is escalated."),
+
+        new OwnerWriteEntry("OutboxService.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
+            "sprk_notificationoutbox — one row per recipient user."),
+        new OwnerWriteEntry("WorkspaceLayoutService.cs", "CreateLayoutAsync", 1, OwnerWriteKind.PerUser,
+            "sprk_workspacelayout — a user's own layout."),
+        new OwnerWriteEntry("NotificationService.cs", "CreateNotificationAsync", 1, OwnerWriteKind.PerUser,
+            "appnotification — owned by its recipient so only they see it."),
+        new OwnerWriteEntry("NotificationActionCore.cs", "BuildNotificationEntity", 1, OwnerWriteKind.PerUser,
+            "appnotification from a playbook — owned by its recipient."),
+        new OwnerWriteEntry("DirectThreadAccessService.cs", "FindOrCreateDirectThreadAsync", 1, OwnerWriteKind.PerUser,
+            "A Direct (two-party) thread — per-participant by design (E2)."),
+
+        new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
+            "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "
+            + "a row filed under nothing (IsFiledOrUnreadableAsync first)."),
+    };
+
+    /// <summary>The gate an <see cref="OwnerWriteKind.UnfiledOnly"/> member must call before its owner write.</summary>
+    private const string UnfiledGate = "IsFiledOrUnreadableAsync";
+
+    /// <summary>A const whose value is the owner key — <c>"ownerid"</c> or <c>"ownerid@odata.bind"</c>.</summary>
+    private static readonly Regex OwnerKeyConst = new(
+        @"const\s+string\s+(?<name>\w+)\s*=\s*""ownerid(?:@odata\.bind)?""\s*;", RegexOptions.Compiled);
+
+    [Fact(DisplayName = "Task 146 r2: every owner write in the server is censused, by member, with its kind")]
+    public void EveryOwnerWriteIsCensused()
+    {
+        var actual = ScanOwnerWrites(ServerFiles());
+        var expected = OwnerWrites.ToDictionary(e => (e.FileName, e.Member), e => e.Writes);
+        var problems = new List<string>();
+
+        foreach (var ((file, member), lines) in actual.OrderBy(kv => kv.Key.File, StringComparer.Ordinal))
+        {
+            if (!expected.TryGetValue((file, member), out var count))
+                problems.Add($"UNLISTED owner write in {file}.{member}: lines {string.Join(", ", lines)}");
+            else if (count != lines.Count)
+                problems.Add($"COUNT CHANGED for {file}.{member}: census says {count}, source has {lines.Count} (lines {string.Join(", ", lines)})");
+        }
+
+        foreach (var key in expected.Keys.Where(k => !actual.ContainsKey(k)))
+            problems.Add($"CENSUSED BUT ABSENT: {key.FileName}.{key.Member}. Remove the entry if the owner write was deleted.");
+
+        Assert.True(
+            problems.Count == 0,
+            "The owner-write census does not match the source (unified-access-control-r2 task 146 r2). A child's owner is "
+            + "IRecordOwnershipResolver's answer — no writer computes a team itself. Route the new write through the resolver "
+            + "(or classify it with its reason), then list it:\n" + string.Join("\n", problems));
+    }
+
+    [Fact(DisplayName = "Task 146 r2: Routed owner writes sit in files that call the resolver; UnfiledOnly writes check the filing first")]
+    public void EveryOwnerWriteKeepsItsKind()
+    {
+        var files = ServerFiles();
+        var problems = new List<string>();
+
+        foreach (var entry in OwnerWrites.Where(e => e.Kind == OwnerWriteKind.Routed))
+        {
+            if (CodeOf(files, entry.FileName) is not { } code || !ResolverCall.IsMatch(code))
+                problems.Add($"{entry.FileName}.{entry.Member}: Routed, but the file makes no IRecordOwnershipResolver call");
+        }
+
+        foreach (var entry in OwnerWrites.Where(e => e.Kind == OwnerWriteKind.UnfiledOnly))
+        {
+            var body = CodeOf(files, entry.FileName) is { } code ? MethodBody(code, entry.Member) : null;
+            if (body is null || !UnfiledOnlyGateComesFirst(body))
+                problems.Add($"{entry.FileName}.{entry.Member}: UnfiledOnly, but it does not call {UnfiledGate} before its owner write");
+        }
+
+        Assert.True(problems.Count == 0, "Owner writes that no longer keep their kind:\n" + string.Join("\n", problems));
+    }
+
+    /// <summary>True when <paramref name="memberBody"/> calls the filing gate before its first owner write.</summary>
+    private static bool UnfiledOnlyGateComesFirst(string memberBody)
+    {
+        var gate = Regex.Match(memberBody, @"\b" + UnfiledGate + @"\s*\(");
+        var write = Regex.Match(memberBody, @"\[\s*""ownerid(?:@odata\.bind)?""\s*\]\s*=(?!=)");
+        return gate.Success && write.Success && gate.Index < write.Index;
+    }
+
+    [Fact(DisplayName = "Task 146 r2: negative control — an unlisted owner override is found, by member; a lost filing gate is found")]
+    public void OwnerWriteDetector_NegativeControl()
+    {
+        // The verifier's finding, seeded: a category-routing owner override inside a file the create census lists.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private const string OwnerKey = \"ownerid@odata.bind\";",
+            "    private async Task AssignCategoryTeamAsync(Dictionary<string, object> fields, Guid teamId)",
+            "    {",
+            "        fields[\"ownerid\"] = new EntityReference(\"team\", teamId);",
+            "    }",
+            "    private void Bind(Dictionary<string, object?> body, Guid team) { body[OwnerKey] = $\"/teams({team})\"; }",
+            "    private void Read(Entity e) { var o = e.GetAttributeValue<EntityReference>(\"ownerid\"); var x = e[\"ownerid\"] == null; }",
+            "}",
+        });
+
+        var sites = ScanOwnerWrites(new Dictionary<string, string> { ["Seeded.cs"] = code });
+
+        Assert.Equal(2, sites.Count);
+        Assert.Single(sites[("Seeded.cs", "AssignCategoryTeamAsync")]);
+        Assert.Single(sites[("Seeded.cs", "Bind")]);
+
+        Assert.False(UnfiledOnlyGateComesFirst(
+            "{ var teamId = await ResolveTeamIdByNameAsync(n, ct); fields[\"ownerid\"] = new EntityReference(\"team\", teamId); }"));
+        Assert.True(UnfiledOnlyGateComesFirst(
+            "{ if (await " + UnfiledGate + "(id, ct)) return; fields[\"ownerid\"] = new EntityReference(\"team\", t); }"));
+    }
+
+    /// <summary>(file, member) → the 1-based lines of each owner write in it.</summary>
+    private static Dictionary<(string File, string Member), List<int>> ScanOwnerWrites(IReadOnlyDictionary<string, string> files)
+    {
+        var globalKeys = files.Values
+            .SelectMany(code => OwnerKeyConst.Matches(code).Select(m => m.Groups["name"].Value))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var sites = new Dictionary<(string, string), List<int>>();
+        foreach (var (fileName, code) in files)
+        {
+            var keys = OwnerKeyConst.Matches(code).Select(m => Regex.Escape(m.Groups["name"].Value))
+                .Concat(globalKeys.Select(Regex.Escape))
+                .Distinct()
+                .Prepend(@"""ownerid(?:@odata\.bind)?""");
+            var write = new Regex(@"\[\s*(?:" + string.Join("|", keys) + @")\s*\]\s*=(?!=)");
+
+            var members = MemberDeclaration.Matches(code).ToList();
+            foreach (Match m in write.Matches(code))
+            {
+                var declaration = members.LastOrDefault(d => d.Index <= m.Index);
+                var name = declaration is null
+                    ? "(file)"
+                    : Regex.Match(code[declaration.Index..], @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\(").Groups["name"].Value;
+                var key = (fileName, name);
+                if (!sites.TryGetValue(key, out var list))
+                    sites[key] = list = new List<int>();
+                list.Add(SourceScan.LineOf(code, m.Index));
+            }
+        }
+
+        return sites;
+    }
+
+    /// <summary>An external payload builder that refuses an empty team (<c>RequireOwner(owningTeamId, …)</c>) AND writes
+    /// <c>[OwnerBindKey] = $"/teams({owningTeamId})"</c> — the very team it was handed, onto the payload it returns.</summary>
+    private static Regex RefusesAndBindsTheOwner => new(
+        @"(?s)^(?=.*\bRequireOwner\s*\(\s*owningTeamId\b)(?=.*\[\s*OwnerBindKey\s*\]\s*=\s*\$""/teams\(\{owningTeamId\}\)"")");
+
+
+    /// <summary>A resolver call — the ONE owner (task 146 constraint: no writer computes a team itself). r2: the chat tools'
+    /// one owned-create path (<c>OwnedChildWrite.CreateAsync</c>, itself an UnscannedWriter that calls the resolver).</summary>
     private static readonly Regex ResolverCall = new(
-        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync)\s*\(",
+        @"\b(ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync|OwnedChildWrite\.CreateAsync)\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>An owner write onto a row about to be created.</summary>
@@ -373,73 +645,60 @@ public class RecordOwnerAssignmentCensusTests
     }
 
     /// <summary>
-    /// Writers that create a child row RUN AS THE USER through a computed-URL POST the literal scanner cannot see, and are
-    /// NOT routed through the resolver: task 146 escalation (owner S1 vs the handlers' spec "User-OBO ONLY" MUST — an
-    /// app-only create needs an as-user pre-check, security-sensitive, CLAUDE.md §6). Listed so the census names them
-    /// (verifier item 6): the row is owned by the calling user in the user's business unit — NOT isolated when filed to a
-    /// secure record.
+    /// Run-as-user writes that neither create a row nor change what a row is filed under (so not census entries), each
+    /// with its reason. With <see cref="Census"/> and <see cref="UnscannedWriters"/> (which must call the resolver) this
+    /// classifies every run-as-user POST and PATCH in the BFF.
     /// </summary>
-    private sealed record EscalatedWriter(string FileName, Regex Shape, string Reason);
-
-    private static readonly IReadOnlyList<EscalatedWriter> EscalatedWriters = new[]
-    {
-        new EscalatedWriter("DataverseCreateRecordHandler.cs", new Regex(@"_dataverse\.PostAsync\s*\("),
-            "AI create-record tool: run-as-user (OBO) POST to a computed entity set — any table the tool is allowed to "
-            + "create, children of a secure record included. Escalated in task 146 (§5 'Run-as-user AI handlers'): "
-            + "pending the owner's S1 implementation (app-only create owned by the team + an as-user pre-check)."),
-        new EscalatedWriter("EmailDraftToolHandler.cs", new Regex(@"_dataverse\.PostAsync\s*\("),
-            "AI email-draft tool: run-as-user (OBO) POST of a sprk_communication draft, possibly filed to a secure "
-            + "record. Escalated in task 146 with DataverseCreateRecordHandler (same decision)."),
-    };
-
-    /// <summary>
-    /// Run-as-user POSTs that are not creates (so not census entries), each with its reason. Together with
-    /// <see cref="EscalatedWriters"/> this classifies every run-as-user POST in the BFF.
-    /// </summary>
-    private static readonly IReadOnlyDictionary<string, string> RunAsUserPostsThatAreNotCreates = new Dictionary<string, string>
+    /// <remarks>r2: the two run-as-user create tools are no longer escalated — they route their owner (owner S1 / G5) and
+    /// are <see cref="UnscannedWriters"/>; so is the update tool, whose re-file the r1 census never saw (verifier item 2).</remarks>
+    private static readonly IReadOnlyDictionary<string, string> RunAsUserWritesThatFileNothing = new Dictionary<string, string>
     {
         ["DataverseSearchDataHandler.cs"] = "POSTs to the Dataverse search action (searchquery) — a READ; writes no row.",
+        ["WorkProductRecordPersister.cs"] = "PATCHes ONE registry-declared text column (the work-product envelope JSON) on "
+                                            + "the session's host record — never a lookup, so it files nothing anywhere.",
     };
 
-    [Fact(DisplayName = "Task 146 r1: every run-as-user POST in the BFF is classified — escalated create or not a create")]
-    public void EveryRunAsUserPostIsClassified()
+    [Fact(DisplayName = "Task 146 r2: every run-as-user POST and PATCH in the BFF is classified — routed, or files nothing")]
+    public void EveryRunAsUserWriteIsClassified()
     {
         var files = ServerFiles();
-        var unclassified = UnclassifiedRunAsUserPosts(files);
+        var unclassified = UnclassifiedRunAsUserWrites(files);
 
         Assert.True(
             unclassified.Count == 0,
-            "Run-as-user (IDataverseUserClient) POSTs that the census does not classify (task 146 r1). A run-as-user CREATE "
-            + "of a child record leaves the row owned by the caller in an ordinary business unit: route its owner through "
-            + "IRecordOwnershipResolver, or list it as an EscalatedWriter with the escalation that stops it; a POST that "
-            + "writes no row goes in RunAsUserPostsThatAreNotCreates with its reason:\n  " + string.Join("\n  ", unclassified));
+            "Run-as-user (IDataverseUserClient) POSTs / PATCHes that the census does not classify (task 146 r2). A run-as-"
+            + "user CREATE of a child record leaves it owned by the caller in an ordinary business unit, and a run-as-user "
+            + "PATCH of a lookup re-files a child with no owner re-derivation: route the owner through IRecordOwnershipResolver "
+            + "and list the file in UnscannedWriters; a write that files nothing goes in RunAsUserWritesThatFileNothing with "
+            + "its reason:\n  " + string.Join("\n  ", unclassified));
 
-        var stale = EscalatedWriters
-            .Where(w => CodeOf(files, w.FileName) is not { } code || !w.Shape.IsMatch(code) || ResolverCall.IsMatch(code))
-            .Select(w => $"{w.FileName}: the escalated create is gone, or the file now routes its owner — move or delete the entry")
+        var stale = RunAsUserWritesThatFileNothing.Keys
+            .Where(name => CodeOf(files, name) is not { } code || !RunAsUserWrite.IsMatch(code))
+            .Select(name => $"{name}: no run-as-user write any more — delete the entry")
             .ToList();
-        Assert.True(stale.Count == 0, "Stale escalated-writer entries:\n" + string.Join("\n", stale));
+        Assert.True(stale.Count == 0, "Stale run-as-user classification entries:\n" + string.Join("\n", stale));
     }
 
-    /// <summary>Files that POST through the run-as-user client (<c>IDataverseUserClient</c>) and are classified nowhere.</summary>
-    private static List<string> UnclassifiedRunAsUserPosts(IReadOnlyDictionary<string, string> files)
+    /// <summary>A POST or PATCH through the run-as-user client field (<c>_dataverse</c> of type <c>IDataverseUserClient</c>).</summary>
+    private static readonly Regex RunAsUserWrite = new(@"\b_dataverse\s*\.\s*(?:PostAsync|PatchAsync)\s*\(", RegexOptions.Compiled);
+
+    /// <summary>Files that POST or PATCH through the run-as-user client and are classified nowhere.</summary>
+    private static List<string> UnclassifiedRunAsUserWrites(IReadOnlyDictionary<string, string> files)
     {
-        var userPost = new Regex(@"\b_dataverse\s*\.\s*PostAsync\s*\(");
-        var classified = EscalatedWriters.Select(w => w.FileName)
-            .Concat(RunAsUserPostsThatAreNotCreates.Keys)
+        var classified = RunAsUserWritesThatFileNothing.Keys
             .Concat(Census.Select(e => e.FileName))
             .Concat(UnscannedWriters.Select(w => w.FileName))
             .ToHashSet(StringComparer.Ordinal);
 
         return files
-            .Where(f => f.Value.Contains("IDataverseUserClient", StringComparison.Ordinal) && userPost.IsMatch(f.Value))
+            .Where(f => f.Value.Contains("IDataverseUserClient", StringComparison.Ordinal) && RunAsUserWrite.IsMatch(f.Value))
             .Select(f => f.Key)
             .Where(name => !classified.Contains(name))
             .ToList();
     }
 
-    [Fact(DisplayName = "Task 146 r1: negative control — an unlisted run-as-user POST fails the classification")]
-    public void RunAsUserPostDetector_NegativeControl()
+    [Fact(DisplayName = "Task 146 r2: negative control — an unlisted run-as-user POST or PATCH fails the classification")]
+    public void RunAsUserWriteDetector_NegativeControl()
     {
         var files = new Dictionary<string, string>
         {
@@ -450,10 +709,17 @@ public class RecordOwnerAssignmentCensusTests
                 "    Task A() => _dataverse.PostAsync($\"/api/data/v9.2/{set}\", body, ct);",
                 "}",
             }),
+            ["NewRefileHandler.cs"] = SourceScan.CodeText(new[]
+            {
+                "internal sealed class NewRefileHandler(IDataverseUserClient _dataverse)",
+                "{",
+                "    Task A() => _dataverse.PatchAsync($\"{set}({id:D})\", body, ct);",
+                "}",
+            }),
             ["DataverseSearchDataHandler.cs"] = "IDataverseUserClient _dataverse; _dataverse.PostAsync(x);",
         };
 
-        Assert.Equal(new[] { "NewCreateHandler.cs" }, UnclassifiedRunAsUserPosts(files));
+        Assert.Equal(new[] { "NewCreateHandler.cs", "NewRefileHandler.cs" }, UnclassifiedRunAsUserWrites(files));
     }
 
     [Fact(DisplayName = "Task 146: every seam refuses a create with no resolved owner team")]

@@ -621,6 +621,114 @@ public class RecordOwnershipResolverTests
         resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
     }
 
+    // ---- Any child of a parent that is NOT team-owned but IS filed (task 146 r2, verifier item 10) ----
+
+    [Fact]
+    public async Task ResolveOwner_ForAChildOfAUserOwnedDocumentFiledToASecureMatter_OwnsItByTheNamedTeam()
+    {
+        // The verifier's case: a document owned by its creator in an ordinary business unit (pre-146 data, or a client
+        // create — task 147) but FILED to a secure matter. An analysis of it (ForChild / ForParents, not ContentOf) used
+        // to take the document's own unit's team. The document's filing decides secrecy.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+        resolution.OwningTeamId.Should().NotBe(SecureDefaultTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAChildTwoLevelsBelowASecureMatter_ThroughUnownedChildren_OwnsItByTheNamedTeam()
+    {
+        // A file version of a user-owned document attached to a user-owned communication filed to a secure matter.
+        var communicationId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_communication", communicationId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", MatterId) })
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_communication"] = new EntityReference("sprk_communication", communicationId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAChildOfAUserOwnedDocumentFiledToAnOrdinaryMatter_KeepsThePrimaryParentsUnit()
+    {
+        // Nothing changes for a child of ordinary records: the ancestors only take part in the SECURE decision, and the
+        // ordinary answer is still the primary parent's own unit.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", MatterId, ChildBu, isSecure: false, owningTeam: ChildTeam)
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(GeneralTeam);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAChildOfAUserOwnedDocumentFiledToAFlaggedButNotIsolatedProject_Refuses()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_project", FlaggedProjectId, ChildBu, isSecure: true, owningTeam: ChildTeam)
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_relatedproject"] = new EntityReference("sprk_project", FlaggedProjectId) });
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.SecureParentNotIsolated);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_WhenAnAncestorOfAnUnownedChildIsMissing_Refuses()
+    {
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_document", documentId, GeneralBu, owningTeam: null,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) }); // the matter is absent
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(RecordOwnerRefusal.ParentUnresolved);
+    }
+
+    [Fact]
+    public async Task ResolveOwner_ForAChildOfATeamOwnedParent_DoesNotReadTheParentsFiling()
+    {
+        // A team-owned parent's owner already IS the resolver's answer for its own filing — it is not followed.
+        var documentId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_document", documentId, ChildBu, owningTeam: ChildTeam,
+                extra: new() { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) }); // never read
+
+        var resolution = await Build(directory).ResolveOwnerAsync(
+            RecordOwnershipContext.ForParents(new[] { new RecordOwnershipParent("sprk_document", documentId) }),
+            CancellationToken.None);
+
+        resolution.OwningTeamId.Should().Be(ChildTeam);
+        directory.QueriedEntities.Should().NotContain("sprk_matter");
+    }
+
     // ---- Reparent ----
 
     [Fact]

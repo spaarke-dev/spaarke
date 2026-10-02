@@ -139,6 +139,29 @@ public sealed class SecureChildOwnershipExternalTests : IClassFixture<ExternalCh
         _fixture.Data.DocumentOwners.Should().BeEmpty();
     }
 
+    // Task 146 r2 (verifier item 3): every external create payload binds the owner the route resolved, as the
+    // `ownerid@odata.bind` Dataverse reads. The seeded removal of the to-do's bind passed every test before this.
+    [Fact]
+    public void ExternalCreatePayloads_EachBindTheResolvedOwnerTeam()
+    {
+        var team = Directory.SecureNamedTeam;
+        var projectId = ExternalChildOwnershipTestFixture.SecureProject;
+
+        var todo = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "Respond" },
+            ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!, projectId, "Project", null, team);
+        var @event = ExternalDataService.BuildEventCreatePayload(
+            projectId, new CreateExternalEventRequest { SprkName = "Hearing" }, team);
+        var document = ExternalDataService.BuildDocumentCreatePayload(
+            projectId, new ExternalUploadedFilePointers("b!drive", "item-1", "brief.pdf", 3, null), team);
+
+        foreach (var payload in new[] { todo, @event, document })
+        {
+            payload[ExternalDataService.OwnerBindKey].Should().Be($"/teams({team})");
+            ExternalChildOwnershipTestFixture.RecordingExternalDataService.BoundOwner(payload).Should().Be(team);
+        }
+    }
+
     private static MultipartFormDataContent FileForm()
     {
         var form = new MultipartFormDataContent();
@@ -268,31 +291,43 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
             DocumentOwners.Clear();
         }
 
+        // Task 146 r2 (verifier item 3): each override records the owner the REAL payload builder bound — the very
+        // `ownerid@odata.bind` the real create serializes and POSTs — not the argument it was handed. A builder that
+        // drops the bind records Guid.Empty, so the owner assertions above fail instead of passing on the argument.
+
         public override Task<ExternalTodoDto> CreateTodoAsync(
             TodoRootKind rootKind, Guid rootId, CreateExternalTodoRequest request, Guid owningTeamId,
             CancellationToken ct = default)
         {
-            // The seam's own owner refusal still runs over the real payload builder.
-            BuildTodoCreatePayload(request, TryGetRootBinding(rootKind)!, rootId, "root", null, owningTeamId);
-            TodoOwners.Add(owningTeamId);
+            TodoOwners.Add(BoundOwner(
+                BuildTodoCreatePayload(request, TryGetRootBinding(rootKind)!, rootId, "root", null, owningTeamId)));
             return Task.FromResult(new ExternalTodoDto { SprkTodoid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 
         public override Task<ExternalEventDto> CreateEventAsync(
             Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CancellationToken ct = default)
         {
-            BuildEventCreatePayload(projectId, request, owningTeamId);
-            EventOwners.Add(owningTeamId);
+            EventOwners.Add(BoundOwner(BuildEventCreatePayload(projectId, request, owningTeamId)));
             return Task.FromResult(new ExternalEventDto { SprkEventid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 
         public override Task<ExternalDocumentDto> CreateDocumentAsync(
             Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CancellationToken ct = default)
         {
-            BuildDocumentCreatePayload(projectId, pointers, owningTeamId);
-            DocumentOwners.Add(owningTeamId);
+            DocumentOwners.Add(BoundOwner(BuildDocumentCreatePayload(projectId, pointers, owningTeamId)));
             return Task.FromResult(new ExternalDocumentDto { SprkDocumentid = Guid.NewGuid().ToString(), SprkName = pointers.FileName });
         }
+
+        /// <summary>The team a create payload binds as its owner (<c>ownerid@odata.bind = /teams(id)</c>), or
+        /// <see cref="Guid.Empty"/> when it binds none.</summary>
+        internal static Guid BoundOwner(IReadOnlyDictionary<string, object?> payload) =>
+            payload.TryGetValue(OwnerBindKey, out var bind)
+            && bind is string path
+            && path.StartsWith("/teams(", StringComparison.Ordinal)
+            && path.EndsWith(')')
+            && Guid.TryParse(path["/teams(".Length..^1], out var team)
+                ? team
+                : Guid.Empty;
 
         private sealed class StubCredential : TokenCredential
         {
