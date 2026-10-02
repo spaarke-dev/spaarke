@@ -225,10 +225,14 @@ Owner, verbatim ("follow recommended", recorded in `session27-owner-decisions-an
 > - Enable the schedule in **report-only** mode now. Enable writes only after the owner has reviewed one report.
 > - Inactive contacts and inactive roots stay READ guards only, so reactivating one restores access with no data repair.
 
-Applied by task 137 r3 (branch `task/uac-r2-137-b1`), in one change:
+Applied by task 137 r3 (begun on `task/uac-r2-137-b1`, interrupted; finished and verified on `task/uac-r2-137-b2`),
+in one change:
 
 - `ExternalAccessModule.cs`: `enabled: false` removed — the job is registered ENABLED on its daily schedule
-  (`0 5 * * *`, unchanged).
+  (`0 5 * * *`, unchanged). The owner's answer names no schedule, and R3/R4's "safety net at ≤ 5 min" is scoped to
+  tasks 142/143. It does not bind this job: none of R1–R3 changes when access ends. The read path already stops a
+  grant under an inactive organization and a membership past its end date (task 109), and it stops an undated grant
+  (task 107). The job only makes the row's own state match.
 - `ExternalAccess:Reconciliation:WritesEnabled`: **`false`** — now written explicitly in `appsettings.template.json`
   (beside a comment naming this decision) so the switch the owner will flip is discoverable; absent still means `false`.
 - No writer rule for inactive contacts or inactive roots — they remain read-time guards (`AccessibleRecordSetService`).
@@ -237,9 +241,19 @@ Applied by task 137 r3 (branch `task/uac-r2-137-b1`), in one change:
   `true` is report-only).
 
 **Owner's next action (not this task's):** after the first scheduled (or manually triggered) run on dev, review its
-report — `GET /api/admin/jobs/external-access-reconciliation/status` as a `SystemAdmin`, `RecentRuns[0].ResultJson`
-(`mode: report-only`, per-rule `planned` / sampled ids; the complete list is the per-row before-state log lines) —
-then decide whether to set `ExternalAccess:Reconciliation:WritesEnabled = true` in the App Service configuration.
+report, then decide whether to set `ExternalAccess__Reconciliation__WritesEnabled = true` in the App Service
+configuration. The report comes from two sources, and only one of them lasts:
+
+- **Durable: Application Insights traces.** Each run writes one `[EXT-ACCESS-RECON] heartbeat` line with
+  `mode=report-only`, the per-rule `r1/r2/r3 Scanned / Planned / Changed / Failed` counts, `trigger=` and `runId=`.
+  It also writes one `[EXT-ACCESS-RECON] before-state` line for EVERY row a write run would change. Those lines are the
+  complete list. For example:
+  `traces | where message startswith "[EXT-ACCESS-RECON]" | where timestamp > ago(2d) | order by timestamp asc`.
+- **Process-local: the admin status endpoint.** `GET /api/admin/jobs/external-access-reconciliation/status` (as a
+  `SystemAdmin`) returns `RecentRuns[0].ResultJson`: `mode`, `writesEnabled`, the per-rule `planned` counts and up to 200
+  sampled ids per rule (`MaxSampledIdsPerRule`). The BFF's job store is `InMemoryBackgroundJobStore` (`SchedulingModule`), so this
+  history is lost on restart. It is also visible only on the instance that ran the job. **No `sprk_backgroundjobrun`
+  row is written.** Corrects the earlier notes; the Dataverse-backed store is ADR-036's target, not today's.
 
 Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md` §2):
 
@@ -253,10 +267,12 @@ Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md`
 
 The before-state was re-taken with the job's own scan shape (grants scanned 5, memberships scanned 0;
 R1 = R2 = R3 = 0). With the schedule now enabled, the first report-only RUN happens at the next 05:00 UTC tick after the
-dev deploy (it writes one `sprk_backgroundjobrun` row and no data); to get it sooner, a `SystemAdmin` caller
-`POST /api/admin/jobs/external-access-reconciliation/trigger`, then `GET …/status` — expect `mode: report-only`, every
-rule `planned: 0`, `changed: 0` (`notes/task-137-soft-revocation.md` §2). This run is still a pending live gate (needs
-the deploy).
+dev deploy. It writes no Dataverse data at all: the run record goes to the in-memory job store, and the report goes
+to the log lines above. To get it sooner, a `SystemAdmin` caller runs
+`POST /api/admin/jobs/external-access-reconciliation/trigger`, then `GET …/status`. Expect `mode: report-only`, every
+rule `planned: 0` and `changed: 0`, and a matching heartbeat trace (`notes/task-137-soft-revocation.md` §2). This run
+is still a pending live gate (needs the deploy). The manual trigger is a live call into dev, so the main session runs
+it.
 
 History: escalation 1 fired 2026-10-02 (rounds 1–6 did not answer it — round 4 item 6's "reconciliation job" is task
 141's `IdentityLinkReconciliationJob`); answered by round 7 item 1 the same day.
