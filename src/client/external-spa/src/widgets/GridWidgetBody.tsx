@@ -5,7 +5,7 @@
  * is a one-line call to `createGridWidgetBody(CONFIG_ID)` — this file is the ONE shared
  * implementation, not five hand-rolled grids (§11).
  *
- * Deliberately mounts the shared grid directly rather than `<DataGridPageShell>` — the shell injects a
+ * Deliberately mounts the shared grid (through `ExternalDataGrid`) rather than `<DataGridPageShell>` — the shell injects a
  * GLOBAL `html/body { overflow:hidden; height:100% }` CSS reset intended for a standalone Custom
  * Page's own document (see DataGridPageShell.tsx file header: "the shell's canonical Custom Page
  * mount"). This SPA embeds the grid as ONE TAB inside the larger workspace shell (tab strip +
@@ -22,22 +22,21 @@
  * which console-warns and no-ops without `Xrm` present — a graceful degrade (no crash, no write),
  * consistent with "widgets are READ-ONLY (broker)". See notes/task-016-deviations.md.
  *
- * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). `showViewSelector={false}`
- * is a SECURITY setting here, not a cosmetic one. With the selector on, the grid offered the entity's
- * INTERNAL MDA main views (`/savedqueries/{entity}`), and the BFF had to admit every column those views
- * project. With it off, the grid only ever runs its own `sprk_gridconfiguration` FetchXML, so each
- * external module's server column allow-list (ExternalAccessModule.cs) is that config's columns plus the
- * scope and /record default columns, and nothing more. Turning the selector back on would make every
- * sibling view error with DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard
- * ExternalSpaGridViewSelectorGuardTests fails the build if any external shared-grid mount drops this prop.
- * That guard scans comments as code, so comments in this file say "the shared grid" rather than the
- * imported component's name.
+ * NO VIEW SELECTOR (unified-access-control-r2 task 157, owner round 4 item 7). The grid is mounted through
+ * `ExternalDataGrid`, which forces `showViewSelector={false}` at runtime. That is a SECURITY setting, not a
+ * cosmetic one. With the selector on, the grid offered the entity's INTERNAL MDA main views
+ * (`/savedqueries/{entity}`), and the BFF had to admit every column those views project. With it off, the
+ * grid only ever runs its own `sprk_gridconfiguration` FetchXML, so each external module's server column
+ * allow-list (ExternalAccessModule.cs) is that config's columns plus the scope and /record default columns,
+ * and nothing more. Turning the selector back on would make every sibling view error with
+ * DV_FETCHXML_COLUMN_NOT_PERMITTED. The arch guard ExternalSpaGridViewSelectorGuardTests refuses any import
+ * of the shared grid outside `ExternalDataGrid.tsx`.
  */
 import * as React from 'react';
 import { makeStyles, webLightTheme, type Theme } from '@fluentui/react-components';
-import { DataGrid } from '@spaarke/ui-components/components/DataGrid/DataGrid';
 import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-components/utils/themeStorage';
 import { gridDataverseClient } from '../services/gridDataverseClient';
+import { ExternalDataGrid } from './ExternalDataGrid';
 import type { WidgetBodyComponent, WidgetBodyProps } from '../registry/PlaceholderWidgetBody';
 
 const useStyles = makeStyles({
@@ -70,7 +69,7 @@ export function createGridWidgetBody(configId: string): WidgetBodyComponent {
     const theme = useAmbientTheme();
     return (
       <div className={s.root}>
-        <DataGrid configId={configId} dataverseClient={gridDataverseClient} theme={theme} showViewSelector={false} />
+        <ExternalDataGrid configId={configId} dataverseClient={gridDataverseClient} theme={theme} />
       </div>
     );
   };

@@ -162,5 +162,73 @@
       Justification: no new service, DI registration, endpoint, option, job or package. Changes: one test file,
       comment-only edits to one client file, and documentation.
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b1" round="review-3">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design) and the owner decision on F1.
+      BLOCKING item (criterion 1, the guard failed open a third time). The verifier compiled three shapes with
+      vite build into a live mount with the picker on: V1 import.meta.glob of DataGrid.tsx, V2 a unicode-escaped
+      identifier, and V3 React.cloneElement over a compliant mount. A regex cannot catch V3 in general (a computed
+      property such as React['clone' + 'Element'] spells nothing), so the guarantee now rests on a runtime guard.
+      Runtime guard: the new src/client/external-spa/src/widgets/ExternalDataGrid.tsx renders the shared grid as
+      DataGrid {...props} showViewSelector={false}, with the forced false AFTER the caller's props. Its props type
+      omits showViewSelector. A clone or createElement of ExternalDataGrid sets the wrapper's props, and the forced
+      false still wins. GridWidgetBody.tsx now mounts ExternalDataGrid; its header comment was updated. The bundle
+      (dist/assets/app.js) shows e=&gt;u.jsx(ole,{...e,showViewSelector:!1}), and showViewSelector:!0 occurs
+      nowhere in it.
+      Scan: ExternalSpaGridViewSelectorGuardTests now enforces six rules.
+      1. Only ExternalDataGrid.tsx may import a grid binding. A fully compliant mount in any other file is
+         refused.
+      2. The wrapper's text is pinned, whitespace-insensitive. A computed clone inside the wrapper passes every
+         regex rule but fails the pin (P5).
+      3. import.meta.glob is refused in any form (V1, plus the spaced, bracket and globEager forms).
+      4. In a grid-binding file, cloneElement, createElement and any \u escape are refused (V2, V3).
+      5. Every from '...' specifier must be escape-free. One that names the shared library must belong to a parsed
+         import, which catches the string-named specifier { "DataGrid" as G }. It must resolve inside the SPA
+         source or into the library. A bare @spaarke/ specifier must be the library.
+      6. Every import() or require() takes one plain literal that resolves inside the SPA source.
+      New fact SharedLibrary_OnlyKnownModulesCarryTheGrid pins the four shared-library modules that import or
+      re-export the grid: DataGrid/index.ts, DataGridPageShell.tsx, components/index.ts and src/index.ts.
+      Without that pin, a new shared component that embeds the grid would reach the SPA unseen; the scan
+      refuses DataGridPageShell only by name.
+      Controls: 23 round-3 Theory rows (V1-V1e, V2-V2e, V3-V3c, W1-W5, X1-X4, Y1). There is also a sanctioned
+      external-SPA control (it uses the wrapper, local dynamic imports, @/ and npm imports, and Array.from) and a
+      fan-in control. The round-1 and round-2 rows now run AS the wrapper, so each still proves its own rule fires.
+      Proof the guard bites:
+      - Nine seed files under external-spa/src/zzseed (V1, V2, V3, a clone of ExternalDataGrid, a string-named
+        specifier, an escaped module specifier, a module outside the SPA, a dynamic variable import, and a
+        compliant mount outside the wrapper). The production fact went red with 10 violations across the 8
+        bypass files. The clone of ExternalDataGrid was correctly NOT flagged, because the runtime guard
+        neutralises it. The seeds were deleted.
+      - P4 (spread moved after the forced prop in the wrapper): the production fact and the pin both went red.
+      - P5 (a computed clone inside the wrapper): only the pin went red. That is the scan's residual, closed by
+        the pin.
+      - P1 (GridWidgetBody imports the shared grid directly, compliant JSX): the production fact went red.
+      - P6 (a new shared component imports the grid as Table): the fan-in fact went red.
+      Each perturbation was restored from a hash-checked backup and touched.
+      MINOR item (overclaims): the ExternalAccessModule.cs derivation comment (comment only) no longer says the
+      guard "fails the build otherwise". It now names the runtime wrapper and the guard's documented residuals,
+      and says the allow-list refuses regardless. The guard's remarks no longer claim the scan refuses
+      everything; they say three rounds each found a bypass and list the residuals. Note section 7 records round
+      3 without a "no remaining shape" claim.
+      Residuals (documented in the guard remarks and in note G5):
+      - a new npm dependency that bundles and re-exports the grid;
+      - a shared-library import() whose path is built in a variable elsewhere;
+      - edits to the shared DataGrid.tsx itself.
+      All three are reviewed changes outside external-spa/src, and the BFF allow-list still returns 400 for the
+      internal views' columns.
+      CONFIRMED / INFO / CLEAN items: no change needed. F1 stays OPEN for the owner.
+      Section 11 justification for the new file ExternalDataGrid.tsx:
+      (1) Existing: GridWidgetBody.tsx mounted the shared grid directly. DataGridPageShell also wraps the grid but
+      forces the picker ON, and Grep shows no other wrapper.
+      (2) Extension: the shared DataGrid's default cannot change, because internal surfaces keep the picker (a
+      task constraint). Forcing the prop inside GridWidgetBody would leave an 80-line file as the only grid
+      importer, and its text is too large to pin. A 20-line pinned wrapper is the smallest unit the guard can
+      hold exactly.
+      (3) Cost of doing nothing: the three verifier shapes compile into a live mount with the picker on, and the
+      guard passes them.
+      Section 10: no BFF surface was added. The BFF edit is comment-only (no IL change), so the publish size was
+      not re-measured.
+      Runs: see note section 7 (round 3).
+    </outcome>
   </execution>
 </task>

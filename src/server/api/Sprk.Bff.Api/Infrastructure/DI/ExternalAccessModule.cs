@@ -232,11 +232,14 @@ public static class ExternalAccessModule
         // /record default projection (primary id + primary name, from EntityDefinitions — each descriptor
         // DECLARES its PrimaryNameAttribute and Register refuses a list missing either). NOTHING ELSE.
         // Task 134's rule (b) — the columns of the internal MDA sibling views the grid's ViewSelector offered
-        // — is GONE: the external SPA mounts every grid with showViewSelector={false} (GridWidgetBody.tsx;
-        // ExternalSpaGridViewSelectorGuardTests fails the build otherwise), so no external grid can switch
-        // to an internal view. No live grid references a pointer column, an FLS-secured column, an alias or
-        // an aggregate. Full tables: projects/unified-access-control-r2/notes/task-134-external-module-
-        // column-allow-list.md (original) and notes/task-157-external-grid-columns.md (shrink + drop sets).
+        // — is GONE: the external SPA mounts the shared grid only through ExternalDataGrid.tsx, which forces
+        // showViewSelector={false} at runtime, so no external grid can switch to an internal view. The arch
+        // test ExternalSpaGridViewSelectorGuardTests pins that wrapper and refuses any other import path to
+        // the shared grid (its residuals are listed in its remarks). Whatever the client does, this list
+        // still refuses the internal views' columns with a 400. No live grid references a pointer column,
+        // an FLS-secured column, an alias or an aggregate. Full tables: projects/unified-access-control-r2/
+        // notes/task-134-external-module-column-allow-list.md (original) and
+        // notes/task-157-external-grid-columns.md (shrink + drop sets).
         // ⚠️ Changing a grid configuration to show a new column now REQUIRES adding the column here —
         // otherwise that grid gets a 400. ⚠️ Re-enabling the view selector on an external grid REQUIRES
         // re-deriving these lists with rule (b) first — otherwise every sibling view gets a 400.

@@ -8,8 +8,8 @@ using Xunit;
 namespace Spaarke.ArchTests;
 
 /// <summary>
-/// unified-access-control-r2 task 157 (owner round 4 item 7, 2026-10-01) — every Spaarke <c>DataGrid</c> the
-/// external SPA mounts must pass <c>showViewSelector={false}</c>.
+/// unified-access-control-r2 task 157 (owner round 4 item 7, 2026-10-01) — the external SPA never shows the
+/// shared Spaarke <c>DataGrid</c>'s view picker.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -19,66 +19,117 @@ namespace Spaarke.ArchTests;
 /// <c>sprk_gridconfiguration</c> shows, plus the scope and <c>/record</c> default columns. That is correct
 /// only while the grid cannot switch to another query. The shared <c>DataGrid</c> defaults
 /// <c>showViewSelector</c> to <c>true</c> and then offers every INTERNAL MDA main view of the entity
-/// (<c>/savedqueries/{entity}</c>). A mount that drops the prop brings that picker back, and every sibling
-/// view errors with <c>DV_FETCHXML_COLUMN_NOT_PERMITTED</c>. The tempting "fix" for that error is to widen the
+/// (<c>/savedqueries/{entity}</c>). A mount that leaves the picker on brings it back, and every sibling view
+/// errors with <c>DV_FETCHXML_COLUMN_NOT_PERMITTED</c>. The tempting "fix" for that error is to widen the
 /// server allow-list again, which re-exposes internal columns (<c>ownerid</c>, <c>sprk_assignedto</c>,
-/// <c>sprk_visibilitystate</c> …) to outside counsel. This guard stops the first step.
+/// <c>sprk_visibilitystate</c> …) to outside counsel. This guard stops the first step. (The BFF allow-list
+/// is the data control and fails closed with a 400 on its own; this guard keeps the client from creating
+/// the pressure to widen it.)
 /// </para>
 /// <para>
-/// <b>What it scans.</b> Every script file under <c>src/client/external-spa/src</c>. The shared library is
-/// any module specifier that names <c>@spaarke/ui-components</c> or <c>Spaarke.UI.Components</c> ANYWHERE
-/// (the package alias, a path into the library's source, or a <c>…/node_modules/@spaarke/ui-components/…</c>
-/// path). Fluent's own <c>DataGrid</c> (from <c>@fluentui/react-components</c>) has no view picker and is
-/// ignored.
+/// <b>Two layers (review round 3).</b> A regex scan cannot prove that no JavaScript expression ever
+/// re-enables a prop — the verifier compiled <c>import.meta.glob</c>, a unicode-escaped identifier and
+/// <c>React.cloneElement</c> past the round-2 scan. So the guarantee now rests on a RUNTIME guard plus a
+/// scan that only has to prove a narrow, checkable fact:
 /// </para>
-/// <para><b>Fail closed.</b> The rules are written so that a shape the scan cannot attribute is REFUSED, not
-/// passed (task 157 review round 1 seeded nine shapes that the first version let through; review round 2
-/// seeded five more):</para>
+/// <list type="number">
+/// <item><b>Runtime:</b> <c>src/client/external-spa/src/widgets/ExternalDataGrid.tsx</c> mounts the shared grid
+/// with <c>showViewSelector={false}</c> AFTER the caller's props, so no caller prop, spread,
+/// <c>cloneElement</c> or <c>createElement</c> of <c>ExternalDataGrid</c> can turn the picker on. Its text is
+/// PINNED (whitespace-insensitive) by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>.</item>
+/// <item><b>Scan:</b> no OTHER file under <c>src/client/external-spa/src</c> may reach the shared grid. The rules
+/// are written to refuse what they cannot attribute, but a regex scan is not a proof — three review rounds
+/// each found a compiled bypass of the previous version. So the scan's job is narrow (keep every path to the
+/// grid going through the pinned wrapper), and the known residuals are listed below.</item>
+/// </list>
+/// <para><b>Scan rules</b> (every script file under <c>src/client/external-spa/src</c>):</para>
 /// <list type="number">
 /// <item>A grid binding is ANY import of <c>DataGrid</c> / <c>DataGridDefault</c> from the shared library —
-/// named, aliased, <c>{ default as X }</c>, default import, or mixed default + named — where a default import
-/// counts when the module's last path segment is <c>DataGrid</c>. A mount is <c>&lt;X</c> followed by
-/// anything that cannot continue the identifier, so <c>&lt;X&lt;T&gt;</c>, <c>&lt;X{...p}</c> and
-/// <c>&lt;X.Y</c> are mounts too. Every mount must pass <c>showViewSelector={false}</c> as its LAST top-level
-/// <c>showViewSelector</c> attribute (a bare <c>showViewSelector</c> counts as a later <c>true</c>), with no
-/// attribute spread after it (a later <c>{...rest}</c> could switch it back on).</item>
-/// <item>A mount whose opening tag the scan cannot walk with certainty is refused: type arguments
-/// (<c>&lt;X&lt;T&gt;</c>), a string attribute holding <c>{ } &lt; &gt;</c>, a string or template literal
-/// holding <c>{ }</c> inside a prop expression, a <c>/</c> (comment, regex, division, nested closing tag)
-/// anywhere in the tag except its closing <c>/&gt;</c>, a bare JSX element as an attribute value, an
-/// unbalanced <c>}</c>, or a tag that never closes. Hoist such expressions to a const above the JSX.</item>
-/// <item>A binding may appear only as a JSX tag (<c>&lt;X</c>, <c>&lt;/X</c>), after <c>typeof</c>, or as a
-/// member name (<c>.X</c>). Any other reference — <c>React.createElement(X, …)</c>, <c>const G = X</c>,
-/// <c>export { X }</c>, <c>export default X</c>, <c>memo(X)</c> — lets the grid leave this file unchecked and
-/// is refused.</item>
-/// <item><c>DataGridPageShell</c> / <c>DataGridPageShellDefault</c> (by name, by <c>default as</c>, or by
-/// default import of a <c>…/DataGridPageShell</c> module) is refused: it mounts the shared grid itself and
-/// cannot switch the picker off.</item>
-/// <item>Namespace imports, re-exports that could carry the grid (<c>export *</c>, a grid name, <c>default</c>,
-/// or a module path naming <c>DataGrid</c>), any dynamic <c>import()</c> / <c>require()</c> of the shared
-/// library (<c>React.lazy</c>), and any import clause the scan cannot parse are refused.</item>
+/// named, aliased, <c>{ default as X }</c>, default import of a <c>…/DataGrid</c> module, or mixed. The shared
+/// library is any specifier naming <c>@spaarke/ui-components</c> or <c>Spaarke.UI.Components</c>. Only the
+/// wrapper may hold a grid binding.</item>
+/// <item>In a file holding a grid binding: every mount must end with a top-level
+/// <c>showViewSelector={false}</c> and no spread after it (rounds 1–2: generics, string braces, comments,
+/// nested elements … are refused); the binding may appear only as a JSX tag, after <c>typeof</c>, or as a
+/// member name; <c>cloneElement</c>, <c>createElement</c> and any <c>\u</c> escape are refused (round 3,
+/// V2/V3).</item>
+/// <item><c>DataGridPageShell(Default)</c>, namespace imports and re-exports that could carry the grid are
+/// refused.</item>
+/// <item><b>Module specifiers (round 3).</b> Every <c>from '…'</c> must be a plain string (no <c>\</c>
+/// escape, which would spell the library without naming it). One that names the shared library must belong
+/// to an import or re-export the scan parsed (so <c>import { "DataGrid" as G }</c> cannot hide). A relative,
+/// <c>/</c> or <c>@/</c> specifier must resolve inside the external SPA source or into the shared library;
+/// a bare <c>@spaarke/…</c> specifier must be the shared library. A module elsewhere could re-export the grid
+/// under any name.</item>
+/// <item><b>Dynamic loads (round 3).</b> Every <c>import(…)</c> / <c>require(…)</c> must take one plain string
+/// literal that resolves inside the external SPA source. <c>import.meta.glob</c> is refused in any form: its
+/// pattern can match the grid's file without naming it (V1).</item>
 /// </list>
-/// <para>
-/// <b>Comments are NOT stripped.</b> Without a parser the scan cannot tell a comment from JSX text: inside JSX
-/// children a line reading <c>// &lt;X configId="x" /&gt;</c> or <c>/* &lt;X /&gt; */</c> is TEXT followed by a
-/// live element, and a <c>{…}</c> on such a line is a live expression (review round 2, S2/S3). So every
-/// comment is scanned as code. The cost is fail-closed: in a file that imports the grid, a comment must not
-/// quote a mount or name the binding (write "the shared grid" instead) — GridWidgetBody's JSDoc is worded
-/// that way.
-/// </para>
-/// <para>
-/// <b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each rule
-/// is paired with a negative control proving it fires and a positive control proving it does not fire on the
-/// sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected KEEP path.
-/// </para>
+/// <para><b>Shared-library fan-in (round 3).</b> The scan refuses <c>DataGridPageShell</c> by name, which is
+/// only enough while it is the one shared component that mounts the grid.
+/// <see cref="SharedLibrary_OnlyKnownModulesCarryTheGrid"/> pins that: inside the shared library (tests
+/// excluded) only <c>DataGrid/index.ts</c>, <c>DataGrid/DataGridPageShell.tsx</c>, <c>components/index.ts</c>
+/// and <c>src/index.ts</c> may import or re-export the grid. A new shared component that embeds it fails that
+/// fact until it is reviewed (refuse it here by name, like the shell, or prove it switches the picker off).</para>
+/// <para><b>Comments are NOT stripped.</b> Inside JSX children a line reading <c>// &lt;X /&gt;</c> is TEXT
+/// followed by a live element (round 2, S2/S3), so every comment is scanned as code. In a file that holds a
+/// grid binding, a comment must not quote a mount, name the binding, or spell an element-cloning API.</para>
+/// <para><b>Residual (documented, not scanned).</b> (1) A NEW npm dependency (a <c>package.json</c> change) that
+/// itself bundles and re-exports the shared grid under another name. (2) Inside the shared library, a dynamic
+/// <c>import()</c> whose path is built in a variable elsewhere (the fan-in fact reads the call's own argument
+/// text only, because the library's prose says "import (" in many comments). (3) Edits to the shared
+/// library's own <c>DataGrid.tsx</c> (e.g. ignoring the prop). All three are reviewed changes outside
+/// <c>external-spa/src</c>, and the BFF allow-list still refuses every column the picker's views would
+/// need.</para>
+/// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each
+/// rule is paired with a negative control proving it fires and a positive control proving it does not fire
+/// on the sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected
+/// KEEP path.</para>
 /// <para><b>Maintenance.</b> If an external grid ever genuinely needs a view picker, do NOT relax this guard
 /// alone: re-derive the module's server allow-list with task 134's rule (b) (sibling-view columns) in the same
 /// change and have the owner approve the wider column exposure.</para>
 /// </remarks>
 public class ExternalSpaGridViewSelectorGuardTests
 {
-    private static string ExternalSpaSource =>
-        Path.Combine(SourceScan.RepoRoot, "src", "client", "external-spa", "src");
+    private static string ExternalSpaRoot => Path.Combine(SourceScan.RepoRoot, "src", "client", "external-spa");
+
+    private static string ExternalSpaSource => Path.Combine(ExternalSpaRoot, "src");
+
+    private static string SharedLibraryRoot =>
+        Path.Combine(SourceScan.RepoRoot, "src", "client", "shared", "Spaarke.UI.Components");
+
+    private static string SharedLibrarySource => Path.Combine(SharedLibraryRoot, "src");
+
+    /// <summary>The runtime guard: the ONLY external-SPA file allowed to import the shared grid.</summary>
+    internal const string WrapperFile = "src/client/external-spa/src/widgets/ExternalDataGrid.tsx";
+
+    /// <summary>
+    /// The wrapper's text, pinned. Compared with ALL whitespace removed, so a formatter cannot break it, but
+    /// any change to a token (a prop, a spread, the order of the two) fails the pin and must be reviewed here.
+    /// </summary>
+    private const string PinnedWrapperSource = """
+        /**
+         * ExternalDataGrid — the ONLY way the external SPA mounts the shared Spaarke grid
+         * (unified-access-control-r2 task 157, owner round 4 item 7).
+         *
+         * It switches the view picker off at RUNTIME: `showViewSelector={false}` comes AFTER the caller's props,
+         * so no caller prop, spread or cloned element can turn the picker back on. With the picker on, the grid
+         * would offer the entity's internal MDA views, whose columns the BFF's external allow-lists
+         * (ExternalAccessModule.cs) do not admit.
+         *
+         * ExternalSpaGridViewSelectorGuardTests refuses every other import of the shared grid under
+         * src/client/external-spa/src and pins this file's text, so a change here is a change to that guard.
+         */
+        import * as React from 'react';
+        import { DataGrid, type DataGridProps } from '@spaarke/ui-components/components/DataGrid/DataGrid';
+
+        /** The shared grid's props without the view picker switch: an external grid never shows the picker. */
+        export type ExternalDataGridProps = Omit<DataGridProps, 'showViewSelector'>;
+
+        export const ExternalDataGrid: React.FC<ExternalDataGridProps> = props => (
+          <DataGrid {...props} showViewSelector={false} />
+        );
+        """;
 
     private static readonly string[] ScriptExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
 
@@ -88,11 +139,13 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <summary>The shared shell that mounts the grid with the picker on and no way to switch it off.</summary>
     private static readonly HashSet<string> ShellNames = new(StringComparer.Ordinal) { "DataGridPageShell", "DataGridPageShellDefault" };
 
-    // A module specifier that resolves into the shared UI library: one that names the package alias or the
-    // library's folder ANYWHERE — `@spaarke/ui-components/…`, `../../shared/Spaarke.UI.Components/…`, or
-    // `../../node_modules/@spaarke/ui-components/…` (review round 2, S5: a start-anchored alias missed the last).
-    private const string SharedModule =
-        @"(?<module>[^'""`\n]*(?i:@spaarke/ui-components|Spaarke\.UI\.Components)[^'""`\n]*)";
+    // Names the shared UI library ANYWHERE — `@spaarke/ui-components/…`, `../../shared/Spaarke.UI.Components/…`,
+    // or `../../node_modules/@spaarke/ui-components/…` (review round 2, S5).
+    private const string SharedLibraryName = @"(?i:@spaarke/ui-components|Spaarke\.UI\.Components)";
+
+    private const string SharedModule = @"(?<module>[^'""`\n]*" + SharedLibraryName + @"[^'""`\n]*)";
+
+    private static readonly Regex NamesSharedLibrary = new(SharedLibraryName, RegexOptions.Compiled);
 
     // `import <clause> from '<shared>'`. The clause starts at a name, `{` or `*` (so `import.meta` and
     // `import(` never match) and cannot cross a quote or `;`, so it cannot swallow a neighbouring statement.
@@ -104,8 +157,23 @@ public class ExternalSpaGridViewSelectorGuardTests
         @"\bexport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""]" + SharedModule + @"['""]",
         RegexOptions.Compiled);
 
-    private static readonly Regex DynamicLoad = new(
-        @"\b(?:import|require)\s*\(\s*['""`]" + SharedModule + @"['""`]", RegexOptions.Compiled);
+    // Every `from '<specifier>'` in the file, whatever precedes it (round 3: the specifier rules).
+    private static readonly Regex AnyFrom = new(@"\bfrom\s*(?<q>['""])(?<spec>[^'""\n]*)\k<q>", RegexOptions.Compiled);
+
+    // Every `import(` / `require(`; the argument is then checked with DynamicLiteralArgAt.
+    private static readonly Regex DynamicCall = new(@"\b(?:import|require)\s*\(", RegexOptions.Compiled);
+
+    // One plain string literal (no escape, no template, no concatenation) and then `)` or `,`.
+    private static readonly Regex DynamicLiteralArgAt = new(
+        @"\G\s*(?<q>['""])(?<spec>[^'""`\n\\]*)\k<q>\s*[),]", RegexOptions.Compiled);
+
+    // `import.meta.glob(…)`, `import.meta.globEager(…)`, `import . meta['glob']` … (round 3, V1).
+    private static readonly Regex ImportMetaGlob = new(
+        @"\bimport\s*\.\s*meta\s*(?:\.\s*|\[\s*['""`])glob", RegexOptions.Compiled);
+
+    // Element-cloning APIs and identifier escapes, refused in a file that holds a grid binding (round 3, V2/V3).
+    private static readonly Regex CloneOrCreate = new(@"(?<![\w$])(?:cloneElement|createElement)(?![\w$])", RegexOptions.Compiled);
+    private static readonly Regex UnicodeEscape = new(@"\\u", RegexOptions.Compiled);
 
     // `[type] [Default] [, ] [{ names } | * as NS]`
     private static readonly Regex ImportClause = new(
@@ -128,27 +196,36 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <summary>The result of scanning one file: every violation, and how many sanctioned mounts it holds.</summary>
     internal sealed record ScanResult(IReadOnlyList<string> Violations, int CompliantMounts);
 
-    /// <summary>Scans one file's text. Pure, so the controls below exercise exactly the production detector.</summary>
+    /// <summary>
+    /// Scans one file's text. <paramref name="fileName"/> is repo-relative with <c>/</c> separators: it decides
+    /// whether the file is the wrapper and anchors relative specifiers. Pure, so the controls below exercise
+    /// exactly the production detector.
+    /// </summary>
     internal static ScanResult Scan(string source, string fileName)
     {
         // Comments are scanned as code: a line-leading `//` or `/*` inside JSX children is text, not a comment.
         var text = source;
         var violations = new List<string>();
         var localNames = new List<string>();
-        // Import / re-export / dynamic-load statements: their module paths name `DataGrid` and are not references.
+        var firstGridImport = -1; // where the first grid binding is imported (for the wrapper-only message)
+        // Statements whose text names `DataGrid` in a module path, not as a reference.
         var importSpans = new List<(int Start, int End)>();
+        // Parsed import / re-export statements from the shared library: their `from '…'` is attributed.
+        var parsedSharedSpans = new List<(int Start, int End)>();
+        var isWrapper = string.Equals(fileName, WrapperFile, StringComparison.Ordinal);
 
         string Where(int index) => $"{fileName}:{LineOf(text, index)}";
 
         foreach (Match import in StaticImport.Matches(text))
         {
             importSpans.Add((import.Index, import.Index + import.Length));
+            parsedSharedSpans.Add((import.Index, import.Index + import.Length));
             var module = import.Groups["module"].Value;
             var clause = ImportClause.Match(import.Groups["clause"].Value.Trim());
             if (!clause.Success)
             {
                 violations.Add($"{Where(import.Index)}: import clause from '{module}' could not be parsed. Import "
-                               + "from the shared library with a plain named import so DataGrid mounts can be checked.");
+                               + "from the shared library with a plain named import so DataGrid imports can be checked.");
                 continue;
             }
 
@@ -157,7 +234,7 @@ public class ExternalSpaGridViewSelectorGuardTests
                 // `import * as UI from '@spaarke/ui-components'` then `<UI.DataGrid>` would mount the grid under a
                 // name this scan cannot attribute.
                 violations.Add($"{Where(import.Index)}: namespace import of '{module}'. Import from the shared "
-                               + "library by name so every DataGrid mount can be checked for showViewSelector={false}.");
+                               + "library by name so every DataGrid import can be checked.");
             }
 
             if (clause.Groups["default"].Success)
@@ -190,6 +267,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         foreach (Match reExport in ReExport.Matches(text))
         {
             importSpans.Add((reExport.Index, reExport.Index + reExport.Length));
+            parsedSharedSpans.Add((reExport.Index, reExport.Index + reExport.Length));
             var clause = reExport.Groups["clause"].Value.Trim();
             var module = reExport.Groups["module"].Value;
             if (clause.StartsWith("type ", StringComparison.Ordinal) || clause.StartsWith("type{", StringComparison.Ordinal))
@@ -204,16 +282,92 @@ public class ExternalSpaGridViewSelectorGuardTests
             }
         }
 
-        foreach (Match load in DynamicLoad.Matches(text))
+        // ── Round 3: module specifiers. A module the scan does not see could re-export the grid under any name. ──
+        foreach (Match fromClause in AnyFrom.Matches(text))
         {
-            importSpans.Add((load.Index, load.Index + load.Length));
-            violations.Add($"{Where(load.Index)}: dynamic import/require of '{load.Groups["module"].Value}' "
-                           + "(e.g. React.lazy). Import the shared library statically by name so every DataGrid mount "
-                           + "can be checked.");
+            var spec = fromClause.Groups["spec"].Value;
+            if (spec.Contains('\\'))
+            {
+                violations.Add($"{Where(fromClause.Index)}: escape in a module specifier ('{spec}'). An escape can spell the "
+                               + "shared library without naming it; write the specifier plainly.");
+                continue;
+            }
+            if (NamesSharedLibrary.IsMatch(spec))
+            {
+                if (!parsedSharedSpans.Any(span => fromClause.Index >= span.Start && fromClause.Index < span.End))
+                {
+                    violations.Add($"{Where(fromClause.Index)}: import from '{spec}' is not attributed to a parsed import or "
+                                   + "re-export (e.g. a string-named specifier such as { \"DataGrid\" as G }). Import "
+                                   + "from the shared library with plain identifiers.");
+                }
+                if (ResolvesOutsideSanctionedRoots(spec, fileName, allowSharedLibrary: true) is { } where)
+                {
+                    violations.Add($"{Where(fromClause.Index)}: '{spec}' names the shared library but resolves to {where}, "
+                                   + "outside the external SPA source and the shared library.");
+                }
+                continue;
+            }
+            if (ResolvesOutsideSanctionedRoots(spec, fileName, allowSharedLibrary: false) is { } outside)
+            {
+                violations.Add($"{Where(fromClause.Index)}: imports '{spec}' ({outside}), a module outside the external SPA "
+                               + "source. It could re-export the shared DataGrid under a name this scan cannot attribute.");
+            }
+        }
+
+        // ── Round 3: dynamic loads. Only a plain local string literal is attributable. ──
+        foreach (Match call in DynamicCall.Matches(text))
+        {
+            var arg = DynamicLiteralArgAt.Match(text, call.Index + call.Length);
+            var end = arg.Success ? arg.Index + arg.Length : call.Index + call.Length;
+            importSpans.Add((call.Index, end));
+            if (!arg.Success)
+            {
+                violations.Add($"{Where(call.Index)}: dynamic import/require whose argument is not one plain string "
+                               + "literal (a variable, template, concatenation or escape). Its target cannot be checked.");
+                continue;
+            }
+            var spec = arg.Groups["spec"].Value;
+            if (NamesSharedLibrary.IsMatch(spec)
+                || ResolvesOutsideSanctionedRoots(spec, fileName, allowSharedLibrary: false) is not null)
+            {
+                violations.Add($"{Where(call.Index)}: dynamic import/require of '{spec}' (e.g. React.lazy). Only a "
+                               + "module inside the external SPA source may be loaded dynamically; import the shared "
+                               + "library statically by name so every DataGrid import can be checked.");
+            }
+        }
+
+        foreach (Match glob in ImportMetaGlob.Matches(text))
+        {
+            violations.Add($"{Where(glob.Index)}: import.meta.glob is refused. Its pattern can match the shared "
+                           + "DataGrid's file without naming it, so the grid it loads cannot be checked.");
         }
 
         var compliant = 0;
-        foreach (var local in localNames.Distinct(StringComparer.Ordinal))
+        var distinctLocals = localNames.Distinct(StringComparer.Ordinal).ToList();
+        if (distinctLocals.Count > 0)
+        {
+            if (!isWrapper)
+            {
+                violations.Add($"{Where(firstGridImport)}: imports the shared DataGrid (as '{string.Join("', '", distinctLocals)}') "
+                               + "outside ExternalDataGrid.tsx. Mount ExternalDataGrid instead: it switches the view "
+                               + "picker off at runtime.");
+            }
+
+            foreach (Match api in CloneOrCreate.Matches(text))
+            {
+                violations.Add($"{Where(api.Index)}: '{api.Value}' in a file that holds the shared DataGrid. A cloned or "
+                               + "created element can switch showViewSelector back on after the JSX mount is checked "
+                               + "(cloneElement/createElement are refused here).");
+            }
+
+            foreach (Match escape in UnicodeEscape.Matches(text))
+            {
+                violations.Add($"{Where(escape.Index)}: unicode escape in a file that holds the shared DataGrid. An "
+                               + "escaped identifier can reference the grid under a spelling this scan cannot see.");
+            }
+        }
+
+        foreach (var local in distinctLocals)
         {
             var name = Regex.Escape(local);
 
@@ -265,15 +419,69 @@ public class ExternalSpaGridViewSelectorGuardTests
             if (GridNames.Contains(exported))
             {
                 localNames.Add(local);
+                if (firstGridImport < 0)
+                {
+                    firstGridImport = index;
+                }
             }
             else if (ShellNames.Contains(exported))
             {
                 violations.Add($"{Where(index)}: imports DataGridPageShell (as '{local}'), which mounts the shared "
-                               + "DataGrid with its default view selector and cannot switch it off. Mount DataGrid "
-                               + "directly with showViewSelector={false}.");
+                               + "DataGrid with its default view selector and cannot switch it off. Mount "
+                               + "ExternalDataGrid instead.");
             }
         }
     }
+
+    /// <summary>
+    /// Where a module specifier resolves, when that is OUTSIDE the external SPA source (and, when
+    /// <paramref name="allowSharedLibrary"/>, outside the shared library and its node_modules link too);
+    /// <c>null</c> when it stays inside, or when it is a bare npm package other than an <c>@spaarke/…</c> one.
+    /// Mirrors the Vite config: <c>@/</c> → <c>src</c>, a leading <c>/</c> → the project root, and
+    /// <c>@spaarke/ui-components</c> → the shared library.
+    /// </summary>
+    private static string? ResolvesOutsideSanctionedRoots(string spec, string fileName, bool allowSharedLibrary)
+    {
+        string full;
+        if (spec == "@" || spec.StartsWith("@/", StringComparison.Ordinal))
+        {
+            full = Path.GetFullPath(Path.Combine(ExternalSpaSource, spec.Length > 2 ? spec[2..] : "."));
+        }
+        else if (spec.StartsWith('/'))
+        {
+            full = Path.GetFullPath(Path.Combine(ExternalSpaRoot, spec.TrimStart('/')));
+        }
+        else if (spec.StartsWith('.'))
+        {
+            var directory = Path.GetDirectoryName(fileName.Replace('/', Path.DirectorySeparatorChar)) ?? string.Empty;
+            full = Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, directory, spec));
+        }
+        else if (spec.StartsWith("@spaarke/", StringComparison.Ordinal))
+        {
+            var isSharedAlias = spec == "@spaarke/ui-components" || spec.StartsWith("@spaarke/ui-components/", StringComparison.Ordinal);
+            return allowSharedLibrary && isSharedAlias ? null : "a @spaarke package other than the shared library";
+        }
+        else
+        {
+            return null; // a third-party npm package (residual: see the class remarks)
+        }
+
+        if (IsUnder(full, ExternalSpaSource))
+        {
+            return null;
+        }
+        if (allowSharedLibrary
+            && (IsUnder(full, SharedLibraryRoot)
+                || IsUnder(full, Path.Combine(ExternalSpaRoot, "node_modules", "@spaarke", "ui-components"))))
+        {
+            return null;
+        }
+        return Path.GetRelativePath(SourceScan.RepoRoot, full).Replace('\\', '/');
+    }
+
+    private static bool IsUnder(string full, string root) =>
+        full.Equals(root, StringComparison.OrdinalIgnoreCase)
+        || full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// What a default import of <paramref name="module"/> binds, by the module's last path segment
@@ -433,21 +641,23 @@ public class ExternalSpaGridViewSelectorGuardTests
         return Refuse("the opening tag never closes");
     }
 
-    private static IEnumerable<string> ExternalSpaFiles() =>
-        Directory.EnumerateFiles(ExternalSpaSource, "*.*", SearchOption.AllDirectories)
+    private static IEnumerable<string> ScriptFilesUnder(string root) =>
+        Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
             .Where(f => ScriptExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
 
-    [Fact(DisplayName = "Every Spaarke DataGrid mounted by the external SPA passes showViewSelector={false}")]
+    private static string RepoRelative(string file) => Path.GetRelativePath(SourceScan.RepoRoot, file).Replace('\\', '/');
+
+    [Fact(DisplayName = "No external-SPA file reaches the shared DataGrid except ExternalDataGrid.tsx, whose mount passes showViewSelector={false}")]
     public void ExternalSpa_EverySpaarkeDataGridMount_TurnsTheViewSelectorOff()
     {
         Assert.True(Directory.Exists(ExternalSpaSource), $"the external SPA source must exist at {ExternalSpaSource}");
 
         var violations = new List<string>();
-        var compliantByFile = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in ExternalSpaFiles())
+        var compliantByFile = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var file in ScriptFilesUnder(ExternalSpaSource))
         {
-            var relative = Path.GetRelativePath(SourceScan.RepoRoot, file).Replace('\\', '/');
+            var relative = RepoRelative(file);
             var result = Scan(File.ReadAllText(file), relative);
             violations.AddRange(result.Violations);
             if (result.CompliantMounts > 0)
@@ -457,27 +667,187 @@ public class ExternalSpaGridViewSelectorGuardTests
         }
 
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
-        // Not vacuous: the one known mount (every outside-counsel widget resolves to it) was found and passed.
-        Assert.Contains("src/client/external-spa/src/widgets/GridWidgetBody.tsx", compliantByFile.Keys);
+        // Not vacuous: the wrapper was found, scanned, and holds exactly the one sanctioned mount.
+        var only = Assert.Single(compliantByFile);
+        Assert.Equal(WrapperFile, only.Key);
+        Assert.Equal(1, only.Value);
+    }
+
+    [Fact(DisplayName = "ExternalDataGrid.tsx is pinned: it mounts the shared grid with showViewSelector={false} after the caller's props")]
+    public void ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff()
+    {
+        var path = Path.Combine(SourceScan.RepoRoot, WrapperFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(path), $"the runtime guard must exist at {WrapperFile}");
+
+        var actual = File.ReadAllText(path);
+        Assert.True(
+            Squash(actual) == Squash(PinnedWrapperSource),
+            $"{WrapperFile} changed. It is the runtime guard that keeps the shared DataGrid's view picker off for "
+            + "external callers: `showViewSelector={false}` must stay AFTER the caller's props, and nothing may "
+            + "clone, re-create or re-export the grid. If the change is deliberate and keeps that, update "
+            + "PinnedWrapperSource in this test in the same change (a reviewed change to this guard).");
+        // The pinned text itself is the sanctioned shape the scan expects.
+        var result = Scan(actual, WrapperFile);
+        Assert.Empty(result.Violations);
+        Assert.Equal(1, result.CompliantMounts);
+    }
+
+    private static string Squash(string text) => Regex.Replace(text, @"\s+", string.Empty);
+
+    // ── Shared-library fan-in: which shared modules carry the grid (round 3) ──
+
+    /// <summary>Repo-relative shared-library files allowed to import or re-export the shared grid / shell.</summary>
+    private static readonly HashSet<string> SharedFanInAllowed = new(StringComparer.Ordinal)
+    {
+        "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/index.ts",
+        "src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGridPageShell.tsx",
+        "src/client/shared/Spaarke.UI.Components/src/components/index.ts",
+        "src/client/shared/Spaarke.UI.Components/src/index.ts",
+    };
+
+    private static readonly Regex LibStatement = new(
+        @"\b(?:import|export)\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""](?<module>[^'""\n]+)['""]",
+        RegexOptions.Compiled);
+
+    private static readonly Regex GridOrShellToken = new(
+        @"(?<![\w$])(?:DataGrid|DataGridDefault|DataGridPageShell|DataGridPageShellDefault)(?![\w$])", RegexOptions.Compiled);
+
+    private static readonly Regex DefaultInClause = new(@"^(?:type\s+)?[\w$]+\s*(?:,|$)|(?<![\w$])default(?![\w$])", RegexOptions.Compiled);
+
+    /// <summary>Shared-library paths (without extension) that ARE the grid, the shell, or a barrel above them.</summary>
+    private static readonly string[] GridCarryingModules =
+    [
+        "src/components/DataGrid/DataGrid", "src/components/DataGrid/DataGridPageShell", "src/components/DataGrid/index",
+        "src/components/DataGrid", "src/components/index", "src/components", "src/index", "src",
+    ];
+
+    /// <summary>
+    /// Scans one shared-library file for statements that import or re-export the shared grid or shell. Returns
+    /// a description per statement; <paramref name="fileName"/> is repo-relative.
+    /// </summary>
+    internal static IReadOnlyList<string> SharedFanIn(string source, string fileName)
+    {
+        var found = new List<string>();
+        string Where(int index) => $"{fileName}:{LineOf(source, index)}";
+
+        foreach (Match statement in LibStatement.Matches(source))
+        {
+            var module = statement.Groups["module"].Value;
+            if (module.StartsWith("@fluentui/", StringComparison.Ordinal))
+            {
+                continue; // Fluent's own DataGrid has no view picker
+            }
+            var clause = statement.Groups["clause"].Value.Trim();
+            var target = DefaultExportOf(module);
+            var carriesByName = GridOrShellToken.IsMatch(clause);
+            var carriesByDefault = target is "DataGrid" or "DataGridPageShell" && DefaultInClause.IsMatch(clause);
+            var carriesByStar = clause.StartsWith('*') && IsGridCarryingModule(module, fileName);
+            if (carriesByName || carriesByDefault || carriesByStar)
+            {
+                found.Add($"{Where(statement.Index)}: '{clause}' from '{module}'");
+            }
+        }
+
+        // Prose in the library's comments says "import (" often, so a non-literal argument is not refused here
+        // (unlike the external-SPA scan); the call is flagged when its argument text, up to the closing `)`,
+        // names DataGrid, or when a plain literal resolves to a grid-carrying module.
+        foreach (Match call in DynamicCall.Matches(source))
+        {
+            var argStart = call.Index + call.Length;
+            var close = source.IndexOf(')', argStart);
+            var argText = close < 0 ? source[argStart..] : source[argStart..close];
+            var arg = DynamicLiteralArgAt.Match(source, argStart);
+            if (argText.Contains("DataGrid", StringComparison.OrdinalIgnoreCase)
+                || (arg.Success && IsGridCarryingModule(arg.Groups["spec"].Value, fileName)))
+            {
+                found.Add($"{Where(call.Index)}: a dynamic import/require that loads the grid or a barrel above it");
+            }
+        }
+
+        foreach (Match glob in ImportMetaGlob.Matches(source))
+        {
+            found.Add($"{Where(glob.Index)}: import.meta.glob");
+        }
+        return found;
+    }
+
+    private static bool IsGridCarryingModule(string module, string fileName)
+    {
+        if (!module.StartsWith('.'))
+        {
+            return module.StartsWith("@spaarke/ui-components", StringComparison.Ordinal);
+        }
+        var directory = Path.GetDirectoryName(fileName.Replace('/', Path.DirectorySeparatorChar)) ?? string.Empty;
+        var full = Path.GetFullPath(Path.Combine(SourceScan.RepoRoot, directory, module));
+        var relative = Path.GetRelativePath(SharedLibraryRoot, full).Replace('\\', '/');
+        var withoutExtension = Regex.Replace(relative, @"\.(?:tsx?|jsx?)$", string.Empty, RegexOptions.IgnoreCase);
+        return GridCarryingModules.Contains(withoutExtension, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsSharedLibraryTestFile(string relative) =>
+        relative.Split('/').Any(segment => segment.StartsWith("__", StringComparison.Ordinal))
+        || Regex.IsMatch(relative, @"\.(?:test|spec|stories)\.[cm]?[jt]sx?$", RegexOptions.IgnoreCase);
+
+    [Fact(DisplayName = "Inside the shared library, only the known barrels and DataGridPageShell import or re-export the grid")]
+    public void SharedLibrary_OnlyKnownModulesCarryTheGrid()
+    {
+        Assert.True(Directory.Exists(SharedLibrarySource), $"the shared library must exist at {SharedLibrarySource}");
+
+        var unexpected = new List<string>();
+        var carriersSeen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in ScriptFilesUnder(SharedLibrarySource))
+        {
+            var relative = RepoRelative(file);
+            if (IsSharedLibraryTestFile(relative)
+                || relative.EndsWith("/components/DataGrid/DataGrid.tsx", StringComparison.Ordinal))
+            {
+                continue; // tests are not bundled; DataGrid.tsx is the grid itself
+            }
+            var hits = SharedFanIn(File.ReadAllText(file), relative);
+            if (hits.Count == 0)
+            {
+                continue;
+            }
+            if (SharedFanInAllowed.Contains(relative))
+            {
+                carriersSeen.Add(relative);
+            }
+            else
+            {
+                unexpected.AddRange(hits);
+            }
+        }
+
+        Assert.True(unexpected.Count == 0,
+            "A shared-library module now imports or re-exports the shared DataGrid (or DataGridPageShell). If the "
+            + "external SPA can import it, it may mount the grid with the view picker on, and the external-SPA scan "
+            + "would not see it. Review it: add it to ShellNames (refused for the external SPA) or prove it switches "
+            + "the picker off, then add it to SharedFanInAllowed." + Environment.NewLine
+            + string.Join(Environment.NewLine, unexpected));
+        // Not vacuous: every allowed carrier still carries the grid (the detector reads the real barrels).
+        Assert.Equal(SharedFanInAllowed.OrderBy(f => f, StringComparer.Ordinal), carriersSeen.OrderBy(f => f, StringComparer.Ordinal));
     }
 
     // ── Controls: the detector fires on each violation shape and is silent on the sanctioned one ──
 
     private const string SpaarkeImport = "import { DataGrid } from '@spaarke/ui-components/components/DataGrid/DataGrid';\n";
 
+    /// <summary>A non-wrapper file inside the external SPA (relative specifiers resolve from its folder).</summary>
+    private const string OtherSpaFile = "src/client/external-spa/src/widgets/Seeded.tsx";
+
     [Fact(DisplayName = "Control: a mount without the prop is reported")]
     public void Scan_WhenTheSharedDataGridIsMountedWithoutTheProp_ReportsIt()
     {
-        var result = Scan(SpaarkeImport + "const A = () => <DataGrid configId={id} dataverseClient={c} />;", "seeded.tsx");
+        var result = Scan(SpaarkeImport + "const A = () => <DataGrid configId={id} dataverseClient={c} />;", WrapperFile);
 
-        Assert.Contains("seeded.tsx:2", Assert.Single(result.Violations));
+        Assert.Contains($"{WrapperFile}:2", Assert.Single(result.Violations));
         Assert.Equal(0, result.CompliantMounts);
     }
 
     [Fact(DisplayName = "Control: showViewSelector={true} is reported")]
     public void Scan_WhenTheSelectorIsExplicitlyOn_ReportsIt()
     {
-        var result = Scan(SpaarkeImport + "<DataGrid configId={id} showViewSelector={true} />", "seeded.tsx");
+        var result = Scan(SpaarkeImport + "<DataGrid configId={id} showViewSelector={true} />", WrapperFile);
 
         Assert.Single(result.Violations);
     }
@@ -488,7 +858,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         var text = SpaarkeImport +
                    "<DataGrid\n  configId={id}\n  onRecordsLoaded={rows => setRows(rows)}\n  showViewSelector={false}\n/>";
 
-        var result = Scan(text, "ok.tsx");
+        var result = Scan(text, WrapperFile);
 
         Assert.Empty(result.Violations);
         Assert.Equal(1, result.CompliantMounts);
@@ -499,16 +869,16 @@ public class ExternalSpaGridViewSelectorGuardTests
     {
         var text = "import {\n  DataGrid\n    as Grid,\n} from '@spaarke/ui-components';\n<Grid configId={id} />";
 
-        Assert.Contains("<Grid>", Assert.Single(Scan(text, "alias.tsx").Violations));
+        Assert.Contains("<Grid>", Assert.Single(Scan(text, WrapperFile).Violations));
     }
 
     [Fact(DisplayName = "Control: DataGridPageShell and namespace imports are refused")]
     public void Scan_WhenTheGridIsReachedThroughAShellOrANamespace_ReportsIt()
     {
         Assert.Contains("DataGridPageShell",
-            Assert.Single(Scan("import { DataGridPageShell } from '@spaarke/ui-components';", "shell.tsx").Violations));
+            Assert.Single(Scan("import { DataGridPageShell } from '@spaarke/ui-components';", OtherSpaFile).Violations));
         Assert.Contains("namespace import",
-            Assert.Single(Scan("import * as UI from '@spaarke/ui-components';\n<UI.DataGrid configId={id} />", "ns.tsx").Violations));
+            Assert.Single(Scan("import * as UI from '@spaarke/ui-components';\n<UI.DataGrid configId={id} />", OtherSpaFile).Violations));
     }
 
     [Fact(DisplayName = "Control: a mount inside a comment is reported (inside JSX children a // or /* line is text)")]
@@ -519,12 +889,12 @@ public class ExternalSpaGridViewSelectorGuardTests
                    "// <DataGrid configId={id} />\n" +
                    "const u = 'https://x.test'; const A = () => <DataGrid configId={id} />;";
 
-        var result = Scan(text, "comments.tsx");
+        var result = Scan(text, WrapperFile);
 
         Assert.Equal(3, result.Violations.Count);
-        Assert.Contains(result.Violations, v => v.StartsWith("comments.tsx:3", StringComparison.Ordinal));
-        Assert.Contains(result.Violations, v => v.StartsWith("comments.tsx:5", StringComparison.Ordinal));
-        Assert.Contains(result.Violations, v => v.StartsWith("comments.tsx:6", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith($"{WrapperFile}:3", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith($"{WrapperFile}:5", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith($"{WrapperFile}:6", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Control: Fluent's own DataGrid (no view picker) is ignored")]
@@ -533,7 +903,7 @@ public class ExternalSpaGridViewSelectorGuardTests
         var text = "import { DataGrid, DataGridHeader } from '@fluentui/react-components';\n" +
                    "<DataGrid items={rows} columns={cols}><DataGridHeader /></DataGrid>";
 
-        var result = Scan(text, "fluent.tsx");
+        var result = Scan(text, OtherSpaFile);
 
         Assert.Empty(result.Violations);
         Assert.Equal(0, result.CompliantMounts);
@@ -579,10 +949,8 @@ public class ExternalSpaGridViewSelectorGuardTests
     [InlineData("J-unparsed", "import DataGrid, Other from " + GridModule + ";", "could not be parsed")]
     public void Scan_WhenAnEvasionShapeIsSeeded_ReportsIt(string shape, string source, string expected)
     {
-        var result = Scan(source, shape + ".tsx");
-
-        Assert.Contains(result.Violations, v => v.Contains(expected, StringComparison.Ordinal));
-        Assert.Equal(0, result.CompliantMounts);
+        // Scanned AS the wrapper, so each row proves its own rule fires (not just "imported outside the wrapper").
+        AssertReported(shape, Scan(source, WrapperFile), expected);
     }
 
     // ── Review round 2 (2026-10-02): five more shapes compiled (esbuild) into a live mount with the picker on,
@@ -612,13 +980,18 @@ public class ExternalSpaGridViewSelectorGuardTests
     [InlineData("S4i-namespaced-prop", SpaarkeImport + "<DataGrid x:showViewSelector={false} />", "<DataGrid> mounted without")]
     // A spread straight after the name (no whitespace) was not read as a mount
     [InlineData("S4j-spread-no-space", SpaarkeImport + "<DataGrid{...p} />", "<DataGrid> mounted without")]
-    // S5: a node_modules-relative path to the shared library
+    // S5: a node_modules-relative path to the shared library (from the wrapper's folder)
     [InlineData("S5-node-modules-path", "import { DataGrid } from '../../node_modules/@spaarke/ui-components/src/components/DataGrid/DataGrid';\n<DataGrid" + Bad, "<DataGrid>")]
     public void Scan_WhenARound2EvasionShapeIsSeeded_ReportsIt(string shape, string source, string expected)
     {
-        var result = Scan(source, shape + ".tsx");
+        AssertReported(shape, Scan(source, WrapperFile), expected);
+    }
 
-        Assert.Contains(result.Violations, v => v.Contains(expected, StringComparison.Ordinal));
+    private static void AssertReported(string shape, ScanResult result, string expected)
+    {
+        Assert.True(
+            result.Violations.Any(v => v.Contains(expected, StringComparison.Ordinal)),
+            $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, result.Violations)}");
         Assert.Equal(0, result.CompliantMounts);
     }
 
@@ -631,11 +1004,11 @@ public class ExternalSpaGridViewSelectorGuardTests
                    "const z = 'end */';\n" +
                    "const s = 'a // b'; const B = () => <DataGrid configId={id} />;";
 
-        var result = Scan(text, "strings.tsx");
+        var result = Scan(text, WrapperFile);
 
         Assert.Equal(2, result.Violations.Count);
-        Assert.Contains(result.Violations, v => v.StartsWith("strings.tsx:3", StringComparison.Ordinal));
-        Assert.Contains(result.Violations, v => v.StartsWith("strings.tsx:5", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith($"{WrapperFile}:3", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith($"{WrapperFile}:5", StringComparison.Ordinal));
     }
 
     [Fact(DisplayName = "Control: sanctioned neighbours pass — spread BEFORE the prop, closing tag, typeof, type-only re-export, plain string and arrow props")]
@@ -649,9 +1022,99 @@ public class ExternalSpaGridViewSelectorGuardTests
                    "    <DataGrid aria-label=\"Matters & invoices\" onRecordsLoaded={rows => setRows(rows.map(r => ({ ...r, k: 'a' })))}\n" +
                    "      showViewSelector={ false } / >\n  </div>\n);";
 
-        var result = Scan(text, "sanctioned.tsx");
+        var result = Scan(text, WrapperFile);
 
         Assert.Empty(result.Violations);
         Assert.Equal(2, result.CompliantMounts);
+    }
+
+    // ── Review round 3 (2026-10-02): three shapes compiled (vite build) into a live mount with the picker on
+    // past the round-2 scan (V1–V3), plus the classes they belong to. Each one MUST be reported. ──
+
+    private const string GridSource = "../../../shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx";
+
+    [Theory(DisplayName = "Control: every evasion shape seeded in review round 3 is reported")]
+    // V1: import.meta.glob — names the library, names nothing, and the spaced / bracket / eager forms
+    [InlineData("V1-glob", WrapperFile, "const G = Object.values(import.meta.glob('" + GridSource + "', { eager: true, import: 'DataGrid' }))[0];\nconst A = () => <G configId=\"x\" />;", "import.meta.glob")]
+    [InlineData("V1b-glob-no-library-name", OtherSpaFile, "const m = import.meta.glob('../../../shared/*/src/**/D*Grid.tsx', { eager: true });", "import.meta.glob")]
+    [InlineData("V1c-glob-spaced", OtherSpaFile, "const m = import . meta . glob('./x/*.tsx');", "import.meta.glob")]
+    [InlineData("V1d-glob-eager", OtherSpaFile, "const m = import.meta.globEager('./x/*.tsx');", "import.meta.glob")]
+    [InlineData("V1e-glob-bracket", OtherSpaFile, "const m = import.meta['glob']('./x/*.tsx');", "import.meta.glob")]
+    // V2: a unicode-escaped identifier, an escaped import specifier, an escaped module specifier
+    [InlineData("V2-escaped-identifier", WrapperFile, SpaarkeImport + "const G = Data\\u0047rid;\nconst A = () => <G configId=\"x\" />;", "unicode escape")]
+    [InlineData("V2b-escaped-import-name", OtherSpaFile, "import { Data\\u0047rid as G } from '@spaarke/ui-components/components/DataGrid/DataGrid';\n<G configId=\"x\" />", "could not be parsed")]
+    [InlineData("V2c-escaped-module-specifier", OtherSpaFile, "import { DataGrid as G } from '@spaarke/ui-c\\u006fmponents/components/DataGrid/DataGrid';\n<G configId=\"x\" />", "escape in a module specifier")]
+    [InlineData("V2d-hex-escaped-module-specifier", OtherSpaFile, "import { DataGrid as G } from '../../../shared/Spaarke.UI.C\\x6fmponents/src/components/DataGrid/DataGrid';", "escape in a module specifier")]
+    [InlineData("V2e-string-named-specifier", OtherSpaFile, "import { \"DataGrid\" as G } from '@spaarke/ui-components/components/DataGrid/DataGrid';\n<G configId=\"x\" />", "not attributed")]
+    // V3: a compliant mount, then cloned (or re-created) with the picker on
+    [InlineData("V3-cloneElement", WrapperFile, SpaarkeImport + "const base = <DataGrid configId=\"x\" showViewSelector={false} />;\nconst A = () => React.cloneElement(base, { showViewSelector: true });", "cloneElement")]
+    [InlineData("V3b-createElement-alias", WrapperFile, SpaarkeImport + "const make = React.createElement;\nconst A = () => <DataGrid configId=\"x\" showViewSelector={false} />;", "createElement")]
+    [InlineData("V3c-destructured-clone", WrapperFile, SpaarkeImport + "const { cloneElement: c } = React;\nconst A = () => <DataGrid configId=\"x\" showViewSelector={false} />;", "cloneElement")]
+    // The class: a module the scan cannot see could re-export the grid under any name
+    [InlineData("W1-module-outside-the-spa", OtherSpaFile, "import { Grid } from '../../../../solutions/Other/src/grid';\n<Grid configId=\"x\" />", "outside the external SPA")]
+    [InlineData("W2-alias-escaping-src", OtherSpaFile, "import { Grid } from '@/../../../solutions/Other/src/grid';", "outside the external SPA")]
+    [InlineData("W3-root-relative", OtherSpaFile, "import { Grid } from '/../shared/Other/grid';", "outside the external SPA")]
+    [InlineData("W4-other-spaarke-package", OtherSpaFile, "import { Grid } from '@spaarke/legal-workspace';", "outside the external SPA")]
+    [InlineData("W5-library-name-elsewhere", OtherSpaFile, "import { Grid } from '../../../../solutions/Spaarke.UI.Components-fork/grid';", "outside the external SPA source and the shared library")]
+    // Dynamic loads: a variable, a template, a concatenation, a module outside the SPA
+    [InlineData("X1-dynamic-variable", OtherSpaFile, "const p = '@spaarke/ui-components/components/DataGrid/DataGrid';\nconst G = React.lazy(() => import(p));", "dynamic import")]
+    [InlineData("X2-dynamic-template", OtherSpaFile, "const G = React.lazy(() => import(`../../../shared/Spaarke.UI.Components/src/components/${n}/DataGrid`));", "dynamic import")]
+    [InlineData("X3-dynamic-concatenation", OtherSpaFile, "const G = React.lazy(() => import('../../../shared/' + 'Spaarke.UI.Components/src/components/DataGrid/DataGrid'));", "dynamic import")]
+    [InlineData("X4-dynamic-outside", OtherSpaFile, "const G = React.lazy(() => import('../../../../solutions/Other/src/grid'));", "dynamic import")]
+    // The wrapper rule: a fully compliant mount in any OTHER file is still refused
+    [InlineData("Y1-compliant-mount-outside-wrapper", OtherSpaFile, SpaarkeImport + "const A = () => <DataGrid configId=\"x\" showViewSelector={false} />;", "outside ExternalDataGrid.tsx")]
+    public void Scan_WhenARound3EvasionShapeIsSeeded_ReportsIt(string shape, string fileName, string source, string expected)
+    {
+        // CompliantMounts is not asserted: V3 rows hold a compliant JSX mount and are refused for the clone.
+        var result = Scan(source, fileName);
+
+        Assert.True(
+            result.Violations.Any(v => v.Contains(expected, StringComparison.Ordinal)),
+            $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, result.Violations)}");
+    }
+
+    [Fact(DisplayName = "Control: sanctioned external-SPA neighbours pass — the wrapper's consumer, local dynamic imports, @/ and npm imports")]
+    public void Scan_WhenAnExternalSpaFileUsesOnlySanctionedImports_Passes()
+    {
+        var text = "import * as React from 'react';\n" +
+                   "import { makeStyles } from '@fluentui/react-components';\n" +
+                   "import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';\n" +
+                   "import type { DataGridProps } from '@spaarke/ui-components/components/DataGrid/DataGrid';\n" +
+                   "import { ExternalDataGrid } from './ExternalDataGrid';\n" +
+                   "import { isEntitled } from '../registry/widgetRegistry';\n" +
+                   "import { config } from '@/config';\n" +
+                   "const L = () => import('../widgets/ProjectsWidget').then(m => ({ default: m.ProjectsWidgetBody }));\n" +
+                   "const n = Array.from('abc');\n" +
+                   "const A = () => <ExternalDataGrid configId=\"x\" />;";
+
+        var result = Scan(text, OtherSpaFile);
+
+        Assert.Empty(result.Violations);
+        Assert.Equal(0, result.CompliantMounts);
+    }
+
+    [Fact(DisplayName = "Control: the shared-library fan-in detector reports a new carrier and ignores Fluent and type-only imports")]
+    public void SharedFanIn_ReportsANewCarrierAndIgnoresNeighbours()
+    {
+        const string NewWidget = "src/client/shared/Spaarke.UI.Components/src/components/NewWidget/NewWidget.tsx";
+
+        Assert.Single(SharedFanIn("import { DataGrid } from '../DataGrid';\n<DataGrid configId=\"x\" />", NewWidget));
+        Assert.Single(SharedFanIn("import { DataGrid as Table } from '../../index';", NewWidget));
+        Assert.Single(SharedFanIn("import Grid from '../DataGrid/DataGrid';", NewWidget));
+        Assert.Single(SharedFanIn("import { DataGridPageShell } from '../DataGrid';", NewWidget));
+        Assert.Single(SharedFanIn("export * from '../DataGrid';", NewWidget));
+        Assert.Single(SharedFanIn("import * as C from '../index';", NewWidget));
+        Assert.Single(SharedFanIn("const G = React.lazy(() => import('../DataGrid/DataGrid'));", NewWidget));
+        Assert.Single(SharedFanIn("const G = React.lazy(() => import(`../DataGrid/${name}`));", NewWidget));
+        Assert.Single(SharedFanIn("const G = React.lazy(() => import('../index'));", NewWidget));
+        Assert.Single(SharedFanIn("const m = import.meta.glob('../**/*.tsx');", NewWidget));
+
+        Assert.Empty(SharedFanIn(
+            "import { DataGrid, DataGridBody } from '@fluentui/react-components';\n" +
+            "import type { DataGridProps } from '../DataGrid/DataGrid';\n" +
+            "export * from './NewWidgetTypes';\n" +
+            "// No `@spaarke/auth` import (ADR-028); pdfjs is a dynamic import() below.\n" +
+            "const pdf = import('pdfjs-dist');\n" +
+            "import { tokens } from '../DataGrid/tokens';", NewWidget));
     }
 }
