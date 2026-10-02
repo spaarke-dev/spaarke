@@ -233,6 +233,15 @@
     <EmbeddedResource Include="Services\Registration\EmailTemplates\*.html" />
   </ItemGroup>
 
+  <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at
+       config/secure-record-owner-role.json — LINKED (not copied) so the NFR-05 census (scheduled job + manual gate)
+       reads the same bytes as scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and the setup guide. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\..\config\secure-record-owner-role.json"
+                      LogicalName="Sprk.Bff.Api.SecureRecordOwnerRole.json"
+                      Link="Infrastructure\Dataverse\secure-record-owner-role.json" />
+  </ItemGroup>
+
   <!-- Exclude template config from publish - all config comes from Azure App Settings -->
   <ItemGroup>
     <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />

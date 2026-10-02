@@ -19,6 +19,11 @@
 // 020 resolves. It is the single place the authorization boundary is composed + audited, and is the
 // authz-before-stream gate task 030 (broker document access) depends on.
 //
+// unified-access-control-r2 task 135 (defect C1): the CIAM contact (external SPA) is composed HERE too,
+// through ComposeForCiamContactAsync — the same contact-plane composition and veto pipeline as the
+// workforce contact, minus the two derived-member terms (owner decision A2; see ComposeContactPlaneAsync).
+// Before that, the CIAM strategy built its scope from the grant set alone and no veto ran on it.
+//
 // Broker-only (ADR-028 A2 NFR-02): reads membership/grant/flag data APP-ONLY against the already-
 // resolved principal (task 020). No caller-token exchange (no OBO), no Graph SDK types, no
 // AI-internal types.
@@ -31,8 +36,9 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 /// <summary>
 /// Composes and evaluates the accessible-record set for a resolved <see cref="WorkforcePrincipal"/>
-/// per design.md §5 / spec FR-06. The single enforcement primitive: given a principal + entity type
-/// + record id, decide membership in the composed set (deny anything outside it).
+/// per design.md §5 / spec FR-06 — and, since task 135, for a resolved CIAM contact
+/// (<see cref="ComposeForCiamContactAsync"/>). The single enforcement primitive: given a principal + entity
+/// type + record id, decide membership in the composed set (deny anything outside it).
 /// </summary>
 /// <remarks>
 /// ADR-010 testing seam: the interface lets the endpoint filter (and task 030) be exercised against
@@ -48,14 +54,51 @@ public interface IAccessibleRecordSetService
         WorkforcePrincipal principal, string entityType, CancellationToken ct);
 
     /// <summary>
-    /// The enforcement decision: is <paramref name="recordId"/> in the principal's composed
-    /// accessible set for <paramref name="entityType"/>? A <c>false</c> result MUST be enforced as a
-    /// DENY (not merely an omission) by the caller.
+    /// Composes the accessible-record set of <paramref name="entityType"/> for a CIAM (Entra External ID)
+    /// contact — the external SPA's caller, already resolved to <paramref name="contactId"/> by its plane
+    /// strategy (unified-access-control-r2 task 135 · defect C1).
     /// </summary>
     /// <remarks>
-    /// Membership only — it answers "may the caller SEE this record", not "may the caller change it".
+    /// <para>
+    /// The SAME contact-plane composition a workforce contact-only principal gets through
+    /// <see cref="ComposeAsync"/> — one implementation, not a copy: the explicit grant term with Secure
+    /// pre-max suppression (FR-22), then the deny-list veto over the contact and its organizations (FR-23),
+    /// then Restricted (FR-21, nothing contact-sourced survives).
+    /// </para>
+    /// <para>
+    /// The one difference is that the two DERIVED-MEMBER terms (standing-grant membership and organization
+    /// expansion) are not composed: a CIAM contact has never had them, and owner decision A2 (round 3,
+    /// 2026-09-30) keeps both planes as they work today. See the branch point in the shared composition.
+    /// </para>
+    /// <para>
+    /// Takes a contact id rather than a <see cref="WorkforcePrincipal"/> on purpose: a CIAM caller is not a
+    /// workforce identity, and passing one through as a <see cref="WorkforcePrincipal"/> would hand its
+    /// <c>Kind</c>, <c>TenantId</c> and <c>Oid</c> to code written for workforce callers. Identity resolution
+    /// (ADR-028 A1, oid-first) stays with the caller; this method never resolves identity.
+    /// </para>
+    /// <para>
+    /// The result's <see cref="AccessibleRecordSet.PrincipalKind"/> is
+    /// <see cref="WorkforcePrincipalKind.ContactOnly"/>: the set is a contact's, whichever plane asked.
+    /// </para>
+    /// </remarks>
+    Task<AccessibleRecordSet> ComposeForCiamContactAsync(
+        Guid contactId, string entityType, CancellationToken ct);
+
+    /// <summary>
+    /// The enforcement decision: does the principal hold <see cref="AccessRights.Read"/> on
+    /// <paramref name="recordId"/> of <paramref name="entityType"/>? A <c>false</c> result MUST be enforced
+    /// as a DENY (not merely an omission) by the caller.
+    /// </summary>
+    /// <remarks>
+    /// Read only — it answers "may the caller SEE this record", not "may the caller change it".
     /// A mutating route MUST use <see cref="IsOperationPermittedAsync"/> instead; treating membership
     /// as permission to write is the defect FR-19 removes.
+    /// <para>
+    /// Task 136 (defect C2): this used to answer "is the id a key in the composed map", and two live paths
+    /// put keys in that map with no rights at all (a Secure-suppressed organization grant; a matter or work
+    /// assignment grant row with no level). It now answers through <see cref="AccessibleRecordSet.Contains"/>,
+    /// which means "holds Read".
+    /// </para>
     /// </remarks>
     Task<bool> IsRecordAccessibleAsync(
         WorkforcePrincipal principal, string entityType, Guid recordId, CancellationToken ct);
@@ -98,20 +141,32 @@ public sealed class AccessibleRecordSet
     /// max() a low value is simply ignored, so an ethical wall modelled as a level would fail silently
     /// in exactly the case it exists for (ADR-003 as amended by task 030). Vetoes delete keys.
     /// </para>
+    /// <para>
+    /// <b>No key without Read (task 136 · defect C2).</b> Every composition removes, as its last step, any
+    /// entry whose rights lack <see cref="AccessRights.Read"/> — a Secure-suppressed organization grant and a
+    /// level-less matter or work-assignment grant row both used to survive here as a key worth nothing, and
+    /// every presence-gated read admitted it. The views below (<see cref="RecordIds"/>,
+    /// <see cref="Contains"/>, <see cref="Count"/>) ALSO require Read, so a set built some other way (a
+    /// test double, a future composer that forgets the step) still fails closed.
+    /// </para>
     /// </summary>
     public required IReadOnlyDictionary<Guid, AccessRights> Rights { get; init; }
 
     private IReadOnlySet<Guid>? _recordIds;
 
     /// <summary>
-    /// The de-duplicated record ids the principal may access for this entity type.
+    /// The de-duplicated record ids the principal may READ for this entity type.
     /// <para>
     /// As of task 032 this is a DERIVED VIEW over <see cref="Rights"/>, not a stored second collection,
     /// so ids and rights cannot disagree. Kept at this exact shape so <c>Tier2ScopeFilterInjector</c>,
-    /// the module scope predicates and <c>CallerPrincipalResolver</c> are unaffected.
+    /// the module scope predicates and <c>CallerPrincipalResolver</c> are unaffected. Since task 136 an
+    /// entry whose rights lack Read is not in this view.
     /// </para>
     /// </summary>
-    public IReadOnlySet<Guid> RecordIds => _recordIds ??= Rights.Keys.ToHashSet();
+    public IReadOnlySet<Guid> RecordIds => _recordIds ??= Rights
+        .Where(kvp => kvp.Value.HasFlag(AccessRights.Read))
+        .Select(kvp => kvp.Key)
+        .ToHashSet();
 
     /// <summary>
     /// The rights the principal holds on <paramref name="recordId"/>, or
@@ -143,10 +198,18 @@ public sealed class AccessibleRecordSet
     /// </summary>
     public int CapLimit { get; init; } = MembershipResolveOptions.MaxLimit;
 
-    public int Count => Rights.Count;
+    /// <summary>How many records the principal may read — the size of <see cref="RecordIds"/>.</summary>
+    public int Count => RecordIds.Count;
 
-    /// <summary>The enforcement check: <c>true</c> iff the record is in the composed set.</summary>
-    public bool Contains(Guid recordId) => Rights.ContainsKey(recordId);
+    /// <summary>
+    /// The enforcement check: <c>true</c> iff the principal holds <see cref="AccessRights.Read"/> on the
+    /// record (task 136 · defect C2 — it used to be "the id is a key", which a None-rights key satisfied).
+    /// </summary>
+    /// <remarks>
+    /// <c>HasFlag(Read)</c> on <see cref="AccessRights.None"/> is <c>false</c>, so an absent record and a
+    /// present-but-powerless one give the same answer. Never test <c>HasFlag(None)</c>: it is always true.
+    /// </remarks>
+    public bool Contains(Guid recordId) => RightsFor(recordId).HasFlag(AccessRights.Read);
 }
 
 /// <summary>
@@ -181,6 +244,61 @@ public readonly record struct AccessibleRecordSetSources(
     bool ContactGrants,
     bool StandingGrantMembership,
     bool OrgExpansionMembership = false);
+
+/// <summary>
+/// The outcome of the ONE read of a subject's organization memberships (<c>sprk_contactorganization</c>):
+/// two NAMED sets, plus whether the read could be completed at all.
+/// </summary>
+/// <param name="ConferringOrganizationIds">
+/// Organizations whose membership CONFERS access today — an active junction row, current on both date
+/// bounds (<c>sprk_startdate</c> ≤ today ≤ <c>sprk_enddate</c>, a null bound being unbounded), under an
+/// ACTIVE <c>sprk_organization</c>. Owner decisions D-2 part 1, D-10, and ISS-026's read guard. Read by
+/// every ADDITIVE org term: org expansion (here) and org grants
+/// (<c>ExternalParticipationService.QueryOrganizationGrantRowsAsync</c>). Empty on a fault.
+/// </param>
+/// <param name="WallSubjectOrganizationIds">
+/// Organizations the subject is checked against by the FR-23 deny veto — every ACTIVE junction row, bounded
+/// on <c>statecode</c> ONLY. Deliberately a SUPERSET of the conferring set: an org-keyed ethical wall keeps
+/// binding a former member, a not-yet-started one, and a member of an inactive organization (owner D-2
+/// part 2, D-10). Date-bounding it would be a fail-OPEN change to a veto. Empty on a fault — so a consumer
+/// MUST read <paramref name="Unreadable"/> first.
+/// </param>
+/// <param name="Unreadable">The read could not be completed. Additive terms contribute nothing; the veto
+/// denies every queried candidate.</param>
+/// <remarks>
+/// <para>🔴 <b>Why this is an outcome and not a list.</b> One junction read feeds two consumers whose safe
+/// failure directions are OPPOSITE:</para>
+/// <list type="bullet">
+/// <item>the ADDITIVE org terms, where over-inclusion is an over-GRANT — so a failed read must contribute
+/// NOTHING;</item>
+/// <item>the FR-23 deny-veto SUBJECT, where over-inclusion is merely a stricter wall — so a failed read must
+/// deny EVERY candidate (the behaviour <c>ResolveDenyVetoAsync</c> has always had).</item>
+/// </list>
+/// <para>Collapsing both onto a bare empty list converts the veto's fail-CLOSED into a fail-OPEN: an empty
+/// subject-org list looks exactly like "belongs to no organization", so the wall simply stops matching.
+/// <see cref="Unreadable"/> keeps the two decisions distinct while still costing one read (NFR-02).</para>
+/// <para>✅ <b>The guarantee now covers every fault — task 109 (ISS-019, #998).</b> Task 043's code-review
+/// gate recorded that <see cref="Unreadable"/> was set only for faults reaching the evaluator as an
+/// EXCEPTION (token/API-url acquisition): a junction QUERY failure (HTTP 500/403, timeout) was swallowed
+/// inside <c>ExternalParticipationService</c>'s private query into an empty list, arrived as
+/// <c>Unreadable: false</c>, and silently removed the wall's organization axis for that subject. The query
+/// now returns <see cref="Failed"/> itself, which is the fix "one layer down" that review asked for — not a
+/// second query for the veto path, which would have re-introduced the two-snapshot hazard task 043
+/// removed.</para>
+/// <para>Two NAMED sets rather than one set plus a predicate, so a consumer cannot pick up "the
+/// organizations" without saying which question it is asking.</para>
+/// </remarks>
+internal readonly record struct ActiveOrgMemberships(
+    IReadOnlyList<Guid> ConferringOrganizationIds,
+    IReadOnlyList<Guid> WallSubjectOrganizationIds,
+    bool Unreadable)
+{
+    /// <summary>No contact subject, or a subject that genuinely belongs to no organization.</summary>
+    internal static ActiveOrgMemberships None { get; } = new(Array.Empty<Guid>(), Array.Empty<Guid>(), false);
+
+    /// <summary>The read faulted — contribute nothing, and deny every queried candidate.</summary>
+    internal static ActiveOrgMemberships Failed { get; } = new(Array.Empty<Guid>(), Array.Empty<Guid>(), true);
+}
 
 /// <inheritdoc />
 public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
@@ -230,8 +348,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </para>
     /// <para>
     /// A secure record whose ONLY source was an org grant has a null direct level, which maps to
-    /// <see cref="AccessRights.None"/>. The id still appears in the map with no rights; the Restricted veto
-    /// or a downstream consumer sees an entry that permits nothing. It is not resurrectable by the max.
+    /// <see cref="AccessRights.None"/>. The term enters it at None (the max cannot resurrect it), and
+    /// <see cref="RemoveEntriesWithoutRead"/> deletes it at the end of the composition (task 136 · defect C2).
+    /// Until then it stayed in the answer as a key worth nothing, and every read route that asked "is the id
+    /// present?" admitted it — including the app-only document content download.
     /// </para>
     /// </remarks>
     private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
@@ -406,6 +526,42 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         }
     }
 
+    /// <summary>
+    /// The LAST step of every composition, after <see cref="ApplyVetoPipeline"/>: delete every entry whose
+    /// rights lack <see cref="AccessRights.Read"/> (unified-access-control-r2 task 136 · defect C2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two live paths put a key into the composed map with no rights. A Secure root reached only through an
+    /// organization grant: the term contributes the null direct level, which is None (FR-22). And a matter or
+    /// work-assignment grant row with no <c>sprk_accesslevel</c>, kept as a None key by the grant read. A veto
+    /// already removes keys; these were never vetoed, so they stayed — and the external read routes, the module
+    /// scope and <c>/me</c> asked "is the id present?", so a key worth nothing admitted reads, including the
+    /// app-only document content download. The owner's rule (C9, 2026-09-30) is that a contact gets only the
+    /// records it is granted, at the granted level; a record with no rights is not a granted record.
+    /// </para>
+    /// <para>
+    /// Removal, never a sentinel: there is no <see cref="AccessRights"/> value that means "denied", and absence
+    /// is the only representation of no access (the same rule the veto slots follow). Task 042 set the
+    /// precedent on the standing term — "present but powerless is worse than not accessible".
+    /// </para>
+    /// <para>
+    /// The views on <see cref="AccessibleRecordSet"/> and on <c>CallerPrincipal</c> also require Read, so a
+    /// composition that skipped this step would still fail closed there. This step is what keeps the answer
+    /// itself honest for every consumer of <see cref="AccessibleRecordSet.Rights"/>.
+    /// </para>
+    /// </remarks>
+    private static void RemoveEntriesWithoutRead(Dictionary<Guid, AccessRights> composed)
+    {
+        foreach (var (recordId, rights) in composed.ToList())
+        {
+            if (!rights.HasFlag(AccessRights.Read))
+            {
+                composed.Remove(recordId);
+            }
+        }
+    }
+
     /// <summary>Shared "nothing to evaluate / nothing denied" result for <see cref="ResolveDenyVetoAsync"/>.</summary>
     private static readonly IReadOnlySet<Guid> EmptyDeniedSet = new HashSet<Guid>();
 
@@ -423,49 +579,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private static readonly string[] OrganizationIdentityTypeOnly = { "Organization" };
 
     /// <summary>
-    /// The outcome of reading a subject's ACTIVE organization memberships
-    /// (<c>sprk_contactorganization</c>) — the ids, plus whether the read could be completed at all.
-    /// </summary>
-    /// <remarks>
-    /// 🔴 <b>Why this is an outcome and not just a list.</b> One junction read feeds two consumers whose
-    /// safe failure directions are OPPOSITE:
-    /// <list type="bullet">
-    /// <item>the ADDITIVE org-expansion term, where over-inclusion is an over-GRANT — so a failed read
-    /// must contribute NOTHING;</item>
-    /// <item>the FR-23 deny-veto SUBJECT, where over-inclusion is merely a stricter wall — so a failed
-    /// read must deny EVERY candidate (the behaviour <c>ResolveDenyVetoAsync</c> has always had).</item>
-    /// </list>
-    /// Collapsing both onto a bare empty list would have converted the veto's fail-CLOSED into a
-    /// fail-OPEN for the faults this type CAN see: an empty subject-org list looks exactly like
-    /// "belongs to no organization", so the wall would simply stop matching. Carrying
-    /// <see cref="Unreadable"/> keeps the two decisions distinct while still costing one read (NFR-02).
-    /// <para>
-    /// ⚠️ <b>Scope of the guarantee — corrected by task 043's code-review gate, which found the original
-    /// wording here claimed more than the code delivers.</b> <see cref="Unreadable"/> is set only for
-    /// faults that reach
-    /// <see cref="ReadActiveOrgMembershipsAsync"/> as an <b>exception</b>, which in practice means
-    /// token/API-url acquisition. A junction <i>query</i> failure (HTTP 500/403, timeout, any
-    /// non-success status) is swallowed inside <c>ExternalParticipationService</c>'s private query,
-    /// which returns an empty list — so it arrives here as <c>Unreadable: false</c> and the deny veto's
-    /// ORGANIZATION axis silently stops matching for that subject. Contact-keyed deny rows still apply,
-    /// so the wall narrows rather than vanishes. That hole PRE-DATES task 043; what task 043 briefly did
-    /// was document and test it as closed, which is worse than silence because it stops the next reader
-    /// looking. See <see cref="ResolveDenyVetoAsync"/>'s remarks for why fixing it properly has to
-    /// happen one layer down, in the junction query itself.
-    /// </para>
-    /// </remarks>
-    private readonly record struct ActiveOrgMemberships(IReadOnlyList<Guid> OrganizationIds, bool Unreadable)
-    {
-        /// <summary>No contact subject, or a subject that genuinely belongs to no organization.</summary>
-        internal static ActiveOrgMemberships None { get; } = new(Array.Empty<Guid>(), false);
-
-        /// <summary>The read faulted — contribute nothing, and deny every queried candidate.</summary>
-        internal static ActiveOrgMemberships Failed { get; } = new(Array.Empty<Guid>(), true);
-    }
-
-    /// <summary>
-    /// Reads the subject's ACTIVE organization memberships ONCE per composition, for both the
-    /// org-expansion term and the deny-veto subject (task 043).
+    /// Reads the subject's organization memberships ONCE per composition, for both the org-expansion term
+    /// and the deny-veto subject (task 043; the one read now yields two named sets — task 109).
     /// </summary>
     /// <remarks>
     /// <para>
@@ -475,12 +590,18 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// anyway, since they are an input to it.
     /// </para>
     /// <para>
-    /// ⚠️ <b>The query bounds on <c>statecode</c> only; it does NOT bound on <c>sprk_enddate</c></b>, and
-    /// task 043 decided that deliberately rather than inheriting it. See
-    /// <c>notes/task-043-org-expansion-term.md</c> — the short version is that
-    /// <c>QueryActiveOrgIdsAsync</c> is shared by this ADDITIVE caller and the VETO subject, whose fail
-    /// directions are inverted, so a blanket date bound would tighten the grant path and simultaneously
-    /// make the ethical wall match FEWER subjects. One query shape cannot be correct for both.
+    /// <b>Date bounds — decided by the owner (D-2, D-10), implemented by task 109.</b> Task 043 left the
+    /// read bounded on <c>statecode</c> alone because one bare-id projection could not be right for both
+    /// consumers. It is one READ, not one FILTER: the read now projects both date columns and the
+    /// organization's state, and returns the CONFERRING set (date-bounded at both ends, active
+    /// organization) beside the WALL-SUBJECT set (<c>statecode</c> only). This method returns the outcome
+    /// unchanged; the consumers below each pick their own set.
+    /// </para>
+    /// <para>
+    /// Every fault becomes <see cref="ActiveOrgMemberships.Failed"/>: a query-level fault inside the read
+    /// itself (task 109 · ISS-019), and a token/API-url fault here. Only the caller's own cancellation
+    /// propagates (rethrown by the participation service's entry) — a timeout is a fault, not a
+    /// cancellation.
     /// </para>
     /// </remarks>
     private async Task<ActiveOrgMemberships> ReadActiveOrgMembershipsAsync(
@@ -496,11 +617,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
-            var orgIds = await _participations
-                .QueryActiveOrgIdsAsync(contactId, ct).ConfigureAwait(false);
-            return new ActiveOrgMemberships(orgIds, Unreadable: false);
+            return await _participations
+                .ReadOrganizationMembershipsAsync(contactId, ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -538,12 +658,13 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// EITHER axis. The deny-list reader is never even queried in that case.
     /// </param>
     /// <param name="subjectOrgs">
-    /// The subject's active organization memberships, already resolved by
+    /// The subject's organization memberships, already resolved by
     /// <see cref="ReadActiveOrgMembershipsAsync"/> (task 043 hoisted the read out of this method so the
-    /// additive org-expansion term and this veto cannot be computed from two different snapshots).
-    /// <see cref="ActiveOrgMemberships.Unreadable"/> denies every queried candidate — but read that
-    /// type's remarks for exactly which fault modes set it, because the junction query's own error
-    /// handling does NOT surface every failure as one.
+    /// additive org-expansion term and this veto cannot be computed from two different snapshots). This
+    /// veto reads <see cref="ActiveOrgMemberships.WallSubjectOrganizationIds"/> — the <c>statecode</c>-only
+    /// set — and NEVER the conferring set (owner D-2 part 2, D-10). <see cref="ActiveOrgMemberships.Unreadable"/>
+    /// denies every queried candidate, and since task 109 it is set for every fault of the junction read,
+    /// query-level ones included.
     /// </param>
     /// <remarks>
     /// <para>
@@ -567,26 +688,23 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// deny entry keyed on an organization it actually references but which the read could not
     /// confirm — exactly the "skipped record is an unevaluated wall" case task 039's escalation
     /// trigger names.</item>
-    /// <item>A subject whose active organizations could not be read
+    /// <item>A subject whose organizations could not be read
     /// (<see cref="ActiveOrgMemberships.Unreadable"/>) denies every queried candidate, mirroring
     /// <see cref="NoAccessListReader"/>'s own over-large-subject-set precedent: a subject that cannot be
-    /// safely evaluated is treated the same as a subject the reader could not evaluate.</item>
+    /// safely evaluated is treated the same as a subject the reader could not evaluate. Since task 109 this
+    /// covers a junction QUERY failure (HTTP 500/403, timeout, any non-success status) as well as a
+    /// token/API-url fault — the query reports <see cref="ActiveOrgMemberships.Failed"/> instead of an
+    /// empty list (ISS-019, #998). Before that, a failed query arrived here as "belongs to no
+    /// organization" and silently removed the wall's organization axis for that subject.</item>
     /// <item>Any other unexpected fault in this method is caught below and denies every queried
     /// candidate.</item>
     /// </list>
     /// <para>
-    /// 🔴 <b>The one fault this veto does NOT catch</b> (recorded by task 043's code-review gate; the
-    /// hole PRE-DATES that task and is not introduced by it). A junction <i>query</i> failure — HTTP
-    /// 500/403, a timeout, any non-success status — is swallowed inside
-    /// <c>ExternalParticipationService</c>'s private query, which returns an EMPTY list rather than
-    /// throwing. The public overload only propagates a token/API-url acquisition fault. So a failed
-    /// junction query reaches this method as <c>Unreadable: false</c> with no organizations, which is
-    /// indistinguishable from "this subject belongs to no organization" — and the subject's
-    /// ORGANIZATION axis of the wall stops matching. Contact-keyed deny rows (contact×record,
-    /// contact×org) are unaffected, so the wall is narrowed rather than removed. Closing it properly
-    /// means surfacing an outcome from the junction query itself, which also governs the org-GRANT
-    /// path, whose additive caller deliberately wants empty-on-fault — i.e. the same inverted-fail-
-    /// direction problem one layer down. Filed, not fixed here.
+    /// <b>The subject's organizations OVER-match too, on purpose</b> (owner D-2 part 2, D-10): the wall
+    /// set is every organization with an ACTIVE junction row — a membership ended by date, one not yet
+    /// started, and one under an inactive organization all still bind. The conferring set the additive
+    /// terms use is narrower; using it here would make the wall match fewer subjects, a fail-OPEN change
+    /// to a veto.
     /// </para>
     /// <para>
     /// In every case the veto is never SKIPPED — an observable fault denies; it never causes the
@@ -626,7 +744,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         try
         {
-            var subjectOrgIds = subjectOrgs.OrganizationIds;
+            // The WALL set — statecode only, never the conferring set (owner D-2 part 2, D-10).
+            var subjectOrgIds = subjectOrgs.WallSubjectOrganizationIds;
 
             var referencedOrgs = await _participations
                 .GetReferencedOrganizationIdsAsync(entityType, candidateIds, ct).ConfigureAwait(false);
@@ -743,6 +862,25 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             _ => throw new ArgumentOutOfRangeException(
                 nameof(principal), principal.Kind, "Unknown workforce principal kind."),
         };
+    }
+
+    /// <inheritdoc />
+    public Task<AccessibleRecordSet> ComposeForCiamContactAsync(
+        Guid contactId, string entityType, CancellationToken ct)
+    {
+        if (contactId == Guid.Empty)
+        {
+            // An unresolved caller is denied by the strategy before it gets here; an empty id reaching this
+            // point is a caller bug, and composing for it would read as "a contact with no grants".
+            throw new ArgumentException("contactId must be a resolved contact id.", nameof(contactId));
+        }
+
+        if (string.IsNullOrWhiteSpace(entityType))
+        {
+            throw new ArgumentException("entityType must not be null/empty/whitespace.", nameof(entityType));
+        }
+
+        return ComposeContactPlaneAsync(contactId, entityType, includeDerivedMemberTerms: false, ct);
     }
 
     /// <inheritdoc />
@@ -1093,6 +1231,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             flags,
             membershipTerm.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
 
+        // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's
+        // organization-only grant on a Secure root, which term 2 enters at None.
+        RemoveEntriesWithoutRead(composed);
+
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
             "{Count} records over {Pages} membership page(s) (ADR-034 membership; contact-grants " +
@@ -1110,8 +1252,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         };
     }
 
-    // ── contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ───────────────
-    private async Task<AccessibleRecordSet> ComposeForContactAsync(
+    // ── workforce contact plane: grants ∪ (standing membership IFF flag set) ∪ org expansion ─────
+    private Task<AccessibleRecordSet> ComposeForContactAsync(
         WorkforcePrincipal principal, string entityType, CancellationToken ct)
     {
         // A contact-only principal always carries a contactId anchor (task 020 invariant).
@@ -1119,6 +1261,26 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             ?? throw new InvalidOperationException(
                 "A ContactOnly principal must carry a ContactId anchor (task 020 invariant).");
 
+        return ComposeContactPlaneAsync(contactId, entityType, includeDerivedMemberTerms: true, ct);
+    }
+
+    /// <summary>
+    /// The ONE contact-plane composition, shared by both contact sign-ins (task 135 · defect C1): the
+    /// workforce contact-only principal (<see cref="ComposeForContactAsync"/>) and the CIAM contact
+    /// (<see cref="ComposeForCiamContactAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// Before task 135 only the workforce plane came through here; the CIAM strategy built its principal
+    /// from the grant set alone, so a contact on the No Access List, holding a grant on a Restricted record,
+    /// or inheriting an organization grant on a Secure record kept full access on a ciamlogin.com token.
+    /// Both planes now run the same grant read, the same single junction read, the same batched flag read,
+    /// the same Secure-suppressed grant term, the same deny resolution and the same
+    /// <see cref="ApplyVetoPipeline"/> call. The only difference is
+    /// <paramref name="includeDerivedMemberTerms"/>, named at its branch point below.
+    /// </remarks>
+    private async Task<AccessibleRecordSet> ComposeContactPlaneAsync(
+        Guid contactId, string entityType, bool includeDerivedMemberTerms, CancellationToken ct)
+    {
         var composed = new Dictionary<Guid, AccessRights>();
 
         // Read grants + standing membership + org expansion FIRST so the candidate id set is complete
@@ -1131,10 +1293,31 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             grantsApplied = true;
         }
 
+        // ── THE ONE PERMITTED DIFFERENCE BETWEEN THE TWO CONTACT PLANES (task 135) ─────────────────
+        // includeDerivedMemberTerms is true for the workforce contact plane and false for CIAM. It gates
+        // the two DERIVED-MEMBER terms below — standing-grant membership and organization expansion —
+        // and nothing else: the grant term, Secure suppression, the deny veto and Restricted are shared.
+        //
+        // Why the difference exists: CIAM has never had these terms, and the owner's model is that a
+        // contact gets only what it is granted (C9). Retiring them from the workforce plane was put to the
+        // owner as task 142 (C9, Assigned-To auto-grants) escalation (d). The owner answered in decision A2
+        // (round 3, 2026-09-30, REVERSED): "Standing grants and organization access STAY, as they work
+        // today, on both sign-in types. Assigned-To grants are ADDED alongside them. Nothing is retired."
+        // So this difference is an owner-signed exception — task 135 escalation option (ii) — not a
+        // pending retirement. Adding the terms to CIAM would widen CIAM beyond what it has today;
+        // removing them from the workforce plane would retire access the owner said stays. Either change
+        // is a new owner decision, not a refactor (notes/task-135-ciam-unified-veto-pipeline.md).
+        //
         // ── ONE junction read, shared by the additive org term AND the deny-veto subject (NFR-02) ──
-        // Hoisted above the membership walk because the contact's active organizations are an INPUT to
-        // it: an org-typed descriptor can only emit a condition if the identity carries org ids.
-        var activeOrgs = await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false);
+        // On the workforce plane it is hoisted above the membership walk because the contact's active
+        // organizations are an INPUT to it: an org-typed descriptor can only emit a condition if the
+        // identity carries org ids. The one read yields both NAMED sets (task 109): the org term below
+        // reads ConferringOrganizationIds, the veto reads WallSubjectOrganizationIds. Without the derived
+        // terms (CIAM) the veto is its only consumer, so it is read below, once there are candidates —
+        // the systemuser plane's NFR-02 gate. Null here means "not read yet", never "no organizations".
+        ActiveOrgMemberships? activeOrgs = includeDerivedMemberTerms
+            ? await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false)
+            : null;
 
         // Standing-grant runtime membership, GATED on the subject-level policy flag. The negative case is
         // load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit grants — NEVER automatic
@@ -1155,8 +1338,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // would have entered them at None, and "present but powerless" is a different — worse — answer
         // than "not accessible": it is exactly the shape that makes a UI render a row the caller cannot
         // act on. See notes/task-042-standing-grant-levels.md §4.
-        var standing = await _standingGrant.ReadForContactAsync(contactId, ct).ConfigureAwait(false);
-        var standingRights = standing.Rights;
+        //
+        // Derived-member term — not composed, and the flag not even read, on CIAM (see the plane note above).
+        var standingRights = AccessRights.None;
+        if (includeDerivedMemberTerms)
+        {
+            var standing = await _standingGrant.ReadForContactAsync(contactId, ct).ConfigureAwait(false);
+            standingRights = standing.Rights;
+        }
 
         if (standingRights != AccessRights.None)
         {
@@ -1192,12 +1381,20 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         //
         // Independent of the contact's OWN standing grant: this term is the ORGANIZATION's standing
         // arrangement, so it applies whether or not the contact personally holds one.
+        //
+        // An ADDITIVE term, so it reads the CONFERRING set only (task 109): a membership ended by date,
+        // not yet started, or under an inactive organization derives nothing (owner D-2 part 1, D-10,
+        // ISS-026) — while the veto below still treats it as a wall subject. On an unreadable junction
+        // the conferring set is empty, so the fault contributes nothing.
+        //
+        // Derived-member term — on CIAM `activeOrgs` is still unread (null) here, so this never runs there
+        // (see the plane note above).
         var orgTerms = new List<(AccessRights Rights, HashSet<Guid> RecordIds)>();
         var orgExpansionApplied = false;
-        if (activeOrgs.OrganizationIds.Count > 0)
+        if (includeDerivedMemberTerms && activeOrgs is { ConferringOrganizationIds.Count: > 0 } expansionOrgs)
         {
             var orgsByRights = new Dictionary<AccessRights, List<Guid>>();
-            foreach (var orgId in activeOrgs.OrganizationIds.Distinct())
+            foreach (var orgId in expansionOrgs.ConferringOrganizationIds.Distinct())
             {
                 // The reader refuses Guid.Empty (it is a caller bug there, not a subject). Skipping it
                 // here keeps a malformed junction row from turning the whole term into an exception.
@@ -1293,19 +1490,36 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // Deny-veto subject = this contact's OWN id + its active organizations (task 039 / FR-23) —
         // the SAME single read the org-expansion term above consumed, so the additive term and the
         // ethical wall can never be computed from two different membership snapshots.
-        // NOTHING survives Restricted on this plane: a contact principal's every term is contact-sourced,
-        // which is precisely FR-21's "denies ALL contact principals regardless of grant source".
-        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, activeOrgs, ct)
+        // NOTHING survives Restricted on either contact plane: a contact principal's every term is
+        // contact-sourced, which is precisely FR-21's "denies ALL contact principals regardless of grant
+        // source".
+        //
+        // On CIAM the junction is read here, for the veto alone. With no candidates the veto returns
+        // before it would consult the subject, so `None` is never a fail-open there (the systemuser
+        // plane's identical gate); with candidates the read happens, and its Unreadable outcome — every
+        // fault, query-level included since task 109 — denies every candidate.
+        var subjectOrgs = activeOrgs
+            ?? (candidates.Count == 0
+                ? ActiveOrgMemberships.None
+                : await ReadActiveOrgMembershipsAsync(contactId, ct).ConfigureAwait(false));
+
+        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, contactId, subjectOrgs, ct)
             .ConfigureAwait(false);
 
         ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
 
+        // Last: no key without Read (task 136 · C2), on both contact sign-ins. Reachable cases: an
+        // organization-only grant on a Secure root, and a matter / work-assignment grant row with no level
+        // (owner 2026-09-30: no level = not granted).
+        RemoveEntriesWithoutRead(composed);
+
         _logger.LogInformation(
-            "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +
-            "(grants: {Grants}, standing-grant membership: {Standing}, org expansion: {OrgExpansion} over " +
-            "{OrgTerms} baseline(s), {Pages} membership page(s) total, capped: {Capped}).",
-            contactId, entityType, composed.Count, grantsApplied, standingApplied, orgExpansionApplied,
-            orgTerms.Count, membershipPages, capped);
+            "[WF-AUTHZ] Composed accessible set for contact {ContactId} ({Plane} contact plane) on " +
+            "{EntityType}: {Count} records (grants: {Grants}, standing-grant membership: {Standing}, org " +
+            "expansion: {OrgExpansion} over {OrgTerms} baseline(s), {Pages} membership page(s) total, " +
+            "capped: {Capped}).",
+            contactId, includeDerivedMemberTerms ? "workforce" : "CIAM", entityType, composed.Count,
+            grantsApplied, standingApplied, orgExpansionApplied, orgTerms.Count, membershipPages, capped);
 
         return new AccessibleRecordSet
         {

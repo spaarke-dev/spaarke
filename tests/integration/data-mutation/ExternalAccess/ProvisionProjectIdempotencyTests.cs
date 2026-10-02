@@ -12,8 +12,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// (task 021, 2026-08-25).
 ///
 /// <para><b>What provisioning now does:</b> resolves the ONE canonical Secure Record business unit by
-/// name from configuration, assigns the project to that business unit's default owner team, creates the
-/// project's own SPE container, and records it on <c>sprk_containerid</c>. It creates no business unit,
+/// name from configuration, assigns the project to that business unit's NAMED owner team (task 144 — never its
+/// default team; the named-team invariants are pinned in <see cref="SecureNamedOwnerTeamProvisioningTests"/>), creates
+/// the project's own SPE container, and records it on <c>sprk_containerid</c>. It creates no business unit,
 /// no account, and never writes <c>sprk_externalaccount</c>.</para>
 ///
 /// <para><b>The four defects these tests pin.</b></para>
@@ -255,16 +256,17 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The project ends up owned by the Secure Record business unit's default owner team.
+    /// The project ends up owned by the Secure Record business unit's NAMED owner team — never its default team.
     /// </summary>
     /// <remarks>
-    /// Design.md §5.1a: the default owner team, NOT a service account. Every business unit is created
-    /// with one, so it needs no provisioning — no licence, no credential to rotate, no extra identity
-    /// to audit. Ownership is asserted by reading the row back rather than by observing the PATCH,
-    /// because observing the PATCH is exactly what the old code did wrong.
+    /// <b>Rewritten by task 144 (#967).</b> This test used to pin the business unit's DEFAULT owner team. That was the
+    /// defect: Dataverse maintains a default team's membership from each user's business unit and it cannot be
+    /// curated, so a user moved into the Secure Record BU silently became a member of the team owning every secure
+    /// record. Ownership is asserted by reading the row back rather than by observing the PATCH, because observing the
+    /// PATCH is exactly what the old code did wrong.
     /// </remarks>
     [Fact]
-    public async Task ProvisionProject_AssignsTheProject_ToTheBusinessUnitsDefaultOwnerTeam()
+    public async Task ProvisionProject_AssignsTheProject_ToTheBusinessUnitsNamedOwnerTeam_NeverItsDefaultTeam()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -273,11 +275,15 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         var response = await ProvisionAsync(client, projectId);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId)
+            .And.NotBe(ProvisionProjectTestFixture.SecureDefaultTeamId,
+                "the default team's membership follows every user placed in the business unit");
 
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         body.RootElement.GetProperty("ownerTeamId").GetString()
             .Should().Contain(ProvisionProjectTestFixture.SecureOwnerTeamId.ToString());
+        body.RootElement.GetProperty("ownerTeamName").GetString()
+            .Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamName);
     }
 
     /// <summary>
@@ -336,9 +342,12 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
             "an orphan attached to an unsecured record");
     }
 
-    /// <summary>A business unit with no default owner team fails closed.</summary>
+    /// <summary>
+    /// A business unit with no NAMED owner team fails closed — and does not fall back to its default team, which the
+    /// roster always contains (task 144; rewritten from the default-team version of this test).
+    /// </summary>
     [Fact]
-    public async Task ProvisionProject_WhenTheBusinessUnitHasNoDefaultOwnerTeam_FailsClosed()
+    public async Task ProvisionProject_WhenTheNamedOwnerTeamIsMissing_FailsClosedAndNeverUsesTheDefaultTeam()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -349,7 +358,9 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
 
         response.IsSuccessStatusCode.Should().BeFalse();
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerTeamNotFound);
+        _fixture.Updates.Should().BeEmpty("the default team is present in the roster and must not be chosen instead");
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.OwningTeamOf(projectId).Should().BeNull();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -592,6 +603,26 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
         const string section = "SecureRecord:";
 
         ProvisionProjectEndpoint.SecureBusinessUnitNameConfigKey.Should().StartWith(section);
+        ProvisionProjectEndpoint.SecureOwnerTeamNameConfigKey.Should().StartWith(section);
         UnsecureProjectEndpoint.UnsecureOwnerUserIdConfigKey.Should().StartWith(section);
+    }
+
+    /// <summary>
+    /// The default owner-team name is the one the owner chose (decision F9, 2026-09-30) and is NOT the business unit's
+    /// own name — the name its DEFAULT team carries.
+    /// </summary>
+    /// <remarks>
+    /// A fail-closed lookup key, like the BU name above: the live team, this default, guide §4 and this test move
+    /// together. The inequality is the load-bearing half. Were the two names equal, a configuration that dropped
+    /// <c>isdefault eq false</c> from the lookup would select the default team silently — exactly the team task 144
+    /// retires.
+    /// </remarks>
+    [Fact]
+    public void DefaultSecureOwnerTeamName_IsTheOwnersChoice_AndNotTheBusinessUnitsOwnName()
+    {
+        ProvisionProjectEndpoint.DefaultSecureOwnerTeamName.Should().Be("Secure Record Owners");
+        ProvisionProjectEndpoint.DefaultSecureOwnerTeamName.Should()
+            .NotBe(ProvisionProjectEndpoint.DefaultSecureBusinessUnitName,
+                "the BU's default team carries the BU's name; the owner team must be distinguishable from it");
     }
 }

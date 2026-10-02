@@ -245,10 +245,20 @@ not list, and it is strictly better than either: a ViewOnly matter participant c
 is the same answer a ViewOnly project participant has always received. **No root type is left for
 which membership implies anything.**
 
-The list gate is `AccessRights.Read`. For a project that is *exactly* the `HasProjectAccess`
+The list gate is `AccessRights.Read`. ~~For a project that is *exactly* the `HasProjectAccess`
 membership test it replaces — every participation carries a level and the lowest (ViewOnly) already
 maps to `Read` — so no caller who could list project to-dos before can be denied now. Behaviour
-preserved, uniformity gained.
+preserved, uniformity gained.~~
+
+> **Corrected 2026-10-01 by task 136 (defect C2).** The struck premise was false when written. Once the
+> principal carried the *evaluator's* answer (tasks 032/033) rather than grant rows, "every participation
+> carries a level" stopped holding: a Secure project reached only through an organization grant (FR-22)
+> and a matter/work-assignment grant row with no level both reached the principal as a key with
+> `AccessRights.None`. `HasProjectAccess` (presence) admitted them; this list gate (Read) did not — so the
+> two were **not** the same test, and the to-do list was the one project read route that was right. Task
+> 136 made the other project read routes test Read as well, made `HasProjectAccess` itself require Read,
+> and removed None-rights entries from the evaluator's answer and from the principal. See
+> `notes/task-136-rights-based-read-gates.md`.
 
 ---
 

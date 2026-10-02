@@ -1112,6 +1112,38 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
 
+### `Migrate-SecureRecordsToNamedOwnerTeam.ps1`
+**Purpose:** One-time move of every secure project, matter and work assignment off the Secure Record business unit's DEFAULT owner team and onto its NAMED, non-default, memberless owner team (`Secure Record Owners`). Secure rows outside the business unit are reported as NOT ISOLATED and never touched.
+**Usage:** 🔴 One-time per environment, during the setup-guide §4.3 cutover; idempotent (a second run plans nothing). `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-01 by `unified-access-control-r2` task 144, GitHub #967)
+**Dependencies:** Azure CLI (`az login`) with System Administrator in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-01, **dry run and `-Verify` only** against `spaarkedev1`: plan 0 rows; 1 NOT-ISOLATED test project; STOPs for the named team (not yet created) and the unaccepted Assign-cascade list. **No `-Apply` has been run.**
+
+**Command:**
+```powershell
+# Dry run (default): every check, the census and the plan. Zero writes. Exit 2 when a STOP applies.
+.\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -ReportPath .\logs\secure-owner-migration.json
+
+# Move the planned rows (each owner read back; share counts compared before/after), once the owner accepts the cascade list.
+.\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply -AcceptedAssignCascade team,sharepointdocumentlocation,sharepointdocument
+
+# Gate: exit 0 = every secure row on the named team, team memberless, BU user-free, role on the named team alone.
+.\Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
+```
+
+**Safety model:**
+- It never shares to anyone, moves a user, provisions a record or changes a role.
+- It refuses `-Apply` in any of these cases:
+  - `sharetopreviousowneronassign` is true;
+  - the named team or the default team has members;
+  - a user sits in the business unit;
+  - the named team lacks the role;
+  - a root relationship cascades Assign to a child table that is not in `-AcceptedAssignCascade`.
+- It stops at the first row whose owner did not land, or whose share count changed.
+
+Detail: [`projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md`](../projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md); setup guide §4.3.
+
 ---
 
 ## Testing & Validation Scripts
@@ -1566,4 +1598,5 @@ Most scripts require:
 - **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).
 - **2026-04-04:** Added Release & Deployment Orchestration section with three new scripts: Deploy-Release.ps1 (master release orchestrator), Build-AllClientComponents.ps1 (dependency-ordered client build), Deploy-AllWebResources.ps1 (all web resources to Dataverse) — Task PRPR-032.
 - **2026-09-04:** Added new "Data Backfill Scripts" section with Backfill-CoreAncestorStamps.ps1 — one-time FR-26 core-ancestor stamp backfill for existing child records (`unified-access-control-r2` task 053). Discovers ancestor-stamp + child-of-child lookup columns from live Dataverse metadata every run rather than a hard-coded list, after a live-metadata check during authoring found the project's own prior notes stale on which columns `sprk_todo` carries, and found `sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema (filed for owner decision, not fixed by this script).
+- **2026-10-01:** Added Migrate-SecureRecordsToNamedOwnerTeam.ps1. It moves secure roots off the Secure Record business unit's default team onto its named, memberless owner team, with a dry run by default, read-back, share-count comparison and a `-Verify` gate (`unified-access-control-r2` task 144, #967).
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).

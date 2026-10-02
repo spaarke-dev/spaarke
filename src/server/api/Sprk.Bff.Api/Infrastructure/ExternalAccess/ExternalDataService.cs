@@ -172,7 +172,7 @@ public class ExternalDataService
     /// Retrieves multiple projects by their IDs.
     /// Used by the workspace home page to list the user's accessible projects.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalProjectDto>> GetProjectsAsync(
+    public virtual async Task<IReadOnlyList<ExternalProjectDto>> GetProjectsAsync(
         IEnumerable<Guid> projectIds, CancellationToken ct = default)
     {
         var ids = projectIds.ToList();
@@ -192,7 +192,7 @@ public class ExternalDataService
     }
 
     /// <summary>Retrieves a single project by ID.</summary>
-    public async Task<ExternalProjectDto?> GetProjectByIdAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<ExternalProjectDto?> GetProjectByIdAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
         var url = $"{GetApiUrl()}/sprk_projects({projectId})?$select={select}";
@@ -206,7 +206,7 @@ public class ExternalDataService
     // ---------------------------------------------------------------------------
 
     /// <summary>Retrieves all documents belonging to the specified project.</summary>
-    public async Task<IReadOnlyList<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
         var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId}");
@@ -557,7 +557,7 @@ public class ExternalDataService
     /// FR-29 retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by
     /// <see cref="GetTodosAsync"/>. Reintroducing that flag here would resurrect the model FR-29 removed.
     /// </remarks>
-    public async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_eventid,sprk_name,sprk_duedate,sprk_status,createdon,_sprk_regardingproject_value";
         var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
@@ -886,7 +886,7 @@ public class ExternalDataService
     /// Retrieves contacts with active access to the specified project.
     /// Queries sprk_externalrecordaccess to find contact IDs, then fetches contact details.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalContactDto>> GetContactsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalContactDto>> GetContactsAsync(Guid projectId, CancellationToken ct = default)
     {
         // Step 1: Get contact IDs from the access junction table
         var contactIds = await GetProjectContactIdsAsync(projectId, ct);
@@ -904,7 +904,7 @@ public class ExternalDataService
     /// <summary>
     /// Retrieves organizations (accounts) linked to the project via project contacts.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalOrganizationDto>> GetOrganizationsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalOrganizationDto>> GetOrganizationsAsync(Guid projectId, CancellationToken ct = default)
     {
         // Step 1: Get contacts for the project
         var contacts = await GetContactsAsync(projectId, ct);

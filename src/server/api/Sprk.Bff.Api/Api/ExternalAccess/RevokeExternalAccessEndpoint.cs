@@ -475,13 +475,13 @@ public static class RevokeExternalAccessEndpoint
     /// had been told was revoked.</para>
     ///
     /// <para><b>Why sweeping by <c>statecode</c> alone.</b> The junction also carries
-    /// <c>sprk_enddate</c>, and this ignores it — deliberately, to match
-    /// <c>ExternalParticipationService.QueryActiveOrgIdsAsync</c>, which grants inherited access on
-    /// <c>statecode</c> alone. A membership that has ended by date but was never deactivated therefore
-    /// still CONFERS access on the read side, so a revoke that skipped it would leave a live inheritance
-    /// standing. Over-including on a revoke removes more access (fail-closed); under-including does not.
-    /// The read-side asymmetry itself is recorded for the Phase 1 evaluator (FR-24/FR-25, task 043) —
-    /// changing who has access on the read path is out of scope here.</para>
+    /// <c>sprk_enddate</c> and <c>sprk_startdate</c>, and this ignores both — deliberately. Since task 109
+    /// the read side (<c>ExternalParticipationService.ReadOrganizationMembershipsAsync</c>) confers
+    /// inherited access only through memberships that are date-current under an active organization, a
+    /// SUBSET of the <c>statecode</c>-active rows swept here. So this sweep is a superset of everyone the
+    /// read side can still let in: over-including on a revoke removes more access (fail-closed);
+    /// under-including does not. (Before task 109 the read side conferred on <c>statecode</c> alone, and
+    /// this sweep matched it exactly; the superset relation is what has to hold, and still does.)</para>
     ///
     /// <para><b>⚠️ What this CANNOT confirm.</b> Per-member <c>NoPermissionFound</c> is only as good as
     /// <see cref="SpeContainerMembershipService.RevokeMembershipAsync"/>'s match, and that method reads
@@ -719,8 +719,9 @@ internal readonly record struct OrganizationMemberSet(
 /// </summary>
 /// <remarks>
 /// <para><b>CLAUDE.md §11 justification (task 020).</b> <i>Existing</i>:
-/// <c>ExternalParticipationService.QueryActiveOrgIdsAsync</c> reads the same junction in the INVERSE
-/// direction (contact → organizations). <i>Extension</i>: not callable — it is private and built on a raw
+/// <c>ExternalParticipationService.ReadOrganizationMembershipsAsync</c> (named <c>QueryActiveOrgIdsAsync</c>
+/// until task 109) reads the same junction in the INVERSE direction (contact → organizations).
+/// <i>Extension</i>: not callable — it is private and built on a raw
 /// <c>HttpClient</c> with its own app-only token flow, whereas the revoke path holds a
 /// <c>DataverseWebApiClient</c>; reaching it would drag the participation service's token flow into the
 /// revoke path. So the QUERY SHAPE is mirrored, not the code. <i>Cost of doing nothing</i>: an
@@ -741,8 +742,9 @@ internal readonly record struct OrganizationMemberSet(
 /// revocation query reads as "nothing to revoke" — silently. Confirmed: collection
 /// <c>sprk_contactorganizations</c>; lookups <c>sprk_contact</c> → <c>contact</c> and
 /// <c>sprk_organization</c> → <c>sprk_organization</c>, projected as <c>_sprk_contact_value</c> /
-/// <c>_sprk_organization_value</c>; <c>statecode</c> Active(0)/Inactive(1). This confirms the assumption
-/// standing as a caveat comment in <c>QueryActiveOrgIdsAsync</c> is CORRECT.</para>
+/// <c>_sprk_organization_value</c>; <c>statecode</c> Active(0)/Inactive(1). This confirmed the assumption
+/// that stood as a caveat comment in <c>QueryActiveOrgIdsAsync</c>; task 109 removed that caveat and cites
+/// this record instead.</para>
 /// </remarks>
 internal static class ExternalOrganizationMembership
 {
@@ -768,9 +770,13 @@ internal static class ExternalOrganizationMembership
     /// The <c>$filter</c> selecting one organization's ACTIVE memberships.
     /// </summary>
     /// <remarks>
-    /// Mirrors <c>ExternalParticipationService.QueryActiveOrgIdsAsync</c> term for term, inverted:
-    /// <c>statecode eq 0</c> only. It deliberately does NOT filter on <c>sprk_enddate</c> — see the
-    /// remarks on the caller for why matching the read path matters more than being date-correct here.
+    /// Mirrors the read path's junction <c>$filter</c> (<c>ExternalParticipationService
+    /// .BuildOrganizationMembershipFilter</c>), inverted: <c>statecode</c> only. It deliberately does NOT
+    /// filter on <c>sprk_enddate</c> / <c>sprk_startdate</c> — see the remarks on the caller for why a
+    /// superset of the read path's conferring set matters more than being date-correct here. (The read
+    /// filter also admits a NULL <c>statecode</c>, task 109; this one does not. Dataverse writes no null
+    /// <c>statecode</c>, so the two select the same rows — recorded rather than changed, because this
+    /// task's scope on the revoke path is comments only.)
     /// </remarks>
     internal static string ActiveMembersFilter(Guid organizationId)
         => $"_sprk_organization_value eq {organizationId} and statecode eq 0";

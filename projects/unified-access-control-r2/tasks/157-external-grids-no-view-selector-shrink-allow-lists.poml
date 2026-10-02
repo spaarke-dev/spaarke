@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="157" project="unified-access-control-r2">
+  <metadata>
+    <title>External SPA grids stop offering the internal MDA views (showViewSelector=false), and each external module's column allow-list shrinks to what its grid actually shows (owner round 4 item 7, task 134 open item D1)</title>
+    <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
+    <gate>startable now (134 merged)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Narrows the columns an external (CIAM/contact) caller may read through /fetch and /record. That is an authorization surface (defect C6), plus a client change to the external SPA.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The change touches an authorization allow-list on the external data plane. If a list is shrunk wrongly, it either leaks or blanks a grid.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>It edits ExternalAccessModule.cs descriptor allow-lists (task 134's surface) and the external SPA grid mounts.</parallel-reason>
+    <deps>134</deps>
+    <tags>bff-api, security, external-spa, react</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Task 134 open item D1 (notes/task-134-*.md). Owner round 4 item 7 (2026-10-01): "yes".</origin>
+  </metadata>
+
+  <prompt>Turn off the view picker on every external SPA grid, then shrink each external module's server column allow-list. The new list is the columns that grid's own configuration shows, plus the scope columns and the /record default projection, and nothing more.</prompt>
+
+  <role>SPAARKE platform developer: the external data plane (ExternalModuleDataEndpoints and ExternalAccessModule descriptors) and the external SPA (React, DataGrid framework).</role>
+
+  <goal>Every `&lt;DataGrid&gt;` mounted in `src/client/external-spa` passes `showViewSelector={false}`. External callers can therefore no longer switch a grid to an internal MDA saved view. Each external module descriptor's column allow-list then drops the columns admitted only by derivation rule (b) of task 134, the sibling saved views the ViewSelector offered. It keeps (a) every attribute the module's `sprk_gridconfiguration` references, (c) the scope-dimension attributes, and (d) the /record default projection. The derivation is re-done from LIVE data (read-only) and recorded.</goal>
+
+  <context>
+    <background>Task 134 (defect C6) gave every external module a column allow-list. At the time the external grids still offered a ViewSelector over the entity's internal MDA main views, so rule (b) had to admit the columns of every sibling view that could render rows. That widened each list beyond what the grid's own configuration shows. The owner approved removing the selector (round 4 item 7), so rule (b) no longer applies and the lists can shrink.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/OutsideCounselDashboard.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/ContactsOrganizations.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="read">tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Derive each new list from LIVE data, read-only (the module's sprk_gridconfiguration record, the scope dimensions and EntityDefinitions for the primary id and primary name). Never write a list from memory. Record the derivation per module in the task note.</constraint>
+    <constraint source="project">Shrink ONLY. A column absent from the old list must not appear in the new one. A column the grid configuration references must not be dropped, or the grid blanks.</constraint>
+    <constraint source="project">Every external DataGrid mount in src/client/external-spa gets showViewSelector={false}. The shared DataGrid's default (true) does not change, because internal surfaces still use the selector.</constraint>
+    <constraint source="project">Deployment order is recorded in the note: the external SPA (no selector) deploys BEFORE or WITH the BFF that shrinks the lists. A BFF-first deploy would make a still-offered view error.</constraint>
+    <constraint source="project">The external SPA build is npm run build:prod (or the package's documented prod build). Use npm install --legacy-peer-deps --no-audit --no-fund, never npm ci.</constraint>
+    <constraint source="project">ADR-038 test bans. Prove the shrink bites by seeding a dropped column back.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Grep every DataGrid mount under src/client/external-spa and set showViewSelector={false}; build the SPA.</step>
+    <step order="2">For each external module descriptor, re-derive (a)+(c)+(d) live, read-only; compute the drop set (old list minus new); record both in notes/task-157-external-grid-columns.md.</step>
+    <step order="3">Apply the shrunk lists; update ExternalModuleColumnAllowListTests so each module's list equals its recorded derivation, and add a test that a column admitted only by rule (b) is now refused by /fetch and stripped by /record.</step>
+    <step order="4">Run affected tests, the full BFF unit suite and NetArchTest; record the deployment order.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every DataGrid mount under src/client/external-spa passes showViewSelector={false} (asserted by a source scan test or the SPA's own tests); the shared DataGrid default is unchanged; the SPA prod build succeeds.</criterion>
+    <criterion testable="true">Each external module's allow-list equals its recorded live derivation (a)+(c)+(d); no column was added.</criterion>
+    <criterion testable="true">Negative: a column that was admitted only by rule (b) is refused by /fetch and stripped from /record for that module.</criterion>
+    <criterion testable="true">Every column the module's grid configuration references is still admitted (no grid blanks).</criterion>
+    <criterion testable="true">The shrink is proven to bite by seeding a dropped column back; BFF unit + NetArchTest green.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev, after deploying SPA then BFF): an outside-counsel contact opens each external grid; no view selector shows; each grid renders its configured columns.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A grid's live configuration references a column that is an SPE pointer or FLS-secured (task 134's refused classes) — STOP and report; do not admit it.</trigger>
+  </escalation>
+
+  <notes>Owner round 4 item 7 (2026-10-01). Closes task 134's open item D1.</notes>
+</task>

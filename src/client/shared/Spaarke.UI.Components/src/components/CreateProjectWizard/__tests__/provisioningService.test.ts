@@ -152,7 +152,15 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.secure_bu_ambiguous', 'environment-not-configured'],
     ['sdap.provision.secure_owner_team_not_found', 'environment-not-configured'],
     ['sdap.provision.secure_owner_team_ambiguous', 'environment-not-configured'],
+    // Task 144: the named owner team's members and the business unit's users are checked BEFORE any
+    // mutation, so each of these is a not-safe environment with nothing moved — never 'error'.
+    ['sdap.provision.secure_owner_team_has_members', 'environment-not-configured'],
+    ['sdap.provision.secure_owner_team_membership_unreadable', 'environment-not-configured'],
+    ['sdap.provision.secure_bu_has_users', 'environment-not-configured'],
+    ['sdap.provision.secure_bu_users_unreadable', 'environment-not-configured'],
     ['sdap.provision.already_provisioned', 'already-provisioned'],
+    // Task 144: secured before the named team existed, under the retired default team — already claimed.
+    ['sdap.provision.owned_by_other_secure_team', 'already-provisioned'],
     ['sdap.provision.legacy_per_project_bu', 'legacy-provisioning'],
     ['sdap.provision.creator_unresolved', 'share-failed'],
     ['sdap.provision.creator_share_failed', 'share-failed'],
@@ -183,6 +191,12 @@ describe('provisionSecureProject — failure classification', () => {
       'sdap.provision.legacy_per_project_bu',
       'sdap.provision.creator_unresolved',
       'sdap.provision.creator_share_failed',
+      // Task 144.
+      'sdap.provision.secure_owner_team_has_members',
+      'sdap.provision.secure_owner_team_membership_unreadable',
+      'sdap.provision.secure_bu_has_users',
+      'sdap.provision.secure_bu_users_unreadable',
+      'sdap.provision.owned_by_other_secure_team',
     ];
 
     for (const code of emittedByEndpoint) {
