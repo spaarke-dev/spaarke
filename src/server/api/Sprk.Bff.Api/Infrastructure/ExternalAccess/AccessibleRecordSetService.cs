@@ -118,6 +118,31 @@ public interface IAccessibleRecordSetService
         Guid recordId,
         AccessRights requiredRights,
         CancellationToken ct);
+
+    /// <summary>
+    /// The WRITE-time No Access check (unified-access-control-r2 task 139 · FR-23 · C4 fix direction): would the
+    /// FR-23 deny veto deny <paramref name="recordId"/> to this grantee? <c>true</c> means refuse the grant.
+    /// </summary>
+    /// <param name="entityType">The root's LOGICAL name (<c>sprk_project</c> / <c>sprk_matter</c> / <c>sprk_workassignment</c>).</param>
+    /// <param name="recordId">The record the grant would be written on.</param>
+    /// <param name="granteeContactId">The contact grantee, checked as a direct subject AND through its active
+    /// organization memberships (read here). <c>null</c> for an organization-wide grant, or for a contact that does
+    /// not exist yet.</param>
+    /// <param name="granteeOrganizationIds">Further organization subjects: the organization of an organization-wide
+    /// grant, or the firm a contact grant names.</param>
+    /// <remarks>
+    /// <para>The decision comes from the SAME code as the read-path veto (<c>ResolveDenyVetoAsync</c>) — the record's
+    /// referenced organizations, the subject's wall set, the one <see cref="INoAccessListReader"/> — so the key shapes
+    /// are never re-implemented for the write path.</para>
+    /// <para>Fails CLOSED like the veto: an unreadable membership read, an unreadable record, a faulted deny-list read
+    /// — every one answers <c>true</c>. Nothing to check (no contact, no organization) answers <c>false</c>.</para>
+    /// </remarks>
+    Task<bool> IsGranteeDeniedOnRecordAsync(
+        string entityType,
+        Guid recordId,
+        Guid? granteeContactId,
+        IReadOnlyCollection<Guid> granteeOrganizationIds,
+        CancellationToken ct);
 }
 
 /// <summary>
@@ -744,8 +769,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             return EmptyDeniedSet;
         }
 
+        // No subject on EITHER axis: nothing to check. On the read path this is exactly "no contact" — the org set is
+        // read FROM the contact, so it is empty (and readable) whenever the contact is absent. Task 139's write-time
+        // entry point is the one caller that can supply an organization subject with no contact (an organization-wide
+        // grant, or a contact not created yet), and then the organization axis is checked.
         var hasContactSubject = subjectContactId is { } cid && cid != Guid.Empty;
-        if (!hasContactSubject)
+        if (!hasContactSubject && !subjectOrgs.Unreadable && subjectOrgs.WallSubjectOrganizationIds.Count == 0)
         {
             return EmptyDeniedSet;
         }
@@ -955,6 +984,51 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // RightsFor is None for an absent record, so out-of-set is denied by the same expression —
         // there is no separate membership branch that could drift from the rights branch.
         return set.RightsFor(recordId).HasFlag(requiredRights);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> IsGranteeDeniedOnRecordAsync(
+        string entityType,
+        Guid recordId,
+        Guid? granteeContactId,
+        IReadOnlyCollection<Guid> granteeOrganizationIds,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(entityType) || recordId == Guid.Empty)
+        {
+            // No record to check against is a caller bug; a write-time check that cannot be evaluated refuses.
+            _logger.LogError(
+                "[WF-AUTHZ] IsGranteeDeniedOnRecordAsync called without a record ({EntityType} {RecordId}); " +
+                "refusing the grant (fail closed).", entityType, recordId);
+            return true;
+        }
+
+        // The contact's OWN memberships, read once by the same reader the composition uses (statecode-only wall set,
+        // owner D-2 part 2 / D-10). None when there is no contact — not a fault.
+        var contactOrgs = await ReadActiveOrgMembershipsAsync(granteeContactId, ct).ConfigureAwait(false);
+
+        // The caller-supplied organizations (an org-wide grant's organization, or the firm a contact grant names) join
+        // the WALL set only — never the conferring set. Over-matching is the specified direction for a veto (B-10).
+        var wall = contactOrgs.WallSubjectOrganizationIds
+            .Concat(granteeOrganizationIds ?? Array.Empty<Guid>())
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+        var subjectOrgs = contactOrgs with { WallSubjectOrganizationIds = wall };
+
+        var denied = await ResolveDenyVetoAsync(entityType, new[] { recordId }, granteeContactId, subjectOrgs, ct)
+            .ConfigureAwait(false);
+
+        if (denied.Contains(recordId))
+        {
+            _logger.LogWarning(
+                "[WF-AUTHZ] Write-time No Access check DENIES {EntityType} {RecordId} to contact {ContactId} / " +
+                "organizations {OrganizationIds} (a matching entry, or an unreadable input — fail closed).",
+                entityType, recordId, granteeContactId, string.Join(",", wall));
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>

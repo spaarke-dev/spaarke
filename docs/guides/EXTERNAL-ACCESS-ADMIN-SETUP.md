@@ -387,6 +387,46 @@ External SPE access is entirely BFF-brokered app-only. There is **no per-externa
 | `sdap.access.deny.delegation_write_required` | The caller was correctly identified and the target record correctly resolved, but the caller does **not** hold Write on that record (Read-only, or no access at all, is not enough — B-14 requires Write specifically). | This is very often correct behavior, not a bug — check whether the caller SHOULD have Write on the target record via a share, role, or ownership before assuming it's an error. If they should, grant them Write on the underlying record (not on the external-access surface) and retry. |
 | `sdap.access.deny.delegation_check_failed` | The Write-rights check itself threw — either resolving the target record or evaluating `CallerRecordAccessProbe.GetCallerRightsAsync` failed (transport error, OBO exchange failure, or a Dataverse outage). Logged as `DELEGATION-RPA-UNAVAILABLE` in some call paths. | Transient — retry. If it persists, check BFF connectivity to Dataverse and whether OBO token exchange is healthy (see `src/server/api/Sprk.Bff.Api/CLAUDE.md` Auth section); this fails CLOSED by design, so a systemic outage here denies these six mutation endpoints entirely rather than silently widening access. |
 
+### 7.1b Who May Grant, and Up To What — the grantor ceiling (task 139, owner decision 2026-09-30)
+
+> **Rule.** A person with **Write** on a record may share it (the model-driven app's own **Share** command) and use
+> **Manage Access** to grant users, contacts and organizations. A **View Only** holder may not pass access on.
+> **Every manual grant is capped at the grantor's own level.** This supersedes the 2026-09-15 rule that no share
+> level carried the right to re-share.
+
+**Internal (POA) share levels** — what a "+ User" share, a colleague named at secure provisioning, and the creator's
+own share carry (Dataverse `AccessRights` numbers; the masks are what `principalobjectaccess.accessrightsmask` shows):
+
+| Level | Rights | Mask | Pre-2026-09-30 mask (still read as this level) |
+|---|---|---|---|
+| View Only | Read | 1 | — |
+| Collaborate | Read, Write, Append, AppendTo, **Share** | 262167 | 23 |
+| Full Access | Collaborate + Delete | 327703 | 65559 |
+
+No level carries Assign. The creator and every colleague named at secure provisioning receive the same Collaborate
+share. (The table in Section 8 is the EXTERNAL contact level table — what a contact's grant lets the evaluator admit
+— and is unchanged; the two tables use the same three names for different questions.)
+
+**Upgrading old shares.** Shares written before 2026-09-30 carry 23 / 65559 (no Share). They keep working and keep
+showing their level, but their holders cannot use MDA Share until upgraded. Run
+`scripts/Upgrade-LegacyRecordShareMasks.ps1` with your own `az login` identity — first with no switches (a read-only
+report), then with `-Apply`. It upgrades only **system-user** shares at exactly 23 or 65559 on project, matter and
+work assignment, reads every change back, and LISTS (never modifies) team shares at those masks and any share whose
+mask is not a level — those need an owner decision.
+
+**The ceiling on the grant routes.** `/grant`, `/invite-and-grant` (and organization-wide grants) and `/share-user`
+re-probe the caller's own rights on the record and cap the request: Full Access needs Read + Write + Delete,
+Collaborate needs Read + Write, View Only needs Read.
+
+| Outcome | HTTP / `reasonCode` | What it means | What to do |
+|---|---|---|---|
+| Narrowed | **200**, `narrowed: true`, `grantedAccessLevel` | The request was above the caller's level, so it was written AT the caller's level. The dialog says so. | Nothing — ask someone with the higher level if more is needed. |
+| Would lower existing access | **409** `sdap.access.grant.would_lower_existing` | The request was narrowed, and the person already holds MORE (someone else gave it). Nothing was changed. | Leave it, or have a holder of the higher level change it. An explicit request for a lower level (by someone who could grant more) still downgrades. |
+| Grantee on the No Access list | **422** `sdap.access.grant.grantee_denied` | The contact, one of its active organizations, or the organization of an org-wide grant is on the record's No Access list — or the list could not be read (fail closed). Nothing was granted or onboarded. | Check the record's No Access entries; if the list was unreadable, retry. |
+| Caller cannot grant | **403** `sdap.access.grant.caller_cannot_grant` (`/share-user`: `sdap.access.user_share.caller_cannot_grant`) | The caller's own access allows granting nothing — or could not be confirmed (the probe answers "none" on any OBO/transport failure). | Retry; if it persists, the caller lacks access to the record. |
+| Caller's rights unreadable | **500** `sdap.access.grant.caller_rights_unreadable` (`/share-user`: `sdap.access.user_share.read_failed`) | Establishing the caller's own rights threw. Nothing was written or onboarded. | Transient — retry. |
+| Last person on a secure record | **409** `sdap.access.user_share.last_reader_on_secure_record` (`/unshare-user`) | A secure record must always keep someone who can open it (owner S5). | Share it with someone else first, then remove this share. |
+
 ### 7.2 Checking BFF Logs
 
 ```bash

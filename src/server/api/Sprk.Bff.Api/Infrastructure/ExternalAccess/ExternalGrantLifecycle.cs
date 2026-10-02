@@ -410,6 +410,39 @@ internal static class ExternalGrantLifecycle
     /// <summary>Stable reason code: the record's access flags could not be read, so nothing was granted.</summary>
     internal const string PolicyUnreadableReasonCode = "sdap.access.grant.policy_unreadable";
 
+    // ── Grantor ceiling, never-lower and deny-list refusals (task 139 · owner C4 / Q1) ──────────────
+
+    /// <summary>
+    /// Stable reason code (403): the grantor's own rights on the record allow granting nothing — or could not be
+    /// established, which <c>CallerRecordAccessProbe</c> reports the same way (it answers None, it does not throw).
+    /// Distinct from <c>/share-user</c>'s <c>sdap.access.user_share.caller_cannot_grant</c>, which predates it.
+    /// </summary>
+    internal const string CallerCannotGrantReasonCode = "sdap.access.grant.caller_cannot_grant";
+
+    /// <summary>
+    /// Stable reason code (409): the request was narrowed to the grantor's level, and the grantee already holds MORE
+    /// than that — writing would lower access someone else gave. Used by <c>/grant</c>, <c>/invite-and-grant</c> and
+    /// <c>/share-user</c>; task 140 reuses it verbatim.
+    /// </summary>
+    internal const string WouldLowerExistingReasonCode = "sdap.access.grant.would_lower_existing";
+
+    /// <summary>
+    /// Stable reason code (422): the grantee — the contact, one of its active organizations, or the organization of an
+    /// organization-wide grant — is on this record's No Access list, or the list could not be read (fail closed).
+    /// Task 140 reuses it verbatim.
+    /// </summary>
+    internal const string GranteeDeniedReasonCode = "sdap.access.grant.grantee_denied";
+
+    /// <summary>Stable reason code (500): the grantor's own rights on the record could not be read (the probe threw).</summary>
+    internal const string CallerRightsUnreadableReasonCode = "sdap.access.grant.caller_rights_unreadable";
+
+    /// <summary>
+    /// The lower of the requested level and the ceiling — levels are ordered by their option-set values
+    /// (View Only 100000000 &lt; Collaborate 100000001 &lt; Full Access 100000002).
+    /// </summary>
+    internal static ExternalAccessLevel CapAt(ExternalAccessLevel requested, ExternalAccessLevel ceiling)
+        => (int)requested <= (int)ceiling ? requested : ceiling;
+
     /// <summary>
     /// The ONE write-time grant-policy decision (task 138), shared by <c>/grant</c>, <c>/invite-and-grant</c>,
     /// <c>/invite</c> and the grant core <c>GrantExternalAccessEndpoint.CreateGrantAsync</c> — so every future
@@ -527,11 +560,13 @@ internal enum GrantGranteeKind
 
 /// <summary>
 /// The outcome of <see cref="ExternalGrantLifecycle.DecideGrantPolicy"/> — a typed value, never an exception,
-/// so a refusal can never become the grant routes' catch-all 500 (task 138).
+/// so a refusal can never become the grant routes' catch-all 500 (task 138). Since task 139 it also carries the grant
+/// core's other write-time refusals: the grantor ceiling (403), never-lower (409) and the No Access list (422).
 /// </summary>
 /// <param name="IsAllowed">The grant may be written.</param>
 /// <param name="ReasonCode">The binding reason code for a refusal; <c>null</c> when allowed.</param>
-/// <param name="StatusCode">422 for a policy refusal, 503 for an unreadable policy; 200 when allowed.</param>
+/// <param name="StatusCode">422 for a policy or deny-list refusal, 503 for an unreadable policy, 403 when the grantor
+/// may grant nothing, 409 when the grant would lower existing access; 200 when allowed.</param>
 /// <param name="Detail">A human-readable sentence for the operator; <c>null</c> when allowed.</param>
 internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, int StatusCode, string? Detail)
 {
@@ -563,4 +598,132 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         (isSecure ? "This record is Secure" : "This record's Access Permission is Limited") +
         ", so contacts get access only through grants made to them by name. A whole organization cannot be " +
         "granted access. Nothing was granted. Grant the people who need access individually with + Contact.");
+
+    /// <summary>
+    /// Task 139: the grantor's own access on the record allows granting nothing (or could not be established — the
+    /// probe answers None for both, deliberately). 403.
+    /// </summary>
+    public static GrantPolicyDecision CallerCannotGrant { get; } = new(
+        false,
+        ExternalGrantLifecycle.CallerCannotGrantReasonCode,
+        StatusCodes.Status403Forbidden,
+        "You can only give someone the access you have on this record, and your own access to it could not be " +
+        "confirmed. Nothing was granted. Try again; if it persists, ask someone with access to the record.");
+
+    /// <summary>
+    /// Task 139: the request was narrowed to the grantor's own level and the grantee already holds more. 409 — writing
+    /// would LOWER access someone else gave while the caller asked for more.
+    /// </summary>
+    /// <param name="grantedLevel">The level the request was narrowed to.</param>
+    public static GrantPolicyDecision WouldLowerExisting(ExternalAccessLevel? grantedLevel) => new(
+        false,
+        ExternalGrantLifecycle.WouldLowerExistingReasonCode,
+        StatusCodes.Status409Conflict,
+        "They already have more access than you can grant" +
+        (grantedLevel is { } level ? $" (you can grant up to {DisplayName(level)})" : string.Empty) +
+        ". Nothing was changed, so their existing access stays as it is.");
+
+    /// <summary>
+    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list, or the list could not be read.
+    /// 422. The detail never names the entry or its reason (task 143's rule for refusal messages).
+    /// </summary>
+    public static GrantPolicyDecision GranteeDenied { get; } = new(
+        false,
+        ExternalGrantLifecycle.GranteeDeniedReasonCode,
+        StatusCodes.Status422UnprocessableEntity,
+        "This contact or organization cannot be given access to this record: it is on the record's No Access list, " +
+        "or that list could not be checked. Nothing was granted.");
+
+    /// <summary>The level's name as the Manage Access dialog shows it.</summary>
+    internal static string DisplayName(ExternalAccessLevel level) => level switch
+    {
+        ExternalAccessLevel.ViewOnly => "View Only",
+        ExternalAccessLevel.Collaborate => "Collaborate",
+        ExternalAccessLevel.FullAccess => "Full Access",
+        _ => level.ToString(),
+    };
+}
+
+/// <summary>
+/// The highest level a grant may be written at — a REQUIRED input of the one grant-writing core
+/// (<c>GrantExternalAccessEndpoint.CreateGrantAsync</c>), unified-access-control-r2 task 139 (WP-1, owner Q1).
+/// </summary>
+/// <remarks>
+/// <para><b>Why the core takes it, rather than each handler applying it.</b> The ceiling, the never-lower rule and
+/// the write-time refusals are enforced INSIDE the method every grant writer calls, so no writer can persist a grant
+/// without stating its ceiling: <c>/grant</c> and <c>/invite-and-grant</c> pass the human grantor's own level, task
+/// 140's contact-side route will pass the contact grantor's effective level, and task 142's Assigned-To auto-grants
+/// will pass an explicit, documented Collaborate ceiling (owner rule 5: uncapped Collaborate). A new writer adds a
+/// NAMED factory here, with its basis documented — there is no public constructor, so a ceiling cannot be invented
+/// inline. The ArchTest <c>GrantCeilingGuardTests</c> pins that every call site supplies one.</para>
+/// <para><b>Never-lower for a writer with no human grantor (task 142).</b> The core refuses to lower an existing
+/// higher grant only when the ceiling NARROWED the request; an auto-grant asking for exactly Collaborate is not
+/// narrowed, so task 142 must check the existing level itself (or add that rule here) rather than downgrade a Full
+/// Access grant someone made by hand.</para>
+/// </remarks>
+internal sealed class GrantCeiling
+{
+    private GrantCeiling(ExternalAccessLevel? level, string basis)
+    {
+        Level = level;
+        Basis = basis;
+    }
+
+    /// <summary>The highest level that may be written, or <c>null</c> when nothing may be granted.</summary>
+    public ExternalAccessLevel? Level { get; }
+
+    /// <summary>Where the ceiling came from — logged with every narrowing and refusal.</summary>
+    public string Basis { get; }
+
+    /// <summary>
+    /// The ceiling of a HUMAN grantor: their own rights on the record, freshly probed as them over OBO, through
+    /// the one ceiling table <see cref="ExternalAccessLevels.GrantCeilingFor"/>.
+    /// </summary>
+    public static GrantCeiling FromGrantorRights(AccessRights grantorRights)
+        => new(ExternalAccessLevels.GrantCeilingFor(grantorRights), $"grantor rights {grantorRights}");
+
+    public override string ToString() => $"{Level?.ToString() ?? "none"} ({Basis})";
+}
+
+/// <summary>Who a grant check is about — the shape the write-time checks need (task 139).</summary>
+/// <param name="Kind">The grantee kind the record's access policy judges.</param>
+/// <param name="Key">The logical grant key whose existing rows the never-lower rule reads; <c>null</c> for a
+/// contact that does not exist yet (<c>/invite-and-grant</c> before onboarding), which has no rows.</param>
+/// <param name="ContactId">The contact checked against the No Access list as a direct subject, if any.</param>
+/// <param name="OrganizationIds">Organizations checked as deny subjects besides the contact's own memberships: the
+/// organization of an organization-wide grant, or the firm a contact grant names.</param>
+internal sealed record GrantGrantee(
+    GrantGranteeKind Kind,
+    ExternalGrantKey? Key,
+    Guid? ContactId,
+    IReadOnlyCollection<Guid> OrganizationIds)
+{
+    /// <summary>The grantee of an existing grant key (a named contact, or an organization-wide grant).</summary>
+    /// <param name="key">The key the upsert writes.</param>
+    /// <param name="firmOrganizationId">The firm a contact grant names (association metadata, but a deny subject).</param>
+    public static GrantGrantee ForKey(ExternalGrantKey key, Guid? firmOrganizationId)
+    {
+        var orgs = new List<Guid>();
+        if (key.IsOrganizationGrant && key.OrganizationId is { } grantOrg)
+            orgs.Add(grantOrg);
+        else if (firmOrganizationId is { } firm && firm != Guid.Empty)
+            orgs.Add(firm);
+
+        return new GrantGrantee(
+            key.IsOrganizationGrant ? GrantGranteeKind.Organization : GrantGranteeKind.Contact,
+            key,
+            key.ContactId,
+            orgs);
+    }
+
+    /// <summary>
+    /// A contact that does not exist yet: the person <c>/invite-and-grant</c> would onboard. It holds no grant, so
+    /// only the policy, the ceiling and the deny list (on the request's firm) apply.
+    /// </summary>
+    public static GrantGrantee ProspectiveContact(Guid? firmOrganizationId)
+        => new(
+            GrantGranteeKind.Contact,
+            Key: null,
+            ContactId: null,
+            firmOrganizationId is { } firm && firm != Guid.Empty ? new[] { firm } : Array.Empty<Guid>());
 }

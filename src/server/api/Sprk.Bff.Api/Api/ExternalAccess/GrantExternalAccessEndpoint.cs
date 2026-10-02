@@ -54,11 +54,15 @@ public static class GrantExternalAccessEndpoint
             .Produces<GrantAccessResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            // 403: the delegation gate, or (task 139) the grantor's own rights allow granting nothing
+            // (sdap.access.grant.caller_cannot_grant).
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            // 409: the upsert matched an EXPIRED row and the request supplied no new expiry (task 023).
+            // 409: the upsert matched an EXPIRED row and the request supplied no new expiry (task 023), or (task 139)
+            // the request was capped at the grantor's level and the grantee already holds more (would_lower_existing).
             .ProducesProblem(StatusCodes.Status409Conflict)
             // 422: the record's access policy refuses this grantee (task 138 — record_restricted /
-            // org_grant_direct_only_record). 503: the policy could not be read (policy_unreadable).
+            // org_grant_direct_only_record), or the grantee is on the record's No Access list (task 139 —
+            // grantee_denied). 503: the policy could not be read (policy_unreadable).
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -70,14 +74,16 @@ public static class GrantExternalAccessEndpoint
     // Handler
     // =========================================================================
 
-    private static async Task<IResult> GrantAccessAsync(
+    /// <summary>Handles <c>POST /api/v1/external-access/grant</c>. Internal so the auth tests can drive it directly.</summary>
+    internal static async Task<IResult> GrantAccessAsync(
         GrantAccessRequest request,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
+        IAccessibleRecordSetService accessibleRecords,
+        CallerRecordAccessProbe callerAccessProbe,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
-        IConfiguration configuration,
         TimeProvider timeProvider,
         CancellationToken ct)
     {
@@ -110,15 +116,35 @@ public static class GrantExternalAccessEndpoint
         // ── Resolve caller identity for granted-by reference ─────────────────
         var callerSystemUserId = ResolveCallerSystemUserId(httpContext);
 
+        // ── Task 139: the grantor's ceiling — their OWN rights on this record, re-probed as them ──
+        // Re-probed rather than carried over from DelegationRuleFilter, mirroring /share-user: a handler must not trust
+        // authorization state cached by a filter it cannot see. A probe that THROWS is a 500 with nothing written; a
+        // probe that answers None (its answer for every OBO/transport/parse failure) becomes a ceiling of "none",
+        // which the core refuses with 403 caller_cannot_grant.
+        GrantCeiling ceiling;
+        try
+        {
+            ceiling = await ProbeGrantorCeilingAsync(callerAccessProbe, httpContext, root.Type, root.Id, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-GRANT] Could not establish the caller's own rights on {RootType} {RootId}. Nothing was granted.",
+                root.Type, root.Id);
+            return CallerRightsUnreadableProblem(httpContext);
+        }
+
         logger.LogInformation(
-            "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for {RootType} {RootId}",
-            request.AccessLevel, request.ContactId, root.Type, root.Id);
+            "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for {RootType} {RootId} (ceiling {Ceiling})",
+            request.AccessLevel, request.ContactId, root.Type, root.Id, ceiling);
 
         // ── Create the access record (Dataverse) + invalidate cache ──────────
         GrantUpsertOutcome outcome;
         try
         {
-            outcome = await CreateGrantAsync(request, root.Type, root.Id, today, callerSystemUserId, dataverseClient, participations, cache, httpContext, logger, ct);
+            outcome = await CreateGrantAsync(
+                request, root.Type, root.Id, today, ceiling, callerSystemUserId,
+                dataverseClient, participations, accessibleRecords, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
@@ -132,7 +158,8 @@ public static class GrantExternalAccessEndpoint
                 extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
         }
 
-        // Task 138: the record's access policy refused this grantee. The core returned the refusal as a VALUE,
+        // Task 138: the record's access policy refused this grantee — and since task 139 also the grantor ceiling
+        // (403), the never-lower rule (409) and the No Access list (422). The core returned the refusal as a VALUE,
         // before writing anything, so it reaches here instead of the catch-all 500 above.
         if (outcome.Refusal is { } refusal)
             return PolicyRefusalProblem(refusal, httpContext);
@@ -155,9 +182,47 @@ public static class GrantExternalAccessEndpoint
                 });
         }
 
-        // Broker-only: no synthetic SPE container membership is granted on the external path.
-        return TypedResults.Ok(new GrantAccessResponse(outcome.AccessRecordId, SpeContainerMembershipGranted: false));
+        // Broker-only: no synthetic SPE container membership is granted on the external path. Task 139: the level
+        // actually written, and whether the grantor's ceiling narrowed the request.
+        return TypedResults.Ok(new GrantAccessResponse(
+            outcome.AccessRecordId,
+            SpeContainerMembershipGranted: false,
+            GrantedAccessLevel: outcome.GrantedLevel,
+            Narrowed: outcome.Narrowed));
     }
+
+    /// <summary>
+    /// Re-probes the caller's own rights on the grant root (as them, over OBO) and turns them into the grantor
+    /// ceiling (task 139). Shared by <c>/grant</c> and <c>/invite-and-grant</c>. Exceptions propagate — the caller
+    /// answers 500 and writes nothing.
+    /// </summary>
+    internal static async Task<GrantCeiling> ProbeGrantorCeilingAsync(
+        CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        CancellationToken ct)
+    {
+        var rights = await callerAccessProbe.GetCallerRightsAsync(
+            Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext),
+            ExternalGrantRoot.BindFor(rootType).EntitySet,
+            rootId,
+            ct);
+
+        return GrantCeiling.FromGrantorRights(rights);
+    }
+
+    /// <summary>The 500 for a grantor-rights probe that threw (task 139): nothing was written or onboarded.</summary>
+    internal static IResult CallerRightsUnreadableProblem(HttpContext httpContext)
+        => Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "Access not granted",
+            detail: "Your own access to this record could not be established, so nothing was granted. Try again.",
+            extensions: new Dictionary<string, object?>
+            {
+                ["traceId"] = httpContext.TraceIdentifier,
+                ["reasonCode"] = ExternalGrantLifecycle.CallerRightsUnreadableReasonCode,
+            });
 
     // =========================================================================
     // Reusable core (shared with the invite-and-grant orchestration, task 029)
@@ -200,40 +265,54 @@ public static class GrantExternalAccessEndpoint
     /// (an expired survivor proves every row is expired), and the collapse can never deactivate the row
     /// access rests on (that row is the survivor). A request carrying an explicit expiry ties every row,
     /// so it elects exactly what it always did.</para>
+    ///
+    /// <para><b>The grantor ceiling is a REQUIRED input (task 139, WP-1).</b> Every grant is written at most at
+    /// <paramref name="ceiling"/> — a request above it is NARROWED, never refused, and the outcome says so
+    /// (<see cref="GrantUpsertOutcome.GrantedLevel"/>, <see cref="GrantUpsertOutcome.Narrowed"/>). A ceiling of
+    /// none refuses (403). A narrowed request never LOWERS an existing higher grant on the key: the match path below
+    /// updates the survivor's level in place, so without that check a "Full Access please" capped to Collaborate
+    /// would overwrite somebody else's Full Access grant (409). A grantee on the record's No Access list is refused
+    /// (422). All of it runs in <see cref="CheckGrantAsync"/>, BEFORE any write, and is shared with
+    /// <c>/invite-and-grant</c>'s pre-onboarding check.</para>
     /// </remarks>
     internal static async Task<GrantUpsertOutcome> CreateGrantAsync(
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
         Guid rootId,
         DateOnly today,
+        GrantCeiling ceiling,
         string? callerOid,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
+        IAccessibleRecordSetService accessibleRecords,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
     {
+        // A missing ceiling is a caller bug, never "uncapped" (WP-1). Thrown, so it surfaces as the caller's 500.
+        ArgumentNullException.ThrowIfNull(ceiling);
+
         var key = ResolveGrantKey(request, rootType, rootId);
+
+        // ── Tasks 138 + 139: policy, ceiling, never-lower, No Access — BEFORE any side effect ──
+        // The grantee comes from the SAME key the upsert writes, so the checks judge exactly the row that would be
+        // written (an OrganizationId beside a ContactId is the contact's firm — a deny subject, not the grantee).
+        var check = await CheckGrantAsync(
+            GrantGrantee.ForKey(key, request.OrganizationId), request.AccessLevel, rootType, rootId, ceiling,
+            dataverseClient, participations, accessibleRecords, logger, ct);
+        if (check.Refusal is { } refusal)
+            return GrantUpsertOutcome.Refused(refusal);
+
+        // From here on the request is written at the GRANTED level — the requested one capped at the ceiling.
+        request = request with { AccessLevel = check.GrantedLevel };
         var requestedLevel = (int)request.AccessLevel;
 
-        // ── Task 138: the record's access policy, BEFORE any side effect ─────
-        // The grantee kind comes from the SAME key the upsert writes, so the policy judges exactly the row
-        // that would be written (an OrganizationId beside a ContactId is the contact's firm, not the grantee).
-        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
-            participations,
-            rootType,
-            rootId,
-            key.IsOrganizationGrant ? GrantGranteeKind.Organization : GrantGranteeKind.Contact,
-            logger,
-            ct);
-        if (!policy.IsAllowed)
-            return GrantUpsertOutcome.Refused(policy);
-
         // ── UPSERT: does this logical grant already exist? ───────────────────
-        // Failures propagate deliberately. Falling back to a blind create on a failed pre-existence
-        // query would reintroduce exactly the duplicate this task removes.
-        var existing = await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct);
+        // Read by CheckGrantAsync (the never-lower rule needs it first). Failures propagated from there
+        // deliberately: falling back to a blind create on a failed pre-existence query would reintroduce exactly
+        // the duplicate task 010 removed.
+        var existing = check.ExistingRows;
 
         if (existing.Count > 0)
         {
@@ -347,13 +426,21 @@ public static class GrantExternalAccessEndpoint
                 return new GrantUpsertOutcome(
                     survivor.Id,
                     $"The existing grant expired on {effectiveExpiry:yyyy-MM-dd} and this request supplied no new "
-                    + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.");
+                    + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.")
+                {
+                    GrantedLevel = check.GrantedLevel,
+                    Narrowed = check.Narrowed,
+                };
             }
 
             await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, logger, ct);
             await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
 
-            return new GrantUpsertOutcome(survivor.Id, null);
+            return new GrantUpsertOutcome(survivor.Id, null)
+            {
+                GrantedLevel = check.GrantedLevel,
+                Narrowed = check.Narrowed,
+            };
         }
 
         // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
@@ -411,7 +498,120 @@ public static class GrantExternalAccessEndpoint
 
         await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
 
-        return new GrantUpsertOutcome(accessRecordId, null);
+        return new GrantUpsertOutcome(accessRecordId, null)
+        {
+            GrantedLevel = check.GrantedLevel,
+            Narrowed = check.Narrowed,
+        };
+    }
+
+    // =========================================================================
+    // Write-time checks (tasks 138 + 139) — shared by the core and /invite-and-grant's pre-onboarding check
+    // =========================================================================
+
+    /// <summary>
+    /// The outcome of <see cref="CheckGrantAsync"/>: a refusal, or the level to write and the key's existing rows.
+    /// </summary>
+    /// <param name="Refusal">Non-null when the grant must not be written.</param>
+    /// <param name="GrantedLevel">The requested level capped at the ceiling — what will be written.</param>
+    /// <param name="Narrowed">The ceiling lowered the request.</param>
+    /// <param name="ExistingRows">The key's ACTIVE rows (empty for a contact that does not exist yet).</param>
+    internal sealed record GrantCheck(
+        GrantPolicyDecision? Refusal,
+        ExternalAccessLevel GrantedLevel,
+        bool Narrowed,
+        IReadOnlyList<ExternalGrantRow> ExistingRows)
+    {
+        public static GrantCheck Refused(GrantPolicyDecision refusal, ExternalAccessLevel requested)
+            => new(refusal, requested, false, Array.Empty<ExternalGrantRow>());
+    }
+
+    /// <summary>
+    /// Every write-time check a grant must pass, in order, with NO side effect (task 138's policy; task 139's
+    /// ceiling, never-lower and No Access). Called by <see cref="CreateGrantAsync"/> for every write, and by
+    /// <c>/invite-and-grant</c> BEFORE onboarding so a refused request leaves no Contact or CIAM account behind.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Order.</b> (1) The record's access policy (task 138) — first, so a caller learns nothing more about a
+    /// record whose policy refuses this grantee kind. (2) The ceiling: none → 403; otherwise the request is capped
+    /// (NARROW, not refuse — owner Q1). (3) Never-lower: when the cap narrowed the request and an active row on the
+    /// key holds a HIGHER level, refuse 409 — an explicit request for a lower level (not narrowed) is a deliberate
+    /// downgrade by a Write-holder and is allowed, as before. (4) The No Access list, through the read path's own
+    /// veto code (<see cref="IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync"/>); a fault refuses.</para>
+    /// <para>The existing-row read propagates its exception, exactly as the upsert's own read always did — a failed
+    /// pre-existence read must never be mistaken for "no rows".</para>
+    /// </remarks>
+    internal static async Task<GrantCheck> CheckGrantAsync(
+        GrantGrantee grantee,
+        ExternalAccessLevel requestedLevel,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        GrantCeiling ceiling,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        IAccessibleRecordSetService accessibleRecords,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(ceiling);
+
+        // (1) Task 138 — the record's access policy.
+        var policy = await ExternalGrantLifecycle.EvaluateGrantPolicyAsync(
+            participations, rootType, rootId, grantee.Kind, logger, ct);
+        if (!policy.IsAllowed)
+            return GrantCheck.Refused(policy, requestedLevel);
+
+        // (2) Task 139 — the grantor ceiling.
+        if (ceiling.Level is not { } ceilingLevel)
+        {
+            logger.LogWarning(
+                "[EXT-GRANT] Ceiling {Ceiling} allows granting nothing on {RootType} {RootId}; nothing was granted.",
+                ceiling, rootType, rootId);
+            return GrantCheck.Refused(GrantPolicyDecision.CallerCannotGrant, requestedLevel);
+        }
+
+        var granted = ExternalGrantLifecycle.CapAt(requestedLevel, ceilingLevel);
+        var narrowed = granted != requestedLevel;
+        if (narrowed)
+        {
+            logger.LogInformation(
+                "[EXT-GRANT] Request for {Requested} on {RootType} {RootId} narrowed to {Granted} by ceiling {Ceiling}.",
+                requestedLevel, rootType, rootId, granted, ceiling);
+        }
+
+        // (3) Never silently lower an existing higher grant.
+        IReadOnlyList<ExternalGrantRow> existing = grantee.Key is { } key
+            ? await ExternalGrantLifecycle.QueryActiveRowsAsync(dataverseClient, key, ct)
+            : Array.Empty<ExternalGrantRow>();
+
+        if (narrowed && existing.Any(row => (row.AccessLevel ?? 0) > (int)granted))
+        {
+            logger.LogWarning(
+                "[EXT-GRANT] Refused: {Key} already holds a level above {Granted}, and the request was narrowed to it " +
+                "(asked {Requested}, ceiling {Ceiling}). Writing would lower someone else's grant.",
+                grantee.Key, granted, requestedLevel, ceiling);
+            return GrantCheck.Refused(GrantPolicyDecision.WouldLowerExisting(granted), requestedLevel);
+        }
+
+        // (4) FR-23 at write time — the grantee must not be on this record's No Access list.
+        bool denied;
+        try
+        {
+            denied = await accessibleRecords.IsGranteeDeniedOnRecordAsync(
+                ExternalGrantRoot.LogicalNameFor(rootType), rootId, grantee.ContactId, grantee.OrganizationIds, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-GRANT] The No Access check for {RootType} {RootId} threw; refusing (fail closed).",
+                rootType, rootId);
+            denied = true;
+        }
+
+        if (denied)
+            return GrantCheck.Refused(GrantPolicyDecision.GranteeDenied, requestedLevel);
+
+        return new GrantCheck(null, granted, narrowed, existing);
     }
 
     /// <summary>
@@ -425,6 +625,12 @@ public static class GrantExternalAccessEndpoint
     /// </remarks>
     internal sealed record GrantUpsertOutcome(Guid AccessRecordId, string? Warning, GrantPolicyDecision? Refusal = null)
     {
+        /// <summary>The level written — the requested one capped at the grantor's ceiling (task 139). Null on a refusal.</summary>
+        public ExternalAccessLevel? GrantedLevel { get; init; }
+
+        /// <summary>The grantor's ceiling lowered the request (task 139).</summary>
+        public bool Narrowed { get; init; }
+
         /// <summary>
         /// The record's access policy refused the grant (task 138): nothing was queried or written, and there is
         /// no row id. A typed value, never an exception — see <see cref="CreateGrantAsync"/>.
@@ -434,8 +640,9 @@ public static class GrantExternalAccessEndpoint
 
     /// <summary>
     /// The ProblemDetails for a write-time policy refusal (task 138), shared by <c>/grant</c>,
-    /// <c>/invite-and-grant</c> and <c>/invite</c>: 422 (record_restricted / org_grant_direct_only_record) or
-    /// 503 (policy_unreadable), each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the
+    /// <c>/invite-and-grant</c> and <c>/invite</c>: 422 (record_restricted / org_grant_direct_only_record /
+    /// grantee_denied), 503 (policy_unreadable), 403 (caller_cannot_grant) or 409 (would_lower_existing) — the last
+    /// three added by task 139 — each with its stable <c>reasonCode</c>, a human-readable <c>detail</c> the
     /// Manage Access dialog shows verbatim, and the <c>traceId</c>.
     /// </summary>
     internal static IResult PolicyRefusalProblem(
@@ -454,9 +661,13 @@ public static class GrantExternalAccessEndpoint
 
         return Results.Problem(
             statusCode: refusal.StatusCode,
-            title: refusal.StatusCode == StatusCodes.Status503ServiceUnavailable
-                ? "Access settings unavailable"
-                : "Grant not allowed on this record",
+            title: refusal.StatusCode switch
+            {
+                StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",
+                StatusCodes.Status409Conflict => "Existing access is higher",
+                StatusCodes.Status403Forbidden => "Access not granted",
+                _ => "Grant not allowed on this record",
+            },
             detail: refusal.Detail,
             extensions: extensions);
     }

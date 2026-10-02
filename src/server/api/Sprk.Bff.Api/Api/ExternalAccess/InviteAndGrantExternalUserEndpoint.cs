@@ -37,9 +37,13 @@ public static class InviteAndGrantExternalUserEndpoint
             .Produces<InviteAndGrantResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            // 403: the delegation gate, or (task 139) the caller's own rights allow granting nothing.
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            // 422/503: the record's access policy refused the grant, or could not be read (task 138) —
-            // checked BEFORE onboarding, so a refusal leaves no Contact, CIAM account or email behind.
+            // 409 (task 139): the request was capped at the caller's level and the EXISTING contact already holds more.
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            // 422/503: the record's access policy refused the grant, or could not be read (task 138); or the grantee
+            // is on the record's No Access list (task 139). All checked BEFORE onboarding, so a refusal leaves no
+            // Contact, CIAM account or email behind.
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
@@ -47,10 +51,13 @@ public static class InviteAndGrantExternalUserEndpoint
         return group;
     }
 
-    private static async Task<IResult> InviteAndGrantAsync(
+    /// <summary>Handles <c>POST /api/v1/external-access/invite-and-grant</c>. Internal so the auth tests can drive it directly.</summary>
+    internal static async Task<IResult> InviteAndGrantAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
+        IAccessibleRecordSetService accessibleRecords,
+        CallerRecordAccessProbe callerAccessProbe,
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ITenantCache cache,
@@ -96,6 +103,79 @@ public static class InviteAndGrantExternalUserEndpoint
         if (!policy.IsAllowed)
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(policy, httpContext);
 
+        // ── Task 139: the grantor ceiling, BEFORE onboarding ──────────────────
+        // The caller's own rights on the record, re-probed as them (not trusted from the delegation filter). A probe
+        // that throws is a 500 with nothing onboarded; a probe that answers None becomes a ceiling of "none", which the
+        // check below refuses with 403.
+        GrantCeiling ceiling;
+        try
+        {
+            ceiling = await GrantExternalAccessEndpoint.ProbeGrantorCeilingAsync(
+                callerAccessProbe, httpContext, grantRoot.Type, grantRoot.Id, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-INVITE-GRANT] Could not establish the caller's own rights on {RootType} {RootId}. Nothing was " +
+                "onboarded or granted.", grantRoot.Type, grantRoot.Id);
+            return GrantExternalAccessEndpoint.CallerRightsUnreadableProblem(httpContext);
+        }
+
+        // ── Task 139: who would receive the grant — READ-ONLY, BEFORE onboarding ──
+        // The same email match onboarding uses, without creating anything. An existing contact is judged by the
+        // never-lower and No Access checks exactly as /grant judges it; a person with no contact yet holds no grant,
+        // so only the ceiling and the No Access check on the request's firm apply. Creating the contact first to get
+        // an id is forbidden: a refused request must leave no Contact and no CIAM account behind.
+        (Guid ContactId, string? ExistingOid)? existingContact;
+        try
+        {
+            existingContact = await InviteExternalUserEndpoint.FindContactByEmailAsync(dataverseClient, request.Email, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-INVITE-GRANT] Could not check whether {Email} already has a Contact. Nothing was onboarded or granted.",
+                request.Email);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "Could not check whether this person already exists, so nothing was onboarded or granted. Try again.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
+        }
+
+        var requestedLevel = (ExternalAccessLevel)request.AccessLevel;
+        var preGrantee = existingContact is { ContactId: var foundId } && foundId != Guid.Empty
+            ? GrantGrantee.ForKey(
+                ExternalGrantKey.ForContact(grantRoot.Type, grantRoot.Id, foundId), request.OrganizationId)
+            : GrantGrantee.ProspectiveContact(request.OrganizationId);
+
+        GrantExternalAccessEndpoint.GrantCheck preCheck;
+        try
+        {
+            preCheck = await GrantExternalAccessEndpoint.CheckGrantAsync(
+                preGrantee, requestedLevel, grantRoot.Type, grantRoot.Id, ceiling,
+                dataverseClient, participations, accessibleRecords, logger, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[EXT-INVITE-GRANT] The pre-onboarding grant check failed for {Email} on {RootType} {RootId}. Nothing " +
+                "was onboarded or granted.", request.Email, grantRoot.Type, grantRoot.Id);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "The existing access on this record could not be read, so nothing was onboarded or granted. Try again.",
+                extensions: new Dictionary<string, object?> { ["traceId"] = httpContext.TraceIdentifier });
+        }
+
+        if (preCheck.Refusal is { } preRefusal)
+        {
+            logger.LogWarning(
+                "[EXT-INVITE-GRANT] Refused {Email} on {RootType} {RootId} before onboarding: {ReasonCode}.",
+                request.Email, grantRoot.Type, grantRoot.Id, preRefusal.ReasonCode);
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(preRefusal, httpContext);
+        }
+
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
 
@@ -136,13 +216,18 @@ public static class InviteAndGrantExternalUserEndpoint
         var callerSystemUserId = GrantExternalAccessEndpoint.ResolveCallerSystemUserId(httpContext);
 
         Guid accessRecordId;
+        GrantExternalAccessEndpoint.GrantUpsertOutcome grantOutcome;
         try
         {
-            var grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
-                grantRequest, grantRoot.Type, grantRoot.Id, today, callerSystemUserId, dataverseClient, participations, cache, httpContext, logger, ct);
+            // The SAME ceiling the pre-check used — the core re-runs every check itself (WP-1), so a record or a grant
+            // that changed while the account was being provisioned is still judged at write time.
+            grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
+                grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
+                dataverseClient, participations, accessibleRecords, cache, httpContext, logger, ct);
 
-            // Task 138: the core's own policy check refused (the record changed after the pre-check above).
-            // The Contact was onboarded; the refusal is reported as itself, with the contact id, never as a 500.
+            // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
+            // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
+            // reported as itself, with the contact id, never as a 500.
             if (grantOutcome.Refusal is { } refusal)
             {
                 logger.LogWarning(
@@ -188,6 +273,9 @@ public static class InviteAndGrantExternalUserEndpoint
             "[EXT-INVITE-GRANT] Onboarded ({Status}) + granted Contact {ContactId} to {RootType} {RootId} — access record {AccessRecordId}",
             onboardStatus, contactId, grantRoot.Type, grantRoot.Id, accessRecordId);
 
-        return TypedResults.Ok(new InviteAndGrantResponse(contactId, onboardStatus, accessRecordId, portalUrl));
+        return TypedResults.Ok(new InviteAndGrantResponse(
+            contactId, onboardStatus, accessRecordId, portalUrl,
+            GrantedAccessLevel: grantOutcome.GrantedLevel,
+            Narrowed: grantOutcome.Narrowed));
     }
 }

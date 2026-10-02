@@ -244,9 +244,21 @@ public class GrantLifecycleCharacterizationTests
     private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Grant(
         Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
-            request, ExternalGrantRootType.Project, ProjectId, Today,
-            callerOid: null, client.Object, OpenRecordPolicy, Mock.Of<ITenantCache>(),
+            request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
+            callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear, Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
+
+    /// <summary>
+    /// Task 139: the grant core takes the grantor's ceiling as a REQUIRED input. The upsert behaviour this class pins
+    /// predates the ceiling, so its grantor holds Read + Write + Delete — a Full Access ceiling, which never narrows.
+    /// The ceiling itself is pinned in the "Task 139" section below.
+    /// </summary>
+    private static readonly GrantCeiling FullAccessGrantor =
+        GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete);
+
+    /// <summary>Task 139: the write-time No Access check, answering "not denied" for every grantee in this class.</summary>
+    private static readonly IAccessibleRecordSetService NoAccessListClear =
+        GrantPolicyTestDoubles.DenyListAnswering(denied: false);
 
     /// <summary>
     /// Task 138: the grant core now reads the root's access flags before writing. Every root in this class is a
@@ -337,8 +349,10 @@ public class GrantLifecycleCharacterizationTests
         var table = new FakeGrantTable();
         var client = table.BuildMock();
 
-        var viewOnlyId = await Grant(client, Request(ExternalAccessLevel.ViewOnly));
-        var fullAccessId = await Grant(client, Request(ExternalAccessLevel.FullAccess));
+        // Compared by ROW ID (GrantId), not by the whole outcome record: since task 139 the outcome also carries the
+        // level written, which legitimately differs between the two calls.
+        var viewOnlyId = await GrantId(client, Request(ExternalAccessLevel.ViewOnly));
+        var fullAccessId = await GrantId(client, Request(ExternalAccessLevel.FullAccess));
 
         fullAccessId.Should().Be(viewOnlyId, "the level change updates the existing row");
         table.ActiveRows.Should().ContainSingle();
@@ -1198,9 +1212,10 @@ public class GrantLifecycleCharacterizationTests
     private static Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> GrantUnder(
         Mock<DataverseWebApiClient> client, GrantAccessRequest request, RootRecordFlags flags)
         => GrantExternalAccessEndpoint.CreateGrantAsync(
-            request, ExternalGrantRootType.Project, ProjectId, Today,
+            request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
             callerOid: null, client.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(flags),
-            Mock.Of<ITenantCache>(), new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
+            NoAccessListClear, Mock.Of<ITenantCache>(), new DefaultHttpContext(), NullLogger.Instance,
+            CancellationToken.None);
 
     /// <summary>
     /// Criterion 8: called DIRECTLY, the core writes nothing on a Restricted root and RETURNS the refusal — it does
@@ -1283,8 +1298,9 @@ public class GrantLifecycleCharacterizationTests
         var throwing = new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None) { ThrowOnRead = true };
 
         var faulted = await GrantExternalAccessEndpoint.CreateGrantAsync(
-            Request(), ExternalGrantRootType.Project, ProjectId, Today, callerOid: null, client.Object, throwing,
-            Mock.Of<ITenantCache>(), new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
+            Request(), ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor, callerOid: null,
+            client.Object, throwing, NoAccessListClear, Mock.Of<ITenantCache>(), new DefaultHttpContext(),
+            NullLogger.Instance, CancellationToken.None);
         var realRestricted = await GrantUnder(
             client, Request(), new RootRecordFlags(IsSecure: true, IsRestricted: true));
 

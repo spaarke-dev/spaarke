@@ -206,18 +206,13 @@ public static class InviteExternalUserEndpoint
         try
         {
             // Check if Contact already exists by email (and read any existing oid binding).
-            var existing = await dataverseClient.QueryAsync<ContactRow>(
-                ContactEntitySet,
-                filter: $"emailaddress1 eq '{request.Email.Replace("'", "''")}'",
-                select: "contactid,sprk_externalobjectid",
-                top: 1,
-                cancellationToken: ct);
+            var existing = await FindContactByEmailAsync(dataverseClient, request.Email, ct);
 
-            if (existing.Count > 0)
+            if (existing is { } found)
             {
                 logger.LogDebug("[EXT-INVITE] Found existing Contact {ContactId} for email {Email} (oid bound: {Bound})",
-                    existing[0].contactid, request.Email, !string.IsNullOrWhiteSpace(existing[0].sprk_externalobjectid));
-                return (existing[0].contactid, existing[0].sprk_externalobjectid);
+                    found.ContactId, request.Email, !string.IsNullOrWhiteSpace(found.ExistingOid));
+                return found;
             }
 
             // Create new Contact
@@ -239,6 +234,28 @@ public static class InviteExternalUserEndpoint
             logger.LogError(ex, "[EXT-INVITE] Failed to resolve or create Contact for email {Email}", request.Email);
             return (Guid.Empty, null);
         }
+    }
+
+    /// <summary>
+    /// The EXISTING Contact the onboarding seam would resolve for <paramref name="email"/>, READ-ONLY — or <c>null</c>
+    /// when none exists. The one email match: <see cref="ProvisionAsync"/> resolves through it, and
+    /// <c>/invite-and-grant</c> calls it BEFORE onboarding (task 139) so its never-lower and No Access checks judge
+    /// the same contact onboarding would use, without creating one. Exceptions propagate — a failed lookup must
+    /// never read as "no such contact".
+    /// </summary>
+    internal static async Task<(Guid ContactId, string? ExistingOid)?> FindContactByEmailAsync(
+        DataverseWebApiClient dataverseClient, string email, CancellationToken ct)
+    {
+        var existing = await dataverseClient.QueryAsync<ContactRow>(
+            ContactEntitySet,
+            filter: $"emailaddress1 eq '{email.Replace("'", "''")}'",
+            select: "contactid,sprk_externalobjectid",
+            top: 1,
+            cancellationToken: ct);
+
+        return existing.Count > 0
+            ? (existing[0].contactid, existing[0].sprk_externalobjectid)
+            : null;
     }
 
     // ── Dataverse row DTOs ───────────────────────────────────────────────────

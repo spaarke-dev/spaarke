@@ -1321,7 +1321,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         foreach (var row in rows)
         {
             if (!TryReadGuid(row, "principalid", out var principalId)
-                || !TryReadInt(row, "principaltypecode", out var principalTypeCode))
+                || !TryReadPrincipalKind(row, out var kind))
             {
                 if (strict)
                     throw ShareReadFailed(entityLogicalName, recordId, "a share row has no readable principal");
@@ -1329,7 +1329,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 continue;
             }
 
-            var kind = DataversePrincipalRefExtensions.FromPrincipalTypeCode(principalTypeCode);
             if (kind is null)
                 continue;
 
@@ -1374,6 +1373,36 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return row.TryGetValue(property, out var element)
             && element.ValueKind == JsonValueKind.String
             && Guid.TryParse(element.GetString(), out value);
+    }
+
+    /// <summary>
+    /// Reads a POA row's <c>principaltypecode</c>. <c>false</c> when the value is absent or is neither a number nor a
+    /// string (unreadable); <c>true</c> with a <c>null</c> kind for a principal type this seam does not model.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 139 (verified live on spaarkedev1, 2026-10-02): the Web API returns this
+    /// EntityName column as the logical-name STRING — <c>"principaltypecode":"systemuser"</c> — not as the object type
+    /// code. This method used to accept only a JSON number, so the soft read silently skipped every share and the
+    /// strict read refused every record that had one. Both forms are accepted; the numeric one is kept for any reader
+    /// (or test double) that supplies the code.
+    /// </remarks>
+    private static bool TryReadPrincipalKind(Dictionary<string, JsonElement> row, out DataversePrincipalKind? kind)
+    {
+        kind = null;
+        if (!row.TryGetValue("principaltypecode", out var element))
+            return false;
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Number when element.TryGetInt32(out var code):
+                kind = DataversePrincipalRefExtensions.FromPrincipalTypeCode(code);
+                return true;
+            case JsonValueKind.String when !string.IsNullOrWhiteSpace(element.GetString()):
+                kind = DataversePrincipalRefExtensions.FromPrincipalTypeName(element.GetString());
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static bool TryReadInt(Dictionary<string, JsonElement> row, string property, out int value)

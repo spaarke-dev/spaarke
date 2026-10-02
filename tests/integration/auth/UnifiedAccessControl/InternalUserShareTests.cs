@@ -52,18 +52,23 @@ public class InternalUserShareTests
     private static readonly Guid TeamId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid CallerOid = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
-    // Dataverse's stored masks, as literals.
+    // Dataverse's stored masks, as literals (owner 2026-09-30, task 139: Collaborate and Full Access carry Share).
     private const int ViewOnlyMask = 1;              // Read
-    private const int CollaborateMask = 23;          // Read 1 + Write 2 + Append 4 + AppendTo 16
-    private const int FullAccessMask = 65559;        // Collaborate + Delete 65536
-    private const int CreatorMask = 262167;          // Collaborate + Share 262144 — the provisioning creator's share
+    private const int CollaborateMask = 262167;      // Read 1 + Write 2 + Append 4 + AppendTo 16 + Share 262144
+    private const int FullAccessMask = 327703;       // Collaborate + Delete 65536
+    private const int LegacyCollaborateMask = 23;    // Collaborate before task 139: Read + Write + Append + AppendTo
+    private const int LegacyFullAccessMask = 65559;  // Full Access before task 139: legacy Collaborate + Delete
     private const int ShareBit = 262144;
     private const int AssignBit = 524288;
 
-    private const string CollaborateCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+    private const string CollaborateCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
+    private const string LegacyCollaborateCsv = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
 
     private readonly FakeRecordShareTable _shares = new();
     private readonly FakeSystemUsers _users = new();
+
+    /// <summary>The record's flags, read by /unshare-user's S5 rule (task 139). Unseeded: Standard, not secure.</summary>
+    private readonly GrantPolicyTestDoubles.FlagStubParticipationService _flags = new(defaultFlags: RootRecordFlags.None);
     private readonly Mock<ITenantCache> _cache = new();
     private readonly List<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
 
@@ -157,7 +162,7 @@ public class InternalUserShareTests
     public async Task Share_WhenTheCallerLacksDelete_NarrowsFullAccessToWhatTheyHold()
     {
         var callerHoldsCollaborate =
-            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
 
         var result = await Share(UserId, ExternalAccessLevel.FullAccess, callerRights: callerHoldsCollaborate);
 
@@ -210,6 +215,7 @@ public class InternalUserShareTests
     [InlineData(AccessRights.Read | AccessRights.Append, "ReadAccess,AppendAccess", 5)]
     [InlineData(AccessRights.Read | AccessRights.AppendTo, "ReadAccess,AppendToAccess", 17)]
     [InlineData(AccessRights.Read | AccessRights.Delete, "ReadAccess,DeleteAccess", 65537)]
+    [InlineData(AccessRights.Read | AccessRights.Share, "ReadAccess,ShareAccess", 262145)]   // Spaarke 64 ↔ Dataverse 262144
     public void Intersect_PairsTheTwoVocabulariesRightByRight(
         AccessRights callerRights, string expectedCsv, int expectedMask)
     {
@@ -218,6 +224,27 @@ public class InternalUserShareTests
         var granted = RecordShareLevels.Intersect(fullAccess, callerRights);
 
         granted.Should().Be(new RecordShareRights(expectedCsv, expectedMask));
+    }
+
+    /// <summary>
+    /// Task 139, criterion 2: Share joined the pairing table, so the intersection carries <c>ShareAccess</c> exactly when
+    /// the caller holds <see cref="AccessRights.Share"/>. Before the row existed, Intersect DROPPED a Share bit whatever
+    /// the caller held — which, once Share joined the levels, would have stripped it from every share. The twin
+    /// differs only in the caller's Share flag.
+    /// </summary>
+    [Theory]
+    [InlineData(true, "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess,DeleteAccess", 327703)]
+    [InlineData(false, "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess", 65559)]
+    public void Intersect_FullAccess_CarriesShareOnlyWhenTheCallerHoldsShare(
+        bool callerHoldsShare, string expectedCsv, int expectedMask)
+    {
+        RecordShareLevels.TryGetRights(ExternalAccessLevel.FullAccess, out var fullAccess).Should().BeTrue();
+        var callerRights = FullWorkingRights & ~AccessRights.Share;
+        if (callerHoldsShare)
+            callerRights |= AccessRights.Share;
+
+        RecordShareLevels.Intersect(fullAccess, callerRights)
+            .Should().Be(new RecordShareRights(expectedCsv, expectedMask));
     }
 
     /// <summary>A caller's rights the level does not ask for add nothing: the level is the ceiling, their rights the floor.</summary>
@@ -256,18 +283,101 @@ public class InternalUserShareTests
     }
 
     /// <summary>
-    /// Owner decision "No re-share at any level": setting a level replaces every right, so a provisioning creator's
-    /// Share right does not survive a level change made here.
+    /// Task 139, criterion 1: a share written before Share joined the levels (the legacy Collaborate mask, 23) is
+    /// re-shared at Collaborate by a caller who holds Share — the write brings it up to the current mask and reports
+    /// "updated", not "unchanged". The twin below differs only in the caller's Share right.
     /// </summary>
     [Fact]
-    public async Task Share_OverACreatorShareCarryingTheShareRight_LeavesExactlyTheLevel()
+    public async Task Share_AtCollaborate_OverALegacyCollaborateShare_ByACallerHoldingShare_UpgradesItToTheCurrentMask()
     {
-        _shares.Seed(MatterTable, MatterId, User(UserId), CreatorMask);
+        _shares.Seed(MatterTable, MatterId, User(UserId), LegacyCollaborateMask);
+        var callerRights =
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
 
-        await Share(UserId, ExternalAccessLevel.Collaborate);
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate, callerRights: callerRights);
 
+        OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
+            UserId, ExternalAccessLevel.Collaborate, CollaborateMask, InternalShareEndpoints.OutcomeUpdated,
+            Narrowed: false));
         _shares.Writes.Should().Equal($"ModifyAccess {CollaborateCsv}");
         _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>
+    /// The twin: the same request from a caller WITHOUT Share is narrowed to exactly the legacy mask the user already
+    /// holds, so nothing is written and the outcome is "unchanged" — a caller cannot hand on a right they lack.
+    /// </summary>
+    [Fact]
+    public async Task Share_AtCollaborate_OverALegacyCollaborateShare_ByACallerWithoutShare_WritesNothing()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), LegacyCollaborateMask);
+        var callerRights = AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo;
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate, callerRights: callerRights);
+
+        OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
+            UserId, ExternalAccessLevel.Collaborate, LegacyCollaborateMask, InternalShareEndpoints.OutcomeUnchanged,
+            Narrowed: true));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 139, criterion 7 — a narrowed share never silently LOWERS an existing one
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The hazard the cap makes live: ModifyAccess REPLACES rights, so a caller holding Collaborate who asks for Full
+    /// Access — narrowed to Collaborate — would overwrite somebody else's Full Access share, LOWERING it while asking for
+    /// more. Refused with 409 and nothing written.
+    /// </summary>
+    [Fact]
+    public async Task Share_WhenNarrowedBelowWhatTheUserAlreadyHolds_Is409AndWritesNothing()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), FullAccessMask);
+        var callerHoldsCollaborate =
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
+
+        var result = await Share(UserId, ExternalAccessLevel.FullAccess, callerRights: callerHoldsCollaborate);
+
+        ProblemOf(result).Should().Be((409, ExternalGrantLifecycle.WouldLowerExistingReasonCode));
+        result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Detail
+            .Should().Contain("already have more access than you can grant");
+        _shares.Writes.Should().BeEmpty();
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(FullAccessMask);
+    }
+
+    /// <summary>
+    /// The positive twin: an EXPLICIT request for a lower level (not narrowed — the caller holds everything) is a
+    /// deliberate downgrade by a Write-holder and is applied, exactly as before task 139.
+    /// </summary>
+    [Fact]
+    public async Task Share_AnExplicitDowngradeByACallerHoldingEverything_StillDowngrades()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), FullAccessMask);
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        OkBody<ShareRecordWithUserResponse>(result).Should().Be(new ShareRecordWithUserResponse(
+            UserId, ExternalAccessLevel.Collaborate, CollaborateMask, InternalShareEndpoints.OutcomeUpdated,
+            Narrowed: false));
+        _shares.Writes.Should().Equal($"ModifyAccess {CollaborateCsv}");
+    }
+
+    /// <summary>
+    /// Criterion 8, pinned alongside the grant routes: a THROWING probe is 500 read_failed and a probe answering None
+    /// is 403 caller_cannot_grant (the latter is <see cref="Share_WhenTheCallersRightsCannotBeEstablished_Is403AndWritesNothing"/>);
+    /// neither writes.
+    /// </summary>
+    [Fact]
+    public async Task Share_WhenTheCallersRightsProbeThrows_Is500ReadFailedAndWritesNothing()
+    {
+        var result = await InternalShareEndpoints.ShareAsync(
+            new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
+            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(),
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+        ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
+        _shares.Writes.Should().BeEmpty();
     }
 
     /// <summary>A row with a zero mask carries only inherited access; a direct share there is created, not modified.</summary>
@@ -310,35 +420,59 @@ public class InternalUserShareTests
         RecordShareLevels.LevelForMask(mask).Should().Be(level);
     }
 
+    /// <summary>
+    /// Owner 2026-09-30 (task 139, C4): a Write-holder may pass access on, so Collaborate and Full Access carry Share;
+    /// View Only does not; and NO level carries Assign — nobody given access through Manage Access can take the record
+    /// over.
+    /// </summary>
     [Theory]
-    [InlineData(ExternalAccessLevel.ViewOnly)]
-    [InlineData(ExternalAccessLevel.Collaborate)]
-    [InlineData(ExternalAccessLevel.FullAccess)]
-    public void Levels_NeverCarryShareOrAssign(ExternalAccessLevel level)
+    [InlineData(ExternalAccessLevel.ViewOnly, false)]
+    [InlineData(ExternalAccessLevel.Collaborate, true)]
+    [InlineData(ExternalAccessLevel.FullAccess, true)]
+    public void Levels_CarryShareFromCollaborateUp_AndNeverAssign(ExternalAccessLevel level, bool carriesShare)
     {
         RecordShareLevels.TryGetRights(level, out var rights).Should().BeTrue();
 
-        rights.AccessRightsCsv.Should().NotContainAny("ShareAccess", "AssignAccess");
-        (rights.AccessRightsMask & (ShareBit | AssignBit)).Should().Be(0,
-            "owner 2026-09-15: no level lets a person pass a record on or take it over");
+        (rights.AccessRightsMask & ShareBit).Should().Be(carriesShare ? ShareBit : 0);
+        rights.AccessRightsCsv.Contains("ShareAccess", StringComparison.Ordinal).Should().Be(carriesShare);
+        (rights.AccessRightsMask & AssignBit).Should().Be(0, "no level lets a person take the record over");
+        rights.AccessRightsCsv.Should().NotContain("AssignAccess");
     }
+
+    /// <summary>
+    /// Task 139, criterion 1 (data compatibility): the masks Collaborate and Full Access stored before Share joined
+    /// them still read as their level — otherwise every pre-existing share would show "no level" until the backfill ran.
+    /// </summary>
+    [Theory]
+    [InlineData(LegacyCollaborateMask, ExternalAccessLevel.Collaborate)]
+    [InlineData(LegacyFullAccessMask, ExternalAccessLevel.FullAccess)]
+    public void LevelForMask_ReadsTheLegacyMasksAsTheirLevel(int mask, ExternalAccessLevel level)
+        => RecordShareLevels.LevelForMask(mask).Should().Be(level);
 
     [Theory]
     [InlineData(0)]
-    [InlineData(3)]                          // Read + Write: no level
-    [InlineData(CreatorMask)]                // Collaborate + Share
-    [InlineData(CollaborateMask | 32)]       // Collaborate + Create
+    [InlineData(3)]                               // Read + Write: no level
+    [InlineData(ViewOnlyMask | ShareBit)]         // Read + Share: no level
+    [InlineData(CollaborateMask | 32)]            // Collaborate + Create
+    [InlineData(CollaborateMask | AssignBit)]     // Collaborate + Assign
+    [InlineData(LegacyFullAccessMask | AssignBit)] // a legacy mask with anything more is not a level either
     public void LevelForMask_ForRightsOutsideTheThreeLevels_IsNull(int mask)
         => RecordShareLevels.LevelForMask(mask).Should().BeNull();
 
+    /// <summary>
+    /// Owner 2026-09-30 (C4): colleagues named at secure provisioning receive EXACTLY the creator's rights — the
+    /// Collaborate level, which now carries Share. Both constants are asserted against the LITERAL.
+    /// </summary>
     [Fact]
-    public void ProvisioningShares_AreBuiltFromTheCollaborateLevel()
+    public void ProvisioningShares_CreatorAndColleagues_CarryTheIdenticalCollaborateLiteral()
     {
-        ProvisionProjectEndpoint.CollaboratorAccessRights.Should().Be(CollaborateCsv,
+        const string collaborateLiteral = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
+
+        ProvisionProjectEndpoint.CollaboratorAccessRights.Should().Be(collaborateLiteral,
             "asserted against the LITERAL, not against RecordShareLevels.CollaborateRights: comparing a constant " +
             "with the constant it is now DEFINED as can only catch re-literalization, and would move with any drift");
-        ProvisionProjectEndpoint.CreatorAccessRights.Should().Be(CollaborateCsv + ",ShareAccess",
-            "the creator's share is unchanged by task 063: Collaborate plus the right to re-share");
+        ProvisionProjectEndpoint.CreatorAccessRights.Should().Be(collaborateLiteral,
+            "the creator's share is the same Collaborate level — its value (mask 262167) is unchanged by task 139");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -612,13 +746,109 @@ public class InternalUserShareTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // S5 (owner round 3; task 139 amendment R3) — a secure record always keeps someone who can see it
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private void MarkMatterSecure() => _flags.Flags[MatterId] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+    [Fact]
+    public async Task Unshare_TheLastPersonOnASecureRecord_Is409AndRemovesNothing()
+    {
+        MarkMatterSecure();
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        var result = await Unshare(UserId);
+
+        ProblemOf(result).Should().Be((409, InternalShareEndpoints.LastReaderOnSecureRecordReasonCode));
+        result.Should().BeOfType<ProblemHttpResult>().Subject.ProblemDetails.Detail
+            .Should().Contain("last person who can open this secure record");
+        _shares.Writes.Should().BeEmpty();
+        _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>The positive twin: another enabled person keeps a share that can read it, so the removal proceeds.</summary>
+    [Fact]
+    public async Task Unshare_OnASecureRecord_WhenAnotherEnabledPersonCanStillReadIt_Removes()
+    {
+        MarkMatterSecure();
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+        _shares.Seed(MatterTable, MatterId, User(OtherUserId), ViewOnlyMask);
+
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
+        _shares.Writes.Should().Equal("RevokeAccess");
+    }
+
+    /// <summary>The other twin: on a record that is NOT secure, the owner's business unit still sees it — no S5 check.</summary>
+    [Fact]
+    public async Task Unshare_TheOnlyShareOnANonSecureRecord_IsRemoved()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Who counts: an enabled USER whose share carries Read. A disabled user cannot open the record, and a team's
+    /// membership is not read here, so neither keeps the record visible — the removal is refused.
+    /// </summary>
+    [Theory]
+    [InlineData("disabled-user")]
+    [InlineData("team-only")]
+    [InlineData("no-read")]
+    public async Task Unshare_OnASecureRecord_WhenNoOtherEnabledReaderRemains_Is409(string other)
+    {
+        MarkMatterSecure();
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+        switch (other)
+        {
+            case "disabled-user":
+                _users.SeedPerson(OtherUserId, "Brook Okafor", isDisabled: true);
+                _shares.Seed(MatterTable, MatterId, User(OtherUserId), FullAccessMask);
+                break;
+            case "team-only":
+                _shares.Seed(MatterTable, MatterId, DataversePrincipalRef.Team(TeamId), FullAccessMask);
+                break;
+            case "no-read":
+                _shares.Seed(MatterTable, MatterId, User(OtherUserId), mask: 0);
+                break;
+        }
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.LastReaderOnSecureRecordReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>A record whose secure flag cannot be read is treated as secure (fail closed: keep the share).</summary>
+    [Fact]
+    public async Task Unshare_WhenTheSecureFlagCannotBeRead_AppliesTheLastPersonRule()
+    {
+        _flags.Flags[MatterId] = RootRecordFlags.Unreadable;
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.LastReaderOnSecureRecordReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>If the other sharers cannot be checked, nothing is removed — never a guess that someone remains.</summary>
+    [Fact]
+    public async Task Unshare_OnASecureRecord_WhenTheOtherSharersCannotBeRead_Is500AndRemovesNothing()
+    {
+        MarkMatterSecure();
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+        _shares.Seed(MatterTable, MatterId, User(OtherUserId), CollaborateMask);
+        _users.FailQueriesSelecting = InternalShareEndpoints.SystemUserEnabledSelect;
+
+        ProblemOf(await Unshare(UserId)).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // List
     // ─────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public async Task List_ReturnsTheDirectSystemUserSharesWithNamesAndExactLevels()
     {
-        _shares.Seed(MatterTable, MatterId, User(OtherUserId), CreatorMask);
+        _shares.Seed(MatterTable, MatterId, User(OtherUserId), CollaborateMask | AssignBit);
         _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
         _shares.Seed(MatterTable, MatterId, DataversePrincipalRef.Team(TeamId), ViewOnlyMask);
         _shares.Seed(MatterTable, MatterId, User(InheritedOnlyUserId), mask: 0);
@@ -627,7 +857,23 @@ public class InternalUserShareTests
 
         shares.Select(s => (s.SystemUserId, s.FullName, s.AccessRightsMask, s.AccessLevel)).Should().Equal(
             (UserId, "Ada Lovelace", CollaborateMask, ExternalAccessLevel.Collaborate),
-            (OtherUserId, "Brook Okafor", CreatorMask, (ExternalAccessLevel?)null));
+            (OtherUserId, "Brook Okafor", CollaborateMask | AssignBit, (ExternalAccessLevel?)null));
+    }
+
+    /// <summary>Task 139: a share still at a legacy mask lists at its level, with the stored mask shown as it is.</summary>
+    [Fact]
+    public async Task List_ShowsALegacyMaskShareAtItsLevel()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), LegacyFullAccessMask);
+
+        var shares = OkBody<RecordUserSharesResponse>(await List()).Shares;
+
+        shares.Should().ContainSingle().Which.Should().BeEquivalentTo(new
+        {
+            SystemUserId = UserId,
+            AccessRightsMask = LegacyFullAccessMask,
+            AccessLevel = (ExternalAccessLevel?)ExternalAccessLevel.FullAccess,
+        });
     }
 
     [Fact]
@@ -754,10 +1000,12 @@ public class InternalUserShareTests
 
     /// <summary>
     /// What a caller holds unless a test says otherwise: a full working set, so the level asked for is the level
-    /// granted and the narrowing path stays visible only in the tests that ask for it.
+    /// granted and the narrowing path stays visible only in the tests that ask for it. Includes Share since task 139
+    /// put Share into Collaborate and Full Access — without it every Collaborate share here would be narrowed.
     /// </summary>
     private const AccessRights FullWorkingRights =
-        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete;
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
+        | AccessRights.Share;
 
     private Task<IResult> Share(
         Guid? systemUserId, ExternalAccessLevel? level, string? recordType = "matter", AccessRights? callerRights = null) =>
@@ -784,10 +1032,23 @@ public class InternalUserShareTests
             => Task.FromResult(_rights);
     }
 
+    /// <summary>A probe that throws — the 500 path, distinct from the None answer every OBO/transport failure gives.</summary>
+    private sealed class ThrowingCallerRightsProbe : CallerRecordAccessProbe
+    {
+        public ThrowingCallerRightsProbe()
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+        {
+        }
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+            => throw new InvalidOperationException("Simulated failure establishing the caller's rights.");
+    }
+
     private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
-            _shares, _users.Client, _cache.Object, AuthenticatedContext(), NullLogger<Program>.Instance,
+            _shares, _users.Client, _flags, _cache.Object, AuthenticatedContext(), NullLogger<Program>.Instance,
             CancellationToken.None);
 
     private Task<IResult> List(string? recordType = "matter") =>
@@ -869,6 +1130,9 @@ public class InternalUserShareTests
 
         public Exception? QueryFailure { get; set; }
 
+        /// <summary>Fails only the queries whose <c>$select</c> is exactly this (task 139: one read among several).</summary>
+        public string? FailQueriesSelecting { get; set; }
+
         public int Queries { get; private set; }
 
         public void SeedPerson(
@@ -889,6 +1153,8 @@ public class InternalUserShareTests
             Queries++;
             if (QueryFailure is not null)
                 throw QueryFailure;
+            if (FailQueriesSelecting is not null && select == FailQueriesSelecting)
+                throw new HttpRequestException("Dataverse 503");
 
             var columns = (select ?? throw new InvalidOperationException("A systemuser read without $select returns every column."))
                 .Split(',');

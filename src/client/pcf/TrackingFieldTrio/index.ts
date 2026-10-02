@@ -120,6 +120,14 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.33 (task 139, unified-access-control-r2 — the grant model, owner C4 + Q1):
+ * no change in this file's logic; the bundled `AccessGrantModal` now reports a
+ * `/grant` or `/invite-and-grant` that the server capped at the caller's own
+ * level (the narrowed notice), and shows the server's own sentence for the new
+ * refusals — would-lower-existing (409), grantee on the No Access list (422),
+ * caller cannot grant (403) — and for `/unshare-user`'s refusal to remove the
+ * last person who can open a secure record.
+ *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
@@ -1178,7 +1186,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.32 • Built 2026-10-02',
+      versionText: 'v1.0.33 • Built 2026-10-02',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

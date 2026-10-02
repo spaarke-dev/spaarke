@@ -421,15 +421,30 @@ function classifyAccessFailure(err: unknown): { kind: 'delegation' | 'unauthenti
   return null;
 }
 
-/** The write-time access-policy refusals the grant routes return (task 138) —
- * `sdap.access.grant.record_restricted` / `.org_grant_direct_only_record`
- * (422) and `.policy_unreadable` (503). Their ProblemDetails `detail` is
- * written for the person, so the modal shows it verbatim. */
+/** The write-time refusals the grant routes return. Task 138: the record's
+ * access policy — `sdap.access.grant.record_restricted` /
+ * `.org_grant_direct_only_record` (422) and `.policy_unreadable` (503). Task
+ * 139 (owner Q1, "cap every grant at the grantor's own level"):
+ * `.caller_cannot_grant` (403 — your own access allows granting nothing),
+ * `.would_lower_existing` (409 — the grant was capped at your level and the
+ * person already holds more; also returned by `/share-user`) and
+ * `.grantee_denied` (422 — the grantee is on the record's No Access list), plus
+ * `/share-user`'s own `sdap.access.user_share.caller_cannot_grant`. Their
+ * ProblemDetails `detail` is written for the person, so the modal shows it
+ * verbatim instead of a generic "try again" — retrying would fail the same way. */
 const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.record_restricted',
   'sdap.access.grant.org_grant_direct_only_record',
   'sdap.access.grant.policy_unreadable',
+  'sdap.access.grant.caller_cannot_grant',
+  'sdap.access.grant.would_lower_existing',
+  'sdap.access.grant.grantee_denied',
+  'sdap.access.user_share.caller_cannot_grant',
 ]);
+
+/** Task 139 (owner round 3, S5): `/unshare-user` refuses to remove the last
+ * person who can open a secure record. Its `detail` says what to do instead. */
+const UNSHARE_LAST_READER_REASON_CODE = 'sdap.access.user_share.last_reader_on_secure_record';
 
 /** The server's own explanation when the record's access policy refused a
  * grant (task 138), or `null` for any other failure. */
@@ -819,6 +834,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * so callers can build one combined notice. */
   interface IGrantOutcome {
     notifyPending: boolean;
+    /** Task 139: the server capped the grant at the caller's own level. */
+    narrowed: boolean;
+  }
+
+  /** The additive task-139 fields `/grant` and `/invite-and-grant` return. */
+  interface IGrantWriteResponseBody {
+    grantedAccessLevel?: number | null;
+    narrowed?: boolean;
   }
 
   /**
@@ -847,12 +870,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // to the more harmful one.
       const internal = await isInternalContact(contact.contactId).catch(() => true);
       let notifyPending = false;
+      let data: IGrantWriteResponseBody | undefined;
 
       if (!internal && contact.email) {
         // External, known email → the built, atomic onboard+grant+CIAM-email endpoint.
         // Polymorphic root (task 070/071): send {recordType, recordId} — the BFF
         // binds the correct typed root lookup (project|matter|workassignment).
-        await postJson('/api/v1/external-access/invite-and-grant', {
+        data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/invite-and-grant', {
           email: contact.email,
           recordType,
           recordId,
@@ -863,7 +887,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       } else {
         // Internal workforce contact, or an external contact with no email on
         // file → the built grant-only core (no CIAM onboarding attempted).
-        await postJson('/api/v1/external-access/grant', {
+        data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
           contactId: contact.contactId,
           recordType,
           recordId,
@@ -876,7 +900,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
       }
 
-      return { notifyPending };
+      // Task 139: every grant is capped at the caller's own level; the server
+      // says when it did, and the batch notice reports it.
+      return { notifyPending, narrowed: data?.narrowed === true };
     },
     [isInternalContact, postJson, recordId, recordType]
   );
@@ -937,13 +963,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
    * `contactId` is omitted so the BFF treats (empty contact + organizationId) as an org grant; every
    * active member of the organization then inherits access at check time (server Term-3 union). */
   const grantOrganization = React.useCallback(
-    async (org: IOrganizationPick, level: number): Promise<void> => {
-      await postJson('/api/v1/external-access/grant', {
+    async (org: IOrganizationPick, level: number): Promise<{ narrowed: boolean }> => {
+      const data = await postJson<IGrantWriteResponseBody>('/api/v1/external-access/grant', {
         recordType,
         recordId,
         accessLevel: level,
         organizationId: org.id,
       });
+      // Task 139: an organization-wide grant is capped at the caller's level too.
+      return { narrowed: data?.narrowed === true };
     },
     [postJson, recordType, recordId]
   );
@@ -994,8 +1022,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         if (it.kind === 'contact' && it.contact) {
           const outcome = await grantContact(it.contact, { level });
           anyNotifyPending = anyNotifyPending || outcome.notifyPending;
+          anyNarrowed = anyNarrowed || outcome.narrowed;
         } else if (it.kind === 'organization' && it.org) {
-          await grantOrganization(it.org, level);
+          const outcome = await grantOrganization(it.org, level);
+          anyNarrowed = anyNarrowed || outcome.narrowed;
         } else if (it.kind === 'user' && it.user) {
           const outcome = await shareUser(it.user, level);
           anyNarrowed = anyNarrowed || outcome.narrowed;
@@ -1175,6 +1205,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
             deactivatedCount: err.deactivatedCount,
           })
         );
+      } else if (
+        pendingRevoke.kind === 'share' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode === UNSHARE_LAST_READER_REASON_CODE
+      ) {
+        // Task 139 (S5): the last person who can open a secure record cannot be
+        // removed. The server's sentence says what to do; nothing was removed.
+        setPendingRevoke(null);
+        setNotice({ intent: 'warning', text: err.detail });
       } else {
         setNotice({
           intent: 'error',

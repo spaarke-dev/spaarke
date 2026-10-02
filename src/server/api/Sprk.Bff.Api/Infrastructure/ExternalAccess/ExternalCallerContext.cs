@@ -282,6 +282,37 @@ public static class ExternalAccessLevels
             return ExternalAccessLevel.ViewOnly;
         return null;
     }
+
+    /// <summary>
+    /// The highest level a grantor holding <paramref name="grantorRights"/> on a record may GRANT on it — the ONE
+    /// grantor ceiling (unified-access-control-r2 task 139; owner Q1, round 2, confirmed round 3b: "cap every grant
+    /// at the grantor's own level"). <c>null</c> when the grantor may grant nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The table.</b> Full Access iff Read + Write + Delete; Collaborate iff Read + Write; View Only iff Read;
+    /// otherwise none. Create, Append, AppendTo and Share are deliberately NOT consulted: the input comes from
+    /// <c>RetrievePrincipalAccess</c> on an EXISTING record (<c>CallerRecordAccessProbe</c>), which is not guaranteed
+    /// to report <c>CreateAccess</c>, so a test including Create would under-state a Deep-role user as View Only —
+    /// and Append/AppendTo/Share do not change what a grant level confers on a contact.</para>
+    /// <para><b>Not <see cref="ToDisplayLevel"/></b>, whose containment test includes Create and whose remark forbids
+    /// authorizing on it. This method IS an authorization input: it bounds what a grant route writes.</para>
+    /// <para>Shared by <c>/grant</c> and <c>/invite-and-grant</c> (task 139) and task 140's contact-side route, through
+    /// <c>GrantCeiling.FromGrantorRights</c>; never computed anywhere else.</para>
+    /// </remarks>
+    public static ExternalAccessLevel? GrantCeilingFor(AccessRights grantorRights)
+    {
+        const AccessRights read = AccessRights.Read;
+        const AccessRights readWrite = AccessRights.Read | AccessRights.Write;
+        const AccessRights readWriteDelete = AccessRights.Read | AccessRights.Write | AccessRights.Delete;
+
+        if ((grantorRights & readWriteDelete) == readWriteDelete)
+            return ExternalAccessLevel.FullAccess;
+        if ((grantorRights & readWrite) == readWrite)
+            return ExternalAccessLevel.Collaborate;
+        if ((grantorRights & read) == read)
+            return ExternalAccessLevel.ViewOnly;
+        return null;
+    }
 }
 
 /// <summary>
