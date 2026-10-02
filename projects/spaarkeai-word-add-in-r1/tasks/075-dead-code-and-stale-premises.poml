@@ -4,7 +4,7 @@
     <title>502 lines of dead adapter that this branch edited five times to keep the compiler quiet, a duplicated function, and three comments that describe code that no longer exists</title>
     <phase>5 Remediation — code quality</phase>
     <gate>blocked — requires 065 (which corrects two of the same comments) and 058 (adjacent deletions)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes a 502-line file and changes an error's HTTP status class. Modifies `.ts` and `.cs`.</rigor-reason>
     <model-tier>sonnet</model-tier>

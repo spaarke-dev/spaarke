@@ -38,10 +38,17 @@ public sealed class ExternalCallerContext
     public bool FromCache { get; init; }
 
     /// <summary>
-    /// Checks if the Contact has access to the specified project.
+    /// Whether the Contact holds <see cref="AccessRights.Read"/> on the specified project.
     /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 136 (defect C2): was "a participation for the id exists", the same
+    /// presence shape as <c>CallerPrincipal.HasProjectAccess</c>. A participation always carries a level today,
+    /// so the answer does not change; the shape is aligned so no copy of the presence gate survives to be
+    /// imitated. No production handler reads this class any more — the /api/v1/external routes read
+    /// <c>CallerPrincipal</c>.
+    /// </remarks>
     public bool HasProjectAccess(Guid projectId) =>
-        Participations.Any(p => p.ProjectId == projectId);
+        GetEffectiveRights(projectId).HasFlag(AccessRights.Read);
 
     /// <summary>
     /// Gets the access level for the specified project, or null if no access.
@@ -56,10 +63,10 @@ public sealed class ExternalCallerContext
         ExternalAccessLevels.ToAccessRights(GetAccessLevel(projectId));
 
     /// <summary>
-    /// Gets all project IDs the Contact can access (for AI search filter construction).
+    /// Gets all project IDs the Contact can READ (for AI search filter construction). Read-gated by task 136.
     /// </summary>
     public IEnumerable<Guid> GetAccessibleProjectIds() =>
-        Participations.Select(p => p.ProjectId);
+        Participations.Where(p => HasProjectAccess(p.ProjectId)).Select(p => p.ProjectId);
 }
 
 /// <summary>
@@ -100,13 +107,20 @@ public sealed class ExternalParticipation
 /// assignments had no access level anywhere in the pipeline (register A-8 / B-8).
 /// </para>
 /// <para>
-/// ⚠️ <b>Nullable by design.</b> The PROJECT partition drops rows whose level is null
-/// (<c>&amp;&amp; r.sprk_accesslevel.HasValue</c>); this shape deliberately does NOT, because applying
-/// that filter to matters/WAs would turn a level-less row from "grants access" into "grants nothing" —
-/// a silent REVOCATION on the security boundary. A null level keeps its id (set membership unchanged)
-/// and contributes <see cref="AccessRights.None"/>, which the highest-wins max cannot widen. Verified
-/// 2026-09-04: every active grant row in dev carries a level on all three root types, so this is a
-/// safety property for other tenants rather than a live case.
+/// ⚠️ <b>Nullable by design.</b> The level is carried as read, null included: a null maps to
+/// <see cref="AccessRights.None"/>, which the highest-wins max cannot widen. The row is kept here (not
+/// filtered like the PROJECT partition's <c>&amp;&amp; r.sprk_accesslevel.HasValue</c>) only so the grant
+/// read stays a faithful copy of the rows; it no longer grants anything.
+/// </para>
+/// <para>
+/// <b>No level = not granted (owner, 2026-09-30; unified-access-control-r2 task 136 · defect C2).</b> This
+/// paragraph used to argue that dropping a level-less row would be a "silent REVOCATION", and the id was kept
+/// as a key so set membership stayed unchanged. That key had no rights, yet every presence-gated read admitted
+/// it — the module /fetch and /record for the matter or work assignment and its documents and invoices. The
+/// owner's rule is that a contact gets only the records it is granted, at the granted level, so the evaluator
+/// now removes the record at the end of every composition. Measured before the change (2026-10-01, dev): 0 grant
+/// rows with a null level in any state, of 31 active — so nothing live was revoked. Only rows written outside
+/// the BFF can lack a level; the BFF always writes one.
 /// </para>
 /// </summary>
 public sealed class ExternalRootGrant
@@ -126,29 +140,56 @@ public sealed class ExternalRootGrant
 }
 
 /// <summary>
-/// The two veto-bearing flags on a root record (task 037 · FR-21 / FR-22).
+/// The access-policy flags on a root record (task 037 · FR-21 / FR-22; task 138 · Limited).
 /// </summary>
-/// <param name="IsSecure"><c>sprk_issecure</c> — suppresses derived-member and org-expansion terms
-/// BEFORE the max, for every principal kind.</param>
+/// <param name="IsSecure"><c>sprk_issecure</c> — makes the record DIRECT-ONLY for contacts (see
+/// <see cref="IsDirectOnly"/>).</param>
 /// <param name="IsRestricted"><c>sprk_accesspermission == Restricted</c> — removes every
 /// contact-sourced contribution AFTER the max.</param>
+/// <param name="IsLimited"><c>sprk_accesspermission == Limited</c> — makes the record DIRECT-ONLY for
+/// contacts, exactly as Secure does (task 138; teams-app-r1 FR-14 "Option A": named grants only).</param>
+/// <param name="IsUnreadable">
+/// <c>true</c> only when the flags could NOT be read (a fault, a non-success status, or an id the query did
+/// not return). The read path never needs it — the other three fields already carry the most restrictive
+/// combination — but the WRITE-time grant policy does: it must tell an operator "the record's settings could
+/// not be read" rather than "the record is Restricted", which would be false (task 138).
+/// </param>
 /// <remarks>
-/// The two are independent, so a record can be neither, either, or both. They are carried together
-/// because they come from the same row and the same read.
+/// The flags are independent, so a record can carry any combination. They are carried together because they
+/// come from the same row and the same read. <see cref="IsLimited"/> and <see cref="IsUnreadable"/> are
+/// optional so a value built with only the first two (every pre-138 call site) means what it always meant.
 /// </remarks>
-public readonly record struct RootRecordFlags(bool IsSecure, bool IsRestricted)
+public readonly record struct RootRecordFlags(
+    bool IsSecure, bool IsRestricted, bool IsLimited = false, bool IsUnreadable = false)
 {
     /// <summary>
-    /// What an unreadable or unreturned record resolves to: <b>both vetoes active</b> (spec NFR-01).
+    /// The ONE pre-max suppression predicate (ADR-003 item 8 as amended by task 138 · FR-22): on a
+    /// direct-only record a contact's access comes ONLY from its own named grant rows. Organization-inherited
+    /// grants, standing-grant membership and organization expansion contribute nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Secure OR Limited.</b> The owner's model (round 2, 2026-09-30): Limited means named, direct
+    /// grants only, which is exactly what FR-22 Secure suppression already does — and a Secure record is
+    /// Limited for contacts. So this is the same predicate widened, not a second one. Every term that used to
+    /// ask "is it Secure?" asks this instead.</para>
+    /// <para><b>Restricted is not part of it.</b> Restricted is a POST-max veto that removes every
+    /// contact-sourced contribution, direct grants included (<c>AccessibleRecordSetService.ApplyVetoPipeline</c>).
+    /// Where Restricted and direct-only are both present, Restricted wins because it runs last.</para>
+    /// </remarks>
+    public bool IsDirectOnly => IsSecure || IsLimited;
+
+    /// <summary>
+    /// What an unreadable or unreturned record resolves to: <b>every restriction active</b> (spec NFR-01),
+    /// plus the <see cref="IsUnreadable"/> marker.
     /// <para>
     /// This is the fail-closed direction, and it is deliberately the MOST restrictive combination — not
     /// merely "restricted". Treating an unknown record as non-secure would let a derived-member or
     /// org-expansion term contribute access to a record nobody could confirm is safe to share.
     /// </para>
     /// </summary>
-    public static RootRecordFlags Unreadable => new(IsSecure: true, IsRestricted: true);
+    public static RootRecordFlags Unreadable => new(IsSecure: true, IsRestricted: true, IsLimited: true, IsUnreadable: true);
 
-    /// <summary>No veto applies. Only ever produced by a SUCCESSFUL read of a row carrying neither flag.</summary>
+    /// <summary>No restriction applies. Only ever produced by a SUCCESSFUL read of a Standard, non-secure row.</summary>
     public static RootRecordFlags None => new(IsSecure: false, IsRestricted: false);
 }
 
@@ -238,6 +279,37 @@ public static class ExternalAccessLevels
         if (rights.HasFlag(ToAccessRights(ExternalAccessLevel.Collaborate)))
             return ExternalAccessLevel.Collaborate;
         if (rights.HasFlag(ToAccessRights(ExternalAccessLevel.ViewOnly)))
+            return ExternalAccessLevel.ViewOnly;
+        return null;
+    }
+
+    /// <summary>
+    /// The highest level a grantor holding <paramref name="grantorRights"/> on a record may GRANT on it — the ONE
+    /// grantor ceiling (unified-access-control-r2 task 139; owner Q1, round 2, confirmed round 3b: "cap every grant
+    /// at the grantor's own level"). <c>null</c> when the grantor may grant nothing.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The table.</b> Full Access iff Read + Write + Delete; Collaborate iff Read + Write; View Only iff Read;
+    /// otherwise none. Create, Append, AppendTo and Share are deliberately NOT consulted: the input comes from
+    /// <c>RetrievePrincipalAccess</c> on an EXISTING record (<c>CallerRecordAccessProbe</c>), which is not guaranteed
+    /// to report <c>CreateAccess</c>, so a test including Create would under-state a Deep-role user as View Only —
+    /// and Append/AppendTo/Share do not change what a grant level confers on a contact.</para>
+    /// <para><b>Not <see cref="ToDisplayLevel"/></b>, whose containment test includes Create and whose remark forbids
+    /// authorizing on it. This method IS an authorization input: it bounds what a grant route writes.</para>
+    /// <para>Shared by <c>/grant</c> and <c>/invite-and-grant</c> (task 139) and task 140's contact-side route, through
+    /// <c>GrantCeiling.FromGrantorRights</c>; never computed anywhere else.</para>
+    /// </remarks>
+    public static ExternalAccessLevel? GrantCeilingFor(AccessRights grantorRights)
+    {
+        const AccessRights read = AccessRights.Read;
+        const AccessRights readWrite = AccessRights.Read | AccessRights.Write;
+        const AccessRights readWriteDelete = AccessRights.Read | AccessRights.Write | AccessRights.Delete;
+
+        if ((grantorRights & readWriteDelete) == readWriteDelete)
+            return ExternalAccessLevel.FullAccess;
+        if ((grantorRights & readWrite) == readWrite)
+            return ExternalAccessLevel.Collaborate;
+        if ((grantorRights & read) == read)
             return ExternalAccessLevel.ViewOnly;
         return null;
     }
@@ -339,8 +411,8 @@ public enum WorkforcePrincipalKind
     /// Accessible set = ADR-034 membership (automatic).</summary>
     SystemUser,
 
-    /// <summary>Caller has no systemuser but resolves to a <c>contact</c> (by AAD oid or
-    /// verified email). Accessible set = contact-anchored membership / grants (task 021).</summary>
+    /// <summary>Caller has no systemuser but resolves to a <c>contact</c> BOUND to their Entra oid
+    /// (<c>sprk_externalobjectid</c>, task 141). Accessible set = contact-anchored membership / grants (task 021).</summary>
     ContactOnly
 }
 
@@ -364,8 +436,8 @@ public sealed class WorkforcePrincipal
     /// <summary>The Dataverse <c>contactid</c>. For a <see cref="WorkforcePrincipalKind.ContactOnly"/>
     /// principal this is the required anchor (always non-null). For a
     /// <see cref="WorkforcePrincipalKind.SystemUser"/> principal this is the <b>derived</b> contact
-    /// (via <c>sprk_primarycontact</c> / AAD cross-ref) and MAY be null when the systemuser has no
-    /// linked contact.</summary>
+    /// (its <c>sprk_primarycontact</c> link, else the contact bound to its oid — task 141) and MAY be null
+    /// when the systemuser has neither.</summary>
     public Guid? ContactId { get; init; }
 
     /// <summary>The workforce AAD object id (<c>oid</c> claim) the caller was resolved by.</summary>
@@ -374,9 +446,10 @@ public sealed class WorkforcePrincipal
     /// <summary>The workforce tenant id (<c>tid</c> claim).</summary>
     public required string TenantId { get; init; }
 
-    /// <summary>The caller's tenant-verified email/UPN (from token claims). Used as the fallback key to
-    /// find the caller's contact-grants when a <see cref="WorkforcePrincipalKind.SystemUser"/> has no
-    /// derived <see cref="ContactId"/> (no <c>sprk_primarycontact</c> link). May be empty.</summary>
+    /// <summary>The caller's email/UPN from token claims — UNVERIFIED (Microsoft documents these claims as
+    /// mutable). Display and audit only: since task 141 it is NEVER used to resolve a contact or its grants
+    /// (the email fallback in <c>AccessibleRecordSetService</c> was removed — a licensed user's contact comes
+    /// only from the systemuser↔contact link). May be empty.</summary>
     public string Email { get; init; } = string.Empty;
 
     /// <summary>True when this is a systemuser principal (ADR-034 membership plane).</summary>
@@ -425,9 +498,8 @@ public sealed class WorkforcePrincipalResolution
     public static WorkforcePrincipalResolution Resolved(WorkforcePrincipal principal)
         => new() { Principal = principal ?? throw new ArgumentNullException(nameof(principal)) };
 
-    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + verified email).
-    /// <paramref name="email"/> is the fallback key for the caller's contact-grants when the systemuser
-    /// has no derived contact (see <see cref="WorkforcePrincipal.Email"/>).</summary>
+    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + token email).
+    /// <paramref name="email"/> is display/audit only (see <see cref="WorkforcePrincipal.Email"/>).</summary>
     public static WorkforcePrincipalResolution ForSystemUser(
         Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null)
         => Resolved(new WorkforcePrincipal

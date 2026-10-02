@@ -2,26 +2,11 @@ import { apiClient, ApiClientError } from '@shared/services';
 import { cleanGuid } from '../utils/cleanGuid';
 
 /**
- * shareLinkService.ts — spaarkeai-word-add-in-r1 task 037 (FR-17): the `shareDocument` Word ribbon
- * command's link-minting call.
+ * shareLinkService.ts — the add-in's ONE share-link minter: the Word ribbon's `shareDocument` command
+ * (task 037, FR-17) and Send Email (`sendEmailService.ts`, task 036, FR-15) both call it.
  *
- * **Component justification (root CLAUDE.md §11).** `sendEmailService.ts` (task 036, FR-15) already
- * has a private `mintDocumentShareLink` that calls the SAME route this file calls. This file does NOT
- * import or extend it, and that is a deliberate, narrow exception, not an oversight:
- *
- * 1. **Existing** — `sendEmailService.mintDocumentShareLink` does exactly what this file needs.
- * 2. **Extension** — task 037's own POML places it in wave `P3-c` alongside sibling task 036 and
- *    binds: *"Do not modify … the share-link/send-email path — those belong to siblings in this
- *    wave."* `sendEmailService.ts` IS the send-email path (its own header names task 036). Exporting
- *    the existing private function would still be an edit to that file, so extension is unavailable
- *    under this task's own constraint — not a technical limitation.
- * 3. **Cost of doing nothing** — without a mint call, `shareDocument` cannot produce a share link at
- *    all, failing FR-17's Share acceptance criterion outright.
- *
- * A small, independent duplicate is therefore the correct call here, not scope creep — see
- * `projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md` for the full note. If the wave
- * boundary is later lifted, consolidating both call sites onto one shared function is a legitimate,
- * low-risk follow-up (same request/response shape, same route, same auth path).
+ * Task 037 wrote it as a duplicate of a private copy in `sendEmailService.ts`, because its wave forbade
+ * touching that file; task 075 removed the copy and pointed Send Email here.
  *
  * The route itself (`POST /api/documents/{documentId}/share-link`, `FileAccessEndpoints.cs`) is
  * EXISTING, shipped server infrastructure — calling it is ordinary client reuse, not new BFF surface,

@@ -3,12 +3,13 @@
  *
  * Lifted from the `TrackingFieldTrio` PCF (`TrackingFieldTrioApp.tsx`) into
  * `@spaarke/ui-components` per task 023 (email-communication-solution-r5).
- * The shared core carries NO `sprk_communication`-specific option integers,
- * labels, or colors — every access-permission segment (value + label +
- * color) and every field display label is supplied by the caller. The PCF
- * caller injects its `sprk_communication` OptionSet metadata via
- * `getAccessPermissionOptions()`; a future consumer (e.g. the Phase-3
- * reading-pane tracking view, task 035) injects its own.
+ * The shared core carries NO entity-specific option integers, labels, or
+ * colors — every access-permission segment (value + label + color) and every
+ * field display label is supplied by the caller. The PCF caller injects the
+ * bound record's OptionSet metadata via `getAccessPermissionOptions()` (the
+ * project / matter / work-assignment `sprk_accesspermission`; the
+ * `sprk_communication` copy is retired — task 138, owner Q6: a communication
+ * inherits its parent's permission).
  */
 
 /** A single access-permission segment: the option's raw value, display label,
@@ -55,6 +56,36 @@ export interface ITrackingFieldTrioProps {
   onMonitorChange: (value: boolean) => void;
   onHighPriorityChange: (value: boolean) => void;
   onAccessPermissionChange: (value: number) => void;
+
+  /** The control is read-only — the host's form is disabled or read-only (task
+   * 138; the PCF passes `context.mode.isControlDisabled`). Disables ALL THREE
+   * controls: the Monitor and High Priority switches and the access-permission
+   * pill, whose menu then cannot open — so no `on*Change` callback can fire and
+   * no write that the form would refuse is offered. Default `false`. */
+  disabled?: boolean;
+  /** Disables the access-permission pill ONLY — e.g. the bound column is not
+   * editable for this user (the PCF passes the attribute's
+   * `security.editable === false`). Default `false`. */
+  accessPermissionDisabled?: boolean;
+  /** Whether the access-permission pill is shown at all (task 138). `false`
+   * when the host has no access-permission column bound (the property is
+   * optional in the PCF manifest) — the third column then stays empty, keeping
+   * the grid aligned. Default `true`. */
+  showAccessPermission?: boolean;
+  /** Secure-record display for the pill (task 138; owner O1 FINAL, 2026-10-01).
+   * When supplied — the host knows the record is SECURE — the CLOSED pill reads
+   * `label` in red for every underlying value (both "secure" and "secure +
+   * Restricted": "Secure – Restricted" would not fit the pill without changing
+   * the trio's spacing). It changes the closed label ONLY: the open menu still
+   * lists {@link accessPermissionOptions} unchanged (Standard / Limited /
+   * Restricted), and selecting one calls {@link onAccessPermissionChange} with
+   * that option's own value — the secure display never rewrites the stored
+   * value. O1 FINAL specifies the closed label and the Manage Access bar, not a
+   * different menu. Securing and unsecuring the record is NOT done here (task
+   * 150's ribbon command). */
+  secureAccessPermission?: {
+    label: string;
+  };
 
   // ---------------------------------------------------------------------
   // Governance toolbar (person + email icons — task 040, teams-app-r1).

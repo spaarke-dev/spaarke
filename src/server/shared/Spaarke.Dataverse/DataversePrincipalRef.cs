@@ -74,4 +74,23 @@ public static class DataversePrincipalRefExtensions
         (int)DataversePrincipalKind.Team => DataversePrincipalKind.Team,
         _ => null,
     };
+
+    /// <summary>
+    /// Maps a POA <c>principaltypecode</c> as the Web API actually returns it — the entity LOGICAL NAME
+    /// (<c>"systemuser"</c> / <c>"team"</c>) — to a <see cref="DataversePrincipalKind"/>, or <c>null</c> for a name this
+    /// seam does not model.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 139 (found while running the share backfill read-only against spaarkedev1,
+    /// 2026-10-02): <c>principaltypecode</c> is an EntityName column, and the Web API serializes it as the logical-name
+    /// STRING (<c>"principaltypecode":"systemuser"</c>), not the object type code 8. A reader that accepted only a JSON
+    /// number skipped — or, strictly, refused — every share row.
+    /// </remarks>
+    public static DataversePrincipalKind? FromPrincipalTypeName(string? principalTypeName) =>
+        principalTypeName?.Trim().ToLowerInvariant() switch
+        {
+            "systemuser" => DataversePrincipalKind.SystemUser,
+            "team" => DataversePrincipalKind.Team,
+            _ => null,
+        };
 }

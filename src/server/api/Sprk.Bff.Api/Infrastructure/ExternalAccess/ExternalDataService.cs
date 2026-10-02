@@ -172,7 +172,7 @@ public class ExternalDataService
     /// Retrieves multiple projects by their IDs.
     /// Used by the workspace home page to list the user's accessible projects.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalProjectDto>> GetProjectsAsync(
+    public virtual async Task<IReadOnlyList<ExternalProjectDto>> GetProjectsAsync(
         IEnumerable<Guid> projectIds, CancellationToken ct = default)
     {
         var ids = projectIds.ToList();
@@ -192,7 +192,7 @@ public class ExternalDataService
     }
 
     /// <summary>Retrieves a single project by ID.</summary>
-    public async Task<ExternalProjectDto?> GetProjectByIdAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<ExternalProjectDto?> GetProjectByIdAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_projectid,sprk_projectname,sprk_projectnumber,sprk_projectdescription,sprk_issecure,statecode,createdon,modifiedon";
         var url = $"{GetApiUrl()}/sprk_projects({projectId})?$select={select}";
@@ -206,7 +206,7 @@ public class ExternalDataService
     // ---------------------------------------------------------------------------
 
     /// <summary>Retrieves all documents belonging to the specified project.</summary>
-    public async Task<IReadOnlyList<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalDocumentDto>> GetDocumentsAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_documentid,sprk_documentname,sprk_documenttype,sprk_filesummary,_sprk_project_value,createdon";
         var filter = Uri.EscapeDataString($"_sprk_project_value eq {projectId}");
@@ -557,7 +557,7 @@ public class ExternalDataService
     /// FR-29 retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by
     /// <see cref="GetTodosAsync"/>. Reintroducing that flag here would resurrect the model FR-29 removed.
     /// </remarks>
-    public async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
     {
         var select = "sprk_eventid,sprk_name,sprk_duedate,sprk_status,createdon,_sprk_regardingproject_value";
         var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
@@ -645,9 +645,21 @@ public class ExternalDataService
     /// <para><c>virtual</c> per ADR-038 §4 (substitution seam), added by task 029 for the same reason
     /// <c>UpdateTodoAsync</c> is virtual: the deny tests must assert the create NEVER REACHED
     /// Dataverse, and a status-code assertion alone would pass even if it had.</para>
+    /// <para><b>Assigned To (unified-access-control-r2 task 152, #1044 split).</b> The create is app-only, so Created
+    /// By is the BFF application user and cannot say who the to-do is for. The CALLING contact — the triggering
+    /// person — is written to <c>sprk_assignedto</c> (the closed request DTO carries no assignee, so nothing is ever
+    /// overwritten). An unlinked workforce caller (<paramref name="callerContactId"/> null) leaves it blank with a
+    /// <c>todo_unassigned</c> warning; the to-do is still reachable through its root. Never a team, never an email
+    /// match. Escalation (d) checked: no grant path treats <c>sprk_todo.sprk_assignedto</c> as grant-bearing today
+    /// (child-entity registry entries confer nothing; task 142's recommendation (f) keeps it that way) — reconcile
+    /// with 142 if that changes.</para>
     /// </remarks>
     public virtual async Task<ExternalTodoDto> CreateTodoAsync(
-        TodoRootKind rootKind, Guid rootId, CreateExternalTodoRequest request, CancellationToken ct = default)
+        TodoRootKind rootKind,
+        Guid rootId,
+        CreateExternalTodoRequest request,
+        Guid? callerContactId,
+        CancellationToken ct = default)
     {
         if (rootId == Guid.Empty)
             throw new ArgumentException("Root id must be a non-empty GUID.", nameof(rootId));
@@ -678,7 +690,14 @@ public class ExternalDataService
 
         // ADR-024: the specific regarding lookup + the 4 resolver fields are written ATOMICALLY in
         // this one request — never in a follow-up PATCH.
-        var body = BuildTodoCreatePayload(request, binding, rootId, rootDisplayName, recordTypeRef?.Id);
+        var body = BuildTodoCreatePayload(request, binding, rootId, rootDisplayName, recordTypeRef?.Id, callerContactId);
+        if (!body.ContainsKey(AssignedToBindKey))
+        {
+            _logger.LogWarning(
+                "todo_unassigned: entity=sprk_todo parentEntity={ParentEntity} parentId={ParentId} reason={Reason} — the "
+                + "calling principal has no linked contact; sprk_assignedto left blank (never a team, never an email match)",
+                binding.EntityLogicalName, rootId, "caller_has_no_linked_contact");
+        }
 
         var url = $"{GetApiUrl()}/sprk_todos";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
@@ -708,6 +727,9 @@ public class ExternalDataService
         return MapTodo(row);
     }
 
+    /// <summary>The <c>sprk_todo.sprk_assignedto</c> (contact) bind key on the Web API create payload (task 152).</summary>
+    internal const string AssignedToBindKey = "sprk_AssignedTo@odata.bind";
+
     /// <summary>
     /// Builds the COMPLETE create payload for a to-do: the caller-supplied fields, exactly one
     /// regarding lookup bind, and all four ADR-024 resolver fields — then asserts the one-parent
@@ -729,7 +751,8 @@ public class ExternalDataService
         TodoRootBinding binding,
         Guid rootId,
         string rootDisplayName,
-        Guid? recordTypeRefId)
+        Guid? recordTypeRefId,
+        Guid? assignedToContactId = null)
     {
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
@@ -767,6 +790,13 @@ public class ExternalDataService
 
         // Non-fatal when absent, mirroring the SDK path: correctness is intact, only the
         // cross-entity-view icon is lost. The caller logs the warning (it owns the lookup).
+
+        // Task 152: the person this to-do is FOR — the calling contact (the triggering person). PascalCase navigation
+        // property, the same bind every client to-do writer uses (CreateTodoWizard/todoService.ts).
+        if (assignedToContactId is { } assignee && assignee != Guid.Empty)
+        {
+            body[AssignedToBindKey] = $"/contacts({assignee:D})";
+        }
 
         AssertSingleRegardingLookup(body);
 
@@ -886,7 +916,7 @@ public class ExternalDataService
     /// Retrieves contacts with active access to the specified project.
     /// Queries sprk_externalrecordaccess to find contact IDs, then fetches contact details.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalContactDto>> GetContactsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalContactDto>> GetContactsAsync(Guid projectId, CancellationToken ct = default)
     {
         // Step 1: Get contact IDs from the access junction table
         var contactIds = await GetProjectContactIdsAsync(projectId, ct);
@@ -904,7 +934,7 @@ public class ExternalDataService
     /// <summary>
     /// Retrieves organizations (accounts) linked to the project via project contacts.
     /// </summary>
-    public async Task<IReadOnlyList<ExternalOrganizationDto>> GetOrganizationsAsync(Guid projectId, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<ExternalOrganizationDto>> GetOrganizationsAsync(Guid projectId, CancellationToken ct = default)
     {
         // Step 1: Get contacts for the project
         var contacts = await GetContactsAsync(projectId, ct);

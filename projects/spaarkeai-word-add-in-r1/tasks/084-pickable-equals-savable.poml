@@ -3,7 +3,8 @@
   <metadata>
     <title>Pickable equals savable: the record picker, Outlook's suggestion cards and the ribbon quick-save offer only records the save will accept (#1037, #1075)</title>
     <phase>5 Remediation — authorization affordance</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-01, `91e73b6fc`. The search (`access=file` → `canFile`) and the suggestions (`filingAccess`) carry the save's own verdict, from ONE evaluator (`OfficeSearchService.EvaluateFilingAccessAsync`). The probe gained a multi-record method (identity once, ≤4 lookups at once). The pane shows a non-fileable record disabled with the verbatim reason and never selects it. The ribbon sends the friendly type (#1075), does not auto-file a non-fileable prediction, and its notifications now use `replaceAsync` within the 150-character limit (two defects found in review). Parity test over 6 rights masks; seeded control 6 failures. Suite 13,064/0/54 (+24 exact); ArchTests 337; jest 61/809; lint 0; tsc 68/0 production; publish +5,043 B. OPEN, stated: the live check (no deploy), and latency measured from a workstation (≈0.71 s modelled p50, under the 1 s trigger); confirm on the dev BFF after the next deploy. Record: `notes/084-pickable-equals-savable.md`.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF endpoints and the caller-rights probe (bff-api, auth), the pane (.tsx), and tests/**. It decides what a user is shown as fileable, which is an authorization affordance.</rigor-reason>
     <model-tier>opus</model-tier>

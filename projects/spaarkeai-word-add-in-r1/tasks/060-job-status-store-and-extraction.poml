@@ -4,7 +4,8 @@
     <title>Office job status lives in a static in-memory dictionary — it does not survive a restart or a second instance</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>blocked until 058 AND 067 merge — 058 removes attachment/share members that also touch the job path, and 067 lands the creator-OID schema change this task consumes. RE-SCOPED 2026-09-21: two persisted fields and the client's terminal-error handling are now in scope. See the RE-SCOPE block in background.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-01, `3511668f4` + review fix `3fb75a1a4`; #1084 / ISS-017. The static store was the smallest of three defects: both Dataverse job reads returned anonymous types read through `dynamic` (RuntimeBinderException in production), so the 039 idempotency check never worked live; and 27 of 40 saves had no job row (content base64 in sprk_payload). Store decided before code (note §2): the Dataverse row, with the save's own view in sprk_result (the workers never write it), typed ProcessingJobRecord reads, one effective-state rule for status and idempotency (including a 5-minute abandoned rule), payload = metadata only, and a create failure refused as OFFICE_014 502 before any write. New OfficeJobStatusService (the stream moved verbatim); OfficeService constructor 20 to 19; IOfficeService unchanged; the dead Workers/Office stub deleted. Pane: Completed without a document is a visible terminal error on poll and SSE; SSE understands the server's event names; the outcome is applied once. Reproduce-first: 6 new and 5 existing (false-green) server tests red, 5 client tests red. Named job-status, 039 and 029 test methods unmodified; one fixture (OfficeVersionSaveWorld) became production-faithful. Seeds caught 11 / 3 / 1 / 1. Gates in note §9; publish +338 B. Open, stated: a live restart check after the next deploy. Task 068 owns the dispatcher and JobStatusService._jobSequences.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>A live correctness defect on the deployed save path, not a refactor. Tags include bff-api. The storage decision is architectural (ADR-009 Redis-first) and the extraction is a hot-path change.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -115,6 +116,22 @@
     <step>Extract the job-status and SSE cluster into `OfficeJobStatusService`; register concretely.</step>
     <step>Gates, then `notes/060-job-status-store-and-extraction.md` with the decision record and before/after metrics.</step>
   </steps>
+
+  <ui-tests>
+    <test name="Save survives a restart (manual, after the next BFF deploy from master)">
+      <steps>
+        <step>Word pane: save a document (over 40 KB) to a Matter. The pane completes and offers Open.</step>
+        <step>Restart spaarke-bff-dev. Open the same job's status URL (or reopen the pane on the save): it reports Completed with the same document id, never 404.</step>
+        <step>Save the identical document again: the pane reports it as already saved (duplicate), and no second document appears.</step>
+      </steps>
+    </test>
+    <test name="A save cut off mid-flight reaches a definite outcome">
+      <steps>
+        <step>Start a save and restart the BFF while it is in flight. The pane shows an error, never an endless "processing".</step>
+        <step>Retry after 5 minutes: the save runs, and is not answered as a duplicate of the dead attempt.</step>
+      </steps>
+    </test>
+  </ui-tests>
 
   <relevant-files>
     <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>

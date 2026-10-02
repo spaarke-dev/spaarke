@@ -161,6 +161,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         composed.RecordIds.Should().NotContain(StandingOnlyProject,
             "absent, not present-with-zero-rights: a visible record the caller cannot act on is worse");
         composed.RightsFor(StandingOnlyProject).Should().Be(AccessRights.None);
+        composed.Rights.Should().NotContainKey(StandingOnlyProject,
+            "task 136: absent from the answer itself, not only from the Read-gated views");
         (await sut.IsRecordAccessibleAsync(principal, ProjectEntity, StandingOnlyProject, CancellationToken.None))
             .Should().BeFalse("a standing grant with no chosen level is not a grant");
 
@@ -283,8 +285,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         // Task 039: same reasoning as the RootRecordFlags override above — without these, the base
         // implementations throw on `credential: null!`, and AccessibleRecordSetService's deny-veto
         // resolution would fail closed (deny everything), which this seam is not testing.
-        public override Task<IReadOnlyList<Guid>> QueryActiveOrgIdsAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<Guid>>(Array.Empty<Guid>());
+        internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(ActiveOrgMemberships.None);
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

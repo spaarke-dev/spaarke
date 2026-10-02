@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -17,6 +17,7 @@ import {
   SearchRegular,
   AddRegular,
   DismissRegular,
+  InfoRegular,
   PersonSearchRegular,
 } from '@fluentui/react-icons';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
@@ -37,7 +38,17 @@ import type { MatterTypeChoice } from '../services/matterTypeLookupService';
  * Selecting only turns the card's check GREEN (with a small × to clear) — the search row
  * and other cards stay. Single-select chips (gray except selected=blue, default Matter).
  * Host-agnostic: selecting only *chooses*; the regarding is written at save. Fluent v9.
+ *
+ * Task 084 (#1037, "pickable equals savable"): a record whose `canFile === false` (the caller can read
+ * it but the save would refuse it — filing needs AppendTo) renders DISABLED with the reason, for search
+ * rows and suggestion cards alike. It has no select control, is out of the tab order, and is never
+ * selected — not by click, not by keyboard, not by any pre-selection. `canFile` true/null/absent rows
+ * behave exactly as before.
  */
+
+/** Task 084 — the disabled row's reason. Verbatim owner copy; do not reword (the tests pin it literally). */
+const FILING_BLOCKED_REASON =
+  "You can view this record but can't file to it. Filing needs Append To permission on the record.";
 
 const useStyles = makeStyles({
   root: {
@@ -74,6 +85,16 @@ const useStyles = makeStyles({
   cardBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   cardTitle: { overflow: 'hidden', textOverflow: 'ellipsis' },
   cardMeta: { color: tokens.colorNeutralForeground3 },
+  // Task 084: the disabled row's inline reason. The Card's own `disabled` styling dims the record (Fluent
+  // disabled tokens); the reason keeps a readable foreground token so it stays legible in both themes.
+  blockedReason: {
+    display: 'flex',
+    alignItems: 'flex-start',
+    gap: tokens.spacingHorizontalXS,
+    marginTop: tokens.spacingVerticalXXS,
+    color: tokens.colorNeutralForeground2,
+  },
+  blockedReasonIcon: { flexShrink: 0, marginTop: tokens.spacingVerticalXXS },
   checkWrap: { position: 'relative', flexShrink: 0 },
   greenCheckBtn: {
     backgroundColor: tokens.colorStatusSuccessBackground3,
@@ -210,6 +231,19 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const selectedShown =
     value !== null && (typeMatches.some(c => sameRecord(c, value)) || searchResults.some(r => sameRecord(r, value)));
 
+  // Task 084: a selection the save would refuse never stands. The picker itself never selects a
+  // `canFile === false` record, but a selection can arrive from elsewhere — e.g. SaveFlow restoring the
+  // last association, made before the caller's rights changed. If the server now reports that record as
+  // not fileable (here, or in a search row / suggestion card on screen), clear it; the disabled row says why.
+  const selectedNotFileable =
+    value !== null &&
+    (value.canFile === false ||
+      searchResults.some(r => r.canFile === false && sameRecord(r, value)) ||
+      candidates.some(c => c.canFile === false && sameRecord(c, value)));
+  useEffect(() => {
+    if (selectedNotFileable) onChange(null);
+  }, [selectedNotFileable, onChange]);
+
   const handleTypeChange = (type: EntityType) => {
     setSelectedType(type);
     setQuery('');
@@ -298,9 +332,34 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   };
 
   // One card. Selected → green check + a small × to clear; else a blue check to select.
+  // Task 084: `canFile === false` → a DISABLED card with the reason and NO select control (modeled on
+  // AttachmentSelector's invalid-attachment row). Fluent's Card `disabled` sets aria-disabled="true",
+  // dims it with disabled tokens and drops onClick; tabIndex -1 keeps it out of the tab order. There is
+  // no handler of any kind on it, so neither a click nor Enter/Space can select it.
   const renderCard = (rec: EntitySearchResult, opts: { confidence?: number; keyPrefix?: string }) => {
     const selected = value !== null && sameRecord(rec, value);
     const key = `${opts.keyPrefix ?? ''}${rec.logicalName}:${rec.id}`;
+    const meta = opts.confidence != null ? `${rec.entityType} · ${pct(opts.confidence)}% match` : rec.entityType;
+    if (rec.canFile === false) {
+      return (
+        <Card key={key} className={styles.card} disabled aria-disabled="true" tabIndex={-1}>
+          <div className={styles.cardRow}>
+            <div className={styles.cardBody}>
+              <Text weight="semibold" className={styles.cardTitle}>
+                {rec.displayInfo ? `${rec.displayInfo} : ${rec.name}` : rec.name}
+              </Text>
+              <Text size={200} className={styles.cardMeta}>
+                {meta}
+              </Text>
+              <Text size={200} className={styles.blockedReason}>
+                <InfoRegular className={styles.blockedReasonIcon} aria-hidden="true" />
+                <span>{FILING_BLOCKED_REASON}</span>
+              </Text>
+            </div>
+          </div>
+        </Card>
+      );
+    }
     return (
       <Card key={key} className={mergeClasses(styles.card, selected && styles.cardSelected)}>
         <div className={styles.cardRow}>
@@ -309,7 +368,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
               {rec.displayInfo ? `${rec.displayInfo} : ${rec.name}` : rec.name}
             </Text>
             <Text size={200} className={styles.cardMeta}>
-              {opts.confidence != null ? `${rec.entityType} · ${pct(opts.confidence)}% match` : rec.entityType}
+              {meta}
             </Text>
           </div>
           {selected ? (

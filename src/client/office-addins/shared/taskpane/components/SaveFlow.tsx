@@ -879,6 +879,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
     (entity: EntitySearchResult | null) => {
+      // Task 084: a record the caller cannot file to is never selected, whatever path asked for it. The
+      // picker already offers no way to select one; this is the pane-level backstop.
+      if (entity?.canFile === false) return;
       setSelectedEntity(entity);
       if (entity) {
         announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
@@ -944,6 +947,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // status-aware fallback otherwise, via `describeFetchFailure`); `RelatedToPicker`'s `runSearch` catches
   // it and renders it distinctly from an empty result set, with a Retry. A genuinely empty search still
   // resolves to `[]`, unchanged.
+  //
+  // Task 084 (#1037, "pickable equals savable"): this search lists records the caller can READ, but the
+  // save demands AppendTo on the chosen record. So it asks the server for filing access (`access=file`,
+  // opt-in — the To Do Contact search in App.tsx deliberately does NOT send it) and carries each row's
+  // `canFile` into the picker, which shows a `canFile === false` row disabled with the reason.
   const relatedSearch = useCallback(
     async (query: string, type: EntityType): Promise<EntitySearchResult[]> => {
       if (!apiBaseUrl || !getAccessToken) {
@@ -954,7 +962,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       try {
         const token = await getAccessToken();
         res = await authenticatedJsonFetch(
-          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10`,
+          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10&access=file`,
           { headers: { 'Content-Type': 'application/json' } },
           token,
           { getRetryToken: getAccessToken }
@@ -976,13 +984,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         logicalName: string;
         name: string;
         displayInfo?: string;
+        canFile?: boolean | null;
       }>;
+      // An EXPLICIT field map: any field not listed here is dropped. `canFile` must stay listed, or a
+      // record the save would refuse renders as selectable again (task 084 pins this with a test).
       return rows.map(item => ({
         id: item.id,
         entityType: item.entityType as EntityType,
         logicalName: item.logicalName,
         name: item.name,
         ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
+        ...(item.canFile !== undefined ? { canFile: item.canFile } : {}),
       }));
     },
     [apiBaseUrl, getAccessToken]

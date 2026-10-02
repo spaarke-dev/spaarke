@@ -92,6 +92,26 @@
     Exit 0 even when the credential could not be verified by token exchange. Off by default,
     deliberately — an unverified FIC is not evidence that anything works.
 
+.PARAMETER AcctClaimOnly
+    Ensure the `acct` optional claim on an EXISTING BFF app registration's access tokens and exit
+    (unified-access-control-r2 task 141). Requires -AcctClaimAppId. Idempotent: an `acct` entry already
+    present is left alone; every other optional claim is preserved.
+
+    WHY: the BFF binds a first-time workforce caller (a customer employee with no Power Apps licence) to a
+    contact by email ONLY when that caller is a MEMBER of a configured customer tenant — `acct = 0`. Without
+    `acct` in the token the member test fails closed and every first sign-in is denied
+    (sdap.access.deny.workforce_acct_claim_missing). It is a PER-CUSTOMER requirement: every per-customer BFF
+    registration (D-13) needs it. Optional claims on the resource registration apply to every access token
+    issued FOR it, including Teams SSO tokens. A fresh registration created by Step 1 gets it automatically.
+
+.PARAMETER AcctClaimAppId
+    App registration (appId or object ID) for -AcctClaimOnly.
+
+.EXAMPLE
+    # Add `acct` to the dev BFF registration's access tokens (task 141 manual gate G-2)
+    .\Register-EntraAppRegistrations.ps1 -TenantId a221a95e-6abc-4434-aecc-e48338a1b2f2 `
+      -AcctClaimOnly -AcctClaimAppId 1e40baad-e065-4aea-a8d4-4b7ab273458c
+
 .EXAMPLE
     # Create + verify the dev FIC (re-running against an existing one is a no-op)
     .\Register-EntraAppRegistrations.ps1 -FicOnly `
@@ -142,7 +162,12 @@ param(
     # NOT defaulted to on. Flipping the default would silently change behaviour for every existing
     # caller of a script that provisions identities — including customer-provisioning-orchestration-r1,
     # whose Wave G-3 consumes it. Opt-in keeps the change visible at the call site.
-    [switch]$SkipClientSecret
+    [switch]$SkipClientSecret,
+
+    # ── `acct` optional claim — added 2026-10-01, unified-access-control-r2 task 141 ──
+    # Inert unless specified. See .PARAMETER AcctClaimOnly.
+    [switch]$AcctClaimOnly,
+    [string]$AcctClaimAppId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -156,6 +181,10 @@ $ficArgsSupplied = @($UamiResourceId, $FederatedCredentialAppId, $FederatedCrede
 if (($ficArgsSupplied -gt 0 -or $ForceFederatedCredentialUpdate -or $AllowUnverified) -and
     -not ($CreateFederatedCredential -or $FicOnly)) {
     throw "Federated-credential parameters were supplied without -CreateFederatedCredential or -FicOnly. Refusing to run the full app-registration path (which would mint a client secret and write to Key Vault) when a FIC run was clearly intended."
+}
+
+if ($AcctClaimOnly -and -not $AcctClaimAppId) {
+    throw "-AcctClaimOnly needs -AcctClaimAppId (the BFF app registration to add the acct optional claim to)."
 }
 
 # -FicOnly is a mode, not an extra step: it turns this into a federated-credential-only run.
@@ -1074,6 +1103,92 @@ anything works.
 # to move with it, which is why it was not done inline here.
 
 # ─────────────────────────────────────────────────────────────────────────────
+# `acct` optional claim (unified-access-control-r2 task 141)
+# ─────────────────────────────────────────────────────────────────────────────
+
+function Get-SpaarkeAccessTokenOptionalClaimsWithAcct {
+    <#
+    .SYNOPSIS
+        PURE. Returns the access-token optional-claims list with `acct` added, preserving every existing
+        entry; returns $null when `acct` is already present (nothing to change).
+    #>
+    param([object[]]$ExistingAccessTokenClaims)
+
+    $existing = @($ExistingAccessTokenClaims | Where-Object { $_ })
+    if ($existing | Where-Object { $_.name -eq 'acct' }) {
+        return $null
+    }
+
+    $merged = @($existing | ForEach-Object {
+            @{ name = $_.name; source = $_.source; essential = [bool]$_.essential; additionalProperties = @($_.additionalProperties) }
+        })
+    $merged += @{ name = 'acct'; source = $null; essential = $false; additionalProperties = @() }
+    return , $merged
+}
+
+function Set-SpaarkeAcctOptionalClaim {
+    <#
+    .SYNOPSIS
+        Ensures the `acct` optional claim (member = 0, guest = 1) on an app registration's ACCESS tokens.
+        Idempotent; preserves every other optional claim (the dev registration carries email,
+        preferred_username and upn). Reads first, writes only when `acct` is missing.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [switch]$DryRun
+    )
+
+    $app = az ad app show --id $AppId --output json 2>$null | ConvertFrom-Json
+    if (-not $app) {
+        throw "App registration '$AppId' not found — cannot add the acct optional claim."
+    }
+
+    $claims = Get-SpaarkeAccessTokenOptionalClaimsWithAcct -ExistingAccessTokenClaims $app.optionalClaims.accessToken
+    if ($null -eq $claims) {
+        Write-Success "acct optional claim already present on $($app.displayName) ($($app.appId)) — no change"
+        return
+    }
+
+    if ($DryRun) {
+        Write-Info "DRY RUN: Would add the acct optional claim to $($app.displayName) access tokens"
+        Write-Info "  accessToken claims after: $(($claims | ForEach-Object { $_.name }) -join ', ')"
+        return
+    }
+
+    $body = @{
+        optionalClaims = @{
+            accessToken = $claims
+            idToken     = @($app.optionalClaims.idToken | Where-Object { $_ })
+            saml2Token  = @($app.optionalClaims.saml2Token | Where-Object { $_ })
+        }
+    } | ConvertTo-Json -Depth 6
+
+    $bodyPath = [System.IO.Path]::GetTempFileName()
+    try {
+        $body | Out-File -FilePath $bodyPath -Encoding utf8
+        az rest --method PATCH `
+            --uri "https://graph.microsoft.com/v1.0/applications/$($app.id)" `
+            --headers "Content-Type=application/json" `
+            --body "@$bodyPath" `
+            --output none
+        if ($LASTEXITCODE -ne 0) {
+            throw "Graph PATCH of optionalClaims failed for $($app.appId)."
+        }
+    }
+    finally {
+        Remove-Item $bodyPath -ErrorAction SilentlyContinue
+    }
+
+    # Read back — a write we did not observe is not a write we can report.
+    $after = az ad app show --id $AppId --query "optionalClaims.accessToken[?name=='acct'] | length(@)" -o tsv 2>$null
+    if ($after -ne '1') {
+        throw "acct optional claim not visible on $($app.appId) after the PATCH (read back: '$after')."
+    }
+
+    Write-Success "acct optional claim added to $($app.displayName) ($($app.appId)) access tokens"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Pre-flight Checks
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1104,6 +1219,12 @@ if ($currentTenant -ne $TenantId) {
     }
 }
 Write-Success "Target tenant: $TenantId"
+
+if ($AcctClaimOnly) {
+    Write-Header "ACCT OPTIONAL CLAIM (task 141)"
+    Set-SpaarkeAcctOptionalClaim -AppId $AcctClaimAppId -DryRun:$DryRun
+    exit 0
+}
 
 # Verify Key Vault access (not relevant to a federated-credential-only run — a FIC replaces
 # the secret rather than storing one)
@@ -1277,9 +1398,13 @@ if (-not $SkipBffApi) {
 
         Remove-Item $apiPath -ErrorAction SilentlyContinue
         Write-Success "Exposed API scope: $appIdUri/user_impersonation"
+
+        # task 141: the member test behind first-sign-in identity binding reads `acct` from the access token.
+        Set-SpaarkeAcctOptionalClaim -AppId $BffApiAppId
     } elseif ($DryRun) {
         Write-Info "DRY RUN: Would set Application ID URI: api://<app-id>"
         Write-Info "DRY RUN: Would expose scope: api://<app-id>/user_impersonation"
+        Write-Info "DRY RUN: Would add the acct optional claim to access tokens (task 141)"
     }
 
     # Step 3: Generate client secret

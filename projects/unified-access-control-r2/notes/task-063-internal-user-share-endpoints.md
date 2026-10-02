@@ -93,6 +93,12 @@ surface neither created nor can remove inherited access.
 
 ## 4. The levels (owner decision 2026-09-15, "No re-share at any level")
 
+> ⚠️ **SUPERSEDED 2026-09-30** by the owner's C4 decision (task 139, design-register **B-14a**): a person
+> with Write may share (OOB) and use Manage Access; Collaborate and Full Access now carry `ShareAccess`
+> (masks 262167 / 327703), colleagues named at provisioning receive exactly the creator's rights, and every
+> manual grant is capped at the grantor's own level. The section below is kept as the history of the
+> 2026-09-15 decision; do not implement from it. Current record: `notes/task-139-grant-model.md`.
+
 | Level | Value | Rights sent | Stored mask |
 |---|---|---|---|
 | View Only | 100000000 | `ReadAccess` | 1 |

@@ -1843,14 +1843,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// upstream, not in this reader, which reports honestly rather than filtering.
     /// </para>
     /// </remarks>
-    public async Task<object?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
+    public async Task<ProcessingJobRecord?> GetProcessingJobAsync(Guid id, CancellationToken ct = default)
     {
         const string initiatorAlias = "initiator";
 
         var query = new QueryExpression("sprk_processingjob")
         {
-            ColumnSet = new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
-                                       "sprk_idempotencykey", "sprk_correlationid", "sprk_initiatedby"),
+            ColumnSet = new ColumnSet(ProcessingJobColumns),
             TopCount = 1,
             NoLock = true
         };
@@ -1863,22 +1862,43 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         var entity = results.Entities.FirstOrDefault();
 
-        if (entity == null) return null;
-
-        // Return a dynamic object with the data
-        return new
-        {
-            Id = entity.Id,
-            Name = entity.GetAttributeValue<string>("sprk_name"),
-            JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
-            Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
-            Progress = entity.GetAttributeValue<int?>("sprk_progress"),
-            IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
-            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid"),
-            InitiatedBy = entity.GetAttributeValue<EntityReference>("sprk_initiatedby")?.Id,
-            InitiatedByOid = ExtractAliasedGuid(entity, $"{initiatorAlias}.azureactivedirectoryobjectid")
-        };
+        return entity == null
+            ? null
+            : ToProcessingJobRecord(entity) with
+            {
+                InitiatedByOid = ExtractAliasedGuid(entity, $"{initiatorAlias}.azureactivedirectoryobjectid")
+            };
     }
+
+    /// <summary>
+    /// The <c>sprk_processingjob</c> columns both job reads return. Task 060 added <c>sprk_currentstage</c>,
+    /// <c>sprk_result</c> (the Office save's own view of its job), the error columns and the two timestamps; the
+    /// Office job's effective state is read from them.
+    /// </summary>
+    private static readonly string[] ProcessingJobColumns =
+    {
+        "sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress", "sprk_currentstage", "sprk_idempotencykey",
+        "sprk_correlationid", "sprk_initiatedby", "sprk_result", "sprk_errorcode", "sprk_errormessage", "createdon",
+        "sprk_completeddate"
+    };
+
+    private static ProcessingJobRecord ToProcessingJobRecord(Entity entity) => new()
+    {
+        Id = entity.Id,
+        Name = entity.GetAttributeValue<string>("sprk_name"),
+        JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
+        Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
+        Progress = entity.GetAttributeValue<int?>("sprk_progress"),
+        CurrentStage = entity.GetAttributeValue<string>("sprk_currentstage"),
+        IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
+        CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid"),
+        InitiatedBy = entity.GetAttributeValue<EntityReference>("sprk_initiatedby")?.Id,
+        Result = entity.GetAttributeValue<string>("sprk_result"),
+        ErrorCode = entity.GetAttributeValue<string>("sprk_errorcode"),
+        ErrorMessage = entity.GetAttributeValue<string>("sprk_errormessage"),
+        CreatedOn = entity.GetAttributeValue<DateTime?>("createdon"),
+        CompletedDate = entity.GetAttributeValue<DateTime?>("sprk_completeddate"),
+    };
 
     /// <summary>
     /// Reads an aliased join column as a canonical bare-lowercase GUID string (ADR-044), or null when the
@@ -1901,12 +1921,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<object?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
+    public async Task<ProcessingJobRecord?> GetProcessingJobByIdempotencyKeyAsync(string idempotencyKey, CancellationToken ct = default)
     {
         var query = new QueryExpression("sprk_processingjob")
         {
-            ColumnSet = new ColumnSet("sprk_name", "sprk_jobtype", "sprk_status", "sprk_progress",
-                                       "sprk_idempotencykey", "sprk_correlationid"),
+            ColumnSet = new ColumnSet(ProcessingJobColumns),
             Criteria = new FilterExpression
             {
                 Conditions =
@@ -1924,18 +1943,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
         var entity = results.Entities.FirstOrDefault();
 
-        if (entity == null) return null;
-
-        return new
-        {
-            Id = entity.Id,
-            Name = entity.GetAttributeValue<string>("sprk_name"),
-            JobType = entity.GetAttributeValue<OptionSetValue>("sprk_jobtype")?.Value,
-            Status = entity.GetAttributeValue<OptionSetValue>("sprk_status")?.Value,
-            Progress = entity.GetAttributeValue<int?>("sprk_progress"),
-            IdempotencyKey = entity.GetAttributeValue<string>("sprk_idempotencykey"),
-            CorrelationId = entity.GetAttributeValue<string>("sprk_correlationid")
-        };
+        return entity == null ? null : ToProcessingJobRecord(entity);
     }
 
     public async Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
@@ -2258,6 +2266,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     {
         // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
         throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
+    /// <summary>
+    /// Not implemented here by design — same single-live-implementation rule as
+    /// <see cref="UpdateRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
+    /// </summary>
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
+    /// <summary>
+    /// Not implemented here by design — same single-live-implementation rule as
+    /// <see cref="UpdateExistingRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
+    /// </summary>
+    public Task UpdateRecordFieldsIfUnchangedAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        long expectedVersion,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException("UpdateRecordFieldsIfUnchangedAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
     // ========================================

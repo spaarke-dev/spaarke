@@ -14,8 +14,9 @@ namespace Sprk.Bff.Api.Tests.DataMutation.ExternalAccess;
 /// <c>/unsecure-project</c>.
 /// </summary>
 /// <remarks>
-/// <para><b>The defect these pin.</b> Task 021 assigned secure projects to the Secure Record business
-/// unit's default owner team, which has no members — correct isolation. It issued no shares. design.md
+/// <para><b>The defect these pin.</b> Task 021 assigned secure projects to a memberless Secure Record business
+/// unit owner team (the BU's default team then; its NAMED owner team since task 144) — correct isolation. It issued
+/// no shares. design.md
 /// §5.1 says <i>"All human access is by explicit Dataverse share, including the creating attorney's"</i>,
 /// so provisioning completed and left a record **no human could open**: isolated, and unreachable. The
 /// assertions below are about that round trip — a secure project must end up reachable by exactly the
@@ -88,9 +89,15 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
                 + "every addition would need an administrator");
     }
 
+    /// <summary>
+    /// Owner 2026-09-30 (C4, task 139): colleagues named at provisioning receive EXACTLY the creator's rights — the
+    /// Collaborate level, which carries ShareAccess so they can use the model-driven Share command as well as Manage
+    /// Access. Asserted against the LITERAL and against the creator's own share on the same project.
+    /// </summary>
     [Fact]
-    public async Task Provisioning_SharesToNamedPrincipals_WithoutShareAccess()
+    public async Task Provisioning_SharesToNamedPrincipals_WithExactlyTheCreatorsRights()
     {
+        const string collaborateLiteral = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
         var projectId = Guid.NewGuid();
         var colleague = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -103,10 +110,13 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
 
         var colleagueShare = _fixture.Grants.Should()
             .ContainSingle(g => g.Principal.Id == colleague).Subject;
+        var creatorShare = _fixture.Grants
+            .Single(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
 
-        colleagueShare.AccessRightsCsv.Should().Be(ProvisionProjectEndpoint.CollaboratorAccessRights);
-        colleagueShare.AccessRightsCsv.Should().NotContain("ShareAccess",
-            "re-sharing stays with the creator so the access list cannot widen through a chain nobody reviewed");
+        colleagueShare.AccessRightsCsv.Should().Be(collaborateLiteral);
+        creatorShare.AccessRightsCsv.Should().Be(collaborateLiteral);
+        colleagueShare.AccessRightsCsv.Should().Be(creatorShare.AccessRightsCsv,
+            "owner 2026-09-30: a colleague named at provisioning holds exactly what the creator holds");
     }
 
     [Fact]
@@ -211,6 +221,45 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         body.RootElement.GetProperty("sweepComplete").GetBoolean().Should().BeTrue();
         body.RootElement.GetProperty("sharesRevoked").GetInt32()
             .Should().Be(_fixture.Revokes.Count).And.BeGreaterThan(0);
+    }
+
+    /// <summary>
+    /// Task 144: matters and work assignments carry <c>sprk_issecure</c> too, and the reverse path works for them
+    /// exactly as for a project — owner moved and read back, every share revoked, the flag cleared, and the sweep's
+    /// completeness reported. The legacy <c>projectId</c> field stays empty: a matter's id is not a project id.
+    /// </summary>
+    [Theory]
+    [InlineData("matter", "sprk_matters")]
+    [InlineData("workassignment", "sprk_workassignments")]
+    public async Task Unsecure_OnAMatterOrWorkAssignment_ReassignsRevokesAndClearsTheFlag(string recordType, string entitySet)
+    {
+        var recordId = Guid.NewGuid();
+        if (recordType == "matter")
+            _fixture.SeedMatter(recordId);
+        else
+            _fixture.SeedWorkAssignment(recordId);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var provisioned = await client.PostAsJsonAsync(ProvisionRoute, new { recordType, recordId });
+        provisioned.StatusCode.Should().Be(HttpStatusCode.OK, await provisioned.Content.ReadAsStringAsync());
+        _fixture.OwningTeamOf(recordId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+
+        var response = await client.PostAsJsonAsync(UnsecureRoute, new { recordType, recordId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.OwningUserOf(recordId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId,
+            "ownership moves off the secure team to the caller, verified by read-back");
+        _fixture.Revokes.Should().Contain(r => r.EntitySet == entitySet && r.RecordId == recordId
+                                               && r.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.IsSecureOf(recordId).Should().BeFalse();
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("sweepComplete").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("sharesRevoked").GetInt32().Should().Be(1);
+        body.RootElement.GetProperty("recordType").GetString().Should().Be(recordType);
+        body.RootElement.GetProperty("recordId").GetGuid().Should().Be(recordId);
+        body.RootElement.GetProperty("projectId").GetGuid().Should().Be(Guid.Empty,
+            "the legacy field names a PROJECT; reporting a matter's id there would mislabel it");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

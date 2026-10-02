@@ -94,6 +94,61 @@ Both use existing `SystemAdmin` policy (`AuthorizationModule.cs:241`) per Q6 own
 ### Four global field exclusions
 
 `createdby`, `modifiedby`, `createdonbehalfby`, `modifiedonbehalfby` — these are touch-history, not association.
+**One exception, on one surface only:** the people-targeting surface admits a HUMAN `createdby` (ADR-034 Amendment
+A3, below). Discovery still excludes it everywhere; the resolver synthesizes it for that surface alone.
+
+---
+
+## Three Consumption Surfaces (ADR-034 A1 + A3)
+
+One resolver, three questions. Each is a `MembershipResolveOptions` setting on `IMembershipResolverService.ResolveAsync`;
+none is a second mechanism.
+
+| Surface | Option | Question it answers | Which descriptors bind | Consumers |
+|---|---|---|---|---|
+| **AI scoping** (default) | `options: null` | "Which records is this user associated with, in any way?" — generous by design, for retrieval | Every discovered descriptor (owner, team, BU, contact, account, organization) | `GET /api/users/me/memberships/{entityType}`, LookupUserMembership without `targeting` |
+| **Authorization** (A1/A1.1) | `AccessConferringOnly: true` | "Which records does this association let the user ACCESS?" | Registry-listed Contact/Organization columns + platform ownership (`ownerid`, `owningteam`, `owningbusinessunit`) | `AccessibleRecordSetService.ComposeForSystemUserAsync` |
+| **People targeting** (A3, task 152) | `PeopleTargeting: true` (`MembershipResolveOptions.People`) | "Which records are FOR this person?" — attention: briefing, notifications | A **human** `createdby`; the user-valued owner (`ownerid` / `owninguser`); registry **Contact**-typed "Assigned *" columns bound to the caller's **linked contact** (task 141). Nothing else — `owningteam`, `owningbusinessunit`, Team/BU/Organization/Account-typed lookups and maker-authored systemuser lookups select nothing | `DailyBriefingCollector` (all channels + High Priority), `PortfolioService` (Workspace portfolio / health metrics) and through it `BriefingService.GetTopPriorityMatterAsync`, LookupUserMembership with `"targeting": "people"` (every notification playbook) |
+
+Why the third surface exists (owner decisions round 2 item 9 + Q8, round 3 D1, 2026-09-30): a business unit's
+DEFAULT team contains every user in the unit, so binding `owningteam` put every team- or BU-owned matter in every
+same-BU user's briefing and notifications. Team and BU ownership are **access** facts; they are not **attention**
+facts. "Created By (when human) decides who a record is FOR — never who can open it."
+
+Rules of the people surface:
+
+- **Human Created By only.** The caller's `systemuser.applicationid` is read; an application user (e.g. the BFF's
+  own `# mi-bff-api-dev`, Created By of every BFF-created row) binds no `createdby` condition and a
+  `people_targeting_createdby_skipped` warning is logged. An unreadable systemuser row is treated the same way.
+- **Linked contact only.** "Assigned *" binds through `PersonIdentity.ContactId` (task 141's
+  `systemuser.sprk_primarycontact` / `contact.sprk_externalobjectid` link). No link → the term binds nothing and a
+  `member_skipped … reason=people_targeting_no_linked_contact` warning is logged. Never an email/UPN/name match.
+- **Mutually exclusive with `AccessConferringOnly`** — requesting both throws `ArgumentException`.
+- **Cache key.** `|p:1` is appended to the options hash only when set: every pre-existing key is byte-identical, and a
+  people-targeted call never shares a 5-minute entry with an AI-scoping call for the same user and entity.
+- **Selecting is not authorizing.** Every consumer reads the rows it SHOWS under the caller's Dataverse security
+  (`IImpersonatedCommunicationQuery`, MSCRMCallerID = caller), so a record FOR someone that they cannot open is
+  trimmed by Dataverse. A failed caller-context read is reported as failed (the briefing's `failedChannels` /
+  `highPriorityFailedEntityTypes`, the workspace briefing's `topPriorityMatterUnavailable`), never answered app-only.
+- **Read the whole set (briefing and Workspace consumers).** `DailyBriefingCollector` and `PortfolioService` (and,
+  through it, the Workspace top-priority matter) read their people-targeted ids to completion with `PeopleTargetedSet`
+  (one read at the resolver's 5,000-row ceiling, plus one confirmation read when that page comes back full). The
+  resolver pages in primary-id order, so the default 500-row page is an arbitrary subset, not the most recent rows; a
+  set larger than the ceiling is reported FAILED / unavailable, never shown truncated.
+  **Not the `LookupUserMembership` node:** with `"targeting": "people"` it still reads ONE page at
+  `MembershipResolveOptions.DefaultLimit` (500) and exposes `continuationToken` (pre-existing paging, unchanged by
+  task 152). The notification playbooks interpolate `myMatters.ids` into a downstream FetchXML `in` condition, and a
+  5,000-value `in` list is not a safe query (Dataverse passes `in` values as SQL parameters, and SQL Server refuses a
+  request with more than 2,100), so the node is not routed through `PeopleTargetedSet`; a person with more than
+  500 people-targeted matters gets notifications for a subset. Closing that needs the downstream query to page or
+  chunk its `in` list (a node/query contract change, not made here).
+
+Server-created records therefore name a person in an "Assigned *" column, because their Created By is the
+application user: `TodoGenerationService`, `TaskActionCore`, the external-portal to-do create and `POST
+/api/v1/events` write `sprk_assignedto`; Office quick-create writes `sprk_assignedtointernal` (owner A7). Precedence
+for the server to-do/task writers (`AssignedToDefaults`): a supplied assignee is kept; else the triggering person's
+linked contact; else the regarding parent's `sprk_assignedtointernal`, then `sprk_assignedattorney1`; else blank +
+`todo_unassigned`. Never a team.
 
 ---
 
@@ -298,7 +353,9 @@ This section enumerates every BFF surface that currently consumes the membership
 |---|---|---|---|
 | `LookupUserMembershipNodeExecutor` | `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs:70` | **Shipped — production wired** | Playbook node executor for `ActionType=52` (added task 040). Singleton-with-Scoped DI pattern via `IServiceScopeFactory`. Binds `{ids[], byRole, count, continuationToken, cacheExpiresAt}` to the node's `OutputVariable` for Handlebars consumption (e.g., `{{joinIds myMatters.ids}}`). |
 | `GET /api/users/me/memberships/{entityType}` | `Api/Membership/MembershipEndpoints.cs:102` | **Shipped — production wired** | Single user-facing HTTP endpoint. Auth: `RequireAuthorization()` default JWT (line 93). |
-| `BriefingService.GetTopPriorityMatterAsync` (`GET /api/workspace/briefing`) | `Services/Workspace/BriefingService.cs:172` | **Shipped — production wired (Wave 28 / GitHub #229 closeout, 2026-06-22)** | Replaces the prior STUB that returned hardcoded mock matter data. Resolves AAD `oid` → `systemuserid` via the same `systemuser.azureactivedirectoryobjectid` cross-reference algorithm as `MembershipEndpoints.ResolveSystemUserIdAsync` (10-min Redis cache under sibling prefix `membership:briefing-currentuser:`), calls `IMembershipResolverService.ResolveAsync(systemUserId, "sprk_matter", options: null, ct)`, queries Dataverse for matter detail rows by resolved IDs, applies the deterministic heuristic (max overdue events; tie-break = highest utilization; final tie-break = matter name). Failure-soft: any AAD-oid/resolver/Dataverse failure returns `null` TopMatter (briefing remains fully populated). Non-Guid `oid` short-circuits to `null` without I/O. Unit tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs` (7 scenarios). |
+| `DailyBriefingCollector` (`POST /api/ai/daily-briefing/render` + `/email`, High Priority) | `Services/Ai/Narrators/DailyBriefingCollector.cs` | **People-targeting surface (task 152)** | Resolves events, matters, projects, documents and to-dos with `MembershipResolveOptions.People`; reads every returned row as the caller through `IImpersonatedCommunicationQuery` (chunked at 50 ids); failed reads are named in `failedChannels` / `highPriorityFailedEntityTypes`; all channels failing throws. Holds no app-only Dataverse client. |
+| `BriefingService.GetTopPriorityMatterAsync` (`GET /api/workspace/briefing`) | `Services/Workspace/BriefingService.cs` | **Shipped (Wave 28 / GitHub #229); people-targeting surface since task 152** | Replaces the prior STUB that returned hardcoded mock matter data. Resolves AAD `oid` → `systemuserid` (the `systemuser.azureactivedirectoryobjectid` cross-reference, 10-min Redis cache under `membership:briefing-currentuser:`), then takes the matters FOR the user from `PortfolioService.ReadMattersForSystemUserAsync` (below) — candidates from `MembershipResolveOptions.People`, read to completion (`PeopleTargetedSet`), detail rows + overdue-task counts read as the caller. Deterministic heuristic: max overdue tasks; tie-break = highest utilization; final tie-break = matter name. **Fail closed (task 152):** a failed people resolution, a people set larger than the resolver's 5,000-row ceiling, or a failed caller-context read sets `topPriorityMatterUnavailable` — "could not be determined", distinct from "no matters" (`null` TopMatter). A non-Guid `oid` or an unprovisioned user short-circuits to `null` without I/O. (Task 152 also fixed the original detail query, which named four columns that do not exist on `sprk_matter` and always failed.) Unit tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs`. |
+| `PortfolioService` (`GET /api/workspace/portfolio`, `/health`, the Workspace briefing metrics) | `Services/Workspace/PortfolioService.cs` | **People-targeting surface since task 152 (verifier round 1)** | `ReadMattersForSystemUserAsync`: the matters FOR the user (`PeopleTargetedSet` over `MembershipResolveOptions.People`), read as the caller through `IImpersonatedCommunicationQuery` (chunked at 50 ids; `sprk_mattername`, `sprk_totalspendtodate`, `sprk_totalbudget`; overdue open tasks counted from `sprk_event`). Shared with `BriefingService` so the metrics and the top matter use one matter set. Replaced an app-only query with an ad-hoc `ownerid` = caller condition (the A1/D5 anti-pattern) that also selected three columns that do not exist on `sprk_matter`. A failed read keeps the endpoint's pre-existing empty portfolio. Unit tests: `PortfolioServiceTests.cs`. |
 
 > **Notes**: `Services/Ai/NodeService.cs:983` and `Services/Ai/Nodes/INodeExecutor.cs:139` contain only documentation references in comments — neither consumes the resolver.
 
@@ -312,6 +369,12 @@ All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) 
 | `notification-new-emails.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json` | Task 051 | Same pattern |
 | `notification-new-events.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json` | Task 052 | Same pattern |
 
+**Task 152:** every notification playbook's LookupUserMembership node now carries `"targeting": "people"` (and no
+`roles` filter, which would have dropped Created By) in its source JSON — all seven
+`projects/spaarke-daily-update-service/notes/playbooks/notification-*.json`. The four that are live in dev (Matter/Project
+Activity Summary, Tasks Due Soon, Tasks Overdue, New Work Assignments) are redeployed through
+`scripts/Deploy-Playbook.ps1` as a recorded manual gate (`projects/unified-access-control-r2/notes/task-152-people-targeting.md`).
+
 Integration coverage: `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/MigratedPlaybookTests.cs` + `MigratedPlaybookFixture.cs` (task 053).
 
 ### Consumers of `IMembershipEventPublisher` (Phase 2 publish path)
@@ -324,6 +387,18 @@ Integration coverage: `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks
 | `OfficeService` (save-document path) | `Services/Office/OfficeService.cs:38` (field) + `:52` (ctor) | Implicit `ownerid` on Office-initiated document creates | Task 081/082 |
 
 All four sites use fire-and-forget semantics (Q2) — the mutation succeeds even when publish fails. Default state: publisher is the `NullMembershipEventPublisher` peer (per `Membership:EventPublisher:Enabled=false`); calls are logged at Info but no Service Bus interaction.
+
+**Event semantics (task 152, ADR-034 A3).** All four publish through `MembershipOwnerEvents.PublishOwnerAddedAsync` →
+`MembershipChangedEvent.ForRowOwner`: the event states the row's ACTUAL owner after the write — `PersonIdType=Team,
+PersonId=teamid` for a team-owned row, `PersonIdType=User, PersonId=systemuserid` for a user-owned row — typed from the
+owner value's `LogicalName`. Documents and Office save pass the team they wrote; events and quick-create read the owner
+back. An application-user owner is not a person and produces no event. `MembershipReconciliationJob` applies the same
+typing (`ReadLookupAsIdentity` types an `EntityReference` from its `LogicalName`, not from the descriptor, which is
+always SystemUser for the polymorphic Owner) and the same application-user rule, so both writers build the SAME
+junction key. Before task 152 the publishers wrote the caller's AAD **oid** as a User — false for team-owned rows and in
+an identity space reconciliation never writes; those old rows are orphans and the reconciliation orphan scan removes
+them. The wire contract (`schemaVersion` 1, closed enums, property names) is unchanged; no consumer parses the old
+semantics (the only consumer is `MembershipJunctionUpdater`, which writes `PersonId` verbatim).
 
 ### Consumers of `IMembershipJunctionUpdater` (Phase 2 write path — internal)
 

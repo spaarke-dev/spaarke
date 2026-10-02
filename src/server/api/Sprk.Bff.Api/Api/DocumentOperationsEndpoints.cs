@@ -595,7 +595,7 @@ public static class DocumentOperationsEndpoints
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = correlationId,
-                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
                 MaxAttempts = 3,
                 Payload = JsonDocument.Parse(JsonSerializer.Serialize(new

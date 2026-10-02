@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Services.Ai.Jobs;
 /// - Bulk import operations
 /// - System integrations
 ///
-/// Idempotency key pattern: analysis-{docId}-documentprofile
+/// Idempotency key pattern: <see cref="ProfileIdempotencyKey"/>.
 /// </remarks>
 public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
 {
@@ -32,6 +32,17 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
     /// Job type constant - must match the JobType used when enqueuing analysis jobs.
     /// </summary>
     public const string JobTypeName = "AppOnlyDocumentAnalysis";
+
+    /// <summary>
+    /// The profile job's idempotency key. Without <paramref name="requestId"/> it is the document's key, so a repeat of
+    /// the same automatic profile is skipped. With one, it carries the id of the request that asked for a fresh profile:
+    /// a version save's job id (task 029) or a Generate Profile request's job id (task 068). A redelivery of that
+    /// request repeats the key and still skips; every new request has its own and runs.
+    /// </summary>
+    public static string ProfileIdempotencyKey(Guid documentId, Guid? requestId = null) =>
+        requestId is { } id
+            ? $"analysis-{documentId}-documentprofile-version-{id:N}"
+            : $"analysis-{documentId}-documentprofile";
 
     public AppOnlyDocumentAnalysisJobHandler(
         IAppOnlyAnalysisService analysisService,
@@ -77,7 +88,7 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
             var idempotencyKey = job.IdempotencyKey;
             if (string.IsNullOrEmpty(idempotencyKey))
             {
-                idempotencyKey = $"analysis-{documentId}-documentprofile";
+                idempotencyKey = ProfileIdempotencyKey(documentId);
             }
 
             // Check idempotency - prevent duplicate processing
@@ -92,8 +103,11 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
                 return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
             }
 
-            // Try to acquire processing lock
-            if (!await _idempotencyService.TryAcquireProcessingLockAsync(idempotencyKey, TimeSpan.FromMinutes(10), ct))
+            // Lock under this job's own id (task 068, #1086). A Service Bus redelivery is the same job, and arrives only
+            // after the earlier delivery's message lock expired, so an old lock under its own id is a dead attempt's and
+            // it takes it over; a recent one is a duplicate copy still running, and stays refused. Ownerless, the stale
+            // lock answered "another instance is processing" and the redelivery was completed without a profile.
+            if (!await _idempotencyService.TryAcquireProcessingLockAsync(idempotencyKey, job.JobId.ToString("N"), TimeSpan.FromMinutes(10), ct))
             {
                 _logger.LogWarning(
                     "Could not acquire processing lock for document {DocumentId} (idempotency key: {IdempotencyKey})",
@@ -150,8 +164,9 @@ public class AppOnlyDocumentAnalysisJobHandler : IJobHandler
             }
             finally
             {
-                // Always release the lock
-                await _idempotencyService.ReleaseProcessingLockAsync(idempotencyKey, ct);
+                // Not with ct: on a graceful stop ct is cancelled, and RedisCache refuses a cancelled token before it
+                // reaches Redis, which left the key locked for ten minutes (task 068, #1086).
+                await _idempotencyService.ReleaseProcessingLockAsync(idempotencyKey, CancellationToken.None);
             }
         }
         catch (Exception ex)

@@ -13,8 +13,8 @@
  *   Recipient,
  * } from '@shared/adapters';
  *
- * // Get adapter instance
- * const adapter = await HostAdapterFactory.getOrCreate();
+ * // Get adapter instance (the pane registers its shared adapter first)
+ * const adapter = await HostAdapterFactory.createAndInitialize();
  *
  * // Use adapter methods
  * const hostType = adapter.getHostType();

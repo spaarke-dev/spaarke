@@ -79,7 +79,10 @@ export function buildEmailSaveRequest(
     aiOptions: { ...DEFAULT_AI_OPTIONS },
     documentMetadata: { name: context.subject || 'Untitled Email' },
     targetEntity: {
-      entityType: target.logicalName,
+      // The FRIENDLY type name ("Matter"), never the logical name ("sprk_matter"): the save accepts only
+      // friendly names (`OfficeEndpoints.ValidateSaveRequest` → 400 OFFICE_002 otherwise), and the
+      // finalization worker matches on them. Sending `logicalName` refused every quick-save (#1075).
+      entityType: target.entityType,
       entityId: target.id,
       displayName: target.name,
     },
