@@ -26,14 +26,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      members and that ZERO systemusers sit in the BU — before any mutation (<see cref="SecureRecordOwnerTeam"/>)
 ///   4. Read the marker (see <see cref="RootRow"/>): owned by the team WITH a container → 409, nothing written; owned
 ///      by the team WITHOUT a container → RESUME (below); otherwise continue. Then, still before any mutation: the
-///      SPE container type is configured, the caller's systemuserid (WhoAmI), the record's current owner, and the
-///      creator's current share (complete read or nothing)
+///      SPE container type is configured; a container ALREADY recorded on the record is classified (a business unit's
+///      shared one is replaced, one another root records is refused, the record's own is KEPT — never orphaned); the
+///      caller's systemuserid (WhoAmI), the record's current owner, the creator's current share (complete read or
+///      nothing), and the owners of the rows an Assign cascades to (so an undo can put each back)
 ///   4.5 SHARE-FIRST: give the creator their share while the record is still where it was created
 ///   5. Assign the record's owner to that team, and verify the assignment by reading it back
 ///   5.5 Prove the creator holds exactly <see cref="CreatorAccessRights"/> now that the team owns it (re-issue if the
 ///       move dropped it). If that cannot be proven, COMPENSATE: move the record back to its pre-call owner, read it
-///       back, and put the creator's share back to what it was. Then share any named colleagues.
-///   6. Create the record's own SPE container
+///       back, put back the owner of each row the Assign cascaded to, and put the creator's share back to what it was.
+///       Then share any named colleagues.
+///   6. Create the record's own SPE container — unless it already has its own (kept)
 ///   7. Record the container on the record — and FAIL if that record cannot be written
 ///
 /// <para><b>The one rule this ordering serves</b> (owner, session 27 round 3, S5): a secure record must always keep
@@ -44,14 +47,15 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// its own reason code, a CRITICAL log line, and a resume path an administrator (who holds Write) can run.</para>
 ///
 /// <para><b>RESUME.</b> A record owned by the team with no container recorded did not finish: steps 5.5/6/7 did not
-/// all complete. A call on it ensures the share for the record's <c>createdby</c> user — never for the caller, unless
-/// the caller IS that user (owner decision F8) — then runs steps 6 and 7. Every resume step is an "ensure" keyed on
+/// all complete. A call on it ensures the share for the record's creator — <c>createdby</c> when that is a person,
+/// otherwise the server-stamped <c>sprk_createdbyperson</c> (owner round 7 item 2: an app-only create records its person
+/// there) — never for the caller, unless the caller IS that person (owner decision F8) — then runs steps 6 and 7. Every resume step is an "ensure" keyed on
 /// observed state, so it re-runs whatever the forward path would. Two rules keep a resume from widening the access
 /// list (task 133 verifier round 1): named colleagues are accepted only from the record's creator (anyone else is
-/// refused before any write, and adds people through Manage Access); and when <c>createdby</c> cannot be used —
-/// absent, disabled, an application user or unreadable — the resume is REFUSED with its own reason code, zero grants
-/// and zero containers (the closed acceptance criterion and owner decision F8's interim default; verifier round 2
-/// withdrew a round-1 path that completed when another person already held a share, because it changed that
+/// refused before any write, and adds people through Manage Access); and when neither <c>createdby</c> nor
+/// <c>sprk_createdbyperson</c> is a usable person — absent, disabled, an application user or unreadable — the resume
+/// is REFUSED with its own reason code, zero grants and zero containers (the closed acceptance criterion; verifier
+/// round 2 withdrew a round-1 path that completed when another person already held a share, because it changed that
 /// owner-decided contract without the owner).</para>
 ///
 /// <para><b>Rollback is for ownership and shares only.</b> Steps 4.5–5.5 are undone on failure, because the undo
@@ -171,12 +175,14 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonCreatorShareFailedResumable = "sdap.provision.creator_share_failed_resumable";
 
     /// <summary>
-    /// A resume found the record's <c>createdby</c> unusable as the person to share to — disabled, an application
-    /// user, absent (409), or unreadable (500). Resume never shares to the caller instead (owner decision F8), and
-    /// nothing is written. Recovery, each of which works against this code: <c>unreadable</c> — call again once the
-    /// read works; <c>disabled</c> — an administrator re-enables that user, then calls again (the resume shares to
-    /// them); any state — an administrator ASSIGNS the record to the person who should hold it, which takes it out of
-    /// the owner team, and that person then calls provisioning, which runs from the start and shares it to them.
+    /// A resume found no usable person to share to: <c>createdby</c> when that is a person, otherwise the server-stamped
+    /// <c>sprk_createdbyperson</c> (owner round 7 item 2) — disabled, an application user with no person recorded,
+    /// absent (409), or unreadable (500). The <c>creatorColumn</c> extension names which of the two the state
+    /// describes. Resume never shares to the caller instead (owner decision F8), and nothing is written. Recovery, each
+    /// of which works against this code: <c>unreadable</c> — call again once the read works; <c>disabled</c> — an
+    /// administrator re-enables that user, then calls again (the resume shares to them); any state — an administrator
+    /// ASSIGNS the record to the person who should hold it, which takes it out of the owner team, and that person then
+    /// calls provisioning, which runs from the start and shares it to them.
     /// </summary>
     internal const string ReasonResumeCreatorUnavailable = "sdap.provision.resume_creator_unavailable";
 
@@ -204,6 +210,20 @@ public static class ProvisionProjectEndpoint
     /// mutation. Deterministic for that row: calling again repeats the refusal, so it is not a self-service retry.
     /// </summary>
     internal const string ReasonRecordOwnerUnreadable = "sdap.provision.record_owner_unreadable";
+
+    /// <summary>
+    /// The container recorded on the record (<c>sprk_containerid</c>) is ALSO recorded on another project, matter or
+    /// work assignment (task 133, found live 2026-10-02). Reusing it would put a secure record's files in storage another
+    /// record reaches; replacing it would leave this record's existing files there. Refused before any mutation (409):
+    /// an administrator decides which record the container belongs to.
+    /// </summary>
+    internal const string ReasonContainerSharedWithAnotherRecord = "sdap.provision.container_shared_with_another_record";
+
+    /// <summary>
+    /// The container recorded on the record could not be checked against the business units and the other secure roots
+    /// (a read failed). Refused before any mutation (500); the same caller may call again once Dataverse is reachable.
+    /// </summary>
+    internal const string ReasonContainerOwnershipUnreadable = "sdap.provision.container_ownership_unreadable";
 
     // ── Share rights (task 061) ──────────────────────────────────────────────
 
@@ -455,19 +475,84 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, ReasonContainerTypeNotConfigured));
         }
 
+        // ── Still before any mutation: a container ALREADY recorded on the record (task 133, found live 2026-10-02) ──
+        //
+        // A record reaching here with sprk_containerid set is not owned by the secure owner team (that is the 409
+        // above). Provisioning used to create a new container and overwrite the value — on the live gate that orphaned
+        // the record's OWN container, and with it anything stored there. Now the value is classified first, read-only:
+        // a business unit's shared container is replaced by the record's own (the business unit keeps its container,
+        // so nothing is orphaned); one recorded on ANOTHER root is refused; anything else is this record's own and is
+        // KEPT. A failed read refuses, never guesses.
+        string? keptContainerId = null;
+        if (!resume && !string.IsNullOrWhiteSpace(row.sprk_containerid))
+        {
+            var recorded = row.sprk_containerid.Trim();
+            var holder = await ClassifyRecordedContainerAsync(dataverseClient, root, recordId, recorded, ct);
+            switch (holder.Kind)
+            {
+                case RecordedContainerKind.Unreadable:
+                    logger.LogError(holder.Fault,
+                        "[PROVISION] Could not tell whether container {ContainerId} recorded on {RecordType} {RecordId} " +
+                        "belongs to it alone. Refusing before any change. TraceId={TraceId}",
+                        recorded, root.WireToken, recordId, traceId);
+                    return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                        $"The {root.DisplayLabel.ToLowerInvariant()} already records an SPE container, and whether that " +
+                        "container belongs to it alone could not be checked (a read of the business units or of the other " +
+                        "secure records failed). Nothing was changed; calling again once Dataverse is reachable repeats " +
+                        "the check (the same caller may).",
+                        traceId, (ReasonKey, ReasonContainerOwnershipUnreadable), ("speContainerId", recorded));
+
+                case RecordedContainerKind.AnotherRecord:
+                    logger.LogWarning(
+                        "[PROVISION] Container {ContainerId} recorded on {RecordType} {RecordId} is also recorded on " +
+                        "{OtherType} {OtherId}. Refusing before any change. TraceId={TraceId}",
+                        recorded, root.WireToken, recordId, holder.OtherRoot!.WireToken, holder.OtherRecordId, traceId);
+                    return Problem(StatusCodes.Status409Conflict, "Conflict",
+                        $"The {root.DisplayLabel.ToLowerInvariant()} records an SPE container that another " +
+                        $"{holder.OtherRoot.DisplayLabel.ToLowerInvariant()} also records. Keeping it would put a secure " +
+                        "record's files in storage the other record reaches, and replacing it would leave this record's " +
+                        "existing files there. Nothing was changed: an administrator decides which record the container " +
+                        "belongs to and clears it from the other, then calls provisioning again.",
+                        traceId, (ReasonKey, ReasonContainerSharedWithAnotherRecord), ("speContainerId", recorded),
+                        ("otherRecordType", holder.OtherRoot.WireToken), ("otherRecordId", holder.OtherRecordId));
+
+                case RecordedContainerKind.BusinessUnit:
+                    logger.LogInformation(
+                        "[PROVISION] {RecordType} {RecordId} records business unit {BusinessUnitId}'s shared container " +
+                        "{ContainerId}; it will get its own container. The business unit keeps the shared one.",
+                        root.WireToken, recordId, holder.BusinessUnitId, recorded);
+                    break;
+
+                default:
+                    keptContainerId = recorded;
+                    logger.LogInformation(
+                        "[PROVISION] {RecordType} {RecordId} already records its own container {ContainerId} (no business " +
+                        "unit and no other record holds it). It is kept: no container is created and the value is not " +
+                        "rewritten.", root.WireToken, recordId, recorded);
+                    break;
+            }
+        }
+
         Guid creatorId;
         if (resume)
         {
+            // ── RESUME: the person a resume shares to — createdby when a person, else sprk_createdbyperson ──
+            var person = await ResolveResumeCreatorAsync(
+                dataverseClient, root, recordId, row, ownerTeamId, logger, traceId, ct);
+
+            if (person.Error != null)
+                return person.Error;
+
             // ── RESUME: only the record's creator may name colleagues (task 133 verifier round 1) ──
             var colleagueRefusal = await RefuseResumeColleaguesUnlessCreatorAsync(
-                request, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId, logger, traceId, ct);
+                request, callerAccessProbe, httpContext, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
 
             if (colleagueRefusal != null)
                 return colleagueRefusal;
 
-            // ── RESUME: ensure the share for the record's createdby user ──
+            // ── RESUME: ensure that person's share ──
             var resumed = await EnsureResumeCreatorShareAsync(
-                dataverseClient, recordShare, root, recordId, row, ownerTeamId, logger, traceId, ct);
+                recordShare, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
 
             if (resumed.Error != null)
                 return resumed.Error;
@@ -490,6 +575,27 @@ public static class ProvisionProjectEndpoint
         // ── Named colleagues: only once the creator's share is proven ─────────
         var additionalShared = await ShareToColleaguesAsync(
             recordShare, request, root, recordId, creatorId, logger, traceId, ct);
+
+        // ── Steps 6 + 7: the record's own SPE container — kept when it already has one ──
+        if (keptContainerId is not null)
+        {
+            logger.LogInformation(
+                "[PROVISION] Provisioning complete for {RecordType} {RecordId}: BU={BuId} ({BuName}), " +
+                "OwnerTeam={TeamId}, Container={ContainerId} (its own, kept), Resumed={Resumed}",
+                root.WireToken, recordId, secureBuId, secureBuName, ownerTeamId, keptContainerId, resume);
+
+            return TypedResults.Ok(new ProvisionProjectResponse(
+                BusinessUnitId: secureBuId,
+                BusinessUnitName: secureBuName,
+                OwnerTeamId: ownerTeamId,
+                OwnerTeamName: ownerTeamName,
+                SpeContainerId: keptContainerId,
+                SharedToCreatorSystemUserId: creatorId,
+                AdditionalPrincipalsShared: additionalShared,
+                RecordType: root.WireToken,
+                RecordId: recordId,
+                Resumed: resume));
+        }
 
         // ── Step 6: Create the record's own SPE container ────────────────────
         var containerResult = await CreateSpeContainerAsync(
@@ -764,6 +870,12 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, ReasonRecordOwnerUnreadable)));
         }
 
+        // The owners of the rows an Assign of this record cascades to (task 133 b1): the move to the team re-owns them
+        // and an undo re-owns them again — to the RECORD's pre-call owner, which is not each child's own when they
+        // differed. Read before any write so an undo can put each one back; best-effort, because a provisioning that
+        // cannot read them still must not fail — only an undo then reports their owners as unconfirmed.
+        var cascadeSnapshot = await SnapshotCascadeChildOwnersAsync(dataverseClient, root, recordId, preOwner, logger, ct);
+
         // The creator's share BEFORE the call — complete, or not at all. An unreadable list is never "no share"
         // (ADR-003): without it, share-first is not used, and compensation's only safe target is "no share".
         int? preCreatorMask;
@@ -941,6 +1053,11 @@ public static class ProvisionProjectEndpoint
         var back = await MoveOwnerAsync(dataverseClient, root, recordId, preOwner, logger, ct);
         if (back.Outcome == OwnerMoveOutcome.Moved)
         {
+            // The Assign cascaded back too, giving every child the RECORD's pre-call owner; each child whose own owner
+            // differed is put back (task 133 b1 — the compensation half of the owner's round-4 cascade acceptance).
+            var childOwnersRestored = await RestoreCascadeChildOwnersAsync(
+                dataverseClient, root, recordId, cascadeSnapshot, logger, ct);
+
             var restored = !wroteCreatorShare
                            || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, logger, ct);
 
@@ -974,32 +1091,52 @@ public static class ProvisionProjectEndpoint
                 sharesText = "The creator's share is as it was before the call (read back). ";
             }
 
+            var childrenText = childOwnersRestored switch
+            {
+                true => string.Empty,
+                false => "Records Dataverse re-owned together with it (SharePoint document locations) could not all be " +
+                         "put back with their own owners; the ones that could not now have the record's owner (logged " +
+                         "with their ids). ",
+                null => "Records Dataverse re-owned together with it (SharePoint document locations) could not be read " +
+                        "before the call, so whether each has its own owner back is not known; any whose owner differed " +
+                        "from the record's now has the record's owner. "
+            };
+
             return CreatorShareStep.Failed(Problem(
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The record could not be shared to its creator once it was owned by the Secure Record owner team, so " +
                 "the move was undone: its owner is back to the owner it had before the call (read back). " + sharesText +
-                "The same caller may retry.",
+                childrenText + "The same caller may retry.",
                 traceId, (ReasonKey, ReasonCreatorShareFailed),
                 ("ownershipRestored", true), ("sharesRestored", sharesRestored),
-                ("creatorShareRemoved", creatorShareRemoved)));
+                ("creatorShareRemoved", creatorShareRemoved), ("childOwnersRestored", childOwnersRestored)));
         }
 
+        // The undo did not land, or could not be verified (ADR-003: an unverifiable compensation is a failure, never
+        // "reverted"). The record may be owned by the memberless team with no confirmed creator share — the one state
+        // that can leave nobody able to open it — so it is CRITICAL, and only an administrator can finish it.
+        var undoUnverified = back.Outcome == OwnerMoveOutcome.Unverified;
         logger.LogCritical(
-            "[PROVISION] {RecordType} {RecordId}: the creator's share could not be proven AND the record could not be " +
-            "moved back to {OwnerKind} {OwnerId} (outcome {Outcome}). It is owned by the memberless Secure Record owner " +
-            "team without a confirmed creator share — possibly NOBODY can open it. An administrator must call " +
+            "[PROVISION] {RecordType} {RecordId}: the creator's share could not be proven AND the move back to " +
+            "{OwnerKind} {OwnerId} {UndoState} (outcome {Outcome}). It may be owned by the memberless Secure Record " +
+            "owner team without a confirmed creator share — possibly NOBODY can open it. An administrator must call " +
             "provisioning again to resume. TraceId={TraceId}",
-            root.WireToken, recordId, preOwner.Kind, preOwner.Id, back.Outcome, traceId);
+            root.WireToken, recordId, preOwner.Kind, preOwner.Id,
+            undoUnverified ? "could not be verified" : "did not take effect", back.Outcome, traceId);
 
         return CreatorShareStep.Failed(Problem(
             StatusCodes.Status500InternalServerError, "Internal Server Error",
-            "The record could not be shared to its creator once it was owned by the Secure Record owner team, and the " +
-            "move could not be undone. The record is owned by that memberless team without a confirmed creator share, " +
-            "so its creator may not be able to open it and no longer passes the Write check this endpoint requires. An " +
+            "The record could not be shared to its creator once it was owned by the Secure Record owner team, and " +
+            (undoUnverified
+                ? "the move back to its previous owner could not be verified: its owner could not be read back, so it may " +
+                  "still be owned by that memberless team without a confirmed creator share. "
+                : "the move back to its previous owner did not take effect (read back). It is owned by that memberless " +
+                  "team without a confirmed creator share. ") +
+            "Its creator may not be able to open it and may no longer pass the Write check this endpoint requires. An " +
             "administrator (who holds Write on it) calls provisioning again: it resumes and shares the record to its " +
             "creator (createdby).",
             traceId, (ReasonKey, ReasonCreatorShareFailedResumable),
-            ("ownerTeamId", ownerTeamId), ("ownershipRestored", false)));
+            ("ownerTeamId", ownerTeamId), ("ownershipRestored", false), ("ownershipVerified", !undoUnverified)));
     }
 
     /// <summary>
@@ -1019,6 +1156,10 @@ public static class ProvisionProjectEndpoint
     /// <c>additionalPrincipalsShared: 0</c> to a caller who asked for shares — a success that hides what did not
     /// happen. The refusal names the reason and changes nothing; the same call without the list completes the
     /// resume. The record's creator named in the list is not a colleague (they receive the creator share anyway).</para>
+    ///
+    /// <para><b>An unresolvable caller is not "not the creator"</b> (task 133 verifier round 3). When WhoAmI cannot
+    /// establish who is calling, the refusal is <c>creator_unresolved</c> and says exactly that — it does not claim the
+    /// caller is someone other than the creator, which nothing showed.</para>
     /// </remarks>
     private static async Task<IResult?> RefuseResumeColleaguesUnlessCreatorAsync(
         ProvisionProjectRequest request,
@@ -1026,13 +1167,12 @@ public static class ProvisionProjectEndpoint
         HttpContext httpContext,
         SecureRecordRoot root,
         Guid recordId,
-        RootRow row,
+        Guid createdBy,
         Guid ownerTeamId,
         ILogger logger,
         string traceId,
         CancellationToken ct)
     {
-        var createdBy = row._createdby_value ?? Guid.Empty;
         var named = (request.SharePrincipalIds ?? Array.Empty<Guid>())
             .Where(id => id != Guid.Empty && id != createdBy)
             .Distinct()
@@ -1044,14 +1184,32 @@ public static class ProvisionProjectEndpoint
         var caller = await callerAccessProbe.GetCallerSystemUserIdAsync(
             TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
 
-        if (caller is { } callerId && callerId != Guid.Empty && callerId == createdBy)
+        if (caller is not { } callerId || callerId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "[PROVISION] Resume of {RecordType} {RecordId} refused: the request names {Count} principal(s) to share " +
+                "with, and the caller's Dataverse identity could not be established, so it could not be shown to be " +
+                "the record's creator ({CreatorId}). Nothing was changed. TraceId={TraceId}",
+                root.WireToken, recordId, named.Count, createdBy, traceId);
+
+            return Problem(
+                StatusCodes.Status403Forbidden, "Forbidden",
+                $"{root.DisplayLabel} {recordId} is owned by the Secure Record owner team with no container recorded, so " +
+                "this call would finish securing it. The request names people to share it with, which only the person " +
+                "who created the record may do at this stage — and the calling user's Dataverse identity could not be " +
+                "established, so it could not be checked. Nothing was changed. Calling again without sharePrincipalIds " +
+                "finishes securing the record; people are added through Manage Access.",
+                traceId, (ReasonKey, ReasonCreatorUnresolved), ("ownerTeamId", ownerTeamId));
+        }
+
+        if (callerId == createdBy)
             return null;
 
         logger.LogWarning(
             "[PROVISION] Resume of {RecordType} {RecordId} refused: the request names {Count} principal(s) to share " +
-            "with, and its caller ({CallerId}) is not the record's creator (createdby {CreatorId}). Nothing was " +
+            "with, and its caller ({CallerId}) is not the record's creator ({CreatorId}). Nothing was " +
             "changed. TraceId={TraceId}",
-            root.WireToken, recordId, named.Count, caller, createdBy, traceId);
+            root.WireToken, recordId, named.Count, callerId, createdBy, traceId);
 
         return Problem(
             StatusCodes.Status403Forbidden, "Forbidden",
@@ -1065,32 +1223,37 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>
     /// RESUME (task 133): the record is owned by the team with no container recorded, so an earlier run stopped after
-    /// the move. Ensures the share for the record's <c>createdby</c> user — the persisted creator — and nobody else.
+    /// the move. Decides — read-only, before any write — the ONE person the resume shares to: <c>createdby</c> when that
+    /// is a person; otherwise the server-stamped <c>sprk_createdbyperson</c>; otherwise nobody (refused).
     /// </summary>
     /// <remarks>
     /// <para><b>Never the caller as a substitute</b> (owner decision F8). A resume is often run by an administrator,
     /// who reaches the record through their role; adding them to its explicit access list would be a C4 decision made
     /// as a recovery side effect. When the caller IS the creator, it is the same share.</para>
     ///
-    /// <para><b><c>createdby</c> must be a person</b>: present, enabled, and not an application user. A row created
-    /// app-only (Office quick-create) has the app as <c>createdby</c> (the interim default of F8 — a persisted human
-    /// creator for app-created rows is an open owner decision).</para>
+    /// <para><b>Which person</b> (owner round 7 item 2, option (a), 2026-10-02). <c>createdby</c> is the identity that
+    /// sent the create. For a row the BFF created APP-ONLY (Office quick-create, <c>POST /api/v1/work-assignments</c>)
+    /// that is the BFF application user, and the person who asked for it is the BFF-stamped
+    /// <c>sprk_createdbyperson</c> (<see cref="RecordCreatorPerson"/>). So: a usable <c>createdby</c> person wins; a
+    /// DISABLED <c>createdby</c> is still the person who created it and is refused as such (re-enabling them is the
+    /// recovery — the column, stamped from the same person on a human create, would name them again); only when
+    /// <c>createdby</c> is NOT a person — an application user, or absent — is the column read, in its OWN query, so a
+    /// BFF deployed before the schema still provisions forward.</para>
     ///
-    /// <para><b>When <c>createdby</c> cannot be used it is REFUSED</b> — <c>resume_creator_unavailable</c> with the
-    /// state named, zero grants, zero containers — whoever else may hold a share (the closed acceptance criterion; owner
-    /// decision F8's interim default). An unreadable <c>createdby</c> is a 500: a read failed, so the refusal is
-    /// transient and is never folded into "unusable for good". Every recovery the detail names works against this code
-    /// (task 133 verifier round 2): call again once the read works; re-enable a disabled creator; or ASSIGN the record
-    /// to the person who should hold it — it then leaves the owner team, so the next call by that person is a forward
-    /// run that shares it to them. (Round 1 had instead completed the resume whenever another person held a Read
-    /// share; that changed an owner-decided contract and was withdrawn pending the owner — task 133 note §12.)</para>
+    /// <para><b>A person must be usable</b>: present, enabled (an <c>isdisabled</c> read as anything but false is
+    /// disabled), not an application user. When no usable person is found the resume is REFUSED —
+    /// <c>resume_creator_unavailable</c>, the state and the column it describes named, zero grants, zero containers —
+    /// whoever else may hold a share (the closed acceptance criterion). An unreadable person is a 500: a read failed,
+    /// so the refusal is transient and is never folded into "unusable for good". Every recovery the detail names works
+    /// against this code (task 133 verifier round 2): call again once the read works; re-enable a disabled person; or
+    /// ASSIGN the record to the person who should hold it — it then leaves the owner team, so the next call by that
+    /// person is a forward run that shares it to them.</para>
     ///
-    /// <para>No Access (task 143) is not yet in this branch: when it lands, a <c>createdby</c> on the record's No Access
-    /// list is refused here, before the share.</para>
+    /// <para>No Access (task 143) is not yet in this branch: when it lands, a creator on the record's No Access list is
+    /// refused here, before the share.</para>
     /// </remarks>
-    private static async Task<CreatorShareStep> EnsureResumeCreatorShareAsync(
+    private static async Task<CreatorShareStep> ResolveResumeCreatorAsync(
         DataverseWebApiClient dataverseClient,
-        IDataverseRecordShareService recordShare,
         SecureRecordRoot root,
         Guid recordId,
         RootRow row,
@@ -1104,73 +1267,196 @@ public static class ProvisionProjectEndpoint
             "recorded: an earlier run stopped after the owner move. RESUMING. TraceId={TraceId}",
             root.WireToken, recordId, ownerTeamId, traceId);
 
-        string? unusable;
-        var unreadable = false;
-        var createdBy = row._createdby_value;
-
-        if (createdBy is not { } creatorId || creatorId == Guid.Empty)
+        // ── 1. createdby ──
+        var createdBy = row._createdby_value is { } cb && cb != Guid.Empty ? cb : (Guid?)null;
+        string? createdByState;
+        if (createdBy is not { } createdById)
         {
-            unusable = "absent";
-            creatorId = Guid.Empty;
+            createdByState = "absent";
         }
         else
         {
             try
             {
-                unusable = await UnusablePersonStateAsync(dataverseClient, creatorId, ct);
+                createdByState = await UnusablePersonStateAsync(dataverseClient, createdById, ct);
             }
             catch (Exception ex)
             {
-                unusable = "unreadable";
-                unreadable = true;
                 logger.LogError(ex,
                     "[PROVISION] The creator (createdby {CreatorId}) of {RecordType} {RecordId} could not be read. " +
-                    "TraceId={TraceId}", creatorId, root.WireToken, recordId, traceId);
+                    "TraceId={TraceId}", createdById, root.WireToken, recordId, traceId);
+                return ResumeCreatorRefused(root, recordId, "unreadable", CreatedByColumn, personRecorded: null,
+                    ownerTeamId, createdBy, logger, traceId);
             }
         }
 
-        if (unusable is not null)
+        if (createdByState is null)
+            return CreatorShareStep.Ok(createdBy!.Value);
+
+        if (createdByState == "disabled")
         {
-            logger.LogWarning(
-                "[PROVISION] Resume of {RecordType} {RecordId} refused: its creator (createdby {CreatorId}) is " +
-                "{CreatorState}. It is not shared to anyone instead. TraceId={TraceId}",
-                root.WireToken, recordId, createdBy, unusable, traceId);
-
-            // Each recovery named here works against this code (task 133 verifier round 2): a resume is keyed on
-            // createdby, and an assigned-away record is no longer owned by the team, so its next call runs forward.
-            var recovery = unusable switch
-            {
-                "unreadable" =>
-                    "A read failed, so this refusal is not final: calling again once Dataverse is reachable repeats " +
-                    "the check (the same caller may). ",
-                "disabled" =>
-                    "If that person should keep the record, an administrator re-enables their user and calls again: " +
-                    "the resume then shares it to them. ",
-                _ => string.Empty
-            };
-
-            return CreatorShareStep.Failed(Problem(
-                unreadable ? StatusCodes.Status500InternalServerError : StatusCodes.Status409Conflict,
-                unreadable ? "Internal Server Error" : "Conflict",
-                $"{root.DisplayLabel} {recordId} is owned by the Secure Record owner team with no container recorded, " +
-                "so provisioning would resume and share it to the person who created it. That person cannot be used " +
-                $"(their user record is {unusable}), and it is never shared to the caller or anyone else instead. " +
-                "Nothing was changed. " + recovery +
-                "Otherwise an administrator assigns the record to the person who should hold it: it then leaves the " +
-                "Secure Record owner team (flagged secure, no container, uploads refused — as before it was first " +
-                "provisioned), and that person calls provisioning, which runs from the start and shares it to them.",
-                traceId, (ReasonKey, ReasonResumeCreatorUnavailable), ("creatorState", unusable),
-                ("ownerTeamId", ownerTeamId)));
+            return ResumeCreatorRefused(root, recordId, "disabled", CreatedByColumn, personRecorded: null,
+                ownerTeamId, createdBy, logger, traceId);
         }
 
+        // ── 2. createdby is not a person (an application user, or absent): the person the BFF stamped ──
+        Guid? person;
+        try
+        {
+            person = await ReadCreatorPersonAsync(dataverseClient, root, recordId, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[PROVISION] The creator person (sprk_createdbyperson) of {RecordType} {RecordId} could not be read; " +
+                "createdby is {CreatedByState}. TraceId={TraceId}", root.WireToken, recordId, createdByState, traceId);
+            return ResumeCreatorRefused(root, recordId, "unreadable", RecordCreatorPerson.Column, personRecorded: null,
+                ownerTeamId, createdBy, logger, traceId);
+        }
+
+        if (person is not { } personId)
+        {
+            return ResumeCreatorRefused(root, recordId, createdByState, CreatedByColumn, personRecorded: false,
+                ownerTeamId, createdBy, logger, traceId);
+        }
+
+        string? personState;
+        try
+        {
+            personState = await UnusablePersonStateAsync(dataverseClient, personId, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[PROVISION] The creator person (sprk_createdbyperson {PersonId}) of {RecordType} {RecordId} could not " +
+                "be read. TraceId={TraceId}", personId, root.WireToken, recordId, traceId);
+            return ResumeCreatorRefused(root, recordId, "unreadable", RecordCreatorPerson.Column, personRecorded: true,
+                ownerTeamId, personId, logger, traceId);
+        }
+
+        if (personState is not null)
+        {
+            return ResumeCreatorRefused(root, recordId, personState, RecordCreatorPerson.Column, personRecorded: true,
+                ownerTeamId, personId, logger, traceId);
+        }
+
+        logger.LogInformation(
+            "[PROVISION] {RecordType} {RecordId} was created by an application ({CreatedByState} createdby); resuming for " +
+            "the person recorded as its creator (sprk_createdbyperson {PersonId}).",
+            root.WireToken, recordId, createdByState, personId);
+        return CreatorShareStep.Ok(personId);
+    }
+
+    /// <summary>The column a <c>resume_creator_unavailable</c> refusal describes when it is <c>createdby</c>.</summary>
+    private const string CreatedByColumn = "createdby";
+
+    /// <summary>
+    /// The <c>resume_creator_unavailable</c> refusal: nothing written, the state and the column it describes named, and
+    /// only recoveries that work against this code (task 133 verifier round 2).
+    /// </summary>
+    private static CreatorShareStep ResumeCreatorRefused(
+        SecureRecordRoot root,
+        Guid recordId,
+        string state,
+        string column,
+        bool? personRecorded,
+        Guid ownerTeamId,
+        Guid? personId,
+        ILogger logger,
+        string traceId)
+    {
+        var unreadable = state == "unreadable";
+
+        logger.LogWarning(
+            "[PROVISION] Resume of {RecordType} {RecordId} refused: its creator ({Column} {PersonId}) is {CreatorState}" +
+            "{NoPerson}. It is not shared to anyone instead. TraceId={TraceId}",
+            root.WireToken, recordId, column, personId, state,
+            personRecorded == false ? " and no person is recorded on sprk_createdbyperson" : string.Empty, traceId);
+
+        var who = (column, state) switch
+        {
+            (CreatedByColumn, "unreadable") => "Its creator (createdby) could not be read.",
+            (CreatedByColumn, "disabled") => "The person who created it (createdby) cannot be used: their user record is disabled.",
+            (CreatedByColumn, "application-user") =>
+                "It was created by an application (createdby), and no person is recorded as its creator " +
+                "(sprk_createdbyperson is empty — the record was created before that column, or outside the BFF).",
+            (CreatedByColumn, _) =>
+                "It records no creator (createdby), and no person is recorded as its creator (sprk_createdbyperson).",
+            (_, "unreadable") =>
+                "It was created by an application, and the person recorded as its creator (sprk_createdbyperson) could " +
+                "not be read — if this repeats, an administrator checks that column exists in this environment " +
+                "(scripts/Set-RecordCreatorPersonSchema.ps1 -Verify).",
+            _ => $"It was created by an application, and the person recorded as its creator (sprk_createdbyperson) " +
+                 $"cannot be used: their user record is {state}."
+        };
+
+        var recovery = state switch
+        {
+            "unreadable" =>
+                "A read failed, so this refusal is not final: calling again once Dataverse is reachable repeats the check " +
+                "(the same caller may). ",
+            "disabled" =>
+                "If that person should keep the record, an administrator re-enables their user and calls again: the " +
+                "resume then shares it to them. ",
+            _ => string.Empty
+        };
+
+        return CreatorShareStep.Failed(Problem(
+            unreadable ? StatusCodes.Status500InternalServerError : StatusCodes.Status409Conflict,
+            unreadable ? "Internal Server Error" : "Conflict",
+            $"{root.DisplayLabel} {recordId} is owned by the Secure Record owner team with no container recorded, so " +
+            "provisioning would resume and share it to the person who created it. " + who + " It is never shared to the " +
+            "caller or anyone else instead. Nothing was changed. " + recovery +
+            "Otherwise an administrator assigns the record to the person who should hold it: it then leaves the Secure " +
+            "Record owner team (flagged secure, no container, uploads refused — as before it was first provisioned), and " +
+            "that person calls provisioning, which runs from the start and shares it to them.",
+            traceId, (ReasonKey, ReasonResumeCreatorUnavailable), ("creatorState", state), ("creatorColumn", column),
+            ("ownerTeamId", ownerTeamId)));
+    }
+
+    /// <summary>
+    /// The record's <c>sprk_createdbyperson</c> (task 133, owner round 7 item 2), in a query of its own: provisioning's
+    /// Step 1 select never names it, so a BFF deployed before the schema still provisions forward. Throws when the read
+    /// fails or the record is not found.
+    /// </summary>
+    private static async Task<Guid?> ReadCreatorPersonAsync(
+        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, CancellationToken ct)
+    {
+        var rows = await dataverseClient.QueryAsync<CreatorPersonRow>(
+            root.EntitySet,
+            filter: $"{root.IdColumn} eq {recordId}",
+            select: root.CreatorPersonSelect,
+            top: 1,
+            cancellationToken: ct);
+
+        var row = rows.FirstOrDefault()
+                  ?? throw new InvalidOperationException($"{root.WireToken} {recordId} was not found when its creator person was read.");
+
+        return row.Person is { } person && person != Guid.Empty ? person : null;
+    }
+
+    /// <summary>
+    /// Ensures the resume's creator share (task 133): exactly <see cref="CreatorAccessRights"/> for the person
+    /// <see cref="ResolveResumeCreatorAsync"/> decided, proven by a read. Nothing else is written here.
+    /// </summary>
+    private static async Task<CreatorShareStep> EnsureResumeCreatorShareAsync(
+        IDataverseRecordShareService recordShare,
+        SecureRecordRoot root,
+        Guid recordId,
+        Guid creatorId,
+        Guid ownerTeamId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
         var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct);
         if (!ensured.Proven)
         {
             return CreatorShareStep.Failed(Problem(
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 $"This call was resuming {root.DisplayLabel.ToLowerInvariant()} {recordId}, which is owned by the " +
-                "Secure Record owner team with no container recorded, and could not confirm the share to its creator " +
-                "(createdby). This call did not change the record's ownership. The same caller may retry.",
+                "Secure Record owner team with no container recorded, and could not confirm the share to the person who " +
+                "created it. This call did not change the record's ownership. The same caller may retry.",
                 traceId, (ReasonKey, ReasonCreatorShareFailed), ("resumed", true), ("ownerTeamId", ownerTeamId)));
         }
 

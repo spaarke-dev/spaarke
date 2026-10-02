@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -15,6 +18,12 @@ namespace Sprk.Bff.Api.Api;
 /// </remarks>
 public static class WorkAssignmentEndpoints
 {
+    /// <summary>
+    /// The caller's Dataverse identity could not be established, so the record could not record who created it
+    /// (task 133). Nothing was created.
+    /// </summary>
+    internal const string CreatorUnresolvedReasonCode = "sdap.workassignment.creator_unresolved";
+
     /// <summary>
     /// Registers work assignment endpoints with the application.
     /// </summary>
@@ -36,16 +45,29 @@ public static class WorkAssignmentEndpoints
             .Produces<CreateWorkAssignmentResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            // 403: the caller's Dataverse identity could not be established (task 133 — the creator stamp).
+            .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
     }
 
     /// <summary>
     /// Creates a new work assignment and notifies the assigned user.
     /// </summary>
+    /// <remarks>
+    /// <para><b>The record's creator (unified-access-control-r2 task 133, owner round 7 item 2).</b> The create runs
+    /// APP-ONLY (<see cref="IGenericEntityService"/>), so <c>createdby</c> is the BFF application user. The caller — the
+    /// person who asked for the work assignment — is resolved from their own token (WhoAmI over OBO, the same
+    /// <see cref="CallerRecordAccessProbe.GetCallerSystemUserIdAsync"/> secure provisioning uses; never the request
+    /// body) and stamped on <c>sprk_createdbyperson</c>. A caller who cannot be resolved is refused before the create:
+    /// a work assignment can be made secure, and secure provisioning's resume shares to this person — an app-created
+    /// row with nobody recorded could only be refused there.</para>
+    /// </remarks>
     private static async Task<IResult> CreateWorkAssignmentAsync(
         [FromBody] CreateWorkAssignmentRequest request,
         IGenericEntityService entityService,
         NotificationService notificationService,
+        CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -65,12 +87,40 @@ public static class WorkAssignmentEndpoints
             "Creating work assignment. Title={Title}, AssignedTo={AssignedToUserId}, MatterId={MatterId}",
             request.Title, request.AssignedToUserId, request.MatterId);
 
+        // ── The person creating it (task 133): resolved before any write ──
+        Guid? creator;
+        try
+        {
+            creator = await callerAccessProbe.GetCallerSystemUserIdAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext), ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not resolve the caller's systemuserid for a work assignment create.");
+            creator = null;
+        }
+
+        if (creator is not { } creatorId || creatorId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "Refusing work assignment create: the caller's Dataverse identity could not be established, so the " +
+                "record could not record who created it. Title={Title}", request.Title);
+
+            return Results.Problem(
+                detail: "Your Dataverse identity could not be established, so the work assignment could not record who " +
+                        "created it. Nothing was created.",
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Forbidden",
+                extensions: new Dictionary<string, object?> { ["reasonCode"] = CreatorUnresolvedReasonCode });
+        }
+
         try
         {
             // ── Create the sprk_workassignment record ─────────────────────
             var entity = new Entity("sprk_workassignment");
             entity["sprk_name"] = request.Title;
             entity["ownerid"] = new EntityReference("systemuser", request.AssignedToUserId);
+            RecordCreatorPerson.Stamp(entity, creatorId);
 
             if (!string.IsNullOrWhiteSpace(request.Description))
                 entity["sprk_description"] = request.Description;

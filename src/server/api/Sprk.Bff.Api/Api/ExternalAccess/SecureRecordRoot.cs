@@ -50,6 +50,32 @@ internal sealed record SecureRecordRoot(
         $"{IdColumn},{NameColumn},sprk_issecure,sprk_containerid," +
         "_sprk_securitybu_value,_owningteam_value,_owninguser_value,_owningbusinessunit_value,_createdby_value";
 
+    /// <summary>
+    /// The resume's read of the server-stamped creator person (task 133, owner round 7 item 2) — deliberately NOT part of
+    /// <see cref="ProvisioningSelect"/>: the column is created by <c>scripts/Set-RecordCreatorPersonSchema.ps1</c>, and a
+    /// Step-1 select naming it would 400 every provisioning in an environment where that script has not run yet.
+    /// </summary>
+    public string CreatorPersonSelect => $"{IdColumn},{Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.ValueColumn}";
+
+    /// <summary>
+    /// The 1:N relationships of this table whose <c>Assign</c> cascades to rows that HAVE an owner — the rows an owner
+    /// move re-owns as a side effect (task 133). Live metadata 2026-10-02 (spaarkedev1): project and matter cascade
+    /// Assign to <c>team</c>, <c>sharepointdocumentlocation</c> and <c>sharepointdocument</c>; work assignment to
+    /// nothing. Only <c>sharepointdocumentlocation</c> is listed: <c>team</c> is business-unit-owned (an Assign cannot
+    /// re-own it), and <c>sharepointdocument</c> rows are not stored in Dataverse — they are read from SharePoint through a
+    /// document location, so they have no owner of their own to put back.
+    /// </summary>
+    public IReadOnlyList<AssignCascadeChild> AssignCascadeChildren => Type switch
+    {
+        ExternalGrantRootType.WorkAssignment => Array.Empty<AssignCascadeChild>(),
+        _ => SharePointDocumentLocations
+    };
+
+    private static readonly AssignCascadeChild[] SharePointDocumentLocations =
+    {
+        new("sharepointdocumentlocation", "sharepointdocumentlocations", "sharepointdocumentlocationid", "_regardingobjectid_value")
+    };
+
     /// <summary>The SPE container display name for a record of this type.</summary>
     public string ContainerDisplayName(string recordName) => $"Secure {DisplayLabel} — {recordName}";
 
@@ -61,6 +87,9 @@ internal sealed record SecureRecordRoot(
     public static readonly SecureRecordRoot Matter = new(ExternalGrantRootType.Matter, "sprk_mattername", "Matter");
     public static readonly SecureRecordRoot WorkAssignment =
         new(ExternalGrantRootType.WorkAssignment, "sprk_name", "Work Assignment");
+
+    /// <summary>The three roots, in a fixed order (task 133: a container recorded on one is checked against all).</summary>
+    public static readonly IReadOnlyList<SecureRecordRoot> All = new[] { Project, Matter, WorkAssignment };
 
     /// <summary>The descriptor for a root type. Exhaustive; an unknown type throws rather than guessing.</summary>
     public static SecureRecordRoot For(ExternalGrantRootType type) => type switch
@@ -89,3 +118,9 @@ internal sealed record SecureRecordRoot(
             RecordType: recordType,
             RecordId: recordId));
 }
+
+/// <summary>
+/// One table an owner move of a secure root re-owns through an <c>Assign</c> cascade (task 133): its logical name, entity
+/// set, primary key, and the read form of the lookup that points at the root.
+/// </summary>
+internal sealed record AssignCascadeChild(string LogicalName, string EntitySet, string IdColumn, string ParentValueColumn);
