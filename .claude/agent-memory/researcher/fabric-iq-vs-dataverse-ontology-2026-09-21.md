@@ -1,0 +1,22 @@
+---
+name: fabric-iq-vs-dataverse-ontology-2026-09-21
+description: Fabric IQ (ontology/graph/ops-agent/data-agent/MCP) status, object model, data-residency, write-back, security, metering as of 2026-09-21 — verdict vs Spaarke's Dataverse legal-ops ontology
+metadata:
+  type: project
+---
+
+## 2026-09-21: Fabric IQ vs a Dataverse-modelled domain ontology
+**Question**: Does Microsoft Fabric IQ overlap, replace, or complement Spaarke's 7-component legal-ops ontology (Dataverse + SPE + .NET BFF, gated actions + decision ledger)?
+
+**Findings**:
+- Announced Ignite 2025-11-18 (preview). Azure blog 2026-06-02 (Build) says "Fabric IQ, now generally available" + Operations agent GA + Graph GA + Planning GA June; **Ontology item still preview** ("GA in coming months"). Learn pages (Aug/Sep 2026) STILL label the workload "IQ (preview)" and "Fabric IQ (preview)" — marketing/Learn contradiction. Fabric IQ MCP (Power BI-only tools) = GA; Ontology MCP = preview; Cowork plugin = preview (Power BI only).
+- Object model = entity types + typed properties (integer/boolean/datetime/double/string; Decimal unsupported in Graph) + entity-type key (string/int) + directional relationship types w/ cardinality + static vs time-series bindings + "untyped" properties. NO inheritance/subtypes, NO computed/derived fields, NO actions-on-object-types. "Rules" = Fabric Activator alerts (require a bound time-series property).
+- Data: bindings ONLY to OneLake — managed lakehouse tables (NOT external/shortcut tables, NOT OneLake-security-enabled lakehouses, NOT column-mapped Delta), eventhouse, Direct Lake semantic models (Import/DirectQuery models produce definitions but no bindings). Graph child item materialises + needs manual/scheduled full refresh (costs CU). Dataverse Link-to-Fabric = shortcuts to Dataverse Managed Lake → external + read-only + fixed sysadmin credential → Dataverse row security NOT honoured in Fabric; direct ontology binding of those shortcut tables is (inferred) unsupported → copy into managed table.
+- Write-back: NONE at the ontology layer. Data agent "strictly enforces read-only"; both MCP servers read-only; REST API = definition CRUD only. Only "action" paths = Activator/Operations-agent side-effects (Teams, email, Power Automate, Fabric jobs) executed under the CREATOR's delegated identity after a Teams approval. No per-object permitted-action model, no provenance/ledger beyond an activity log.
+- Security: Fabric workspace roles + item permissions; Power BI RLS/OLS honoured only via semantic-model paths; ontology MCP/Foundry/data agent run delegated (OBO) — service principal only on data-agent MCP endpoint direct. No object-level security on ontology instances.
+- Metering: Fabric CU (F2+ paid; trial capacities unsupported for ops agents). Ontology Modeling 0.0039 CU/hr per definition (30-min windows); Ontology AI 400/1600 CU-s per 1K in/out tokens; Graph 10 CU-s per CPU-second + ≥100 GB cache storage; ops agent 0.46 CU-hr/hr + reasoning tokens. Cowork = Copilot consumption billing. No separate SKU.
+- **Verdict**: analytical semantic layer over OneLake for agents; complements (as a reporting/graph view), does NOT replace Spaarke's binding declaration, deterministic fact supply, policy object, gated actions, or decision ledger. Would duplicate class/link declarations and force a copy of Dataverse data with security lost.
+
+**Sources**: learn.microsoft.com/fabric/iq/overview · /iq/ontology/overview · /iq/ontology/how-to-bind-data · /iq/ontology/how-to-use-rules · /iq/ontology/resources-capacity-usage · /iq/ontology/how-to-use-ontology-mcp-server · /iq/connectors/fabric-iq-mcp · /iq/connectors/cowork-overview · /data-science/concept-data-agent · /real-time-intelligence/operations-agent(-actions,-billing) · /onelake/create-dataverse-shortcut · /power-apps/maker/data-platform/azure-synapse-link-view-in-fabric · /rest/api/fabric/ontology/items · /azure/foundry/agents/how-to/tools/fabric-iq · /microsoft-copilot-studio/mcp-fabric-iq-ontology · azure.microsoft.com Build-2026 Fabric blog (2026-06-02) · Ignite-2025 Azure blog (2025-11-18)
+
+**Open questions**: Ontology GA date; whether Dataverse-shortcut tables will ever be bindable; whether "actions" on entity types (promised in blogs) ship as anything beyond Activator; whether row/object-level security lands on ontology instances. blog.fabric.microsoft.com + community.fabric.microsoft.com return 403 to WebFetch — use Azure/devblogs/Learn mirrors.
