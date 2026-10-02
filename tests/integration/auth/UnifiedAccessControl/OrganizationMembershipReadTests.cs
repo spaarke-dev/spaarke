@@ -666,6 +666,28 @@ public class OrganizationMembershipReadTests
     }
 
     /// <summary>
+    /// C5, fail closed (ADR-003 constraint "a missing row is treated as INACTIVE"): a contact-state read that answers
+    /// 404 — the contact row is gone — confers nothing on either plane. The twin of
+    /// <see cref="ContactStateReadFaults_ConfersNothing"/>: 404 has its own branch in the production read, so a regression
+    /// that maps it to Active would otherwise go unnoticed (task 137 r3, verifier finding 1).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task ContactStateReadAnswers404_TheMissingRowConfersNothing(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+        (await world.ProjectIdsAsync(plane)).Should().NotBeEmpty("control: a readable active contact keeps its access");
+
+        dataverse.ContactStateFault = HttpStatusCode.NotFound;
+
+        (await world.ProjectIdsAsync(plane)).Should().BeEmpty($"{plane}: a missing contact row is not Active");
+        dataverse.Requests.Count(r => r.Collection.StartsWith("contacts(", StringComparison.Ordinal)).Should().Be(2,
+            "the 404 came from the live contact-state read itself, once per request");
+    }
+
+    /// <summary>
     /// C5: an INACTIVE root confers nothing to a contact on either plane — the state rides the existing batched flag
     /// read — and reactivating it restores the access with no other change (a read-time rule, not a grant write).
     /// </summary>

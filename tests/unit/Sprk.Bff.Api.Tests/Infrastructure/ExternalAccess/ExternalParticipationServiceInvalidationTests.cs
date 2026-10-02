@@ -193,6 +193,25 @@ public class ExternalParticipationServiceInvalidationTests
             "a fault is not remembered");
     }
 
+    /// <summary>
+    /// A RETURNED <see cref="ContactRecordState.Unreadable"/> (a non-2xx answer other than 404, or a row with no
+    /// <c>statecode</c>) is not remembered either: within the SAME request, the next read goes back to Dataverse. The
+    /// thrown-fault case above returns from the catch before the memo is written, so only this case exercises the
+    /// memo's own <c>!= Unreadable</c> guard (task 137 r3, verifier finding 2).
+    /// </summary>
+    [Fact]
+    public async Task ReadContactStateAsync_AReturnedUnreadable_IsNotRemembered_WithinTheSameRequest()
+    {
+        var sut = new CountingState(TidContext()) { Next = ContactRecordState.Unreadable };
+
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Unreadable);
+
+        sut.Next = ContactRecordState.Active;
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Active,
+            "an unreadable answer is retried on the next read of the same request, never memoised");
+        sut.Reads.Should().Be(2, "both reads reached Dataverse");
+    }
+
     private static DefaultHttpContext TidContext() => new()
     {
         User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tid", Tenant) })),

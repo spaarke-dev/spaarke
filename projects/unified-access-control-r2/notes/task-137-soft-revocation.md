@@ -1,11 +1,14 @@
 # Task 137 (#1060) — C5 soft revocation: read guards and invalidation
 
-**Status:** code complete; **two parts stopped on escalation** (reconciliation posture = owner decision; manual live
-gate = needs live writes). Branch `task/uac-r2-137` (parents: `task/uac-r2-139-r1` + `task/uac-r2-141-f3`).
+**Status:** code complete; reconciliation posture **DECIDED** (owner round 7 item 1, applied in r3 — §6, §11); the
+manual live gate, the real report-only job run and publish size remain pending (need the dev deploy / main session). Branch `task/uac-r2-137` (parents: `task/uac-r2-139-r1` + `task/uac-r2-141-f3`).
 r1 fix round on `task/uac-r2-137-r1` (2026-10-02): verifier findings closed or recorded — §2 (job-scan before-state),
 §6 (posture still pending after the relayed answers), §9 (observations, new tests, perturbations).
 r2 fix round on `task/uac-r2-137-r1-r2` (2026-10-02): the production member-page read driven over the transport, the
 junction guard widened to see it, a stale test reference fixed — §10; posture still pending — §6.
+r3 fix round on `task/uac-r2-137-b1` (2026-10-02): owner round 7 item 1 applied (schedule ON, report-only), the three
+remaining verifier findings closed in tests (404 confers nothing, a returned Unreadable is not memoised, a failed revoke
+with a failed invalidation keeps its ProblemDetails) — §6, §11.
 
 ## 1. Ownership map (closes the "partially tracked" finding)
 
@@ -17,7 +20,7 @@ junction guard widened to see it, a stale test reference fixed — §10; posture
 | CIAM-tenant invalidation miss | **here** | `ExternalParticipationService.InvalidateGrantSetsAsync` + `GrantCacheTenantIds` |
 | Organization-grant invalidation (grant, revoke, close, expire) | **here** | same routine, organization → ACTIVE members paged to completion |
 | #1006 / ISS-026 read half (inactive organization) | task 109 (merged) — verified on BOTH planes here | `OrganizationMembershipReadTests.Task109Guards_OnBothPlanes_ConferOnlyThroughCurrentMembershipsOfActiveOrganizations(ciam|workforce)` |
-| #1006 write half (R2 deactivation) | task 117 (completed, shipped disabled) | posture → §6 (owner decision pending) |
+| #1006 write half (R2 deactivation) | task 117 (completed) | posture DECIDED (owner round 7 item 1): scheduled daily, report-only; writes after one reviewed report — §6 |
 | #999 / ISS-020 end date, D-10 start date | task 109 (implementation), task 110 (closure) — verified on BOTH planes here | same theory (ended + not-yet-started memberships confer nothing on CIAM and workforce); wall still binds a former member on CIAM: `Task109Guards_OnTheCiamPlane_TheOrgKeyedWallStillBindsAFormerMember(ended|not-yet-started|inactive-organization)`; workforce: the existing `ComposeAsync_OrgKeyedDenyRow_StillMatchesAMemberWhoseMembershipNoLongerConfers` |
 
 ## 2. Before-state (dev `spaarkedev1`, READ-ONLY, 2026-10-02, Dataverse MCP SQL)
@@ -136,7 +139,7 @@ New members (no new service / registration / endpoint / option / job / package):
 Complexity (§11.5): `ExternalParticipationService` grows by ~300 lines but stays one reason to change — the external
 grant DATA (read, cache, invalidate); `AccessibleRecordSetService` +~45.
 
-## 6. Reconciliation posture — ⏳ ESCALATED (owner decision pending)
+## 6. Reconciliation posture — ✅ DECIDED (owner round 7 item 1, 2026-10-02; applied in r3)
 
 Not answered by owner rounds 1–4 (round 4 item 6's "reconciliation job" is task 141's identity-link job). Registration
 (`enabled: false`) and `ExternalAccess:Reconciliation:WritesEnabled` (absent → false) are **unchanged**.
@@ -160,6 +163,34 @@ and 6 do not address it either. One input for the owner when answering (verifier
 only a safety net, running at ≤ 5 min". That sentence is scoped to tasks 142/143, but it bears on (b)/(c): this job's
 current schedule is daily (`0 5 * * *`), so if the owner wants it to be the ≤ 5-minute safety net here too, the answer
 should name the schedule as well as the mode.
+
+**r3 (2026-10-02): DECIDED.** Owner round 7 item 1, verbatim ("follow recommended" — option (c); recorded in
+`session27-owner-decisions-and-research.md`):
+
+> - Enable the schedule in **report-only** mode now. Enable writes only after the owner has reviewed one report.
+> - Inactive contacts and inactive roots stay READ guards only, so reactivating one restores access with no data repair.
+
+Applied in one change (branch `task/uac-r2-137-b1`):
+
+| Surface | Before | After |
+|---|---|---|
+| `ExternalAccessModule` registration | `AddScheduledJob<ExternalAccessReconciliationJob>(DefaultCronSchedule, enabled: false)` | `AddScheduledJob<ExternalAccessReconciliationJob>(DefaultCronSchedule)` — enabled, daily `0 5 * * *` (schedule unchanged; the owner named no other) |
+| `ExternalAccess:Reconciliation:WritesEnabled` | absent (= false) | **`false`**, now explicit in `appsettings.template.json` with a comment naming this decision (absent still = false) |
+| writer rules for inactive contacts / roots | none | none — by decision; read guards only |
+| job remarks / `Description` / module comment | "ships disabled" | "runs on its schedule in report-only mode" + the decision |
+| `DEPLOY-CHECKLIST.md` §0, §4, §4.1 | "must stay OFF", "owner decision pending" | the decided posture, the owner's verbatim answer, the owner's next action |
+| `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-8 | "job registered disabled / Job not enabled" | scheduled, report-only; writes after one reviewed report |
+
+Pinned by `ExternalAccessReconciliationTests.S2_TheJobShipsScheduled_AndItsShippingConfigurationIsReportOnly`
+(renamed from `S2_TheJobShipsDisabled_SoEnablingItIsAnOwnerAction`): registration enabled, schedule `0 5 * * *`, the
+registered job's `WritesEnabled` false with no key. The S1 tests already pin that every value but `true` writes nothing.
+Seeded `enabled: false` back into the registration: S2 red; restored, touched.
+
+What enabling the schedule does in dev: one report-only run per day, writing one `sprk_backgroundjobrun` row and no
+data; with §2's counts (R1 = R2 = R3 = 0) it lists nothing. The owner's next action is to review that report
+(DEPLOY-CHECKLIST §4.1) and then decide on `WritesEnabled`. The scheduler store is in-memory and is seeded from the
+registration on every start (`SchedulingModule`: `InMemoryBackgroundJobStore`), so no persisted "disabled" definition
+survives the deploy.
 
 ## 7. Tests (ADR-038 KEEP paths; no `Mock<HttpMessageHandler>`, no DI-registration or ctor null-check tests)
 
@@ -293,3 +324,43 @@ RecordShareExpiry, CallerPrincipalResolver) **149 / 0 / 0**; full BFF unit suite
   report-only job run (writes one `sprk_backgroundjobrun` row — live gate); criterion 17 manual live gate
   (DEPLOY-CHECKLIST §4.2); publish size (main session measures). Criterion 9's remaining gap (finding 1/20) is closed
   by the transport test above.
+
+## 11. r3 — verifier findings (2026-10-02, branch `task/uac-r2-137-b1`)
+
+- **Finding 1 (MEDIUM, closed in tests): the 404 → Inactive branch is pinned.**
+  `OrganizationMembershipReadTests.ContactStateReadAnswers404_TheMissingRowConfersNothing(ciam|workforce)` is the twin
+  of `ContactStateReadFaults_ConfersNothing`: the fake Dataverse answers the live `contacts({id})?$select=statecode`
+  read with 404; both planes compose the empty set, and the 404 came from the live read itself (one per request).
+  Seeded `404 → ContactRecordState.Active` in `QueryContactStateAsync`: both cases red (the verifier's seed had left
+  2,734 related tests green); restored, touched.
+- **Finding 2 (LOW, closed in tests): a RETURNED Unreadable is not memoised.**
+  `ExternalParticipationServiceInvalidationTests.ReadContactStateAsync_AReturnedUnreadable_IsNotRemembered_WithinTheSameRequest`:
+  within ONE `HttpContext`, `QueryContactStateAsync` returns Unreadable, then Active; the second read returns Active
+  and both reads reached Dataverse. Seeded the memo guard `state != ContactRecordState.Unreadable` away: this test red
+  (the thrown-fault test stays green on that seed, as the verifier found); restored, touched.
+- **Finding 3 (LOW, closed in tests): criterion 10's second clause has a direct test.**
+  `SpeRevokeMatcherTests.Revoke_WhenGraphFails_AndEveryCacheRemovalThrows_StillReturnsTheSameProblem` runs the same
+  FAILED revoke (Graph error, so `RevokeIncomplete`) twice through the PRODUCTION invalidation routine
+  (`RealInvalidationOver`): once over a real `TenantCache`, once over a cache whose every removal throws. The faulted
+  run's status (500), `reasonCode` (`RevokeSpeCleanupIncompleteReason`), title, detail and extensions (except the
+  per-request `traceId`) equal the healthy run's. The `Revoke` helper gained an optional participation parameter
+  (default unchanged). Seeded "a failed invalidation turns the failed revoke into a bare 500" in the endpoint: this
+  test red and nothing else (`GrantLifecycleCharacterizationTests` stayed green, the gap the verifier named);
+  restored, touched.
+- **Criterion 13 (posture): closed** — §6 r3.
+- **Still pending (not closable from code):** criterion 14's real report-only job run (it now also happens on the first
+  05:00 UTC tick after the dev deploy, or by the admin trigger — DEPLOY-CHECKLIST §4.1); criterion 17 manual live gate
+  (DEPLOY-CHECKLIST §4.2); criterion 18 publish size (main session; no package change, no CVE delta).
+- **Perturbations (r3)**, each seeded, seen red, restored (`git checkout` or a backup copy), file touched:
+
+| Seed | Red |
+|---|---|
+| `QueryContactStateAsync`: 404 → `Active` | `ContactStateReadAnswers404_TheMissingRowConfersNothing` ×2 |
+| `ReadContactStateAsync`: memo written for Unreadable too | `ReadContactStateAsync_AReturnedUnreadable_IsNotRemembered_WithinTheSameRequest` |
+| `/revoke`: failed revoke + failed invalidation → bare `500` | `Revoke_WhenGraphFails_AndEveryCacheRemovalThrows_StillReturnsTheSameProblem` |
+| registration back to `enabled: false` | `S2_TheJobShipsScheduled_AndItsShippingConfigurationIsReportOnly` |
+
+- **Placement / justification (CLAUDE.md §10 / §11):** no new service, DI registration, endpoint, option, job, column or
+  package. The configuration change flips an EXISTING registration's `enabled` argument and makes an EXISTING key
+  explicit in the template, both per the owner's decision; ADR-036 / ADR-052 placement unchanged (same in-process
+  scheduler, same job).

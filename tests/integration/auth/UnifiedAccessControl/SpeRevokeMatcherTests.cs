@@ -229,11 +229,13 @@ public class SpeRevokeMatcherTests
         Mock<DataverseWebApiClient> dataverse,
         Mock<SpeContainerMembershipService> spe,
         Guid? contactId = null,
-        Guid? containerId = null) =>
+        Guid? containerId = null,
+        ExternalParticipationService? participations = null) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(
                 AccessRecordId, contactId ?? ContactId, ProjectId, containerId ?? ContainerId),
-            dataverse.Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
+            dataverse.Object, spe.Object,
+            participations ?? new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static RevokeAccessResponse Body(IResult result) =>
@@ -364,6 +366,52 @@ public class SpeRevokeMatcherTests
         problem.ProblemDetails.Extensions["speContainerOutcome"].Should().Be(SpeContainerRevokeOutcome.Failed);
         problem.ProblemDetails.Extensions["deactivatedCount"].Should().Be(1,
             "the Dataverse row WAS deactivated even though the SPE half failed — owner directive 2026-09-10");
+    }
+
+    /// <summary>
+    /// Task 137 criterion 10, second clause (verifier r3 finding 3): a FAILED revoke whose grant-cache invalidation
+    /// ALSO fails still returns its own ProblemDetails — the same status, reason code, title, detail and extensions as
+    /// the same failed revoke over a healthy cache. Both runs go through the PRODUCTION invalidation routine
+    /// (<see cref="GrantPolicyTestDoubles.RealInvalidationOver"/>); only the cache differs, and in the faulted run
+    /// every removal throws.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenGraphFails_AndEveryCacheRemovalThrows_StillReturnsTheSameProblem()
+    {
+        var healthyCache = new TenantCache(
+            new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                Microsoft.Extensions.Options.Options.Create(
+                    new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+            NullLogger<TenantCache>.Instance);
+        var healthy = ProblemBody(await Revoke(
+            DataverseFor(ContactId, ContactEmail), new SpeServiceStub().Build(GraphError),
+            participations: GrantPolicyTestDoubles.RealInvalidationOver(healthyCache, AuthenticatedContext())));
+
+        var throwingCache = new Mock<ITenantCache>();
+        throwingCache
+            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated Redis timeout"));
+
+        var faulted = ProblemBody(await Revoke(
+            DataverseFor(ContactId, ContactEmail), new SpeServiceStub().Build(GraphError),
+            participations: GrantPolicyTestDoubles.RealInvalidationOver(throwingCache.Object, AuthenticatedContext())));
+
+        throwingCache.Invocations.Should().NotBeEmpty("precondition: the removals were attempted, and threw");
+        faulted.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        faulted.ProblemDetails.Extensions["reasonCode"].Should()
+            .Be(RevokeExternalAccessEndpoint.RevokeSpeCleanupIncompleteReason,
+                "the failed revoke's own message survives a failed invalidation — never a bare 500");
+        faulted.StatusCode.Should().Be(healthy.StatusCode);
+        faulted.ProblemDetails.Title.Should().Be(healthy.ProblemDetails.Title);
+        faulted.ProblemDetails.Detail.Should().Be(healthy.ProblemDetails.Detail);
+        // traceId is per request by design (ADR-019), so it is the one extension that legitimately differs.
+        static Dictionary<string, object?> WithoutTraceId(IDictionary<string, object?> extensions) =>
+            extensions.Where(kv => kv.Key != "traceId").ToDictionary(kv => kv.Key, kv => kv.Value);
+        faulted.ProblemDetails.Extensions.Should().ContainKey("traceId");
+        WithoutTraceId(faulted.ProblemDetails.Extensions).Should().BeEquivalentTo(
+            WithoutTraceId(healthy.ProblemDetails.Extensions),
+            "an invalidation failure is non-fatal: the failed revoke's problem is unchanged");
     }
 
     /// <summary>

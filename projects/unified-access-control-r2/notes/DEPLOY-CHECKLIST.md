@@ -23,8 +23,9 @@
 | 4 | **PCF `RegardingResolver`** v1.4.9 → **v1.5.0** | bundle rebuilt ✅ | ready |
 | 5 | **Code page `LegalWorkspace`** | real code changes, needs rebuild | ready to build |
 
-Plus **two operator actions** that are NOT deploys and must happen at specific points (§5), and **two
-config switches that must stay OFF** (§4).
+Plus **two operator actions** that are NOT deploys and must happen at specific points (§5), and the
+reconciliation job's **decided posture** (§4: schedule ON, writes OFF until the owner reviews one report — owner
+round 7 item 1, 2026-10-02).
 
 ---
 
@@ -203,29 +204,42 @@ privilege check (`hasEntityPrivilege`) to a **fail-CLOSED** call to the server's
 
 ---
 
-## 4. Config — two switches that must stay OFF
+## 4. Config — the reconciliation job: SCHEDULED, REPORT-ONLY (owner round 7 item 1, task 137)
 
-Both belong to the task 117 reconciliation job. **Neither is a deploy step; both are owner decisions.**
+Both switches belong to the task 117 reconciliation job (`ExternalAccessReconciliationJob`). The owner decided the
+posture on 2026-10-02 (§4.1). **Neither is a deploy step you choose: the code ships the decided posture.**
 
 | Switch | Ships as | Meaning |
 |---|---|---|
-| Scheduled-job registration | `enabled: false` | the job does not run |
-| `ExternalAccess:Reconciliation:WritesEnabled` | **absent → `false`** | report-only even if triggered |
+| Scheduled-job registration | **enabled** (`AddScheduledJob<ExternalAccessReconciliationJob>(DefaultCronSchedule)`, daily `0 5 * * *`) | every tick runs and reports |
+| `ExternalAccess:Reconciliation:WritesEnabled` | **`false`** (explicit in `appsettings.template.json`; absent / empty / unparseable also = `false`) | report-only: R1/R2/R3 are counted and listed, nothing is written |
 
-This is belt **and** braces on purpose: even a manual admin trigger of the disabled job writes nothing,
-because writes are separately gated. The reason is in `ExternalAccessModule.cs:360-372` — rules R2 and
-R3 **remove access that exists today**, and R1 turns a row that (since task 107) confers nothing into
-one that confers access for 90 more days.
+Writes stay off because rules R2 and R3 **remove access that exists today**, and R1 turns a row that (since task 107)
+confers nothing into one that confers access for 90 more days (`ExternalAccessModule.cs`, the comment above the
+registration). **Do not set `WritesEnabled` to `true` until the owner has reviewed one report** (§4.1).
 
-Default cron if ever enabled: `0 5 * * *`. **Do not enable either without an owner decision and a
-before-state count.**
+### 4.1 Task 137 (#1060) — the reconciliation job's posture: ✅ DECIDED (owner round 7 item 1, 2026-10-02)
 
-### 4.1 Task 137 (#1060) — the reconciliation job's posture: ⏳ OWNER DECISION PENDING
+Owner, verbatim ("follow recommended", recorded in `session27-owner-decisions-and-research.md`, round 7 item 1):
 
-Task 137's escalation trigger 1 fired (2026-10-02). The owner's rounds 1–4 do not answer it: round 4 item 6
-approves "the reconciliation job" among **task 141's** live steps — that is the identity-link reconciliation
-job (`IdentityLinkReconciliationJob`), not this one. **So both switches above STAY as they ship** until the
-owner answers; task 137 changed neither the registration nor the key.
+> - Enable the schedule in **report-only** mode now. Enable writes only after the owner has reviewed one report.
+> - Inactive contacts and inactive roots stay READ guards only, so reactivating one restores access with no data repair.
+
+Applied by task 137 r3 (branch `task/uac-r2-137-b1`), in one change:
+
+- `ExternalAccessModule.cs`: `enabled: false` removed — the job is registered ENABLED on its daily schedule
+  (`0 5 * * *`, unchanged).
+- `ExternalAccess:Reconciliation:WritesEnabled`: **`false`** — now written explicitly in `appsettings.template.json`
+  (beside a comment naming this decision) so the switch the owner will flip is discoverable; absent still means `false`.
+- No writer rule for inactive contacts or inactive roots — they remain read-time guards (`AccessibleRecordSetService`).
+- Pinned by `ExternalAccessReconciliationTests.S2_TheJobShipsScheduled_AndItsShippingConfigurationIsReportOnly`
+  (registration enabled, schedule `0 5 * * *`, writes off with no key) and the existing S1 tests (every value but
+  `true` is report-only).
+
+**Owner's next action (not this task's):** after the first scheduled (or manually triggered) run on dev, review its
+report — `GET /api/admin/jobs/external-access-reconciliation/status` as a `SystemAdmin`, `RecentRuns[0].ResultJson`
+(`mode: report-only`, per-rule `planned` / sampled ids; the complete list is the per-row before-state log lines) —
+then decide whether to set `ExternalAccess:Reconciliation:WritesEnabled = true` in the App Service configuration.
 
 Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md` §2):
 
@@ -234,21 +248,18 @@ Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md`
 | R1 — active grant with no expiry | **0** | of 31 active grants (26 contact-only, 5 carrying an organization — one of them also names a contact) |
 | R2 — active grant under an inactive organization | **0** | |
 | R3 — active membership past its end date | **0** | 2 active memberships, both with no end date |
-| (task 137) active grant whose CONTACT is inactive | **0** | read guard, no writer rule |
-| (task 137) active grant whose ROOT is inactive | **0** | read guard, no writer rule |
+| (task 137) active grant whose CONTACT is inactive | **0** | read guard, no writer rule (owner round 7 item 1) |
+| (task 137) active grant whose ROOT is inactive | **0** | read guard, no writer rule (owner round 7 item 1) |
 
-Recommendation put to the owner: keep inactive contacts and inactive roots as **read guards only** (reactivation
-restores access with no data repair — no writer rule for them); enable the schedule in **report-only** first;
-enable `WritesEnabled` only after the owner has reviewed one report. The owner's answer is to be recorded here
-verbatim, and the registration / key changed to match it in the same change.
-
-**Re-checked 2026-10-02 (task 137 r1): still unanswered.** The seven answers relayed with that run are owner round 4
-(root-BU users, `65a3fab2`, assign cascade, B2, 155 (b), live steps for 141/144/145, `showViewSelector`) — none names
-this job or `ExternalAccess:Reconciliation:WritesEnabled`. Both switches stay as shipped. The before-state was re-taken
-with the job's own scan shape (grants scanned 5, memberships scanned 0; R1 = R2 = R3 = 0). A true report-only RUN is a
-pending manual gate (it writes one `sprk_backgroundjobrun` row): after the dev deploy, a `SystemAdmin` caller
+The before-state was re-taken with the job's own scan shape (grants scanned 5, memberships scanned 0;
+R1 = R2 = R3 = 0). With the schedule now enabled, the first report-only RUN happens at the next 05:00 UTC tick after the
+dev deploy (it writes one `sprk_backgroundjobrun` row and no data); to get it sooner, a `SystemAdmin` caller
 `POST /api/admin/jobs/external-access-reconciliation/trigger`, then `GET …/status` — expect `mode: report-only`, every
-rule `planned: 0`, `changed: 0` (`notes/task-137-soft-revocation.md` §2).
+rule `planned: 0`, `changed: 0` (`notes/task-137-soft-revocation.md` §2). This run is still a pending live gate (needs
+the deploy).
+
+History: escalation 1 fired 2026-10-02 (rounds 1–6 did not answer it — round 4 item 6's "reconciliation job" is task
+141's `IdentityLinkReconciliationJob`); answered by round 7 item 1 the same day.
 
 ### 4.2 Task 137 — manual live gate (dev, no CI) — ⏳ PENDING, needs live WRITES
 

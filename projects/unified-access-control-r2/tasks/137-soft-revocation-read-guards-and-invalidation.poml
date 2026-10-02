@@ -4,7 +4,7 @@
     <title>C5 — revocation that actually revokes: inactive contact and inactive root confer nothing, grant-cache invalidation reaches the CIAM entry and every member of an organization, and the reconciliation job's enable/write posture is decided and recorded</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C5)</phase>
     <gate>after-136-109-141</gate>
-    <status>completed-with-escalation</status>
+    <status>code-complete-live-gates-pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization read path and cache invalidation on every grant-write endpoint (.cs); tags bff-api/auth/security; removes access that deactivated contacts and records keep today.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -223,6 +223,21 @@ NOT CLOSED: (15/16) reconciliation posture (criterion 13) — the answers relaye
 TESTS (r2): affected classes (OrganizationMembershipReadTests, ExternalParticipationServiceInvalidationTests, GrantLifecycleCharacterizationTests) 100 / 0 / 0; ExternalAccessQueryIntegrityGuardTests 4 / 0; full BFF unit suite 13,982 passed / 0 failed / 54 skipped (14,036, +2 new); NetArchTest 345 / 0 / 0 (one guard widened, no new test).
 
 PLACEMENT / JUSTIFICATION: no new service, DI registration, endpoint, option, job or package in r2 (test and guard changes + notes only).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-137-b1" base="42173873c" round="r3">
+VERIFIER r3 (findings 1-3 + notMet). Status: completed-with-escalation -> code-complete-live-gates-pending (escalation 1 ANSWERED by owner round 7 item 1; only live gates remain). Full record: notes/task-137-soft-revocation.md §6 (r3) and §11.
+
+ESCALATION 1 ANSWERED, CRITERION 13 MET. Owner round 7 item 1 (2026-10-02), verbatim: "Enable the schedule in report-only mode now. Enable writes only after the owner has reviewed one report. Inactive contacts and inactive roots stay READ guards only, so reactivating one restores access with no data repair." Applied in one change: ExternalAccessModule registers ExternalAccessReconciliationJob ENABLED on its unchanged daily schedule (0 5 * * *; enabled: false removed); ExternalAccess:Reconciliation:WritesEnabled = false, now explicit in appsettings.template.json with a comment naming the decision (absent / empty / unparseable still = report-only); no writer rule for inactive contacts or roots. Job remarks, Description and the module comment rewritten; DEPLOY-CHECKLIST §0/§4/§4.1 record the decision verbatim and the owner's next action (review one report, then decide WritesEnabled); docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md I-8 updated. Pinned by ExternalAccessReconciliationTests.S2_TheJobShipsScheduled_AndItsShippingConfigurationIsReportOnly (was S2_TheJobShipsDisabled_SoEnablingItIsAnOwnerAction): enabled, schedule, WritesEnabled false with no key. The scheduler store is in-memory and re-seeded from the registration on every start, so no persisted disabled definition survives a deploy.
+
+CLOSED IN TESTS (no src behaviour change): (1, MEDIUM) OrganizationMembershipReadTests.ContactStateReadAnswers404_TheMissingRowConfersNothing(ciam|workforce) -- the live contact-state read answers 404 over the UseTestServer fake; both planes confer nothing (ADR-003 "a missing row is treated as INACTIVE"). (2, LOW) ExternalParticipationServiceInvalidationTests.ReadContactStateAsync_AReturnedUnreadable_IsNotRemembered_WithinTheSameRequest -- a RETURNED Unreadable then Active in one HttpContext: the second read returns Active, two reads. (3, LOW) SpeRevokeMatcherTests.Revoke_WhenGraphFails_AndEveryCacheRemovalThrows_StillReturnsTheSameProblem -- a failed revoke through the PRODUCTION invalidation routine over a throwing cache returns the same 500 ProblemDetails (reasonCode, title, detail, extensions except traceId) as over a healthy TenantCache; criterion 10's second clause now has a direct test.
+
+PERTURBATIONS (r3, each seeded, seen red, restored, touched): 404 -&gt; Active in QueryContactStateAsync (2 red); memo written for Unreadable too (1 red); /revoke returns a bare 500 when a failed revoke's invalidation fails (1 red; GrantLifecycleCharacterizationTests stayed green -- the gap); registration back to enabled: false (S2 red).
+
+STILL PENDING (not closable from code): criterion 14's real report-only job run (now also the first 05:00 UTC tick after the dev deploy, or the admin trigger; writes one sprk_backgroundjobrun row, no data); criterion 17 manual live gate (DEPLOY-CHECKLIST §4.2); criterion 18 publish size (main session; no package change, no CVE delta).
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md §10 / §11): no new service, DI registration, endpoint, option, job, column or package. The configuration change flips an EXISTING registration's enabled argument and makes an EXISTING key explicit in the template, per the owner's decision; ADR-036 / ADR-052 placement unchanged.
+
+TESTS (r3): see notes §11 for the exact counts recorded at commit time.
     </outcome>
   </execution>
 </task>
