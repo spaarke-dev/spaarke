@@ -205,7 +205,7 @@ unwired BFF path). Its findings, and what this round did with each:
 | 8 | Office carrier-only to-do born stale; comment false; access change unflagged | **Closed.** `OfficeService.CreateTodoAsync` stamps a carrier-only to-do from its carrier (the one classification rule decides; two carriers and no record = nothing stamped, fail closed; an unreadable carrier refuses the create). Comment corrected. Access change flagged as (xxiv). |
 | 9 | (xiii) premise false for `IncomingAssociationResolver` Ambiguous writes; DirectRootLink rows carry partial copies of a carrier's other root types | **Closed.** The inbound write now follows `ClassifyStampSource` over the row exactly as written: a pair naming a root → nothing copied from a carrier; no pair + a lone intermediate beside an explicit root it can carry → the intermediate is withheld (a review candidate, provenance `written: false`). Latent: the shipped `CoreWritableEntities` writes roots only. See (xxv). |
 | 10 | A generic write to a stamped intermediate's copy column cascaded the hand-written value | **Closed.** `AfterWriteAsync` re-derives a record that carries a copy from its source FIRST when its own root columns were written, so the source's root — never the hand-written one — reaches its children; if the record's own source cannot be read nothing is cascaded (the job repairs both); a row filed under nothing is taken at its word on this path (only the job clears orphans). See (xxvi). |
-| 11 | AC8 manual live gate and the §10 publish-size measurement pending | AC8: still the main session's, after deploy. Publish size: measured this round from fresh short-path worktrees (recorded below, in the commit after the code commit). |
+| 11 | AC8 manual live gate and the §10 publish-size measurement pending | AC8: still the main session's, after deploy. **Publish size: measured — +0.03 MB vs master, +0.04 MB for the whole of task 156** (section below). |
 
 ### New and changed interpretations (owner-reversible)
 
@@ -297,6 +297,22 @@ unwired BFF path). Its findings, and what this round did with each:
 Two seeds first failed to COMPILE (an unassigned counter field is a warning-as-error) and were re-run in a compiling form;
 the seed runner now refuses to run tests on a failed build, so no result came from stale binaries.
 
+### Publish size (CLAUDE.md §10 item 4) — measured 2026-10-02
+
+Three FRESH worktrees at short paths (`C:\w156a`, `C:\w156b`, `C:\w156m`; removed afterwards), each published exactly as
+`scripts/Deploy-BffApi.ps1` does (`dotnet restore`, then `dotnet publish -c Release -o deploy/api-publish --no-restore`)
+and zipped with PowerShell `Compress-Archive`. No `MSB3030`; **212 files on every side**.
+
+| Commit | Zip incl. PDBs | Zip excl. PDBs |
+|---|---|---|
+| `65e6db71f` — origin/master | 45.49 MB | 44.51 MB |
+| `e74541920` — task 156 base (before task 156) | 45.48 MB | 44.49 MB |
+| `dc944a9b0` — task 156 + verifier round 1 | 45.52 MB | 44.53 MB |
+
+Delta: **+0.04 MB** for the whole of task 156 (base → round 1; 48 335 bytes incl. PDBs), **+0.03 MB** branch vs master.
+Code only — no package, project reference or new assembly, so no new CVE surface. Far below the +5 MB justification and the
+55 / 60 MB thresholds.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
 All four new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
@@ -310,8 +326,8 @@ package or plugin; every registration is unconditional (ADR-032: no Null-Object 
 | `CoreAncestorRestampQueue` + `CoreAncestorRestampJobHandler` | `JobSubmissionService` / `IJobHandler` (ADR-004) — reused, not duplicated: the queue is a 20-line typed submitter, the handler a thin adapter onto the restamper | The resolver must not take a Service Bus dependency at construction (it is constructed on every upload); the AI update tool must not hold an app-only client | A stale refusal would wait up to 5 minutes for the job instead of seconds; the AI tool's re-files would wait for the job |
 | `container_ancestor_stale` (problem code) | `container_ancestor_unverifiable` means "cannot be compared"; `container_ancestor_unresolved` means "unknown / unreadable" | Reusing either would mis-classify the inbound retry (stale is transient — the re-stamp makes the retry succeed; unverifiable / unresolved-409 are permanent skips) | A stale email would be skipped permanently, losing its archive |
 
-**Publish size:** code only — no package, no new assembly reference. The fresh-worktree master-vs-branch measurement
-(CLAUDE.md §10 item 4) is left to the main session, as in task 155.
+**Publish size:** code only — no package, no new assembly reference. Measured in verifier round 1 from fresh short-path
+worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that section).
 
 ## Tests
 
