@@ -1,4 +1,5 @@
 ## SharePoint Embedded + Graph
+- [SPE owner app via MI-as-FIC (2026-10-02)](spe-owning-app-mi-as-fic-2026-10-02.md) — GA 2025-05; same-tenant MI; FIC token appidacr=2; registration now Graph v1.0 PUT
 - [SPE version comment (2026-09-12)](spe-version-comment-2026-09-12.md) — WRITE-ONLY via checkin{comment}; no read-back in Graph (CSDL); repo checkin drops comment
 - [SPE WOPI co-auth lock / 423 (2026-07-30)](spe-wopi-coauthoring-lock-423-2026-07-30.md) — no Graph API releases co-auth lock; checkout/checkin = formal checkout only; ~30-min timeout
 - [SPE dedup / content identity (2026-07-14)](spe-dedup-content-identity-2026-07.md) — quickXorHash only; versions API no per-version hash; custom columns queryable

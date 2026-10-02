@@ -12,7 +12,7 @@ Full report: `projects/customer-provisioning-orchestration-r1/notes/graph-spe-20
 - **Graph SDK v6.5.0 / Kiota 2.0 = latest** (no v7). ODataError contract unchanged since the .NET 10 cutover. r1 design matches.
 - **SPE confidential-client + up-to-24h replication = STILL CURRENT** per [SPE auth doc updated 2026-07-13](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/build/configure-authentication-authorization). T6 fix correct.
 - **Exchange RBAC for Applications** explicitly *"replaces Application Access Policies"* per [MS Learn (updated 2026-03-16)](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac). No hard cutover date yet, but the legacy doc is titled `(legacy)` and Microsoft says deprecation "announced in future." Coexistence is safe (additive). r1 keeps ApplicationAccessPolicy for execution; add Phase-D migration item to design.
-- **MI-as-FIC GA in 2026** — UAMI can be a federated credential on an Entra app-reg (max 20 FICs). Enables secretless cross-tenant. Phase-C-plus optimization for Model 2, not r1 scope.
+- **MI-as-FIC GA (actually GA 2025-05-08 per Identity blog — corrected 2026-10-02, see [[spe-owning-app-mi-as-fic-2026-10-02]])** — UAMI can be a federated credential on an Entra app-reg (max 20 FICs). Enables secretless cross-tenant. Phase-C-plus optimization for Model 2, not r1 scope.
 - **Terraform Power Platform provider v4.1.0** (Jan 2026) validates D14. Our M-10 deferral is orthogonal to provider readiness.
 
 ## SPE 2026 rollup (from [whats-new](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/whats-new))
