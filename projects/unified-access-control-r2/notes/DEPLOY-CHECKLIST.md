@@ -220,6 +220,47 @@ one that confers access for 90 more days.
 Default cron if ever enabled: `0 5 * * *`. **Do not enable either without an owner decision and a
 before-state count.**
 
+### 4.1 Task 137 (#1060) — the reconciliation job's posture: ⏳ OWNER DECISION PENDING
+
+Task 137's escalation trigger 1 fired (2026-10-02). The owner's rounds 1–4 do not answer it: round 4 item 6
+approves "the reconciliation job" among **task 141's** live steps — that is the identity-link reconciliation
+job (`IdentityLinkReconciliationJob`), not this one. **So both switches above STAY as they ship** until the
+owner answers; task 137 changed neither the registration nor the key.
+
+Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md` §2):
+
+| Rule | Rows that would change | Note |
+|---|---|---|
+| R1 — active grant with no expiry | **0** | of 31 active grants (27 contact, 4 organization) |
+| R2 — active grant under an inactive organization | **0** | |
+| R3 — active membership past its end date | **0** | 2 active memberships, both with no end date |
+| (task 137) active grant whose CONTACT is inactive | **0** | read guard, no writer rule |
+| (task 137) active grant whose ROOT is inactive | **0** | read guard, no writer rule |
+
+Recommendation put to the owner: keep inactive contacts and inactive roots as **read guards only** (reactivation
+restores access with no data repair — no writer rule for them); enable the schedule in **report-only** first;
+enable `WritesEnabled` only after the owner has reviewed one report. The owner's answer is to be recorded here
+verbatim, and the registration / key changed to match it in the same change.
+
+### 4.2 Task 137 — manual live gate (dev, no CI) — ⏳ PENDING, needs live WRITES
+
+Run by the main session with existing test data only (no user relocation): the CIAM Test User contact
+`394fda9f-ab95-f111-b8dc-7ced8ddc4cc6`, which holds a direct grant on matter `2444af6d-e1f2-f011-8406-7ced8d1dc988`
+(View Only, row `0452ab4b-…`) and inherits organization grants through organization `67577f8c-4301-f111-8407-7ced8d1dc988`
+(e.g. matter `042f4462-860e-f111-8342-7c1e520aa4df`, Full Access org grant row `9aed8ab9-c29c-f111-b8de-7ced8ddc4a05`
+— chosen because the contact holds NO direct grant on that matter, unlike `b68299c6…`).
+Requires the task 137 BFF deployed to dev first.
+
+1. Deactivate matter `2444af6d…` (statecode 1, statuscode 2) → the external SPA loses it on the next request.
+2. Reactivate it → it returns, with no other change.
+3. Deactivate the contact `394fda9f…` → the next sign-in is refused (`sdap.access.deny.contact_inactive`), and an
+   already-signed-in session loses every record on its next request. Reactivate afterwards.
+4. As an existing non-admin Write-holder, revoke the organization grant `9aed8ab9…` → the CIAM session loses matter
+   `042f4462…` on the next request (no 60-second wait). Restore the grant afterwards (re-grant the organization at
+   Full Access, expiry 2026-12-10). If no existing non-admin Write-holder exists at that level, ask the owner to
+   create one (owner round 4 item 1) rather than reusing the root-BU users.
+5. Record evidence (timestamps, responses) in `notes/task-137-soft-revocation.md` §8.
+
 ---
 
 ## 4a. 🔴 CONFIRMED IN THE FIELD 2026-09-21 — PCF v1.0.31 DEPLOYED AHEAD OF THE BFF

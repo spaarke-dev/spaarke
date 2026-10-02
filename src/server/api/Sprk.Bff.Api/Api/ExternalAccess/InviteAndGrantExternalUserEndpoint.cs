@@ -62,7 +62,6 @@ public static class InviteAndGrantExternalUserEndpoint
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
-        ITenantCache cache,
         IConfiguration configuration,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -259,7 +258,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // that changed while the account was being provisioned is still judged at write time.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, cache, httpContext, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is

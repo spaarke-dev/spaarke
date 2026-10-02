@@ -438,6 +438,12 @@ public class WorkforceEmailNoHijackTests
 
         result.DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
         _store.Writes.Should().BeEmpty("deactivating a contact is how an operator removes a person");
+
+        // Task 137 (C5) verification of this rule: with an ACTIVE contact (B) sharing the caller's email, the oid match
+        // on the inactive contact ends the decision — the email path is never even read, so B can never be bound.
+        _store.Reads.Should().NotContain("email", "an oid bound to an inactive contact never falls through to the email path");
+        _store.Contacts[ContactB].Oid.Should().BeNull();
+        result.Principal.Should().BeNull("a deny carries no partial principal");
     }
 
     // ── The resolver carries the decision's own code ─────────────────────────────────────────────────

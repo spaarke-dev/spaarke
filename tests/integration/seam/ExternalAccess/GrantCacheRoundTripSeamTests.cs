@@ -570,6 +570,11 @@ public sealed class GrantCacheRoundTripSeamTests
             return Task.FromResult(flags);
         }
 
+        // Task 137: the contact's live state. Active, so this double's grants compose exactly as before;
+        // the inactive-contact guard itself is pinned by UnifiedEvaluatorSeamTests (task 137 section).
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+            => Task.FromResult(ContactRecordState.Active);
+
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(ActiveOrgMemberships.None);
 

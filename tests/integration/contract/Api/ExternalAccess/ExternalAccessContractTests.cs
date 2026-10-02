@@ -1018,7 +1018,11 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             // Replace the Dataverse-backed external services with header-driven stubs (virtual seams).
             services.RemoveAll<ExternalParticipationService>();
             services.AddScoped<ExternalParticipationService>(sp =>
-                new StubExternalParticipationService(sp.GetRequiredService<IHttpContextAccessor>()));
+                new StubExternalParticipationService(
+                    sp.GetRequiredService<IHttpContextAccessor>(),
+                    // Task 137: the grant-write paths invalidate through this service's ONE routine, which runs for real
+                    // over the fixture's ITenantCache — so the RemoveAsync verifications read what production removed.
+                    sp.GetRequiredService<ITenantCache>()));
 
             services.RemoveAll<ExternalDataService>();
             services.AddScoped<ExternalDataService>(sp =>
@@ -1176,8 +1180,8 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
 {
     private readonly IHttpContextAccessor _accessor;
 
-    public StubExternalParticipationService(IHttpContextAccessor accessor)
-        : base(new HttpClient(), Mock.Of<ITenantCache>(), new ConfigurationBuilder().Build(),
+    public StubExternalParticipationService(IHttpContextAccessor accessor, ITenantCache? cache = null)
+        : base(new HttpClient(), cache ?? Mock.Of<ITenantCache>(), new ConfigurationBuilder().Build(),
                Mock.Of<TokenCredential>(), accessor, NullLogger<ExternalParticipationService>.Instance)
     {
         _accessor = accessor;
@@ -1223,6 +1227,11 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
     // this double would compose to nothing. "Belongs to no organization / references none" is the honest
     // default for contract tests that assert what an ENTITLED caller gets; the vetoes themselves are owned by
     // UnifiedEvaluatorSeamTests.
+    // Task 137: the contact's live state. Active, so this double's grants compose exactly as before;
+    // the inactive-contact guard itself is pinned by UnifiedEvaluatorSeamTests (task 137 section).
+    internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+        => Task.FromResult(ContactRecordState.Active);
+
     internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
         Guid contactId, CancellationToken ct = default)
         => Task.FromResult(ActiveOrgMemberships.None);

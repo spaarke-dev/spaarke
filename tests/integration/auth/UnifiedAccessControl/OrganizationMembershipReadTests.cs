@@ -573,6 +573,184 @@ public class OrganizationMembershipReadTests
             "the veto reads the WALL set from the same response");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Task 137 (#1060, defect C5) — over the same real transport
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<string> BothContactPlanes => new() { "ciam", "workforce" };
+
+    /// <summary>
+    /// Task 137 verifies task 109 on BOTH contact planes (#1006 read half, #999, D-10): through the real read, the
+    /// CIAM principal and the workforce contact-only composition hold exactly the direct grant and the org grant of
+    /// the CURRENT membership of an ACTIVE organization — never the ended, the not-yet-started or the
+    /// inactive-organization one, nor a contact grant carrying an inactive firm.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task Task109Guards_OnBothPlanes_ConferOnlyThroughCurrentMembershipsOfActiveOrganizations(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+
+        var projects = await world.ProjectIdsAsync(plane);
+
+        projects.Should().BeEquivalentTo(new[] { DirectProject, CurrentOrgProject },
+            $"{plane}: ended (#999 / D-2), not-yet-started (D-10) and inactive-organization (#1006) memberships confer " +
+            "no org grant, and a contact grant whose firm is inactive confers nothing");
+    }
+
+    /// <summary>
+    /// Task 137 verifies task 109's other half on the CIAM plane: the ethical wall's ORGANIZATION axis keeps binding a
+    /// FORMER member (ended, not yet started, inactive organization) — the wall set is statecode-only.
+    /// </summary>
+    [Theory]
+    [InlineData("ended")]
+    [InlineData("not-yet-started")]
+    [InlineData("inactive-organization")]
+    public async Task Task109Guards_OnTheCiamPlane_TheOrgKeyedWallStillBindsAFormerMember(string membership)
+    {
+        var wallOrg = membership switch { "ended" => OrgEnded, "not-yet-started" => OrgNotStarted, _ => OrgInactive };
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse, new OrgKeyedDenyList((wallOrg, DirectProject)));
+
+        var projects = await world.ProjectIdsAsync("ciam");
+
+        projects.Should().NotContain(DirectProject, $"CIAM: a {membership} membership is still a wall subject");
+        projects.Should().Contain(CurrentOrgProject, "records the wall does not name are unaffected");
+    }
+
+    /// <summary>
+    /// C5: a contact deactivated AFTER sign-in loses every contact-sourced record on its NEXT request — on both planes —
+    /// while the grant cache is WARM (the second request reads no grant row) and the identity layer still says
+    /// "active" (the CIAM identity store keeps the contact active; the workforce principal is pre-resolved, as a warm
+    /// 10-minute identity cache would hand it over). Only the live contact-state read changed.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task InactiveContact_AfterSignIn_LosesEveryRecordOnTheNextRequest_WithWarmCaches(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse, cache: RealCache());
+
+        var before = await world.ProjectIdsAsync(plane);
+        before.Should().BeEquivalentTo(new[] { DirectProject, CurrentOrgProject }, "control: the active contact's access");
+        var grantReads = GrantReads(dataverse);
+
+        dataverse.ContactStateCode = 1; // deactivated in Dataverse — nothing else changes
+
+        var after = await world.ProjectIdsAsync(plane);
+
+        after.Should().BeEmpty($"{plane}: an inactive contact confers nothing through any contact-sourced term");
+        GrantReads(dataverse).Should().Be(grantReads,
+            "the grant set came from the WARM cache — the live state read, not a cache expiry, removed the access");
+        dataverse.Requests.Count(r => r.Collection.StartsWith("contacts(", StringComparison.Ordinal)).Should().Be(2,
+            "the contact's state is read live once per request, never cached across requests");
+    }
+
+    /// <summary>C5, fail closed: a contact-state read that faults confers nothing on either plane (the control is healthy).</summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task ContactStateReadFaults_ConfersNothing(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+        (await world.ProjectIdsAsync(plane)).Should().NotBeEmpty("control: a readable active contact keeps its access");
+
+        dataverse.ContactStateFault = HttpStatusCode.InternalServerError;
+
+        (await world.ProjectIdsAsync(plane)).Should().BeEmpty($"{plane}: an unreadable contact state is not Active");
+    }
+
+    /// <summary>
+    /// C5: an INACTIVE root confers nothing to a contact on either plane — the state rides the existing batched flag
+    /// read — and reactivating it restores the access with no other change (a read-time rule, not a grant write).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task InactiveProject_ConfersNothing_AndReactivationRestoresIt(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+
+        dataverse.InactiveProjects.Add(DirectProject);
+        var inactive = await world.ProjectIdsAsync(plane);
+
+        inactive.Should().NotContain(DirectProject, $"{plane}: an active grant on an inactive project confers nothing");
+        inactive.Should().Contain(CurrentOrgProject, "only the inactive root is affected");
+        dataverse.Requests.Where(r => r.Collection == "sprk_projects" && r.Select.Contains("sprk_issecure")).Should().NotBeEmpty().And.OnlyContain(
+            r => r.Select.Split(',', StringSplitOptions.None).Contains("statecode"),
+            "the root's state is selected by the SAME batched flag read");
+
+        dataverse.InactiveProjects.Clear();
+        (await world.ProjectIdsAsync(plane)).Should().Contain(DirectProject, "reactivation restores access — no data repair");
+    }
+
+    private static int GrantReads(FakeDataverse dataverse)
+        => dataverse.Requests.Count(r => r.Collection == "sprk_externalrecordaccesses");
+
+    private static TenantCache RealCache()
+        => new(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance);
+
+    /// <summary>
+    /// The real participation service and evaluator over the fake transport, where every call of
+    /// <see cref="ProjectIdsAsync"/> is a NEW request (a fresh <see cref="HttpContext"/> carrying the tid), so nothing
+    /// request-scoped leaks between them — exactly as two HTTP requests would not share one.
+    /// </summary>
+    private sealed class RequestScopedWorld
+    {
+        private readonly HttpContextAccessor _accessor = new();
+        private readonly AccessibleRecordSetService _evaluator;
+
+        public RequestScopedWorld(FakeDataverse dataverse, INoAccessListReader? denyList = null, ITenantCache? cache = null)
+        {
+            var participations = new ExternalParticipationService(
+                dataverse.CreateClient(TimeSpan.FromSeconds(30)),
+                cache ?? Mock.Of<ITenantCache>(),
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = FakeServiceUrl })
+                    .Build(),
+                new StaticTokenCredential(),
+                _accessor,
+                NullLogger<ExternalParticipationService>.Instance);
+            _evaluator = RealEvaluator(participations, denyList ?? new OrgKeyedDenyList(), StandingReader().Object);
+        }
+
+        public async Task<IReadOnlyCollection<Guid>> ProjectIdsAsync(string plane)
+        {
+            _accessor.HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[]
+                    {
+                        new Claim("tid", "11111111-2222-3333-4444-555555555555"),
+                        new Claim("oid", CiamOid),
+                        new Claim("iss", "https://spaarketest.ciamlogin.com/tid/v2.0"),
+                    },
+                    "test")),
+            };
+
+            if (plane == "workforce")
+            {
+                var set = await _evaluator.ComposeAsync(
+                    ContactPrincipal(), AccessibleRecordSetService.ProjectEntity, CancellationToken.None);
+                return set.RecordIds.ToList();
+            }
+
+            var identities = new InMemoryContactIdentityStore();
+            identities.AddContact(ContactId, oid: CiamOid, plane: IdentityPlaneMarker.External);
+            var strategy = new CiamContactPrincipalStrategy(
+                IdentityBindingTestKit.Binder(identities), _evaluator, NullLogger<CiamContactPrincipalStrategy>.Instance);
+            var resolution = await strategy.ResolveAsync(_accessor.HttpContext, CancellationToken.None);
+            resolution.IsResolved.Should().BeTrue("precondition: the CIAM identity layer still resolves the contact");
+            return resolution.Principal!.GetAccessibleProjectIds().ToList();
+        }
+    }
+
     // ── world ────────────────────────────────────────────────────────────────────────────────────
 
     private static void SeedWorld(FakeDataverse dataverse)
@@ -923,9 +1101,22 @@ public class OrganizationMembershipReadTests
                         ["sprk_projectid"] = id,
                         ["sprk_issecure"] = false,
                         ["sprk_accesspermission"] = 100000000,
+                        // Task 137: the root's own state rides the flag read (the live column, Active = 0).
+                        ["statecode"] = InactiveProjects.Contains(Guid.Parse(id)) ? 1 : 0,
                         ["_sprk_assignedlawfirm1_value"] = null,
                         ["_sprk_assignedlawfirm2_value"] = null,
                     }));
+                    return;
+
+                case var single when single.StartsWith("contacts(", StringComparison.Ordinal):
+                    // Task 137: the LIVE contact-state read — contacts({id})?$select=statecode, one row.
+                    if (ContactStateFault is { } contactFault)
+                    {
+                        context.Response.StatusCode = (int)contactFault;
+                        return;
+                    }
+
+                    await context.Response.WriteAsJsonAsync(new Dictionary<string, object?> { ["statecode"] = ContactStateCode });
                     return;
 
                 default:
@@ -933,6 +1124,15 @@ public class OrganizationMembershipReadTests
                     return;
             }
         }
+
+        /// <summary>Task 137: the contact's own <c>statecode</c> the live read returns (Active by default).</summary>
+        public int? ContactStateCode { get; set; } = 0;
+
+        /// <summary>Task 137: non-null — the contact-state read answers with this status.</summary>
+        public HttpStatusCode? ContactStateFault { get; set; }
+
+        /// <summary>Task 137: projects whose own <c>statecode</c> is Inactive.</summary>
+        public HashSet<Guid> InactiveProjects { get; } = new();
 
         private Dictionary<string, object?> Organization(Guid organizationId) => new()
         {

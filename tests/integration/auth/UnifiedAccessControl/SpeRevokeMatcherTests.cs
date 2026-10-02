@@ -233,7 +233,7 @@ public class SpeRevokeMatcherTests
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(
                 AccessRecordId, contactId ?? ContactId, ProjectId, containerId ?? ContainerId),
-            dataverse.Object, spe.Object, Mock.Of<ITenantCache>(),
+            dataverse.Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static RevokeAccessResponse Body(IResult result) =>
@@ -421,7 +421,7 @@ public class SpeRevokeMatcherTests
 
         var result = await RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(AccessRecordId, ContactId, ProjectId, ContainerId: null),
-            DataverseFor(ContactId, ContactEmail).Object, spe.Object, Mock.Of<ITenantCache>(),
+            DataverseFor(ContactId, ContactEmail).Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         Body(result).SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NotAttempted);
@@ -670,7 +670,7 @@ public class SpeRevokeMatcherTests
         public Task<IResult> Revoke(Mock<SpeContainerMembershipService> spe) =>
             RevokeExternalAccessEndpoint.RevokeAccessAsync(
                 new RevokeAccessRequest(AccessRecordId, Guid.Empty, ProjectId, ContainerId),
-                Dataverse.Object, spe.Object, Mock.Of<ITenantCache>(),
+                Dataverse.Object, spe.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None),
                 AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 

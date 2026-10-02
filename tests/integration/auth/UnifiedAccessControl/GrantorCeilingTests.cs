@@ -583,7 +583,7 @@ public class GrantorCeilingTests
     private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            Mock.Of<ITenantCache>(), Context(), NullLogger<Program>.Instance, new FixedClock(Today),
+            Context(), NullLogger<Program>.Instance, new FixedClock(Today),
             CancellationToken.None);
 
     /// <remarks>
@@ -594,13 +594,13 @@ public class GrantorCeilingTests
     private Task<IResult> InviteAndGrant(InviteExternalUserRequest request, AccessRights? callerRights) =>
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identity), Mock.Of<ITenantCache>(),
+            ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identity),
             PortalConfig(), Context(), NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
 
     private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(GrantAccessRequest request, GrantCeiling ceiling) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, ceiling, callerOid: null,
-            _dataverse, _participations, DenyList(), Mock.Of<ITenantCache>(), Context(), NullLogger.Instance,
+            _dataverse, _participations, DenyList(), NullLogger.Instance,
             CancellationToken.None);
 
     private void AssertNothingOnboardedOrWritten()

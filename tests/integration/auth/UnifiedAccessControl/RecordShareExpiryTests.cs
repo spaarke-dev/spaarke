@@ -80,7 +80,8 @@ public class RecordShareExpiryTests
     private readonly Mock<ITenantCache> _cache = new();
 
     private readonly List<(string Entity, List<(Guid id, Dictionary<string, object> fields)> Updates)> _bulkUpdates = new();
-    private readonly List<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
+    // Concurrent: since task 137 the invalidation routine removes keys with bounded parallelism.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
 
     public RecordShareExpiryTests()
     {
@@ -98,7 +99,7 @@ public class RecordShareExpiryTests
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, string, int, string, CancellationToken>(
-                (tenant, resource, id, version, _, _) => _invalidated.Add((tenant, resource, id, version)))
+                (tenant, resource, id, version, _, _) => _invalidated.Enqueue((tenant, resource, id, version)))
             .Returns(Task.CompletedTask);
     }
 
@@ -435,7 +436,12 @@ public class RecordShareExpiryTests
             new SetRecordShareExpiryRequest(recordType, MatterId, expiry),
             _client.Object,
             _dataverse.Object,
-            _cache.Object,
+            // Task 137: the ONE invalidation routine, run for real over this test's cache and the request's tid; only
+            // its organization-member page read is answered from the table (by the production filter).
+            new GrantPolicyTestDoubles.MemberPagingParticipationService(_cache.Object, AuthenticatedContext(), null)
+            {
+                MemberSource = _table.ActiveMembersOf,
+            },
             new FakeTimeProvider(Now),
             AuthenticatedContext(),
             NullLogger<Program>.Instance,
@@ -492,6 +498,15 @@ public class RecordShareExpiryTests
 
         public void SeedMembership(Guid organizationId, Guid contactId, int stateCode = 0)
             => _memberships.Add((organizationId, contactId, stateCode));
+
+        /// <summary>
+        /// Task 137: the members the invalidation routine's page read returns — by INTERPRETING the production
+        /// <see cref="ExternalOrganizationMembership.ActiveMembersFilter"/>, as this table's own junction query does.
+        /// </summary>
+        public Guid[] ActiveMembersOf(Guid organizationId)
+            => MatchMembers(ExternalOrganizationMembership.ActiveMembersFilter(organizationId))
+                .Select(m => m.ContactId)
+                .ToArray();
 
         private ExternalGrantRow Seed(
             Guid? contactId, Guid? organizationId, ExternalGrantRootType rootType, Guid rootId,
