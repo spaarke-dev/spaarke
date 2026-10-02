@@ -56,6 +56,7 @@ import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
 import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 // #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
 // package's convention (briefingService) is @spaarke/auth's authenticatedFetch
@@ -738,6 +739,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // Success — render HighPriority (if any) + TldrSection + filtered channelNarratives.
   const tldr = renderData?.tldr ?? null;
   const highPriorityItems = renderData?.highPriorityItems ?? [];
+  // unified-access-control-r2 task 152: sections whose read as the caller failed are named, never shown as empty.
+  const failedSectionLabels = describeFailedSections(
+    renderData?.failedChannels ?? [],
+    renderData?.highPriorityFailedEntityTypes ?? []
+  );
 
   // Deterministic KPI tiles (task 021 redesign). Every count is derived from the
   // already-deterministic render data — no LLM, no fabrication (FR-A4 posture).
@@ -791,6 +797,14 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         onEmailBriefing={handleEmailBriefing}
       />
       <div className={styles.scrollContent}>
+        {failedSectionLabels.length > 0 && (
+          <MessageBar intent="warning" layout="multiline" className={styles.errorBar}>
+            <MessageBarBody>
+              <MessageBarTitle>Some sections could not be loaded.</MessageBarTitle>
+              {`${failedSectionLabels.join(', ')} — refresh to try again. What is shown below is complete for the other sections.`}
+            </MessageBarBody>
+          </MessageBar>
+        )}
         {/* Task 021 redesign: deterministic KPI tiles at the top. */}
         <StatTiles tiles={statTiles} />
         {/* Operator order (2026-07-09): Today's summary above Critical Today. */}

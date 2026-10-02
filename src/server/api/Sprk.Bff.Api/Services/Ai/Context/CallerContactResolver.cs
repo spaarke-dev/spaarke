@@ -4,20 +4,12 @@
 // data" — "assign it to me" stops being model guesswork).
 //
 // Component Justification (CLAUDE.md §11):
-//   (1) Existing — the AAD-oid→Dataverse cross-reference is already resolved TWICE in this
-//       codebase: MembershipEndpoints.ResolveSystemUserIdAsync (oid → systemuserid, via
-//       systemuser.azureactivedirectoryobjectid) and IdentityNormalizationService.
-//       TryResolveContactIdAsync (systemuser's AAD-oid → contact, via
-//       contact.azureactivedirectoryobjectid). Both are PRIVATE to their host files — neither is
-//       reusable as a service. MembershipEndpoints.cs even flags its own helper as an extraction
-//       candidate ("if a SECOND endpoint needs the same lookup, extract this helper").
-//   (2) Extension — per ADR-028, the AAD oid claim IS the cross-reference key on BOTH systemuser
-//       AND contact (both rows carry the same azureactivedirectoryobjectid value populated by the
-//       same AAD sync). This resolver queries contact directly by the caller's oid claim — the
-//       same one-hop FetchXml/QueryExpression pattern already used at the other two sites — rather
-//       than adding a second network round-trip through systemuserid (which the User slice does not
-//       need). Reusing IDataverseService (the same DI-registered facade both existing sites already
-//       depend on) keeps this additive: no second Dataverse client, no parallel identity service.
+//   (1) Existing — the caller's Entra oid is the binding key. Since unified-access-control-r2 task 141 the
+//       ONE binding column is contact.sprk_externalobjectid (both planes); the shared read is
+//       ContactBindingDecision.ContactsBoundToQuery + DecideBoundContact, also used by IdentityNormalizationService.
+//   (2) Extension — this resolver runs that shared query for the caller's oid claim. It used to query
+//       contact.azureactivedirectoryobjectid, a column that does not exist in dev, so every "assign it to me"
+//       returned lookup-failed (task 141 background item 3).
 //   (3) Cost-of-doing-nothing — without this resolver, "assign it to me" / "my tasks" has no
 //       deterministic contact id to bind to; the ONLY alternative is letting the LLM guess a
 //       contact from conversational context, which is exactly the unreliable behavior FR-B-06
@@ -30,8 +22,8 @@
 
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
-using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Ai.Context;
 
@@ -44,10 +36,11 @@ namespace Sprk.Bff.Api.Services.Ai.Context;
 public interface ICallerContactResolver
 {
     /// <summary>
-    /// Resolves <paramref name="caller"/>'s Dataverse contact deterministically via the AAD oid
-    /// claim → <c>contact.azureactivedirectoryobjectid</c> cross-reference (ADR-028). Returns an
-    /// explicit <see cref="CallerContactResolution.Unresolved"/> result — never a guessed/nearest
-    /// contact — when the caller has no resolvable claims, no oid claim, or no matching contact row.
+    /// Resolves <paramref name="caller"/>'s Dataverse contact deterministically: the ONE contact bound to
+    /// the caller's Entra oid (<c>contact.sprk_externalobjectid</c>, task 141), when it is active. Returns an
+    /// explicit <see cref="CallerContactResolution.Unresolved"/> result — never a guessed/nearest contact — when
+    /// the caller has no resolvable claims, no oid claim, no bound contact, an ambiguous binding (two contacts
+    /// in any state), or an inactive bound contact.
     /// </summary>
     Task<CallerContactResolution> ResolveAsync(ClaimsPrincipal? caller, CancellationToken ct);
 }
@@ -67,7 +60,9 @@ public sealed record CallerContactResolution
 
     /// <summary>
     /// Identifier-only reason for a non-resolution (e.g. <c>no-claims-principal</c>,
-    /// <c>no-oid-claim</c>, <c>no-matching-contact</c>, <c>lookup-failed</c>). Null when resolved.
+    /// <c>no-oid-claim</c>, <c>no-matching-contact</c>, <c>ambiguous-binding</c>, <c>inactive-contact</c>,
+    /// <c>lookup-failed</c>).
+    /// Null when resolved.
     /// </summary>
     public string? UnresolvedReason { get; init; }
 
@@ -109,25 +104,53 @@ public sealed class CallerContactResolver : ICallerContactResolver
 
         try
         {
-            var query = new QueryExpression("contact")
-            {
-                ColumnSet = new ColumnSet("contactid"),
-                TopCount = 1,
-                NoLock = true,
-            };
-            query.Criteria.AddCondition("azureactivedirectoryobjectid", ConditionOperator.Equal, oid.Value);
+            // The ONE binding read (shared with IdentityNormalizationService): every statecode, two rows, answered
+            // by the binder's own oid step — so "assign it to me" never resolves a contact the binder would deny
+            // (verifier finding 6: an active + an inactive contact on one oid is ambiguous, not "the active one").
+            var results = await _dataverse
+                .RetrieveMultipleAsync(ContactBindingDecision.ContactsBoundToQuery(oid.Value), ct)
+                .ConfigureAwait(false);
+            var decision = ContactBindingDecision.DecideBoundContact(
+                ContactBindingDecision.BoundContactLookup(results.Entities));
 
-            var results = await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            if (results.Entities.Count == 0 || results.Entities[0].Id == Guid.Empty)
+            if (decision is null)
             {
                 _logger.LogInformation(
-                    "CallerContactResolver: no contact cross-reference for caller oid={CallerOid} — " +
+                    "CallerContactResolver: no contact bound to caller oid={CallerOid} — " +
                     "honest no-contact result (FR-B-06 fail-honestly; never guesses a nearest/first contact).",
                     oid);
                 return CallerContactResolution.Unresolved("no-matching-contact");
             }
 
-            return CallerContactResolution.Resolved(results.Entities[0].Id.ToString("D"));
+            if (decision.Action == BindingAction.ResolveByOid && decision.ContactId is { } contactId)
+            {
+                return CallerContactResolution.Resolved(contactId.ToString("D"));
+            }
+
+            if (decision.DenyCode == ContactBindingDecision.DenyContactOidAmbiguous)
+            {
+                // Two contacts carrying one oid is an identity collision, not a choice to make here.
+                _logger.LogWarning(
+                    "CallerContactResolver: more than one contact is bound to caller oid={CallerOid} — honest " +
+                    "unresolved result ({DenyCode}); never picks one.",
+                    oid, decision.DenyCode);
+                return CallerContactResolution.Unresolved("ambiguous-binding");
+            }
+
+            if (decision.DenyCode == ContactBindingDecision.DenyContactInactive)
+            {
+                // Deactivating a contact is how an operator removes a person (ADR-003): never "me".
+                _logger.LogInformation(
+                    "CallerContactResolver: the contact bound to caller oid={CallerOid} is inactive — honest " +
+                    "unresolved result ({DenyCode}).",
+                    oid, decision.DenyCode);
+                return CallerContactResolution.Unresolved("inactive-contact");
+            }
+
+            _logger.LogWarning(
+                "CallerContactResolver: caller oid={CallerOid} not resolved ({DenyCode}) — honest unresolved result.",
+                oid, decision.DenyCode);
+            return CallerContactResolution.Unresolved("lookup-failed");
         }
         catch (OperationCanceledException)
         {

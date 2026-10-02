@@ -143,15 +143,27 @@ public class AccessibleRecordSetServiceTests
         set.Sources.StandingGrantMembership.Should().BeFalse("standing-grant is never consulted for a systemuser");
     }
 
+    /// <summary>
+    /// ✅ FLIPPED BY TASK 141 (defect C7 item 5) — was
+    /// <c>ComposeAsync_SystemUserNoLinkedContact_EmailFallbackResolvesContactGrants</c>, which pinned the hole:
+    /// a licensed user with no linked contact had a contact resolved by EMAIL ($top=1, no ambiguity check, no
+    /// binding) and inherited the grants of any unbound contact that carried the address. A licensed user's
+    /// contact now comes ONLY from the systemuser↔contact link.
+    /// </summary>
+    /// <remarks>
+    /// Proven by what the composer ASKS for, not only by what it returns: the participation double holds a
+    /// grant that an email resolution would have reached, and counts every grant read. Zero reads is the
+    /// property — a composer that resolved any contact would have to read that contact's grants.
+    /// </remarks>
     [Fact]
-    public async Task ComposeAsync_SystemUserNoLinkedContact_EmailFallbackResolvesContactGrants()
+    public async Task ComposeAsync_SystemUserNoLinkedContact_WithAnEmail_NeverResolvesAContactOrReadsGrants()
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
             .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity)); // no ADR-034 membership
 
-        // No derived contact (sprk_primarycontact null) but a verified email that resolves to a contact.
+        // No derived contact (sprk_primarycontact null) — but an email that a contact carries.
         var principal = new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
@@ -162,16 +174,17 @@ public class AccessibleRecordSetServiceTests
             Email = "ralph.schroeder@hotmail.com",
         };
         var participations = new FakeParticipationService(
-            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } },
-            resolveContactId: ContactId);
+            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } });
 
         var sut = CreateSut(membership.Object, participations, NeverStanding());
 
         var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
 
-        set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
-            "with no linked contact, the verified-email fallback finds the caller's contact grants");
-        set.Sources.ContactGrants.Should().BeTrue();
+        set.RecordIds.Should().BeEmpty(
+            "an email is not an identity: with no link there is no contact, so no contact grants");
+        set.Sources.ContactGrants.Should().BeFalse();
+        participations.GrantSetReads.Should().Be(0,
+            "no contact may be resolved from the email — any resolution would have read that contact's grants");
     }
 
     [Fact]
@@ -192,7 +205,6 @@ public class AccessibleRecordSetServiceTests
             TenantId = Tenant,
             Email = string.Empty,
         };
-        // Strict-ish: resolveContactId null so even if called, nothing resolves.
         var sut = CreateSut(membership.Object, new FakeParticipationService(Array.Empty<ExternalParticipation>()), NeverStanding());
 
         var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
@@ -435,8 +447,7 @@ public class AccessibleRecordSetServiceTests
                 new[]
                 {
                     new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly }
-                },
-                resolveContactId: ContactId),
+                }),
             standing.Object);
 
         var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
@@ -817,6 +828,167 @@ public class AccessibleRecordSetServiceTests
         set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         standing.Verify(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "the systemuser plane must never consult the standing-grant flag");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Task 138 — Limited (sprk_accesspermission = Limited) reuses the FR-22 pre-max suppression
+    // ─────────────────────────────────────────────────────────────────────
+
+    private static RootRecordFlags LimitedOnly => new(IsSecure: false, IsRestricted: false, IsLimited: true);
+
+    [Fact]
+    public async Task ComposeAsync_LimitedRecord_OrgInheritedGrantConfersNothing_DirectGrantKeepsExactlyItsLevel()
+    {
+        // The same three shapes FR-22 pins for Secure, on a Limited, NON-secure record: an org-only grant
+        // (absent), and a ViewOnly direct grant sitting under a Collaborate org grant (EXACTLY Read — the
+        // ordering proof: suppression runs before the max, so the org term never enters it).
+        var orgOnly = GrantedProject;
+        var mixed = StandingMatter; // reused as a second project id
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = orgOnly, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = null },
+            new ExternalParticipation { ProjectId = mixed, AccessLevel = ExternalAccessLevel.Collaborate, DirectAccessLevel = ExternalAccessLevel.ViewOnly },
+        });
+        participations.Flags[orgOnly] = LimitedOnly;
+        participations.Flags[mixed] = LimitedOnly;
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(orgOnly, "Limited admits only named, direct grants — an org grant confers nothing");
+        set.RightsFor(mixed).Should().Be(AccessRights.Read,
+            "EXACTLY Read — the direct ViewOnly grant contributes its own level and the suppressed org Collaborate cannot outbid it");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ContactStandingMembershipOnLimitedRecord_IsSuppressed()
+    {
+        var limited = MemberRecordA;
+        var open = MemberRecordB;
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(MatterEntity, limited, open));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[limited] = LimitedOnly;
+
+        var sut = CreateSut(membership.Object, participations, AlwaysStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.Contains(limited).Should().BeFalse("standing-grant membership is a derived term; Limited suppresses it exactly as Secure does");
+        set.Contains(open).Should().BeTrue("control: the same term still reaches a Standard record");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_OnALimitedRecord_KeepsItsMembership_ButNotItsContactsOrgInheritedGrant()
+    {
+        // Systemuser plane: the contact-grants term is suppressed by Limited (org-inherited → nothing); the
+        // ADR-034 membership term is NOT — Limited governs which CONTACT grant types count, never internal access.
+        var membershipRecord = MemberRecordA;
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, membershipRecord));
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = null },
+            new ExternalParticipation { ProjectId = membershipRecord, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = null },
+        });
+        participations.Flags[GrantedProject] = LimitedOnly;
+        participations.Flags[membershipRecord] = LimitedOnly;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(GrantedProject,
+            "the linked contact's org-inherited grant is suppressed on a Limited record, on the systemuser plane too");
+        set.RightsFor(membershipRecord).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "the systemuser's own membership survives Limited untouched — Delete is absent, proving the suppressed " +
+            "org FullAccess grant did not contribute");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_RecordBothSecureAndLimited_BehavesExactlyAsSecure()
+    {
+        // Criterion 3: Secure implies Limited for contacts, so the combination is the same predicate — not a
+        // stronger or a weaker one.
+        ExternalParticipation[] Grants() => new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = null },
+            new ExternalParticipation { ProjectId = StandingMatter, AccessLevel = ExternalAccessLevel.Collaborate, DirectAccessLevel = ExternalAccessLevel.ViewOnly },
+        };
+
+        var secure = new FakeParticipationService(Grants());
+        secure.Flags[GrantedProject] = secure.Flags[StandingMatter] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        var both = new FakeParticipationService(Grants());
+        both.Flags[GrantedProject] = both.Flags[StandingMatter] = new RootRecordFlags(IsSecure: true, IsRestricted: false, IsLimited: true);
+
+        var secureSet = await CreateSut(new Mock<IMembershipResolverService>().Object, secure, NeverStanding())
+            .ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+        var bothSet = await CreateSut(new Mock<IMembershipResolverService>().Object, both, NeverStanding())
+            .ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        bothSet.Rights.Should().BeEquivalentTo(secureSet.Rights);
+        bothSet.Rights.Should().BeEquivalentTo(new Dictionary<Guid, AccessRights> { [StandingMatter] = AccessRights.Read });
+    }
+
+    [Fact]
+    public async Task ComposeAsync_RecordRestrictedAndLimited_GivesTheContactNothing_EvenItsDirectGrant()
+    {
+        // Criterion 4: Restricted wins. Limited would keep the direct grant; Restricted removes every
+        // contact-sourced contribution after the max, direct grants included.
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.FullAccess, DirectAccessLevel = ExternalAccessLevel.FullAccess },
+        });
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: true, IsLimited: true);
+
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().NotContainKey(GrantedProject);
+    }
+
+    [Fact]
+    public void Unreadable_IsTheMostRestrictiveCombination_AndCarriesTheUnreadableMarker()
+    {
+        // Criterion 5's read-path half: an unreadable row is Restricted AND direct-only (Secure, Limited), so
+        // every contact-sourced contribution is suppressed and vetoed. The marker exists only for the WRITE-time
+        // policy, which must not report a fault as "the record is Restricted".
+        var unreadable = RootRecordFlags.Unreadable;
+
+        unreadable.IsRestricted.Should().BeTrue();
+        unreadable.IsDirectOnly.Should().BeTrue();
+        unreadable.IsSecure.Should().BeTrue();
+        unreadable.IsLimited.Should().BeTrue();
+        unreadable.IsUnreadable.Should().BeTrue();
+        RootRecordFlags.None.IsDirectOnly.Should().BeFalse();
+        RootRecordFlags.None.IsUnreadable.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_WhenFlagReadFaults_TheStandingTermIsSuppressedToo()
+    {
+        // Criterion 5 through ThrowingFlagParticipationService: the unreadable row is direct-only, so even the
+        // DERIVED standing term — which Restricted alone would also remove — never contributes. Asserted on a
+        // record the contact reaches ONLY through standing membership.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        var sut = CreateSut(
+            membership.Object,
+            new ThrowingFlagParticipationService(Array.Empty<ExternalParticipation>()),
+            AlwaysStanding());
+        var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(MemberRecordA).Should().BeFalse("an unreadable flag row must not default the record to open (NFR-01)");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1879,14 +2051,16 @@ public class AccessibleRecordSetServiceTests
     private sealed class FakeParticipationService : ExternalParticipationService
     {
         private readonly ExternalGrantSet _grantSet;
-        private readonly Guid? _resolveContactId;
+
+        /// <summary>How many times a contact's grants were read (task 141's no-email-resolution proof).</summary>
+        public int GrantSetReads { get; private set; }
 
         /// <param name="matters">Matter grant IDS, for tests that predate levels (task 032). Converted at
         /// Collaborate — the level a bare id effectively resolved to before levels were carried.</param>
         /// <param name="matterGrants">Matter grants WITH levels — use this for rights-fidelity tests.
         /// Takes precedence over <paramref name="matters"/>.</param>
         public FakeParticipationService(
-            IReadOnlyList<ExternalParticipation> participations, Guid? resolveContactId = null,
+            IReadOnlyList<ExternalParticipation> participations,
             IReadOnlySet<Guid>? matters = null, IReadOnlySet<Guid>? workAssignments = null,
             IReadOnlyList<ExternalRootGrant>? matterGrants = null,
             IReadOnlyList<ExternalRootGrant>? workAssignmentGrants = null)
@@ -1899,17 +2073,13 @@ public class AccessibleRecordSetServiceTests
                 MatterGrants = matterGrants ?? RootGrants((matters ?? new HashSet<Guid>()).ToArray()),
                 WorkAssignmentGrants = workAssignmentGrants ?? RootGrants((workAssignments ?? new HashSet<Guid>()).ToArray()),
             };
-            _resolveContactId = resolveContactId;
         }
 
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
-            => Task.FromResult(_grantSet);
-
-        // Email-fallback resolution (systemuser with no derived contact). Returns the configured
-        // contact id regardless of the (oid, email) passed — the test controls whether a match exists.
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult(_resolveContactId);
+        {
+            GrantSetReads++;
+            return Task.FromResult(_grantSet);
+        }
 
         // ── Task 037 veto flags ──────────────────────────────────────────────────────────────────
         //
@@ -2010,10 +2180,6 @@ public class AccessibleRecordSetServiceTests
 
         public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_grantSet);
-
-        public override Task<Guid?> ResolveExternalContactAsync(
-            string? oid, string? email, CancellationToken ct = default)
-            => Task.FromResult<Guid?>(null);
 
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)

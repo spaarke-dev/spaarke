@@ -69,9 +69,9 @@
       "configJson": {
         "__actionType": 52,
         "entityType": "sprk_matter",
-        "roles": ["owner", "assignedAttorney", "assignedParalegal"],
+        "targeting": "people",
         "includeRelated": false,
-        "description": "Resolve the executing user's matter memberships (owner + assigned attorney + assigned paralegal) per ADR-034. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
+        "description": "Resolve the matters FOR the executing user via the people-targeting surface (targeting: people, ADR-034 Amendment A3): records they created (human Created By), are named on (Assigned To, via their linked contact) or personally own — never matters reached only through team, business-unit or organization ownership. Resolved IDs are bound to `myMatters.ids` for downstream filtering via {{joinIds myMatters.ids}}."
       }
     },
     {

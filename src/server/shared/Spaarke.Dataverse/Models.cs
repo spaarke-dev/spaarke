@@ -969,6 +969,13 @@ public class CreateEventRequest
     /// </summary>
     [JsonIgnore]
     public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
+    /// owner decision S1: a BFF-created event is app-only, so its Created By is the application user and cannot say
+    /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
+    /// </summary>
+    public Guid? AssignedToContactId { get; set; }
 }
 
 /// <summary>

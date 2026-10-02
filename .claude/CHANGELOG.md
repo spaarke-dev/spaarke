@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-02 — root `CLAUDE.md` §1.1: product names vs engineering identifiers (spaarke-ontology-platform-r1)
+
+**SpaarkeAi is now called the Spaarke Console.** Added a §1.1 naming table so the rename does **not** require
+sweeping ~705 "SpaarkeAi" occurrences across 256 files: product name and engineering identifier are allowed to
+differ, and the table is what makes the old name readable. `sprk_spaarkeai`, `src/solutions/SpaarkeAi/` and the
+deploy script/workflow names are **explicitly unchanged** — renaming them is tracked at
+[#1095](https://github.com/spaarke-dev/spaarke/issues/1095) and deferred because **37 of 62 active projects
+declare `SpaarkeAi = Y`** and would inherit the merge conflicts. Same split already set for
+~~ledger~~ → Decision Record. Naming authority stays
+`projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.
+
 ###### 2026-09-30 — `office-addins-deploy`: two manifest eras (spaarkeai-word-add-in-r1 task 078)
 
 The skill's "Manifest Upload After Deploy" told operators to download `outlook/manifest.xml` — a path that
@@ -434,6 +445,34 @@ candidate must pass is *holds no privileged legal content at rest*.
   negative/positive/scanner controls) and **armed in the Tier-1 blocking filter** (verdict-neutral under the PR
   #865 mid-shadow-window precedent). Dead plugin-size CI jobs **deferred** to post-cutover — router/tier2/sdap-ci
   are frozen while the shadow window runs (`projects/ci-cd-unit-test-remediation-r1/notes/post-cutover-adr002-ci-cleanup.md`).
+
+###### 2026-09-29 — `spaarke-ontology-platform-r1`: new `FAILURE-MODES.md` **AP-14** (facade named for an entity it does not write) + an **AP-12** instance (Daily Briefing)
+
+- **New `FAILURE-MODES.md` AP-14: a facade method NAMED for an entity it does not write.** (Authored as
+  AP-13; renumbered on merge because `unified-access-control-r2` had already published its own AP-13 —
+  a tool with no parameter for a thing you must control — to master. TOC entries added for both, which
+  neither had.) Sibling of
+  AP-12, separated because an *identifier* is trusted more than a *comment* — it reads as contract
+  rather than commentary. Live instance: `IActionSeam.CreateTaskAsync` returns
+  `CreateTaskResult.TaskId`, while its implementation `TaskActionCore` writes
+  `new Entity("sprk_event")` with an `sprk_eventtype_ref` of type task. An earlier version of that core
+  **did** write `new Entity("task")` and was fixed by `email-communication-intelligence-r2`; the name
+  was never corrected with it.
+- **🔴 Binding rule recorded: Spaarke does not use OOB `task` / `activitypointer`.** Zero such writes
+  exist in `src/`. Tasks are `sprk_event` discriminated by `sprk_eventtype_ref`; to-dos are `sprk_todo`.
+  The rule is load-bearing because `DailyBriefingCollector` queries `sprk_event`/`sprk_todo` and never
+  `task` — so a write to an OOB activity table **succeeds and is then invisible** to the briefing, the
+  Navigator, and every `sprk_event` grid. It fails silently; nothing in the build, tests, or runtime
+  objects. Prevention: read the `*ActionCore`, not the seam; `grep 'new Entity("'` before asserting
+  which table a path writes; treat any platform-vocabulary name in a Spaarke facade as suspect.
+- **New AP-12 worked instance: `CommunicationRiActionService`'s Daily Briefing claim.** Its docstring
+  states the app-notification "mirrors the action so it surfaces in Daily Briefing (spec Success
+  Criterion 2)". Daily Briefing has **no appNotification dependency at all** —
+  `DailyBriefingCollector.cs:4` says so explicitly — and queries six channels deterministically
+  (`sprk_event`, `sprk_todo`, `sprk_document`, `sprk_matter`, `sprk_project`, `sprk_monitor`); the
+  `NotificationCategoryDto` references are the **output** shape, not an input source. The action *does*
+  reach the briefing, but via the `sprk_event` it creates. **Right outcome, wrong mechanism** — worse
+  than a plain error, because the observable behaviour appears to confirm the false claim.
 
 ###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
 

@@ -125,24 +125,27 @@ export type ExternalGrantRootType = 'project' | 'matter' | 'workassignment';
  * ONLY place that knows the real `sprk_project` OptionSet values), keeping
  * this shared modal entity-agnostic per ADR-012.
  *
- * - `'restricted'` — external access is off for this record: the modal
- *   blocks ALL external-grant actions (approve-candidate + add-named-contact).
- * - `'limited'` — named/approved grants remain available, but the
- *   standing-grant option is unavailable (no auto-approval across future
- *   records).
- * - `'standard'` — every grant type is available, including standing
- *   grants. This is the DEFAULT applied when the prop is omitted, matching
- *   task 041's baseline behavior for any caller that hasn't wired the
- *   record's Access-Permission value (zero-regression default).
+ * The owner's model (unified-access-control-r2 task 138, round 2 item 3,
+ * binding) — the server enforces exactly this at read AND write time:
+ * - `'restricted'` — no contact-based access at all; internal users are
+ *   unaffected. The modal does not offer "+ Contact", "+ Organization" or the
+ *   role-based candidates; "+ User" (an internal share), its level dropdown,
+ *   Add and Revoke stay available.
+ * - `'limited'` — contacts get access ONLY through named, direct grants:
+ *   organization-wide grants, standing-grant membership and organization
+ *   expansion confer nothing. The modal does not offer "+ Organization".
+ *   A SECURE record (not Restricted) is passed as `'limited'` too — Secure
+ *   implies Limited for contacts — with {@link IAccessGrantModalProps.isSecureRecord}
+ *   set so the banner can say "Secure".
+ * - `'standard'` — every grant type is available. This is the DEFAULT applied
+ *   when the prop is omitted (task 041's baseline).
+ *
+ * The host maps raw values to this state and MUST fail closed: an unreadable
+ * secure flag maps to `'limited'`, never `'standard'`.
  *
  * DISTINCT from the per-grant `sprk_accesslevel` field (`accessLevelOptions`
- * / `defaultAccessLevel` below) — this state governs WHICH grant types the
- * modal permits, never WHAT access level an individual grant carries. R1
- * exposes no per-grant access-level selector in this modal's UI (see
- * `defaultAccessLevel`'s doc comment), so there is no shared UI surface for
- * this gate to affect; the independence is structural — the gate only
- * touches candidate/named-contact/standing-grant availability, never
- * `accessLevelOptions` or `defaultAccessLevel`.
+ * / `defaultAccessLevel` below) — this state governs WHICH grantee kinds the
+ * modal offers, never WHAT access level an individual grant carries.
  */
 export type AccessPermissionState = 'standard' | 'limited' | 'restricted';
 
@@ -272,17 +275,9 @@ export interface IAccessGrantModalProps {
    * person) — see the modal's own doc comment for the escalated internal
    * deep-link notify gap. */
   isInternalContact: (contactId: string) => Promise<boolean>;
-  /** Sets/clears the contact's subject-level standing-grant flag
-   * (`contact.sprk_standinggrant`, FR-12) — a single-field Contact write, NOT
-   * a `sprk_externalrecordaccess` write, so it is intentionally OUTSIDE the
-   * "reuse the grant endpoint" constraint. The host implements this via
-   * Xrm.WebApi (host-context, single-entity, single-field — per
-   * DATA-ACCESS-DECISION-CRITERIA.md). Best-effort: a failure here does NOT
-   * roll back the grant that was already written (NFR-06 principle applied
-   * to the standing-grant option specifically). Omit to hide the standing-
-   * grant option entirely (e.g., a host that hasn't wired task 050's field
-   * yet). */
-  onSetStandingGrant?: (contactId: string, standingGrant: boolean) => Promise<void>;
+  // `onSetStandingGrant` was REMOVED by task 138: the modal has had no
+  // standing-grant control since task 073 UAT v1.0.24 #5 (the standing grant is
+  // set on the Contact record itself), so the prop was dead wiring.
   /** Header title override (default `"Manage Access"`). */
   title?: string;
   /** Access-level choices offered for every grant (default: the BFF's fixed
@@ -295,14 +290,18 @@ export interface IAccessGrantModalProps {
    * callers needing a different default may override. */
   defaultAccessLevel?: number;
   /** The record's current Access-Permission sharing-gate state (spec FR-14,
-   * Option A — task 043). Governs which grant types the modal permits:
-   * `'restricted'` blocks all external grants (approve-candidate +
-   * add-named-contact disabled, with an explanatory banner); `'limited'`
-   * allows named/approved grants but hides the standing-grant option;
-   * `'standard'` (default, when omitted) allows every grant type — task
-   * 041's unmodified baseline. See {@link AccessPermissionState} for the
-   * full mapping and the `sprk_accesslevel` independence guarantee. */
+   * Option A — task 043; made real by task 138). Governs which grantee kinds
+   * the modal offers: `'restricted'` hides "+ Contact", "+ Organization" and
+   * the candidates (keeping "+ User"); `'limited'` hides "+ Organization";
+   * `'standard'` (default, when omitted) offers everything. See
+   * {@link AccessPermissionState} for the full mapping. */
   accessPermissionState?: AccessPermissionState;
+  /** Whether the record is SECURE (task 138; owner O1 FINAL, 2026-10-01) — a
+   * semantic flag, not a Dataverse column name. Only changes the banner's copy
+   * ("Secure", or "Secure – Restricted" when {@link accessPermissionState} is
+   * `'restricted'`); the gating itself comes from `accessPermissionState`, to
+   * which the host already folds Secure as `'limited'`. Default `false`. */
+  isSecureRecord?: boolean;
   /** Resolves the current record's secure-project owner + business-unit
    * alignment (task 065, design.md §6) for read-only display. Called once
    * when the modal opens, alongside the other loaders. Returns `null` for a

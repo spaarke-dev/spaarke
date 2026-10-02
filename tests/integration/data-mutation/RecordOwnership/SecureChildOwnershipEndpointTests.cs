@@ -466,6 +466,16 @@ public class SecureChildOwnershipEndpointTests
             services.AddSingleton<IEventDataverseService>(Events);
             services.AddSingleton(Mock.Of<ICommunicationDataverseService>());
             services.AddSingleton(Mock.Of<IMembershipEventPublisher>());
+
+            // Task 152 (merged after 146): the create also names the person the event is FOR (sprk_assignedto). Not
+            // under test here — the caller resolves to no systemuser, so it is left blank.
+            services.AddSingleton(Mock.Of<IGenericEntityService>());
+            var callerResolver = new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+            callerResolver
+                .Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Unresolved("not under test"));
+            services.AddSingleton(callerResolver.Object);
+            services.AddSingleton(Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
         }
 
         protected override void Map(WebApplication app) => app.MapEventEndpoints();

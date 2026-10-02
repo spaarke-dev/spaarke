@@ -421,7 +421,9 @@ public class SecureChildOwnershipTests
     private static (TaskActionCore Core, List<Entity> Created) TaskCore(IRecordOwnershipResolver ownership)
     {
         var (entities, created) = CapturingCreates();
-        return (new TaskActionCore(entities, CoreAncestorResolverFixtures.Inert(), ownership, NullLogger.Instance), created);
+        return (new TaskActionCore(
+            entities, CoreAncestorResolverFixtures.Inert(), ownership,
+            IdentityNormalizationFixtures.NoLinkedContact(), NullLogger.Instance), created);
     }
 
     private static (ThreadResolver Resolver, List<Entity> Created) Threads(IRecordOwnershipResolver ownership)

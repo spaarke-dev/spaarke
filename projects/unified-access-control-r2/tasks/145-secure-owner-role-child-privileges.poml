@@ -4,7 +4,7 @@
     <title>ACTIVELY TRACKED (owner) — the Secure Record Owner role must hold the privileges every child re-own needs, in every environment: verify word-add-in-r1 task 082's grant, extend the ONE codified set to every table UAC-r2 re-owns, standing census clause, new-environment provisioning step</title>
     <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 11; GitHub #1046)</phase>
     <gate>Steps 1-2 (tracking, census of tables) startable now. Steps 3-6 (live extension grant, census clause, pipeline) wait for word-add-in-r1 task 082 to land its codified JSON set, its script, its guide rows and its five-table grant (#1046) — or for the owner's decision under the first escalation trigger. Step 5 (census clause retarget) and the named-team verification wait for task 144 (the role's holder moves to 144's named team; 144 rewrites SecureBuRoleDepthAssertion clause 2).</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a live Dataverse security role on the secure-isolation boundary; tags auth, security, dataverse; adds a standing check and a provisioning step.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -237,6 +237,7 @@ NEW ENVIRONMENTS. No provisioning code creates the Secure Record BU, the owner t
       PLACEMENT/JUSTIFICATION: no new service, DI registration, endpoint, option, job or package; one optional parameter
       on an existing census record. TESTS: affected 70/70; full suite and ArchTests in the structured result.
     </outcome>
+    <outcome date="2026-10-02" status="completed">G1 run 2026-10-02 (notes §11): verbatim refusal recorded, -Apply + §5.4 strip, -Verify 9/9 Basic, probes 3/3, census clause 5 PASS live. New-environment handler handed to customer-provisioning-orchestration-r1 (owner F10 = a) via handoffs/INCOMING-145 incl. §6 production topology (round 5).</outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(F11) Only one account holds "Spaarke Basic User" in dev — the owner's guest account ralph.schroeder_hotmail.com#EXT# (BU "Spaarke"), verified 2026-09-30 — so the census clause-1 finding is not structural. UPDATE 2026-10-01: the owner will change that account themselves ("this is in dev and we'll change this") — add NO census exception; clause 1 must pass on its own. Also: 082 (F1) removed the 32 drifted privileges live (role 40 to 8, all Read at Basic); AddPrivilegesRole re-injects the SharePoint four, so after any -Apply that extends the codified set, re-run the guide section 5.4 strip and -Verify.</amendment>

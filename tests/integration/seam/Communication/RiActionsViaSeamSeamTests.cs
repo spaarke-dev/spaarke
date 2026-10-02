@@ -151,6 +151,7 @@ public sealed class RiActionsViaSeamSeamTests
             new Mock<IServiceScopeFactory>().Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             NullLogger<ActionSeam>.Instance);
 
         var outbox = new OutboxService(entity.Object, NullLogger<OutboxService>.Instance);       // REAL outbox

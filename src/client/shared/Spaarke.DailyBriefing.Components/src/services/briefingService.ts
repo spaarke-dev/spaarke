@@ -108,6 +108,13 @@ export interface NarrateResponse {
    * items → widget hides the section.
    */
   highPriorityItems?: HighPriorityItemResult[];
+  /**
+   * unified-access-control-r2 task 152 — channel codes (e.g. "matters") whose read AS THE CALLER failed. A failed
+   * channel is "could not be loaded", never "nothing to report"; the widget says so instead of showing it as empty.
+   */
+  failedChannels?: string[];
+  /** Task 152 — High Priority entity types (e.g. "sprk_invoice") whose read as the caller failed. */
+  highPriorityFailedEntityTypes?: string[];
 }
 
 export interface HighPriorityItemResult {

@@ -297,10 +297,11 @@ public sealed class ExternalChildOwnershipTestFixture : ExternalCollaborationTes
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             TodoRootKind rootKind, Guid rootId, CreateExternalTodoRequest request, Guid owningTeamId,
-            CancellationToken ct = default)
+            Guid? callerContactId, CancellationToken ct = default)
         {
             TodoOwners.Add(BoundOwner(
-                BuildTodoCreatePayload(request, TryGetRootBinding(rootKind)!, rootId, "root", null, owningTeamId)));
+                BuildTodoCreatePayload(
+                    request, TryGetRootBinding(rootKind)!, rootId, "root", null, owningTeamId, callerContactId)));
             return Task.FromResult(new ExternalTodoDto { SprkTodoid = Guid.NewGuid().ToString(), SprkName = request.SprkName });
         }
 

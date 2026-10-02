@@ -472,7 +472,15 @@ public static class ExternalProjectDataEndpoints
         if (refusal is not null)
             return refusal;
 
-        var created = await dataService.CreateTodoAsync(rootKind, rootId, request, owningTeamId, ct);
+        // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
+        // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
+        var created = await dataService.CreateTodoAsync(
+            rootKind,
+            rootId,
+            request,
+            owningTeamId,
+            callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
+            ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
     }
 

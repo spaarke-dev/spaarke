@@ -577,6 +577,14 @@ public class SpeFlatUploadPathTests
         securableEntities
             .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_matter" });
+        // Task 155 f4: the communication ITSELF is now the record the resolver classifies (§F.2 — the double answers
+        // the question the real registry is asked, through the shared model of the production rule).
+        securableEntities
+            .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(
+                name,
+                new HashSet<string>(StringComparer.Ordinal) { "sprk_matter" },
+                new HashSet<string>(StringComparer.Ordinal) { "sprk_matter", CommunicationEntity }));
 
         // The communication row exists but carries NO regarding, so no securable regarding is found.
         var resolverEntities = new Mock<IGenericEntityService>();
@@ -590,7 +598,6 @@ public class SpeFlatUploadPathTests
                 securableEntities.Object,
                 resolverEntities.Object,
                 Mock.Of<ILogger<RecordContainerResolver>>()),
-            resolverEntities.Object,
             securableEntities.Object,
             Mock.Of<ILogger<CommunicationContainerResolver>>());
     }

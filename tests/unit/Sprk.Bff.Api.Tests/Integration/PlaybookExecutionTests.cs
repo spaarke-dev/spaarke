@@ -70,6 +70,7 @@ public class PlaybookExecutionTests
                 mockHttpClientFactory.Object,
                 Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
                 Mock.Of<ILogger<CreateTaskNodeExecutor>>()),
             new SendEmailNodeExecutor(
                 mockTemplateEngine.Object,
@@ -110,6 +111,7 @@ public class PlaybookExecutionTests
             mockHttpClientFactory.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             Mock.Of<ILogger<CreateTaskNodeExecutor>>());
 
         var executors = new List<INodeExecutor> { createTaskExecutor };
@@ -151,6 +153,7 @@ public class PlaybookExecutionTests
                 mockHttpClientFactory.Object,
                 Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
                 Mock.Of<ILogger<CreateTaskNodeExecutor>>()),
             new SendEmailNodeExecutor(
                 mockTemplateEngine.Object,
@@ -456,6 +459,7 @@ public class PlaybookExecutionTests
             entityServiceMock.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             loggerMock.Object);
 
         var context = CreateNodeContext(ExecutorType.CreateTask, @"{""subject"":""Review document"",""description"":""Please review""}");
@@ -481,6 +485,7 @@ public class PlaybookExecutionTests
             entityServiceMock.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             loggerMock.Object);
 
         var context = CreateNodeContext(ExecutorType.CreateTask, @"{""description"":""No subject""}");

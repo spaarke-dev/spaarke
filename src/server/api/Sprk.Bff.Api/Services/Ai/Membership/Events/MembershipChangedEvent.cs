@@ -160,4 +160,59 @@ public sealed record MembershipChangedEvent
     /// </summary>
     [JsonPropertyName("occurredOnUtc"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? OccurredOnUtc { get; init; }
+
+    /// <summary>The source field every owner event carries.</summary>
+    public const string OwnerSourceField = "ownerid";
+
+    /// <summary>The role every owner event carries.</summary>
+    public const string OwnerRole = "owner";
+
+    /// <summary>
+    /// unified-access-control-r2 task 152 (ADR-034 Amendment A3, event semantics) — builds the event that describes a
+    /// row's ACTUAL owner after the write, in the junction's identity space: <c>PersonIdType = Team, PersonId =
+    /// teamid</c> for a team-owned row, <c>PersonIdType = User, PersonId = systemuserid</c> for a user-owned row.
+    /// </summary>
+    /// <remarks>
+    /// <para>The type comes from the owner VALUE (<see cref="Microsoft.Xrm.Sdk.EntityReference.LogicalName"/>), never
+    /// from a descriptor — the polymorphic Owner column always discovers as SystemUser (ADR-034 A1.1), which is how a
+    /// team id used to be recorded as a User. <see cref="MembershipReconciliationJob"/> types the same column the same
+    /// way, so the two writers build the SAME junction key for the same row.</para>
+    /// <para>Before task 152 the four publishers wrote the caller's AAD <b>oid</b> as a User owner, unconditionally:
+    /// false for every team-owned row, and in an identity space (oid) the reconciliation job never produces, so the
+    /// two writers keyed one membership two ways. An application-user owner is not a person; callers skip it the way
+    /// reconciliation does (<see cref="MembershipOwnerEvents"/>).</para>
+    /// </remarks>
+    /// <returns><see langword="null"/> when the owner is absent or is neither a systemuser nor a team.</returns>
+    public static MembershipChangedEvent? ForRowOwner(
+        Microsoft.Xrm.Sdk.EntityReference? owner,
+        string entityLogicalName,
+        Guid entityRecordId,
+        MembershipMutationType mutationType,
+        string correlationId,
+        DateTime? occurredOnUtc = null)
+    {
+        if (owner is null || owner.Id == Guid.Empty || entityRecordId == Guid.Empty)
+        {
+            return null;
+        }
+
+        if (!ApplicationUserCheck.TryMapLogicalName(owner.LogicalName, out var type)
+            || type is not (PersonIdentityType.User or PersonIdentityType.Team))
+        {
+            return null;
+        }
+
+        return new MembershipChangedEvent
+        {
+            PersonId = owner.Id,
+            PersonIdType = type,
+            EntityLogicalName = entityLogicalName,
+            EntityRecordId = entityRecordId,
+            SourceField = OwnerSourceField,
+            Role = OwnerRole,
+            MutationType = mutationType,
+            CorrelationId = correlationId,
+            OccurredOnUtc = occurredOnUtc ?? DateTime.UtcNow,
+        };
+    }
 }

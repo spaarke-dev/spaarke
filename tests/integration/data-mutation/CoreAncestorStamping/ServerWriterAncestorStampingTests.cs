@@ -117,6 +117,7 @@ public class ServerWriterAncestorStampingTests
             entityService.Object,
             CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
             NullLogger.Instance);
 
         var id = await core.CreateAsync(
@@ -135,7 +136,9 @@ public class ServerWriterAncestorStampingTests
         var created = new List<Entity>();
         var entityService = EntityServiceCapturingCreates(created);
         var core = new TaskActionCore(
-            entityService.Object, CoreAncestorResolverFixtures.Failing(), new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger.Instance);
+            entityService.Object, CoreAncestorResolverFixtures.Failing(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), NullLogger.Instance);
 
         var id = await core.CreateAsync(
             new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),

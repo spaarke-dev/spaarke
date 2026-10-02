@@ -612,6 +612,8 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         _fixture.Data.CreateCallCount.Should().Be(1);
         _fixture.Data.LastCreateArgs.Should().Be((expectedKind, rootId),
             "the parent flows from the ROUTE — the root gated must be the root written");
+        _fixture.Data.LastCreateCallerContactId.Should().Be(_fixture.Principal!.ContactId,
+            "UAC-r2 task 152: the calling contact is the triggering person — it becomes Assigned To");
     }
 
     // ---- CREATE: negative (out of scope), one per root ----
@@ -778,6 +780,34 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var act = () => ExternalDataService.BuildTodoListUrl(ApiUrl, kind, Guid.NewGuid());
 
         act.Should().Throw<ArgumentOutOfRangeException>();
+    }
+
+    // ---- UAC-r2 task 152: the external to-do names the calling contact in sprk_assignedto ----
+
+    [Fact]
+    public void BuildTodoCreatePayload_WithTheCallingContact_BindsAssignedTo()
+    {
+        var contactId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var body = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "n" },
+            ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!,
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "Display", null, OwnerTeam, contactId);
+
+        body.Should().ContainKey(ExternalDataService.AssignedToBindKey)
+            .WhoseValue.Should().Be($"/contacts({contactId:D})");
+        body.Keys.Should().NotContain(k => k.Contains("team", StringComparison.OrdinalIgnoreCase),
+            "never a team");
+    }
+
+    [Fact]
+    public void BuildTodoCreatePayload_WithNoCallingContact_LeavesAssignedToBlank()
+    {
+        var body = ExternalDataService.BuildTodoCreatePayload(
+            new CreateExternalTodoRequest { SprkName = "n" },
+            ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Matter)!,
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "Display", null, OwnerTeam, assignedToContactId: null);
+
+        body.Should().NotContainKey(ExternalDataService.AssignedToBindKey);
     }
 
     [Theory]
@@ -1099,7 +1129,11 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             LastCreateArgs = null;
             LastCreateRequest = null;
             LastCreateOwningTeamId = null;
+            LastCreateCallerContactId = null;
         }
+
+        /// <summary>Task 152: the calling contact the endpoint handed the create (becomes Assigned To).</summary>
+        public Guid? LastCreateCallerContactId { get; private set; }
 
         public override Task<IReadOnlyList<ExternalTodoDto>> GetTodosAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId, CancellationToken ct = default)
@@ -1111,12 +1145,13 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId,
-            CreateExternalTodoRequest request, Guid owningTeamId, CancellationToken ct = default)
+            CreateExternalTodoRequest request, Guid owningTeamId, Guid? callerContactId, CancellationToken ct = default)
         {
             CreateCallCount++;
             LastCreateArgs = (rootKind, rootId);
             LastCreateRequest = request;
             LastCreateOwningTeamId = owningTeamId;
+            LastCreateCallerContactId = callerContactId;
             return Task.FromResult(new ExternalTodoDto
             {
                 SprkTodoid = Guid.NewGuid().ToString(),
