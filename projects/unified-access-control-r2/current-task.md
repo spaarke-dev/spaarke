@@ -4,6 +4,21 @@
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
 >
+> **LATEST (2026-10-02 ~14:00Z) — READ FIRST (supersedes everything below):**
+> - ✅ **#1083 and #1093 are both MERGED** (`65e6db71f`, `c726acd65`; merge commits). Closed: #998, #1053, #1055, #1057, #1058, #1068, #967. The main repo's master is synced. The work branch is at `1019cdfb7` (master merged back in, docs pushed). **There is no open PR.**
+> - ✅ **Dev BFF = `bca0941f6`** (batches 1+2), deployed 2026-10-02.
+> - ✅ **Live gates 144/145 done:** named team 6eabc7f9, migration Verify PASS, 65a3fab2 provisioned, role 9×Read Basic. NFR-05 clause 1 = accepted dev artifact (owner rounds 4/5).
+> - **Owner rounds 4, 5 and 6 are recorded** in the decisions note.
+>   - Round 5: root-BU reach is a dev artifact. Production = users plus the BFF app user in the customer child BU. Provisioning gap filed as **#1094** (cpo design §9.3 puts app users in Root).
+>   - Round 6: a work assignment or project filed under a secure root becomes secure → **task 158** (deps 146/148/149/155). **OPEN QUESTION to the owner: on parent unsecure, do the children stay secure (recommended)?**
+> - **RUNNING:**
+>   - batch 3 DAG `wgqgt6cu7` (141 B2, 138→139, 133→150, 146→149→148→147, 157, 137→132, 152, 143→142→140);
+>   - 155 fix-4 → 156 `wbwgbkzzb` (run `wf_882e8431-d34`).
+>   - When they finish, integrate the ready branches onto the work branch (in dependency order), run the suites, measure publish size, then open the next PR and deploy.
+>   - Route to **133**: provisioning an already-secure record creates a NEW container and orphans the old one (seen live on 65a3fab2; the old container was empty).
+>   - Then run 141's live G-1..G-8 (approved).
+> - **Peer messaging is unreliable** (sessions hold messages until their users approve them). Use GitHub issues and comments as the hand-off channel (#1046, #1094).
+>
 > **LATEST (2026-10-02 ~05:00Z) — READ FIRST (supersedes the block below):**
 > - ✅ **#1083 MERGED** as `65e6db71f` (merge commit). #1053, #1055, #1057 and #1068 are closed. The main repo's master is synced.
 > - The work branch was fast-forwarded to integ and then merged with master: **HEAD `bca0941f6`**. **PR #1093** (batch 2: 109/135/136/144/145) is OPEN. Size: 45.49 → 45.54 MB (+0.045), 212/212 files, no CVEs. Its `Router` result is still pending; **merge it as a merge commit when pending = 0.** Close #998/#1058 on merge (they auto-close); close #967 after the 144 live gates pass. #1059 stays open (136 live gate).
