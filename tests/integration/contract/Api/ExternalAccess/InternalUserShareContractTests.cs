@@ -53,7 +53,8 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
         var body = document.RootElement;
         body.GetProperty("systemUserId").GetGuid().Should().Be(UserId);
         body.GetProperty("accessLevel").GetInt32().Should().Be(100000001, "the level is the same number a contact grant carries");
-        body.GetProperty("accessRightsMask").GetInt32().Should().Be(23, "Read 1 + Write 2 + Append 4 + AppendTo 16");
+        body.GetProperty("accessRightsMask").GetInt32().Should().Be(262167,
+            "Read 1 + Write 2 + Append 4 + AppendTo 16 + Share 262144 (owner 2026-09-30, task 139)");
         body.GetProperty("outcome").GetString().Should().Be("created");
         body.GetProperty("narrowed").GetBoolean().Should().BeFalse(
             "the fixture's caller holds a full working set, so their own rights did not narrow the grant");
@@ -128,8 +129,10 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
     public async Task GetUserShares_Returns200WithEachUsersNameMaskAndLevel()
     {
         var modifiedOn = new DateTimeOffset(2026, 9, 15, 10, 0, 0, TimeSpan.Zero);
+        // 23 is the LEGACY Collaborate mask (before task 139 added Share) — still read as Collaborate. 786455 is
+        // Collaborate + Assign (524288), which is no level.
         _fixture.RecordShares.Seed("sprk_project", ProjectId, DataversePrincipalRef.User(UserId), 23, modifiedOn);
-        _fixture.RecordShares.Seed("sprk_project", ProjectId, DataversePrincipalRef.User(OtherUserId), 262167, modifiedOn);
+        _fixture.RecordShares.Seed("sprk_project", ProjectId, DataversePrincipalRef.User(OtherUserId), 786455, modifiedOn);
         _fixture.Dataverse.ContactQueryResult =
             $$"""[{"systemuserid":"{{UserId}}","fullname":"Ada Lovelace"},{"systemuserid":"{{OtherUserId}}","fullname":"Brook Okafor"}]""";
         using var client = _fixture.CreateAdminClient();
@@ -148,9 +151,9 @@ public sealed class InternalUserShareContractTests : IClassFixture<ExternalAcces
         shares[0].GetProperty("modifiedOn").GetDateTimeOffset().Should().Be(modifiedOn);
 
         shares[1].GetProperty("systemUserId").GetGuid().Should().Be(OtherUserId);
-        shares[1].GetProperty("accessRightsMask").GetInt32().Should().Be(262167);
+        shares[1].GetProperty("accessRightsMask").GetInt32().Should().Be(786455);
         shares[1].GetProperty("accessLevel").ValueKind.Should().Be(JsonValueKind.Null,
-            "Collaborate plus Share is no level — the picker shows the rights rather than naming a level");
+            "Collaborate plus Assign is no level — the picker shows the rights rather than naming a level");
     }
 
     private static string SystemUserRow(Guid id, bool isExternal) =>

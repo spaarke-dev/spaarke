@@ -182,4 +182,42 @@ public class MembershipChangedEventTests
         // Assert
         json.Should().NotContain("occurredOnUtc");
     }
+
+    // ── unified-access-control-r2 task 152 (ADR-034 A3): ForRowOwner — the event states the row's REAL owner ──
+
+    [Theory]
+    [InlineData("team", PersonIdentityType.Team)]
+    [InlineData("systemuser", PersonIdentityType.User)]
+    public void ForRowOwner_TypesFromTheOwnerValue(string logicalName, PersonIdentityType expected)
+    {
+        var evt = MembershipChangedEvent.ForRowOwner(
+            new Microsoft.Xrm.Sdk.EntityReference(logicalName, PersonIdFixture),
+            "sprk_matter", EntityRecordIdFixture, MembershipMutationType.Added, CorrelationIdFixture);
+
+        evt.Should().NotBeNull();
+        evt!.PersonIdType.Should().Be(expected);
+        evt.PersonId.Should().Be(PersonIdFixture);
+        evt.SourceField.Should().Be("ownerid");
+        evt.Role.Should().Be("owner");
+        evt.SchemaVersion.Should().Be(1, "the wire contract is unchanged - no consumer parses the old semantics");
+    }
+
+    [Theory]
+    [InlineData("businessunit")]
+    [InlineData("contact")]
+    [InlineData("")]
+    public void ForRowOwner_NotAUserOrTeam_ReturnsNull(string logicalName)
+    {
+        MembershipChangedEvent.ForRowOwner(
+                new Microsoft.Xrm.Sdk.EntityReference(logicalName, PersonIdFixture),
+                "sprk_matter", EntityRecordIdFixture, MembershipMutationType.Added, CorrelationIdFixture)
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void ForRowOwner_NoOwner_ReturnsNull()
+    {
+        MembershipChangedEvent.ForRowOwner(null, "sprk_matter", EntityRecordIdFixture, MembershipMutationType.Added, CorrelationIdFixture)
+            .Should().BeNull();
+    }
 }

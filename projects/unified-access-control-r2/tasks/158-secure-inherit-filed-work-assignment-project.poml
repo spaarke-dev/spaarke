@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="158" project="unified-access-control-r2">
+  <metadata>
+    <title>A work assignment or project filed under a SECURE matter or project is itself secure (owner round 6, 2026-10-02): secured on create, on re-file and when its parent becomes secure; owned by the named team; its parent's sharees can see it</title>
+    <phase>Session 27 — UAC defect remediation (owner round 6)</phase>
+    <gate>startable after 146, 148, 149 and 155 merge</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Secure isolation (C10, CRITICAL). The task decides whether a core record is secure, who owns it, and who can read it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security isolation across create, re-file and transition paths, plus a reconciliation job. Fail-closed decisions.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the secure provisioning path and the transition/backfill paths that tasks 133, 146 and 148 own.</parallel-reason>
+    <deps>146, 148, 149, 155</deps>
+    <tags>bff-api, security, dataverse</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>Task 155 round f3 interpretation (iii) was surfaced to the owner, who answered on 2026-10-02 (round 6): "should a work assignment filed under a secure matter itself become secure? — yes". The question as asked covered a work assignment OR a project, filed under a secure matter or project.</origin>
+  </metadata>
+
+  <prompt>Make a work assignment or project that is filed under a secure matter or project secure itself, everywhere it can come to be filed there. It is secured the same way any secure record is, and the people who can see its secure parent can see it.</prompt>
+
+  <role>SPAARKE platform developer: secure-record provisioning, the write path (no plugins) and access evaluation.</role>
+
+  <goal>A `sprk_workassignment` or `sprk_project` whose regarding link names a matter or project with `sprk_issecure = true` is itself secure. The link can be the typed `sprk_regardingmatter` or `sprk_regardingproject`, or the polymorphic pair (task 155's sweep).
+- It carries `sprk_issecure = true`.
+- It is provisioned through the EXISTING secure-provisioning path: owned by the named team "Secure Record Owners" (task 144), with its own container and the creator shared, per tasks 133 and 144.
+- The secure parent's direct sharees can see it, using task 149's mechanism.
+This holds:
+(1) when the record is created through any BFF path;
+(2) when it is re-filed through any BFF path;
+(3) when its parent BECOMES secure, through task 148's transition path, cascading to every work assignment or project filed under it;
+(4) after writes made outside the BFF: a reconciliation `IScheduledJob` (ADR-036, at most every 5 minutes per owner R3/R4) finds filed, unsecured rows under a secure parent and secures them.
+Because the record is then a secure root, every existing secure rule applies to it with no new code: FR-22 Secure direct-only for contacts, the No Access list, the isolation census, and task 155's own-container resolution.</goal>
+
+  <context>
+    <background>Task 155 found that a work assignment or project can be filed under a secure matter or project while remaining non-secure. Its own files then went to the secure root's container (interpretation iii), but its access followed its own business unit. People could therefore see the record but not its files, and contacts granted on it got access that the secure parent forbids, because FR-22 reads the record's own flag. The owner decided (round 6) that such a record is secure. Making it a real secure root, rather than adding an "inherited" access path, reuses every existing secure mechanism.</background>
+    <relevant-files>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</file>
+      <file role="read">projects/unified-access-control-r2/notes/task-155-child-record-container-resolution.md</file>
+      <file role="read">projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Fail closed (ADR-003). If the parent's flag cannot be read, refuse the create or re-file, or leave it to the job, rather than treat the record as not secure. The S5 invariant holds: a secured record always has at least one user who can see it (the creator share, via provisioning).</constraint>
+    <constraint source="owner">No Dataverse plugins (ADR-002 / D-1). Securing happens in the BFF write paths, the transition path (task 148) and a BFF `IScheduledJob` registered via `AddScheduledJob&lt;&gt;` (ADR-036 / ADR-052). There is no hand-rolled timer.</constraint>
+    <constraint source="project">Reuse the existing provisioning path (tasks 133 and 144). Do not write a second "make secure" implementation. `sprk_issecure` is locked by FLS (task 150) and changed only by the BFF secure/unsecure endpoints. Go through them.</constraint>
+    <constraint source="owner">Never auto-unsecure (owner round 6, 2026-10-02: "yes"). When the parent is unsecured, its secured work assignments and projects STAY secure by default.</constraint>
+    <constraint source="owner">"But the user can unsecure any related records" (owner round 6, 2026-10-02):
+- The parent's unsecure response LISTS the related records that stayed secure.
+- The same unsecure action accepts an OPTIONAL set of those related records to unsecure along with the parent. Each one is checked against F3 rights: Full Access holder or creator. Records failing the check are reported, not unsecured.
+- Any related record can also be unsecured on its own later, through the same endpoint.
+- The UI (the secure/unsecure ribbon flow, task 150) offers the list with a checkbox per record.
+Interpretation (owner-reversible): a related record whose parent is STILL secure cannot be unsecured. The unsecure endpoint refuses with a message naming the secure parent, because the round-6 rule (and the reconciliation job) would secure it again.</constraint>
+    <constraint source="project">ADR-038 test bans. Prove each new guard bites by seeding. Drive at least one real route end to end.</constraint>
+    <constraint source="project">Live Dataverse is read-only during development. The live gate below is run by the main session.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Inventory every BFF path that creates or re-files a work assignment or project with a regarding link (wizards, Office quick-create, the external SPA, imports, IncomingAssociationResolver), and count read-only how many live rows are filed under a secure root today.</step>
+    <step order="2">On create and re-file: when the regarding parent is secure, provision the record as secure through the existing path. If the parent's flag is unreadable, refuse.</step>
+    <step order="3">Hook task 148's secure-transition path, so that securing a parent secures its filed work assignments and projects. Include them in task 149's sharee mechanism.</step>
+    <step order="4">Add the reconciliation job (5-minute cadence; a failed scan is a failed run).</step>
+    <step order="5">Tests, the notes, and the write-path invariant registry row.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Creating a work assignment or project regarding a secure matter or project, through each inventoried BFF path, yields `sprk_issecure = true`, the named team as owner, its own container and the creator share. A route is driven end to end.</criterion>
+    <criterion testable="true">Re-filing an existing non-secure work assignment or project under a secure parent secures it. Re-filing it under a non-secure parent leaves it unchanged.</criterion>
+    <criterion testable="true">Securing a parent (task 148's path) secures every work assignment or project filed under it, and the parent's sharees can then see them (task 149's mechanism).</criterion>
+    <criterion testable="true">The reconciliation job secures a row filed out-of-band within one run. A second run changes nothing, and a failed scan reports a failed run.</criterion>
+    <criterion testable="true">Negative: an unreadable parent flag refuses the create or re-file, and nothing is written. A contact granted on such a work assignment gets only what FR-22 allows for a secure root, which is direct grants only.</criterion>
+    <criterion testable="true">Unsecuring the parent does NOT unsecure the child.</criterion>
+    <criterion testable="true">Unsecuring a parent lists its related records that stayed secure. Passing a subset unsecures exactly those for which the caller holds F3 rights, and reports the rest as refused. A related record can be unsecured on its own once its parent is not secure. Unsecuring a related record whose parent is still secure is refused with a message that names the parent.</criterion>
+    <criterion testable="true">Each new branch is proven to bite by seeding. The BFF unit suite and NetArchTest are green.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev): file a new work assignment under the secure test project 65a3fab2. Confirm (read-only) that it is secure and owned by the named team, and that a non-admin user in a non-root BU with no share is DENIED on it.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A path creates or re-files work assignments or projects outside the BFF in a way the job cannot see within 5 minutes. STOP and report the path.</trigger>
+  </escalation>
+
+  <notes>Owner round 6 (2026-10-02). Supersedes task 155's interpretation (iii) for these records: once secure, they resolve their own container as any secure root does.</notes>
+</task>

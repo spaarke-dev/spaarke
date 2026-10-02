@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
@@ -44,6 +45,7 @@ public class RegistrationDataverseService : IDisposable
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
+    private readonly ContactIdentityBinderFactory _binderFactory;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -62,9 +64,11 @@ public class RegistrationDataverseService : IDisposable
         TrackingIdGenerator trackingIdGenerator,
         TokenCredential credential,
         IHttpClientFactory httpClientFactory,
-        ILogger<RegistrationDataverseService> logger)
+        ILogger<RegistrationDataverseService> logger,
+        ContactIdentityBinderFactory binderFactory)
     {
         _logger = logger;
+        _binderFactory = binderFactory ?? throw new ArgumentNullException(nameof(binderFactory));
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
         _httpClientFactory = httpClientFactory;
@@ -418,8 +422,112 @@ public class RegistrationDataverseService : IDisposable
 
         var userId = Guid.Parse(entityIdHeader.Split('(', ')')[1]);
         _logger.LogInformation("Created systemuser {UserId} in Dataverse", userId);
+
+        // Task 141: link the new user to its contact at creation — in the SAME environment the systemuser was
+        // created in (the target, never the default one), so Assigned-To / No Access / briefing matching work
+        // from the user's first day rather than from the next reconciliation tick.
+        await LinkContactForNewSystemUserAsync(
+            userId, azureAdObjectId, firstName, lastName, email, ContactLinkEnvironment(targetDataverseUrl), ct);
+
         return userId;
     }
+
+    /// <summary>
+    /// The environment a new systemuser's contact link is written to: the environment the systemuser was
+    /// CREATED in — <paramref name="targetDataverseUrl"/> when one was given, else this service's own
+    /// (<see cref="DataverseBaseUrl"/>, the DATAVERSE_URL environment). Never the BFF's default
+    /// <c>Dataverse:ServiceUrl</c>, which is a different environment for every demo/customer target.
+    /// </summary>
+    public string ContactLinkEnvironment(string? targetDataverseUrl)
+        => (string.IsNullOrWhiteSpace(targetDataverseUrl) ? DataverseBaseUrl : targetDataverseUrl).TrimEnd('/');
+
+    /// <summary>
+    /// The identity binder for <paramref name="dataverseBaseUrl"/>, authenticated through this service's existing
+    /// per-environment token path (the BFF's own credential; ADR-028 — no new secret, no caller token). Used for a
+    /// new systemuser's contact link at creation, and by the identity-link reconciliation job for every environment
+    /// this BFF provisions users into (task 141, third fix round).
+    /// </summary>
+    public ContactIdentityBinder ContactBinderFor(string dataverseBaseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
+        var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        return _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
+    }
+
+    /// <summary>
+    /// Runs the identity-binding decision for a just-created systemuser against <paramref name="dataverseBaseUrl"/>
+    /// (task 141): bind or create the contact keyed by the user's Entra oid and set <c>sprk_primarycontact</c>,
+    /// or flag a collision. NON-FATAL by design: the systemuser exists either way.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A link that does not land is retried</b> (a fault, a deny, a lost race — or a collision flag, which
+    /// is re-evaluated). The environment a registration links in is always one the identity-link reconciliation job
+    /// reconciles: the approve endpoint provisions only into an ACTIVE <c>sprk_dataverseenvironment</c> row, and
+    /// with no target the user is created in this service's own <c>DATAVERSE_URL</c> environment. The job
+    /// reconciles this BFF's <c>Dataverse:ServiceUrl</c> AND both of those (its provisioning-target pass), so it
+    /// re-decides the user on its next run once <c>IdentityLink:Reconciliation:WritesEnabled</c> is true; until then
+    /// it reports what it would do. (Second fix round: the job scanned only its own environment and this path
+    /// logged "NOT retried" for every other one — verifier finding 4, closed in the third fix round.)</para>
+    /// <para>The one way out of that coverage is an operator deactivating the environment's registry row after
+    /// provisioning into it: the BFF then stops serving that environment, deliberately.</para>
+    /// </remarks>
+    /// <returns>The link result, or null when nothing could be attempted (unusable oid, or a fault).</returns>
+    public async Task<SystemUserLinkResult?> LinkContactForNewSystemUserAsync(
+        Guid systemUserId, string azureAdObjectId, string firstName, string lastName, string email,
+        string dataverseBaseUrl, CancellationToken ct)
+    {
+        if (!Guid.TryParse(azureAdObjectId, out var oid) || oid == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] Systemuser {SystemUserId} was created with an unusable AAD object id; no contact link",
+                systemUserId);
+            return null;
+        }
+
+        var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        try
+        {
+            var binder = ContactBinderFor(baseUrl);
+
+            // email is the UPN this service created the user with (directory data, not a client value), so it
+            // is both the directory-synced email and the domainname the guest test reads.
+            var row = new SystemUserIdentityRow(
+                systemUserId, oid, email, email, PrimaryContactId: null, ETag: null,
+                FirstName: firstName, LastName: lastName);
+            var result = await binder.EnsureSystemUserLinkAsync(row, applyWrites: true, ct).ConfigureAwait(false);
+
+            if (result.IsLinked)
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link {Outcome} (contact {ContactId})",
+                    systemUserId, baseUrl, result.Outcome, result.ContactId);
+            }
+            else
+            {
+                LogLinkNotMade(systemUserId, baseUrl, result.Outcome.ToString(), result.DenyCode, null);
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogLinkNotMade(systemUserId, baseUrl, "Fault", null, ex);
+            return null;
+        }
+    }
+
+    private void LogLinkNotMade(Guid systemUserId, string environment, string outcome, string? denyCode, Exception? ex)
+        => _logger.LogWarning(ex,
+            "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link NOT made ({Outcome}, code {Code}). "
+            + "The identity-link reconciliation job re-decides the user on its next run — it reconciles this BFF's own "
+            + "environment and every environment it provisions users into (DATAVERSE_URL and every ACTIVE "
+            + "sprk_dataverseenvironment row) — once IdentityLink:Reconciliation:WritesEnabled is true (report-only "
+            + "until then; deployment guide §6.5.2)",
+            systemUserId, environment, outcome, denyCode);
 
     #endregion
 

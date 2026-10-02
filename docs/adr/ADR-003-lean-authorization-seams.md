@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2025-09-27 |
-| Updated | 2026-09-04 (Amendment A1) |
+| Updated | 2026-09-04 (Amendment A1); 2026-10-02 (A1 item 8 widened to Limited — task 138, §6.5 path B) |
 | Authors | Spaarke Engineering |
 
 > ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-04-two-surface-authorization-and-the-unified-evaluator) BEFORE APPLYING ANY RULE BELOW.**
@@ -158,16 +158,33 @@ VETOES — applied AFTER the max, IN THIS ORDER
   7. Restricted           (sprk_accesspermission = Restricted)   -> None for ALL contacts
 
 PRE-MAX SUPPRESSION
-  8. Secure               (sprk_issecure = true) suppresses terms 3 and 4
+  8. Direct-only          (sprk_issecure = true OR sprk_accesspermission = Limited)
+                          suppresses terms 3 and 4 AND org-inherited grants
                           BEFORE the max, for EVERY principal kind
+                          (internal ADR-034 membership is never suppressed)
 ```
+
+> **Item 8 amended 2026-10-02 (unified-access-control-r2 task 138, root CLAUDE.md §6.5 path B).** It
+> named **Secure** as the only pre-max suppressor. The owner's model (round 2, 2026-09-30, binding) makes
+> **Limited** mean exactly the same thing for contacts — named, direct grants only (teams-app-r1 FR-14
+> "Option A") — and a Secure record is Limited for contacts. So the ONE predicate is widened
+> (`RootRecordFlags.IsDirectOnly = IsSecure || IsLimited`, built once per composition in
+> `AccessibleRecordSetService.DirectOnlyPredicate`); there is no second suppression path and no post-max
+> subtraction. Every term that consulted "Secure" consults it: the explicit-grant term (direct level only,
+> so an organization-inherited grant contributes nothing), standing-grant membership and organization
+> expansion. It applies on the workforce contact plane, on the systemuser plane's contact-grants term and —
+> through task 135's shared contact-plane composition — on CIAM. **Restricted stays a post-max veto
+> (item 7) and wins** where both are present. Path A (a project exception) was rejected because Limited is
+> permanent product semantics; path C ("leave Limited inert") was rejected because the owner decided
+> Limited must be real. The write-time counterpart — the grant routes refusing what the read path would
+> discard — is `ExternalGrantLifecycle.DecideGrantPolicy` (one function, shared by every writer).
 
 Four properties of that contract are binding, and each exists because the obvious alternative fails:
 
 - **`"No Access"` is a VETO, never a level.** Modelled as a level, `max()` would simply ignore it, and
   an ethical wall would fail silently in precisely the case it was built for.
-- **Secure suppresses *before* the max**, not after. After the max the suppressed term has already
-  won, and the suppression is a no-op on the only inputs that matter.
+- **Secure (and, since 2026-10-02, Limited) suppresses *before* the max**, not after. After the max the
+  suppressed term has already won, and the suppression is a no-op on the only inputs that matter.
 - **Veto order is deny-list → Restricted**, and it is load-bearing, not stylistic.
 - **Allow-lists are first-class and cover org-typed lookups too**, not only contact-typed ones.
   Unrestricted org expansion confers access from *any* organization named on a record — including

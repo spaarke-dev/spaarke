@@ -95,9 +95,15 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
                 + "every addition would need an administrator");
     }
 
+    /// <summary>
+    /// Owner 2026-09-30 (C4, task 139): colleagues named at provisioning receive EXACTLY the creator's rights — the
+    /// Collaborate level, which carries ShareAccess so they can use the model-driven Share command as well as Manage
+    /// Access. Asserted against the LITERAL and against the creator's own share on the same project.
+    /// </summary>
     [Fact]
-    public async Task Provisioning_SharesToNamedPrincipals_WithoutShareAccess()
+    public async Task Provisioning_SharesToNamedPrincipals_WithExactlyTheCreatorsRights()
     {
+        const string collaborateLiteral = "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess";
         var projectId = Guid.NewGuid();
         var colleague = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -110,10 +116,13 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
 
         var colleagueShare = _fixture.Grants.Should()
             .ContainSingle(g => g.Principal.Id == colleague).Subject;
+        var creatorShare = _fixture.Grants
+            .Single(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
 
-        colleagueShare.AccessRightsCsv.Should().Be(ProvisionProjectEndpoint.CollaboratorAccessRights);
-        colleagueShare.AccessRightsCsv.Should().NotContain("ShareAccess",
-            "re-sharing stays with the creator so the access list cannot widen through a chain nobody reviewed");
+        colleagueShare.AccessRightsCsv.Should().Be(collaborateLiteral);
+        creatorShare.AccessRightsCsv.Should().Be(collaborateLiteral);
+        colleagueShare.AccessRightsCsv.Should().Be(creatorShare.AccessRightsCsv,
+            "owner 2026-09-30: a colleague named at provisioning holds exactly what the creator holds");
     }
 
     [Fact]
