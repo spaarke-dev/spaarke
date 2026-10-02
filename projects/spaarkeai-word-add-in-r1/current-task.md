@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (075 done and gated; ship its PR, then task 079)
+> **Last Updated**: 2026-10-01 (075 shipped as #1092 / `5e39f2bea`; next: task 079 — suggest /compact first)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,14 +18,20 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: ship task 075's PR, then task 079
+### 🔄 ACTIVE: task 079 (record integrity reconciliation) — not started
 
 | Field | Value |
 |---|---|
-| **075** | ✅ DONE 2026-10-01 (`notes/075-dead-code.md`). Dead Outlook adapter deleted; one share-link minter; uncalled factory API removed; `OFFICE_INTERNAL` → 500 with no exception text; dead `GenerateDataverseUrl` deleted. Suite 13,072/0/54; ArchTests 337; publish −330 B; office-addins jest 62/817, lint 0, build OK |
-| **Next Action** | 1) Commit 075 and push; open the PR. 2) Merge after `Router` passes and nothing is pending (`gh pr merge N --merge`, **NEVER `--delete-branch`**); sync both checkouts. 3) Portfolio #945 Tasks Completed → 72. 4) Start task **079** via `task-execute` (`tasks/079-record-integrity-reconciliation.poml`: SC-6/SC-8 test citations, the FR-12 ADR-Tensions row, unsupported ✅ claims, POML status drift, 10 unparseable POMLs) |
-| **Queue after 079** | 090 (wrap-up, with the `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
-| **For the owner** | (1) #1081 before the next BFF deploy from master. (2) `SystemCacheKeys.JobStatusSequence` architecture review. (3) #1088, #1089, #1090 filed |
+| **Task** | 079, `tasks/079-record-integrity-reconciliation.poml`. Start via `task-execute` |
+| **Branch** | `work/spaarkeai-word-add-in-r1` = master `5e39f2bea` (clean). Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` passes and nothing is pending |
+| **Scope (from TASK-INDEX)** | SC-6 / SC-8 cite contradictory test assertions; FR-12's §6.5 path-A deviation has no ADR-Tensions row; 14 ✅ tasks with claims the review found unsupported; 7 POMLs `not-started` while ✅; **10 POMLs do not parse** (`Validate-TaskPoml.ps1` lists 005, 009, 010, 017, 018, 019, 028, 043, 044, 053) |
+| **Queue after 079** | 090 (wrap-up, `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
+| **For the owner** | (1) #1081 before the next BFF deploy from master; tell UAC-r2. (2) `SystemCacheKeys.JobStatusSequence` architecture review. (3) #1088, #1089, #1090 filed. (4) Live checks for 060/068 wait on the deploy |
+
+### ✅ Shipped 2026-10-01: #1092 merged as `5e39f2bea` (task 075)
+
+- 37 checks terminal: `Router` pass, Build & Test pass (53m34s), Code Quality, office-addins gates pass; Tier 2 Full Unit Tests cancelled at its cap (advisory). Both checkouts fast-forwarded. Portfolio #945 = 72.
+- Dead Outlook adapter deleted; one share-link minter; uncalled factory API removed; `OFFICE_INTERNAL` → 500, no exception text; dead `GenerateDataverseUrl` deleted. Suite 13,072/0/54; publish −330 B. `notes/075-dead-code.md`.
 
 ### ✅ Shipped 2026-10-01: #1091 merged as `08b70d6cc` (task 068, #1086 / ISS-018)
 
