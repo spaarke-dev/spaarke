@@ -325,6 +325,115 @@ public class OfficeSaveNoTargetContainerContractTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // §4 unified-access-control-r2 task 155 — a CHILD target's container, pinned at
+    //    the Office save (the resolver-level tests live in ChildRecordContainerResolutionTests).
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid TodoId = Guid.Parse("15515515-0000-0000-0000-000000000155");
+    private static readonly Guid TodoBusinessUnitId = Guid.Parse("15515515-0000-0000-0000-0000000000b0");
+    private const string TodoBusinessUnitContainer = "b!todo-owning-business-unit-container";
+
+    /// <summary>
+    /// A to-do with no secure root saves into the to-do's OWN business-unit container — not the tenant-wide
+    /// default it used to fall through to, and not the acting user's business unit.
+    /// </summary>
+    [Fact]
+    public async Task PostOfficeSave_TargetingATodoWithNoSecureRoot_LandsInTheTodosOwnBusinessUnitContainer()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable,
+            dataverse => ArrangeTodo(dataverse, row => { }));
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.IsSuccessStatusCode.Should().BeTrue();
+        factory.UploadedToContainers.Should().Equal([TodoBusinessUnitContainer],
+            "task 155: the two-argument overload derives the RECORD's owningbusinessunit container. Before it, a "
+            + "to-do resolved Unresolved and the save fell through to EmailProcessing:DefaultContainerId");
+    }
+
+    /// <summary>
+    /// A to-do filed under a report card (which belongs to a matter, but leaves no root stamp on the to-do) is
+    /// refused, and nothing is uploaded anywhere.
+    /// </summary>
+    [Fact]
+    public async Task PostOfficeSave_TargetingATodoFiledUnderAReportCard_IsRefused_AndUploadsNothing()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable,
+            dataverse => ArrangeTodo(dataverse, row =>
+                row["sprk_regardingreportcard"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_reportcard", Guid.NewGuid())));
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        // The Office save renders every resolver refusal as its pre-existing 400 "Save failed: {code}: …" shape
+        // (OfficeService.SaveAsync's catch); the CODE is what identifies the refusal.
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_unverifiable");
+        factory.UploadedToContainers.Should().BeEmpty(
+            "the report card's matter may be SECURE; neither the to-do's business unit nor the tenant default may "
+            + "stand in for it");
+    }
+
+    /// <summary>
+    /// A target that does not exist is refused (the resolver's container_record_not_found) — it no longer falls
+    /// through to the tenant-wide default.
+    /// </summary>
+    [Fact]
+    public async Task PostOfficeSave_TargetingARecordThatDoesNotExist_IsRefused_AndUploadsNothing()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable,
+            dataverse => dataverse
+                .Setup(d => d.RetrieveAsync(
+                    "sprk_todo", TodoId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault>(
+                    new Microsoft.Xrm.Sdk.OrganizationServiceFault { ErrorCode = -2147220969 },
+                    new System.ServiceModel.FaultReason("sprk_todo does not exist"))));
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "OfficeService.SaveAsync's pre-existing refusal shape");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("container_record_not_found");
+        factory.UploadedToContainers.Should().BeEmpty(
+            "a record that cannot be read cannot be shown not to be under a secure root");
+    }
+
+    /// <summary>The to-do's row (only the requested columns, as Dataverse answers) and its business unit.</summary>
+    private static void ArrangeTodo(Mock<IDataverseService> dataverse, Action<Microsoft.Xrm.Sdk.Entity> shape)
+    {
+        var todo = new Microsoft.Xrm.Sdk.Entity("sprk_todo", TodoId)
+        {
+            ["owningbusinessunit"] = new Microsoft.Xrm.Sdk.EntityReference("businessunit", TodoBusinessUnitId)
+        };
+        shape(todo);
+
+        dataverse
+            .Setup(d => d.RetrieveAsync("sprk_todo", TodoId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+            {
+                var projected = new Microsoft.Xrm.Sdk.Entity("sprk_todo", TodoId);
+                foreach (var column in columns.Where(todo.Contains))
+                {
+                    projected[column] = todo[column];
+                }
+
+                return projected;
+            });
+
+        dataverse
+            .Setup(d => d.RetrieveAsync(
+                "businessunit", TodoBusinessUnitId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("businessunit", TodoBusinessUnitId)
+            {
+                ["sprk_containerid"] = TodoBusinessUnitContainer
+            });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Bodies
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -400,8 +509,18 @@ public class OfficeSaveNoTargetContainerContractTests
         }
 
         private readonly CallerOid _caller;
+        private readonly Action<Mock<IDataverseService>>? _arrangeTarget;
 
-        public NoTargetSaveFactory(CallerOid caller) => _caller = caller;
+        /// <param name="caller">The caller identity.</param>
+        /// <param name="arrangeTarget">
+        /// Rows for the TARGET record (task 155 f2), layered after the caller arrangement so a target's own
+        /// business-unit read is distinguishable from the acting user's.
+        /// </param>
+        public NoTargetSaveFactory(CallerOid caller, Action<Mock<IDataverseService>>? arrangeTarget = null)
+        {
+            _caller = caller;
+            _arrangeTarget = arrangeTarget;
+        }
 
         /// <summary>The SPE container id of every upload the save path performed.</summary>
         public ConcurrentBag<string> UploadedToContainers { get; } = new();
@@ -469,6 +588,8 @@ public class OfficeSaveNoTargetContainerContractTests
                 {
                     TestActingUserBusinessUnit.ArrangeWithNoContainer(dataverse);
                 }
+
+                _arrangeTarget?.Invoke(dataverse);
 
                 services.RemoveAll<IDataverseService>();
                 services.AddSingleton(dataverse.Object);
