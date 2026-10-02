@@ -4,6 +4,19 @@
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
 >
+> ## 🛑 STATE AT THE WEEKLY USAGE LIMIT (2026-10-02 ~16:30Z) — READ FIRST
+> **Subagents are unavailable until Oct 5, 9pm ET** ("weekly limit"). Every workflow agent running at the time failed. The main session continued alone. Resume plan:
+>
+> | Item | State | Branch / location | Next |
+> |---|---|---|---|
+> | **Integration for PR #3** (138, 139, 141 B2, 152) | 139-r1 is merged. 152-r1-r2 (contains 141-f3) was merged with the 139×141 conflicts in the invite endpoints RESOLVED: by the resolver agent, then reviewed by the main session (one binder resolution passed through; 138 policy and 139 ceiling run before onboarding; all of 409/422/503 kept). Staged; full suites were running in shell `bog6c3tig` → `scratchpad/integ3-tests.txt` | worktree `C:\wt29i`, branch `integ/uac-r2-batch3` (mid-merge until committed) | If green: commit the merge, merge `work/unified-access-control-r2` into it, measure publish size, open PR #3. **No adversarial verifier ran on the merge** (limit). Do a seeded check or run one after reset. |
+> | **141 G-1 (live, dev)** | PARTIALLY APPLIED. It created the mirror column `contact.sprk_externalobjectidkey` and global choices `sprk_identityplane` / `sprk_identitycollisionreason` (Default solution). No key, FLS, view, data or publish was applied. **Script defect:** it binds `GlobalOptionSet@odata.bind` by `Name='...'` and needs the MetadataId GUID; it also has a mirror-propagation delay. No runtime effect, because the dev BFF does not read these yet. G-2 and G-3 NOT run. | script on `task/uac-r2-141-f3` (and integ); record on branch `live/uac-r2-141-g1g3` @ `9fbdd4509` (worktree `C:\wtl141`, notes `task-141-live-gates-2026-10-02.md`) | Fix the script (bind by MetadataId; poll the mirror re-read), then re-run G-1 (dry run, -Apply, -Verify), then G-2, then G-3. Merge the live branch. |
+> | **Fix round B** (133, 146, 157, 137 + owner round 7) | The fixers were cut off mid-work. Partial work is preserved as **WIP commits (UNVERIFIED, do not merge)** | `task/uac-r2-133-b1` `b38756ba6`, `146-b1` `6edf97c58`, `157-b1` `70d89eeb3`, `137-b1` `33108909e`; verifier findings in `scratchpad/batch3-fixargs.json` | After reset: re-run the fix + adversarial verify from each WIP commit (workflow script `uac-batch3-fix-round-b-*.js`, with `from` = the b1 branch). |
+> | **155** | ✅ READY (f5 verified) | `task/uac-r2-155-f5` `e74541920` | Integrate it (next PR). |
+> | **156** (option b) | Executed, plus 2 fix rounds; the FINAL VERIFY FAILED (limit) → UNVERIFIED | `task/uac-r2-156-r1-r2` `57e0bfca0` | After reset: re-verify, then integrate. |
+> | Dependents | not started | — | 150, 149→148→147, 132, 143→142→140, 158 once the fixes land |
+> | Owner open | **G-1b**: deactivate the stale "Demo 1" registry row? (rec yes) | — | Ask again if unanswered |
+>
 > **LATEST (2026-10-02 ~17:00Z) — READ FIRST (supersedes everything below):**
 > - **Owner rounds 6 and 7 are recorded:**
 >   - 158 stays secure when the parent is unsecured, but the user may unsecure related records;
