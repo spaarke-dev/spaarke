@@ -5,7 +5,7 @@
     <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
     <gate>startable after 155 is merged (it replaces 155's held branch)</gate>
     <status>completed-with-escalation</status>
-    <status-note>Set to completed-with-escalation 2026-10-02 (verifier round 2 item 13b). Implemented, and AC2-AC7 met. Two items remain open and neither is the implementer's to close: AC1 for the user-OBO AI update tool, which enqueues its cascade, waits on the owner (the section 6.5 ADR block in notes/task-156-stamp-freshness.md: path A or B). AC8 is the manual dev live gate, run by the main session after deploy. A further owner decision is recorded in the note (verifier round 2 item 9). Verifier round 3 (2026-10-02): the three seeds that survived (K8, K7, K5) now bite, so AC7 is met; the integration branch is merged; the Office save marks container_ancestor_stale retryable. AC1 (owner, section 6.5 block corrected with the verifier's finding) and AC8 (live gate) remain open.</status-note>
+    <status-note>Set to completed-with-escalation 2026-10-02 (verifier round 2 item 13b). Implemented, and AC2-AC7 met. Two items remain open and neither is the implementer's to close: AC1 for the user-OBO AI update tool, which enqueues its cascade, waits on the owner (the section 6.5 ADR block in notes/task-156-stamp-freshness.md: path A or B). AC8 is the manual dev live gate, run by the main session after deploy. A further owner decision is recorded in the note (verifier round 2 item 9). Verifier round 3 (2026-10-02): the three seeds that survived (K8, K7, K5) now bite, so AC7 is met; the integration branch is merged; the Office save marks container_ancestor_stale retryable. AC1 (owner, section 6.5 block corrected with the verifier's finding) and AC8 (live gate) remain open. Verifier round 4 (2026-10-02, branch task/uac-r2-156-r1-r2b): the branch now carries 8531711d6 (work/unified-access-control-r2 at ea6484102 merged), so the project's hard gate (both integration suites in full) is green; the AI update handler's remarks now state the encapsulation property accurately. AC1 (owner; no answer in rounds 1-7 or the #1081 peer report) and AC8 (live gate) remain open.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which project, matter or work assignment a child record counts as being under. That decides both its access (the stamp feeds access derivation) and where its file bytes are stored (task 155). An isolation surface.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -181,5 +181,25 @@ The Office "carrier" to-do is in scope: it has a direct user-chosen core link pl
       <live-checks>None (no new live claim). Read-only local check: git worktree list still shows C:/wtv156 at 57e0bfca0.</live-checks>
       <placement>No new service, DI registration, endpoint, option, job, column or package. The changes are one condition in OfficeService.SaveAsync, a test-only StampWorld.WithoutColumn, and tests. Publish size is not measured here (the main session measures).</placement>
     </verifier-round-3>
+    <verifier-round-4>
+      <date>2026-10-02</date>
+      <branch>task/uac-r2-156-r1-r2b (the requested name task/uac-r2-156-r1-r2 already belongs to the verifier round 2 branch at 57e0bfca0, still checked out in another workflow worktree; it was not re-pointed)</branch>
+      <base-sha>45eadf2d584f1b53d8ce1717c9b814cd074393e2 (task/uac-r2-156-r1-r1)</base-sha>
+      <record>projects/unified-access-control-r2/notes/task-156-stamp-freshness.md, section "Verifier round 4"</record>
+      <merge>work/unified-access-control-r2 at ea6484102 merged (merge commit e59c74033). No conflicts: only that branch's four files (the Phase2EndToEnd fixture and tests, ExternalAccessIntegrationTests, the project CLAUDE.md hard-gate row).</merge>
+      <closed>
+        Items 3 / 16 (the project's hard gate): the branch now carries 8531711d6, so the three batch-3 fixture failures the verifier reproduced are gone. Both integration suites were run in full on the merged tree: green (tests below).
+        Item 11: DataverseUpdateRecordHandler's remarks are reworded, no behaviour change. No dependency of the class is an app-only Dataverse client; since task 156 that holds by encapsulation, not by construction (CoreAncestorRestampQueue exposes only its enqueue methods but keeps the root IServiceProvider privately); path A (optionally made true by construction by narrowing the queue's dependency) or path B is the owner's open decision. The queue's dependency is not narrowed: that is path A's optional step, and path A is not chosen.
+        Items 2, 4, 5, 6, 7, 8, 9, 10, 12, 14: confirmed by the verifier; nothing to change. Item 12 re-checked: this POML parses (System.Xml) after this round's edit.
+      </closed>
+      <not-closed>
+        Items 1 / 15 (AC1): the owner's. The user-OBO AI update tool (DataverseUpdateRecordHandler) enqueues its cascade. Re-checked this round: the owner decisions note on work/unified-access-control-r2 (rounds 1-7 and the #1081 peer report) has no answer for this handler; round 7 item 3 approved path B for the two CREATE handlers only. The section 6.5 block in the note stands.
+        Item 13: the stale verifier worktree C:\wtv156 (detached at 57e0bfca0) is still registered. For the main session: git worktree remove --force C:/wtv156. Not removed here: it is outside this run's worktree.
+        Item 17 (AC8): the manual dev live gate stays with the main session after deploy (manual-live-gate above).
+      </not-closed>
+      <tests>No test added or changed (a doc-comment change only; no new guard, so nothing to seed). On the merged tree: affected suites (round 2 filter) 513 / 513; tests/integration/Sprk.Bff.Api.IntegrationTests in full: Passed 104 / Failed 0 / Skipped 0 (the verifier's 102 plus the two tests 8531711d6 added); tests/integration/Spe.Integration.Tests in full: Passed 403 / Failed 0 / Skipped 25 (Total 428; the verifier's one failure, InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails, passes); full BFF unit: Passed 14388 / Failed 0 / Skipped 54 (Total 14442; unchanged from round 3, since the merge added integration tests only); NetArchTest: 345 / 345.</tests>
+      <live-checks>None (no new live claim). Read-only local check: git worktree list still shows C:/wtv156 at 57e0bfca0.</live-checks>
+      <placement>No new service, DI registration, endpoint, option, job, column or package. The only source change is a doc comment. Publish size is not measured here (the main session measures).</placement>
+    </verifier-round-4>
   </execution>
 </task>

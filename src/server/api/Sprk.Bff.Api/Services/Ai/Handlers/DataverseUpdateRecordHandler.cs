@@ -32,15 +32,21 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <para>
 /// <b>User-OBO ONLY (spec MUST rule)</b>: executes through <see cref="IDataverseUserClient"/>
 /// under the calling user's exchanged token; privilege-denied updates surface the user's own
-/// access error. No app-only client is reachable from this class (task-012 audit).
+/// access error. No dependency of this class is an app-only Dataverse client (task-012 audit). Since task 156 that holds
+/// by ENCAPSULATION, not by construction: <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue"/>
+/// exposes only its enqueue methods, but it keeps the root <see cref="IServiceProvider"/> privately (to resolve
+/// <c>JobSubmissionService</c> lazily), and an app-only client could be resolved from that provider. Whether to accept
+/// this (section 6.5 path A, optionally made true by construction by narrowing the queue's dependency) or to allow a
+/// narrow write-only facade (path B) is the owner's open decision (unified-access-control-r2 task 156 note).
 /// </para>
 /// <para>
 /// <b>Core-ancestor re-stamp (unified-access-control-r2 task 156)</b>: an update can change what a to-do / event /
 /// communication / analysis is filed under, or the matter / project of a record others are filed under, which leaves
-/// copies of that root stale. The re-stamp is a SERVER-owned invariant written app-only, so it is not done here — that
-/// would put an app-only client in reach of this class. It is ENQUEUED (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue"/>,
-/// ADR-004) and runs as the BFF's background job seconds later; the storage resolver refuses a stale copy in that
-/// window (<c>container_ancestor_stale</c>) and the reconciliation job is the backstop.
+/// copies of that root stale. The re-stamp is a SERVER-owned invariant written app-only, so this class does not run it:
+/// running it here would mean calling an app-only writer from the user-OBO tool. It is ENQUEUED
+/// (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue"/>, ADR-004) and runs as the BFF's background job
+/// seconds later; the storage resolver refuses a stale copy in that window (<c>container_ancestor_stale</c>) and the
+/// reconciliation job is the backstop.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,

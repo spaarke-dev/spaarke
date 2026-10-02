@@ -265,6 +265,9 @@ unwired BFF path). Its findings, and what this round did with each:
     Dataverse client. Not done here, because it is only worth doing if the owner chooses A.
   - Owner round 7 item 3 approved path B for `DataverseCreateRecordHandler` and `EmailDraftToolHandler` only. It does
     not cover this update handler, so this block stays open.
+  - Verifier round 4 item 11: the handler's own remarks now say this too (the property holds by encapsulation, not by
+    construction, and the path is the owner's open decision). Re-checked at that round: rounds 1-7 and the #1081 peer
+    report give no answer for this handler.
 
 🔔 **Owner decision — F-051-6 for rows written with no pair** (item 5 residual)
 
@@ -533,6 +536,54 @@ Results, on the merged tree:
   because of the merge.
 - NetArchTest: **345 / 345**. It grew from 337, also because of the merge.
 
+## Verifier round 4 (2026-10-02, branch `task/uac-r2-156-r1-r2b`)
+
+**Branch name.** The harness asked for `task/uac-r2-156-r1-r2`, but that name already belongs to the verifier round 2
+branch (`57e0bfca0`, an ancestor of this work, still checked out in another workflow worktree). Re-pointing it would have
+moved a branch someone else holds. This round is therefore on `task/uac-r2-156-r1-r2b`, created from
+`task/uac-r2-156-r1-r1` at `45eadf2d5`.
+
+A fourth verifier ran the final verification that round 3 never reached. It reproduced the affected suites (513 / 513) and
+NetArchTest (345 / 345), checked the merge resolution side by side, and seeded two guards of its own. It then ran the
+project's new hard gate (`ea6484102`: both integration suites in full before the PR), which round 3 had not run. Its
+findings, and what this round did with each:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Not ready to merge, for one reason only: AC1 waits on an owner decision | **Not closable here.** See items 15 and the 🔔 block (verifier round 1 section). |
+| 2 | Affected suites 513 / 513 and NetArchTest 345 / 345 reproduced on a fresh worktree | Confirmed; nothing to change. |
+| 3 | The hard gate is red without `8531711d6`: integration 100 passed / 2 failed (`Phase2EndToEndTests` AC1P2_6, AC1P2_3); SPE 402 passed / 1 failed / 25 skipped (`InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails`). None is caused by task 156 | **Closed.** `work/unified-access-control-r2` at `ea6484102` is merged (merge commit `e59c74033`, no conflicts: only that branch's four files, the two integration fixtures, their tests and the project CLAUDE.md row). Both integration suites were then run in full (results below): green. |
+| 4 | The round-3 merge resolution keeps both sides' behaviour and both sides' registry rows (I-1, I-2, I-6, I-10) | Confirmed; nothing to change. |
+| 5 | The Office save marks only a 5xx or `container_ancestor_stale` retryable; a retry reaches the resolver again; the ambiguous test pins "not every 4xx" | Confirmed; nothing to change. |
+| 6 | The verifier's own seeds (A: the stale refusal's enqueue; B: the AI update tool's enqueue) both bite | Confirmed; nothing to change. |
+| 7 | Round-3 tests K8, K7, K5 are behavioural; no ADR-038 banned pattern | Confirmed; nothing to change. |
+| 8 | Fail-closed review of the resolver's walk: no path reaches a shared container while a root is unconfirmed | Confirmed; nothing to change. |
+| 9 | `AfterWriteAsync` never throws except on the caller's cancellation; every call site runs after its own write (AC2) | Confirmed; nothing to change. |
+| 10 | Inventory spot-check: no re-file path outside the inventory | Confirmed; nothing to change. |
+| 11 | Wording: the AI update handler's remarks say re-stamping inline "would put an app-only client in reach of this class", but the queue it already holds keeps the root `IServiceProvider`, so the property holds by encapsulation, not by construction | **Closed (wording only, no behaviour change).** `DataverseUpdateRecordHandler`'s remarks now say that no dependency of the class is an app-only Dataverse client, that since task 156 this holds by encapsulation (the queue exposes only its enqueue methods but keeps the root provider privately), and that path A (optionally made true by construction by narrowing the queue's dependency) or path B is the owner's open decision. The re-stamp paragraph now says the class does not run the re-stamp because that would mean calling an app-only writer from the user-OBO tool. The queue's dependency is NOT narrowed: that is path A's optional step, and path A is not chosen. |
+| 12 | The POML is well-formed; status `completed-with-escalation` plus a status-note | Confirmed. Re-parsed after this round's edit (System.Xml): well-formed. |
+| 13 | Housekeeping: the stale verifier worktree `C:\wtv156` (detached at `57e0bfca0`) is still registered | **For the main session.** Still listed by `git worktree list` at this round. Not removed here: it is outside this run's worktree and not this run's. Command: `git worktree remove --force C:/wtv156`. |
+| 14 | #1081 (root team holds Spaarke Basic User; the Spaarke Demo BU's team holds System Administrator): dev artifacts under rounds 5 and 6; neither changes task 156; AC8 checks the secure project's container and the repair, not root-BU read reach | Agreed; nothing to change. The peer report is already recorded in the owner decisions note ("Peer report: #1081"). AC8's checks read stamp values and the container an upload lands in, which no role placement changes. |
+| 15 | AC1 not met: `DataverseUpdateRecordHandler` enqueues its cascade instead of running it in the same operation. Needs the owner's section 6.5 decision (path A, optionally made true by construction; or path B). Owner round 7 item 3 approved path B for the two CREATE handlers only | **Not closable here — an owner decision, re-checked this round.** The owner decisions note on `work/unified-access-control-r2` (rounds 1-7 and the #1081 peer report) has no answer for this handler. The 🔔 block in the verifier round 1 section stands, with round 3's correction. |
+| 16 | AC7 met on its own terms, but the hard gate is red on the branch until it takes `8531711d6` | **Closed** with item 3. |
+| 17 | AC8 (manual dev live gate) pending | The main session's, after deploy, per the POML `manual-live-gate`. Not a defect. |
+
+### Tests this round
+
+No test was added or changed: the only source change is a doc comment. No new guard, so nothing to seed.
+
+On the merged tree (`e59c74033` plus the remark change):
+- Affected suites (the round 2 filter): **513 / 513**.
+- `tests/integration/Sprk.Bff.Api.IntegrationTests`, in full: **Passed 104 / Failed 0 / Skipped 0 (Total 104)**. The
+  verifier's 102 plus the two tests `8531711d6` added (`ReconJob_ApplicationUserOwner_GetsNoJunctionRow_Task152`,
+  `ReconJob_UnreadableOwner_KeepsExistingRow_AndCreatesNothing_Task152`); the two that failed for the verifier pass.
+- `tests/integration/Spe.Integration.Tests`, in full: **Passed 403 / Failed 0 / Skipped 25 (Total 428)**. The
+  verifier's one failure (`InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails`) passes; the 25 skips
+  are the suite's own (the same 25 the verifier saw).
+- Full BFF unit suite, once at the end: **Passed 14388 / Failed 0 / Skipped 54 (Total 14442)**, the same as round 3:
+  the merge brought integration tests only.
+- NetArchTest: **345 / 345**.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
 All four new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
@@ -573,6 +624,9 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
 - **Verifier round 3** (on the tree merged with `work/unified-access-control-r2`): 6 new test cases (restamper 3, job 3)
   plus retryable assertions on 3 Office-save route tests. Affected suites **513 / 513**; full BFF unit **Passed 14388 /
   Failed 0 / Skipped 54 (Total 14442)**; NetArchTest **345 / 345**; 4 seeds (K8, K7, K5, O1), each red.
+- **Verifier round 4** (on the tree merged with `work/unified-access-control-r2` at `ea6484102`): no test added or
+  changed (a doc-comment change only). Affected suites **513 / 513**; both integration suites in full (the project's
+  hard gate) and the full unit and arch suites: see the verifier round 4 section.
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,
