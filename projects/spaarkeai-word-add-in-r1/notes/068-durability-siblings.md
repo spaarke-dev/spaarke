@@ -239,3 +239,21 @@ An independent reviewer (a separate agent, coverage-first) read the diff and the
 | Six sibling handlers: the crash half of the stale lock | **ISS-020 / #1089** |
 | The pane reads once after Generate Profile | **ISS-021 / #1090** |
 | A Communication seam test flakes under full-suite load | **ISS-019 / #1088** |
+
+## 9. Live check on `spaarke-bff-dev`, 2026-10-02 (after the deploy from master `5e39f2bea`)
+
+Owner-authorized deploy and restarts; user token `ralph.schroeder@spaarke.com`; document `fb79f621-43c5-4083-a721-d0d482074731`
+(saved for 060's check, §11 there).
+
+| Check (POML ui-test) | Result |
+|---|---|
+| Generate Profile answers at once | **202** at 12:23:03 UTC, `Location: /api/v1/documents/fb79f621-…`, job `3b90642b-a4ee-4caf-bf9c-d4b3ef47c3d8` |
+| Restart within ten seconds | `az webapp restart` issued at once (12:23:03). The job had been picked up at 12:23:02.27 (attempt 1/3) and **completed on the old process at 12:23:11.9 (9,661 ms)**; the new process started 12:23:29. So the restart did **not** interrupt the run: the old process was still running when the job ended, 9 s after the restart command (when it received the stop signal is not in the logs) |
+| Status Completed afterwards | From the new process, `GET /api/v1/documents/{id}` → `summaryStatus` 100000002 with summary, TL;DR, keywords and type written. App Insights: one "queued as job" line, one AppOnlyDocumentAnalysis "completed in" line for that job id. **PASS as written** |
+| Click twice | Jobs `862252c2-…` and `5217e424-…`: both queued, both **completed** (11,086 ms and 9,185 ms). **PASS** |
+
+**What this does and does not show.** Live, a profile request's work finishes and its result is readable after a
+restart. Live, it did **not** show a run cut mid-flight and redelivered, because an App Service restart left the old process
+running for longer than the run took (twice: 9 s and 8 s runs, new processes 26 s and 23 s after the command). That path (stale lock released on a stop; owner takeover after a crash) stays proven by
+`Issue1086_OfficeBackgroundWorkRestartTests` only. Before 068 the same restart would have cancelled the in-process
+`Task.Run`, which was bound to `ApplicationStopping`.

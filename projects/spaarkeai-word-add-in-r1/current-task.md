@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (075 shipped as #1092 / `5e39f2bea`; next: task 079 — suggest /compact first)
+> **Last Updated**: 2026-10-02 (master `5e39f2bea` deployed to dev; 060/068 live checks run; #1081 verified; next: task 079)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -26,7 +26,14 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 | **Branch** | `work/spaarkeai-word-add-in-r1` = master `5e39f2bea` (clean). Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` passes and nothing is pending |
 | **Scope (from TASK-INDEX)** | SC-6 / SC-8 cite contradictory test assertions; FR-12's §6.5 path-A deviation has no ADR-Tensions row; 14 ✅ tasks with claims the review found unsupported; 7 POMLs `not-started` while ✅; **10 POMLs do not parse** (`Validate-TaskPoml.ps1` lists 005, 009, 010, 017, 018, 019, 028, 043, 044, 053) |
 | **Queue after 079** | 090 (wrap-up, `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
-| **For the owner** | (1) #1081 before the next BFF deploy from master; tell UAC-r2. (2) `SystemCacheKeys.JobStatusSequence` architecture review. (3) #1088, #1089, #1090 filed. (4) Live checks for 060/068 wait on the deploy |
+| **For the owner** | (1) #1081: owner gave the root team "Spaarke" the **Spaarke Basic User** role and asked if that is right. Recommended instead: a dedicated minimal owner role (Read, Basic depth, "Team privileges only"), as 082 did — awaiting the owner's answer; do NOT change roles without it; tell UAC-r2 once decided. (2) `SystemCacheKeys.JobStatusSequence`: explained in plain terms; awaiting "approved" (no code change either way). (3) #1088, #1089, #1090 filed. (4) Probe documents `fb79f621-…` and `2824a250-…` left in dev; offered to delete |
+
+### ✅ Deployed 2026-10-02: master `5e39f2bea` → `spaarke-bff-dev` (owner: "yes deploy and then restart")
+
+- `Deploy-BffApi.ps1` from a fresh `origin/master` worktree (`C:\wtdep`, removed): 45.46 MB, SHA-256 verified, `/healthz` 200, CORS OK. All changed routes 401 (registered).
+- **#1081 verified live.** The root team "Spaarke" now holds Spaarke Basic User (root copy: Read **Deep** on document/matter/project/invoice/todo, Basic on communication; inheritance "Direct User (Basic) access level and Team privileges"; 171 members). Probe rows owned by it were created and deleted on all six tables; a real unfiled save through the deployed BFF produced a document owned by it.
+- **060** (`notes/060-…md` §11): restart → the job reads Completed with the same document and the stream ends in `job-complete` (**PASS**). Identical re-save → no second document, but the replayed 202 reads `duplicate: false` (wording differs from the ui-test). Mid-flight cut **not reproducible** with a graceful restart (the save finished on the old process); covered by tests only.
+- **068** (`notes/068-…md` §9): 202 + `Location`; restart within 1 s; profile completed (on the old process, 9.7 s) and reads Completed from the new one (**PASS as written**); double click → two jobs, both completed (**PASS**). A run cut mid-flight was not produced live; covered by tests only.
 
 ### ✅ Shipped 2026-10-01: #1092 merged as `5e39f2bea` (task 075)
 

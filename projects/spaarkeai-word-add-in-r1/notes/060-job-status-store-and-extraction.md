@@ -331,3 +331,19 @@ the payload limit, returns the typed record, and can fail the next job create.
 - **`IProcessingJobService.GetEmailArtifactAsync` / `GetAttachmentArtifactAsync`** still return anonymous types as
   `Task<object?>`. They have **no caller at all** (grep over `src/`), so nothing fails today. Whoever first calls one
   must type it first, or it will fail exactly as §1.2 describes.
+
+## 11. Live check on `spaarke-bff-dev`, 2026-10-02 (after the deploy from master `5e39f2bea`)
+
+The owner authorized the deploy and the restarts. The deploy used `Deploy-BffApi.ps1` from a fresh worktree of
+`origin/master`: package 45.46 MB, SHA-256 verified, `/healthz` 200. Calls were made with a user token
+(`ralph.schroeder@spaarke.com`, a root-BU caller) against the endpoints the pane uses, with the pane's request shape.
+
+| Check (POML ui-tests) | Result |
+|---|---|
+| Save a document over 40 KB | **202**, job `2dcf1cf0-5bbe-f111-aaaf-0022482913fc` → Completed, document `fb79f621-43c5-4083-a721-d0d482074731` (79,651-byte .docx, unfiled). Owned by the root team "Spaarke", the #1081 path |
+| Restart, then read the same job | `az webapp restart` 12:23:03 UTC; new process "Application started" 12:23:29. `GET /api/office/jobs/{id}` → **200 Completed, same document id** (not 404). `GET …/stream` → `connected`, `progress` 100, `job-complete` with the same document id. **PASS** |
+| Save the identical document again | **No second document** (one `restart-probe-%` row). The response is the ORIGINAL job's 202, replayed by the `X-Idempotency-Key` response cache, so it reads `duplicate: false`; the pane would show a normal success for the same document rather than "already saved". **Outcome holds; the wording differs from the test's expectation** |
+| Cut a save mid-flight | **Not reproducible with a graceful restart.** A 12.6 MB save was started and the app restarted 3 s later (12:25:36); the old process kept serving and the save finished there at 12:25:41 (job `9889cf5c-5cbe-f111-aaaf-0022482913fc`, document `2824a250-b0d3-45bd-8c93-2c82c216a586`); the new process started 12:25:59. The job reads Completed from the new process: a definite outcome. The killed-mid-save path (abandoned row, retry after 5 min) stays proven by `Issue1084_OfficeJobRecordDurabilityTests` only; producing it live needs a hard kill of the process, which was not done |
+
+Probe documents left in dev: `fb79f621-…` (`restart-probe-10021222`) and `2824a250-…` (`restart-midflight-10021225`,
+12.6 MB of random padding).
