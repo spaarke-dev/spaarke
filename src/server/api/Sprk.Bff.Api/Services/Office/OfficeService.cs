@@ -1065,6 +1065,42 @@ public class OfficeService : IOfficeService
                 StreamUrl = $"/api/office/jobs/{jobId}/stream"
             };
         }
+        catch (SdapProblemException refusal)
+        {
+            // A DELIBERATE refusal, not a server fault (unified-access-control-r2 task 155, merged with task 075):
+            // RecordContainerResolver refuses with a stable reason code when it cannot show where this save's bytes may
+            // go — container_record_not_found, container_ancestor_unverifiable, secure_record_container_missing, … —
+            // and nothing has been uploaded. Task 075's catch-all below turns UNEXPECTED exceptions into a generic 500;
+            // a refusal must instead reach the pane with its own code and its client-facing text (SdapProblemException
+            // carries RFC 7807 Title/Detail, never server internals), in the save's pre-existing refusal shape.
+            _logger.LogWarning(
+                "Save for {ContentType} by user {UserId} was refused ({Code}, HTTP {Status}); nothing was uploaded",
+                request.ContentType, userId, refusal.Code, refusal.StatusCode);
+
+            if (jobId != Guid.Empty && jobRecord is not null)
+            {
+                await _jobs.RecordAsync(
+                    jobRecord with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "Failed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    },
+                    refusal.Code,
+                    CancellationToken.None);
+            }
+
+            return new SaveResponse
+            {
+                Success = false,
+                Error = new SaveError
+                {
+                    Code = refusal.Code,
+                    Message = refusal.Detail ?? refusal.Title,
+                    Retryable = refusal.StatusCode >= 500
+                }
+            };
+        }
         catch (Exception ex)
         {
             _logger.LogError(
