@@ -1,6 +1,6 @@
 # Spaarke Legal Operations Intelligence — Ontology Platform R1 · Design
 
-> **Status**: **DRAFT for review — rev 7**, 2026-10-02. Not yet through `/design-to-spec`.
+> **Status**: **DRAFT for review — rev 8**, 2026-10-02. Not yet through `/design-to-spec`.
 > **Evidence base**: [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) (~800 lines — field-level
 > detail, live-verified schema, defect forensics). **This document holds the decisions; the spec holds the
 > evidence.** Where they disagree, this document is newer.
@@ -231,9 +231,14 @@ violation with no cost-of-doing-nothing to cite.
 
 | Need | ❌ Not this | ✅ Extend this |
 |---|---|---|
-| **Count-filter cards** (replacing the retired stat tiles) | A new card — **nor `StatTiles`**, which has **no `onClick` at all** (`StatTiles.tsx:95-111`) and carries the overlapping-lenses semantics we are retiring | **`MetricCard` / `MetricCardRow`** — `Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx:24-222`, **already clickable** (`role="button"`), square, badge-capable |
+| **Count-filter cards** (replacing the retired stat tiles) | A new card — **nor `StatTiles`**, which has **no `onClick` at all** (`StatTiles.tsx:95-111`) and carries the overlapping-lenses semantics we are retiring | **`WorkspaceShell/MetricCard` + `MetricCardRow`** — `Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx:24-222`, **already clickable** (`role="button"`), square, badge-capable. ⚠️ **Cite the full path** — a second, unrelated `MetricCard` exists at `Spaarke.Visuals/src/components/MetricCard.tsx` serving the `VisualHost` PCF (audit §8.2 D3, item C-3) |
 | **The row's ⋮ action menu** | A fourth hand-rolled `<Menu>` | **`DocumentRowMenu`** — `Spaarke.UI.Components/src/components/DocumentRowMenu.tsx:150-208`, an action-descriptor table with `disabledActions` filtering. **Three bespoke ⋮ menus already exist** (`DocumentRowMenu`, `NarrativeBullet.tsx:600-645`, `HighPrioritySection.tsx:298-325`) — this is §11's own named anti-pattern |
 | **The post-action outcome surface** (complete / reschedule / reassign / dismiss) | A parallel worklist outcome card | **`OutcomeCard`** — `Spaarke.UI.Components/src/components/SprkChat/OutcomeCard.tsx:93-367`; already status badge + summary + link + next-step chips. Extend with the Signal statuses |
+
+**One thing the row needs that nothing provides**: a **generic status/severity badge**. Every badge in the
+shared libraries is domain-specific (`CitationBadge`, `PinnedMemoryProvenanceBadge`, `ChannelBadge`), so the
+Signal-status badge is **legitimately new** — and per rule 1 below it belongs in `Spaarke.UI.Components`, not in
+the Console app (audit §8.5, item C-4).
 
 Two components carry forward **as-is, independently of the row that hosts them today**: `NarrativeCitedText`
 (a pure, test-covered text→entity-link segmenter) and `useInlineTodoCreate` — **the only "action that changes
@@ -241,15 +246,22 @@ something" the package already has.**
 
 #### 🔴 The dismiss-path trap — remove it before building the row
 
-`Spaarke.DailyBriefing.Components` still barrel-exports **three hooks that are dead in the live data path** —
-`useBriefingNotifications`, `useBriefingNarration`, `useBriefingActions` — backed by `notificationService.ts`'s
-`appnotification` writes (`markBriefingRemoved` and friends). Dead because `DailyBriefingApp.tsx:64` imports only
-three other hooks, and the live path is `fetchBriefingLive` behind `USE_LIVE_RENDER=true`.
+⚠️ **Corrected rev 8 — I overstated the mechanism.** Rev 6 said these hooks are *"still barrel-exported."*
+**They are not** (verified: no `useBriefing*` export in the package's `index.ts`), so the footgun is deep-path
+import only. *Recorded rather than quietly edited, because asserting an unverified mechanism is §0.3 applied to
+an audit finding.*
 
-They are still importable and they still **look like** the dismiss mechanism. Wiring the worklist's **Dismiss**
-to `markBriefingRemoved` would write **bell-panel read-state instead of a Decision Record** — silently breaking
-row-contract requirement 5 and starving the suppression input criterion 4 depends on. **Dismissal would appear
-to work and record nothing.** De-barrel or `@deprecated` them *before* the row is built.
+**The real hazard is two stale comments**, which mislead a reader rather than a compiler. The three hooks
+(`useBriefingNotifications`, `useBriefingNarration`, `useBriefingActions`, backed by `notificationService.ts`'s
+`appnotification` writes) **are** dead — the live path is `fetchBriefingLive` behind `USE_LIVE_RENDER=true`
+(`briefingService.ts:397`). But two live app files still *describe* them as the mechanism:
+`LegalWorkspace/.../dailyBriefing.registration.ts:48` and `SpaarkeAi/src/main.tsx:252`.
+
+Anyone reading either to learn how the Briefing gets its data — precisely what a worklist implementer does — is
+told the wrong mechanism and pointed at `appnotification` read-state as if it were the dismiss path. Writing
+Dismiss there records **bell-panel read-state instead of a Decision Record**: it would appear to work, record
+nothing, break row-contract requirement 5 and starve criterion 4's suppression input. **Work item C-1, size XS,
+and it gates the row.**
 
 **Four rules for anything genuinely new** (the row component, the evidence block, the outcome cards):
 
@@ -423,6 +435,30 @@ overdue tasks would push 5 decisions off the screen.
 | Item | Shape | Note |
 |---|---|---|
 | **Landing contract only** | columns + freshness surfacing | The pointer columns (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) and attribute ownership on any entity a later ingest will touch. **In R1 for two reasons**: it is free now and a data migration later (component model §11), and **freshness is load-bearing in the UI** — prototype finding 3, *an absence clause is only as true as its source is fresh*. A `notExists` conjunct evaluated over a stale mirror is a false negative wearing a confident face, which is the §0.3 failure in a new costume |
+
+**Component cleanup pulled in per §5.0** `[rev 8, owner item B]` — *"even if not directly part of or caused by
+this project we need to address it in this project and not defer or hand off."* **Twenty-seven work items
+C-1..C-27**, each sized with files, in [`notes/reuse-verification-2026-10-02.md`](notes/reuse-verification-2026-10-02.md)
+§8.7 + §8.9. The audit grew far past the worklist; these are the seven that matter most, none of which this
+project caused:
+
+| Item | What | Size | Gates the row? |
+|---|---|---|---|
+| **C-19** | 🔴 Delete the **`CommandRegistry` cluster** — dead infra from a **deleted** PCF whose `deleteCommand()` loops `webAPI.deleteRecord` over **every selected record**. It sits beside the live `CommandExecutor` and reads as the generic, privilege-aware command builder, so a dev adding a grid toolbar could ship an untested bulk delete | S | — |
+| **C-21** | 🔴 Resolve the **Pillar-9 `getAgentVisibleState` shim** — an **ADR-015 privacy contract** that looks enforcing and is structurally bypassed (the server re-derives the shapes itself). *Fixing a privacy bug there changes nothing at runtime* | S | — |
+| **C-22** | 🔴 Resolve **`InsightSummaryCard`** — its mount bundle **does not exist in the repo**, so production renders the "Phase 4 placeholder" forever while every other link in the chain reads as live | S | — |
+| **C-5** | 🔴 Delete **`composeCommentThreadsToDocxAnnotations`** — it **already caused silent comment loss on save**, was abandoned for exactly that, and is **still barrel-exported** | XS | — |
+| **C-10** | 🔴 **A live bug, not debt** — the To-Do urgency scorer's three copies have **drifted**: `useKanbanColumns.ts:85-89` never received `todoScoring.ts:71-75`'s local-midnight fix, so they disagree **by one day in every negative-UTC-offset zone**. A To-Do can sit in a different Kanban column than its own detail view | S | — |
+| **C-23** | 🔴 **Root `CLAUDE.md` is wrong** — it documents `CalendarFilterPane` as one of "two intentional Calendar variants", but the live consumer imports `CalendarSection`, and two live files import a type the barrels never export | XS | — |
+| **C-1 · C-3 · C-4** | The three that **do** gate the row: delete the dead briefing hooks + fix the two stale comments · disambiguate `MetricCard` · add the generic status badge | XS/S | ✅ |
+
+Also inside: `cleanGuid` reimplemented **~50 times** with two divergent regexes despite a comment calling itself
+*"the ONE place"*; the Xrm frame-walk implemented **seven** times, **twice under the same exported name in one
+package**; and a whole migration's dead surface in `Spaarke.Events.Components` (`EventsPage` was rewritten onto
+`@spaarke/ui-components` and now imports **nothing** from it, while still declaring the dependency).
+
+**Shape**: ~20 XS/S items, one M, one ongoing migration. Only **C-1, C-3, C-4** gate the row — which is what makes
+absorbing the rest affordable rather than a second project.
 
 **Repairs pulled in per §5.0** — this project holds the diagnosis, so fixing is cheaper than handing off:
 
