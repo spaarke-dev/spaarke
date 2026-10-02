@@ -251,7 +251,9 @@ public class GrantLifecycleCharacterizationTests
     /// <summary>
     /// Task 138: the grant core now reads the root's access flags before writing. Every root in this class is a
     /// Standard, non-secure record, so the policy admits both grantee kinds and the upsert behaviour under test
-    /// is unchanged. The policy itself is pinned in <c>GrantPolicyWriteTimeTests</c>.
+    /// is unchanged. The policy itself is pinned in <c>PolymorphicGrantWriteTests</c> (the
+    /// <c>DecideGrantPolicy_*</c> matrix), <c>GrantPolicyContractTests</c> (the routes) and
+    /// <c>GrantPolicyOrderingTests</c> (403 before 422).
     /// </summary>
     private static readonly GrantPolicyTestDoubles.FlagStubParticipationService OpenRecordPolicy =
         new(defaultFlags: RootRecordFlags.None);

@@ -76,14 +76,15 @@ export interface ITrackingFieldTrioProps {
    * When supplied — the host knows the record is SECURE — the CLOSED pill reads
    * `label` in red for every underlying value (both "secure" and "secure +
    * Restricted": "Secure – Restricted" would not fit the pill without changing
-   * the trio's spacing), and the open menu lists `options` instead of
-   * {@link accessPermissionOptions} (menu items are not width-bound, so they may
-   * say "Secure" and "Secure – Restricted"). Selecting one still calls
-   * {@link onAccessPermissionChange} with that option's value. Securing and
-   * unsecuring the record is NOT done here (task 150's ribbon command). */
+   * the trio's spacing). It changes the closed label ONLY: the open menu still
+   * lists {@link accessPermissionOptions} unchanged (Standard / Limited /
+   * Restricted), and selecting one calls {@link onAccessPermissionChange} with
+   * that option's own value — the secure display never rewrites the stored
+   * value. O1 FINAL specifies the closed label and the Manage Access bar, not a
+   * different menu. Securing and unsecuring the record is NOT done here (task
+   * 150's ribbon command). */
   secureAccessPermission?: {
     label: string;
-    options: IAccessPermissionOption[];
   };
 
   // ---------------------------------------------------------------------

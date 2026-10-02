@@ -52,7 +52,8 @@
   with secure true OR unreadable (null/undefined) → limited; Standard/null with secure false → standard.
 - `TrackingFieldTrio` (shared): `disabled` (all three controls), `accessPermissionDisabled` (pill only; menu
   pinned shut), `showAccessPermission` (unbound → hidden, grid kept aligned), `secureAccessPermission`
-  (closed pill "Secure" in red for every value; menu "Secure" → Limited, "Secure – Restricted" → Restricted).
+  (closed pill "Secure" in red for every value — a closed-LABEL change only; the menu is the unchanged
+  Standard / Limited / Restricted list and each item writes its own value — r1, see §10 item 5).
 - PCF v1.0.32 (manifest, solution.xml, extracted manifest, pack.ps1, footer + rebuilt bundle):
   `context.mode.isControlDisabled` + bound column `security.editable` read on every render; a fail-closed
   `sprk_issecure` GATING read (`ensureSecureFlag`, once per record id); display read unchanged (fail-soft);
@@ -63,9 +64,12 @@
   `EmailTrackingPanel` access props are removed; the panel renders the trio with `showAccessPermission={false}`.
 
 ### Decisions worth recording
-1. **"Secure" in the pill menu writes Limited**, not Standard: Secure already limits contacts, and Limited is
-   the conservative value a record keeps if later unsecured (task 150). Selecting it on a Standard secure record
-   therefore changes the stored value to Limited — no access change while secure.
+1. ~~"Secure" in the pill menu writes Limited~~ — **REVERTED in r1** (verifier finding 5). O1 FINAL specifies
+   only the closed label ("Secure" in red for secure and secure+Restricted) and the Manage Access bar; the
+   "only those two choices" menu came from the SUPERSEDED O1 block. The menu is now the record's own
+   Standard / Limited / Restricted list under the "Secure" closed label, so Standard stays selectable, clicking
+   an item never stores a value other than its own, and no Limited is silently left behind for a later unsecure
+   (task 150).
 2. **NULL `sprk_issecure` → Limited in the dialog** (fail closed, criterion 12 "unreadable"). Field-level
    security also returns null, so the two cannot be told apart. The server treats NULL as not secure. Until
    task 153's Q1 cleanup (NULL → No) runs, Standard records with NULL secure (dev: 9 projects, 18 matters, 11
@@ -212,7 +216,12 @@ the path-B amendment must be recorded in the PR before merge** (criterion 17).
    is Limited and carries contact grants (52bb55e7 Collaborate, 8e9918a9 View Only, 394fda9f via a contact+org row)
    — the first CIAM narrowing will show there.
    (c) Secure non-restricted project (65a3fab2, provisioned per round 4): behaves as (b).
-   (d) Standard project unchanged. (e) The communication form shows no access-permission control after step 3.
+   (d) Standard project unchanged. **Plus (r1, verifier finding 7): on the project, matter AND work-assignment
+   main forms under v1.0.32, the access-permission pill still RENDERS (footer reads v1.0.32) and still WRITES —
+   change Standard → Limited → Standard, save, and confirm `sprk_accesspermission` round-trips on each form
+   (`isAccessPermissionBound()` decides both visibility and `getOutputs` write-back). On a secure record the
+   closed pill reads "Secure" in red and the menu lists Standard / Limited / Restricted.**
+   (e) The communication form shows no access-permission control after step 3.
 
 ## 8. Step 9.5 quality gates
 
@@ -246,3 +255,22 @@ Security: the policy (and its 422 detail) is reachable only after `DelegationRul
 - **153**: the modal's single bar already renders "Secure" / "Secure – Restricted" (O1 FINAL item 3) and the pill
   shows "Secure" in red (item 2) — 153 should not add a second bar.
 - **Concise ADR-003** edit (§5 above).
+
+## 10. Verifier round 1 (2026-10-02, branch `task/uac-r2-138-r1`)
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1–4 | Read path, write path, re-run, perturbation | Verified — no change. |
+| 5 | Two-item secure menu ("Secure" → Limited) went beyond O1 FINAL | **Fixed (revert, verifier option a).** `secureAccessPermission` is now `{ label }` only; the shared trio always lists the host's `accessPermissionOptions`; PCF `SECURE_ACCESS_PERMISSION_OPTIONS` deleted; bundle rebuilt (still v1.0.32 — never deployed). New jest: the secure menu is exactly Standard/Limited/Restricted, and each of the three writes exactly its own value. Perturbation: dropping Standard on secure → 2 red; making a secure item write Limited → 2 red; restored → 20/20. |
+| 6 | NULL `sprk_issecure` → Limited in the dialog vs server "not secure" | **Kept (fail closed), flagged to the owner** alongside task 153's Q1 cleanup: the same mapping applies in PRODUCTION to any legacy NULL rows, so Q1's cleanup must also run (or the column default + cleanup ship) in every environment, not only dev. No code change. |
+| 7 | `isAccessPermissionBound()` relies on `attributes.LogicalName` only | **Hardened + gated.** A numeric `raw` value is now also proof of a binding (an unbound optional property never holds one), so a host that omits metadata still shows and writes the pill whenever the record has a value. Live gate step 16(d) now explicitly checks render + write on the project, matter and work-assignment forms under v1.0.32 (§7 above; POML criterion 16(d)). The PCF still has no jest harness, so the live gate is the check. |
+| 8 | Personal views: filtering view only logged; non-filtering left without `-IncludeUserViews` | **Fixed.** Personal views now follow the system-view rule: a FILTERING personal view refuses the run (exit 2) with or without the switch; a display/sort reference refuses the run (exit 2) unless `-IncludeUserViews` strips it. The refusal is raised outside the scan's try/catch so it cannot be swallowed. Proven offline with a harness that fakes `Invoke-Dv` (any non-GET throws): none → 0; filtering → 2 (both modes); displaying → 2 without the switch, 0 + PLAN with it. Seeded the pre-fix script into the same harness: filtering → 0, displaying → 0 (the old behaviour, so the scenarios bite). The live scan found no personal-view references, so the real run is unaffected. |
+| 9 | Stale `GrantPolicyWriteTimeTests` doc reference | **Fixed** — now names `PolymorphicGrantWriteTests` (the `DecideGrantPolicy_*` matrix), `GrantPolicyContractTests` and `GrantPolicyOrderingTests`. |
+| 10 | Merge sequencing with `task/uac-r2-141-f3` | **Recorded for the main session:** conflicts in `InviteAndGrantExternalUserEndpoint.cs`, `InviteExternalUserEndpoint.cs` and `ExternalAccessContractTests.cs`. Whichever lands second keeps BOTH the 138 policy pre-checks (before any Contact lookup / CIAM call / email) AND the 141 changes; re-run `GrantPolicyContractTests` + `ExternalAccessContractTests` after the resolution. |
+| 11–12 | Info / correctly stopped escalations | No change. |
+| 13 | Criterion 16 pending | Still a manual gate (not attempted; live writes are out of scope). Step (d) now carries the root-form pill check. |
+| 14 | Criterion 17: owner approval of the ADR-003 path-B amendment + concise `.claude/adr` edit | **Not closable here** — the owner's approval is recorded in the PR (no PR from this branch), and `.claude/` is outside the sub-agent boundary (concise text in §5). |
+| 15 | Criterion 19: publish size | **Not closable here** — main session measures (fresh-master short-path Compress-Archive). r1 changes no BFF production code (one test doc comment). |
+| 16 | Criterion 11/13 qualified by finding 5 | Closed by the finding-5 revert: the pill now does exactly what O1 FINAL specifies and nothing more. |
+
+**r1 test results (2026-10-02):** BFF unit suite 13,639 passed / 0 failed / 54 skipped (13,693); NetArchTest 341 / 341; jest `Spaarke.UI.Components` TrackingFieldTrio + AccessGrantModal 111 / 111 (was 108: one secure-menu test replaced by one menu test + three write cases); PCF `npm run lint` clean and `npm run build:prod` succeeded (bundle copied into `Solution/Controls/...`, v1.0.32 footer present, no two-item secure menu in the bundle). Publish size: main session.

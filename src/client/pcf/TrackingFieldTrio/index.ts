@@ -111,8 +111,9 @@
  * - The pill honours a read-only form: `context.mode.isControlDisabled`
  *   disables all three controls, and the bound column's `security.editable ===
  *   false` disables the pill alone (re-read in init and in every updateView).
- * - On a secure record the closed pill reads "Secure" in red (owner O1 FINAL),
- *   and its menu offers "Secure" / "Secure – Restricted".
+ * - On a secure record the closed pill reads "Secure" in red (owner O1 FINAL);
+ *   its menu is the unchanged Standard / Limited / Restricted list, so the
+ *   secure display never rewrites the stored value.
  * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
  *   on a form whose table has no such column (the retired
  *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
@@ -199,14 +200,11 @@ const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
 
 // Owner O1 FINAL (2026-10-01): on a SECURE record the closed pill reads "Secure"
-// (red) for both secure and secure + Restricted; the menu may name both. "Secure"
-// writes Limited — Secure already limits contacts to named grants, and Limited is
-// the conservative value the record keeps if it is later unsecured (task 150).
+// (red) for both secure and secure + Restricted. That is a closed-LABEL change
+// only: the menu keeps the record's own Standard / Limited / Restricted options,
+// so Standard stays selectable and no item writes a value other than its own
+// (a two-item "Secure" → Limited menu was not part of O1 FINAL — task 138 r1).
 const SECURE_PILL_LABEL = 'Secure';
-const SECURE_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
-  { value: ACCESS_PERMISSION_LIMITED, label: 'Secure' },
-  { value: ACCESS_PERMISSION_RESTRICTED, label: 'Secure – Restricted' },
-];
 
 // Fallback segments (no per-option color) used when the bound OptionSet's
 // field metadata isn't available (e.g., harness/test environments). The
@@ -471,11 +469,17 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
   /** Whether the `accessPermission` property is bound to a column on this form (task 138 — the property
    * is optional so the control can sit on a table without the column). A bound OptionSet parameter
-   * carries its attribute metadata (`attributes.LogicalName`); an unbound optional one does not. */
+   * carries its attribute metadata (`attributes.LogicalName`); an unbound optional one does not.
+   * A numeric `raw` value is also proof of a binding (an unbound property never holds one), so a host
+   * that omits the metadata — the case `getAccessPermissionOptions()` falls back for — still shows and
+   * writes back the pill whenever the record has a value. Live gate 16(d) re-checks the three root
+   * forms under v1.0.32 (task 138 r1, verifier finding 7). */
   private isAccessPermissionBound(): boolean {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const attrs = (this.context.parameters.accessPermission as any)?.attributes;
-    return typeof attrs?.LogicalName === 'string' && attrs.LogicalName.length > 0;
+    const param = this.context.parameters.accessPermission as any;
+    const logicalName = param?.attributes?.LogicalName;
+    if (typeof logicalName === 'string' && logicalName.length > 0) return true;
+    return typeof param?.raw === 'number';
   }
 
   /** Whether the bound access-permission column is editable for this user — `false` only when the
@@ -1225,10 +1229,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       disabled: controlDisabled,
       accessPermissionDisabled: !this.isAccessPermissionEditable(),
       showAccessPermission: accessPermissionBound,
-      secureAccessPermission:
-        this.isSecureValue === true
-          ? { label: SECURE_PILL_LABEL, options: SECURE_ACCESS_PERMISSION_OPTIONS }
-          : undefined,
+      secureAccessPermission: this.isSecureValue === true ? { label: SECURE_PILL_LABEL } : undefined,
     };
 
     const recordId = this.getRecordId();

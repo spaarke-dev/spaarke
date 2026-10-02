@@ -289,7 +289,7 @@ Asserted on the workforce contact plane and on the systemuser plane's contact-gr
 (a) Restricted project: "+ User" shares a colleague; the contact/org options are absent; a forced /grant returns the 422 message; a contact holding a prior grant loses access on Teams and on the external SPA; an internal user with role access keeps it.
 (b) Limited project: an org-inherited-only contact loses access; a directly granted contact keeps its level; "+ Organization" is absent.
 (c) Secure non-restricted project: behaves as (b).
-(d) Standard project: unchanged.
+(d) Standard project: unchanged. Plus (verifier r1 finding 7): on the project, matter AND work-assignment main forms under PCF v1.0.32 the access-permission pill still renders and still writes (change the value, save, confirm sprk_accesspermission round-trips on each form); on a secure record the closed pill reads "Secure" in red and its menu is Standard / Limited / Restricted.
 (e) The communication form no longer shows an access-permission control after the operator runs the retirement script.</criterion>
     <criterion testable="true">17. The ADR-003 amendment text (full doc) is merged in this PR and names Limited alongside Secure. The concise-ADR replacement text is recorded in the notes and handed to the main session. The PR description carries the §6.5 path-B citation. The owner's approval of the amendment is recorded in the PR before merge (§6.5: the human reviewer chooses the path).</criterion>
     <criterion testable="true">18. docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md carries the Standard / Limited / Restricted × Secure matrix, stating which grant types each admits and which plane enforces it.</criterion>
@@ -374,6 +374,25 @@ Anchors verified 2026-09-30 against the working tree:
         off: 3 red). Counts for the full suites are in the notes.
       - Deviations: "Secure" in the pill menu writes Limited; a NULL sprk_issecure reads as Limited in the dialog until task
         153's Q1 cleanup; criterion 12's pure test lives in the shared lib's jest.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-138-r1" base="task/uac-r2-138 @ 367a6209c" status="verifier round 1 addressed; criterion 16 live gate, owner approval of the ADR-003 path-B amendment (criterion 17), the concise .claude/adr edit and the publish-size measurement (criterion 19) remain with the main session / owner">
+      Full record: notes/task-138-access-permission-levels.md §10.
+      - Finding 5 (two-item secure menu beyond O1 FINAL): REVERTED. secureAccessPermission is a closed-label change only
+        ({ label }); the menu is the record's own Standard / Limited / Restricted list and each item writes its own value.
+        The "Secure" writes Limited deviation above is withdrawn. PCF SECURE_ACCESS_PERMISSION_OPTIONS deleted; bundle rebuilt
+        (still v1.0.32, never deployed). New jest pins the menu and the three writes; perturbation 2 red + 2 red, restored green.
+      - Finding 6 (NULL sprk_issecure maps to Limited in the dialog): kept, fail closed; flagged to the owner with task 153 —
+        the Q1 cleanup must run in every environment, production included, not only dev.
+      - Finding 7: isAccessPermissionBound() also accepts a numeric raw value as proof of a binding; criterion 16(d) now checks
+        render + write-back on the three root forms under v1.0.32.
+      - Finding 8: the retirement script refuses (exit 2) a personal view that filters on the column, and one that references it
+        without -IncludeUserViews — the same rule as system views. Proven with an offline fake-Invoke-Dv harness, and seeded
+        against the pre-fix script (both scenarios exit 0 there).
+      - Finding 9: stale GrantPolicyWriteTimeTests doc reference now names the real test classes.
+      - Finding 10: merge sequencing with task/uac-r2-141-f3 recorded for the main session (keep both the 138 pre-checks and the
+        141 changes).
+      - Placement / justification (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job or package; no BFF
+        production code changed in r1.
     </outcome>
   </execution>
   <ui-tests>

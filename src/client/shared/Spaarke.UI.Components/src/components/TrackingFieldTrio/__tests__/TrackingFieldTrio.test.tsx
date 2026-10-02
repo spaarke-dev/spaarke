@@ -212,13 +212,7 @@ describe('TrackingFieldTrio', () => {
   });
 
   describe('Secure record display (task 138, owner O1 FINAL)', () => {
-    const SECURE = {
-      label: 'Secure',
-      options: [
-        { value: 100000001, label: 'Secure' },
-        { value: 100000002, label: 'Secure – Restricted' },
-      ],
-    };
+    const SECURE = { label: 'Secure' };
 
     it.each([100000000, 100000001, 100000002])(
       'the closed pill reads "Secure" for underlying value %s (both secure and secure + Restricted)',
@@ -230,18 +224,36 @@ describe('TrackingFieldTrio', () => {
       }
     );
 
-    it('the open menu offers "Secure" and "Secure – Restricted" and writes the chosen value', async () => {
-      const onAccessPermissionChange = jest.fn();
+    // The secure display changes the CLOSED label only (O1 FINAL names nothing else): the menu keeps the
+    // unchanged Standard / Limited / Restricted list, so Standard stays selectable on a secure record and
+    // no menu item silently writes a value other than its own.
+    it('the open menu is the unchanged Standard / Limited / Restricted list', async () => {
       renderWithTheme(
-        <TrackingFieldTrio {...makeProps({ secureAccessPermission: SECURE, onAccessPermissionChange })} />
+        <TrackingFieldTrio {...makeProps({ accessPermission: 100000000, secureAccessPermission: SECURE })} />
       );
 
       fireEvent.click(screen.getByRole('button', { name: 'Access Permission' }));
-      expect(await screen.findByRole('menuitem', { name: 'Secure' })).toBeInTheDocument();
-      expect(screen.getAllByRole('menuitem')).toHaveLength(2);
-      expect(screen.queryByRole('menuitem', { name: 'Standard' })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole('menuitem', { name: 'Secure – Restricted' }));
-      expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
+      await screen.findByRole('menuitem', { name: 'Standard' });
+      expect(screen.getAllByRole('menuitem').map(m => m.textContent)).toEqual(['Standard', 'Limited', 'Restricted']);
+      expect(screen.queryByRole('menuitem', { name: /Secure/ })).not.toBeInTheDocument();
+    });
+
+    it.each([
+      ['Standard', 100000000],
+      ['Limited', 100000001],
+      ['Restricted', 100000002],
+    ])('choosing %s on a secure record writes exactly %s', async (label, value) => {
+      const onAccessPermissionChange = jest.fn();
+      renderWithTheme(
+        <TrackingFieldTrio
+          {...makeProps({ accessPermission: 100000001, secureAccessPermission: SECURE, onAccessPermissionChange })}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Access Permission' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: label }));
+      expect(onAccessPermissionChange).toHaveBeenCalledTimes(1);
+      expect(onAccessPermissionChange).toHaveBeenCalledWith(value);
     });
   });
 

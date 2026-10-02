@@ -46,8 +46,9 @@
  *   - `showAccessPermission={false}` hides the pill when the host has no
  *     access-permission column bound (placeholders keep the grid aligned).
  *   - `secureAccessPermission` (owner O1 FINAL): on a SECURE record the closed
- *     pill reads "Secure" in red for every underlying value, and the menu lists
- *     the secure choices the host supplies.
+ *     pill reads "Secure" in red for every underlying value. The menu is the
+ *     unchanged Standard / Limited / Restricted list — the secure display is a
+ *     closed-label change only and never rewrites the stored value.
  */
 
 import * as React from 'react';
@@ -369,7 +370,6 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
                 ? getSelectedSegmentColors(idx, selOpt)
                 : undefined;
             const pillLabel = secureAccessPermission ? secureAccessPermission.label : (selOpt?.label ?? '');
-            const menuOptions = secureAccessPermission ? secureAccessPermission.options : accessPermissionOptions;
             return (
               // A disabled pill never opens: `open={false}` pins the menu shut in addition to the
               // disabled trigger, so no onAccessPermissionChange can fire on a read-only form.
@@ -391,7 +391,7 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
                 </MenuTrigger>
                 <MenuPopover>
                   <MenuList>
-                    {menuOptions.map(opt => (
+                    {accessPermissionOptions.map(opt => (
                       <MenuItem
                         key={opt.value}
                         onClick={() => {

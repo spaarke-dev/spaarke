@@ -19,7 +19,10 @@
       5. Remove VIEW references (savedquery): the layout cell, the fetch <attribute> and any <order> on the
          column. A view that FILTERS on the column is refused (exit 2) — dropping a filter changes which rows
          the view returns, which is a product decision, not a cleanup.
-      6. Personal views (userquery) are only REPORTED unless -IncludeUserViews is passed.
+      6. Personal views (userquery) get the SAME rule as system views: one that FILTERS on the column is
+         refused (exit 2), and one that merely displays/sorts on it is stripped only when -IncludeUserViews
+         is passed — without it the run is refused (exit 2) rather than deleting the column out from under
+         a user's view. Only personal views visible to the running principal can be scanned.
       7. Delete the unmanaged Copilot form-fill opt-out (aiskillconfig) rows bound to the column.
       8. Re-check RetrieveDependenciesForDelete; anything still listed is reported and the run stops (exit 2).
       9. Delete the column and publish the table.
@@ -34,7 +37,10 @@
     Perform the writes. Without it the script is a READ-ONLY dry run that prints the full plan.
 
 .PARAMETER IncludeUserViews
-    Also strip the column from personal views (userquery). Off by default: those are users' own records.
+    Also strip the column from personal views (userquery) that display or sort on it. Off by default: those
+    are users' own records, so without this switch any such reference REFUSES the run (exit 2) instead of
+    leaving a view that would break when the column is deleted. A personal view that FILTERS on the column
+    is refused either way (the same rule as a system view).
 
 .EXAMPLE
     .\Retire-CommunicationAccessPermission.ps1                 # dry run (default): prints the plan, writes nothing
@@ -225,24 +231,32 @@ if ($viewEdits.Count -eq 0) { Write-Info "No system-view references ($($views.va
 # 6. Personal views -----------------------------------------------------------
 Write-Step "5. Personal views (userquery)"
 $userViewEdits = @()
+$userViewRefusal = $null
 try {
     $uq = Invoke-Dv -Endpoint "userqueries?`$select=userqueryid,name,layoutxml,fetchxml&`$filter=returnedtypecode eq '$Table'"
     foreach ($v in $uq.value) {
         if (($v.layoutxml -notmatch $Column) -and ($v.fetchxml -notmatch $Column)) { continue }
+        # Same rule as a system view (step 4): a filter is a product decision, never stripped silently. And a
+        # reference this run will not strip is refused, never left behind to break when the column goes.
         if (Test-FiltersOnColumn $v.fetchxml) {
-            Write-Info "personal view '$($v.name)' ($($v.userqueryid)) FILTERS on the column — left for its owner."
-            continue
+            $userViewRefusal = "Personal view '$($v.name)' ($($v.userqueryid)) FILTERS on the column; removing the filter changes its rows (its owner's decision)."
+            break
+        }
+        if (-not $IncludeUserViews) {
+            $userViewRefusal = "Personal view '$($v.name)' ($($v.userqueryid)) references the column; pass -IncludeUserViews to strip it, or have its owner remove the column first."
+            break
         }
         $r = Remove-ViewReferences $v.layoutxml $v.fetchxml
         $userViewEdits += @{ Id = $v.userqueryid; Name = $v.name; Layout = $r.Layout; Fetch = $r.Fetch }
-        if ($IncludeUserViews) { Write-Plan "remove the column from personal view '$($v.name)' ($($v.userqueryid))" }
-        else { Write-Info "personal view '$($v.name)' ($($v.userqueryid)) references the column (pass -IncludeUserViews to strip it)." }
+        Write-Plan "remove the column from personal view '$($v.name)' ($($v.userqueryid))"
     }
     if ($userViewEdits.Count -eq 0) { Write-Info "No personal-view references visible to this principal ($($uq.value.Count) scanned)." }
 }
 catch {
     Write-Info "Personal views could not be read by this principal: $($_.Exception.Message)"
 }
+# Refused OUTSIDE the try: Stop-Refused exits, and the catch above must not swallow the refusal.
+if ($userViewRefusal) { Stop-Refused $userViewRefusal }
 
 # 7. Copilot form-fill opt-out rows -------------------------------------------
 Write-Step "6. Copilot form-fill configuration (aiskillconfig)"
@@ -298,11 +312,10 @@ foreach ($e in $viewEdits) {
     Invoke-Dv -Endpoint "savedqueries($($e.Id))" -Method PATCH -Body @{ layoutxml = $e.Layout; fetchxml = $e.Fetch } | Out-Null
     Write-Done "view '$($e.Name)' updated"
 }
-if ($IncludeUserViews) {
-    foreach ($e in $userViewEdits) {
-        Invoke-Dv -Endpoint "userqueries($($e.Id))" -Method PATCH -Body @{ layoutxml = $e.Layout; fetchxml = $e.Fetch } | Out-Null
-        Write-Done "personal view '$($e.Name)' updated"
-    }
+# $userViewEdits is non-empty only with -IncludeUserViews (without it, any reference refused the run above).
+foreach ($e in $userViewEdits) {
+    Invoke-Dv -Endpoint "userqueries($($e.Id))" -Method PATCH -Body @{ layoutxml = $e.Layout; fetchxml = $e.Fetch } | Out-Null
+    Write-Done "personal view '$($e.Name)' updated"
 }
 if ($formEdits.Count -gt 0 -or $viewEdits.Count -gt 0) {
     $publish = "<importexportxml><entities><entity>$Table</entity></entities></importexportxml>"
