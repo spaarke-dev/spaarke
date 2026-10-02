@@ -42,7 +42,7 @@
 |-------|-------|
 | **Task** | none in progress — between tasks. Last completed: **T225a** (`b9fd48bbe`). Next task: **T225b** (no POML yet — file via task-create from plan §7 T225b, which now includes D18). |
 | **Status** | O1–O5 decision records committed (plan §2 D16–D19, §4 G28, §7 T248/T249 + order; spec ADR-028 E-1 + ADR-020 registry rows → path C; matrix doc v2). |
-| **Next Action** | `task-create` T225b, T249, T248 from plan §7 → `task-execute` T225b. **Owner action outstanding**: create the `Spaarke Model 1` container type (SharePoint admin center → Advanced → Containers → Container types → New; owning app `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`; standard billing on *Spaarke Model 1 Production*) and send its id — T248 needs it. |
+| **Next Action** | POMLs filed (225b, 249, 248). `task-execute` T225b (`tasks/225b-converge-model1-dedicated-code-path.poml`). **Owner action outstanding**: create the `Spaarke Model 1` container type (SharePoint admin center → Advanced → Containers → Container types → New; owning app `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`; standard billing on *Spaarke Model 1 Production*) and send its id — T248 needs it. |
 | **Order** | T225b → T249 → T248 → T243 → T242 → T244 → T246 → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → 213.7/207/208/209 → T186 |
 
 ### Completed this session (SESSION 30)
