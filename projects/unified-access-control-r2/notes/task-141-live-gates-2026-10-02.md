@@ -163,3 +163,26 @@ There is no staging slot, so G-3 is a single `appsettings set` on the production
 1. Fix defect 1 on `task/uac-r2-141-f3`. Optionally fix defect 2. Re-verify, then build a new read-only worktree.
 2. G-1: dry run (expect the plan above minus the 3 created components) → `-Apply` → `-Verify` until the key is Active.
 3. G-2 and G-3 as in §8. Both are independent of G-1, but were held back by the stop-on-first-unexpected rule.
+
+## Completion run (main session, 2026-10-02 ~17:30Z), after the two script fixes
+
+The partial run above stopped on a script defect. The fixes were committed on `integ/uac-r2-batch3`:
+- `8e9f85c5e` binds global choices by MetadataId, and the `Wait-DvRead` helper waits for newly created metadata (and for the mirror in data queries);
+- `f39402410` retries the field-permission grant on 0x8004f508 while column security propagates.
+
+The completion was run by the main session; no subagent was available (weekly usage limit).
+
+| Gate | Result |
+|---|---|
+| **G-1 dry run** | It matched the §8 plan less the 3 components already created: 6 copies, the key, 6 columns, the backfill of 6, the view, 2 FLS profiles + 2 writers + 6 reader teams, 2 secured fields, and the solution components. |
+| **G-1 -Apply** | **Three runs.** Runs 1 and 2 each stopped on 0x8004f508 at the WRITER grant, after securing a column and granting the readers (FLS propagation; this is what led to the retry fix). Run 3 completed: the writer grant on `systemuser.sprk_primarycontact`, all solution components (incl. the key, both profiles and the view), and the publish. No error was left over: each re-run skipped what was done. |
+| **G-1 -Verify** | **`VERIFY PASS: the identity-binding schema is complete.` exit 0.** Key `sprk_ExternalObjectIdUniqueKey` is **Active** on `sprk_externalobjectidkey`. 6/6 oids are mirrored and carry plane External. Both fields are field-secured: readers are the 6 BU default teams, and writers are `# mi-bff-api-dev` and `SDAP-BFF-SPE-API`. Everything is in SpaarkeCore. |
+| **G-2** | `Register-EntraAppRegistrations.ps1 -AcctClaimOnly -AcctClaimAppId 1e40baad…` exited 0. `optionalClaims.accessToken` = email, preferred_username, upn, **acct** (before: the first three). |
+| **G-3** | `WorkforceIdentity__CustomerTenantIds__0 = a221a95e-6abc-4434-aecc-e48338a1b2f2` on spaarke-bff-dev, read back. There is no staging slot. After the restart, healthz and ping returned 200. |
+
+**Not done yet:**
+- **G-1b:** awaiting the owner on the stale "Demo 1" registry row.
+- **G-4:** deploy the BFF carrying 141.
+- **G-5 / G-6:** the job runs.
+- **G-7 / G-8:** manual checks.
+- The deployed BFF (`bca0941f6`) does not read the new columns yet. The schema is in place ahead of the deploy, as G-1-before-G-4 requires.
