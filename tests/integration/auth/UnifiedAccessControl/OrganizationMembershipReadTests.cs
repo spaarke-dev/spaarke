@@ -690,6 +690,120 @@ public class OrganizationMembershipReadTests
         (await world.ProjectIdsAsync(plane)).Should().Contain(DirectProject, "reactivation restores access — no data repair");
     }
 
+    // ── Task 137 r2: the PRODUCTION organization-member page read, over the transport ─────────────────
+
+    private static readonly Guid FanOutOrg = Guid.Parse("0f000000-0000-0000-0000-000000000137");
+    private static readonly Guid OtherOrg = Guid.Parse("0f000000-0000-0000-0000-000000000138");
+    private const string RequestTenant = "11111111-2222-3333-4444-555555555555";
+
+    /// <summary>
+    /// Task 137 r2 (verifier finding 1): the ONE invalidation routine's organization fan-out, through the REAL
+    /// <c>ReadOrganizationMemberPageAsync</c> — every other fan-out test substitutes that read. An organization of
+    /// 1,203 active members is three server pages of 500: the request asks for 500 a page (<c>Prefer</c>), sends
+    /// exactly <see cref="ExternalOrganizationMembership.ActiveMembersFilter"/> on every page, follows the server's
+    /// opaque <c>@odata.nextLink</c> verbatim, and every member's cached grant set is removed — nobody else's.
+    /// </summary>
+    /// <remarks>
+    /// A defect in this read is otherwise invisible: the routine catches it, logs a warning and lets the members
+    /// fall back to the 60-second TTL, so a broken read and a working one look the same to every write endpoint.
+    /// The fake server honours <c>odata.maxpagesize</c> as Dataverse does (absent, it answers one page of up to
+    /// 5,000), and its skip tokens are unguessable, so the page count and the tokens are the client's own doing.
+    /// </remarks>
+    [Fact]
+    public async Task OrgFanOut_TheRealMemberPageRead_PagesTheActiveMembersFilterToTheEnd_AndInvalidatesEveryMember()
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        var members = Enumerable.Range(1, 1203).Select(i => new Guid($"c0000000-0000-0000-0000-{i:D12}")).ToArray();
+        var otherMember = Guid.Parse("c0000000-0000-0000-ffff-000000000001");
+        dataverse.OrganizationMembers[FanOutOrg] = members;
+        dataverse.OrganizationMembers[OtherOrg] = new[] { otherMember };
+
+        var cache = RealCache();
+        foreach (var contact in members.Append(otherMember))
+        {
+            await SeedGrantSetAsync(cache, contact);
+        }
+
+        var sut = RealParticipationService(dataverse, cache: cache);
+
+        var result = await sut.InvalidateGrantSetsAsync(Array.Empty<Guid>(), new[] { FanOutOrg }, CancellationToken.None);
+
+        result.OrganizationsNotFullyExpanded.Should().BeEmpty("all three pages were read");
+        result.ContactCount.Should().Be(members.Length);
+        result.RemovalsSucceeded.Should().Be(members.Length, "one tenant (the request's tid) × every member");
+        result.RemovalsFailed.Should().Be(0);
+
+        foreach (var contact in members)
+        {
+            (await CachedGrantSetAsync(cache, contact)).Should().BeNull($"member {contact} of the organization is invalidated");
+        }
+
+        (await CachedGrantSetAsync(cache, otherMember)).Should().NotBeNull("another organization's member is untouched");
+
+        var reads = MemberPageReads(dataverse);
+        reads.Should().HaveCount(3, "1,203 members at 500 a page — the client asked for 500 and followed every nextLink");
+        reads.Should().OnlyContain(
+            r => r.Filter == ExternalOrganizationMembership.ActiveMembersFilter(FanOutOrg),
+            "every page — the first and each nextLink — carries exactly the shared ACTIVE-members $filter");
+        reads.Should().OnlyContain(r => r.Select == ExternalOrganizationMembership.MemberSelect);
+        reads.Should().OnlyContain(r => r.Prefer == $"odata.maxpagesize={ExternalParticipationService.OrganizationMemberPageSize}");
+        reads.Select(r => r.SkipToken).Should().Equal(
+            new[] { "" }.Concat(dataverse.IssuedSkipTokens),
+            "page one is the built query; every later page is the server's own @odata.nextLink, sent back verbatim");
+    }
+
+    /// <summary>
+    /// Task 137 r2: a member page the server FAILS is a fault, never an empty page — the organization is reported as
+    /// not fully expanded, the members already read are invalidated, the rest keep their entry (to the TTL) and the
+    /// routine does not throw. Over the real read, so <c>EnsureSuccessStatusCode</c> is what decides it.
+    /// </summary>
+    [Fact]
+    public async Task OrgFanOut_TheRealMemberPageRead_AFailedSecondPage_ReportsTheGap_AndKeepsWhatWasRead()
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        var members = Enumerable.Range(1, 700).Select(i => new Guid($"c1000000-0000-0000-0000-{i:D12}")).ToArray();
+        dataverse.OrganizationMembers[FanOutOrg] = members;
+        dataverse.MemberPageFaultAt = 1;
+
+        var cache = RealCache();
+        foreach (var contact in members)
+        {
+            await SeedGrantSetAsync(cache, contact);
+        }
+
+        var sut = RealParticipationService(dataverse, cache: cache);
+
+        var result = await sut.InvalidateGrantSetsAsync(Array.Empty<Guid>(), new[] { FanOutOrg }, CancellationToken.None);
+
+        result.OrganizationsNotFullyExpanded.Should().Equal(new[] { FanOutOrg }, "a failed page is a gap, reported");
+        result.ContactCount.Should().Be(500, "page one's members were read and invalidated");
+        MemberPageReads(dataverse).Should().HaveCount(2, "the walk stopped at the failed page");
+
+        foreach (var contact in members.Take(500))
+        {
+            (await CachedGrantSetAsync(cache, contact)).Should().BeNull();
+        }
+
+        foreach (var contact in members.Skip(500))
+        {
+            (await CachedGrantSetAsync(cache, contact)).Should().NotBeNull("an unread member expires on the TTL instead");
+        }
+    }
+
+    private static List<SeenRequest> MemberPageReads(FakeDataverse dataverse)
+        => dataverse.Requests
+            .Where(r => r.Collection == ExternalOrganizationMembership.EntitySet
+                        && r.Filter.StartsWith("_sprk_organization_value eq ", StringComparison.Ordinal))
+            .ToList();
+
+    private static Task SeedGrantSetAsync(ITenantCache cache, Guid contactId)
+        => cache.SetAsync(RequestTenant, ExternalParticipationService.ExternalAccessResource, contactId.ToString(),
+            ExternalParticipationService.CacheVersion, new List<int> { 1 }, TimeSpan.FromMinutes(5));
+
+    private static Task<List<int>?> CachedGrantSetAsync(ITenantCache cache, Guid contactId)
+        => cache.GetAsync<List<int>>(RequestTenant, ExternalParticipationService.ExternalAccessResource,
+            contactId.ToString(), ExternalParticipationService.CacheVersion);
+
     private static int GrantReads(FakeDataverse dataverse)
         => dataverse.Requests.Count(r => r.Collection == "sprk_externalrecordaccesses");
 
@@ -873,8 +987,10 @@ public class OrganizationMembershipReadTests
 
     private sealed record GrantSpec(Guid ProjectId, Guid? OrganizationId);
 
-    /// <summary>One request as the server received it, decoded.</summary>
-    private sealed record SeenRequest(string Collection, string Filter, string Select, string Expand)
+    /// <summary>One request as the server received it, decoded (task 137 r2: plus its <c>Prefer</c> header and
+    /// <c>$skiptoken</c>, for the organization-member page read).</summary>
+    private sealed record SeenRequest(
+        string Collection, string Filter, string Select, string Expand, string Prefer = "", string SkipToken = "")
     {
         public bool IsOrgGrantQuery =>
             Collection == "sprk_externalrecordaccesses" && Filter.Contains("_sprk_contact_value eq null", StringComparison.Ordinal);
@@ -1050,11 +1166,16 @@ public class OrganizationMembershipReadTests
         {
             var filter = context.Request.Query["$filter"].ToString();
             var seen = new SeenRequest(
-                collection, filter, context.Request.Query["$select"].ToString(), context.Request.Query["$expand"].ToString());
+                collection, filter, context.Request.Query["$select"].ToString(), context.Request.Query["$expand"].ToString(),
+                context.Request.Headers["Prefer"].ToString(), context.Request.Query["$skiptoken"].ToString());
             lock (_gate) { _requests.Add(seen); }
 
             switch (collection)
             {
+                case "sprk_contactorganizations" when filter.StartsWith("_sprk_organization_value eq ", StringComparison.Ordinal):
+                    await WriteMemberPageAsync(context, filter, seen);
+                    return;
+
                 case "sprk_contactorganizations":
                     if (JunctionHangs)
                     {
@@ -1133,6 +1254,75 @@ public class OrganizationMembershipReadTests
 
         /// <summary>Task 137: projects whose own <c>statecode</c> is Inactive.</summary>
         public HashSet<Guid> InactiveProjects { get; } = new();
+
+        /// <summary>Task 137 r2: each organization's ACTIVE member contacts (the organization -> members read).</summary>
+        public Dictionary<Guid, Guid[]> OrganizationMembers { get; } = new();
+
+        /// <summary>Task 137 r2: non-null — the member page with this zero-based index answers 503.</summary>
+        public int? MemberPageFaultAt { get; set; }
+
+        /// <summary>Task 137 r2: every <c>$skiptoken</c> this server put in an <c>@odata.nextLink</c>, in order.</summary>
+        public List<string> IssuedSkipTokens { get; } = new();
+
+        private readonly Dictionary<string, int> _skipTokenOffsets = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Task 137 r2: one page of an organization's members, as Dataverse pages it — <c>Prefer:
+        /// odata.maxpagesize</c> honoured (absent, Dataverse's own 5,000), and the next page addressed by an ABSOLUTE
+        /// <c>@odata.nextLink</c> repeating the query plus an opaque <c>$skiptoken</c>. The token is unguessable, so a
+        /// client that pages correctly is one that sends the server's link back.
+        /// </summary>
+        private async Task WriteMemberPageAsync(HttpContext context, string filter, SeenRequest seen)
+        {
+            var organizationId = Guid.Parse(Regex.Match(filter, @"^_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
+            var all = OrganizationMembers.TryGetValue(organizationId, out var ids) ? ids : Array.Empty<Guid>();
+
+            int offset;
+            lock (_gate)
+            {
+                if (seen.SkipToken.Length == 0)
+                {
+                    offset = 0;
+                }
+                else if (!_skipTokenOffsets.TryGetValue(seen.SkipToken, out offset))
+                {
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest; // a token this server never issued
+                    return;
+                }
+            }
+
+            var pageSizeMatch = Regex.Match(seen.Prefer, @"odata\.maxpagesize=(\d+)");
+            var pageSize = pageSizeMatch.Success ? int.Parse(pageSizeMatch.Groups[1].Value) : 5000;
+            if (MemberPageFaultAt is { } faultAt && offset / pageSize == faultAt)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
+            var body = new Dictionary<string, object?>
+            {
+                ["value"] = all.Skip(offset).Take(pageSize)
+                    .Select(id => new Dictionary<string, object?> { ["_sprk_contact_value"] = id })
+                    .ToList(),
+            };
+
+            if (offset + pageSize < all.Length)
+            {
+                var token = $"cookie-{Guid.NewGuid():N}";
+                lock (_gate)
+                {
+                    _skipTokenOffsets[token] = offset + pageSize;
+                    IssuedSkipTokens.Add(token);
+                }
+
+                body["@odata.nextLink"] =
+                    $"{context.Request.Scheme}://{context.Request.Host}{context.Request.Path}" +
+                    $"?$filter={Uri.EscapeDataString(filter)}&$select={Uri.EscapeDataString(seen.Select)}" +
+                    $"&$skiptoken={Uri.EscapeDataString(token)}";
+            }
+
+            await context.Response.WriteAsJsonAsync(body);
+        }
 
         private Dictionary<string, object?> Organization(Guid organizationId) => new()
         {

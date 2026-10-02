@@ -209,5 +209,20 @@ TESTS (r1): affected classes 149 / 0 / 0; full BFF unit suite 13,980 passed / 0 
 
 PLACEMENT / JUSTIFICATION: no new service, DI registration, endpoint, option, job or package in r1 (test-only additions + notes).
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-137-r1-r2" base="131cf5675" round="r2">
+VERIFIER r2 (findings 1-20). Status unchanged: completed-with-escalation. Full record: notes/task-137-soft-revocation.md §10 (r2) and §6 (r2).
+
+CLOSED IN TESTS (no src change): (1/20) the production ExternalParticipationService.ReadOrganizationMemberPageAsync is now driven over the UseTestServer fake Dataverse with the production TenantCache: OrganizationMembershipReadTests.OrgFanOut_TheRealMemberPageRead_PagesTheActiveMembersFilterToTheEnd_AndInvalidatesEveryMember (1,203 members = 3 pages of 500; every page's wire $filter == ExternalOrganizationMembership.ActiveMembersFilter(org), $select == MemberSelect, Prefer == odata.maxpagesize=500; pages 2-3 send exactly the opaque $skiptoken the server issued in its absolute @odata.nextLink; all 1,203 entries removed, another organization's member untouched) and OrgFanOut_TheRealMemberPageRead_AFailedSecondPage_ReportsTheGap_AndKeepsWhatWasRead (page 2 = 503: organization not fully expanded, page-1 members invalidated, the rest still cached, no throw). The fake honours odata.maxpagesize (absent = one page up to 5,000) and rejects unknown skip tokens. The ArchTests guard MembershipJunctionQueriesUseTheWallSafeFilterBuilder now matches both the literal /sprk_contactorganizations and the interpolated /{ExternalOrganizationMembership.EntitySet}, accepts each direction's builder (BuildOrganizationMembershipFilter / ExternalOrganizationMembership.ActiveMembersFilter) and asserts BOTH reads are found (no vacuous pass for either). (2) GrantPolicyTestDoubles.cs now names ExternalParticipationServiceInvalidationTests, the task-137 section of GrantLifecycleCharacterizationTests and the new transport tests instead of the non-existent GrantCacheInvalidationTests.
+
+PERTURBATIONS (r2, each seeded in ExternalParticipationService.cs, seen red, restored, touched): Prefer header removed (2 red); @odata.nextLink dropped (2 red); date term appended after ActiveMembersFilter (1 red, wire $filter); non-success read as an empty last page (1 red); member $filter inlined (ArchTests guard red; the pre-r2 guard stayed 4/4 green on the same seed).
+
+ACCEPTED OBSERVATIONS (unchanged): (3) TenantRouting:Tenants[] not in GrantCacheTenantIds, bounded by the 60 s TTL (notes §9); (4) criterion 8 proven by removal of the same ITenantCache key the CIAM read uses.
+
+NOT CLOSED: (15/16) reconciliation posture (criterion 13) — the answers relayed with r2 are again owner round 4 items 1-7; rounds 5 and 6 do not address it. Escalation trigger 1 stays a first-class stop; ExternalAccessModule registration (enabled: false) and ExternalAccess:Reconciliation:WritesEnabled (absent) UNCHANGED. Notes §6 r2 adds the verifier's input for the owner: R3/R4's "safety net at &lt;= 5 min" is scoped to 142/143, but this job is daily (0 5 * * *), so an answer of (b)/(c) should also name the schedule. (17) the real report-only job run (criterion 14) writes one sprk_backgroundjobrun row — pending live gate (notes §2). (18) manual live gate (criterion 17) — DEPLOY-CHECKLIST §4.2, main session. (19) publish size — main session (instructed to skip); no package change, no CVE delta.
+
+TESTS (r2): affected classes (OrganizationMembershipReadTests, ExternalParticipationServiceInvalidationTests, GrantLifecycleCharacterizationTests) 100 / 0 / 0; ExternalAccessQueryIntegrityGuardTests 4 / 0; full BFF unit suite 13,982 passed / 0 failed / 54 skipped (14,036, +2 new); NetArchTest 345 / 0 / 0 (one guard widened, no new test).
+
+PLACEMENT / JUSTIFICATION: no new service, DI registration, endpoint, option, job or package in r2 (test and guard changes + notes only).
+    </outcome>
   </execution>
 </task>

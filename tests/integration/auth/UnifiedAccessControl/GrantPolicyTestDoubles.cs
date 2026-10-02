@@ -118,8 +118,11 @@ internal static class GrantPolicyTestDoubles
 
         /// <summary>
         /// Task 137: every call of the ONE grant-cache invalidation routine, as (contacts, organizations). The routine
-        /// itself — tenants, organization paging, failure handling — is pinned by <c>GrantCacheInvalidationTests</c>
-        /// over a real cache; here a test proves WHICH grantees a write path asked it to invalidate.
+        /// itself — tenants, organization paging, failure handling — is pinned over a real cache by
+        /// <c>ExternalParticipationServiceInvalidationTests</c> and the task-137 section of
+        /// <c>GrantLifecycleCharacterizationTests</c>, and its production organization-member page read over the
+        /// transport by <c>OrganizationMembershipReadTests</c> (task 137 r2); here a test proves WHICH grantees a write
+        /// path asked it to invalidate.
         /// </summary>
         public ConcurrentQueue<(Guid[] Contacts, Guid[] Organizations)> Invalidations { get; } = new();
 

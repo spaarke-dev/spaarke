@@ -4,6 +4,8 @@
 gate = needs live writes). Branch `task/uac-r2-137` (parents: `task/uac-r2-139-r1` + `task/uac-r2-141-f3`).
 r1 fix round on `task/uac-r2-137-r1` (2026-10-02): verifier findings closed or recorded — §2 (job-scan before-state),
 §6 (posture still pending after the relayed answers), §9 (observations, new tests, perturbations).
+r2 fix round on `task/uac-r2-137-r1-r2` (2026-10-02): the production member-page read driven over the transport, the
+junction guard widened to see it, a stale test reference fixed — §10; posture still pending — §6.
 
 ## 1. Ownership map (closes the "partially tracked" finding)
 
@@ -153,6 +155,12 @@ daily schedule report-only; (c) enable report-only, then writes after one review
 answered, record it verbatim here and in DEPLOY-CHECKLIST §4.1 and change `ExternalAccessModule`'s registration and the
 key together in one commit.
 
+**r2 (2026-10-02): still pending — unchanged.** The answers relayed with r2 are the same seven (owner round 4); rounds 5
+and 6 do not address it either. One input for the owner when answering (verifier r2): R3/R4 says the "background job is
+only a safety net, running at ≤ 5 min". That sentence is scoped to tasks 142/143, but it bears on (b)/(c): this job's
+current schedule is daily (`0 5 * * *`), so if the owner wants it to be the ≤ 5-minute safety net here too, the answer
+should name the schedule as well as the mode.
+
 ## 7. Tests (ADR-038 KEEP paths; no `Mock<HttpMessageHandler>`, no DI-registration or ctor null-check tests)
 
 New: `OrganizationMembershipReadTests` task-137 section (real transport: 109 guards on both planes, CIAM wall binds a
@@ -242,3 +250,46 @@ Steps and records: `DEPLOY-CHECKLIST.md` §4.2. Evidence to be appended here by 
 Results (r1, 2026-10-02): affected classes (ProjectClosureCascade, WorkforceEmailNoHijack, GrantLifecycleCharacterization,
 RecordShareExpiry, CallerPrincipalResolver) **149 / 0 / 0**; full BFF unit suite **13,980 passed / 0 failed / 54 skipped**
 (14,034; +3 new); NetArchTest **345 / 0 / 0**. No `src/` change, no package change. Publish size not measured (main session).
+
+## 10. r2 — verifier findings (2026-10-02, branch `task/uac-r2-137-r1-r2`)
+
+- **Finding 1 (closed in tests): the production member-page read is now driven over the transport.**
+  `ReadOrganizationMemberPageAsync` was the only production I/O behind organization fan-out, and every fan-out test
+  substituted it — a defect there is caught and logged at warning by the routine, so it would have degraded org
+  members to the 60-second TTL with every test green. Two new tests in `OrganizationMembershipReadTests` run the REAL
+  read against the `UseTestServer` fake Dataverse, over the production `TenantCache`:
+  `OrgFanOut_TheRealMemberPageRead_PagesTheActiveMembersFilterToTheEnd_AndInvalidatesEveryMember` (1,203 members =
+  3 server pages of 500; every page's `$filter` on the wire equals `ExternalOrganizationMembership.ActiveMembersFilter(org)`,
+  `$select` equals `MemberSelect`, `Prefer` equals `odata.maxpagesize=500`; pages 2-3 carry exactly the opaque
+  `$skiptoken`s the server issued in its absolute `@odata.nextLink`; all 1,203 entries removed, another organization's
+  member untouched) and `OrgFanOut_TheRealMemberPageRead_AFailedSecondPage_ReportsTheGap_AndKeepsWhatWasRead` (page 2
+  answers 503: organization reported not fully expanded, page-1 members invalidated, the rest still cached, no throw).
+  The fake honours `odata.maxpagesize` as Dataverse does (absent → one page of up to 5,000) and rejects a skip token it
+  never issued, so the page count and the tokens are the client's own doing. The fake's junction route branches on the
+  organization-direction `$filter`; the contact-direction junction read is unchanged.
+- **Finding 1 (closed in the guard): `MembershipJunctionQueriesUseTheWallSafeFilterBuilder` now sees the member read.**
+  It matched only the literal `/sprk_contactorganizations`; the member read interpolates
+  `{ExternalOrganizationMembership.EntitySet}`. The guard now matches both spellings, accepts the builder of each
+  direction (`BuildOrganizationMembershipFilter` / `ExternalOrganizationMembership.ActiveMembersFilter`), and asserts
+  BOTH reads are found, so neither can go vacuous. Proven: with the member filter inlined, the OLD guard passed (4/4)
+  and the new guard fails.
+- **Finding 2 (closed): `GrantPolicyTestDoubles.cs`** named a non-existent `GrantCacheInvalidationTests`; it now names
+  `ExternalParticipationServiceInvalidationTests`, the task-137 section of `GrantLifecycleCharacterizationTests`, and
+  the new transport tests.
+- **Findings 3 and 4**: accepted observations, unchanged (§9 already records the TenantRouting gap with its 60 s bound;
+  criterion 8's key removal under the CIAM tenant uses the same `ITenantCache` key the CIAM read uses).
+- **Finding 15/16 (escalation 1)**: still a first-class stop — see §6 r2. Config unchanged.
+- **Perturbations (r2)**, each seeded in `ExternalParticipationService.cs`, seen red, restored with `git checkout`, file touched:
+
+| Seed | Red |
+|---|---|
+| `Prefer: odata.maxpagesize` header removed | both new tests (1 page read instead of 3; the 503 page never reached) |
+| `@odata.nextLink` dropped (walk stops after page 1) | both new tests (`ContactCount` 500 ≠ 1,203; gap not reported) |
+| a date term appended after `ActiveMembersFilter(...)` | `…PagesTheActiveMembersFilterToTheEnd…` (wire `$filter` mismatch) |
+| non-success status answered as an empty last page | `…AFailedSecondPage_ReportsTheGap…` |
+| member `$filter` inlined instead of `ActiveMembersFilter` | ArchTests `Task 109: membership-junction queries…` (the pre-r2 guard: 4/4 green) |
+
+- **Not closed (unchanged, main session / owner):** criterion 13 reconciliation posture (owner); criterion 14's real
+  report-only job run (writes one `sprk_backgroundjobrun` row — live gate); criterion 17 manual live gate
+  (DEPLOY-CHECKLIST §4.2); publish size (main session measures). Criterion 9's remaining gap (finding 1/20) is closed
+  by the transport test above.
