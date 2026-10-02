@@ -8,6 +8,7 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -20,9 +21,12 @@ public class RecordCreationAssignedInternalTests
 {
     private static readonly Guid Maker = Guid.Parse("aaaaaaaa-0000-0000-0000-00000000000a");
     private static readonly Guid MakersContact = Guid.Parse("cccccccc-0000-0000-0000-00000000000c");
+    private static readonly Guid MappedContact = Guid.Parse("eeeeeeee-0000-0000-0000-00000000000e");
     private static readonly Guid Team = Guid.Parse("dddddddd-0000-0000-0000-00000000000d");
+    private static readonly Guid SourceRecord = Guid.Parse("bbbbbbbb-0000-0000-0000-00000000000b");
 
     private readonly Mock<IGenericEntityService> _entities = new(MockBehavior.Loose);
+    private readonly Mock<IFieldMappingDataverseService> _fieldMappings = new();
     private readonly List<Entity> _created = new();
 
     public RecordCreationAssignedInternalTests()
@@ -32,18 +36,20 @@ public class RecordCreationAssignedInternalTests
             .ReturnsAsync(Guid.NewGuid());
     }
 
-    private RecordCreationService Sut(Guid? makersContact)
+    private RecordCreationService Sut(Mock<IIdentityNormalizationService> identity)
     {
         var ownership = new Mock<IRecordOwnershipResolver>();
         ownership.Setup(o => o.ResolveOwningTeamAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Team);
         return new RecordCreationService(
             _entities.Object,
-            new Mock<IFieldMappingDataverseService>().Object,
+            _fieldMappings.Object,
             ownership.Object,
-            IdentityNormalizationFixtures.WithContact(makersContact).Object,
+            identity.Object,
             NullLogger<RecordCreationService>.Instance);
     }
+
+    private RecordCreationService Sut(Guid? makersContact) => Sut(IdentityNormalizationFixtures.WithContact(makersContact));
 
     [Theory]
     [InlineData(QuickCreateEntityType.Matter)]
@@ -71,5 +77,61 @@ public class RecordCreationAssignedInternalTests
 
         result.Succeeded.Should().BeTrue();
         _created.Single().Contains("sprk_assignedtointernal").Should().BeFalse("never an email match, never a team");
+    }
+
+    /// <summary>
+    /// A7 / round-3 amendment R3 ("a supplied value is never overwritten"): a field-mapping rule that already wrote
+    /// <c>sprk_assignedtointernal</c> keeps its value — the maker does NOT replace it, and the maker's contact is not
+    /// even looked up.
+    /// </summary>
+    [Theory]
+    [InlineData(QuickCreateEntityType.Matter, "sprk_project", "sprk_matter")]
+    [InlineData(QuickCreateEntityType.Project, "sprk_matter", "sprk_project")]
+    public async Task QuickCreate_AFieldMappedAssignedToInternal_IsKept_NotOverwrittenByTheMaker(
+        QuickCreateEntityType type, string sourceEntity, string targetEntity)
+    {
+        _fieldMappings
+            .Setup(m => m.GetFieldMappingProfileWithRulesAsync(sourceEntity, targetEntity, true, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FieldMappingProfileEntity
+            {
+                Id = Guid.NewGuid(),
+                Name = "Source to target",
+                SourceEntity = sourceEntity,
+                TargetEntity = targetEntity,
+                IsActive = true,
+                Rules =
+                [
+                    new FieldMappingRuleEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = "copy-assigned-internal",
+                        SourceField = "sprk_assignedtointernal",
+                        SourceFieldType = 1,
+                        TargetField = "sprk_assignedtointernal",
+                        TargetFieldType = 1,
+                        MappingType = 0,
+                        ExecutionOrder = 1,
+                        IsActive = true,
+                    },
+                ],
+            });
+        _entities
+            .Setup(e => e.RetrieveAsync(sourceEntity, SourceRecord, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(sourceEntity, SourceRecord)
+            {
+                ["sprk_assignedtointernal"] = new EntityReference("contact", MappedContact),
+            });
+        var identity = IdentityNormalizationFixtures.WithContact(MakersContact);
+
+        var result = await Sut(identity).CreateAsync(new RecordCreationRequest
+        {
+            EntityType = type, Name = "New record", CallerUserId = "oid", OwnerSystemUserId = Maker.ToString("D"),
+            SourceEntityLogicalName = sourceEntity, SourceRecordId = SourceRecord,
+        });
+
+        result.Succeeded.Should().BeTrue();
+        _created.Single()["sprk_assignedtointernal"].Should().BeEquivalentTo(
+            new EntityReference("contact", MappedContact), "a value a field-mapping rule wrote is never overwritten");
+        identity.Verify(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

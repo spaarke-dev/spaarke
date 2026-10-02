@@ -16,7 +16,7 @@
 > mechanism. The 1-hop cap, the event semantics, the canonical-resolver rule and the
 > non-existent-entity ban are all unchanged.
 >
-> ⚠️ **[Amendment A3](#amendment-a3-2026-10-02-proposed-the-people-targeting-surface--who-a-record-is-for) (proposed, task 152) adds a THIRD surface — people targeting —**
+> ⚠️ **[Amendment A3](#amendment-a3-2026-10-02-accepted-the-people-targeting-surface--who-a-record-is-for) (accepted by the owner, round 3 D1; task 152) adds a THIRD surface — people targeting —**
 > for "which records are FOR this person" (briefing, notifications): a human Created By, the user-valued owner, and
 > the "Assigned *" contacts through the linked contact; never team / business-unit ownership. It admits `createdby` on
 > that surface only, and states the event semantics: an owner event names the row's REAL owner (team or user) in
@@ -333,10 +333,15 @@ narrowing changes no other surface's behaviour contract.
 
 ---
 
-## Amendment A3 (2026-10-02, proposed): The people-targeting surface — who a record is FOR
+## Amendment A3 (2026-10-02, accepted): The people-targeting surface — who a record is FOR
 
-> **Status**: **Proposed — awaiting owner approval** (resolution path **B — amendment**, per root CLAUDE.md §6.5).
-> The code that depends on it (task 152) MUST NOT merge until the owner approves this amendment.
+> **Status**: **Accepted** (resolution path **B — amendment**, per root CLAUDE.md §6.5). The owner approved it in
+> round 3 (2026-09-30), consolidated decision **D1** — "Path B for both" ADR-034 amendments, of which (2) is "let a
+> human 'Created By' count as membership for briefings and notifications only, not for access or AI scoping" — accepted
+> as recommended and clarified ("Created By decides who a record is FOR; it never decides who can OPEN it").
+> Source: `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md` round 3, and
+> `notes/raw/session27-owner-questions.json` (D1). The concise version in `.claude/adr/ADR-034-user-record-membership.md`
+> is applied by the main session (sub-agents cannot write `.claude/`) with, or before, the task 152 PR.
 > **Numbering**: A3 is the next free number at drafting time (A1 and A1.1 exist; task 036 has claimed
 > "Amendment 2"). If task 142's ADR-034 amendment merges first and takes A3, renumber this one at merge.
 > **Driver project**: `unified-access-control-r2` task 152 (GitHub #1073; membership half of #1044).
@@ -400,10 +405,18 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 - **MUST** read every row a people-targeted consumer SHOWS under the caller's Dataverse security
   (`IImpersonatedCommunicationQuery`, MSCRMCallerID = the caller). Selecting is not authorizing (owner D1). A failed
   caller-context read is reported as failed — never answered app-only, never shown as "nothing to report".
-- **MUST** read the people-targeted set to completion (`PeopleTargetedSet`: the resolver's 5,000-row ceiling plus one
-  confirmation read). The resolver pages in primary-id order, so a default 500-row page is an arbitrary subset; a set
-  larger than the ceiling is reported failed / unavailable — never a silently truncated list (task 152 verifier
-  round 1).
+- **MUST**, in the **Daily Briefing and Workspace consumers** (`DailyBriefingCollector`, `PortfolioService` and,
+  through it, `BriefingService`'s top-priority matter), read the people-targeted set to completion
+  (`PeopleTargetedSet`: the resolver's 5,000-row ceiling plus one confirmation read). The resolver pages in
+  primary-id order, so a default 500-row page is an arbitrary subset; a set larger than the ceiling is reported
+  failed / unavailable — never a silently truncated list (task 152 verifier round 1).
+  **Scope note — the `LookupUserMembership` node is NOT covered by this rule.** With `"targeting": "people"` it reads
+  ONE page at `MembershipResolveOptions.DefaultLimit` (500) and exposes `continuationToken`, exactly as it did before
+  A3 (pre-existing paging, unchanged). It is not routed through `PeopleTargetedSet` because the notification playbooks
+  interpolate `myMatters.ids` into a downstream FetchXML `in` condition, and a 5,000-value `in` list is not a safe
+  query (Dataverse passes `in` values as SQL parameters; SQL Server refuses more than 2,100). A person with more than
+  500 people-targeted matters can therefore get notifications for a subset only. Closing that needs the downstream
+  query to page or chunk its `in` list — a separate change to the node/query contract.
 - **MUST** make server-created records name a person in an "Assigned *" column, because their Created By is the
   application user: the to-do and task writers fill `sprk_assignedto` (a supplied assignee is kept; else the
   triggering person's linked contact; else the regarding parent's `sprk_assignedtointernal`, then
@@ -432,15 +445,23 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 - **The AI-scoping default** — byte-identical (descriptors, FetchXML, cache key) for every caller that does not opt in.
 - **The 1-hop cap, M1, N2** — unchanged.
 
-### Open owner confirmations (raised in the PR; confirm before merge)
+### Owner confirmations (all answered — binding owner decisions, session27 rounds 2 and 3)
 
-- (a) Personal user ownership (`ownerid` / `owninguser` = the caller) is kept as a third person term. The owner named
-  Created By and Assigned To; recommendation: keep it (it names exactly one person and covers records reassigned to the
-  caller in MDA). If declined, remove that term.
-- (b) High Priority is narrowed to flagged records in the caller's people-targeted set that the caller can read.
-  Alternative ("every flagged record the caller can read") would re-create a team/BU-wide list for broad-role users.
-- (c) App-only creates: answered by the owner's round 3 S1 (events default Assigned To to the acting user's contact)
-  and A7 (Office quick-create defaults the internal Assigned-To to the maker).
+- The amendment itself: **round 3 D1** — path B for both ADR-034 amendments (this one is D1 (2)); accepted as
+  recommended and clarified (Created By decides who a record is FOR, never who can open it).
+- (a) Personal user ownership (`ownerid` / `owninguser` = the caller) as a third person term: **round 3 B1, option
+  (1) — keep it**, accepted as recommended. It names exactly one person and covers records reassigned to the caller in
+  MDA.
+- (b) High Priority = the flagged records in the caller's people-targeted set that the caller can read: **answered by
+  round 2 item 9** (`raw/session27-owner-questions.json` `droppedAsAnswered`, entry "152(b)": "Show only flagged
+  records in the user's people-targeted set that they can read").
+- (c) App-only creates: answered by the owner's round 3 **S1** (events default Assigned To to the acting user's
+  contact) and **A7** (Office quick-create defaults the internal Assigned-To to the maker).
+- (d) External-portal to-do Assigned To and parent grants: **round 3 A6, option (a)** — a child-entity Assigned field
+  confers no root grant.
+- Deployment order with task 146: **round 3 B2, option (1)** — if 152 cannot deploy with or before 146, an interim
+  drop-out of some to-dos from the Daily Briefing is accepted, announced and recorded in the PR. (This is the
+  round 3 consolidated B2, not round 4's "B2" for the `sprk_externalobjectid` alternate key.)
 
 ### Live-consumer check (done before amending)
 
@@ -448,7 +469,7 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 |---|---|
 | `DailyBriefingCollector` (render + email + High Priority) | People targeting |
 | `PortfolioService` (Workspace portfolio / health metrics) and, through it, `BriefingService.GetTopPriorityMatterAsync` | People targeting (was an app-only ad-hoc `ownerid` = caller filter; fixed in task 152 verifier round 1) |
-| `LookupUserMembershipNodeExecutor` with `"targeting": "people"` (every notification playbook) | People targeting |
+| `LookupUserMembershipNodeExecutor` with `"targeting": "people"` (every notification playbook) | People targeting (one 500-row page + `continuationToken`, pre-existing paging; see the completeness MUST's scope note) |
 | `LookupUserMembershipNodeExecutor` without `targeting` | AI scoping (unchanged) |
 | `MembershipEndpoints` (`/api/users/me/memberships/*`) | AI scoping (unchanged) |
 | `AccessibleRecordSetService` | Authorization (unchanged) |

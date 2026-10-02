@@ -130,10 +130,18 @@ Rules of the people surface:
   (`IImpersonatedCommunicationQuery`, MSCRMCallerID = caller), so a record FOR someone that they cannot open is
   trimmed by Dataverse. A failed caller-context read is reported as failed (the briefing's `failedChannels` /
   `highPriorityFailedEntityTypes`, the workspace briefing's `topPriorityMatterUnavailable`), never answered app-only.
-- **Read the whole set.** A consumer reads its people-targeted ids to completion with `PeopleTargetedSet` (one read at
-  the resolver's 5,000-row ceiling, plus one confirmation read when that page comes back full). The resolver pages in
-  primary-id order, so the default 500-row page is an arbitrary subset, not the most recent rows; a set larger than
-  the ceiling is reported FAILED / unavailable, never shown truncated.
+- **Read the whole set (briefing and Workspace consumers).** `DailyBriefingCollector` and `PortfolioService` (and,
+  through it, the Workspace top-priority matter) read their people-targeted ids to completion with `PeopleTargetedSet`
+  (one read at the resolver's 5,000-row ceiling, plus one confirmation read when that page comes back full). The
+  resolver pages in primary-id order, so the default 500-row page is an arbitrary subset, not the most recent rows; a
+  set larger than the ceiling is reported FAILED / unavailable, never shown truncated.
+  **Not the `LookupUserMembership` node:** with `"targeting": "people"` it still reads ONE page at
+  `MembershipResolveOptions.DefaultLimit` (500) and exposes `continuationToken` (pre-existing paging, unchanged by
+  task 152). The notification playbooks interpolate `myMatters.ids` into a downstream FetchXML `in` condition, and a
+  5,000-value `in` list is not a safe query (Dataverse passes `in` values as SQL parameters, and SQL Server refuses a
+  request with more than 2,100), so the node is not routed through `PeopleTargetedSet`; a person with more than
+  500 people-targeted matters gets notifications for a subset. Closing that needs the downstream query to page or
+  chunk its `in` list (a node/query contract change, not made here).
 
 Server-created records therefore name a person in an "Assigned *" column, because their Created By is the
 application user: `TodoGenerationService`, `TaskActionCore`, the external-portal to-do create and `POST

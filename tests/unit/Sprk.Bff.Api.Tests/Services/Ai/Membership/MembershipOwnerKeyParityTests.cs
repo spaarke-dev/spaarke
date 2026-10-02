@@ -114,6 +114,37 @@ public class MembershipOwnerKeyParityTests
         dispatched.Should().NotContain(e => e.PersonId == OwnerEventTestKit.ApplicationUserId && e.MutationType == MembershipMutationType.Updated);
     }
 
+    /// <summary>
+    /// The publisher's "unknown" case: a user owner whose <c>applicationid</c> cannot be read (the read throws, or
+    /// returns no row) publishes NOTHING — an unknown systemuser is never treated as a person; the nightly
+    /// reconciliation re-decides it.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ApplicationUserCheckUnreadable_PublisherPublishesNothing(bool readThrows)
+    {
+        var dataverse = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        var read = dataverse.Setup(d => d.RetrieveAsync("systemuser", OwnerEventTestKit.HumanUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (readThrows)
+        {
+            read.ThrowsAsync(new InvalidOperationException("read fault"));
+        }
+        else
+        {
+            read.ReturnsAsync((Entity)null!);
+        }
+
+        var publisher = new RecordingMembershipEventPublisher();
+        var evt = await MembershipOwnerEvents.PublishOwnerAddedAsync(
+            publisher, dataverse.Object, Matter, MatterId, new EntityReference("systemuser", OwnerEventTestKit.HumanUserId),
+            "c", NullLogger.Instance, CancellationToken.None);
+
+        evt.Should().BeNull();
+        publisher.Published.Should().BeEmpty("an unreadable systemuser is never published as a person");
+        dataverse.Verify(d => d.RetrieveAsync("systemuser", OwnerEventTestKit.HumanUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task ApplicationUserCheckUnreadable_ReconciliationKeepsTheExistingRow()
     {
