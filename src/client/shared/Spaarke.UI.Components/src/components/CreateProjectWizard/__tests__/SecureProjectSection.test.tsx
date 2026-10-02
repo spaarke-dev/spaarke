@@ -85,9 +85,9 @@ describe('SecureProjectSection — copy matches shipped behaviour (FR-31)', () =
 
     it('states that ownership grants nobody access', () => {
       // Traceable to design.md §5.1 + the endpoint's owner-team assignment (steps 2, 3, 5).
-      // "by design" is asserted deliberately: emptiness of the owner team is an environment
-      // invariant, not something provisioning checks, so the copy must not claim it as a fact
-      // the code enforces.
+      // "by design" is asserted deliberately: since task 144 provisioning refuses unless the named
+      // owner team is empty, but only at the moment it runs — a member added later is reported by the
+      // census job, not prevented — so the copy must not claim permanent emptiness as a fact.
       renderWithProviders(<SecureProjectSection isSecure onSecureChange={noop} />);
 
       expect(screen.getByText(/by design has no people in it/i)).toBeInTheDocument();
@@ -137,7 +137,7 @@ describe('SecureProjectSection — copy matches shipped behaviour (FR-31)', () =
   });
 
   describe('ADR-021 / accessibility', () => {
-    it("names the switch with the word the user can SEE (WCAG 2.5.3 Label in Name)", () => {
+    it('names the switch with the word the user can SEE (WCAG 2.5.3 Label in Name)', () => {
       // The accessible name must CONTAIN the visible label, or a speech-input user saying the word
       // on screen gets no match. This suite previously pinned the opposite: a visible "Enabled"
       // next to an aria-label of "Mark this project as a Secure Project", sharing no words at all.
