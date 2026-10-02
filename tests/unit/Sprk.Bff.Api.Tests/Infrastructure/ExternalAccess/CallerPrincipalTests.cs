@@ -1,5 +1,9 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Logging.Abstractions;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -99,28 +103,117 @@ public class CallerPrincipalTests
         caller.GetEffectiveRights(Guid.NewGuid()).Should().Be(AccessRights.None);
     }
 
+    // ── GET /me, driven through the REAL handler (task 136 · defect C2) ─────────────────────────────
+    //
+    // This block used to hold a test that re-implemented the handler's projection lambda and asserted on
+    // its own copy — it would have stayed green whatever the handler did. These call
+    // ExternalUserContextEndpoint.Handle itself, with the principal the group filter would have stored.
+
+    private static ExternalUserContextResponse CallMe(CallerPrincipal caller)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Items[CallerPrincipal.HttpContextItemsKey] = caller;
+
+        var result = ExternalUserContextEndpoint.Handle(httpContext, NullLogger<Program>.Instance);
+
+        return result.Should().BeOfType<Ok<ExternalUserContextResponse>>().Subject.Value!;
+    }
+
     [Theory]
     [InlineData(ExternalAccessLevel.ViewOnly, "ViewOnly")]
     [InlineData(ExternalAccessLevel.Collaborate, "Collaborate")]
     [InlineData(ExternalAccessLevel.FullAccess, "FullAccess")]
-    public void MeProjection_CiamAccessLevel_MapsToSameStringAsLegacyHandler(
+    public void Me_ReadableProject_IsReturnedWithTheSameLevelStringAsTheLegacyHandler(
         ExternalAccessLevel level, string expectedString)
     {
-        // The /me handler projects ProjectAccess → ProjectAccessEntry(ProjectId, level-string).
-        // Task 033 made the level a DERIVED display projection over stored AccessRights, so this test
-        // now also pins that the round-trip level → rights → level is lossless for all three real
-        // levels: the CIAM /me payload is byte-identical to what the old handler produced.
+        // Task 033 made the level a DERIVED display projection over stored AccessRights; this pins that the
+        // round trip level → rights → level is lossless for all three real levels, so the /me payload for a
+        // readable project is what the old handler produced.
         var projectId = Guid.NewGuid();
-        var caller = Ciam(CallerProjectAccess.FromLevel(projectId, level));
 
-        var projects = caller.ProjectAccess
-            .Select(p => new ProjectAccessEntry(
-                p.ProjectId, p.AccessLevel?.ToString() ?? nameof(AccessRights.None)))
-            .ToList();
+        var response = CallMe(Ciam(CallerProjectAccess.FromLevel(projectId, level)));
 
-        projects.Should().ContainSingle();
-        projects[0].ProjectId.Should().Be(projectId);
-        projects[0].AccessLevel.Should().Be(expectedString);
+        response.Projects.Should().Equal(new ProjectAccessEntry(projectId, expectedString));
+    }
+
+    [Fact]
+    public void Me_ProjectTheCallerHoldsNothingOn_IsNotReturned_AndNoneIsNeverEmitted()
+    {
+        // The C2 leak: /me used to return every ProjectAccess entry and emit "None" for one with no rights,
+        // telling the client the GUID of a record it cannot read (a Secure project reached only through an
+        // organization grant). The principal here is built DIRECTLY with a None-rights entry, bypassing the
+        // strategies' pruning, so this pins the handler's own filter.
+        var readable = Guid.NewGuid();
+        var powerless = Guid.NewGuid();
+        var caller = Ciam(
+            new CallerProjectAccess { ProjectId = readable, Rights = AccessRights.Read },
+            new CallerProjectAccess { ProjectId = powerless, Rights = AccessRights.None });
+
+        var response = CallMe(caller);
+
+        response.Projects.Should().Equal(new ProjectAccessEntry(readable, "ViewOnly"));
+        response.Projects.Should().NotContain(p => p.AccessLevel == nameof(AccessRights.None),
+            "/me never emits the level string \"None\"");
+    }
+
+    // ── Defence in depth (task 136 · defect C2): the views require Read on their own ─────────────────
+
+    [Fact]
+    public void ReadViews_PrincipalBuiltDirectlyWithNoneRightsEntries_ExcludeThemOnAllThreeRootTypes()
+    {
+        // Bypasses both strategies' construction-time pruning on purpose: a future construction path that
+        // forgets to prune must still fail closed at the views every read route and module dimension uses.
+        var readableProject = Guid.NewGuid();
+        var powerlessProject = Guid.NewGuid();
+        var readableMatter = Guid.NewGuid();
+        var powerlessMatter = Guid.NewGuid();
+        var readableWa = Guid.NewGuid();
+        var powerlessWa = Guid.NewGuid();
+
+        var caller = new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.Workforce,
+            ContactId = Guid.NewGuid(),
+            ProjectAccess = new[]
+            {
+                new CallerProjectAccess { ProjectId = readableProject, Rights = AccessRights.Read },
+                new CallerProjectAccess { ProjectId = powerlessProject, Rights = AccessRights.None },
+            },
+            MatterAccess = new Dictionary<Guid, AccessRights>
+            {
+                [readableMatter] = AccessRights.Read, [powerlessMatter] = AccessRights.None,
+            },
+            WorkAssignmentAccess = new Dictionary<Guid, AccessRights>
+            {
+                [readableWa] = AccessRights.Read, [powerlessWa] = AccessRights.None,
+            },
+        };
+
+        caller.HasProjectAccess(readableProject).Should().BeTrue("control: a Read-bearing project passes");
+        caller.HasProjectAccess(powerlessProject).Should().BeFalse("a None-rights entry is not access (C2)");
+        caller.GetAccessibleProjectIds().Should().Equal(readableProject);
+        caller.ReadableProjects.Select(p => p.ProjectId).Should().Equal(readableProject);
+        caller.GetAccessibleMatterIds().Should().BeEquivalentTo(new[] { readableMatter });
+        caller.GetAccessibleWorkAssignmentIds().Should().BeEquivalentTo(new[] { readableWa });
+    }
+
+    [Fact]
+    public void FromReadBearing_KeepsOnlyEntriesCarryingRead()
+    {
+        // The construction-time half, shared by both strategies. A Write-only entry is not readable either:
+        // the gate is HasFlag(Read), and HasFlag(None) — true for every value — is never the test.
+        var read = Guid.NewGuid();
+        var collaborate = Guid.NewGuid();
+        var none = Guid.NewGuid();
+        var writeOnly = Guid.NewGuid();
+
+        CallerPrincipal.FromReadBearing(new Dictionary<Guid, AccessRights>
+        {
+            [read] = AccessRights.Read,
+            [collaborate] = AccessRights.Read | AccessRights.Write | AccessRights.Create,
+            [none] = AccessRights.None,
+            [writeOnly] = AccessRights.Write,
+        }).Keys.Should().BeEquivalentTo(new[] { read, collaborate });
     }
 
     // ── Workforce Tier-2 record scope (NFR-08): only the accessible set, never all projects ──────

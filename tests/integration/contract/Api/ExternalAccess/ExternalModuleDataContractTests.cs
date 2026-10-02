@@ -269,4 +269,67 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
+
+    // ── Task 136 · defect C2 — a grant row with NO level confers nothing (owner 2026-09-30) ──────────────
+    //
+    // Matter and work-assignment grant rows with a null sprk_accesslevel (only writable outside the BFF) were
+    // kept as None-rights keys, and the module scope dimensions read the KEY views — so /fetch scoped rows to
+    // that matter's documents and invoices, and /record admitted it. The dimensions now read Read-gated views
+    // (task 136 does not touch the registry or ExternalAccessModule; they change through CallerPrincipal).
+
+    private static readonly Guid NullLevelMatter = Guid.Parse("4d000000-0000-0000-0000-000000000136");
+    private static readonly Guid NullLevelWorkAssignment = Guid.Parse("4e000000-0000-0000-0000-000000000136");
+    private static readonly Guid LevelledMatter = Guid.Parse("4d000000-0000-0000-0000-000000000137");
+
+    public static TheoryData<string> BothPlanes() => new() { "ciam", "workforce" };
+
+    [Theory]
+    [MemberData(nameof(BothPlanes))]
+    public async Task ModuleFetchAndRecord_MatterAndWorkAssignmentGrantRowsWithNoLevel_ConferNothing(string plane)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: Array.Empty<Guid>(),
+            workforce: plane == "workforce",
+            nullLevelMatters: new[] { NullLevelMatter },
+            nullLevelWorkAssignments: new[] { NullLevelWorkAssignment });
+
+        foreach (var (entity, column) in new[] { ("sprk_document", "sprk_documentid"), ("sprk_invoice", "sprk_invoiceid") })
+        {
+            var fetch = await client.PostAsJsonAsync(FetchPath, new
+            {
+                entityName = entity,
+                fetchXml = $"<fetch><entity name=\"{entity}\"><attribute name=\"{column}\"/></entity></fetch>",
+                pagingCookie = (string?)null,
+            });
+
+            // 200 with 0 rows WITHOUT a query: every scope dimension is empty. Had the null-level ids reached a
+            // dimension, the scoped query would have run — and, offline, failed rather than answered 200.
+            fetch.StatusCode.Should().Be(HttpStatusCode.OK, $"{plane}: {entity} fetch with an empty accessible set");
+            var body = await fetch.Content.ReadFromJsonAsync<JsonElement>();
+            body.GetProperty("entities").GetArrayLength().Should().Be(0,
+                $"{plane}: a level-less grant row scopes no {entity} rows to its matter / work assignment");
+        }
+
+        (await client.GetAsync($"/api/v1/external/api/dataverse/record/sprk_matter/{NullLevelMatter}"))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{plane}: no level = not granted (matter)");
+        (await client.GetAsync($"/api/v1/external/api/dataverse/record/sprk_workassignment/{NullLevelWorkAssignment}"))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden, $"{plane}: no level = not granted (work assignment)");
+    }
+
+    [Theory]
+    [MemberData(nameof(BothPlanes))]
+    public async Task ModuleRecord_MatterGrantRowWithALevel_PassesTheTier2Gate(string plane)
+    {
+        // Control for the test above: the same route admits a matter whose grant row carries a level, so the
+        // 403 there is the missing level and not a route that refuses every matter.
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: Array.Empty<Guid>(), workforce: plane == "workforce");
+        client.DefaultRequestHeaders.Add("X-Test-Matters", LevelledMatter.ToString());
+
+        var response = await client.GetAsync(
+            $"/api/v1/external/api/dataverse/record/sprk_matter/{LevelledMatter}?$select=sprk_mattername");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            "past the Tier-2 gate the offline read finds nothing (404); a refusal would be 403");
+    }
 }

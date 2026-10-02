@@ -38,10 +38,17 @@ public sealed class ExternalCallerContext
     public bool FromCache { get; init; }
 
     /// <summary>
-    /// Checks if the Contact has access to the specified project.
+    /// Whether the Contact holds <see cref="AccessRights.Read"/> on the specified project.
     /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 136 (defect C2): was "a participation for the id exists", the same
+    /// presence shape as <c>CallerPrincipal.HasProjectAccess</c>. A participation always carries a level today,
+    /// so the answer does not change; the shape is aligned so no copy of the presence gate survives to be
+    /// imitated. No production handler reads this class any more — the /api/v1/external routes read
+    /// <c>CallerPrincipal</c>.
+    /// </remarks>
     public bool HasProjectAccess(Guid projectId) =>
-        Participations.Any(p => p.ProjectId == projectId);
+        GetEffectiveRights(projectId).HasFlag(AccessRights.Read);
 
     /// <summary>
     /// Gets the access level for the specified project, or null if no access.
@@ -56,10 +63,10 @@ public sealed class ExternalCallerContext
         ExternalAccessLevels.ToAccessRights(GetAccessLevel(projectId));
 
     /// <summary>
-    /// Gets all project IDs the Contact can access (for AI search filter construction).
+    /// Gets all project IDs the Contact can READ (for AI search filter construction). Read-gated by task 136.
     /// </summary>
     public IEnumerable<Guid> GetAccessibleProjectIds() =>
-        Participations.Select(p => p.ProjectId);
+        Participations.Where(p => HasProjectAccess(p.ProjectId)).Select(p => p.ProjectId);
 }
 
 /// <summary>
@@ -100,13 +107,20 @@ public sealed class ExternalParticipation
 /// assignments had no access level anywhere in the pipeline (register A-8 / B-8).
 /// </para>
 /// <para>
-/// ⚠️ <b>Nullable by design.</b> The PROJECT partition drops rows whose level is null
-/// (<c>&amp;&amp; r.sprk_accesslevel.HasValue</c>); this shape deliberately does NOT, because applying
-/// that filter to matters/WAs would turn a level-less row from "grants access" into "grants nothing" —
-/// a silent REVOCATION on the security boundary. A null level keeps its id (set membership unchanged)
-/// and contributes <see cref="AccessRights.None"/>, which the highest-wins max cannot widen. Verified
-/// 2026-09-04: every active grant row in dev carries a level on all three root types, so this is a
-/// safety property for other tenants rather than a live case.
+/// ⚠️ <b>Nullable by design.</b> The level is carried as read, null included: a null maps to
+/// <see cref="AccessRights.None"/>, which the highest-wins max cannot widen. The row is kept here (not
+/// filtered like the PROJECT partition's <c>&amp;&amp; r.sprk_accesslevel.HasValue</c>) only so the grant
+/// read stays a faithful copy of the rows; it no longer grants anything.
+/// </para>
+/// <para>
+/// <b>No level = not granted (owner, 2026-09-30; unified-access-control-r2 task 136 · defect C2).</b> This
+/// paragraph used to argue that dropping a level-less row would be a "silent REVOCATION", and the id was kept
+/// as a key so set membership stayed unchanged. That key had no rights, yet every presence-gated read admitted
+/// it — the module /fetch and /record for the matter or work assignment and its documents and invoices. The
+/// owner's rule is that a contact gets only the records it is granted, at the granted level, so the evaluator
+/// now removes the record at the end of every composition. Measured before the change (2026-10-01, dev): 0 grant
+/// rows with a null level in any state, of 31 active — so nothing live was revoked. Only rows written outside
+/// the BFF can lack a level; the BFF always writes one.
 /// </para>
 /// </summary>
 public sealed class ExternalRootGrant
