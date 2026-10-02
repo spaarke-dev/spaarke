@@ -44,13 +44,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// dataverse.* write handlers).
 /// </para>
 /// <para>
-/// <b>One exception, by owner decision S1 / G5 (unified-access-control-r2 task 146 r2; CLAUDE.md §6.5 path A recorded
-/// in the task note).</b> A draft FILED under a project, matter or work assignment (its regarding, or the FR-26 stamp
-/// of one) is owned by that record's team — the named Secure team for a secure one — never the drafting user. The
-/// handler checks AS THE CALLER that they could create it themselves, then the APPLICATION creates it owned by the team
-/// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/> names, with the drafting user recorded as the
-/// sender (<c>sprk_sentby</c> — S1's "for" person, since Created By is then the application). See
-/// <see cref="OwnedChildWrite"/>. An unfiled draft is unchanged (escalation E1).
+/// <b>The User-OBO rule is AMENDED for this create — owner round 7 item 3 (2026-10-02), CLAUDE.md §6.5 path B</b>
+/// (unified-access-control-r2 task 146; it supersedes the r2 path-A exception and is recorded in
+/// spaarke-ai-architecture-redesign-r1's spec and the task 146 note §13): the G5 pattern. A draft FILED under a project,
+/// matter or work assignment (its regarding, or the FR-26 stamp of one) is checked AS THE CALLER (Create/Append, AppendTo
+/// on every record named), then created by the APPLICATION owned by the team
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/> names — the named Secure team for a secure
+/// one — with the drafting user recorded in the "for" column, the sender (<c>sprk_sentby</c>; Created By is then the
+/// application). See <see cref="OwnedChildWrite"/>. An UNFILED draft keeps its creator — the resolver's own answer for
+/// an unfiled communication (escalation E1: the per-user master thread keys on the owning user, and a team-owned draft
+/// would show one person's unsent email to their whole business unit), so it is still created as the user.
 /// </para>
 /// <para>
 /// <b>Ledger grounding (ADR-039/ADR-040)</b>: <c>source_refs</c> carries the addressable

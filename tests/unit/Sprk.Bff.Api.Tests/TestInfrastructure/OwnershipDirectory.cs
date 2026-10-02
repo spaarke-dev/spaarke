@@ -102,12 +102,13 @@ internal sealed class OwnershipDirectory
             .Setup(e => e.UpdateAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
             .Returns((string entity, Guid id, Dictionary<string, object> fields, CancellationToken _) =>
             {
-                Assign(entity, id, fields);
+                Update(entity, id, fields);
                 return Task.CompletedTask;
             });
         entities
             .Setup(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => Row(entity, id));
+            .Returns((string entity, Guid id, string[] _, CancellationToken _) =>
+                OwnerReadFault is { } readFault ? Task.FromException<Entity>(readFault) : Task.FromResult(Row(entity, id)));
 
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
@@ -166,6 +167,56 @@ internal sealed class OwnershipDirectory
         {
             row["owningteam"] = new EntityReference("team", owner.Id);
             row["ownerid"] = owner;
+        }
+    }
+
+    // ── Task 146 b2: the failures a re-file must recover from ───────────────────────────────────────────────────
+
+    /// <summary>When set, an OWNER update throws it — after applying when <see cref="AssignmentLandsBeforeFault"/>
+    /// (a lost response), before otherwise (the assignment did not happen).</summary>
+    public Exception? AssignmentFault { get; set; }
+
+    /// <summary>With <see cref="AssignmentFault"/>: the assignment is applied, then the fault is thrown.</summary>
+    public bool AssignmentLandsBeforeFault { get; set; }
+
+    /// <summary>When set, every single-row read (<c>RetrieveAsync</c> — the owner read-backs) throws it.</summary>
+    public Exception? OwnerReadFault { get; set; }
+
+    /// <summary>When set, an update WITHOUT an owner (a filing restore) throws it.</summary>
+    public Exception? RestoreFault { get; set; }
+
+    /// <summary>Every update that set no owner (a filing restore), in order.</summary>
+    public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> FieldUpdates { get; } = new();
+
+    /// <summary>An owner update is an assignment; any other update writes its columns (<see cref="DBNull"/> clears).</summary>
+    public void Update(string entity, Guid id, Dictionary<string, object> fields)
+    {
+        if (fields.ContainsKey("ownerid"))
+        {
+            if (AssignmentFault is { } fault)
+            {
+                if (AssignmentLandsBeforeFault)
+                    Assign(entity, id, fields);
+                throw fault;
+            }
+
+            Assign(entity, id, fields);
+            return;
+        }
+
+        if (RestoreFault is { } restoreFault)
+            throw restoreFault;
+
+        FieldUpdates.Add((entity, id, new Dictionary<string, object>(fields)));
+        if (_records.TryGetValue((entity, id), out var row))
+        {
+            foreach (var (column, value) in fields)
+            {
+                if (value is DBNull)
+                    row.Attributes.Remove(column);
+                else
+                    row[column] = value;
+            }
         }
     }
 

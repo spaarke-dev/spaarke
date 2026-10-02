@@ -162,6 +162,14 @@ public class RecordOwnerAssignmentCensusTests
         new CensusEntry("TodoGenerationService.cs", "sprk_todo", 1, Disposition.Routed,
             "Generated to-dos are owned from their source event (ownershipSource); a refusal counts the rule failed."),
 
+        // ── Task 146 b2 (verifier AC10): create-by-upsert sites the scanner now sees (a PATCH of a fresh id) ─────────
+        new CensusEntry("InvoiceReviewService.cs", "sprk_invoice", 1, Disposition.Routed,
+            "Invoice confirm (G5): a fresh-id PATCH whose field map BuildInvoiceCreateFields binds the matter's team "
+            + "(task 130, ResolveOwningTeamAsync record-first from the matter); an unresolved team refuses before any write."),
+        new CensusEntry("SignalEvaluationService.cs", "sprk_spendsignal", 1, Disposition.Routed,
+            "Spend signals: a deterministic-id PATCH (idempotent upsert) whose field map binds the matter's team, "
+            + "resolved by the caller of UpsertSignalAsync; a refusal skips the evaluation."),
+
         // ── Waived ─────────────────────────────────────────────────────────────────────────────────────────────
         new CensusEntry("MessagingIngestor.cs", "sprk_communication", 1, Disposition.Waived,
             "An inbound chat message names no parent at create, so it keeps its creator (task 146 escalation E1: unfiled "
@@ -185,7 +193,7 @@ public class RecordOwnerAssignmentCensusTests
             "A ROOT, not a child: its ownership is provisioning's (task 144 / owner S6, never a bare re-own here). It "
             + "cannot file under a matter today — the endpoint writes sprk_matterid, which sprk_workassignment does not "
             + "have (live metadata 2026-10-02: the matter lookup is sprk_regardingmatter), so every MatterId-carrying "
-            + "create already fails. Inline secure provisioning at creation (S6 b) is recorded as task 146 handoff.",
+            + "create already fails. A work assignment filed under a SECURE matter becoming secure (S6 b) is task 158 (owner round 6).",
             WaiverKind.Pending),
     };
 
@@ -196,10 +204,8 @@ public class RecordOwnerAssignmentCensusTests
 
     private static readonly IReadOnlyList<UnscannedWriter> UnscannedWriters = new[]
     {
-        new UnscannedWriter("InvoiceReviewService.cs", "create-by-upsert PATCH (sprk_invoice) + document re-file",
-            "Invoice owned by the matter's team (task 130); linking the document is a reparent (task 146)."),
-        new UnscannedWriter("SignalEvaluationService.cs", "create-by-upsert PATCH (sprk_spendsignal)",
-            "Owned by the matter's team; a refusal skips the evaluation."),
+        new UnscannedWriter("InvoiceReviewService.cs", "document re-file under the new invoice",
+            "Linking the document is a reparent (task 146); the invoice's own create-by-upsert is a census site (b2)."),
         new UnscannedWriter("SpendSnapshotService.cs", "keyed UpsertRequest (sprk_spendsnapshot)",
             "Owned by the parent matter/project's team; a refusal skips the snapshot."),
         new UnscannedWriter("ExternalProjectDataEndpoints.cs", "Web API POST to a computed URL (document, event, to-do)",
@@ -256,7 +262,9 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateEmailArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", Calls("RequireArtifactOwner")),
         new OwnerSeam("DataverseServiceClientImpl.cs", "RequireArtifactOwner", Refusal),
-        new OwnerSeam("DataverseWebApiService.cs", "CreateEventAsync", Refusal),
+        // b2 merge (task 152 extracted the payload builder): the refusal lives in the builder, so no payload without an
+        // owner is ever built; CreateEventAsync's POST uses only that builder.
+        new OwnerSeam("DataverseWebApiService.cs", "BuildCreateEventPayload", Refusal),
         // r2 (verifier items 3 and 15): a builder must REFUSE an empty team AND BIND the team it was handed — dropping the
         // bind used to pass every test, leaving the external create owned by the BFF application user.
         new OwnerSeam("ExternalDataService.cs", "BuildDocumentCreatePayload", RefusesAndBindsTheOwner),
@@ -322,8 +330,8 @@ public class RecordOwnerAssignmentCensusTests
             "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
         new OwnerWriteEntry("DataverseServiceClientImpl.cs", "CreateAttachmentArtifactAsync", 1, OwnerWriteKind.Seam,
             "The OwningTeamId request property — RequireArtifactOwner refuses without it."),
-        new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventAsync", 1, OwnerWriteKind.Seam,
-            "CreateEventRequest.OwningTeamId — throws without it."),
+        new OwnerWriteEntry("DataverseWebApiService.cs", "BuildCreateEventPayload", 1, OwnerWriteKind.Seam,
+            "CreateEventRequest.OwningTeamId — throws without it (the builder CreateEventAsync POSTs; task 152 extracted it)."),
         new OwnerWriteEntry("DataverseWebApiService.cs", "CreateEventLogAsync", 1, OwnerWriteKind.Seam,
             "The owner EventEndpoints resolved as content of the event; null only when the resolver answered Unchanged."),
         new OwnerWriteEntry("ExternalDataService.cs", "BuildDocumentCreatePayload", 1, OwnerWriteKind.Seam,
@@ -379,7 +387,7 @@ public class RecordOwnerAssignmentCensusTests
         new OwnerWriteEntry("UnsecureProjectEndpoint.cs", "UnsecureProjectAsync", 1, OwnerWriteKind.Root,
             "Un-securing hands the ROOT back to a user (task 144 / F3)."),
         new OwnerWriteEntry("WorkAssignmentEndpoints.cs", "CreateWorkAssignmentAsync", 1, OwnerWriteKind.Root,
-            "A work assignment (a ROOT) created owned by its assignee; S6 b (inline secure provisioning) is escalated."),
+            "A work assignment (a ROOT) created owned by its assignee; S6 b (secure under a secure matter) is task 158 (owner round 6)."),
 
         new OwnerWriteEntry("OutboxService.cs", "WriteAsync", 1, OwnerWriteKind.PerUser,
             "sprk_notificationoutbox — one row per recipient user."),
@@ -492,35 +500,409 @@ public class RecordOwnerAssignmentCensusTests
     /// <summary>(file, member) → the 1-based lines of each owner write in it.</summary>
     private static Dictionary<(string File, string Member), List<int>> ScanOwnerWrites(IReadOnlyDictionary<string, string> files)
     {
-        var globalKeys = files.Values
-            .SelectMany(code => OwnerKeyConst.Matches(code).Select(m => m.Groups["name"].Value))
-            .ToHashSet(StringComparer.Ordinal);
-
+        var globalKeys = GlobalOwnerKeys(files);
         var sites = new Dictionary<(string, string), List<int>>();
         foreach (var (fileName, code) in files)
         {
-            var keys = OwnerKeyConst.Matches(code).Select(m => Regex.Escape(m.Groups["name"].Value))
-                .Concat(globalKeys.Select(Regex.Escape))
-                .Distinct()
-                .Prepend(@"""ownerid(?:@odata\.bind)?""");
-            var write = new Regex(@"\[\s*(?:" + string.Join("|", keys) + @")\s*\]\s*=(?!=)");
-
             var members = MemberDeclaration.Matches(code).ToList();
-            foreach (Match m in write.Matches(code))
+            foreach (var (index, _) in OwnerWritesIn(code, globalKeys))
             {
-                var declaration = members.LastOrDefault(d => d.Index <= m.Index);
-                var name = declaration is null
-                    ? "(file)"
-                    : Regex.Match(code[declaration.Index..], @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\(").Groups["name"].Value;
-                var key = (fileName, name);
+                var key = (fileName, MemberNameAt(code, members, index));
                 if (!sites.TryGetValue(key, out var list))
                     sites[key] = list = new List<int>();
-                list.Add(SourceScan.LineOf(code, m.Index));
+                list.Add(SourceScan.LineOf(code, index));
             }
         }
 
         return sites;
     }
+
+    /// <summary>Every const, anywhere in the server, whose value is an owner key.</summary>
+    private static HashSet<string> GlobalOwnerKeys(IReadOnlyDictionary<string, string> files) =>
+        files.Values
+            .SelectMany(code => OwnerKeyConst.Matches(code).Select(m => m.Groups["name"].Value))
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The owner writes in <paramref name="code"/>: the index of each and the index its VALUE starts at. Three shapes
+    /// (task 146 b2, verifier AC10 — the last two were proven blind by seeding):
+    /// <list type="bullet">
+    /// <item><c>x["ownerid"] = v</c> / <c>x["ownerid@odata.bind"] = v</c> (or through a const holding either key);</item>
+    /// <item><c>x.Add("ownerid", v)</c> / <c>x.Attributes.Add(…)</c> / <c>TryAdd</c>;</item>
+    /// <item>a collection-initializer element <c>{ "ownerid", v }</c> — only when the element CLOSES after its value, so a
+    /// list of column names (<c>{ "ownerid", "owninguser", … }</c>) is not an owner write.</item>
+    /// </list>
+    /// </summary>
+    private static IEnumerable<(int Index, int ValueStart)> OwnerWritesIn(string code, IReadOnlySet<string> globalKeys)
+    {
+        var keys = string.Join("|", OwnerKeyConst.Matches(code).Select(m => Regex.Escape(m.Groups["name"].Value))
+            .Concat(globalKeys.Select(Regex.Escape))
+            .Distinct()
+            .Prepend(@"""ownerid(?:@odata\.bind)?"""));
+
+        foreach (Match m in new Regex(@"\[\s*(?:" + keys + @")\s*\]\s*=(?![=>])").Matches(code))
+            yield return (m.Index, m.Index + m.Length);
+
+        foreach (Match m in new Regex(@"\.(?:Add|TryAdd)\s*\(\s*(?:" + keys + @")\s*,").Matches(code))
+            yield return (m.Index, m.Index + m.Length);
+
+        foreach (Match m in new Regex(@"\{\s*(?:" + keys + @")\s*,").Matches(code))
+        {
+            // A dictionary element is an INNER brace — preceded by its initializer's '{' or a ',' — that closes after its
+            // value. A set initializer's own brace (`new() { "ownerid", "owninguser" }`) follows ')' or a type name.
+            var before = code[..m.Index].TrimEnd();
+            var (_, terminator) = ValueEnd(code, m.Index + m.Length);
+            if (terminator == '}' && before.Length > 0 && before[^1] is '{' or ',')
+                yield return (m.Index, m.Index + m.Length);
+        }
+    }
+
+    /// <summary>The index of the bracket that closes the one opened at <paramref name="open"/> (commas ignored).</summary>
+    private static int MatchingClose(string code, int open)
+    {
+        var depth = 0;
+        for (var i = open; i < code.Length; i++)
+        {
+            if (code[i] is '(' or '[' or '{')
+                depth++;
+            else if (code[i] is ')' or ']' or '}' && --depth == 0)
+                return i;
+        }
+
+        return code.Length;
+    }
+
+    /// <summary>
+    /// Where a value that starts at <paramref name="start"/> ends: the first <c>;</c> or <c>,</c> at nesting depth 0, or
+    /// the bracket that closes its enclosing construct — and which of those it was.
+    /// </summary>
+    private static (int End, char Terminator) ValueEnd(string code, int start)
+    {
+        var depth = 0;
+        for (var i = start; i < code.Length; i++)
+        {
+            var c = code[i];
+            if (c is '(' or '[' or '{')
+            {
+                depth++;
+            }
+            else if (c is ')' or ']' or '}')
+            {
+                if (depth == 0)
+                    return (i, c);
+                depth--;
+            }
+            else if ((c is ';' or ',') && depth == 0)
+            {
+                return (i, c);
+            }
+        }
+
+        return (code.Length, '\0');
+    }
+
+    /// <summary>The name of the member declared last before <paramref name="index"/> — "(file)" when none.</summary>
+    private static string MemberNameAt(string code, IReadOnlyList<Match> members, int index)
+    {
+        var declaration = members.LastOrDefault(d => d.Index <= index);
+        return declaration is null
+            ? "(file)"
+            : Regex.Match(code[declaration.Index..], @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\(").Groups["name"].Value;
+    }
+
+    // =============================================================================================
+    // PER-MEMBER VALUE CHECK (task 146 b2, verifier GAP "census check is per file, not per member")
+    // ---------------------------------------------------------------------------------------------
+    // EveryOwnerWriteKeepsItsKind only asks whether the FILE calls the resolver, so a Routed member could write any team
+    // while a sibling member made the call — proven by seeding a hard-coded team into ThreadResolver's default-thread
+    // owner write. This asks it of the VALUE: every owner write in a Routed member must take its value from a resolution
+    // made in that member (a resolver call, or a call to a member of the file that reaches one), from a
+    // RecordOwnerResolution handed to it, or — for a builder — from a parameter every caller of which resolves.
+    // =============================================================================================
+
+    [Fact(DisplayName = "Task 146 b2: every Routed owner write takes its value from a resolution in the member that writes it")]
+    public void EveryRoutedOwnerWriteTakesItsValueFromAResolution()
+    {
+        var files = ServerFiles();
+        var globalKeys = GlobalOwnerKeys(files);
+        var problems = OwnerWrites
+            .Where(e => e.Kind == OwnerWriteKind.Routed)
+            .SelectMany(e => CodeOf(files, e.FileName) is { } code
+                ? RoutedValueProblems(code, e.FileName, e.Member, globalKeys)
+                : new[] { $"{e.FileName}: not found" })
+            .ToList();
+
+        Assert.True(
+            problems.Count == 0,
+            "Routed owner writes whose value is not a resolution made in (or handed to) the member that writes it (task 146 "
+            + "b2). A child's owner is IRecordOwnershipResolver's answer — write THAT answer, not a team found another way:\n"
+            + string.Join("\n", problems));
+    }
+
+    /// <summary>The value problems of one Routed member's owner writes (see the section comment).</summary>
+    private static IEnumerable<string> RoutedValueProblems(
+        string code, string fileName, string member, IReadOnlySet<string> globalKeys)
+    {
+        var body = MethodBody(code, member);
+        if (body is null)
+        {
+            yield return $"{fileName}.{member}: member not found";
+            yield break;
+        }
+
+        var reaching = MembersReachingTheResolver(code);
+        var tainted = ResolvedNamesIn(body, member, reaching, IsFedOnlyByResolvingMembers(code, member, reaching));
+
+        var writes = OwnerWritesIn(body, globalKeys).ToList();
+        if (writes.Count == 0)
+            yield return $"{fileName}.{member}: censused as Routed but writes no owner";
+
+        foreach (var (index, valueStart) in writes)
+        {
+            var (end, _) = ValueEnd(body, valueStart);
+            var value = body[valueStart..end];
+            if (HardCodedId.IsMatch(value))
+            {
+                yield return $"{fileName}.{member}: hard-coded owner `{value.Trim()}`";
+                continue;
+            }
+
+            var identifiers = Regex.Matches(value, @"\b[A-Za-z_]\w*\b").Select(m => m.Value).ToHashSet(StringComparer.Ordinal);
+            if (!identifiers.Overlaps(tainted) && !ResolverOrReachingCall(reaching).IsMatch(value))
+                yield return $"{fileName}.{member}: owner value `{value.Trim()}` is not a resolution made in this member";
+        }
+    }
+
+    /// <summary>A GUID literal or a GUID parsed from text — never a resolver's answer.</summary>
+    private static readonly Regex HardCodedId = new(
+        @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\bGuid\.Parse\s*\(|\bnew\s+Guid\s*\(",
+        RegexOptions.Compiled);
+
+    private static Regex ResolverOrReachingCall(IReadOnlySet<string> reaching) => new(
+        @"\b(?:ResolveOwnerAsync|ResolveOwningTeamAsync|ReparentAsync|AssignToThreadReconcilingOwnerAsync|ResolveDocumentOwnerTeamAsync"
+        + string.Concat(reaching.Select(r => "|" + Regex.Escape(r))) + @")\s*(?:<[^>()]*>)?\s*\(");
+
+    /// <summary>
+    /// The members of <paramref name="code"/> that reach the resolver: those whose body calls it, and — to a fixpoint —
+    /// those whose body calls one of them (<c>ThreadResolver.ResolveRecordThreadOwnerAsync</c>,
+    /// <c>ExternalProjectDataEndpoints.ResolveChildOwnerAsync</c>).
+    /// </summary>
+    private static HashSet<string> MembersReachingTheResolver(string code)
+    {
+        var names = MemberDeclaration.Matches(code)
+            .Select(m => Regex.Match(code[m.Index..], @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\(").Groups["name"].Value)
+            .Where(n => n.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var bodies = names.ToDictionary(n => n, n => MethodBody(code, n) ?? string.Empty, StringComparer.Ordinal);
+
+        var reaching = new HashSet<string>(StringComparer.Ordinal);
+        bool grew;
+        do
+        {
+            grew = false;
+            var call = ResolverOrReachingCall(reaching);
+            foreach (var name in names.Where(n => !reaching.Contains(n)))
+            {
+                // A member's own declaration ("Name(") is not a call of itself.
+                var body = bodies[name];
+                var firstParen = body.IndexOf('(');
+                if (firstParen >= 0 && call.IsMatch(body[(firstParen + 1)..]))
+                {
+                    reaching.Add(name);
+                    grew = true;
+                }
+            }
+        }
+        while (grew);
+
+        return reaching;
+    }
+
+    /// <summary>True when <paramref name="member"/> is called in this file only by members that reach the resolver (and
+    /// at least once) — so the values its parameters carry are the callers' resolutions (a builder of the owned row).</summary>
+    private static bool IsFedOnlyByResolvingMembers(string code, string member, IReadOnlySet<string> reaching)
+    {
+        var members = MemberDeclaration.Matches(code).ToList();
+
+        // The '(' that opens each declaration of the member — a match ending there is the declaration, not a call.
+        var declarationParens = members
+            .Where(d => MemberNameAt(code, members, d.Index) == member)
+            .Select(d => code.IndexOf('(', d.Index))
+            .ToHashSet();
+        var callers = Regex.Matches(code, @"\b" + Regex.Escape(member) + @"\s*(?:<[^>()]*>)?\s*\(")
+            .Where(m => !declarationParens.Contains(m.Index + m.Length - 1))
+            .Select(m => MemberNameAt(code, members, m.Index))
+            .ToList();
+
+        return callers.Count > 0 && callers.All(reaching.Contains);
+    }
+
+    /// <summary>
+    /// The names in <paramref name="body"/> that hold a resolution (a crude taint): parameters typed
+    /// <c>RecordOwnerResolution</c>; every parameter when <paramref name="fedByResolution"/>; any variable assigned from a
+    /// resolver call, a call to a reaching member, or an expression over a resolved name; any pattern variable bound from
+    /// a resolved name or a resolving call (<c>recordOwner is { } ownerTeamId</c>,
+    /// <c>await ResolveSnapshotOwnerAsync(…) is not { } owningTeamId</c>) — to a fixpoint.
+    /// </summary>
+    private static HashSet<string> ResolvedNamesIn(
+        string body, string member, IReadOnlySet<string> reaching, bool fedByResolution)
+    {
+        var resolved = new HashSet<string>(StringComparer.Ordinal);
+
+        // The parameter list opens right after the member's NAME (a tuple return type has a '(' of its own before it).
+        var name0 = Regex.Match(body, @"\b" + Regex.Escape(member) + @"\s*(?:<[^>()]*>)?\s*\(");
+        var open = name0.Success ? name0.Index + name0.Length - 1 : -1;
+        if (open >= 0)
+        {
+            var close = MatchingClose(body, open);
+            foreach (var parameter in SplitTopLevel(body[(open + 1)..close]))
+            {
+                var name = Regex.Match(parameter, @"(?<name>\w+)\s*(?:=[^,]*)?\s*$").Groups["name"].Value;
+                if (name.Length > 0 && (fedByResolution || parameter.Contains("RecordOwnerResolution", StringComparison.Ordinal)))
+                    resolved.Add(name);
+            }
+        }
+
+        var call = ResolverOrReachingCall(reaching);
+        var assignments = Regex.Matches(body, @"(?<lhs>(?:\bvar\s+)?(?:\([^()=]*\)|[A-Za-z_][\w\.]*))\s*=(?![=>])(?<rhs>[^;]*)");
+        bool grew;
+        do
+        {
+            grew = false;
+            foreach (Match a in assignments)
+            {
+                var rhs = a.Groups["rhs"].Value;
+                var taintedRhs = call.IsMatch(rhs)
+                                 || Regex.Matches(rhs, @"\b[A-Za-z_]\w*\b").Any(m => resolved.Contains(m.Value));
+                if (!taintedRhs)
+                    continue;
+
+                foreach (Match n in Regex.Matches(a.Groups["lhs"].Value.Replace("var", " ", StringComparison.Ordinal), @"\b[A-Za-z_]\w*\b"))
+                {
+                    var name = n.Value.Split('.').Last();
+                    if (resolved.Add(name))
+                        grew = true;
+                }
+            }
+
+            // Pattern bindings: the expression the pattern tests — back to the nearest condition or statement boundary —
+            // must be a resolving call or name a resolved value.
+            foreach (Match b in Regex.Matches(body, @"\bis\s+(?:not\s+)?\{[^}]*\}\s+(?<v>\w+)"))
+            {
+                var lead = body[Math.Max(0, b.Index - 300)..b.Index];
+                var cut = new[] { "if (", "if(", "&&", "||", ";", "{", "}", "return " }
+                    .Select(t => lead.LastIndexOf(t, StringComparison.Ordinal))
+                    .Max();
+                var tested = cut >= 0 ? lead[cut..] : lead;
+                var fromResolution = call.IsMatch(tested)
+                                     || Regex.Matches(tested, @"\b[A-Za-z_]\w*\b").Any(m => resolved.Contains(m.Value));
+                if (fromResolution && resolved.Add(b.Groups["v"].Value))
+                    grew = true;
+            }
+        }
+        while (grew);
+
+        return resolved;
+    }
+
+    /// <summary>Splits a parameter or argument list on its top-level commas.</summary>
+    private static IEnumerable<string> SplitTopLevel(string list)
+    {
+        var depth = 0;
+        var start = 0;
+        for (var i = 0; i < list.Length; i++)
+        {
+            var c = list[i];
+            if (c is '(' or '[' or '{' or '<')
+                depth++;
+            else if (c is ')' or ']' or '}' or '>')
+                depth--;
+            else if (c == ',' && depth == 0)
+            {
+                yield return list[start..i];
+                start = i + 1;
+            }
+        }
+
+        if (start < list.Length)
+            yield return list[start..];
+    }
+
+    [Fact(DisplayName = "Task 146 b2: negative control — the per-member value check flags a hard-coded or sibling-resolved owner")]
+    public void RoutedValueCheck_NegativeControl()
+    {
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private static readonly Guid OtherTeam = Guid.NewGuid();",
+            "    private async Task<Guid?> ResolveRowOwnerAsync(Guid id, CancellationToken ct)",
+            "    {",
+            "        var owner = await _ownership.ResolveOwnerAsync(Context(id), ct);",
+            "        return owner.OwningTeamId;",
+            "    }",
+            "    private async Task ResolvedHereAsync(Entity row, CancellationToken ct)",
+            "    {",
+            "        var recordOwner = await ResolveRowOwnerAsync(row.Id, ct);",
+            "        if (recordOwner is { } teamId)",
+            "            row[\"ownerid\"] = new EntityReference(\"team\", teamId);",
+            "    }",
+            "    private async Task SiblingResolvesAsync(Entity row, CancellationToken ct)",
+            "    {",
+            "        var unused = await ResolveRowOwnerAsync(row.Id, ct);",
+            "        row[\"ownerid\"] = new EntityReference(\"team\", OtherTeam);",
+            "    }",
+            "    private void HardCoded(Entity row, RecordOwnerResolution owner)",
+            "    {",
+            "        row.Attributes.Add(\"ownerid\", new EntityReference(\"team\", Guid.Parse(\"0f0f0f0f-0000-4000-8000-000000000001\")));",
+            "    }",
+            "    private void FromResolution(Entity row, RecordOwnerResolution owner)",
+            "    {",
+            "        row[\"ownerid\"] = new EntityReference(\"team\", owner.OwningTeamId!.Value);",
+            "    }",
+            "    private static Dictionary<string, object> BuildFields(Guid teamId) => new() { { \"ownerid\", new EntityReference(\"team\", teamId) } };",
+            "    private static Dictionary<string, object> BuildUnfedFields(Guid teamId) => new() { { \"ownerid\", new EntityReference(\"team\", teamId) } };",
+            "    private async Task FeedsAsync(Guid id, CancellationToken ct)",
+            "    {",
+            "        var team = await _ownership.ResolveOwningTeamAsync(Context(id), ct);",
+            "        var fields = BuildFields(team!.Value);",
+            "    }",
+            "    private void FeedsBadly() { var fields = BuildUnfedFields(OtherTeam); }",
+            "}",
+        });
+        var keys = new HashSet<string>();
+
+        Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "ResolvedHereAsync", keys));
+        Assert.Single(RoutedValueProblems(code, "Seeded.cs", "SiblingResolvesAsync", keys)); // the verifier's seed shape
+        Assert.Single(RoutedValueProblems(code, "Seeded.cs", "HardCoded", keys));
+        Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "FromResolution", keys));
+        Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "BuildFields", keys));
+        Assert.Single(RoutedValueProblems(code, "Seeded.cs", "BuildUnfedFields", keys)); // fed by a non-resolving caller
+    }
+
+    /// <summary>
+    /// Task 146 b2: a <c>RecordOwnerResolution</c> carrying a team can be made only by the resolver. A writer that built
+    /// one itself (<c>RecordOwnerResolution.Owned(team)</c>) would pass every Routed check while choosing its own team.
+    /// </summary>
+    [Fact(DisplayName = "Task 146 b2: no server code outside the resolver makes an Owned resolution")]
+    public void NoServerCodeForgesAnOwnedResolution()
+    {
+        var forged = ServerFiles()
+            .Where(f => f.Key != "RecordOwnershipResolver.cs")
+            .SelectMany(f => ForgedResolution.Matches(f.Value).Select(m => $"{f.Key}:{SourceScan.LineOf(f.Value, m.Index)}"))
+            .ToList();
+
+        Assert.True(forged.Count == 0,
+            "An owned RecordOwnerResolution may be made only by RecordOwnershipResolver (task 146 b2): " + string.Join(", ", forged));
+        Assert.True(ForgedResolution.IsMatch("var r = RecordOwnerResolution.Owned(team);"), "negative control");
+        Assert.True(ForgedResolution.IsMatch("var r = resolution with { OwningTeamId = other };"), "negative control");
+        Assert.False(ForgedResolution.IsMatch("return RecordOwnerResolution.Refused(code, reason);"), "positive control");
+    }
+
+    private static readonly Regex ForgedResolution = new(
+        @"\bRecordOwnerResolution\s*\.\s*Owned\s*\(|\bnew\s+(?:[\w\.]+\.)?RecordOwnerResolution\s*\(|\bwith\s*\{[^}]*\bOwningTeamId\s*=",
+        RegexOptions.Compiled);
 
     /// <summary>An external payload builder that refuses an empty team (<c>RequireOwner(owningTeamId, …)</c>) AND writes
     /// <c>[OwnerBindKey] = $"/teams({owningTeamId})"</c> — the very team it was handed, onto the payload it returns.</summary>
@@ -802,6 +1184,122 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Single(sites[("Seeded.cs", "sprk_todo")]); // the two-argument update is not a create
     }
 
+    [Fact(DisplayName = "Task 146 b2: negative control — a create-by-upsert or a fresh-id construction is a create; an update is not")]
+    public void Detector_NegativeControl_UpsertAndFreshIdCreates()
+    {
+        // The verifier's AC10 seed (a): an owner-less create-by-upsert of sprk_todo was invisible to the census.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private const string TodoEntity = \"sprk_todo\";",
+            "    private async Task A() { await _f.UpdateRecordFieldsAsync(\"sprk_todo\", Guid.NewGuid(), fields, ct); }",
+            "    private async Task B() { var id = Guid.NewGuid(); await _f.UpdateRecordFieldsAsync(TodoEntity, id, fields, ct); }",
+            "    private async Task C() { var key = GenerateDeterministicId(m, t); await _f.UpdateRecordFieldsAsync(TodoEntity, key, fields, ct); }",
+            "    private async Task D() { var row = new Entity(\"sprk_todo\", Guid.NewGuid()); await _s.UpsertAsync(row, ct); }",
+            "    private async Task E(Guid existing) { await _f.UpdateRecordFieldsAsync(\"sprk_todo\", existing, fields, ct); }",
+            "    private void F(Guid existing) { var update = new Entity(\"sprk_todo\", existing); }",
+            "}",
+        });
+
+        var sites = ScanSites(new Dictionary<string, string> { ["Seeded.cs"] = code });
+
+        Assert.Equal(4, sites[("Seeded.cs", "sprk_todo")].Count); // A, B, C, D — never the updates E and F
+    }
+
+    [Fact(DisplayName = "Task 146 b2: negative control — Add(...) and initializer owner writes are found; a list of column names is not")]
+    public void OwnerWriteDetector_NegativeControl_AddAndInitializerForms()
+    {
+        // The verifier's AC10 seeds (b) and (c), plus the shapes that are NOT owner writes.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private void AttributesAdd(Entity row, Guid t) { row.Attributes.Add(\"ownerid\", new EntityReference(\"team\", t)); }",
+            "    private void DictionaryAdd(Dictionary<string, object> f, Guid t) { f.Add(\"ownerid@odata.bind\", $\"/teams({t})\"); }",
+            "    private Dictionary<string, object> Initializer(Guid t) => new() { { \"ownerid\", new EntityReference(\"team\", t) } };",
+            "    private static readonly HashSet<string> ServerColumns = new() { \"ownerid\", \"owninguser\", \"createdby\" };",
+            "    private void ColumnList(List<string> c) { c.Add(\"ownerid\"); }",
+            "}",
+        });
+
+        var sites = ScanOwnerWrites(new Dictionary<string, string> { ["Seeded.cs"] = code });
+
+        Assert.Equal(3, sites.Count);
+        Assert.Contains(("Seeded.cs", "AttributesAdd"), sites.Keys);
+        Assert.Contains(("Seeded.cs", "DictionaryAdd"), sites.Keys);
+        Assert.Contains(("Seeded.cs", "Initializer"), sites.Keys);
+    }
+
+    [Fact(DisplayName = "Task 146 b2: negative control — the per-site check needs an owner on an upsert's field map")]
+    public void PerSiteDetector_NegativeControl_Upserts()
+    {
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private async Task OwnedInlineAsync(Guid team)",
+            "    {",
+            "        var fields = new Dictionary<string, object?> { [\"sprk_name\"] = \"x\", [\"ownerid@odata.bind\"] = $\"/teams({team})\" };",
+            "        await _f.UpdateRecordFieldsAsync(\"sprk_todo\", Guid.NewGuid(), fields, ct);",
+            "    }",
+            "    private async Task OwnedByBuilderAsync(Guid team)",
+            "    {",
+            "        var fields = BuildFields(team);",
+            "        await _f.UpdateRecordFieldsAsync(\"sprk_todo\", Guid.NewGuid(), fields, ct);",
+            "    }",
+            "    private static Dictionary<string, object?> BuildFields(Guid team)",
+            "    {",
+            "        var f = new Dictionary<string, object?>();",
+            "        f[\"ownerid@odata.bind\"] = $\"/teams({team})\";",
+            "        return f;",
+            "    }",
+            "    private async Task OwnerlessAsync()",
+            "    {",
+            "        var fields = new Dictionary<string, object?> { [\"sprk_name\"] = \"x\" };",
+            "        await _f.UpdateRecordFieldsAsync(\"sprk_todo\", Guid.NewGuid(), fields, ct);",
+            "    }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+
+        var sites = ScanSiteIndexes(files)[("Seeded.cs", "sprk_todo")];
+        var problems = SiteOwnerProblems(code, "Seeded.cs", "sprk_todo", sites).ToList();
+
+        Assert.Equal(3, sites.Count);
+        Assert.Contains(problems, p => p.Contains("Seeded.cs:22", StringComparison.Ordinal));
+        Assert.Single(problems);
+    }
+
+    /// <summary>
+    /// Task 146 b2 (AC14 in code): every table whose rows the server can hand the Secure team is in the ONE codified
+    /// Secure Record Owner role set (<c>config/secure-record-owner-role.json</c>) — otherwise Dataverse refuses the owner
+    /// ("Read Privilege Check For Owner failed"). The tables are the resolver's child set
+    /// (<c>RecordOwnershipResolver.IsReparentableChild</c>: the chat tools and every re-file) and every Routed or Seam create
+    /// in the census (content rows owned like their secure parent).
+    /// </summary>
+    [Fact(DisplayName = "Task 146 b2: the codified Secure Record Owner role set covers every table the server can hand the Secure team")]
+    public void CodifiedSecureOwnerRoleSet_CoversEveryTableTheServerCanHandTheSecureTeam()
+    {
+        var configPath = Path.Combine(SourceScan.RepoRoot, "config", "secure-record-owner-role.json");
+        using var config = System.Text.Json.JsonDocument.Parse(File.ReadAllText(configPath));
+        var codified = config.RootElement.GetProperty("tables").EnumerateArray()
+            .Select(t => t.GetProperty("logicalName").GetString()!)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var required = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.OwnershipParentEntities
+            .Where(Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild)
+            .Concat(Census.Where(e => e.Disposition is Disposition.Routed or Disposition.Seam).Select(e => e.Table))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = required.Where(t => !codified.Contains(t)).OrderBy(t => t, StringComparer.Ordinal).ToList();
+        Assert.True(
+            missing.Count == 0,
+            "Tables the server can make the Secure Record team own, missing from config/secure-record-owner-role.json — "
+            + "add each through the file's howToExtend procedure (refusal first), then the live role per task 145's "
+            + "procedure: " + string.Join(", ", missing));
+    }
+
     [Fact(DisplayName = "Task 146 r1: negative control — the per-site check flags the one site in a multi-site member that lost its owner")]
     public void PerSiteDetector_NegativeControl()
     {
@@ -903,11 +1401,11 @@ public class RecordOwnerAssignmentCensusTests
             return code[start..(end > index ? end : code.Length)];
         }
 
-        // `row["ownerid"]` — or `row[FieldOwnerId]` through a const whose value is "ownerid".
-        var ownerKey = string.Join("|", StringConst.Matches(code)
-            .Where(m => m.Groups["value"].Value == "ownerid")
+        // `row["ownerid"]` / `fields["ownerid@odata.bind"]` — or either through a const whose value is the key.
+        var ownerKey = string.Join("|", OwnerKeyConst.Matches(code)
             .Select(m => Regex.Escape(m.Groups["name"].Value))
-            .Prepend(@"""ownerid"""));
+            .Distinct()
+            .Prepend(@"""ownerid(?:@odata\.bind)?"""));
 
         // Members of this file that write an owner onto their FIRST parameter — a create helper the row is handed to
         // (CommunicationEnrichmentService.CreateReviewLogAsync(entity, …) resolves and applies the owner itself).
@@ -933,6 +1431,17 @@ public class RecordOwnerAssignmentCensusTests
             {
                 written = true; // the construction's own initializer sets the owner
             }
+            else if (construction.StartsWith("UpdateRecordFieldsAsync", StringComparison.Ordinal))
+            {
+                // Task 146 b2: a create-by-upsert — its row is the field map (third argument), which must carry the owner:
+                // in its own initializer, by a write onto it, or by the same-file builder it is assigned from.
+                var open = construction.IndexOf('(');
+                var arguments = SplitTopLevel(construction[(open + 1)..]).Select(a => a.Trim()).ToList();
+                var fields = arguments.Count > 2 ? arguments[2] : string.Empty;
+                written = Regex.IsMatch(fields, @"^[A-Za-z_]\w*$")
+                    && (WritesOwnerOn(region, fields, ownerKey, ownerWritingHelpers)
+                        || InitializerOrBuilderOwns(code, region, fields, ownerKey, RegionAt));
+            }
             else if (isPost)
             {
                 // A Web API POST: the row is a JSON payload built in the member — its owner bind must be there.
@@ -956,12 +1465,38 @@ public class RecordOwnerAssignmentCensusTests
         }
     }
 
+    /// <summary>
+    /// True when the field map <paramref name="v"/> owns its row: its initializer in <paramref name="region"/> (up to the
+    /// end of the statement) names an owner key, or it is assigned from a call to a same-file member that writes one.
+    /// </summary>
+    private static bool InitializerOrBuilderOwns(
+        string code, string region, string v, string ownerKey, Func<int, string> regionAt)
+    {
+        var assignment = Regex.Match(region, $@"\b{Regex.Escape(v)}\s*=\s*(?<rhs>[^;]*;)");
+        if (!assignment.Success)
+            return false;
+
+        var rhs = assignment.Groups["rhs"].Value;
+        if (Regex.IsMatch(rhs, ownerKey))
+            return true;
+
+        var builder = Regex.Match(rhs, @"^\s*(?:await\s+)?(?<name>[A-Za-z_]\w*)\s*\(");
+        if (!builder.Success)
+            return false;
+
+        var declaration = Regex.Match(code,
+            @"^[ \t]*(?:public|internal|private|protected)\b[^;=\n]*?\b" + Regex.Escape(builder.Groups["name"].Value) + @"\s*\(",
+            RegexOptions.Multiline);
+        return declaration.Success && Regex.IsMatch(regionAt(declaration.Index), $@"\[\s*(?:{ownerKey})\s*\]\s*=");
+    }
+
     /// <summary>True when <paramref name="region"/> writes an owner onto the row variable <paramref name="v"/>.</summary>
     private static bool WritesOwnerOn(string region, string v, string ownerKey, IReadOnlySet<string>? helpers)
     {
         var name = Regex.Escape(v);
         if (Regex.IsMatch(region,
-                $@"\b{name}\s*\[\s*(?:{ownerKey})\s*\]\s*=|\.ApplyTo\s*\(\s*{name}\s*\)|\bApply\w*Owner\w*\s*\(\s*{name}\b"))
+                $@"\b{name}\s*\[\s*(?:{ownerKey})\s*\]\s*=|\b{name}(?:\.Attributes)?\.(?:Add|TryAdd)\s*\(\s*(?:{ownerKey})\s*,"
+                + $@"|\.ApplyTo\s*\(\s*{name}\s*\)|\bApply\w*Owner\w*\s*\(\s*{name}\b"))
         {
             return true;
         }
@@ -1035,9 +1570,48 @@ public class RecordOwnerAssignmentCensusTests
 
             foreach (Match m in HttpPost.Matches(code))
                 Add(TableOfEntitySet(Resolve(m)), m.Index);
+
+            // Task 146 b2 (verifier AC10): creates the literal shapes above cannot see, proven blind by seeding —
+            // a create-by-upsert (a PATCH of a FRESH id — Guid.NewGuid(), or a variable assigned one or a generated id in
+            // the same member) and a two-argument construction with a fresh id.
+            var members = MemberDeclaration.Matches(code).Select(d => d.Index).ToList();
+            foreach (Match m in CreateByUpsert.Matches(code))
+            {
+                if (IsFreshId(code, members, m.Index, m.Groups["rid"].Value))
+                    Add(Resolve(m), m.Index);
+            }
+
+            foreach (Match m in FreshEntityCreate.Matches(code))
+            {
+                if (IsFreshId(code, members, m.Index, m.Groups["rid"].Value))
+                    Add(Resolve(m), m.Index);
+            }
         }
 
         return sites;
+    }
+
+    /// <summary>A field-map PATCH of a record id — a CREATE when the id is fresh (Dataverse upserts).</summary>
+    private static readonly Regex CreateByUpsert = new(
+        @"UpdateRecordFieldsAsync\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_]\w*)",
+        RegexOptions.Compiled);
+
+    /// <summary>A two-argument construction — a create (or upsert target) when the id is fresh.</summary>
+    private static readonly Regex FreshEntityCreate = new(
+        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_]\w*)\s*\)",
+        RegexOptions.Compiled);
+
+    /// <summary>True when <paramref name="id"/> is <c>Guid.NewGuid()</c>, or a variable the same member assigns from
+    /// <c>Guid.NewGuid()</c> or a generated id (a deterministic upsert key, as SignalEvaluationService's).</summary>
+    private static bool IsFreshId(string code, IReadOnlyList<int> members, int index, string id)
+    {
+        if (id.StartsWith("Guid.NewGuid", StringComparison.Ordinal))
+            return true;
+
+        var start = members.LastOrDefault(i => i <= index);
+        var region = code[start..index];
+        return Regex.IsMatch(region,
+            @"\b" + Regex.Escape(id) + @"\s*=\s*(?:Guid\.NewGuid\s*\(\s*\)|[\w\.]*Generate\w*Id\s*\()");
     }
 
     private static string? TableOfEntitySet(string? entitySet)

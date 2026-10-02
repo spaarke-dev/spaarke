@@ -3,6 +3,11 @@
 > **Date**: 2026-07-05 · **Task**: 012 (STANDARD rigor, read-only) · **Gate material for**: task 014 (G-P0)
 > **Scope**: every path from AI code (`Services/Ai/Handlers/**`, `Services/Ai/Chat/Tools/**`, `Services/Ai/LinearConsumers/**`, AI services on the request path) to a Dataverse client, classified user-OBO / user-delegated / app-only / no-Dataverse, with file:line evidence.
 > All paths relative to `src/server/api/Sprk.Bff.Api/` unless prefixed. NFR-07: identifiers and code locations only — no tokens, no record content.
+>
+> **Amended 2026-10-02 (spec "Amendment A-UAC146", CLAUDE.md §6.5 path B, owner round 7 item 3):** `dataverse.create_record`
+> and `email.draft` now CREATE app-only after an as-the-caller rights check (the G5 pattern), owned by the team
+> `IRecordOwnershipResolver` names, so this audit's "user-OBO" classification of those two creates is superseded by
+> design. Reads, updates and deletes are unchanged. Record: `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §13.
 
 ---
 

@@ -273,7 +273,8 @@ it does not re-open design.
 - ✅ MUST route every AI invocation through Event / Click / Text; ✅ MUST write every output +
   tool chain to the ledger before rendering; ✅ MUST gate side effects via the ONE gate by
   declared `side_effect_class`; ✅ MUST keep both catalogs closed; ✅ MUST run user-OBO for all
-  Dataverse tool access; ✅ MUST ship Null-Object peers for gated registrations (ADR-032);
+  Dataverse tool access (**AMENDED 2026-10-02 for the two CREATE tools — see "Amendment A-UAC146" under ADR
+  Tensions**); ✅ MUST ship Null-Object peers for gated registrations (ADR-032);
   ✅ MUST keep new composites as `coded` workflows.
 - ❌ MUST NOT add a second intent-detection mechanism anywhere; ❌ MUST NOT add routing config
   outside the Binding table; ❌ MUST NOT gate by tool-name lists; ❌ MUST NOT land new capability
@@ -296,6 +297,28 @@ it does not re-open design.
 > amendment; ADR-037 engine-steering rescind — see `notes/audit-inputs/ADR-REVIEW-VS-GREENFIELD.md`
 > §5, applied 2026-07-05). All listed ADRs apply without exception. This section updates if
 > tensions emerge during implementation.
+
+### Amendment A-UAC146 (2026-10-02) — the "user-OBO for all Dataverse tool access" MUST, for creates
+
+- **Rule amended**: "✅ MUST run user-OBO for all Dataverse tool access" (MUST Rules, above) and FR-P0-10 ("no
+  app-only Dataverse path reachable from AI"), for the two CREATE tools only: `dataverse.create_record`
+  (`DataverseCreateRecordHandler`) and `email.draft` (`EmailDraftToolHandler`).
+- **Path**: CLAUDE.md §6.5 **path B**, decided by the owner — unified-access-control-r2 owner decisions round 7
+  item 3 (`projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`). It supersedes the
+  narrower path-A exception task 146 r2 had recorded (filed child rows only).
+- **New rule (the G5 pattern)**: check the caller's rights AS THE USER (Create on the table — plus Append when the row
+  sets a lookup — and AppendTo on every record a lookup names, via `RetrievePrincipalAccess`; no field-secured or
+  owner/audit column), then the APPLICATION creates the row OWNED BY THE TEAM `IRecordOwnershipResolver` names (the named
+  Secure Record team under a secure parent, otherwise the parent's — or, unfiled, the caller's — business-unit team),
+  and records the person in the table's Assigned-To / "for" column where one exists.
+- **Why**: a run-as-user create leaves the row owned by the caller in their own business unit — readable by every
+  colleague with ordinary depth, including the children of a secure record (UAC C10, CRITICAL), and contrary to owner
+  round 5 ("records … assigned to the creating user's business unit/team").
+- **Still user-OBO**: every read, update and delete tool, and the creates where the resolver keeps the creator
+  (per-user tables, unfiled communications/threads — UAC escalation E1/E2 — and tables with no user/team ownership).
+- **Implementation and tests**: `Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs`;
+  `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs`; record:
+  `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §13.
 
 ## Success Criteria
 

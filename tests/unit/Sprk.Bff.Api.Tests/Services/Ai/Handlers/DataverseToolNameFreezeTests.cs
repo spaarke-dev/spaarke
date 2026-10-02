@@ -126,7 +126,8 @@ public sealed class DataverseToolNameFreezeTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance,
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object);
+            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
 
         var parameters = handler.Metadata.Parameters;
         parameters.Should().HaveCount(2, because: "GA MCP create_record takes exactly two arguments");
@@ -176,7 +177,8 @@ public sealed class DataverseToolNameFreezeTests
         IToolHandler[] handlers =
         {
             new DataverseCreateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance, new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>().Object,
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact()),
             new DataverseUpdateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance,
                 new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble()),
             new DataverseDeleteRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDeleteRecordHandler>.Instance)

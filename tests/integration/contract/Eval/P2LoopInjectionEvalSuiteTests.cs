@@ -603,7 +603,8 @@ public class P2LoopInjectionEvalSuiteTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance,
             new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
-            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object);
+            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
 
         var adapter = new ToolHandlerToAIFunctionAdapter(
             toolRow, handler,

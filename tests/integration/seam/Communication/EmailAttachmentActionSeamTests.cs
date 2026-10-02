@@ -122,6 +122,7 @@ public sealed class EmailAttachmentActionSeamTests
             actionSeam,
             TestRoutingGate.Disabled(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Mock.Of<Spaarke.Dataverse.IFieldMappingDataverseService>(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

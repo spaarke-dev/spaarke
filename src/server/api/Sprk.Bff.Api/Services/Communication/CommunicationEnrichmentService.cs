@@ -47,6 +47,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     private readonly IActionSeam _actionSeam;
     private readonly Engine.CategoryRoutingGate _routingGate;
     private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
+    // Task 146 b2: the FR-E7 routed owner write is CONDITIONAL on the version the filing was read at (If-Match), which only
+    // the Web API seam offers. Unconditionally registered (GraphModule), so no asymmetric registration (CLAUDE.md §10 F.1).
+    private readonly IFieldMappingDataverseService _fieldMapping;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
 
     // ── Job B propose (task 030, FR-09) — sprk_emailreviewlog / sprk_emailupdatefield constants ──
@@ -182,6 +186,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         IActionSeam actionSeam,
         Engine.CategoryRoutingGate routingGate,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        IFieldMappingDataverseService fieldMapping,
         ILogger<CommunicationEnrichmentService> logger)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
@@ -191,6 +196,7 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
         _routingGate = routingGate ?? throw new ArgumentNullException(nameof(routingGate));
         _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _fieldMapping = fieldMapping ?? throw new ArgumentNullException(nameof(fieldMapping));
         _logger = logger;
     }
 
@@ -594,19 +600,19 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                 : RiConfidenceScorer.UrgencyWeightFromClassification(classification.Urgency);
             fields["sprk_riconfidence"] = RiConfidenceScorer.Compute(urgencyWeight, deterministicAgreement);
 
-            // category → owning team (FR-E7 / task 057, ADR-018 CategoryRoutingGate): when routing is enabled
-            // and the category is mapped, ASSIGN the communication to the mapped team by setting ownerid (an
-            // ownership set on THIS same additive triage update — ADR-024, no second write path). Wrapped
-            // independently so a routing failure (unknown team / query error) NEVER drops the triage fields
-            // (NFR-04). An unmapped category / disabled routing leaves ownerid untouched (default view).
-            await AssignOwningTeamAsync(result.Category, fields, communicationId, ct).ConfigureAwait(false);
-
             await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct)
                 .ConfigureAwait(false);
 
             _logger.LogInformation(
                 "Enrichment[email-triage] persisted triage output to sprk_communication | CommunicationId: {CommunicationId}, FieldCount: {FieldCount}.",
                 communicationId, fields.Count);
+
+            // category → owning team (FR-E7 / task 057, ADR-018 CategoryRoutingGate): when routing is enabled and the
+            // category is mapped, ASSIGN an UNFILED communication to the mapped team. Its own conditional write AFTER
+            // the triage fields (task 146 b2 — see AssignOwningTeamAsync), wrapped independently so a routing failure
+            // (unknown team / query error / a concurrent change) NEVER drops the triage fields (NFR-04). An unmapped
+            // category / disabled routing leaves ownerid untouched (default view).
+            await AssignOwningTeamAsync(result.Category, communicationId, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -708,9 +714,14 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// move a secure record's email out of isolation. So a filed row — or one whose filing cannot be read — keeps its
     /// owner, and routing applies only to a row filed under nothing (which keeps its creator otherwise, E1). A row filed
     /// AFTER it was routed is re-owned by the resolver when it is filed (the reparent in IncomingAssociationResolver).
+    /// <para><b>No gap between the check and the write</b> (task 146 b2, verifier LOW "race"). The owner write is its own
+    /// CONDITIONAL write, made only if the row is still at the version its filing was read at (<c>If-Match</c>,
+    /// <see cref="IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync"/>). A filing that lands in between
+    /// changes the version, so the routed owner is never written over a now-filed (possibly secure) email; that write
+    /// fails with a concurrency error and the row is left as it is (412 — "not routed", logged). A filing that lands
+    /// after the routed write re-derives the owner itself (its re-file reads the owner after its change).</para>
     /// </remarks>
-    private async Task AssignOwningTeamAsync(
-        string? category, Dictionary<string, object> fields, Guid communicationId, CancellationToken ct)
+    private async Task AssignOwningTeamAsync(string? category, Guid communicationId, CancellationToken ct)
     {
         try
         {
@@ -718,7 +729,8 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             if (string.IsNullOrWhiteSpace(teamName))
                 return;
 
-            if (await IsFiledOrUnreadableAsync(communicationId, ct).ConfigureAwait(false))
+            var filing = await IsFiledOrUnreadableAsync(communicationId, ct).ConfigureAwait(false);
+            if (filing.FiledOrUnreadable)
             {
                 _logger.LogInformation(
                     "Enrichment[email-triage] routing: category {Category} maps to team {Team}, but the communication is "
@@ -729,19 +741,33 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             }
 
             var teamId = await ResolveTeamIdByNameAsync(teamName, ct).ConfigureAwait(false);
-            if (teamId.HasValue)
-            {
-                fields["ownerid"] = new EntityReference("team", teamId.Value);
-                _logger.LogInformation(
-                    "Enrichment[email-triage] routing: category {Category} → team {Team} — assigning ownerid | CommunicationId: {CommunicationId}.",
-                    category, teamName, communicationId);
-            }
-            else
+            if (!teamId.HasValue)
             {
                 _logger.LogInformation(
                     "Enrichment[email-triage] routing: category {Category} maps to team {Team} but no team row matches that name — leaving ownerid unset | CommunicationId: {CommunicationId}.",
                     category, teamName, communicationId);
+                return;
             }
+
+            var routed = new Dictionary<string, object?> { ["ownerid@odata.bind"] = $"/teams({teamId.Value:D})" };
+            try
+            {
+                await _fieldMapping.UpdateRecordFieldsIfUnchangedAsync(
+                    "sprk_communication", communicationId, routed, filing.Version, ct).ConfigureAwait(false);
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                _logger.LogInformation(
+                    "Enrichment[email-triage] routing: the communication changed after its filing was read (it may have been "
+                    + "filed under a record) — NOT routed to team {Team}; its owner stays the record-ownership resolver's "
+                    + "(task 146) | CommunicationId: {CommunicationId}.",
+                    teamName, communicationId);
+                return;
+            }
+
+            _logger.LogInformation(
+                "Enrichment[email-triage] routing: category {Category} → team {Team} — assigned ownerid | CommunicationId: {CommunicationId}.",
+                category, teamName, communicationId);
         }
         catch (Exception ex)
         {
@@ -757,9 +783,11 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
     /// True when the communication is filed under any ownership parent — every lookup it carries to a record the
     /// resolver files children under (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf"/>,
     /// the resolver's own definition, read over every column: no per-table column list) — or when the row cannot be
-    /// read at all (fail closed: an unknown filing is never routed). Task 146 r2.
+    /// read at all (fail closed: an unknown filing is never routed). Task 146 r2. b2: also the row's
+    /// <c>versionnumber</c> at that read — the routed owner write is conditional on it; a row whose version cannot be
+    /// read is treated as unreadable (never routed).
     /// </summary>
-    private async Task<bool> IsFiledOrUnreadableAsync(Guid communicationId, CancellationToken ct)
+    private async Task<(bool FiledOrUnreadable, long Version)> IsFiledOrUnreadableAsync(Guid communicationId, CancellationToken ct)
     {
         var query = new QueryExpression("sprk_communication")
         {
@@ -769,8 +797,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         query.Criteria.AddCondition("sprk_communicationid", ConditionOperator.Equal, communicationId);
 
         var row = (await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
-        return row is null
-               || Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row.Attributes).Count > 0;
+        if (row is null || row.GetAttributeValue<long?>("versionnumber") is not { } version)
+            return (true, 0);
+
+        return (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ParentsOf(row.Attributes).Count > 0, version);
     }
 
     /// <summary>Resolves a team NAME to its <c>teamid</c> via the SAME name-lookup read path

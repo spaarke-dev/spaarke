@@ -559,6 +559,7 @@ public class SecureChildOwnershipWriterTests
             Mock.Of<IActionSeam>(),
             TestRoutingGate.Disabled(),
             ownership,
+            Mock.Of<Spaarke.Dataverse.IFieldMappingDataverseService>(),
             NullLogger<CommunicationEnrichmentService>.Instance);
         return (service, created);
     }

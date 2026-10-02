@@ -92,6 +92,7 @@ public sealed class TriagePersistenceSeamTests
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
             new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Mock.Of<Spaarke.Dataverse.IFieldMappingDataverseService>(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

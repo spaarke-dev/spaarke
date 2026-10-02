@@ -39,7 +39,8 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
 
     private DataverseCreateRecordHandler CreateHandler() =>
         new(_dataverse.Object, CreateLogger<DataverseCreateRecordHandler>(), _handoffUrlBuilder,
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), _appOnly.Object);
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), _appOnly.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact());
 
     private static AnalysisTool BuildCreateTool() =>
         BuildAnalysisTool(handlerClass: nameof(DataverseCreateRecordHandler), name: "SYS-Dataverse Create Record");

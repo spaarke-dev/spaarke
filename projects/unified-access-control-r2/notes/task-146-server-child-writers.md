@@ -3,6 +3,9 @@
 > Branch `task/uac-r2-146` (base `integ/uac-r2-batch2` @ `2a9b4b26c`). Status: **code complete, not deployed**.
 > Ships together with task 149. Deploy order with task 152 accepted as B2. Live steps are manual gates (§7, §11d).
 > Verifier round 1 fixes (branch `task/uac-r2-146-r1`): §11. Verifier round 2 fixes (branch `task/uac-r2-146-r1-r2`): §12.
+> Fix round b2 (branch `task/uac-r2-146-b2`, base = `work/unified-access-control-r2` merged at `c8ede843e`): §13 —
+> the round-2 verifier's open items, owner round 7 items 3 (G5 for the AI create tools, §6.5 path B) and 4 (role
+> 9 → 26 readiness). **G146-1 is a HARD pre-deploy gate** (§13c).
 
 ## 1. Outcome
 
@@ -559,3 +562,378 @@ named below and passed again once restored.
 > **Deploy gates (main session):** G146-1 (Secure Record Owner role: the census tables), G146-2 + G146-5 (BU default
 > teams' Read on `sprk_emailreviewlog`; the Dev 1 / Test 1 default teams' roles), G146-3 (hold-alert recipients), G146-4
 > (the live check after deploy with 149). Publish size: measured by the main session against a fresh master build.
+
+
+## 13. Fix round b2 (2026-10-02, branch `task/uac-r2-146-b2`)
+
+**Base.** `task/uac-r2-146-b1` (the b1 WIP commit `6edf97c58`: compensation + depth refusal, unverified) with
+`work/unified-access-control-r2` merged in (origin/master `93634db58` + integrated batch 3: 138, 139, 141, 152, 155
+and the Office save fix). The merge commit is `c8ede843e`.
+
+The merge conflicted in 17 files. Every resolution keeps BOTH sides: 146's owner from the resolver, and 152's
+Assigned To / acting-user contact. The details:
+
+- **AI tasks.** `TaskActionCore`, `ActionSeam` and `CreateTaskNodeExecutor` take both the resolver and
+  `IIdentityNormalizationService`. An unparented task's owner user is `OwnerId`, else 152's `ActingUserId`.
+- **Generated to-dos.** `TodoGenerationService` is now 152's `IScheduledJob`. Its lazy dependency step resolves the
+  resolver too. The removed `ownerId` / `ownerEntityName` parameters stay removed.
+- **Event create.** It resolves the owner AND the acting user's linked contact. The membership owner event now names
+  the team the create WROTE (`knownOwner`), not a read-back.
+- **Event payload.** 152 extracted `DataverseWebApiService.BuildCreateEventPayload`. The owner refusal moved into it,
+  so no payload without an owner is ever built. The census seam and owner-write entries were updated to match.
+- **External to-dos.** They take both `owningTeamId` and `callerContactId`.
+
+Several 152 tests needed fixes the merge could not see:
+
+- Two payload tests passed a contact id where 146 now takes the owner. They compiled, and would have bound the
+  contact as the owner. Fixed.
+- `EventEndpointsMembershipPublishingTests` was rewritten to the merged contract.
+
+### 13a. The round-2 verifier's open items
+
+| # | Finding | Disposition |
+|---|---|---|
+| GAP S6a | A hard-coded owner in `ThreadResolver.FindOrCreateDefaultThreadAsync` survived every test | **Closed.** `SecureChildOwnershipTests` drives the REAL resolver through `ResolveAndAssignThreadAsync`'s FR-09 ladder. A secure matter's default thread goes to the named team; an ordinary one to its BU team (Theory, 2 cases). A flagged-not-isolated project is refused: nothing is created and the message is left unthreaded. The Tier-3 master keeps its creator (E2). The verifier's exact seed (P1) now fails both the tests and the census. |
+| GAP per-member | `EveryOwnerWriteKeepsItsKind` asked only whether the FILE calls the resolver | **Closed.** See below. |
+| GAP AC10 | An owner-less create-by-upsert, `Attributes.Add("ownerid", …)` and `{ { "ownerid", … } }` were all invisible | **Closed.** See below. |
+| RESIDUAL FAIL-OPEN | `ReparentAsync` applied the change, and a failed assignment left the row filed under the secure parent but owned elsewhere | **Closed in code** (b1's compensation, reworked). See below. |
+| LOW depth | The lineage stopped at 4 levels and answered "ordinary" | **Closed.** b1's change was verified: a frontier left at the limit REFUSES (`ParentUnresolved`, reason names the levels). A 6-deep chain ending at a secure matter is refused; a 3-deep one resolves (control). Seed P6 bites. |
+| LOW race | FR-E7 routing read the filing, then wrote the owner later | **Closed.** See below. |
+| OBSERVATION | A Write + AppendTo holder can re-file a secure root's CHILD out of it, which un-secures it | **Not changed: owner question** (§13f). |
+| Pending live / main-session items | G146-1..5, publish size, #1034, the PR | Unchanged by design (§13f). |
+
+**GAP per-member — what now runs:**
+
+- `EveryRoutedOwnerWriteTakesItsValueFromAResolution`. Every owner write in a Routed member must take its VALUE from a
+  resolution. Accepted sources:
+  - a resolution made in that member: a resolver call, or a call to a same-file member that reaches one;
+  - a `RecordOwnerResolution` parameter;
+  - for a builder: a parameter every same-file caller of which resolves.
+
+  The check is a crude taint: assignments, `is { } x` bindings and fixpoint. A GUID literal or `Guid.Parse` is always
+  rejected.
+- `NoServerCodeForgesAnOwnedResolution`. Only the resolver may make an Owned `RecordOwnerResolution`. Without this, a
+  forged one would satisfy the value check.
+- Negative controls cover: a sibling-resolved seed (the verifier's shape), a hard-coded owner, a resolution parameter,
+  a fed builder, and an unfed builder.
+
+**GAP AC10 — what the census now sees:**
+
+- **Owner writes**, in three forms:
+  - `x["ownerid"] =`, as before;
+  - `.Add` / `.TryAdd(KEY, …)`, including `Attributes.Add`;
+  - collection-initializer elements `{ KEY, v }`. Only an INNER brace counts (one preceded by `{` or `,`), so a column
+    list such as `new() { "ownerid", "owninguser" }` is not an owner write.
+- **Creates**, two new shapes:
+  - a create-by-upsert: `UpdateRecordFieldsAsync(<table>, <fresh id>, …)`, where the fresh id is `Guid.NewGuid()` or a
+    variable the member assigns from it or from a `Generate…Id(…)`;
+  - a two-argument construction with a fresh id.
+- **New census entries.** Two real sites are now listed as Routed: `InvoiceReviewService` (sprk_invoice) and
+  `SignalEvaluationService` (sprk_spendsignal). `SignalEvaluationService` left `UnscannedWriters`.
+- **The per-site check** now requires an upsert's field map to carry the owner: in its initializer, by a write, or
+  through the same-file builder it comes from.
+- **Seed proofs.** The verifier's three seeds (P2, P3, P4) and a real owner-bind removal (P15) each fail.
+
+**RESIDUAL FAIL-OPEN — how a failed assignment now recovers.** When the assignment (or its read-back) fails after the
+change, the owner is read again:
+
+| Owner reads back as | What happens | Logged |
+|---|---|---|
+| the resolved team | The assignment landed (a lost response). The re-file stands. | — |
+| anything else | The filing is put back. Restored columns: the parent lookups the change moved, plus `RecordReparent.AttachColumns`. | `ReparentOwnerAssignmentFailed` |
+| unreadable | The SAFE direction is taken. A move INTO a secure record is put back (at worst over-restricted); otherwise the new filing is kept (at worst a stricter old owner). | `ReparentLeftInconsistent` |
+
+A restore that itself fails is also logged `ReparentLeftInconsistent`. The original failure always propagates to the
+writer's own contract.
+
+Further changes in this area:
+
+- **The "already owned" check reads the owner AFTER the change.** A concurrent owner write is never mistaken for the
+  resolved owner (seed P7).
+- **Thread JOIN.** It passes `AttachColumns = sprk_communicationthread`, so a failed assignment takes the message back
+  out of the secure record's thread (P12).
+- **Invoice confirm.** Its change is "create the invoice + link the document". On a post-change failure it deletes
+  the invoice it created. Because `sprk_document_Invoice_n1` cascades `RemoveLink`, that also removes the link, and no
+  orphan remains. A lost-race link is left to the winning confirmation. Seed P9 bites.
+- **G146-1 is now a HARD pre-deploy gate** (§13c). The expected cause of an assignment failure is a role still missing
+  Read on the table.
+
+**LOW race — the routing write.** FR-E7 routing's owner write is now its own CONDITIONAL write, made after the triage
+fields:
+
+- It goes through `IFieldMappingDataverseService.UpdateRecordFieldsIfUnchangedAsync`, with `If-Match` on the
+  `versionnumber` read alongside the filing.
+- A filing landing in between makes it fail (412). The email is then "not routed" and keeps its resolver owner.
+- A missing version is treated as unreadable, so the email is never routed.
+- A filing landing AFTER the routed write re-derives the owner itself, because the re-file reads the owner after its
+  change.
+- `CommunicationEnrichmentService` gained the `IFieldMappingDataverseService` dependency. It is unconditionally
+  registered (GraphModule), so there is no asymmetric registration.
+- Tests: mapped → conditional write with the read version; 412 → not routed and nothing escapes; no version → not
+  routed; filed / unreadable / unmapped → no write. Seed P8 bites.
+
+### 13b. Owner round 7 item 3: G5 for the AI create tools (CLAUDE.md §6.5 path B)
+
+**`dataverse.create_record` now takes the G5 path for EVERY create** (`OwnedChildWrite.PathFor`):
+
+1. Checks AS THE CALLER:
+   - Create on the table, plus Append when the row sets a lookup, by the privilege names the table's metadata
+     declares;
+   - AppendTo on every record a lookup names (`RetrievePrincipalAccess`);
+   - no field-secured column;
+   - no owner/audit column.
+2. The owner from `IRecordOwnershipResolver`: the named Secure team under a secure parent, otherwise the parent's BU
+   team, or the caller's BU team for an unfiled row.
+3. The APPLICATION creates the row by a fresh-id PATCH that carries the owner.
+4. The caller is named in the table's "for" column.
+
+This supersedes r2's narrower path A (filed child rows only).
+
+**The creator is kept** (a run-as-user create) only where the resolver's own rules keep it:
+
+- tables whose metadata ownership is not `UserOwned` / `TeamOwned`;
+- per-user tables (`appnotification`, notification outbox, workspace layout, nav item, user preferences / profile, AI
+  chat message / summary);
+- unfiled communications and threads (E1 / E2).
+
+Such a create filed under a SECURE record is refused, as before.
+
+**Two more refusals.** Each says why, and nothing is created:
+
+- A ROOT that the resolver would hand the Secure team. A work assignment or project under a secure record is secured
+  by provisioning: task 158.
+- Any table outside the ownership set that the resolver would hand the Secure team. The role holds no Read on it.
+
+**`email.draft`: no code change.** A filed draft was already G5 with `sprk_sentby` = the drafter. An UNFILED draft
+keeps its creator, which is the resolver's E1 answer: a team-owned draft would show one person's unsent email to the
+whole BU. Its XML doc now records path B.
+
+**"For" columns.** Each follows its shipped precedent. A supplied value is never overwritten. The column is server-set,
+so no AppendTo is asked of the caller's own contact.
+
+| Table | Column | Value | Precedent |
+|---|---|---|---|
+| `sprk_todo`, `sprk_event` | `sprk_assignedto` (contact) | the caller's LINKED contact (task 141); none → blank + `assigned_unset` log | task 152, #1044 |
+| `sprk_matter`, `sprk_project` | `sprk_assignedtointernal` (contact) | same | owner A7 (Office quick-create) |
+| `sprk_communication` | `sprk_sentby` (systemuser) | the caller | S1 (the email draft) |
+| `sprk_workassignment` | — | not defaulted | it carries both `sprk_assignedto` and `sprk_assignedtointernal` with no shipped precedent; the model may still supply either |
+
+This supersedes §12c's "for" table for the tools.
+
+**Where the supersession is recorded:**
+
+- `projects/spaarke-ai-architecture-redesign-r1/spec.md`: MUST-rule marker, plus "Amendment A-UAC146" under ADR
+  Tensions;
+- `projects/spaarke-ai-architecture-redesign-r1/notes/user-obo-audit.md`: header amendment;
+- both handlers' XML docs;
+- `OwnedChildWrite`'s remarks;
+- this note;
+- the POML `<execution>` b2 outcome;
+- the PR description (§13g).
+
+**Not changed: the model-facing tool description.** It still says "Records you create belong to the calling user
+automatically". Changing it needs three things at once:
+
+1. `infra/dataverse/sprk_analysistool-dataverse-create-record-row.json`;
+2. the compiled `Metadata.Description` (`CatalogToolDescriptionParityContractTests`);
+3. a live re-push (`scripts/Seed-TypedHandlers.ps1`).
+
+Without step 3, `RoutingConsumerTypeHealthCheck` reports the BFF Unhealthy on description drift. **Follow-up for the
+main session (with the deploy):** replace that sentence in all three with "Records you create are owned by the team of
+the record they are filed under (or your own team) and name you as their Assigned To where the table has one."
+
+### 13c. Owner round 7 item 4: the live role extension, 9 → 26 tables (READY, not applied)
+
+**Read-only checks on spaarkedev1, 2026-10-02:**
+
+- The live `Secure Record Owner` role (`e4ebabd9-b4a0-f111-aaac-000d3a99d1d7`, BU `Secure Record`) holds exactly
+  **9** privileges, all Read at Basic (`privilegedepthmask` 1): Communication, Document, Event, Invoice, Matter, Memo,
+  Project, Todo, WorkAssignment.
+- `config/secure-record-owner-role.json` lists **26** tables: those 9 plus 17 marked `VERBATIM REFUSAL PENDING`.
+- **All 17 new `privilegeName`s match live metadata exactly**, including casing (a `privilege` query). The script's
+  `-cne` name check will therefore not stop the run:
+  `prvReadsprk_analysis`, `prvReadsprk_analysisoutput`, `prvReadsprk_CommunicationThread`,
+  `prvReadsprk_CommunicationAttachment`, `prvReadsprk_CommunicationParticipant`, `prvReadsprk_EmailReviewLog`,
+  `prvReadsprk_SpendSignal`, `prvReadsprk_SpendSnapshot`, `prvReadsprk_FileVersion`, `prvReadsprk_EmailArtifact`,
+  `prvReadsprk_AttachmentArtifact`, `prvReadsprk_EventLog`, `prvReadsprk_Agreement`, `prvReadsprk_BillingEvent`,
+  `prvReadsprk_Budget`, `prvReadsprk_KPIAssessment`, `prvReadsprk_ReportCard`.
+
+**Other readiness:**
+
+- **Script.** `scripts/Set-SecureRecordOwnerRolePrivileges.ps1` needs no change. Its behavior:
+  - it accepts the pending-evidence text (non-empty);
+  - `-Apply` adds all missing privileges in one `AddPrivilegesRole` call and reads them back;
+  - `-Verify` exits 0 at 26 of 26.
+- **Guide.** `SECURE-PROJECT-ENVIRONMENT-SETUP.md` §5.3 gains the "Extending the set" order (negative control →
+  evidence write-back → dry run → `-Apply` → §5.4 strip → `-Verify` → positive probes). The §5.4 strip reads `$keep`
+  from the file, so it keeps all 26.
+- **New guard (in code).** `CodifiedSecureOwnerRoleSet_CoversEveryTableTheServerCanHandTheSecureTeam` fails the build
+  when a table the resolver or a Routed/Seam create can hand the Secure team is missing from the file. Seed P14 bites.
+
+**G146-1: HARD pre-deploy gate (main session, live writes).** Run it BEFORE 146's code reaches dev. Dataverse refuses
+team ownership without Read, and `ReparentAsync` would then roll back every secure re-file of those tables.
+
+```powershell
+# From the repository root. Pin the environment (guide §2).
+$DvUrl = 'https://spaarkedev1.crm.dynamics.com'; $Api = "$DvUrl/api/data/v9.2"
+$tok = az account get-access-token --resource $DvUrl --query accessToken -o tsv
+$H = @{ Authorization = "Bearer $tok"; Accept = 'application/json'; 'OData-MaxVersion' = '4.0'; 'OData-Version' = '4.0'
+        'Content-Type' = 'application/json; charset=utf-8'; Prefer = 'return=representation' }
+$teamId = '6eabc7f9-13be-f111-a05b-0022482913fc'   # 'Secure Record Owners' (task-145 note §11) — confirm with guide §4.1
+$pending = (Get-Content config/secure-record-owner-role.json -Raw | ConvertFrom-Json).tables |
+           Where-Object { $_.evidence -like 'VERBATIM REFUSAL PENDING*' }
+
+# 1) NEGATIVE CONTROL — 3 polls ~25 s apart per table; expect "... is missing prvRead<table> privilege ...".
+foreach ($t in $pending) {
+  $m = Invoke-RestMethod "$Api/EntityDefinitions(LogicalName='$($t.logicalName)')?`$select=EntitySetName,PrimaryIdAttribute,PrimaryNameAttribute" -Headers $H
+  $b = @{ 'ownerid@odata.bind' = "/teams($teamId)" }
+  if ($m.PrimaryNameAttribute) { $b[$m.PrimaryNameAttribute] = "task146-probe-$($t.logicalName)" }
+  try {
+    $row = Invoke-RestMethod -Method Post "$Api/$($m.EntitySetName)" -Headers $H -Body ([Text.Encoding]::UTF8.GetBytes(($b | ConvertTo-Json)))
+    "NOT REFUSED: $($t.logicalName) $($row.($m.PrimaryIdAttribute)) — DELETE it and remove the entry (revert commit)"
+  } catch { "$($t.logicalName): $($_.ErrorDetails.Message)" }
+}
+# A refusal that names a missing REQUIRED column instead of the Read privilege: add that column (a lookup to an existing
+# row) and re-probe; ESCALATE if it names anything other than a Read privilege (task 145 trigger 3).
+# 2) WRITE BACK: replace each entry's "VERBATIM REFUSAL PENDING …" evidence with date + poll count + refusal; commit FIRST.
+# 3) Role:
+.\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl            # dry run: MISSING ×17, would add 17
+.\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl -Apply     # expect the SharePoint-four WARNING
+#    guide §5.4 strip with $roleId = 'e4ebabd9-b4a0-f111-aaac-000d3a99d1d7' ($keep read from the file — 26 names)
+.\scripts\Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl $DvUrl -Verify    # exit 0: "26 of 26"
+# 4) POSITIVE: re-run step 1 until each create SUCCEEDS on 3 consecutive polls; read back owningteam (= $teamId);
+#    DELETE every probe and record each 404. Control: a table NOT in the file (e.g. sprk_invoicelineitem) must still be
+#    refused with privilegeCount=26.
+# 5) NFR-05 census live run (clause 5: 26 of 26 at Basic):
+$env:SPAARKE_NFR05_DATAVERSE_URL = $DvUrl; $env:SPAARKE_NFR05_REQUIRED = 'true'; $env:AZURE_TOKEN_CREDENTIALS = 'AzureCliCredential'
+dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "Category=LiveDataverseRoleDepth" --logger "console;verbosity=detailed"
+```
+
+Before/after for the record: before = the 9 above; after = 26, all Basic, diff +17, nothing removed.
+
+### 13d. Tests (b2)
+
+**New tests:**
+
+- `RecordOwnershipResolverTests` (+10):
+  - the assignment fails after a move IN, so the filing is put back and the failure rethrown;
+  - the assignment fails after a move OUT, so the cleared secure lookup is restored;
+  - a lost response that landed, so the re-file stands;
+  - the owner is unreadable after a move IN, so the filing is put back;
+  - the owner is unreadable after a move to an ordinary parent, so the filing is kept;
+  - the restore also fails, so the ORIGINAL failure propagates;
+  - a thread-JOIN attach column is put back;
+  - a concurrent re-owner between the read and the change still ends with the resolved team;
+  - the depth limit refuses, with a within-limit control.
+- `SecureChildOwnershipTests` (+5): the default record thread, secure and ordinary (Theory, 2 cases); the flagged
+  default thread is refused and left unthreaded; the master thread keeps its creator; a JOIN through `ThreadResolver`
+  is undone when its assignment fails.
+- `InvoiceReviewWritePathTests` (+1): the document owner cannot be moved after the link, so the created invoice is
+  deleted and nothing is queued.
+- `EmailTriageSeamTests` (+2, 4 reworked): routing is a conditional write with the read version; 412 means not routed;
+  no version means not routed.
+- `SecureChildOwnershipAiToolTests` (+9, 2 flipped):
+  - flipped: an unfiled to-do and a task under an ordinary matter are now app-created and team-owned;
+  - new: a filed to-do names the caller in Assigned To without asking AppendTo of their contact; a supplied assignee is
+    kept; no linked contact leaves it blank but still creates; an unfiled matter is owned by the caller's BU team with
+    Assigned To (internal); a work assignment under a secure matter is refused (158); a per-user table and an
+    organization-owned table run as the user (Theory); an unfiled communication runs as the user (E1); an unfiled
+    `email.draft` runs as the user (E1).
+- `RecordOwnerAssignmentCensusTests` (+7, now 21):
+  - the per-member value check, the forging guard and the codified-set guard;
+  - negative controls for the value check, upsert / fresh-id creates, `Add` / initializer owner writes, and the upsert
+    per-site check.
+- `EventEndpointsMembershipPublishingTests` reworked for the merge (§13 base).
+
+**Seed-and-bite (b2).** Each plant was made in the real source and checked with the tests named. Each plant was
+restored byte-for-byte and touched; a grep confirmed none remained.
+
+| Plant | What failed |
+|---|---|
+| P1: hard-coded team in the default-thread owner write (the verifier's seed) | 2 default-thread tests and the per-member value check |
+| P2: owner-less `UpdateRecordFieldsAsync("sprk_todo", Guid.NewGuid(), …)` | the create census (UNLISTED) |
+| P3: `entity.Attributes.Add("ownerid", …)` | the owner-write census |
+| P4: `{ { "ownerid", … } }` | the owner-write census |
+| P5: recovery removed | 6 resolver / JOIN recovery tests |
+| P6: depth limit answers ordinary | the depth test |
+| P7: stale pre-change "already owned" | the concurrent re-owner test. First attempt did NOT bite: the harness handed back the live row. The test now swaps in a new row version, and the plant bites. |
+| P8: unconditional routing write | 2 routing tests |
+| P9: invoice undo removed | the invoice test |
+| P10: G5 only for filed children (the r2 scope) | 3 tool tests |
+| P11: no "for" column | 3 tool tests |
+| P12: JOIN without `AttachColumns` | the JOIN test |
+| P13: a forged `RecordOwnerResolution.Owned(…)` | the forging guard |
+| P14: `sprk_emailreviewlog` dropped from the JSON | the codified-set guard |
+| P15: the spend signal's owner bind removed | the per-site check and the owner-write census |
+
+**Test harness.** `OwnershipDirectory` gained fault hooks: assignment fault (optionally after applying), owner-read
+fault and restore fault. Non-owner updates now WRITE their columns, with `DBNull` clearing.
+
+**Test scope.** These are the items named above, plus the merge's contract updates. No other test was changed.
+
+### 13e. Placement and component justification (CLAUDE.md §10 / §11)
+
+There is no new service, endpoint, DI registration, option, job or package. The changes:
+
+- **Two new constructor dependencies,** each on an unconditionally registered singleton (no asymmetric registration,
+  §10 F.1):
+  - `IFieldMappingDataverseService` on `CommunicationEnrichmentService`. Existing: the only conditional (`If-Match`)
+    write in the server. Extension: reused, not a new method. Cost of doing nothing: the routing race stays open.
+  - `IIdentityNormalizationService` on `DataverseCreateRecordHandler`. Existing: task 141's linked-contact read, used
+    by 152's writers. Cost of doing nothing: round 7's "record the person" cannot name a contact.
+- **New members on existing types:**
+  - `RecordReparent.AttachColumns` (b1);
+  - in `RecordOwnershipResolver`: `ReadOwningTeamAsync`, `RecoverFromFailedAssignmentAsync`, `RestoreFilingAsync`
+    (b1's `CompensateAsync` reworked), and the event ids `ReparentOwnerAssignmentFailed` / `ReparentLeftInconsistent`;
+  - `ThreadResolver.ThreadLookupOnCommunication` (a const);
+  - in `OwnedChildWrite`: `PathFor`, `WritePath`, `PerUserTables`, `KeepsItsCreatorWhenUnfiled`, `ForPersonColumns`,
+    `ForPersonColumn`, `WithLookup`, `Sets`, and `Outcome.SecureFilingRefused`;
+  - in `DataverseCreateRecordHandler`: `WithForPersonAsync` and `LinkedContactAsync`.
+
+  None duplicates an existing owner rule. Every owner still comes from the one resolver; the new code decides only
+  WHEN to ask it and what to do on failure.
+- **Publish size.** Not measured here; the main session measures it.
+
+### 13f. Not closed (and why)
+
+- **Owner question: a CHILD re-filed OUT of a secure root** (verifier OBSERVATION). F3 limits un-securing a ROOT to
+  Full Access holders plus the creator. Round 6 says un-securing a related record is "an explicit act by the people F3
+  allows", but it addresses secured work assignments and projects (roots).
+  - **Question:** must the same F3 limit apply when a document, event or to-do is moved out of a secure root? Today
+    Write on the child plus AppendTo on the target is enough.
+  - **Recommendation:** yes. Every re-file route would ask F3 rights on the secure root being left: the PUT documents
+    route, the event PUT, `associate-record`, `dataverse.update_record`, and inbound filing (which only adds).
+  - **Not implemented:** it is a new authorization rule the owner has not stated for children.
+- **E1 vs owner round 5** (for the main session to reconcile, as the verifier asked). Round 5 says BFF-created rows go
+  to the creating identity's BU team. E1 keeps UNFILED communications with their creator. Recommendation:
+  - unfiled inbound / outbound EMAIL → the creating identity's BU team;
+  - unfiled CHAT messages and DRAFTS stay with their creator. Direct-thread privacy rests on per-participant shares,
+    the master thread keys on the owning user, and a team-owned draft exposes unsent mail.
+
+  This needs the owner's yes, because it changes who can read unfiled mail. Nothing changed here.
+- **S6 b** (a work assignment under a secure matter becomes secure) is **task 158** (owner round 6). It is not
+  implemented here. The chat tool refuses that create (§13b). `POST /api/v1/work-assignments` still writes
+  `sprk_matterid`, which the table lacks: a pre-existing bug, recorded for 158.
+- **E2, E3 / G146-2, trigger 3 → task 149:** unchanged.
+- **Live gates, all main session:**
+  - G146-1: the 9 → 26 role extension, a HARD pre-deploy gate, approved by owner round 7 item 4 (§13c);
+  - G146-2 / G146-5: default-team Read on `sprk_emailreviewlog`, and roles for the Dev 1 / Test 1 default teams;
+  - G146-3: hold-alert recipients;
+  - G146-4: the step-8 live check after deploy with 149. It now also covers the AI create path: a chat-created unfiled
+    to-do is owned by the caller's BU team with Assigned To = their contact.
+- **Main session:** publish size; closing #1034 after merge; the PR (§13g); the tool-description follow-up (§13b).
+
+### 13g. PR description addendum (append to §12f)
+
+> **b2 (owner round 7):**
+>
+> - `dataverse.create_record` applies the G5 pattern to EVERY create: an as-the-caller rights check, an app-only
+>   create owned by the resolver's team, and the caller in the table's Assigned-To / "for" column. This is a §6.5
+>   **path B** amendment of spaarke-ai-architecture-redesign-r1's "user-OBO for all Dataverse tool access" MUST, and it
+>   supersedes r2's path A.
+> - The creator is kept only for per-user tables, unfiled communications (E1) and non-user-owned tables.
+> - `email.draft` is unchanged: filed drafts are G5, unfiled drafts follow E1.
+>
+> **G146-1 (Secure Record Owner role, 9 → 26 tables) must run BEFORE this deploys.** A re-file whose owner assignment
+> fails is now rolled back (or left in the safe direction) and logged CRITICAL. The FR-E7 routing owner write is
+> conditional on the version its filing was read at.

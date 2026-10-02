@@ -266,6 +266,98 @@ public class SecureChildOwnershipTests
     }
 
     // =====================================================================================
+    // Create — a record's DEFAULT thread (FR-09 Tier 2; owner S6 a) and the per-user master (Tier 3; E2)
+    // Task 146 b2 (verifier GAP, AC2/AC17): nothing pinned this owner — a hard-coded team survived every test.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("secure")]
+    [InlineData("ordinary")]
+    public async Task DefaultRecordThread_IsOwnedByItsRecordsTeam_TheNamedSecureTeamWhenSecure(string kind)
+    {
+        var matter = kind == "secure" ? SecureMatter : OrdinaryMatter;
+        var expectedTeam = kind == "secure" ? Directory.SecureNamedTeam : Directory.ChildTeam;
+        var communicationId = Guid.NewGuid();
+        var (resolver, created, assigned) = DefaultThreads(World().Resolver(), Message(communicationId,
+            regarding: new EntityReference("sprk_matter", matter)));
+
+        var threadId = await resolver.ResolveAndAssignThreadAsync(Request(communicationId), CancellationToken.None);
+
+        threadId.Should().NotBeNull();
+        var thread = created.Should().ContainSingle().Which;
+        thread.LogicalName.Should().Be("sprk_communicationthread");
+        thread.GetAttributeValue<bool>("sprk_isdefaultthread").Should().BeTrue("the Tier-2 per-record default");
+        var owner = thread.GetAttributeValue<EntityReference>("ownerid");
+        owner.Should().NotBeNull("a record's default thread is a child of the record, never left to its creator");
+        owner.LogicalName.Should().Be("team");
+        owner.Id.Should().Be(expectedTeam);
+        owner.Id.Should().NotBe(Directory.SecureDefaultTeam, "the Secure BU's default team is a decoy");
+        assigned.Should().ContainSingle("the message joins the thread it opened");
+    }
+
+    [Fact]
+    public async Task DefaultRecordThread_OfAFlaggedButNotIsolatedProject_IsRefused_CreatesNothing_LeavesTheMessageUnthreaded()
+    {
+        var communicationId = Guid.NewGuid();
+        var (resolver, created, assigned) = DefaultThreads(World().Resolver(), Message(communicationId,
+            regarding: new EntityReference("sprk_project", FlaggedNotIsolatedProject)));
+
+        var threadId = await resolver.ResolveAndAssignThreadAsync(Request(communicationId), CancellationToken.None);
+
+        threadId.Should().BeNull("thread resolution is best-effort (NFR-02): a refusal leaves the message unthreaded");
+        created.Should().BeEmpty("no record thread is created with an ordinary owner for a flagged root");
+        assigned.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task JoiningASecureRecordsThread_WhenTheOwnerAssignmentFails_TakesTheMessageBackOutOfTheThread()
+    {
+        // Task 146 b2 (verifier RESIDUAL FAIL-OPEN): the JOIN writes the message's thread lookup, then its owner moves to the
+        // secure record's team. When that assignment fails, the thread lookup the JOIN wrote is put back (AttachColumns),
+        // so the message never sits in a secure record's thread while owned elsewhere.
+        var communicationId = Guid.NewGuid();
+        var threadId = Guid.NewGuid();
+        var previousThread = new EntityReference("sprk_communicationthread", Guid.NewGuid());
+        var world = World().WithRecord("sprk_communication", communicationId, Directory.ChildBu, owningTeam: Directory.ChildTeam,
+            extra: new() { ["sprk_communicationthread"] = previousThread });
+        world.AssignmentFault = new InvalidOperationException("Read Privilege Check For Owner failed");
+        var threads = new Mock<IGenericEntityService>();
+        threads
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", threadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communicationthread", threadId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+            });
+
+        var act = () => ThreadResolver.AssignToThreadReconcilingOwnerAsync(
+            threads.Object, world.Resolver(), communicationId, threadId,
+            _ =>
+            {
+                world.Row("sprk_communication", communicationId)[ThreadResolver.ThreadLookupOnCommunication] =
+                    new EntityReference("sprk_communicationthread", threadId);
+                return Task.CompletedTask;
+            },
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        world.Row("sprk_communication", communicationId).GetAttributeValue<EntityReference>("sprk_communicationthread")
+            .Should().Be(previousThread, "the JOIN is undone with its failed owner assignment");
+    }
+
+    [Fact]
+    public async Task MasterThread_OfAnUnfiledMessage_KeepsItsCreator_NoTeamOwner()
+    {
+        // Tier 3 (no regarding): the per-user master catch-all is per-user by design (E2) — no owner is written.
+        var communicationId = Guid.NewGuid();
+        var (resolver, created, _) = DefaultThreads(World().Resolver(), Message(communicationId, regarding: null));
+
+        var threadId = await resolver.ResolveAndAssignThreadAsync(Request(communicationId), CancellationToken.None);
+
+        threadId.Should().NotBeNull();
+        created.Should().ContainSingle().Which.Contains("ownerid").Should().BeFalse();
+    }
+
+    // =====================================================================================
     // Content rows — a communication's participant index
     // =====================================================================================
 
@@ -433,6 +525,57 @@ public class SecureChildOwnershipTests
             Array.Empty<Sprk.Bff.Api.Services.Communication.Threads.IThreadKeyStrategy>(), entities, ownership,
             NullLogger<ThreadResolver>.Instance), created);
     }
+
+    /// <summary>
+    /// A thread resolver whose channel key never groups (Tier-1 miss → the FR-09 fallback ladder), over a message row
+    /// that is filed under <c>regarding</c> (Tier 2) or under nothing (Tier 3); no default thread exists yet.
+    /// </summary>
+    private static (ThreadResolver Resolver, List<Entity> Created, List<Dictionary<string, object>> Assigned) DefaultThreads(
+        IRecordOwnershipResolver ownership, Entity message)
+    {
+        var created = new List<Entity>();
+        var assigned = new List<Dictionary<string, object>>();
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communication", message.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(message);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection()); // no default thread exists yet
+        entities
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => created.Add(e))
+            .ReturnsAsync(Guid.NewGuid);
+        entities
+            .Setup(e => e.UpdateAsync("sprk_communication", message.Id, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => assigned.Add(f))
+            .Returns(Task.CompletedTask);
+
+        var strategy = new Mock<Sprk.Bff.Api.Services.Communication.Threads.IThreadKeyStrategy>();
+        strategy.SetupGet(s => s.SupportedType).Returns(CommunicationType.Email);
+        strategy
+            .Setup(s => s.ResolveAsync(It.IsAny<ThreadResolutionRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Sprk.Bff.Api.Services.Communication.Threads.ThreadKeyResolution(null, CreateWhenAbsent: false));
+
+        var resolver = new ThreadResolver(new[] { strategy.Object }, entities.Object, ownership, NullLogger<ThreadResolver>.Instance);
+        return (resolver, created, assigned);
+    }
+
+    private static Entity Message(Guid id, EntityReference? regarding)
+    {
+        var row = new Entity("sprk_communication", id) { ["ownerid"] = new EntityReference("systemuser", Directory.CallerUserId) };
+        if (regarding is not null)
+            row[regarding.LogicalName == "sprk_matter" ? "sprk_regardingmatter" : "sprk_regardingproject"] = regarding;
+        return row;
+    }
+
+    private static ThreadResolutionRequest Request(Guid communicationId) => new()
+    {
+        CommunicationId = communicationId,
+        ChannelType = CommunicationType.Email,
+        Direction = CommunicationDirection.Incoming,
+        Message = new NormalizedMessage { Direction = CommunicationDirection.Incoming, Subject = "Re: filing" },
+    };
 
     private static (CommunicationParticipantIndexer Indexer, List<Entity> Created) Indexer(IRecordOwnershipResolver ownership)
     {

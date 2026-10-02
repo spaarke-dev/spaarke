@@ -189,6 +189,9 @@ public sealed class ThreadResolver : IThreadResolver
     /// metadata 2026-08-03 — the same exclusion <c>CommunicationThreadReadService.ThreadRegardingFields</c> makes).
     /// Selecting a column the table lacks faults the whole read.
     /// </summary>
+    /// <summary>The message's thread lookup — the column a JOIN writes (and a failed owner assignment puts back).</summary>
+    internal const string ThreadLookupOnCommunication = "sprk_communicationthread";
+
     private static readonly string[] ThreadRegardingColumns = RegardingFieldMap.All
         .Where(x => x.RegardingField != "sprk_regardingreportcard")
         .Select(x => x.RegardingField)
@@ -267,6 +270,9 @@ public sealed class ThreadResolver : IThreadResolver
                 RecordId = communicationId,
                 ParentChanges = new Dictionary<string, EntityReference?>(),
                 InheritedParents = new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(anchor.RecordType, recordId) },
+                // Task 146 b2: the column the JOIN writes — put back if the owner assignment that must follow it fails, so
+                // the message is never left in a secure record's thread while owned elsewhere.
+                AttachColumns = new[] { ThreadLookupOnCommunication },
                 WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
             },
             assign,

@@ -21,10 +21,12 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// unified-access-control-r2 task 146 r2 (verifier items 2 and 6) — the chat tools that write Dataverse AS THE USER, driven
 /// through their REAL handlers and the REAL <see cref="RecordOwnershipResolver"/> over <see cref="Directory"/>:
 /// <list type="bullet">
-/// <item><c>dataverse.create_record</c> and <c>email.draft</c> (owner decision S1 option (1), G5 refined): a CHILD row
-/// filed under a record is checked AS THE CALLER (Create/Append, AppendTo on every record named, no owner or field-secured
-/// column), then created by the APPLICATION owned by the team the resolver names — the named Secure team for a secure
-/// record — never by the caller; refusals create nothing.</item>
+/// <item><c>dataverse.create_record</c> and <c>email.draft</c> (owner decision S1 option (1), G5 refined; owner round 7
+/// item 3, §6.5 path B): a create is checked AS THE CALLER (Create/Append, AppendTo on every record named, no owner or
+/// field-secured column), then created by the APPLICATION owned by the team the resolver names — the named Secure team
+/// for a secure record, the parent's (or, unfiled, the caller's) business-unit team otherwise — with the caller named in
+/// the table's "for" column; never owned by the caller. The creator is kept only where the resolver keeps it (per-user
+/// tables, unfiled communications — E1 — and tables with no user/team ownership). Refusals create nothing.</item>
 /// <item><c>dataverse.update_record</c>: a re-file of a child re-derives its owner (<c>ReparentAsync</c>): the caller's own
 /// PATCH runs only after the owner is decided, then the owner is assigned and read back.</item>
 /// </list>
@@ -39,8 +41,13 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     private static readonly Guid FlaggedProject = Guid.Parse("a2460000-0000-4000-8000-000000000003");
     private static readonly Guid OrdinaryDocument = Guid.Parse("a2460000-0000-4000-8000-000000000004");
     private static readonly Guid Caller = Guid.Parse("a2460000-0000-4000-8000-0000000000aa");
+    private static readonly Guid CallerOid = Guid.Parse("a2460000-0000-4000-8000-0000000000ab");
+
+    /// <summary>The caller's LINKED contact (task 141) — the person a contact-typed "for" column names.</summary>
+    private static readonly Guid CallerContact = Guid.Parse("a2460000-0000-4000-8000-0000000000ac");
 
     private readonly Directory _world = Directory.Standard()
+        .WithUser(Caller, CallerOid, Directory.ChildBu) // the caller sits in the child business unit (owner round 5)
         .WithSecureRoot("sprk_matter", SecureMatter)
         .WithOrdinaryRoot("sprk_matter", OrdinaryMatter)
         .WithRecord("sprk_project", FlaggedProject, Directory.ChildBu, isSecure: true, owningTeam: Directory.ChildTeam)
@@ -148,9 +155,107 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     }
 
     [Fact]
-    public async Task CreateRecord_AnUnfiledToDo_IsStillCreatedAsTheUser()
+    public async Task CreateRecord_AnUnfiledToDo_IsCreatedByTheApp_OwnedByTheCallersBusinessUnitTeam_ForTheCaller()
     {
+        // Owner round 7 item 3 (G5 for every create) + round 5 (a record is assigned to the creating user's business-unit
+        // team): the r2 "unfiled stays run-as-user" exception is superseded.
         var result = await CreateRecord("sprk_todo", ("sprk_name", JsonSerializer.SerializeToElement("Call back")));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().BeEmpty("never owned by the individual");
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Owner(fields).Should().Be(Directory.ChildTeam, "the caller's business-unit default team");
+        Bind(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({CallerContact:D})",
+            "the person the to-do is FOR is the caller's linked contact (Created By is the application)");
+    }
+
+    [Fact]
+    public async Task CreateRecord_AFiledToDo_NamesTheCallerInAssignedTo_WithoutAskingAppendToOnTheirContact()
+    {
+        // The "for" column is SERVER-set: it names the caller, so it costs no AppendTo check (the caller may lack it).
+        _user.NoAppendTo.Add(CallerContact);
+
+        var result = await CreateRecord("sprk_todo", Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Owner(fields).Should().Be(Directory.SecureNamedTeam);
+        Bind(fields, "sprk_AssignedTo@odata.bind").Should().Be($"/contacts({CallerContact:D})");
+    }
+
+    [Fact]
+    public async Task CreateRecord_ASuppliedAssignee_IsNeverOverwritten()
+    {
+        var colleague = Guid.NewGuid();
+
+        var result = await CreateRecord("sprk_todo",
+            Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter),
+            Lookup("sprk_assignedto", "contact", colleague));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Bind(_appCreates.Should().ContainSingle().Subject.Fields, "sprk_AssignedTo@odata.bind")
+            .Should().Be($"/contacts({colleague:D})");
+    }
+
+    [Fact]
+    public async Task CreateRecord_ACallerWithNoLinkedContact_IsStillCreated_TeamOwned_WithTheAssigneeBlank()
+    {
+        var handler = CreateRecordHandler(identity: IdentityNormalizationFixtures.NoLinkedContact());
+
+        var result = await handler.ExecuteChatAsync(
+            CreateContext("sprk_todo", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter)),
+            BuildAnalysisTool(nameof(DataverseCreateRecordHandler)), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Owner(fields).Should().Be(Directory.ChildTeam);
+        fields.Keys.Should().NotContain(k => k.StartsWith("sprk_AssignedTo", StringComparison.Ordinal),
+            "never a team, never an email match — blank when there is no linked contact");
+    }
+
+    [Fact]
+    public async Task CreateRecord_AnUnfiledMatter_IsOwnedByTheCallersBusinessUnitTeam_AndNamesTheCallerAsAssignedToInternal()
+    {
+        // A root created from chat follows the Office quick-create precedent (task 080 owner, A7 "for" column).
+        var result = await CreateRecord("sprk_matter", ("sprk_mattername", JsonSerializer.SerializeToElement("Acme v Beta")));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_matter").Subject.Fields;
+        Owner(fields).Should().Be(Directory.ChildTeam);
+        Bind(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallerContact:D})");
+    }
+
+    [Fact]
+    public async Task CreateRecord_AWorkAssignmentFiledToASecureMatter_IsRefused_ItMustBeSecuredByProvisioning_Task158()
+    {
+        // Owner round 6: a work assignment under a secure root is itself secure — through provisioning (task 158), never
+        // a bare re-own by the Secure team. From chat it is refused, and nothing is created.
+        var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("sprk_workspacelayout")]   // per-user by design
+    [InlineData("sprk_mattertype_ref")]    // organization-owned: no owner to decide
+    public async Task CreateRecord_ATableThatKeepsItsCreator_IsStillCreatedAsTheUser(string table)
+    {
+        var result = await CreateRecord(table, ("sprk_name", JsonSerializer.SerializeToElement("x")));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().ContainSingle();
+        _appCreates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateRecord_AnUnfiledCommunication_IsStillCreatedAsTheUser_E1()
+    {
+        // The resolver keeps an unfiled communication's creator (escalation E1, pending the main session's reconciliation
+        // with owner round 5) — G5 follows the resolver, it does not override it.
+        var result = await CreateRecord("sprk_communication", ("sprk_name", JsonSerializer.SerializeToElement("Note")));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
         _user.Posts.Should().ContainSingle();
@@ -164,17 +269,21 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         var result = await CreateRecord("task", Lookup("regardingobjectid", "sprk_matter", SecureMatter));
 
         result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed,
+            "the Secure team may own only the ownership set's child tables (the codified role set)");
         _user.Posts.Should().BeEmpty();
         _appCreates.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task CreateRecord_ATableOutsideTheOwnershipSetFiledToAnOrdinaryMatter_IsStillCreatedAsTheUser()
+    public async Task CreateRecord_ATableOutsideTheOwnershipSetFiledToAnOrdinaryMatter_IsCreatedByTheApp_OwnedByThatMattersTeam()
     {
+        // Owner round 7 item 3: G5 for every create — an activity regarding an ordinary matter is that matter's team's.
         var result = await CreateRecord("task", Lookup("regardingobjectid", "sprk_matter", OrdinaryMatter));
 
         result.Success.Should().BeTrue(result.ErrorMessage);
-        _user.Posts.Should().ContainSingle();
+        _user.Posts.Should().BeEmpty();
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam);
     }
 
     [Fact]
@@ -220,6 +329,25 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         Bind(fields, "sprk_SentBy@odata.bind").Should().Be($"/systemusers({Caller:D})",
             "S1: Created By is the application, so the drafting user is recorded as the sender");
         ((JsonElement)fields["statuscode"]!).GetInt32().Should().Be(1, "still a DRAFT");
+    }
+
+    [Fact]
+    public async Task EmailDraft_Unfiled_IsStillCreatedAsTheDrafter_E1()
+    {
+        // An unfiled draft keeps its creator — the resolver's own answer for an unfiled communication (E1): a team-owned
+        // draft would show one person's unsent email to their whole business unit.
+        var handler = new EmailDraftToolHandler(
+            _user, Mock.Of<IEmailDraftAi>(), CoreAncestorResolverFixtures.Inert(), CreateLogger<EmailDraftToolHandler>(),
+            _world.Resolver(), _appOnly.Object);
+        var args = JsonSerializer.Serialize(new { subject = "Hello", body = "Draft.", to = new[] { "a@b.example" } });
+
+        var result = await handler.ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: args) with { UserId = Guid.NewGuid().ToString() },
+            BuildAnalysisTool(nameof(EmailDraftToolHandler)), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().ContainSingle();
+        _appCreates.Should().BeEmpty();
     }
 
     // =====================================================================================
@@ -306,9 +434,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     // Harness
     // =====================================================================================
 
-    private DataverseCreateRecordHandler CreateRecordHandler(IRecordOwnershipResolver? resolver = null) =>
+    private DataverseCreateRecordHandler CreateRecordHandler(
+        IRecordOwnershipResolver? resolver = null,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService? identity = null) =>
         new(_user, CreateLogger<DataverseCreateRecordHandler>(), new HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
-            resolver ?? _world.Resolver(), _appOnly.Object);
+            resolver ?? _world.Resolver(), _appOnly.Object,
+            identity ?? IdentityNormalizationFixtures.WithContact(CallerContact).Object);
 
     private Task<ToolResult> CreateRecord(string table, params (string Column, JsonElement Value)[] item) =>
         CreateRecordHandler().ExecuteChatAsync(
@@ -363,8 +494,13 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         {
             ["sprk_todo"] = "sprk_todos", ["sprk_matter"] = "sprk_matters", ["sprk_project"] = "sprk_projects",
             ["sprk_document"] = "sprk_documents", ["sprk_communication"] = "sprk_communications",
-            ["task"] = "tasks", ["systemuser"] = "systemusers",
+            ["task"] = "tasks", ["systemuser"] = "systemusers", ["contact"] = "contacts",
+            ["sprk_workassignment"] = "sprk_workassignments", ["sprk_workspacelayout"] = "sprk_workspacelayouts",
+            ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
         };
+
+        /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
+        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref" };
 
         /// <summary>table → (lookup column, target table, navigation property).</summary>
         private static readonly Dictionary<string, (string Column, string Target, string Navigation)[]> Lookups = new()
@@ -373,8 +509,11 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
                 ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+                ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
             },
+            ["sprk_matter"] = new[] { ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal") },
+            ["sprk_workassignment"] = new[] { ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter") },
             ["sprk_communication"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
@@ -391,7 +530,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         public HashSet<string> Held { get; } = new(StringComparer.OrdinalIgnoreCase)
         {
             "prvCreatesprk_todo", "prvAppendsprk_todo", "prvCreatesprk_communication", "prvAppendsprk_communication",
-            "prvCreateActivity", "prvAppendActivity",
+            "prvCreateActivity", "prvAppendActivity", "prvCreatesprk_matter", "prvAppendsprk_matter",
+            "prvCreatesprk_workassignment", "prvAppendsprk_workassignment",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
@@ -462,7 +602,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     });
                 }
 
-                return Ok(new { EntitySetName = EntitySets[table], PrimaryIdAttribute = table == "task" ? "activityid" : table + "id" });
+                return Ok(new
+                {
+                    EntitySetName = EntitySets[table],
+                    PrimaryIdAttribute = table == "task" ? "activityid" : table + "id",
+                    OwnershipType = OrganizationOwned.Contains(table) ? "OrganizationOwned" : "UserOwned",
+                });
             }
 
             // A row read as the caller: "{set}({id})?$select=…".

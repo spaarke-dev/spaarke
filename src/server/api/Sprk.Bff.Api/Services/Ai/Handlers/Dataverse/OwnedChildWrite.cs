@@ -18,10 +18,16 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// individual". A run-as-user create leaves the row owned by the caller in their own business unit, readable by every
 /// colleague with ordinary depth even when it is filed to a secure record. Create-then-assign (option 2) leaves that
 /// window open; widening user roles with prvAssign (option 3) is forbidden.</para>
-/// <para><b>CLAUDE.md §6.5 path A, recorded in the task 146 note.</b> spaarke-ai-architecture-redesign-r1 binds its tool
-/// plane "MUST run user-OBO for all Dataverse tool access" (FR-P0-10). For a FILED child row only, the create runs
-/// app-only after the as-user check below — the owner's S1 decision on exactly these handlers. Every unfiled create, and
-/// every create of a table outside the ownership set, still runs as the user, unchanged.</para>
+/// <para><b>CLAUDE.md §6.5 path B — owner round 7 item 3 (2026-10-02), superseding the r2 path-A exception.</b>
+/// spaarke-ai-architecture-redesign-r1 bound its tool plane "MUST run user-OBO for all Dataverse tool access"
+/// (FR-P0-10, the handlers' "User-OBO ONLY" rule). The owner amended that rule for <c>dataverse.create_record</c> and
+/// <c>email.draft</c>: "apply the G5 pattern — check the caller's rights AS THE USER, create AS THE APP owned by the team
+/// (the named secure team under a secure parent; otherwise the RecordOwnershipResolver team), record the person in the
+/// table's Assigned-To / 'for' column where one exists" (amendment recorded in that project's spec and in the task 146
+/// note §13). <c>dataverse.create_record</c> therefore takes this path for EVERY create (<see cref="PathFor"/>), except
+/// where the resolver keeps the creator (unfiled communications/threads, E1/E2), per-user tables, and tables with no
+/// user/team ownership. <c>email.draft</c> takes it for a filed draft (an unfiled draft keeps its creator, E1).
+/// Reads, updates and deletes stay user-OBO.</para>
 /// <para><b>What "as the user" covers</b> — everything a run-as-user create would have had Dataverse check, so the
 /// app-only create grants nothing the caller lacks: (1) the table's Create privilege, and Append when the row sets a
 /// lookup, by the privilege names the table's own metadata declares (activity tables share <c>prvCreateActivity</c>);
@@ -56,12 +62,120 @@ internal static class OwnedChildWrite
             .ToArray();
 
     /// <summary>
-    /// True when a create of <paramref name="table"/> takes the owned path: the table is a CHILD in the ownership set
-    /// (<see cref="RecordOwnershipResolver.IsReparentableChild"/> — every one UserOwned in live metadata) and the row names
-    /// a parent. A root's ownership is provisioning's (S6); an unfiled row keeps its creator.
+    /// True when an <c>email.draft</c> takes the owned path: a draft (a <c>sprk_communication</c>, a CHILD in the ownership
+    /// set) that names a parent. An unfiled draft keeps its creator — the resolver's own answer for an unfiled
+    /// communication (escalation E1: the per-user master thread and Direct-thread privacy rest on it).
     /// </summary>
     internal static bool AppliesTo(string table, DataverseWriteItemMapper.MappedItem item) =>
         RecordOwnershipResolver.IsReparentableChild(table) && ParentsOf(item).Count > 0;
+
+    // ── Owner round 7 item 3 (2026-10-02): G5 for EVERY create of dataverse.create_record ────────────────────────────
+
+    /// <summary>Which way a <c>dataverse.create_record</c> create is written.</summary>
+    internal enum WritePath
+    {
+        /// <summary>G5: checked AS THE CALLER, created by the APPLICATION owned by the resolver's team.</summary>
+        Owned,
+
+        /// <summary>Created as the caller (their own create; Dataverse authorizes it and the caller owns it).</summary>
+        RunAsUser,
+    }
+
+    /// <summary>
+    /// Tables whose rows are per-user by design and stay owned by their user (task 146 constraint "per-user artifacts"):
+    /// a team owner would show one person's notification, layout, navigation pins, preferences or chat history to their
+    /// whole business unit.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> PerUserTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "appnotification", "sprk_notificationoutbox", "sprk_workspacelayout", "sprk_navitem",
+        "sprk_userpreferences", "sprk_userprofile", "sprk_aichatmessage", "sprk_aichatsummary",
+    };
+
+    /// <summary>
+    /// Owner round 7 item 3: the path a <c>dataverse.create_record</c> create of <paramref name="table"/> takes. Every
+    /// create is G5 (<see cref="WritePath.Owned"/>) — owned by the team <see cref="IRecordOwnershipResolver"/> names, never
+    /// the individual — except where the resolver's own rules keep the creator:
+    /// <list type="bullet">
+    /// <item>a table whose metadata declares no user/team ownership (<paramref name="ownershipType"/> is neither
+    /// <c>UserOwned</c> nor <c>TeamOwned</c> — organization-owned rows have no owner to decide);</item>
+    /// <item>a per-user table (<see cref="PerUserTables"/>);</item>
+    /// <item>an UNFILED communication or thread (escalation E1 / E2: <see cref="UnfiledOwnership.KeepCreator"/>).</item>
+    /// </list>
+    /// A run-as-user create still refuses a filing under a SECURE record (the handler's secure-filing check).
+    /// </summary>
+    internal static WritePath PathFor(string table, DataverseWriteItemMapper.MappedItem item, string? ownershipType)
+    {
+        if (ownershipType is not ("UserOwned" or "TeamOwned"))
+            return WritePath.RunAsUser;
+        if (PerUserTables.Contains(table))
+            return WritePath.RunAsUser;
+        if (KeepsItsCreatorWhenUnfiled(table) && ParentsOf(item).Count == 0)
+            return WritePath.RunAsUser;
+        return WritePath.Owned;
+    }
+
+    /// <summary>Communications and threads filed under nothing keep their creator (E1 / E2) — the resolver's
+    /// <see cref="UnfiledOwnership.KeepCreator"/> answer, honoured here rather than overridden.</summary>
+    internal static bool KeepsItsCreatorWhenUnfiled(string table) =>
+        string.Equals(table, "sprk_communication", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(table, "sprk_communicationthread", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The column a table names the person a record is FOR in, and the table that column looks up.</summary>
+    internal sealed record ForPersonColumn(string Column, string RelatedTable);
+
+    /// <summary>
+    /// Owner round 7 item 3: "record the person in the table's Assigned-To / 'for' column where one exists". Each entry
+    /// follows the precedent already shipped for that table, so one table never has two "for" columns:
+    /// <c>sprk_todo</c> / <c>sprk_event</c> → <c>sprk_assignedto</c> (contact; task 152, #1044);
+    /// <c>sprk_matter</c> / <c>sprk_project</c> → <c>sprk_assignedtointernal</c> (contact; owner A7, Office quick-create);
+    /// <c>sprk_communication</c> → <c>sprk_sentby</c> (systemuser; S1, the email draft). <c>sprk_workassignment</c> carries
+    /// both <c>sprk_assignedto</c> and <c>sprk_assignedtointernal</c> with no shipped precedent for either, so it is not
+    /// defaulted (task note §13). A table not listed has no "for" column.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, ForPersonColumn> ForPersonColumns =
+        new Dictionary<string, ForPersonColumn>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_todo"] = new(AssignedToDefaults.AssignedToAttribute, "contact"),
+            ["sprk_event"] = new(AssignedToDefaults.AssignedToAttribute, "contact"),
+            ["sprk_matter"] = new("sprk_assignedtointernal", "contact"),
+            ["sprk_project"] = new("sprk_assignedtointernal", "contact"),
+            ["sprk_communication"] = new("sprk_sentby", "systemuser"),
+        };
+
+    /// <summary>
+    /// <paramref name="item"/> with <paramref name="column"/> set to a lookup of <paramref name="relatedTable"/>
+    /// (<paramref name="recordId"/>) in the write mapper's object form — so the mapper resolves its navigation property
+    /// from metadata, as for every other lookup. The caller adds it only when the item does not set the column itself (a
+    /// supplied value is never overwritten).
+    /// </summary>
+    internal static JsonElement WithLookup(JsonElement item, string column, string relatedTable, Guid recordId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in item.EnumerateObject())
+            {
+                property.WriteTo(writer);
+            }
+
+            writer.WritePropertyName(column);
+            writer.WriteStartObject();
+            writer.WriteString("relatedTable", relatedTable);
+            writer.WriteString("recordId", recordId.ToString("D"));
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    /// <summary>True when <paramref name="item"/> sets <paramref name="column"/> itself (any value, including null).</summary>
+    internal static bool Sets(JsonElement item, string column) =>
+        item.ValueKind == JsonValueKind.Object
+        && item.EnumerateObject().Any(p => string.Equals(p.Name.Trim(), column, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>What the owned create (or a check) answered.</summary>
     internal sealed record Outcome
@@ -77,7 +191,16 @@ internal static class OwnedChildWrite
         /// <summary>A question asked as the caller failed at Dataverse — the caller's own error.</summary>
         public DataverseUserResponse? ClientFailure { get; init; }
 
-        public bool Succeeded => CreatedId is not null || (Denied is null && OwnerRefusal is null && ClientFailure is null);
+        /// <summary>
+        /// The row would be owned by the Secure team, but its table is not one that team may own from here — a root
+        /// (task 158 secures a work assignment or project filed under a secure record) or a table outside the ownership
+        /// set (the Secure Record Owner role holds no Read on it). Nothing is created.
+        /// </summary>
+        public string? SecureFilingRefused { get; init; }
+
+        public bool Succeeded =>
+            CreatedId is not null
+            || (Denied is null && OwnerRefusal is null && ClientFailure is null && SecureFilingRefused is null);
 
         public static readonly Outcome Allowed = new();
     }
@@ -114,6 +237,22 @@ internal static class OwnedChildWrite
         if (!owner.IsOwned)
             return new Outcome { OwnerRefusal = owner.IsRefused ? owner : RecordOwnerResolution.Refused(RecordOwnerRefusal.NoOwnerSource, owner.Reason ?? "no owner was resolved") };
 
+        // The Secure team may own only the CHILD tables of the ownership set (each in the codified Secure Record Owner role
+        // set, config/secure-record-owner-role.json). A root filed under a secure record is task 158's (it is secured
+        // through provisioning, never a bare re-own); any other table would be refused by Dataverse (no Read).
+        if (owner.IsSecureOwner && !RecordOwnershipResolver.IsReparentableChild(table))
+        {
+            return new Outcome
+            {
+                SecureFilingRefused = RecordOwnershipResolver.IsOwnershipParent(table)
+                    ? $"A '{table}' record cannot be created under a secure record from chat: it would itself have to be "
+                      + "made secure (its own owner team, container and sharing — the record's Make Secure path). It was "
+                      + "NOT created. Create it from the secure record itself."
+                    : $"A '{table}' record cannot be filed under a secure record from chat, and was NOT created. Create it "
+                      + "from the record itself.",
+            };
+        }
+
         var fields = BodyFields(item.JsonBody);
         fields["ownerid@odata.bind"] = $"/teams({owner.OwningTeamId!.Value})";
 
@@ -138,7 +277,7 @@ internal static class OwnedChildWrite
         {
             return new Outcome
             {
-                Denied = $"Column '{serverOwned}' is set by the server for a record filed under another record — omit it.",
+                Denied = $"Column '{serverOwned}' is set by the server on a record the application creates for you — omit it.",
             };
         }
 
@@ -183,7 +322,7 @@ internal static class OwnedChildWrite
         {
             return new Outcome
             {
-                Denied = $"Column '{secured}' is field-secured and cannot be set from chat on a record filed under another record.",
+                Denied = $"Column '{secured}' is field-secured and cannot be set from chat on a record the application creates for you.",
             };
         }
 

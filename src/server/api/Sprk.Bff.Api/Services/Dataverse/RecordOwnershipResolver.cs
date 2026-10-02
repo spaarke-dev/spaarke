@@ -129,12 +129,17 @@ public interface IRecordOwnershipResolver
     /// Otherwise the resolution after the change and any reassignment succeeded.
     /// </returns>
     /// <remarks>
-    /// <b>A failed assignment is rolled back, never left half-done</b> (task 146 b1). When the owner assignment (or its
-    /// read-back) fails AFTER <paramref name="applyChange"/> wrote the change — a Secure Record Owner role still missing
-    /// Read on the table is the expected cause until gate G146-1 runs — the columns the change moved (its parent lookups
-    /// and <see cref="RecordReparent.AttachColumns"/>) are written back to their previous values, so the row's filing
-    /// matches the owner it still has, and the failure is logged CRITICAL (<c>ReparentOwnerAssignmentFailed</c>; a restore
-    /// that also fails is <c>ReparentLeftInconsistent</c>, for manual repair). The original failure then propagates.
+    /// <para><b>A failed assignment is rolled back, never left half-done</b> (task 146 b1/b2). When the owner assignment
+    /// (or its read-back) fails AFTER <paramref name="applyChange"/> wrote the change — a Secure Record Owner role still
+    /// missing Read on the table is the expected cause until gate G146-1 runs — the owner is read again: when it IS the
+    /// resolved team the assignment landed and the re-file stands; otherwise the columns the change moved (its parent
+    /// lookups and <see cref="RecordReparent.AttachColumns"/>) are written back to their previous values, so the row's
+    /// filing matches the owner it still has, and the failure is logged CRITICAL (<c>ReparentOwnerAssignmentFailed</c>).
+    /// When the owner cannot be read at all, the safe direction is taken (put back for a move into a secure record, kept
+    /// otherwise) and logged <c>ReparentLeftInconsistent</c>, as is a restore that also fails. The original failure then
+    /// propagates.</para>
+    /// <para>The "already owned" check reads the owner AFTER the change, so an owner another writer set in between is
+    /// never mistaken for the resolved one.</para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">The reassignment did not read back as applied (the change was rolled
     /// back first).</exception>
@@ -851,28 +856,27 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         var teamId = resolution.OwningTeamId!.Value;
-        var currentOwner = current.GetAttributeValue<EntityReference>(OwnerColumn);
-        if (currentOwner is not null
-            && string.Equals(currentOwner.LogicalName, TeamEntity, StringComparison.OrdinalIgnoreCase)
-            && currentOwner.Id == teamId)
-        {
-            return resolution; // already owned by the resolved team
-        }
 
         // Ownership is assigned on its own, not folded into the field update: Dataverse treats an owner change as a
         // distinct operation, and combining them is a documented way to have one of the two quietly not happen
         // (the ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync rationale).
         try
         {
+            // The owner is read AFTER the change, never taken from the row read before it (task 146 b2): another writer
+            // may have re-owned the row in between — FR-E7 category routing of an unfiled communication is one — and a
+            // stale "already owned" answer would leave the re-filed row with that writer's owner.
+            if (await ReadOwningTeamAsync(request, ct).ConfigureAwait(false) == teamId)
+            {
+                return resolution; // already owned by the resolved team
+            }
+
             await _dataverse.UpdateAsync(
                 request.EntityLogicalName,
                 request.RecordId,
                 new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, teamId) },
                 ct).ConfigureAwait(false);
 
-            var readBack = await _dataverse.RetrieveAsync(
-                request.EntityLogicalName, request.RecordId, new[] { OwningTeamColumn }, ct).ConfigureAwait(false);
-            if (readBack?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id != teamId)
+            if (await ReadOwningTeamAsync(request, ct).ConfigureAwait(false) != teamId)
             {
                 throw new InvalidOperationException(
                     $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as team {teamId:D} "
@@ -881,10 +885,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
         catch (Exception assignFailure)
         {
-            // The change is already written and the owner is not: the row is filed under its NEW parents while still
-            // owned for its OLD ones — for a move under a secure record, readable in an ordinary business unit (ADR-003
-            // fail-open, task 146 b1 verifier item). Put the filing back first, then surface the failure.
-            await CompensateAsync(request, restore, teamId, assignFailure).ConfigureAwait(false);
+            // The change is already written and the owner may not be: the row would be filed under its NEW parents while
+            // still owned for its OLD ones — for a move under a secure record, readable in an ordinary business unit
+            // (ADR-003 fail-open, task 146 b1/b2 verifier item). Recover first, then surface the failure.
+            if (await RecoverFromFailedAssignmentAsync(request, restore, resolution, assignFailure).ConfigureAwait(false))
+            {
+                return resolution; // the assignment landed despite the failure report: filing and owner agree
+            }
+
             throw;
         }
 
@@ -894,31 +902,106 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         return resolution;
     }
 
-    /// <summary>Event id of a re-file whose owner assignment failed AFTER the change was written (task 146 b1).</summary>
+    /// <summary>The team that owns the row now (<c>owningteam</c>), or <c>null</c> when a user owns it.</summary>
+    private async Task<Guid?> ReadOwningTeamAsync(RecordReparent request, CancellationToken ct)
+    {
+        var row = await _dataverse.RetrieveAsync(
+            request.EntityLogicalName, request.RecordId, new[] { OwningTeamColumn }, ct).ConfigureAwait(false);
+        return row?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
+    }
+
+    /// <summary>Event id of a re-file whose owner assignment failed AFTER the change was written and whose filing was
+    /// put back (task 146 b1/b2).</summary>
     public static readonly EventId ReparentOwnerAssignmentFailed = new(14601, nameof(ReparentOwnerAssignmentFailed));
 
-    /// <summary>Event id of a re-file that could NOT be put back after its owner assignment failed — the row needs
-    /// manual repair: it is filed under its new parents but owned for its old ones (task 146 b1).</summary>
+    /// <summary>Event id of a re-file left needing manual repair after its owner assignment failed: the filing could not
+    /// be put back, or the owner could not be confirmed (task 146 b1/b2). The log names the row and which way it is
+    /// wrong.</summary>
     public static readonly EventId ReparentLeftInconsistent = new(14602, nameof(ReparentLeftInconsistent));
 
     /// <summary>
-    /// After a failed owner assignment, writes back what the row was filed under before the change — the columns the
-    /// change moved (<paramref name="restore"/>: the parent lookups it set or cleared, and its
-    /// <see cref="RecordReparent.AttachColumns"/>) — so the row's filing matches the owner it still has. App-only, with
-    /// no cancellation (the caller's token may be what failed). Every outcome is a CRITICAL log naming the row; a
-    /// restore that itself fails is logged under <see cref="ReparentLeftInconsistent"/> for manual repair. Never throws:
-    /// the caller rethrows the original failure, which the writer reports in its own contract.
+    /// After the owner assignment that must follow a written change fails, makes the row's filing and its owner agree
+    /// again — and never in the direction that exposes a secure record's child (ADR-003). App-only, with no cancellation
+    /// (the caller's token may be what failed). Returns <c>true</c> only when the row turns out to be owned by the
+    /// resolved team after all (a lost response): the re-file stands. Otherwise the caller rethrows the original
+    /// failure, which the writer reports in its own contract.
     /// </summary>
-    private async Task CompensateAsync(
-        RecordReparent request, IReadOnlyDictionary<string, object> restore, Guid teamId, Exception assignFailure)
+    /// <remarks>
+    /// <list type="number">
+    /// <item><b>Owner reads back as the resolved team</b> → the assignment landed; nothing to undo.</item>
+    /// <item><b>Owner reads back as anything else</b> → the assignment did not land: the columns the change moved (its
+    /// parent lookups and <see cref="RecordReparent.AttachColumns"/>) are written back to their previous values, so the
+    /// row is filed where the owner it still has belongs (<see cref="ReparentOwnerAssignmentFailed"/>).</item>
+    /// <item><b>Owner cannot be read</b> → which way the row is wrong is unknown, so the SAFE direction is taken. When the
+    /// resolved team is the Secure team (a move INTO a secure record) the filing is put back: whether or not the
+    /// assignment landed, the row is then never filed under the secure record while owned elsewhere (at worst it is owned
+    /// by the Secure team under its old parents — over-restricted). When the resolved team is ordinary (a move out of, or
+    /// between, ordinary records) the filing is kept: at worst the row keeps a stricter old owner. Either way it is logged
+    /// <see cref="ReparentLeftInconsistent"/> for repair.</item>
+    /// </list>
+    /// A restore that itself fails is logged <see cref="ReparentLeftInconsistent"/>.
+    /// </remarks>
+    private async Task<bool> RecoverFromFailedAssignmentAsync(
+        RecordReparent request, IReadOnlyDictionary<string, object> restore, RecordOwnerResolution resolution,
+        Exception assignFailure)
+    {
+        var teamId = resolution.OwningTeamId!.Value;
+
+        bool? landed;
+        try
+        {
+            landed = await ReadOwningTeamAsync(request, CancellationToken.None).ConfigureAwait(false) == teamId;
+        }
+        catch (Exception readFailure)
+        {
+            _logger.LogWarning(readFailure,
+                "Re-file of {Entity} {RecordId}: after a failed owner assignment its owner could not be read back.",
+                request.EntityLogicalName, request.RecordId);
+            landed = null;
+        }
+
+        if (landed == true)
+        {
+            _logger.LogWarning(assignFailure,
+                "Re-file of {Entity} {RecordId}: the owner assignment to team {TeamId} reported a failure, but the owner reads "
+                + "back as that team — the assignment landed (lost response); the re-file stands (task 146).",
+                request.EntityLogicalName, request.RecordId, teamId);
+            return true;
+        }
+
+        if (landed is null && !resolution.IsSecureOwner)
+        {
+            _logger.LogCritical(
+                ReparentLeftInconsistent, assignFailure,
+                "Re-file of {Entity} {RecordId} needs checking: the owner assignment to the ORDINARY team {TeamId} failed and "
+                + "the owner could not be read back. The new filing is kept (it names no secure record), so the row is owned "
+                + "either by that team or still by its previous owner — re-run the re-file to settle it (task 146).",
+                request.EntityLogicalName, request.RecordId, teamId);
+            return false;
+        }
+
+        await RestoreFilingAsync(request, restore, teamId, assignFailure, ownerUnknown: landed is null).ConfigureAwait(false);
+        return false;
+    }
+
+    /// <summary>
+    /// Writes back what the row was filed under before the change — the columns the change moved
+    /// (<paramref name="restore"/>: the parent lookups it set or cleared, and its <see cref="RecordReparent.AttachColumns"/>)
+    /// — so the row's filing matches the owner it still has. Every outcome is a CRITICAL log naming the row; a restore
+    /// that itself fails is logged under <see cref="ReparentLeftInconsistent"/> for manual repair. Never throws.
+    /// </summary>
+    private async Task RestoreFilingAsync(
+        RecordReparent request, IReadOnlyDictionary<string, object> restore, Guid teamId, Exception assignFailure,
+        bool ownerUnknown)
     {
         if (restore.Count == 0)
         {
             _logger.LogCritical(
                 ReparentLeftInconsistent, assignFailure,
                 "Re-file of {Entity} {RecordId}: the change was written but the owner could not be assigned to team "
-                + "{TeamId}, and the change named no column to put back. The row may be readable outside its new "
-                + "parent's team until it is re-owned (task 146).",
+                + "{TeamId}, and the change named no column to put back. Unless the writer undoes its own change (the "
+                + "invoice confirm does), the row may be readable outside its new parent's team until it is re-owned "
+                + "(task 146).",
                 request.EntityLogicalName, request.RecordId, teamId);
             return;
         }
@@ -929,12 +1012,25 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 request.EntityLogicalName, request.RecordId, new Dictionary<string, object>(restore),
                 CancellationToken.None).ConfigureAwait(false);
 
-            _logger.LogCritical(
-                ReparentOwnerAssignmentFailed, assignFailure,
-                "Re-file of {Entity} {RecordId} ROLLED BACK: the owner could not be assigned to team {TeamId} after the "
-                + "change, so its filing columns ({Columns}) were restored to match the owner it still has. The caller "
-                + "receives the failure (task 146).",
-                request.EntityLogicalName, request.RecordId, teamId, string.Join(", ", restore.Keys));
+            if (ownerUnknown)
+            {
+                _logger.LogCritical(
+                    ReparentLeftInconsistent, assignFailure,
+                    "Re-file of {Entity} {RecordId} ROLLED BACK, owner unconfirmed: the assignment to the Secure team {TeamId} "
+                    + "failed and the owner could not be read back, so its filing columns ({Columns}) were restored. If the "
+                    + "assignment did land, the row is owned by the Secure team under its previous parents (over-restricted, "
+                    + "not exposed) — re-run the re-file (task 146).",
+                    request.EntityLogicalName, request.RecordId, teamId, string.Join(", ", restore.Keys));
+            }
+            else
+            {
+                _logger.LogCritical(
+                    ReparentOwnerAssignmentFailed, assignFailure,
+                    "Re-file of {Entity} {RecordId} ROLLED BACK: the owner could not be assigned to team {TeamId} after the "
+                    + "change, so its filing columns ({Columns}) were restored to match the owner it still has. The caller "
+                    + "receives the failure (task 146).",
+                    request.EntityLogicalName, request.RecordId, teamId, string.Join(", ", restore.Keys));
+            }
         }
         catch (Exception restoreFailure)
         {

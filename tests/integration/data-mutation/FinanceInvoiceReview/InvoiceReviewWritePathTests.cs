@@ -347,6 +347,37 @@ public class InvoiceReviewWritePathTests
     }
 
     [Fact]
+    public async Task Confirm_DocumentOwnerCannotBeMovedAfterTheLink_DeletesTheCreatedInvoice_AndQueuesNothing()
+    {
+        // Task 146 b2 (verifier RESIDUAL FAIL-OPEN): the resolver ran the change (create + link) and then could not
+        // assign the document's new owner. The link is this flow's change, so the flow deletes the invoice it created,
+        // which removes the link too — the document is never left filed under a secure invoice while owned elsewhere.
+        var request = NewRequest();
+        _records.ExistingDocument(request.DocumentId);
+        _records.Vendor(request.VendorOrgId, "Acme LLP");
+        AllowInvoiceDeletes();
+        var ownerFailure = new InvalidOperationException("Read Privilege Check For Owner failed ... prvReadsprk_Document");
+        _ownership.Setup(o => o.ReparentAsync(
+                It.IsAny<RecordReparent>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (RecordReparent _, Func<CancellationToken, Task> apply, CancellationToken token) =>
+            {
+                await apply(token);
+                throw ownerFailure;
+            });
+
+        var act = () => Sut().ConfirmInvoiceAsync(request, "corr-146b2");
+
+        var failure = (await act.Should().ThrowAsync<InvoiceReviewException>()).Which;
+        failure.Failure.Should().Be(InvoiceReviewFailure.LinkFailed);
+        failure.InnerException.Should().BeSameAs(ownerFailure);
+        var createdId = _records.Writes.Single(w => w.Kind == WriteKind.Upsert).Id;
+        _deleted.Should().ContainSingle().Which.Id.Should().Be(createdId,
+            "deleting the created invoice also removes the link (RemoveLink cascade)");
+        _records.Writes.Should().NotContain(w => w.Fields.ContainsKey("sprk_invoicereviewstatus"));
+        _submitted.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Confirm_LinkFails_DeletesTheCreatedInvoice_AndLeavesTheDocumentUntouched()
     {
         var request = NewRequest();

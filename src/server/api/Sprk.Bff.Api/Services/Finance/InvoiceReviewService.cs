@@ -405,19 +405,43 @@ public class InvoiceReviewService : IInvoiceReviewService
             // invoice, no link. Steps 1-2 run inside the reparent, which then reassigns the document (read back).
             Guid created = Guid.Empty;
             LinkOutcome? linkOutcome = null;
-            await RefileDocumentUnderInvoiceAsync(
-                request,
-                async token =>
-                {
-                    // Step 1: create the invoice, owned by the MATTER's team.
-                    created = await CreateInvoiceRecordAsync(request, token);
+            try
+            {
+                await RefileDocumentUnderInvoiceAsync(
+                    request,
+                    async token =>
+                    {
+                        // Step 1: create the invoice, owned by the MATTER's team.
+                        created = await CreateInvoiceRecordAsync(request, token);
 
-                    // Step 2: link the document to it — only if the document is still at the version read above. On
-                    // failure, undo step 1 so no orphan invoice is left behind. A concurrent confirm that linked
-                    // first makes this answer with ITS invoice (same matter and vendor) or refuse (409).
-                    linkOutcome = await LinkDocumentOrCompensateAsync(request, created, first, token);
-                },
-                ct);
+                        // Step 2: link the document to it — only if the document is still at the version read above. On
+                        // failure, undo step 1 so no orphan invoice is left behind. A concurrent confirm that linked
+                        // first makes this answer with ITS invoice (same matter and vendor) or refuse (409).
+                        linkOutcome = await LinkDocumentOrCompensateAsync(request, created, first, token);
+                    },
+                    ct);
+            }
+            catch (Exception refileFailure) when (refileFailure is not InvoiceReviewException
+                                                  && created != Guid.Empty
+                                                  && linkOutcome is { ConcurrentInvoiceId: null })
+            {
+                // Task 146 b2: the invoice was created and the document linked to it, but the document's owner could not
+                // then be moved under the invoice (the owner assignment the reparent makes after the change failed). The
+                // link is THIS flow's change, so this flow undoes it: deleting the invoice it created also removes the
+                // link (sprk_document_Invoice_n1 cascades Delete as RemoveLink, live metadata 2026-10-01). The document
+                // is left as it was — never filed under a (possibly secure) invoice while owned elsewhere — and no
+                // orphan invoice remains. A lost-race link (another confirmation's invoice) is that confirmation's.
+                _logger.LogError(refileFailure,
+                    "Document {DocumentId} was linked to new invoice {InvoiceId}, but its owner could not be moved under the "
+                    + "invoice; deleting the invoice (which removes the link). CorrelationId={CorrelationId}",
+                    request.DocumentId, created, correlationId);
+                await DeleteCreatedInvoiceOrThrowAsync(request.DocumentId, created, refileFailure);
+                throw new InvoiceReviewException(
+                    InvoiceReviewFailure.LinkFailed,
+                    "The document could not be filed under the new invoice because its owner could not be moved with it, "
+                    + "so the invoice was removed again. Nothing was saved; retry the confirmation.",
+                    inner: refileFailure);
+            }
             var link = linkOutcome!.Value; // set by the change, which ran (a refusal threw above)
 
             if (link.ConcurrentInvoiceId is { } winner)
