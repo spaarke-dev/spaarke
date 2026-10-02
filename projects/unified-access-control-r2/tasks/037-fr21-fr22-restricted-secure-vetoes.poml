@@ -138,7 +138,15 @@ Verified: 12,082 unit passed / 0 failed; ArchTests 191/191; publish 45.47 MB vs 
     HasProjectAccess is ProjectAccess.Any(...), and the module id sets are Keys views. So an org-only grant
     on a secure project still passes project, document list and content-download reads. Task 136 makes
     those gates require AccessRights.Read, or prunes None-valued keys before the principal is built. It
-    adds seam tests asserting that the read is DENIED, not merely that RightsFor is None.</amendment>
+    adds seam tests asserting that the read is DENIED, not merely that RightsFor is None.
+    COMPLETION (2026-10-01): amendment n=2 (C2) delivered by task 136 on 2026-10-01 (branch task/uac-r2-136);
+    evidence: notes/task-136-rights-based-read-gates.md §8. Both fix shapes were applied, as two layers: the
+    gates require Read (HasProjectAccess, the GetAccessible*Ids views, AccessibleRecordSet.Contains, every
+    project read route) AND None-rights entries are pruned (end of every composition; both strategies at
+    construction). Amended criteria 1-4 are met by tests, including route-level 403s on BOTH planes through the
+    real handlers (tests/integration/contract/Api/ExternalAccess/). Criterion 5 (MANUAL LIVE GATE) is NOT met:
+    neither 135 nor 136 could run it under read-only live rules. So, per criterion 6, this task STAYS PENDING;
+    the main session closes it once the live gate is recorded.</amendment>
     <amendment n="3">Correction to this task's acceptance criteria as executed: criteria that assert
     "RightsFor(record) == None" are necessary but not sufficient. For a suppressed or vetoed record, the
     closing evidence is that the record is unreadable on every external read route for BOTH workforce and

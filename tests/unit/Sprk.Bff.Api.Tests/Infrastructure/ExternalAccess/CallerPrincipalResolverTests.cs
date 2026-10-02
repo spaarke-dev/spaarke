@@ -318,6 +318,90 @@ public class CallerPrincipalResolverTests
         result.Failure.Should().NotBeNull();
     }
 
+    // ── Construction-time pruning (task 136 · defect C2) — both strategies ─────────────────────────────
+    //
+    // The evaluator double returns a None-rights entry on every root type, as the evaluator itself did before
+    // task 136 (a Secure root reached only through an organization grant; a level-less matter/WA grant row).
+    // The assertions read the principal's RAW collections, not its Read-gated views, because those views
+    // would hide the entry on their own — this pins the OTHER layer: the strategy never puts it there.
+
+    private static readonly IReadOnlyDictionary<string, (Guid Readable, Guid Powerless)> RootsWithAPowerlessEntry =
+        new Dictionary<string, (Guid, Guid)>
+        {
+            ["sprk_project"] = (Guid.NewGuid(), Guid.NewGuid()),
+            ["sprk_matter"] = (Guid.NewGuid(), Guid.NewGuid()),
+            ["sprk_workassignment"] = (Guid.NewGuid(), Guid.NewGuid()),
+        };
+
+    private static IReadOnlyDictionary<Guid, AccessRights> ReadableAndPowerless(string entityType) =>
+        new Dictionary<Guid, AccessRights>
+        {
+            [RootsWithAPowerlessEntry[entityType].Readable] = AccessRights.Read,
+            [RootsWithAPowerlessEntry[entityType].Powerless] = AccessRights.None,
+        };
+
+    private static void AssertOnlyTheReadableEntriesReachedThePrincipal(CallerPrincipal principal)
+    {
+        principal.ProjectAccess.Select(p => p.ProjectId).Should().Equal(
+            new[] { RootsWithAPowerlessEntry["sprk_project"].Readable },
+            "a project the caller holds nothing on is not one of its projects (C2)");
+        principal.MatterAccess.Keys.Should().Equal(RootsWithAPowerlessEntry["sprk_matter"].Readable);
+        principal.WorkAssignmentAccess.Keys.Should().Equal(RootsWithAPowerlessEntry["sprk_workassignment"].Readable);
+    }
+
+    [Fact]
+    public async Task CiamStrategy_EvaluatorAnswerWithNoneRightsEntries_BuildsAPrincipalWithoutThem()
+    {
+        var contactId = Guid.NewGuid();
+        var participations = CreateParticipationServiceMock();
+        participations.Setup(s => s.ResolveExternalContactAsync(
+                It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(contactId);
+
+        var accessible = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        foreach (var entityType in RootsWithAPowerlessEntry.Keys)
+        {
+            SetupCiamComposition(accessible, contactId, entityType, ReadableAndPowerless(entityType));
+        }
+
+        var strategy = new CiamContactPrincipalStrategy(
+            participations.Object, accessible.Object, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(
+            new DefaultHttpContext { User = Principal(("oid", Guid.NewGuid().ToString())) }, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        AssertOnlyTheReadableEntriesReachedThePrincipal(result.Principal!);
+    }
+
+    [Fact]
+    public async Task WorkforceStrategy_EvaluatorAnswerWithNoneRightsEntries_BuildsAPrincipalWithoutThem()
+    {
+        var resolver = new Mock<IWorkforcePrincipalResolver>();
+        resolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(WorkforcePrincipalResolution.ForContact(
+                Guid.NewGuid(), Guid.NewGuid().ToString(), WorkforceTenantId));
+
+        var accessible = new Mock<IAccessibleRecordSetService>();
+        accessible.Setup(s => s.ComposeAsync(
+                It.IsAny<WorkforcePrincipal>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entity,
+                Rights = ReadableAndPowerless(entity),
+                Sources = new AccessibleRecordSetSources(false, true, false),
+            });
+
+        var strategy = new WorkforcePrincipalStrategy(
+            resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
+
+        var result = await strategy.ResolveAsync(new DefaultHttpContext { User = Principal() }, CancellationToken.None);
+
+        result.IsResolved.Should().BeTrue();
+        AssertOnlyTheReadableEntriesReachedThePrincipal(result.Principal!);
+    }
+
     private static void SetupCiamComposition(
         Mock<IAccessibleRecordSetService> accessible,
         Guid contactId,

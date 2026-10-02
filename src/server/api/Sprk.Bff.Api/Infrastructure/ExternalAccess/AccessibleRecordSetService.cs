@@ -85,14 +85,20 @@ public interface IAccessibleRecordSetService
         Guid contactId, string entityType, CancellationToken ct);
 
     /// <summary>
-    /// The enforcement decision: is <paramref name="recordId"/> in the principal's composed
-    /// accessible set for <paramref name="entityType"/>? A <c>false</c> result MUST be enforced as a
-    /// DENY (not merely an omission) by the caller.
+    /// The enforcement decision: does the principal hold <see cref="AccessRights.Read"/> on
+    /// <paramref name="recordId"/> of <paramref name="entityType"/>? A <c>false</c> result MUST be enforced
+    /// as a DENY (not merely an omission) by the caller.
     /// </summary>
     /// <remarks>
-    /// Membership only — it answers "may the caller SEE this record", not "may the caller change it".
+    /// Read only — it answers "may the caller SEE this record", not "may the caller change it".
     /// A mutating route MUST use <see cref="IsOperationPermittedAsync"/> instead; treating membership
     /// as permission to write is the defect FR-19 removes.
+    /// <para>
+    /// Task 136 (defect C2): this used to answer "is the id a key in the composed map", and two live paths
+    /// put keys in that map with no rights at all (a Secure-suppressed organization grant; a matter or work
+    /// assignment grant row with no level). It now answers through <see cref="AccessibleRecordSet.Contains"/>,
+    /// which means "holds Read".
+    /// </para>
     /// </remarks>
     Task<bool> IsRecordAccessibleAsync(
         WorkforcePrincipal principal, string entityType, Guid recordId, CancellationToken ct);
@@ -135,20 +141,32 @@ public sealed class AccessibleRecordSet
     /// max() a low value is simply ignored, so an ethical wall modelled as a level would fail silently
     /// in exactly the case it exists for (ADR-003 as amended by task 030). Vetoes delete keys.
     /// </para>
+    /// <para>
+    /// <b>No key without Read (task 136 · defect C2).</b> Every composition removes, as its last step, any
+    /// entry whose rights lack <see cref="AccessRights.Read"/> — a Secure-suppressed organization grant and a
+    /// level-less matter or work-assignment grant row both used to survive here as a key worth nothing, and
+    /// every presence-gated read admitted it. The views below (<see cref="RecordIds"/>,
+    /// <see cref="Contains"/>, <see cref="Count"/>) ALSO require Read, so a set built some other way (a
+    /// test double, a future composer that forgets the step) still fails closed.
+    /// </para>
     /// </summary>
     public required IReadOnlyDictionary<Guid, AccessRights> Rights { get; init; }
 
     private IReadOnlySet<Guid>? _recordIds;
 
     /// <summary>
-    /// The de-duplicated record ids the principal may access for this entity type.
+    /// The de-duplicated record ids the principal may READ for this entity type.
     /// <para>
     /// As of task 032 this is a DERIVED VIEW over <see cref="Rights"/>, not a stored second collection,
     /// so ids and rights cannot disagree. Kept at this exact shape so <c>Tier2ScopeFilterInjector</c>,
-    /// the module scope predicates and <c>CallerPrincipalResolver</c> are unaffected.
+    /// the module scope predicates and <c>CallerPrincipalResolver</c> are unaffected. Since task 136 an
+    /// entry whose rights lack Read is not in this view.
     /// </para>
     /// </summary>
-    public IReadOnlySet<Guid> RecordIds => _recordIds ??= Rights.Keys.ToHashSet();
+    public IReadOnlySet<Guid> RecordIds => _recordIds ??= Rights
+        .Where(kvp => kvp.Value.HasFlag(AccessRights.Read))
+        .Select(kvp => kvp.Key)
+        .ToHashSet();
 
     /// <summary>
     /// The rights the principal holds on <paramref name="recordId"/>, or
@@ -180,10 +198,18 @@ public sealed class AccessibleRecordSet
     /// </summary>
     public int CapLimit { get; init; } = MembershipResolveOptions.MaxLimit;
 
-    public int Count => Rights.Count;
+    /// <summary>How many records the principal may read — the size of <see cref="RecordIds"/>.</summary>
+    public int Count => RecordIds.Count;
 
-    /// <summary>The enforcement check: <c>true</c> iff the record is in the composed set.</summary>
-    public bool Contains(Guid recordId) => Rights.ContainsKey(recordId);
+    /// <summary>
+    /// The enforcement check: <c>true</c> iff the principal holds <see cref="AccessRights.Read"/> on the
+    /// record (task 136 · defect C2 — it used to be "the id is a key", which a None-rights key satisfied).
+    /// </summary>
+    /// <remarks>
+    /// <c>HasFlag(Read)</c> on <see cref="AccessRights.None"/> is <c>false</c>, so an absent record and a
+    /// present-but-powerless one give the same answer. Never test <c>HasFlag(None)</c>: it is always true.
+    /// </remarks>
+    public bool Contains(Guid recordId) => RightsFor(recordId).HasFlag(AccessRights.Read);
 }
 
 /// <summary>
@@ -322,8 +348,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// </para>
     /// <para>
     /// A secure record whose ONLY source was an org grant has a null direct level, which maps to
-    /// <see cref="AccessRights.None"/>. The id still appears in the map with no rights; the Restricted veto
-    /// or a downstream consumer sees an entry that permits nothing. It is not resurrectable by the max.
+    /// <see cref="AccessRights.None"/>. The term enters it at None (the max cannot resurrect it), and
+    /// <see cref="RemoveEntriesWithoutRead"/> deletes it at the end of the composition (task 136 · defect C2).
+    /// Until then it stayed in the answer as a key worth nothing, and every read route that asked "is the id
+    /// present?" admitted it — including the app-only document content download.
     /// </para>
     /// </remarks>
     private static IEnumerable<KeyValuePair<Guid, AccessRights>> GrantedRightsFor(
@@ -492,6 +520,42 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 composed[recordId] = surviving;
             }
             else
+            {
+                composed.Remove(recordId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The LAST step of every composition, after <see cref="ApplyVetoPipeline"/>: delete every entry whose
+    /// rights lack <see cref="AccessRights.Read"/> (unified-access-control-r2 task 136 · defect C2).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two live paths put a key into the composed map with no rights. A Secure root reached only through an
+    /// organization grant: the term contributes the null direct level, which is None (FR-22). And a matter or
+    /// work-assignment grant row with no <c>sprk_accesslevel</c>, kept as a None key by the grant read. A veto
+    /// already removes keys; these were never vetoed, so they stayed — and the external read routes, the module
+    /// scope and <c>/me</c> asked "is the id present?", so a key worth nothing admitted reads, including the
+    /// app-only document content download. The owner's rule (C9, 2026-09-30) is that a contact gets only the
+    /// records it is granted, at the granted level; a record with no rights is not a granted record.
+    /// </para>
+    /// <para>
+    /// Removal, never a sentinel: there is no <see cref="AccessRights"/> value that means "denied", and absence
+    /// is the only representation of no access (the same rule the veto slots follow). Task 042 set the
+    /// precedent on the standing term — "present but powerless is worse than not accessible".
+    /// </para>
+    /// <para>
+    /// The views on <see cref="AccessibleRecordSet"/> and on <c>CallerPrincipal</c> also require Read, so a
+    /// composition that skipped this step would still fail closed there. This step is what keeps the answer
+    /// itself honest for every consumer of <see cref="AccessibleRecordSet.Rights"/>.
+    /// </para>
+    /// </remarks>
+    private static void RemoveEntriesWithoutRead(Dictionary<Guid, AccessRights> composed)
+    {
+        foreach (var (recordId, rights) in composed.ToList())
+        {
+            if (!rights.HasFlag(AccessRights.Read))
             {
                 composed.Remove(recordId);
             }
@@ -1167,6 +1231,10 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             flags,
             membershipTerm.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
 
+        // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's
+        // organization-only grant on a Secure root, which term 2 enters at None.
+        RemoveEntriesWithoutRead(composed);
+
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
             "{Count} records over {Pages} membership page(s) (ADR-034 membership; contact-grants " +
@@ -1439,6 +1507,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             .ConfigureAwait(false);
 
         ApplyVetoPipeline(composed, deniedIds, flags, EmptyRights);
+
+        // Last: no key without Read (task 136 · C2), on both contact sign-ins. Reachable cases: an
+        // organization-only grant on a Secure root, and a matter / work-assignment grant row with no level
+        // (owner 2026-09-30: no level = not granted).
+        RemoveEntriesWithoutRead(composed);
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for contact {ContactId} ({Plane} contact plane) on " +

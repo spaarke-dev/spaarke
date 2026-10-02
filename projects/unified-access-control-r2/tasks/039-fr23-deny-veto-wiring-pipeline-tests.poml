@@ -124,7 +124,14 @@ status was changed on the index alone.</status-note>
     The deny veto REMOVES keys, so its own effect does not depend on the presence-only gates. It is listed
     as a co-requisite because this task's pipeline tests also cover Secure pre-max suppression (see the
     title). That suppression's read effect is only real once task 136 makes the external read gates require
-    AccessRights.Read.</amendment>
+    AccessRights.Read.
+    COMPLETION (2026-10-01): amendment n=2 (C2) delivered by task 136 on 2026-10-01 (branch task/uac-r2-136);
+    evidence: notes/task-136-rights-based-read-gates.md §8. Every external project read route and the module
+    /fetch and /record scope now require Read; the evaluator and both plane strategies drop entries without
+    Read. Amended criteria 1-4 are met by tests (task 135's CIAM seam tests, still green on this branch).
+    Criterion 5 (MANUAL LIVE GATE) is NOT met: neither task 135 nor task 136 could run it (the run rules allow
+    read-only live checks only, and the gate needs a No Access entry added and removed). So, per criterion 6,
+    this task STAYS PENDING; the main session closes it once the live gate is recorded.</amendment>
     <amendment n="3">Adjacent defects handled elsewhere. They are not re-homed onto this task, and are
     recorded so they are not mistaken for gaps here. A junction-read fault that drops the org axis of the
     wall is task 109 (ISS-019). The admin-tid cache invalidation that delays revocation for CIAM callers is

@@ -4,7 +4,7 @@
     <title>C2 — external read gates test RIGHTS, not key presence: a None-rights root stops admitting reads (including document content download) on both planes, and /me stops leaking None ids</title>
     <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C2)</phase>
     <gate>after-135-131</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization gates on live /api/v1/external read routes (.cs), including an app-only file stream; tags bff-api/auth/security.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -151,5 +151,48 @@ Related: tasks 029, 032, 037, 039, 042, 070, 107, 131, 135, 137, 138, 140 (conta
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5 unconditionally.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-136" base="task/uac-r2-135" status="code-complete; manual live gate pending; tasks 037/039 stay pending on their own live gates; publish size measured by the main session after merge">
+      Full record: projects/unified-access-control-r2/notes/task-136-rights-based-read-gates.md.
+      - Fix, three independent layers: (1) AccessibleRecordSetService.RemoveEntriesWithoutRead runs last in every
+        composition (systemuser path and the shared contact path, after ApplyVetoPipeline); AccessibleRecordSet
+        Contains / RecordIds / Count require Read. (2) Both strategies build the principal through
+        CallerPrincipal.FromReadBearing; HasProjectAccess, GetAccessibleProjectIds, Accessible*Ids and the new
+        ReadableProjects require Read on their own. (3) The seven project read routes test Read through
+        HoldsReadOnProject (RightsForRoot, the to-do list's expression); GET /projects lists Read-bearing ids only;
+        the content download still denies before any SPE pointer resolution. /me returns readable projects only and
+        never emits "None". Mutating routes unchanged (Read-gated HasProjectAccess, then Create). ExternalCallerContext
+        aligned. ExternalParticipationService: comment only (owner decision recorded; grant query unchanged).
+        ExternalAccessModule.cs / ExternalModuleRegistry.cs not edited.
+      - Step 1 (dev, READ-ONLY): 0 grant rows with a null level in any state (31 active, all levelled); 1 Secure
+        project, 0 grants on it; 0 Secure matters/WAs; 0 organization grants on Secure roots. Escalations 1-3 did not
+        fire. Consumer enumeration: 17 consumers, each with its covering test or reason (notes §3).
+      - Tests: unit (CallerPrincipalTests real-handler /me tests replace the lambda-copy test; defence-in-depth views;
+        strategy construction pruning both planes; AccessibleRecordSet direct-build views), seam (C2 on both contact
+        sign-ins, null-level matter/WA, no-entry-without-Read over five compositions; absence added at 15 None-only
+        sites (8 evaluator unit, 6 seam, 1 standing-grant seam); GrantCacheRoundTrip null-level criterion reversed per owner), contract (7 read routes x 2 planes 403
+        before any read + admitted with direct ViewOnly; 3 mutating routes x 2 planes 403 insufficient_rights; list and
+        /me; route layer isolated with a hand-built None principal; module /fetch documents+invoices 0 rows and /record
+        403 for null-level matter/WA, with levelled control). Six ExternalDataService read methods made virtual (test
+        seam, task 030 precedent) so positives assert 200.
+      - Perturbations (all restored byte-exact from a WIP commit): presence HasProjectAccess -> 1 red; no construction
+        pruning -> 3; no evaluator pruning -> 14; /me unfiltered with "None" -> 1; route helper back to presence -> 0,
+        then 7 after adding the isolated route-layer tests; Contains back to ContainsKey -> 1.
+      - Step 4: task 070 amendment re-verified (n=1 anchors unchanged; verdict anchors corrected; delivered line added;
+        negative grep 0). notes/task-029 §5 premise corrected. Tasks 037/039: dated amendment n=2 completion lines
+        added; amended criteria 1-4 evidenced; criterion 5 (MANUAL CIAM live gate) NOT met, so per their criterion 6 both
+        STAY PENDING. DEVIATION from this task's criterion "set both to completed": recorded, not improvised around.
+      - Step 9.5: code-review 0 Critical (1 low-confidence warning: the contract fixture re-registers the strategies,
+        so a future third production strategy would be dropped from those tests; 4 suggestions); adr-check 0
+        violations (1 low warning: read-route 403s carry no reasonCode, pre-existing, kept per the constraint).
+      - Placement (CLAUDE.md §10 / bff-extensions.md): in the BFF, inside the existing evaluator, principal and
+        endpoints — per-request authorization before an app-only read. No new service, endpoint, DI registration,
+        option, job or package. New surface: CallerPrincipal.ReadableProjects + FromReadBearing (members on an existing
+        type), two private helpers, virtual on six existing methods. §11: existing = RightsForRoot + the veto key
+        removal (reused); extension = yes (one helper, one step, one shared filter); cost of doing nothing = a Secure
+        project reached only through an organization grant lists and streams documents app-only to a caller holding
+        nothing (C2). No package change, so no new CVE.
+      - Not done (run rules): live writes / manual live gate (exact procedure in notes §10), publish size, TASK-INDEX
+        and current-task edits (main session).
+    </outcome>
   </execution>
 </task>

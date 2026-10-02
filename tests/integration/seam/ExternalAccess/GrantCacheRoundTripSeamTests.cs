@@ -176,22 +176,27 @@ public sealed class GrantCacheRoundTripSeamTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════
-    // Criterion 5 — NULL-LEVEL matter/WA row: keeps its id, contributes None (task 032's asymmetry).
+    // Criterion 5 — NULL-LEVEL matter/WA row: confers NOTHING, on a miss and on a hit.
+    //
+    // Task 136 (defect C2) reversed task 032's rule here. 032 kept a level-less row's id as a None-rights key
+    // ("no silent revocation"); every presence-gated read then admitted it. Owner 2026-09-30: no level = not
+    // granted, so the record is ABSENT. What this criterion protects for the cache is unchanged: a null level
+    // must restore as null. A cache that invented a level would put the record back with rights on the hit.
     // ═════════════════════════════════════════════════════════════════════════════════════════════
 
     [Theory]
     [MemberData(nameof(NullableLevelRootEntityTypes))]
-    public async Task ComposeAsync_NullLevelGrant_KeepsItsIdWithNoRightsOnMissAndOnHit(string entityType)
+    public async Task ComposeAsync_NullLevelGrant_ConfersNothingOnMissAndOnHit(string entityType)
     {
         var world = new CacheWorld(Grant(entityType, RecordId, level: null, direct: null));
 
         var (miss, hit) = await ComposeOnMissThenHitAsync(world, Plane.ContactOnly, entityType);
 
-        miss.Contains(RecordId).Should().BeTrue("task 032: a level-less matter/WA row keeps its id (no silent revocation)");
-        miss.RightsFor(RecordId).Should().Be(AccessRights.None);
-        hit.Contains(RecordId).Should().BeTrue("the id must survive the cache exactly as on the miss");
-        hit.RightsFor(RecordId).Should().Be(AccessRights.None,
-            "a null level must restore as null — never invented as a level the row did not carry");
+        miss.Contains(RecordId).Should().BeFalse("task 136: a level-less matter/WA row grants nothing (owner: no level = not granted)");
+        miss.Rights.Should().NotContainKey(RecordId, "absent, not present with no rights");
+        hit.Contains(RecordId).Should().BeFalse(
+            "a null level must restore as null — a cache that invented a level would admit the record here");
+        hit.Rights.Should().NotContainKey(RecordId);
         hit.Rights.Should().BeEquivalentTo(miss.Rights);
     }
 

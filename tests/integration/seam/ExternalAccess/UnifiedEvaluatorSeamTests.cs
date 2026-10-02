@@ -167,6 +167,7 @@ public sealed class UnifiedEvaluatorSeamTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(recordId).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(recordId, "task 136: absent from the answer, not present with no rights");
         set.Contains(recordId).Should().BeFalse(
             "FR-21 denies EVERY contact principal regardless of grant strength — FullAccess included");
     }
@@ -301,6 +302,9 @@ public sealed class UnifiedEvaluatorSeamTests
 
         set.RightsFor(secureRecord).Should().Be(AccessRights.None,
             "a Type 1 user must not derive access to a secure record via their linked contact's org-inherited grant");
+        // Task 136 (C2): None alone is also what a present-but-powerless key reads as. Absence is the claim.
+        set.Contains(secureRecord).Should().BeFalse("no Read, so not in the set");
+        set.Rights.Should().NotContainKey(secureRecord, "absent from the answer, not present with no rights");
         set.Contains(membershipRecord).Should().BeTrue("the user's own ADR-034 membership is untouched");
 
         dataverse.Verify(
@@ -335,6 +339,8 @@ public sealed class UnifiedEvaluatorSeamTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(orgOnly).Should().Be(AccessRights.None, "a FullAccess ORG grant confers nothing on a secure record");
+        set.Contains(orgOnly).Should().BeFalse("task 136 (C2): no Read, so not in the set");
+        set.Rights.Should().NotContainKey(orgOnly, "absent from the answer, not present with no rights");
         set.RightsFor(direct).Should().Be(
             ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate),
             "a DIRECT personal grant survives Secure suppression (FR-22 survivor case)");
@@ -397,6 +403,7 @@ public sealed class UnifiedEvaluatorSeamTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(deniedRecord).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(deniedRecord, "task 136: absent from the answer, not present with no rights");
         set.Contains(deniedRecord).Should().BeFalse(
             "a contact-subject × record-object deny entry removes exactly that record — a FullAccess " +
             "grant plus a matching deny entry resolves to None, because the veto runs AFTER the max and " +
@@ -632,6 +639,7 @@ public sealed class UnifiedEvaluatorSeamTests
         set.RecordIds.Should().BeEquivalentTo(new[] { grantedRecord },
             "only the explicit grant survives — an unchosen level confers nothing");
         set.RightsFor(record).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(record, "task 136: absent from the answer, not present with no rights");
         set.Sources.StandingGrantMembership.Should().BeFalse("provenance must not claim a term that contributed nothing");
     }
 
@@ -834,8 +842,10 @@ public sealed class UnifiedEvaluatorSeamTests
         var scope = ScopeOf(principal, entityType);
 
         RightsIn(scope, orgOnly).Should().Be(AccessRights.None,
-            "FR-22 on CIAM: on a Secure root an organization-inherited grant confers nothing (the None-rights key " +
-            "that remains is defect C2, closed by task 136's rights-based read gates)");
+            "FR-22 on CIAM: on a Secure root an organization-inherited grant confers nothing");
+        scope.Should().NotContainKey(orgOnly,
+            "task 136 (C2): the record is ABSENT from the CIAM principal — before 136 a None-rights key remained " +
+            "here and every presence-gated read admitted it");
         RightsIn(scope, mixed).Should().Be(AccessRights.Read,
             "EXACTLY Read — suppression runs before the max, so the org Collaborate never enters it");
     }
@@ -981,7 +991,8 @@ public sealed class UnifiedEvaluatorSeamTests
             ScopeOf(ciam, entityType).Should().BeEquivalentTo(ScopeOf(workforce, entityType),
                 $"one rule set for every contact sign-in: {scenario} on {entityType} must answer the same on CIAM " +
                 "as on the workforce contact plane");
-            ScopeOf(ciam, entityType).Where(kvp => kvp.Value != AccessRights.None)
+            // Exact, unfiltered (task 136): the answer carries no None-rights entry to filter out any more.
+            ScopeOf(ciam, entityType)
                 .Should().BeEquivalentTo(expected[entityType],
                     $"…and the shared answer for {scenario} on {entityType} is the right one, not merely the same one");
         }
@@ -1072,17 +1083,133 @@ public sealed class UnifiedEvaluatorSeamTests
         }, $"a CIAM contact with plain grants on open {entityType} records keeps exactly what it was granted");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 136 · defect C2 — a record reaches the answer and the principal ONLY with Read, on both contact
+    // sign-ins. Before 136 the two cases below each left a None-rights KEY, and every presence-gated read
+    // (project routes, module /fetch and /record, /me) admitted it. Route-level 403s are asserted through the
+    // real handlers in tests/integration/contract/Api/ExternalAccess/.
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task C2_SecureRootReachedOnlyThroughAnOrganizationGrant_IsAbsentFromTheSetAndFromBothPrincipals(
+        string entityType)
+    {
+        var secureOrgOnly = RootId(entityType, 71);
+        var openDirect = RootId(entityType, 72);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType,
+            OrgOnly(secureOrgOnly, ExternalAccessLevel.FullAccess),
+            Direct(openDirect, ExternalAccessLevel.ViewOnly)));
+        participations.Flags[secureOrgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        var evaluator = GrantOnlySut(participations);
+
+        var set = await evaluator.ComposeAsync(ContactPrincipal(), entityType, CancellationToken.None);
+        set.Rights.Should().NotContainKey(secureOrgOnly, "absent from the composed answer, not present with None");
+        set.Contains(secureOrgOnly).Should().BeFalse();
+        (await evaluator.IsRecordAccessibleAsync(ContactPrincipal(), entityType, secureOrgOnly, CancellationToken.None))
+            .Should().BeFalse("IsRecordAccessibleAsync means \"holds Read\"");
+        set.Contains(openDirect).Should().BeTrue("control: the open record's direct ViewOnly grant still reads");
+
+        var workforce = await ResolveWorkforceContactAsync(evaluator);
+        var ciam = await ResolveCiamAsync(evaluator, participations);
+        foreach (var (plane, principal) in new[] { ("workforce", workforce), ("CIAM", ciam) })
+        {
+            ScopeOf(principal, entityType).Should().Equal(
+                new Dictionary<Guid, AccessRights> { [openDirect] = AccessRights.Read },
+                $"{plane}: the Secure record is not in the principal at all — only the readable control is");
+        }
+    }
+
+    public static TheoryData<string> NullableLevelRootEntityTypes => new() { MatterEntity, WorkAssignmentEntity };
+
+    [Theory]
+    [MemberData(nameof(NullableLevelRootEntityTypes))]
+    public async Task C2_GrantRowWithNoLevel_ConfersNothing_OnBothContactSignIns(string entityType)
+    {
+        var noLevel = RootId(entityType, 73);
+        var levelled = RootId(entityType, 74);
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(entityType, NoLevel(noLevel), Direct(levelled, ExternalAccessLevel.Collaborate)));
+        var evaluator = GrantOnlySut(participations);
+
+        var set = await evaluator.ComposeAsync(ContactPrincipal(), entityType, CancellationToken.None);
+        set.Rights.Should().NotContainKey(noLevel, "owner 2026-09-30: no level = not granted");
+        set.Contains(noLevel).Should().BeFalse();
+
+        var workforce = await ResolveWorkforceContactAsync(evaluator);
+        var ciam = await ResolveCiamAsync(evaluator, participations);
+        foreach (var (plane, principal) in new[] { ("workforce", workforce), ("CIAM", ciam) })
+        {
+            ScopeOf(principal, entityType).Should().Equal(
+                new Dictionary<Guid, AccessRights> { [levelled] = Rights(ExternalAccessLevel.Collaborate) },
+                $"{plane}: the level-less {entityType} is absent; the levelled control keeps exactly its level");
+            (entityType == MatterEntity ? principal.GetAccessibleMatterIds() : principal.GetAccessibleWorkAssignmentIds())
+                .Should().BeEquivalentTo(new[] { levelled }, $"{plane}: the module scope dimension never sees the level-less record");
+        }
+    }
+
+    [Fact]
+    public async Task C2_NoComposedSetCarriesAnEntryWithoutRead_OnTheSystemUserOrTheContactPlane()
+    {
+        // The end-of-composition step, pinned on its own: whatever the terms entered at None is GONE from
+        // AccessibleRecordSet.Rights — the raw answer, which the Read-gated views would otherwise mask.
+        var secureOrgOnly = Guid.Parse("13600000-0000-0000-0000-000000000001");
+        var membershipRecord = Guid.Parse("13600000-0000-0000-0000-000000000002");
+        var noLevelMatter = Guid.Parse("13600000-0000-0000-0000-000000000003");
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, membershipRecord));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsAcross(new[]
+        {
+            (ProjectEntity, OrgOnly(secureOrgOnly, ExternalAccessLevel.FullAccess)),
+            (MatterEntity, NoLevel(noLevelMatter)),
+        }));
+        participations.Flags[secureOrgOnly] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
+
+        var compositions = new[]
+        {
+            ("systemuser / project", await evaluator.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None)),
+            ("contact / project", await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None)),
+            ("contact / matter", await evaluator.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None)),
+            ("CIAM / project", await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None)),
+            ("CIAM / matter", await evaluator.ComposeForCiamContactAsync(ContactId, MatterEntity, CancellationToken.None)),
+        };
+
+        foreach (var (name, set) in compositions)
+        {
+            set.Rights.Values.Should().NotContain(r => !r.HasFlag(AccessRights.Read),
+                $"{name}: no composed set carries an entry without Read after composition");
+            set.Rights.Should().NotContainKeys(new[] { secureOrgOnly, noLevelMatter }, $"{name}: absent, not None");
+        }
+
+        compositions[0].Item2.Contains(membershipRecord).Should().BeTrue(
+            "control: the systemuser's own membership is untouched by the step");
+    }
+
     // ── CIAM harness (task 135) ──────────────────────────────────────────────────────────────────
 
     private const string CiamOid = "c1a00000-0000-0000-0000-0000000000c1";
 
     /// <summary>One grant row as the grant set carries it: the all-sources level and the DIRECT level
-    /// (null when only an organization grant reaches the record).</summary>
-    private sealed record GrantRow(Guid RecordId, ExternalAccessLevel Level, ExternalAccessLevel? DirectLevel);
+    /// (null when only an organization grant reaches the record). The all-sources level is null only for a
+    /// matter / work-assignment row written with no level (task 136; the real read drops such PROJECT rows).</summary>
+    private sealed record GrantRow(Guid RecordId, ExternalAccessLevel? Level, ExternalAccessLevel? DirectLevel);
 
     private static GrantRow Direct(Guid recordId, ExternalAccessLevel level) => new(recordId, level, level);
 
     private static GrantRow OrgOnly(Guid recordId, ExternalAccessLevel level) => new(recordId, level, null);
+
+    /// <summary>A contact's own grant row with no <c>sprk_accesslevel</c> (matter / work assignment only).</summary>
+    private static GrantRow NoLevel(Guid recordId) => new(recordId, null, null);
 
     private static AccessRights Rights(ExternalAccessLevel level) => ExternalAccessLevels.ToAccessRights(level);
 
@@ -1114,7 +1241,12 @@ public sealed class UnifiedEvaluatorSeamTests
         {
             Projects = all
                 .Where(x => x.EntityType == ProjectEntity)
-                .Select(x => new ExternalParticipation { ProjectId = x.Row.RecordId, AccessLevel = x.Row.Level, DirectAccessLevel = x.Row.DirectLevel })
+                .Select(x => new ExternalParticipation
+                {
+                    ProjectId = x.Row.RecordId,
+                    AccessLevel = x.Row.Level ?? throw new ArgumentException("A project grant row always carries a level."),
+                    DirectAccessLevel = x.Row.DirectLevel,
+                })
                 .ToList(),
             MatterGrants = RootGrantsOf(MatterEntity),
             WorkAssignmentGrants = RootGrantsOf(WorkAssignmentEntity),

@@ -129,7 +129,11 @@ public sealed class CallerPrincipal
     /// transitional email-only CIAM resolution.</summary>
     public string? Oid { get; init; }
 
-    /// <summary>The caller's Tier-2 record scope: the projects they may access, with levels.</summary>
+    /// <summary>
+    /// The caller's Tier-2 record scope: the projects they may access, with rights. Both strategies put only
+    /// Read-bearing entries here (task 136); readers that list or gate should still use
+    /// <see cref="ReadableProjects"/> / <see cref="HasProjectAccess"/>, which require Read on their own.
+    /// </summary>
     public required IReadOnlyList<CallerProjectAccess> ProjectAccess { get; init; }
 
     /// <summary>
@@ -152,28 +156,68 @@ public sealed class CallerPrincipal
     private IReadOnlySet<Guid>? _matterIds;
     private IReadOnlySet<Guid>? _workAssignmentIds;
 
+    // ── Every read view below requires Read (unified-access-control-r2 task 136 · defect C2) ─────────────
+    //
+    // These views used to be key views: "the id is in the map". Two live paths put ids in the map with no
+    // rights — a Secure root reached only through an organization grant, and a matter or work-assignment grant
+    // row with no level — and every /api/v1/external read route, the module /fetch and /record scope, and /me
+    // treated presence as authorization. Both strategies now drop such entries when they build the principal
+    // (FromReadBearing), and the views ALSO require Read: two independent layers, so a future construction
+    // path that forgets to prune still fails closed here.
+    //
+    // ⚠️ Test HasFlag(AccessRights.Read), never HasFlag(None): AccessRights is [Flags], so HasFlag(None) is
+    // true for every value, including None itself.
+
     /// <summary>
-    /// Accessible matter ids. A DERIVED VIEW over <see cref="MatterAccess"/> as of task 033 — not a
-    /// second stored collection, so ids and rights cannot disagree. Read-scope injection
-    /// (<c>Tier2ScopeFilterInjector</c>, the module <c>ScopeDimension</c>s) consumes this shape unchanged.
+    /// Matter ids the caller may READ. A DERIVED VIEW over <see cref="MatterAccess"/> (task 033) — not a second
+    /// stored collection, so ids and rights cannot disagree. Read-scope injection (<c>Tier2ScopeFilterInjector</c>,
+    /// the module <c>ScopeDimension</c>s) consumes this shape unchanged; since task 136 an entry without Read is
+    /// not in it.
     /// </summary>
-    public IReadOnlySet<Guid> AccessibleMatterIds => _matterIds ??= MatterAccess.Keys.ToHashSet();
+    public IReadOnlySet<Guid> AccessibleMatterIds => _matterIds ??= ReadableIdsOf(MatterAccess);
 
-    /// <summary>Accessible work-assignment ids — a DERIVED VIEW over <see cref="WorkAssignmentAccess"/>.</summary>
+    /// <summary>Work-assignment ids the caller may READ — a DERIVED VIEW over <see cref="WorkAssignmentAccess"/>.</summary>
     public IReadOnlySet<Guid> AccessibleWorkAssignmentIds =>
-        _workAssignmentIds ??= WorkAssignmentAccess.Keys.ToHashSet();
+        _workAssignmentIds ??= ReadableIdsOf(WorkAssignmentAccess);
 
-    /// <summary>All project ids the caller can access (for list construction).</summary>
-    public IEnumerable<Guid> GetAccessibleProjectIds() => ProjectAccess.Select(p => p.ProjectId);
+    /// <summary>
+    /// The projects the caller may READ, with their rights — the entries /me lists and the project list returns.
+    /// An entry on <see cref="ProjectAccess"/> without Read is not one of them (task 136).
+    /// </summary>
+    public IEnumerable<CallerProjectAccess> ReadableProjects =>
+        ProjectAccess.Where(p => p.Rights.HasFlag(AccessRights.Read));
 
-    /// <summary>All matter ids the caller can access (task 028).</summary>
+    /// <summary>All project ids the caller can READ (for list construction).</summary>
+    public IEnumerable<Guid> GetAccessibleProjectIds() => ReadableProjects.Select(p => p.ProjectId);
+
+    /// <summary>All matter ids the caller can READ (task 028; Read-gated by task 136).</summary>
     public IReadOnlySet<Guid> GetAccessibleMatterIds() => AccessibleMatterIds;
 
-    /// <summary>All work-assignment ids the caller can access (task 028).</summary>
+    /// <summary>All work-assignment ids the caller can READ (task 028; Read-gated by task 136).</summary>
     public IReadOnlySet<Guid> GetAccessibleWorkAssignmentIds() => AccessibleWorkAssignmentIds;
 
-    /// <summary>Whether the caller can access the specified project (the record∈set check).</summary>
-    public bool HasProjectAccess(Guid projectId) => ProjectAccess.Any(p => p.ProjectId == projectId);
+    /// <summary>
+    /// Whether the caller holds <see cref="AccessRights.Read"/> on the specified project. Until task 136 this was
+    /// "the id is in <see cref="ProjectAccess"/>", which a None-rights entry satisfied.
+    /// </summary>
+    public bool HasProjectAccess(Guid projectId) => GetEffectiveRights(projectId).HasFlag(AccessRights.Read);
+
+    /// <summary>
+    /// The entries of an evaluator answer that carry <see cref="AccessRights.Read"/> — the construction-time
+    /// half of task 136's two layers. Both plane strategies build <see cref="ProjectAccess"/>,
+    /// <see cref="MatterAccess"/> and <see cref="WorkAssignmentAccess"/> through this, so neither can admit a
+    /// record the caller holds nothing on, whatever the evaluator returned.
+    /// </summary>
+    public static IReadOnlyDictionary<Guid, AccessRights> FromReadBearing(IReadOnlyDictionary<Guid, AccessRights> rights)
+    {
+        ArgumentNullException.ThrowIfNull(rights);
+        return rights
+            .Where(kvp => kvp.Value.HasFlag(AccessRights.Read))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+    }
+
+    private static IReadOnlySet<Guid> ReadableIdsOf(IReadOnlyDictionary<Guid, AccessRights> rights) =>
+        rights.Where(kvp => kvp.Value.HasFlag(AccessRights.Read)).Select(kvp => kvp.Key).ToHashSet();
 
     /// <summary>
     /// The DISPLAY level for the specified project, or null if the caller has no access.
@@ -419,15 +463,19 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             .ComposeForCiamContactAsync(contactId.Value, AccessibleRecordSetService.WorkAssignmentEntity, reqCt)
             .ConfigureAwait(false);
 
-        // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does.
-        var projectAccess = accessibleProjects.Rights
+        // Per-record rights, straight from the evaluator — as WorkforcePrincipalStrategy does. Only entries
+        // carrying Read reach the principal (task 136 · C2): a record the caller holds nothing on is not one
+        // of its records, whatever map it came in.
+        var projectAccess = CallerPrincipal.FromReadBearing(accessibleProjects.Rights)
             .Select(kvp => new CallerProjectAccess { ProjectId = kvp.Key, Rights = kvp.Value })
             .ToList();
+        var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
+        var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
 
         _logger.LogInformation(
             "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — accessible roots: {Projects} project / {Matters} matter / {Was} work-assignment",
             contactId.Value, !string.IsNullOrEmpty(oid), projectAccess.Count,
-            accessibleMatters.Count, accessibleWorkAssignments.Count);
+            matterAccess.Count, workAssignmentAccess.Count);
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
@@ -437,8 +485,8 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             Email = email ?? string.Empty,
             Oid = oid,
             ProjectAccess = projectAccess,
-            MatterAccess = accessibleMatters.Rights,
-            WorkAssignmentAccess = accessibleWorkAssignments.Rights,
+            MatterAccess = matterAccess,
+            WorkAssignmentAccess = workAssignmentAccess,
         });
     }
 }
@@ -537,16 +585,20 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
         var accessibleWorkAssignments = await _accessibleSet
             .ComposeAsync(principal, WorkAssignmentEntity, reqCt).ConfigureAwait(false);
 
-        // Per-record rights, straight from the evaluator — no stamp, no per-plane default.
-        var projectAccess = accessibleProjects.Rights
+        // Per-record rights, straight from the evaluator — no stamp, no per-plane default. Only entries
+        // carrying Read reach the principal (task 136 · C2); until then this copied every key, a None-rights
+        // one included, and every presence-gated read admitted it.
+        var projectAccess = CallerPrincipal.FromReadBearing(accessibleProjects.Rights)
             .Select(kvp => new CallerProjectAccess { ProjectId = kvp.Key, Rights = kvp.Value })
             .ToList();
+        var matterAccess = CallerPrincipal.FromReadBearing(accessibleMatters.Rights);
+        var workAssignmentAccess = CallerPrincipal.FromReadBearing(accessibleWorkAssignments.Rights);
 
         _logger.LogInformation(
             "[WF-AUTH] Workforce {Kind} (systemuser={SystemUserId}, contact={ContactId}) resolved with " +
             "{Projects} project / {Matters} matter / {Was} work-assignment accessible roots (project sources: {Sources}).",
             principal.Kind, principal.SystemUserId, principal.ContactId, projectAccess.Count,
-            accessibleMatters.Count, accessibleWorkAssignments.Count, accessibleProjects.Sources);
+            matterAccess.Count, workAssignmentAccess.Count, accessibleProjects.Sources);
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
@@ -556,8 +608,8 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             Email = WorkforcePrincipalResolver.ExtractVerifiedEmail(httpContext.User) ?? string.Empty,
             Oid = principal.Oid,
             ProjectAccess = projectAccess,
-            MatterAccess = accessibleMatters.Rights,
-            WorkAssignmentAccess = accessibleWorkAssignments.Rights,
+            MatterAccess = matterAccess,
+            WorkAssignmentAccess = workAssignmentAccess,
         });
     }
 }

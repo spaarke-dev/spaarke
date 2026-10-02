@@ -131,10 +131,18 @@ BROKER-ONLY DECISION (2026-08-25, see SECURE-DOCUMENTS-BUILD-PLAN.md): the BFF i
     (context background, "THE REFERENCE IMPLEMENTATION ALREADY SHIPS", and the notes line "if this fix
     does not end up looking like ExternalProjectDataEndpoints, question why"). That reference is the
     presence-only gate of defect C2. CallerPrincipal.HasProjectAccess
-    (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:161) is
-    ProjectAccess.Any(...) and never checks AccessRights.Read. ExternalProjectDataEndpoints gates on it at
-    :273, :290, :322, :562, :694, :766, :792, :823 and :840. Copying it would admit None-rights keys,
-    including Secure-suppressed org grants.</verdict>
+    (src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:161 at the time;
+    :203 after task 136) was ProjectAccess.Any(...) and never checked AccessRights.Read. ExternalProjectDataEndpoints
+    gated on it at :273, :290, :322, :562, :694, :766, :792, :823 and :840 (after task 136 the seven READ routes
+    are :283, :300, :334, :721, :792, :849, :866 through HoldsReadOnProject (:499), and the two MUTATING routes
+    :589, :818 keep HasProjectAccess, now Read-gated, before their Create check). Copying it would admit
+    None-rights keys, including Secure-suppressed org grants.</verdict>
+    <delivered>task 136 gate delivered 2026-10-01 (branch task/uac-r2-136): HasProjectAccess requires Read;
+    every project read route tests Read via HoldsReadOnProject; the evaluator removes entries without Read
+    at the end of every composition and both plane strategies prune at construction. Amendment n=1's anchors
+    into SemanticSearchAuthorizationFilter.cs (:413, :497-498, :500, :604-607), SemanticSearchEndpoints.cs
+    (:171-178, :292) and DataverseAccessDataSource.cs (:429) re-verified unchanged; the amended negative grep
+    re-run 2026-10-01 returns zero. Evidence: notes/task-136-rights-based-read-gates.md §7.</delivered>
     <amendment n="1" title="What actually shipped (verified 2026-09-30)">
     The implementation did NOT copy the presence gate. The workforce scope checks are rights-based:
     SemanticSearchAuthorizationFilter calls AuthorizationService.GetCallerRecordAccessAsync

@@ -93,6 +93,30 @@ public class AccessibleRecordSetServiceTests
             .Should().BeFalse("a record outside membership must be denied, not omitted");
     }
 
+    [Fact]
+    public void AccessibleRecordSet_BuiltDirectlyWithANoneRightsEntry_ItsReadViewsExcludeIt()
+    {
+        // Task 136 (C2), the set's own layer. Every composition removes entries without Read, which would mask
+        // these views; a set built some other way (a test double, a future composer) must still answer "holds
+        // Read" — so this builds one directly, with the entry the evaluator itself used to leave behind.
+        var set = new AccessibleRecordSet
+        {
+            PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+            EntityType = ProjectEntity,
+            Rights = new Dictionary<Guid, AccessRights>
+            {
+                [GrantedProject] = AccessRights.Read,
+                [UnrelatedRecord] = AccessRights.None,
+            },
+            Sources = new AccessibleRecordSetSources(false, true, false),
+        };
+
+        set.Contains(GrantedProject).Should().BeTrue("control: a Read-bearing entry is in the set");
+        set.Contains(UnrelatedRecord).Should().BeFalse("Contains means \"holds Read\", not \"is a key\"");
+        set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject });
+        set.Count.Should().Be(1);
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // (1b) systemuser + linked contact grant — membership ∪ contact grants (project-scoped)
     //      §6.5 Path-B amendment (external-access-r2 UAT 2026-08-07 — parallel workforce/contact access)
@@ -623,6 +647,7 @@ public class AccessibleRecordSetServiceTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         set.Contains(GrantedProject).Should().BeFalse(
             "a veto REMOVES the key — it never writes a low value that max() would ignore");
         set.RecordIds.Should().NotContain(GrantedProject,
@@ -699,6 +724,7 @@ public class AccessibleRecordSetServiceTests
 
         set.RightsFor(orgOnly).Should().Be(AccessRights.None,
             "a FullAccess ORG grant confers nothing on a secure record — Secure suppresses org expansion");
+        set.Rights.Should().NotContainKey(orgOnly, "task 136: absent from the answer, not present with no rights");
         set.RightsFor(direct).Should().Be(
             ExternalAccessLevels.ToAccessRights(ExternalAccessLevel.Collaborate),
             "a DIRECT personal grant survives Secure (FR-22 survivor case)");
@@ -787,6 +813,7 @@ public class AccessibleRecordSetServiceTests
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "a Type 1 user must not derive access to a secure record via their linked contact — the Secure "
             + "BU covers the Dataverse half, this veto covers the grant half (design §5.1)");
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         standing.Verify(s => s.ReadForContactAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
             "the systemuser plane must never consult the standing-grant flag");
     }
@@ -874,6 +901,7 @@ public class AccessibleRecordSetServiceTests
 
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "a Full Access grant plus a matching deny entry must resolve to None — the veto runs after the max");
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         set.Contains(GrantedProject).Should().BeFalse(
             "a veto REMOVES the key; it never writes AccessRights.None (which IsOperationPermittedAsync " +
             "would refuse as a malformed request, not honour as a denial)");
@@ -1075,6 +1103,7 @@ public class AccessibleRecordSetServiceTests
         var set = await sut.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.RightsFor(secureRecord).Should().Be(AccessRights.None, "Secure suppresses the org-inherited grant pre-max");
+        set.Rights.Should().NotContainKey(secureRecord, "task 136: absent from the answer, not present with no rights");
         set.Contains(deniedRecord).Should().BeFalse("the deny veto removes the entry post-max, slot 1");
         set.Contains(restrictedRecord).Should().BeFalse("Restricted removes every contact-sourced entry post-max, slot 2");
         set.RightsFor(openRecord).Should().Be(AccessRights.Read, "an unvetoed record is untouched by any of the three mechanisms");
@@ -1375,6 +1404,7 @@ public class AccessibleRecordSetServiceTests
         set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
             "only the explicit grant survives — an unchosen level confers nothing");
         set.RightsFor(StandingProject).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(StandingProject, "task 136: absent from the answer, not present with no rights");
         set.Sources.StandingGrantMembership.Should().BeFalse(
             "provenance must not claim a term that contributed nothing");
 
@@ -1523,6 +1553,7 @@ public class AccessibleRecordSetServiceTests
         set.Contains(OrgDerivedRecord).Should().BeFalse(
             "a Full Access ORG standing grant confers nothing on a secure record");
         set.RightsFor(OrgDerivedRecord).Should().Be(AccessRights.None);
+        set.Rights.Should().NotContainKey(OrgDerivedRecord, "task 136: absent from the answer, not present with no rights");
         set.Contains(OrgDerivedRecordB).Should().BeTrue(
             "the non-secure record still comes through the very same term");
     }
@@ -1561,6 +1592,7 @@ public class AccessibleRecordSetServiceTests
 
         set.RightsFor(GrantedProject).Should().Be(AccessRights.None,
             "org-inherited access is suppressed on a secure record for a systemuser principal too");
+        set.Rights.Should().NotContainKey(GrantedProject, "task 136: absent from the answer, not present with no rights");
         set.Contains(MemberRecordA).Should().BeTrue("the user's own ADR-034 membership is untouched");
         set.Sources.OrgExpansionMembership.Should().BeFalse();
         membership.Verify(

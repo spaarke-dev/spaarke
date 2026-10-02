@@ -161,6 +161,8 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         composed.RecordIds.Should().NotContain(StandingOnlyProject,
             "absent, not present-with-zero-rights: a visible record the caller cannot act on is worse");
         composed.RightsFor(StandingOnlyProject).Should().Be(AccessRights.None);
+        composed.Rights.Should().NotContainKey(StandingOnlyProject,
+            "task 136: absent from the answer itself, not only from the Read-gated views");
         (await sut.IsRecordAccessibleAsync(principal, ProjectEntity, StandingOnlyProject, CancellationToken.None))
             .Should().BeFalse("a standing grant with no chosen level is not a grant");
 

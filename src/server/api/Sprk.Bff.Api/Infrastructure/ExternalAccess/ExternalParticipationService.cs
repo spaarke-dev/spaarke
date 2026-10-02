@@ -1061,12 +1061,19 @@ public class ExternalParticipationService
             // GrantRowSelect has always $select'ed sprk_accesslevel; the partitioning simply discarded
             // it, which is why these root types had no level anywhere downstream (register A-8 / B-8).
             //
-            // ⚠️ NOTE THE ASYMMETRY WITH `projects` ABOVE, WHICH IS DELIBERATE. The project filter
-            // requires `sprk_accesslevel.HasValue` and drops rows without one. Copying that here would
-            // read as tidy symmetry and would be a SILENT REVOCATION: a matter/WA row with a null level
-            // grants access today, and would stop granting it. So the level is carried as NULLABLE and
-            // the row is kept — set membership is unchanged, and a null level contributes
+            // ⚠️ NOTE THE ASYMMETRY WITH `projects` ABOVE. The project filter requires
+            // `sprk_accesslevel.HasValue` and drops rows without one; here the level is carried as NULLABLE
+            // and the row is kept, so this read stays a faithful copy of the rows. A null level contributes
             // AccessRights.None, which the highest-wins max cannot widen.
+            //
+            // OWNER DECISION (2026-09-30), applied by task 136 (defect C2): NO LEVEL = NOT GRANTED. This
+            // comment used to call dropping such a row a "SILENT REVOCATION" and keep its id as a key so set
+            // membership stayed unchanged — but a key with no rights still admitted every presence-gated read.
+            // The owner's rule is that a contact gets only granted records at the granted level, so the
+            // evaluator now removes any record without Read at the end of every composition
+            // (AccessibleRecordSetService.RemoveEntriesWithoutRead). The grant query itself is unchanged here
+            // on purpose (C12 and task 137 own this file's other changes). Dev before-state, 2026-10-01: 0 rows
+            // with a null level in any state — notes/task-136-rights-based-read-gates.md §2.
             var matters = rows
                 .Where(r => r._sprk_matter_value.HasValue)
                 .Select(r => new ExternalRootGrant

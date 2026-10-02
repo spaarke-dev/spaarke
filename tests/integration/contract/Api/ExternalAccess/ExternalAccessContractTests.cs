@@ -180,6 +180,227 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     }
 
     // ================================================================================
+    // ===== (4b) Task 136 · defect C2 — read gates test RIGHTS, not key presence ======
+    // ================================================================================
+    //
+    // The world: ProjectA is Secure and the caller's only grant on it is organization-inherited (no direct
+    // level). FR-22 makes that grant worth nothing. Before task 136 the record still sat in the caller's map
+    // as a None-rights key, and every project read route below asked "is the id present?" — so the caller
+    // listed ProjectA's documents and streamed their content app-only. Each route must now 403 BEFORE any data
+    // read, on BOTH planes (the routes are plane-agnostic; the principal is built by a different strategy).
+
+    private static readonly string[] Planes = { "ciam", "workforce" };
+
+    private static readonly string[] ProjectReadRoutes =
+    {
+        $"/api/v1/external/projects/{ProjectA}",
+        $"/api/v1/external/projects/{ProjectA}/documents",
+        $"/api/v1/external/projects/{ProjectA}/documents/{DocumentX}/content",
+        $"/api/v1/external/projects/{ProjectA}/documents/{DocumentX}/versions",
+        $"/api/v1/external/projects/{ProjectA}/events",
+        $"/api/v1/external/projects/{ProjectA}/contacts",
+        $"/api/v1/external/projects/{ProjectA}/organizations",
+    };
+
+    public static TheoryData<string, string> ProjectReadRoutesOnBothPlanes()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var plane in Planes)
+            foreach (var route in ProjectReadRoutes)
+                data.Add(plane, route);
+        return data;
+    }
+
+    public static TheoryData<string> BothPlanes() => new() { "ciam", "workforce" };
+
+    [Theory]
+    [MemberData(nameof(ProjectReadRoutesOnBothPlanes))]
+    public async Task ProjectReadRoute_SecureProjectReachedOnlyThroughAnOrganizationGrant_Returns403BeforeAnyRead(
+        string plane, string route)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: new[] { ProjectA },
+            documentProjectId: ProjectA,
+            workforce: plane == "workforce",
+            secureProjects: new[] { ProjectA }); // no direct level ⇒ organization-inherited only
+
+        var response = await client.GetAsync(route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            $"{plane}: an organization grant confers nothing on a Secure project (FR-22), so the caller holds no " +
+            "Read on it and the read must be denied — presence of the id is not authorization (C2)");
+        _fixture.DataReads.Should().BeEmpty("the gate runs BEFORE the app-only data read, never after it");
+        _fixture.StorageResolverMock.Verify(
+            r => r.GetSpePointersAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "a denied caller must never trigger SPE pointer resolution");
+        _fixture.SpeFileOperationsMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "a denied caller must never trigger the app-only content download (no bytes)");
+        _fixture.SpeFileOperationsMock.Verify(
+            s => s.ListFileVersionsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "a denied caller must never trigger the app-only version read");
+    }
+
+    public static TheoryData<string> ProjectReadRouteData()
+    {
+        var data = new TheoryData<string>();
+        foreach (var route in ProjectReadRoutes)
+            data.Add(route);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectReadRouteData))]
+    public async Task ProjectReadRoute_PrincipalHoldingTheProjectAtNoneRights_Returns403BeforeAnyRead(string route)
+    {
+        // The route's OWN Read test, isolated: the evaluator and both strategies prune None-rights entries, so this
+        // principal is built directly (PowerlessProjectCiamStrategy). A route that went back to asking "is the id
+        // present?" would admit it here and nowhere else.
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: Array.Empty<Guid>(), documentProjectId: ProjectA);
+        client.DefaultRequestHeaders.Add("X-Test-PowerlessProject", ProjectA.ToString());
+
+        var response = await client.GetAsync(route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "the read routes test Read on the record, not presence of its id in the caller's map");
+        _fixture.DataReads.Should().BeEmpty("the gate runs BEFORE the app-only data read");
+        _fixture.StorageResolverMock.Verify(
+            r => r.GetSpePointersAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task ProjectListAndMe_PrincipalHoldingTheProjectAtNoneRights_ListNothing()
+    {
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: Array.Empty<Guid>());
+        client.DefaultRequestHeaders.Add("X-Test-PowerlessProject", ProjectA.ToString());
+
+        var list = await client.GetAsync("/api/v1/external/projects");
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync()))
+        {
+            doc.RootElement.GetProperty("value").GetArrayLength().Should().Be(0, "nothing readable, nothing listed");
+        }
+
+        _fixture.DataReads.Should().BeEmpty("no id is sent to the data read when nothing is readable");
+
+        var me = await client.GetAsync("/api/v1/external/me");
+        me.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var doc = JsonDocument.Parse(await me.Content.ReadAsStringAsync()))
+        {
+            doc.RootElement.GetProperty("projects").GetArrayLength().Should().Be(0,
+                "/me does not disclose the GUID of a project the caller holds nothing on");
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(ProjectReadRoutesOnBothPlanes))]
+    public async Task ProjectReadRoute_DirectViewOnlyGrantOnTheSecureProject_IsAdmitted(string plane, string route)
+    {
+        _fixture.StorageResolverMock
+            .Setup(r => r.GetSpePointersAsync(DocumentX, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("drive-ext-1", "item-ext-1"));
+        _fixture.SpeFileOperationsMock
+            .Setup(s => s.DownloadFileAsync("drive-ext-1", "item-ext-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(new byte[] { 0x25, 0x50 }));
+        _fixture.SpeFileOperationsMock
+            .Setup(s => s.ListFileVersionsAsync("drive-ext-1", "item-ext-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Sprk.Bff.Api.Models.VersionInfoDto> { new("1.0", null, DateTimeOffset.UnixEpoch, 2) });
+
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: new[] { ProjectA },
+            documentProjectId: ProjectA,
+            accessLevel: ExternalAccessLevel.ViewOnly,
+            workforce: plane == "workforce",
+            secureProjects: new[] { ProjectA },
+            directAccessLevel: ExternalAccessLevel.ViewOnly);
+
+        var response = await client.GetAsync(route);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"{plane}: a named DIRECT ViewOnly grant is what Secure keeps for a contact, and it carries Read");
+    }
+
+    public static TheoryData<string, string> MutatingRoutesOnBothPlanes()
+    {
+        var data = new TheoryData<string, string>();
+        foreach (var plane in Planes)
+            foreach (var route in new[] { "todos", "events", "documents" })
+                data.Add(plane, route);
+        return data;
+    }
+
+    [Theory]
+    [MemberData(nameof(MutatingRoutesOnBothPlanes))]
+    public async Task MutatingRoute_DirectViewOnlyGrantOnTheSecureProject_Returns403InsufficientRights(
+        string plane, string route)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: new[] { ProjectA },
+            accessLevel: ExternalAccessLevel.ViewOnly,
+            workforce: plane == "workforce",
+            secureProjects: new[] { ProjectA },
+            directAccessLevel: ExternalAccessLevel.ViewOnly);
+
+        var path = $"/api/v1/external/projects/{ProjectA}/{route}";
+        HttpResponseMessage response;
+        if (route == "documents")
+        {
+            using var form = new MultipartFormDataContent();
+            form.Add(new ByteArrayContent(new byte[] { 1, 2, 3 }), "file", "upload.bin");
+            response = await client.PostAsync(path, form);
+        }
+        else
+        {
+            response = await client.PostAsJsonAsync(path, new { sprk_name = "x" });
+        }
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            $"{plane}: Read admits the read routes, but ViewOnly carries no Create");
+        (await ReasonCode(response)).Should().Be("sdap.access.deny.insufficient_rights",
+            "the refusal is the Create gate, not the read gate — the caller DOES hold Read");
+        _fixture.SpeFileOperationsMock.Verify(
+            s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(),
+                It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Never(),
+            "nothing is written for a caller without Create");
+    }
+
+    [Theory]
+    [MemberData(nameof(BothPlanes))]
+    public async Task ProjectListAndMe_SecureProjectReachedOnlyThroughAnOrganizationGrant_AreNotListed(string plane)
+    {
+        using var client = _fixture.CreateAuthenticatedClient(
+            accessibleProjects: new[] { ProjectA, ProjectB },
+            workforce: plane == "workforce",
+            secureProjects: new[] { ProjectA }); // A: org-inherited only on a Secure root; B: open
+
+        var list = await client.GetAsync("/api/v1/external/projects");
+        list.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync()))
+        {
+            doc.RootElement.GetProperty("value").EnumerateArray()
+                .Select(p => p.GetProperty("sprk_projectid").GetString())
+                .Should().Equal(new[] { ProjectB.ToString() },
+                    $"{plane}: GET /projects lists only Read-bearing projects — never one the caller holds nothing on");
+        }
+
+        _fixture.DataReads.Should().Equal(new[] { $"GetProjectsAsync:{ProjectB}" },
+            "the Secure project's id is not even sent to the data read");
+
+        var me = await client.GetAsync("/api/v1/external/me");
+        me.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (var doc = JsonDocument.Parse(await me.Content.ReadAsStringAsync()))
+        {
+            var entries = doc.RootElement.GetProperty("projects").EnumerateArray()
+                .Select(p => (Id: p.GetProperty("projectId").GetGuid(), Level: p.GetProperty("accessLevel").GetString() ?? ""))
+                .ToList();
+
+            entries.Should().Equal(new[] { (ProjectB, "FullAccess") },
+                $"{plane}: /me tells the client only about projects it can read — not the GUID of a Secure project");
+            entries.Should().NotContain(e => e.Level == "None", "/me never emits the level string \"None\"");
+        }
+    }
+
+    // ================================================================================
     // ===== (5) Provisioner idempotency (FR-08) ======================================
     // ================================================================================
 
@@ -477,6 +698,7 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
         TenantCacheMock.Reset();
         Dataverse.Reset();
         RecordShares.Reset();
+        DataReads.Clear();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -654,24 +876,64 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
             services.RemoveAll<ExternalDataService>();
             services.AddScoped<ExternalDataService>(sp =>
-                new StubExternalDataService(sp.GetRequiredService<IHttpContextAccessor>()));
+                new StubExternalDataService(sp.GetRequiredService<IHttpContextAccessor>(), DataReads));
 
             // Task 135 (C1): CIAM callers now pass the deny-list veto. Offline, the real reader fails CLOSED
             // and would deny every record; these contract tests assert an entitled caller's contract, so the
             // reader at its module boundary denies nothing. Veto behaviour is owned by UnifiedEvaluatorSeamTests.
             services.RemoveAll<INoAccessListReader>();
             services.AddSingleton(Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.NeverDeniesReader());
+
+            // Task 136: the read routes are plane-agnostic, so the C2 denials are asserted on BOTH planes. A
+            // workforce-token request (X-Test-Plane: workforce) resolves to a contact-only principal named by
+            // its X-Test-Contact header; with no standing grant anywhere, its contact plane composes exactly
+            // the explicit grants the stub participation service returns — the same world the CIAM request sees.
+            services.RemoveAll<IWorkforcePrincipalResolver>();
+            services.AddSingleton<IWorkforcePrincipalResolver, HeaderWorkforcePrincipalResolver>();
+            services.RemoveAll<ISubjectStandingGrantReader>();
+            services.AddSingleton<ISubjectStandingGrantReader, NoStandingGrantReader>();
+
+            // Task 136: the route gate is the THIRD layer (after the evaluator's and the strategies' pruning),
+            // so no real strategy can hand a route a None-rights entry. The CIAM strategy is wrapped — at the
+            // ICallerPrincipalStrategy plug-in seam — so a request carrying X-Test-PowerlessProject receives a
+            // hand-built principal holding that project at None, and the handlers' own Read test is observable.
+            // Every other request is delegated to the real CIAM strategy unchanged.
+            services.RemoveAll<ICallerPrincipalStrategy>();
+            services.AddScoped<CiamContactPrincipalStrategy>();
+            services.AddScoped<ICallerPrincipalStrategy>(sp =>
+                new PowerlessProjectCiamStrategy(sp.GetRequiredService<CiamContactPrincipalStrategy>()));
+            services.AddScoped<ICallerPrincipalStrategy, WorkforcePrincipalStrategy>();
         });
     }
+
+    /// <summary>
+    /// Every app-only data read the project routes reached (task 136), as "Method:projectId". A denied read
+    /// must leave this empty: the gate runs before the read, never after it.
+    /// </summary>
+    public System.Collections.Concurrent.ConcurrentQueue<string> DataReads { get; } = new();
 
     public HttpClient CreateUnauthenticatedClient() =>
         CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
     /// <summary>External (CIAM) caller. Scenario is carried on request headers read by the stub services.</summary>
+    /// <param name="accessibleProjects">Project grant rows (all-sources level = <paramref name="accessLevel"/>).</param>
+    /// <param name="documentProjectId">The project the requested document belongs to.</param>
+    /// <param name="accessLevel">The grant rows' all-sources level. Omitted ⇒ FullAccess.</param>
+    /// <param name="workforce">Task 136: sign in on a WORKFORCE token (contact-only principal) instead of CIAM.</param>
+    /// <param name="secureProjects">Task 136: projects whose <c>sprk_issecure</c> flag reads true.</param>
+    /// <param name="directAccessLevel">Task 136: the DIRECT level of the project grant rows. Omitted ⇒ null, i.e.
+    /// every row looks organization-inherited — invisible on an open project, and nothing on a Secure one.</param>
+    /// <param name="nullLevelMatters">Task 136: matter grant rows with NO level (written outside the BFF).</param>
+    /// <param name="nullLevelWorkAssignments">Task 136: work-assignment grant rows with NO level.</param>
     public HttpClient CreateAuthenticatedClient(
         IReadOnlyList<Guid> accessibleProjects,
         Guid? documentProjectId = null,
-        ExternalAccessLevel? accessLevel = null)
+        ExternalAccessLevel? accessLevel = null,
+        bool workforce = false,
+        IReadOnlyList<Guid>? secureProjects = null,
+        ExternalAccessLevel? directAccessLevel = null,
+        IReadOnlyList<Guid>? nullLevelMatters = null,
+        IReadOnlyList<Guid>? nullLevelWorkAssignments = null)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
@@ -684,6 +946,16 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
         // write-incapable participant is refused on a write route (unified-access-control-r2).
         if (accessLevel.HasValue)
             client.DefaultRequestHeaders.Add("X-Test-AccessLevel", accessLevel.Value.ToString());
+        if (workforce)
+            client.DefaultRequestHeaders.Add("X-Test-Plane", "workforce");
+        if (secureProjects is { Count: > 0 })
+            client.DefaultRequestHeaders.Add("X-Test-SecureProjects", string.Join(",", secureProjects));
+        if (directAccessLevel.HasValue)
+            client.DefaultRequestHeaders.Add("X-Test-DirectAccessLevel", directAccessLevel.Value.ToString());
+        if (nullLevelMatters is { Count: > 0 })
+            client.DefaultRequestHeaders.Add("X-Test-NullLevelMatters", string.Join(",", nullLevelMatters));
+        if (nullLevelWorkAssignments is { Count: > 0 })
+            client.DefaultRequestHeaders.Add("X-Test-NullLevelWorkAssignments", string.Join(",", nullLevelWorkAssignments));
         return client;
     }
 
@@ -716,16 +988,29 @@ internal sealed class ExternalTestAuthHandler : AuthenticationHandler<Authentica
         if (!Request.Headers.ContainsKey("Authorization"))
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
             new Claim("oid", "00000000-0000-0000-0000-0000000000a1"),
             new Claim("tid", "00000000-0000-0000-0000-0000000000b1"),
             new Claim(ClaimTypes.NameIdentifier, "00000000-0000-0000-0000-0000000000a1"),
-            // teams-app-r1 task 025: the CallerPrincipalResolver selects the plane by token issuer.
-            // These external tests exercise the CIAM plane, so the fake token carries a *.ciamlogin.com
-            // issuer → CallerPrincipalResolver routes to the CIAM strategy (StubExternalParticipationService).
-            new Claim("iss", "https://spaarketest.ciamlogin.com/00000000-0000-0000-0000-0000000000c1/v2.0"),
         };
+
+        // teams-app-r1 task 025: the CallerPrincipalResolver selects the plane by token issuer.
+        if (string.Equals(Request.Headers["X-Test-Plane"], "workforce", StringComparison.OrdinalIgnoreCase))
+        {
+            // Task 136: a WORKFORCE token (tid b1 is not the configured CIAM tenant c1, and the issuer is not
+            // ciamlogin.com) → the workforce strategy. Its contact-only principal comes from
+            // HeaderWorkforcePrincipalResolver, keyed on the test_contact claim.
+            claims.Add(new Claim("iss", "https://login.microsoftonline.com/00000000-0000-0000-0000-0000000000b1/v2.0"));
+            claims.Add(new Claim("test_contact", Request.Headers["X-Test-Contact"].ToString()));
+        }
+        else
+        {
+            // These external tests exercise the CIAM plane by default, so the fake token carries a
+            // *.ciamlogin.com issuer → the CIAM strategy (StubExternalParticipationService).
+            claims.Add(new Claim("iss", "https://spaarketest.ciamlogin.com/00000000-0000-0000-0000-0000000000c1/v2.0"));
+        }
+
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, Scheme.Name));
         return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(principal, Scheme.Name)));
     }
@@ -761,10 +1046,16 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
         // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
         // and fails CLOSED — every record would read as secure AND restricted and this double would
         // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
+        // Task 136: X-Test-SecureProjects flags the named ids sprk_issecure (never Restricted).
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
-                recordIds.Distinct().ToDictionary(id => id, _ => RootRecordFlags.None));
+        {
+            var secure = ParseGuidHeader("X-Test-SecureProjects");
+            return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+                recordIds.Distinct().ToDictionary(
+                    id => id,
+                    id => secure.Contains(id) ? new RootRecordFlags(IsSecure: true, IsRestricted: false) : RootRecordFlags.None));
+        }
 
     // Task 135 (C1): a CIAM caller is now composed by the unified evaluator, which also reads the contact's
     // organization memberships (the deny-veto subject) and each candidate's referenced organizations. Without
@@ -791,16 +1082,27 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
             ? parsed
             : ExternalAccessLevel.FullAccess;
 
+        // Task 136: the DIRECT level. Absent ⇒ null — the row reads as organization-inherited, which is
+        // invisible on an open project (the all-sources level is used) and confers nothing on a Secure one.
+        ExternalAccessLevel? directLevel = Enum.TryParse<ExternalAccessLevel>(
+            Header("X-Test-DirectAccessLevel"), ignoreCase: true, out var direct)
+            ? direct
+            : null;
+
         IReadOnlyList<ExternalParticipation> projects = string.IsNullOrWhiteSpace(raw)
             ? Array.Empty<ExternalParticipation>()
             : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                  .Where(p => Guid.TryParse(p, out _))
-                 .Select(p => new ExternalParticipation { ProjectId = Guid.Parse(p), AccessLevel = level })
+                 .Select(p => new ExternalParticipation { ProjectId = Guid.Parse(p), AccessLevel = level, DirectAccessLevel = directLevel })
                  .ToList();
 
         // Optional matter / work-assignment grants for polymorphic tests (task 028).
         var matters = ParseGuidHeader("X-Test-Matters");
         var was = ParseGuidHeader("X-Test-WorkAssignments");
+
+        // Task 136: grant rows with NO level — written outside the BFF. Owner 2026-09-30: no level = not granted.
+        var nullLevelMatters = ParseGuidHeader("X-Test-NullLevelMatters");
+        var nullLevelWas = ParseGuidHeader("X-Test-NullLevelWorkAssignments");
 
         return Task.FromResult(new ExternalGrantSet
         {
@@ -810,11 +1112,15 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
             MatterGrants = matters.Select(id => new ExternalRootGrant
             {
                 RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
-            }).ToList(),
+            })
+            .Concat(nullLevelMatters.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = null }))
+            .ToList(),
             WorkAssignmentGrants = was.Select(id => new ExternalRootGrant
             {
                 RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
-            }).ToList(),
+            })
+            .Concat(nullLevelWas.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = null }))
+            .ToList(),
         });
     }
 
@@ -837,12 +1143,68 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
 internal sealed class StubExternalDataService : ExternalDataService
 {
     private readonly IHttpContextAccessor _accessor;
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _reads;
 
-    public StubExternalDataService(IHttpContextAccessor accessor)
+    public StubExternalDataService(
+        IHttpContextAccessor accessor, System.Collections.Concurrent.ConcurrentQueue<string> reads)
         : base(new HttpClient(), new ConfigurationBuilder().Build(),
                Mock.Of<TokenCredential>(), NullLogger<ExternalDataService>.Instance)
     {
         _accessor = accessor;
+        _reads = reads;
+    }
+
+    // ── Task 136: the project READ seams, recorded. A route that admits a caller reaches one of these and
+    // returns 200; a route that denies must never reach them (asserted through ExternalAccessContractFixture.DataReads).
+
+    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto>> GetProjectsAsync(
+        IEnumerable<Guid> projectIds, CancellationToken ct = default)
+    {
+        var ids = projectIds.ToList();
+        _reads.Enqueue($"{nameof(GetProjectsAsync)}:{string.Join(",", ids)}");
+        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto>>(ids
+            .Select(id => new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto { SprkProjectid = id.ToString(), SprkName = "Project" })
+            .ToList());
+    }
+
+    public override Task<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto?> GetProjectByIdAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _reads.Enqueue($"{nameof(GetProjectByIdAsync)}:{projectId}");
+        return Task.FromResult<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto?>(
+            new Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalProjectDto { SprkProjectid = projectId.ToString(), SprkName = "Project" });
+    }
+
+    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>> GetDocumentsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _reads.Enqueue($"{nameof(GetDocumentsAsync)}:{projectId}");
+        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>>(
+            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalDocumentDto>());
+    }
+
+    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>> GetEventsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _reads.Enqueue($"{nameof(GetEventsAsync)}:{projectId}");
+        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>>(
+            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalEventDto>());
+    }
+
+    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>> GetContactsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _reads.Enqueue($"{nameof(GetContactsAsync)}:{projectId}");
+        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>>(
+            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalContactDto>());
+    }
+
+    public override Task<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>> GetOrganizationsAsync(
+        Guid projectId, CancellationToken ct = default)
+    {
+        _reads.Enqueue($"{nameof(GetOrganizationsAsync)}:{projectId}");
+        return Task.FromResult<IReadOnlyList<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>>(
+            Array.Empty<Sprk.Bff.Api.Api.ExternalAccess.Dtos.ExternalOrganizationDto>());
     }
 
     public override Task<(Guid? ProjectId, string? DocumentName)> GetDocumentProjectAndNameAsync(Guid documentId, CancellationToken ct = default)
@@ -852,6 +1214,64 @@ internal sealed class StubExternalDataService : ExternalDataService
             ? Task.FromResult<(Guid?, string?)>((projectId, "external-doc.bin"))
             : Task.FromResult<(Guid?, string?)>((null, null));
     }
+}
+
+/// <summary>
+/// Task 136: resolves a workforce-token request to a CONTACT-ONLY principal named by its <c>test_contact</c>
+/// claim (from the X-Test-Contact header), so the read-route denials can be asserted on the workforce plane
+/// through the real <see cref="WorkforcePrincipalStrategy"/> and the real evaluator. Substituted at the
+/// <see cref="IWorkforcePrincipalResolver"/> seam (ADR-010), which exists for exactly this.
+/// </summary>
+internal sealed class HeaderWorkforcePrincipalResolver : IWorkforcePrincipalResolver
+{
+    public Task<WorkforcePrincipalResolution> ResolveAsync(ClaimsPrincipal user, CancellationToken ct)
+        => Task.FromResult(Guid.TryParse(user.FindFirst("test_contact")?.Value, out var contactId)
+            ? WorkforcePrincipalResolution.ForContact(
+                contactId, user.FindFirst("oid")!.Value, user.FindFirst("tid")!.Value)
+            : WorkforcePrincipalResolution.Denied(
+                WorkforceDenyReason.PrincipalNotResolved, WorkforcePrincipalResolver.DenyPrincipalNotResolved));
+}
+
+/// <summary>
+/// Task 136: the CIAM strategy, except that a request carrying <c>X-Test-PowerlessProject</c> resolves to a
+/// principal BUILT DIRECTLY with that project at <see cref="AccessRights.None"/> — the entry the evaluator and both
+/// strategies now refuse to produce. It isolates the read routes' own Read test, the third of task 136's layers.
+/// </summary>
+internal sealed class PowerlessProjectCiamStrategy : ICallerPrincipalStrategy
+{
+    private readonly CiamContactPrincipalStrategy _inner;
+
+    public PowerlessProjectCiamStrategy(CiamContactPrincipalStrategy inner) => _inner = inner;
+
+    public CallerPrincipalPlane Plane => CallerPrincipalPlane.CiamContact;
+
+    public Task<CallerPrincipalResolution> ResolveAsync(HttpContext httpContext, CancellationToken ct)
+    {
+        if (!Guid.TryParse(httpContext.Request.Headers["X-Test-PowerlessProject"].ToString(), out var projectId))
+        {
+            return _inner.ResolveAsync(httpContext, ct);
+        }
+
+        return Task.FromResult(CallerPrincipalResolution.Resolved(new CallerPrincipal
+        {
+            Plane = CallerPrincipalPlane.CiamContact,
+            ContactId = Guid.NewGuid(),
+            ProjectAccess = new[] { new CallerProjectAccess { ProjectId = projectId, Rights = AccessRights.None } },
+        }));
+    }
+}
+
+/// <summary>
+/// Task 136: no contact or organization holds a standing grant, so the workforce contact plane's derived-member
+/// terms contribute nothing and it composes the same explicit grants the CIAM plane does.
+/// </summary>
+internal sealed class NoStandingGrantReader : ISubjectStandingGrantReader
+{
+    public Task<StandingGrantState> ReadForContactAsync(Guid contactId, CancellationToken ct)
+        => Task.FromResult(StandingGrantState.NotHeld);
+
+    public Task<StandingGrantState> ReadForOrganizationAsync(Guid organizationId, CancellationToken ct)
+        => Task.FromResult(StandingGrantState.NotHeld);
 }
 
 /// <summary>
