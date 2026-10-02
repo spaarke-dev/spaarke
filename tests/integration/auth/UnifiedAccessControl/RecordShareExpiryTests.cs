@@ -318,6 +318,37 @@ public class RecordShareExpiryTests
             new[] { ContactId, MemberA, MemberB }.Select(id => id.ToString()));
     }
 
+    /// <summary>
+    /// Task 137 (verifier r1 finding 8): an organization share whose organization is LARGER than the revoke path's
+    /// 200-member SPE bound has every ACTIVE member invalidated — the member walk is paged to completion through the
+    /// real routine, not capped (the old share-expiry path skipped an organization over 200 members silently). A
+    /// former member is still left alone.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_OnAnOrganizationOverTheTwoHundredMemberBound_InvalidatesEveryActiveMember()
+    {
+        _table.SeedOrganizationShare(OrganizationId, ExternalGrantRootType.Matter, MatterId);
+        var members = Enumerable.Range(1, ExternalOrganizationMembership.MaxMembersPerSweep + 51)
+            .Select(i => Guid.Parse($"dddddddd-0000-0000-0000-{i:D12}"))
+            .ToArray();
+        foreach (var member in members)
+        {
+            _table.SeedMembership(OrganizationId, member);
+        }
+
+        _table.SeedMembership(OrganizationId, FormerMember, stateCode: 1);
+        var participations = Participations();
+        participations.PageSize = 100;
+
+        var result = await Send(NewExpiry, participations: participations);
+
+        OkBody(result).UpdatedCount.Should().Be(1);
+        _invalidated.Select(i => i.Id).Should().BeEquivalentTo(members.Select(id => id.ToString()),
+            "every active member — all 251 — is invalidated, and the former member is not");
+        participations.PageReads.Select(p => p.Page).Should().Equal(new[] { 0, 1, 2 },
+            "251 members at 100 per page are read in three pages, to the end");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // The stored date
     // ─────────────────────────────────────────────────────────────────────────────
@@ -431,21 +462,23 @@ public class RecordShareExpiryTests
     // Driving the real handler
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private Task<IResult> Send(DateOnly? expiry, string recordType = "matter") =>
+    private Task<IResult> Send(
+        DateOnly? expiry, string recordType = "matter",
+        GrantPolicyTestDoubles.MemberPagingParticipationService? participations = null) =>
         SetRecordShareExpiryEndpoint.Handle(
             new SetRecordShareExpiryRequest(recordType, MatterId, expiry),
             _client.Object,
             _dataverse.Object,
             // Task 137: the ONE invalidation routine, run for real over this test's cache and the request's tid; only
             // its organization-member page read is answered from the table (by the production filter).
-            new GrantPolicyTestDoubles.MemberPagingParticipationService(_cache.Object, AuthenticatedContext(), null)
-            {
-                MemberSource = _table.ActiveMembersOf,
-            },
+            participations ?? Participations(),
             new FakeTimeProvider(Now),
             AuthenticatedContext(),
             NullLogger<Program>.Instance,
             CancellationToken.None);
+
+    private GrantPolicyTestDoubles.MemberPagingParticipationService Participations() =>
+        new(_cache.Object, AuthenticatedContext(), null) { MemberSource = _table.ActiveMembersOf };
 
     private (string Entity, List<(Guid id, Dictionary<string, object> fields)> Updates) SingleBulkUpdate() =>
         _bulkUpdates.Should().ContainSingle().Subject;

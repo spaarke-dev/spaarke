@@ -703,10 +703,6 @@ public class ProjectClosureCascadeTests
     }
 
     /// <summary>
-    /// Each affected contact's participation cache is cleared, so access stops at once rather than after
-    /// the TTL. The cache is what the enforcement path reads.
-    /// </summary>
-    /// <summary>
     /// Task 137 (C5): closing a project with an ORGANIZATION grant clears every ACTIVE member's cached grant set —
     /// members used to wait out the 60-second TTL because an organization grant names no contact. 205 members, past
     /// the revoke path's 200-member bound, are paged to completion.
@@ -737,6 +733,10 @@ public class ProjectClosureCascadeTests
         }
     }
 
+    /// <summary>
+    /// Each affected contact's participation cache is cleared, so access stops at once rather than after
+    /// the TTL. The cache is what the enforcement path reads.
+    /// </summary>
     [Fact]
     public async Task CloseProject_InvalidatesTheParticipationCacheForEachAffectedContact()
     {

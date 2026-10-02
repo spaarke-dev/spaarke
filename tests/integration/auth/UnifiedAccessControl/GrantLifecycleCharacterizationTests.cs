@@ -1471,4 +1471,48 @@ public class GrantLifecycleCharacterizationTests
                 (Contacts: new List<Guid> { OtherContactId }, Organizations: new List<Guid>()),
             }, o => o.WithStrictOrdering());
     }
+
+    /// <summary>
+    /// C5 end to end on /grant (verifier r1 finding 8): an ORGANIZATION grant written through the real core, over the
+    /// REAL invalidation routine and the production cache, clears every ACTIVE member's CIAM-tenant entry — an
+    /// organization LARGER than the revoke path's 200-member SPE bound, paged to completion — and leaves a contact
+    /// outside the organization cached.
+    /// </summary>
+    [Fact]
+    public async Task Grant_OfAnOrganizationGrant_ClearsEveryMember_EvenPastTheTwoHundredMemberBound()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var members = Enumerable.Range(1, ExternalOrganizationMembership.MaxMembersPerSweep + 51)
+            .Select(i => Guid.Parse($"bbbbbbbb-0000-0000-0000-{i:D12}"))
+            .ToArray();
+        var cache = RealCache();
+        foreach (var member in members)
+        {
+            await SeedEntryAsync(cache, CiamTenant, member);
+        }
+
+        await SeedEntryAsync(cache, CiamTenant, OtherContactId);
+
+        var participations = GrantPolicyTestDoubles.RealInvalidationOver(cache, AdminRequest(), TenantConfig);
+        participations.RootFlags = RootRecordFlags.None;
+        participations.PageSize = 100;
+        participations.Members[OrganizationId] = members;
+
+        var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
+            Request(contactId: Guid.Empty, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId, Today,
+            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, NullLogger.Instance,
+            CancellationToken.None);
+
+        outcome.Refusal.Should().BeNull("precondition: the organization grant is written");
+        table.ActiveRows.Should().ContainSingle().Which.OrganizationId.Should().Be(OrganizationId);
+        foreach (var member in members)
+        {
+            (await CachedAsync(cache, CiamTenant, member)).Should().BeFalse($"member {member} is invalidated");
+        }
+
+        (await CachedAsync(cache, CiamTenant, OtherContactId)).Should().BeTrue("a contact outside the organization is untouched");
+        participations.PageReads.Select(p => p.Page).Should().Equal(new[] { 0, 1, 2 },
+            "251 members at 100 per page are read in three pages, to the end");
+    }
 }

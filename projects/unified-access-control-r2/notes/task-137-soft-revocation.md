@@ -2,6 +2,8 @@
 
 **Status:** code complete; **two parts stopped on escalation** (reconciliation posture = owner decision; manual live
 gate = needs live writes). Branch `task/uac-r2-137` (parents: `task/uac-r2-139-r1` + `task/uac-r2-141-f3`).
+r1 fix round on `task/uac-r2-137-r1` (2026-10-02): verifier findings closed or recorded — §2 (job-scan before-state),
+§6 (posture still pending after the relayed answers), §9 (observations, new tests, perturbations).
 
 ## 1. Ownership map (closes the "partially tracked" finding)
 
@@ -35,6 +37,34 @@ gate = needs live writes). Branch `task/uac-r2-137` (parents: `task/uac-r2-139-r
   guard never touches a systemuser's own membership.
 
 **Access this task removes in dev today: none.** Escalation trigger 2 (real access removed) does not fire.
+
+**r1 (verifier finding 7) — re-taken with the JOB'S OWN SCAN, 2026-10-02, still read-only.** Step 1 prescribes a
+report-only run of `ExternalAccessReconciliationJob`. That run is not read-only end to end: the manual dispatch
+(`POST /api/admin/jobs/external-access-reconciliation/trigger`, `SystemAdmin`) writes a `sprk_backgroundjobrun` row, and
+it needs this branch deployed — so it stays a **pending manual gate** (below). What CAN be done read-only was redone with
+the job's exact scan shape instead of the rules' paraphrase: `BuildGrantScanFetchXml` = active-or-NULL statecode AND
+(`sprk_expiresdate` null OR `sprk_organization` not null), OUTER join to `sprk_organization.statecode`;
+`BuildMembershipScanFetchXml` = active-or-NULL statecode AND `sprk_enddate lt '2026-10-02'`. Then each returned row was
+classified by `PlanGrantChange` / `PlanMembershipChange` by hand (R2 before R1).
+
+| Job scan | Scanned | R1 planned | R2 planned | R3 planned |
+|---|---|---|---|---|
+| grants (R1 + R2) | **5** — all five carry an organization (`6f54531a`, `0452ab4b` [also a contact: `394fda9f`, the firm recorded beside the person], `ec54e576`, `1967189b`, `9aed8ab9`), every one has `sprk_expiresdate` 2026-12-10 and organization `67577f8c…` statecode **0** | **0** | **0** | — |
+| memberships (R3) | **0** | — | — | **0** |
+
+Same answer as the first pass (R1 = R2 = R3 = 0). Correction to the line above: 31 active grants = 26 contact-only + 5
+carrying an organization, of which one (`0452ab4b`) also names a contact — the earlier "27 + 4" counted that row as a
+contact grant.
+
+Pending manual gate (main session, after the dev deploy; writes ONE run-history row, no data change while
+`ExternalAccess:Reconciliation:WritesEnabled` is absent):
+
+```bash
+TOKEN=$(az account get-access-token --resource api://<bff-app-id> --query accessToken -o tsv)   # a SystemAdmin caller
+curl -s -X POST -H "Authorization: Bearer $TOKEN" https://<dev-bff-host>/api/admin/jobs/external-access-reconciliation/trigger
+curl -s -H "Authorization: Bearer $TOKEN" https://<dev-bff-host>/api/admin/jobs/external-access-reconciliation/status
+# expect RecentRuns[0].ResultJson: mode "report-only", writesEnabled false, R1/R2/R3 planned 0, changed 0
+```
 
 ## 3. What changed
 
@@ -112,6 +142,17 @@ Recommendation: inactive contacts and inactive roots stay **read guards only** (
 restores access with no repair); enable the schedule in **report-only** first; enable writes only after the owner has
 reviewed one report. With today's counts (§2: R1 = R2 = R3 = 0) enabling report-only changes nothing in dev.
 
+**r1 (2026-10-02): still pending.** The answers relayed with the r1 run ("1. let's not worry about these users … 7. yes")
+are owner round 4 item for item (root-BU users; provision `65a3fab2`; assign cascade; B2; 155 (b); "yes can run it" for
+141/144/145's live steps; `showViewSelector=false`), already recorded in `session27-owner-decisions-and-research.md`.
+None of the seven names `ExternalAccessReconciliationJob`, its schedule, or `ExternalAccess:Reconciliation:WritesEnabled`;
+item 6's approval is scoped to 141/144/145, and 141's "reconciliation job" is `IdentityLinkReconciliationJob`. So
+escalation trigger 1 stays a first-class stop: the registration (`enabled: false`) and the key (absent) are unchanged,
+and the question to the owner is unchanged — *"External-access reconciliation job: (a) keep it disabled; (b) enable the
+daily schedule report-only; (c) enable report-only, then writes after one reviewed report?"* (recommended: c). When
+answered, record it verbatim here and in DEPLOY-CHECKLIST §4.1 and change `ExternalAccessModule`'s registration and the
+key together in one commit.
+
 ## 7. Tests (ADR-038 KEEP paths; no `Mock<HttpMessageHandler>`, no DI-registration or ctor null-check tests)
 
 New: `OrganizationMembershipReadTests` task-137 section (real transport: 109 guards on both planes, CIAM wall binds a
@@ -160,3 +201,44 @@ cross-request memo would hide a deactivation).
 ## 8. Manual live gate — ⏳ PENDING (needs live writes; not run by this task)
 
 Steps and records: `DEPLOY-CHECKLIST.md` §4.2. Evidence to be appended here by the main session.
+
+## 9. r1 — verifier findings and observations (2026-10-02, branch `task/uac-r2-137-r1`)
+
+- **TenantRouting tenants are not in the removal set (finding 9).** `GrantCacheTenantIds` enumerates the request `tid`,
+  an explicit tenant, `Ciam:TenantId`, `AzureAd:TenantId` and `WorkforceIdentity:CustomerTenantIds` — the sets the POML
+  named. It does NOT enumerate `TenantRouting:Tenants[]`. A workforce caller whose `tid` is accepted only through
+  TenantRouting (neither `AzureAd:TenantId` nor a CustomerTenantId — possible for an existing oid binding, which 141
+  still resolves) caches its grant set under that tid; a write made from ANOTHER tenant does not clear it, so that entry
+  waits out the 60-second TTL. A write made from that same tenant clears it (request `tid`). Within the owner's R3/R4
+  "minutes" bound; not a criterion failure. Closing it means adding the TenantRouting tenant ids to `GrantCacheTenantIds`
+  — a one-line follow-up if a deployment ever routes a customer tenant only through TenantRouting.
+- **A partial revoke skips invalidation (finding 10).** When `/revoke`'s Step 1 fails part-way it returns 500 before
+  Step 3, so rows already deactivated keep a stale cache entry for up to 60 s. Unchanged from before this task; the
+  client is told the revoke failed and retries; accepted.
+- **For tasks 140 and 142 (finding 11).** Granting on an INACTIVE root is still allowed at write time — the read-time
+  rule makes the grant confer nothing until the root is reactivated. 140 (contact-side grant) and 142 (Assigned-To
+  auto-grants) inherit this: neither should treat a 200 from the grant core as "the grantee can now see the record" when
+  the root is inactive. 140's invalidation must go through `InvalidateGrantSetsAsync` (already the only route).
+- **Doc fixes.** `ProjectClosureCascadeTests`: the closure-cache test's `<summary>` was stranded above the new
+  organization test (two summaries on one, none on the other) — moved back. `task-139-grant-model.md` lines 19 and 81 named
+  the `FindContactByEmailAsync` that merge `6300dbbae` removed — now name `ContactIdentityBinder.PeekInviteContactAsync`.
+- **New tests (r1).** `WorkforceEmailNoHijackTests.AnOidOnlyOnAnInactiveContact_ThroughTheWorkforceStrategy_Is403WithTheContactInactiveCode`
+  (criterion 1 on the WORKFORCE plane at the HTTP boundary: real resolver → real `WorkforcePrincipalStrategy` → executed
+  ProblemDetails is 403 with `sdap.access.deny.contact_inactive`, never `principal_not_resolved`, evaluator Strict and
+  untouched); `GrantLifecycleCharacterizationTests.Grant_OfAnOrganizationGrant_ClearsEveryMember_EvenPastTheTwoHundredMemberBound`
+  (/grant through the real core and the REAL routine over the production `TenantCache`, 251 members in 3 pages);
+  `RecordShareExpiryTests.SetShareExpiry_OnAnOrganizationOverTheTwoHundredMemberBound_InvalidatesEveryActiveMember`
+  (251 active members from the fake junction by the production filter, former member untouched, 3 pages). The
+  `MemberPagingParticipationService` double gained an opt-in `RootFlags` answer so the /grant policy check runs without
+  Dataverse; unset, the production read is unchanged.
+- **Perturbations (r1)**, each seeded, seen red, restored, file touched:
+
+| Seed | Red |
+|---|---|
+| `WorkforcePrincipalStrategy` maps every deny to `principal_not_resolved` | `…ThroughTheWorkforceStrategy_Is403WithTheContactInactiveCode` |
+| `/grant` passes no organization to the routine | `Grant_OfAnOrganizationGrant_ClearsEveryMember…`, `Grant_InvalidatesTheOrganizationOnAnOrgGrant…` |
+| member walk stops after page 1 (the silent cap) | `Grant_OfAnOrganizationGrant…`, `SetShareExpiry_OnAnOrganizationOverTheTwoHundredMemberBound…`, `Revoke_OfAnOrganizationGrant…` |
+
+Results (r1, 2026-10-02): affected classes (ProjectClosureCascade, WorkforceEmailNoHijack, GrantLifecycleCharacterization,
+RecordShareExpiry, CallerPrincipalResolver) **149 / 0 / 0**; full BFF unit suite **13,980 passed / 0 failed / 54 skipped**
+(14,034; +3 new); NetArchTest **345 / 0 / 0**. No `src/` change, no package change. Publish size not measured (main session).

@@ -257,6 +257,20 @@ internal static class GrantPolicyTestDoubles
         /// <summary>Every (organization, page index) read, in order.</summary>
         public ConcurrentQueue<(Guid OrganizationId, int Page)> PageReads { get; } = new();
 
+        /// <summary>
+        /// When set, the root-flag read answers these flags for every id instead of reading Dataverse — so a WRITE
+        /// path whose policy check reads the flags (<c>/grant</c>) can run end to end over the real invalidation
+        /// routine. Unset, the production read runs (and the write paths that never read flags are unaffected).
+        /// </summary>
+        public RootRecordFlags? RootFlags { get; set; }
+
+        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+            => RootFlags is { } flags
+                ? Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+                    recordIds.Distinct().ToDictionary(id => id, _ => flags))
+                : base.GetRootRecordFlagsAsync(entityType, recordIds, ct);
+
         internal override Task<OrganizationMemberPage> ReadOrganizationMemberPageAsync(
             Guid organizationId, string? nextLink, CancellationToken ct)
         {

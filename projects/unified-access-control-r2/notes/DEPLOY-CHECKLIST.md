@@ -231,7 +231,7 @@ Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md`
 
 | Rule | Rows that would change | Note |
 |---|---|---|
-| R1 — active grant with no expiry | **0** | of 31 active grants (27 contact, 4 organization) |
+| R1 — active grant with no expiry | **0** | of 31 active grants (26 contact-only, 5 carrying an organization — one of them also names a contact) |
 | R2 — active grant under an inactive organization | **0** | |
 | R3 — active membership past its end date | **0** | 2 active memberships, both with no end date |
 | (task 137) active grant whose CONTACT is inactive | **0** | read guard, no writer rule |
@@ -241,6 +241,14 @@ Recommendation put to the owner: keep inactive contacts and inactive roots as **
 restores access with no data repair — no writer rule for them); enable the schedule in **report-only** first;
 enable `WritesEnabled` only after the owner has reviewed one report. The owner's answer is to be recorded here
 verbatim, and the registration / key changed to match it in the same change.
+
+**Re-checked 2026-10-02 (task 137 r1): still unanswered.** The seven answers relayed with that run are owner round 4
+(root-BU users, `65a3fab2`, assign cascade, B2, 155 (b), live steps for 141/144/145, `showViewSelector`) — none names
+this job or `ExternalAccess:Reconciliation:WritesEnabled`. Both switches stay as shipped. The before-state was re-taken
+with the job's own scan shape (grants scanned 5, memberships scanned 0; R1 = R2 = R3 = 0). A true report-only RUN is a
+pending manual gate (it writes one `sprk_backgroundjobrun` row): after the dev deploy, a `SystemAdmin` caller
+`POST /api/admin/jobs/external-access-reconciliation/trigger`, then `GET …/status` — expect `mode: report-only`, every
+rule `planned: 0`, `changed: 0` (`notes/task-137-soft-revocation.md` §2).
 
 ### 4.2 Task 137 — manual live gate (dev, no CI) — ⏳ PENDING, needs live WRITES
 
