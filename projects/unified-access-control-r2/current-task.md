@@ -4,6 +4,22 @@
 >
 > **Owner standing instruction (2026-10-01):** "continue autonomous as each of these steps are completed". Proceed step by step without asking. Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5).
 >
+> **LATEST (2026-10-02 ~17:00Z) — READ FIRST (supersedes everything below):**
+> - **Owner rounds 6 and 7 are recorded:**
+>   - 158 stays secure when the parent is unsecured, but the user may unsecure related records;
+>   - 137 is report-only;
+>   - 133 gets the server-stamped creator column;
+>   - 146 uses the G5 pattern for the AI create handlers;
+>   - **146's role extension 9→26 is APPROVED (apply BEFORE deploying 146);**
+>   - child access inheritance is confirmed (149 users / root-scoped contacts).
+> - **Batch 3 DAG (`wgqgt6cu7`) result:**
+>   - READY: 141 `task/uac-r2-141-f3`, 138→139 `task/uac-r2-139-r1`, 152 `task/uac-r2-152-r1-r2` (contains 141).
+>   - NEEDS-FIXES: 133, 146, 157, 137.
+>   - SKIPPED: 150, 149, 148, 147, 132, 143, 142, 140.
+> - **Integration branch `integ/uac-r2-batch3`** (worktree `C:\wt29i`, from `6cd02997d`) has merged 139-r1. The merge of 152-r1-r2 hit 139×141 conflicts in the invite endpoints; workflow `wqsym4mj4` is resolving and verifying them. After that, merge `work/unified-access-control-r2` (`ee2be9213`, docs) into it, run the suites, measure publish size, open PR #3, deploy, then run 141 G-1..G-8 (approved).
+> - **Fix round B is RUNNING:** `wwpnme1b4` (run `wf_52a9841d-812`) for 133/146/157/137, on branches `task/uac-r2-{id}-b1/-b2`, with findings in `scratchpad/batch3-fixargs.json`. When it finishes, integrate the ready ones, apply the 146 role extension live BEFORE deploying 146, then run the dependents DAG (150; 149→148→147; 132; 143→142→140; 158) on top of the merged work.
+> - **155 f4 → 156 is RUNNING:** `wbwgbkzzb`.
+>
 > **LATEST (2026-10-02 ~14:00Z) — READ FIRST (supersedes everything below):**
 > - ✅ **#1083 and #1093 are both MERGED** (`65e6db71f`, `c726acd65`; merge commits). Closed: #998, #1053, #1055, #1057, #1058, #1068, #967. The main repo's master is synced. The work branch is at `1019cdfb7` (master merged back in, docs pushed). **There is no open PR.**
 > - ✅ **Dev BFF = `bca0941f6`** (batches 1+2), deployed 2026-10-02.
