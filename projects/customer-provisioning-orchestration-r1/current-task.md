@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-02 SESSION 30 — T245b ✅ + T245c ✅ (G25 closed) + **T225a ✅**. **Next: T225b.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps G16–G28).
+> **Last Updated**: 2026-10-02 SESSION 30 (by context-handoff) — T245b ✅ T245c ✅ T225a ✅ (pushed `b9fd48bbe`, branch 0 behind master). **Next: owner items O1–O5 (answered 2026-10-02) → then file + execute T225b.** 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§7 order, §4 gaps).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,23 +36,35 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 30, 2026-10-01)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 30 checkpoint, 2026-10-02)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **225b — Converge Model 1 onto the dedicated code path** · see plan §7 T225b (POML may need filing via task-create) · **not started** |
-| **Step** | none yet |
-| **Next Action** | Check `tasks/` for a T225b POML; if none, file it (task-create) from plan §7 T225b (H2b Model 1 branch + tenant-filter template → dedicated; H12c SharedPlatformOpenAiEndpoint; Seed-PlatformKeyVault.ps1:402-403; worker Bicep config; ArmDeploymentRunner Model 1 arm → `customer` (fails closed since T225a); tenancy × profile pairing G6; Model1SharedDagParityTests rename G13; G21 secret-free default incl. the two PinnedManifestGaps). Then `task-execute`. Plan §7 after: T243 → T242 → T244 → T227 → T228 → … → T186. |
-| **Verified state (end of T225a)** | Branch merged with master (`5de91f095`). ControlPlane.Tests **2141 pass / 6 fail (T221 baseline) / 1 skip**; ArchTests **340/340**; all Bicep stacks build, checked-in JSON = fresh compile; dry-run PASS (3 stacks); prereqs validate OK (manifest v4); catalog -Verify OK. |
-| **🔔 Open with the owner** | (a) **G28** — no SPE owning-app certificate in any readable vault; H0 rejects every run until the topology runbook creates it + an `speContainerTypeOwners` entry. (b) ADR-028 E-1 scope for L2 H0/H8/T6 — spec row PROPOSED (path B recommended). (c) ADR-020 registry-column semantics — spec row PROPOSED. (d) Vendor keys must be seeded into the platform vault (`Seed-PlatformKeyVault.ps1` does not); ContentSafety → T246. (e) H9 (and H10–H14) now wait on H5. (f) H0's 24 h cert-age gate vs the observed near-instant SPE wait. T245c decisions D14/D15 are recorded (plan §2). |
-| **Branch** | T245b committed + pushed. master ahead; merge master when the owner asks or before a PR. No open PR. |
-| **Owner decisions in force** | D13 keyless stamps; G23 `spaarke-demo` → later; **"if a fix is required and you can make it, do not defer"**; user (2026-10-01): "commit and /push-to-github; then continue with next tasks". |
+| **Task** | none in progress — between tasks. Last completed: **T225a** (`b9fd48bbe`). Next task: **T225b** (no POML yet — file via task-create from plan §7 T225b). |
+| **Status** | clean tree, pushed, 0 behind origin/master (master merged at `5de91f095`). No open PR. |
+| **Next Action** | Work the owner's answers O1–O5 below (investigate → act or direct), then file T225b (`task-create`) and `task-execute` it. |
+| **Verified state (end of T225a)** | ControlPlane.Tests **2141 pass / 6 fail (T221 baseline `CustomerRunGuardModulePostConfigureTests`) / 1 skip**; ArchTests **340/340**; Api/Worker/LoadTests 0/0; every Bicep stack builds + checked-in JSON = fresh compile; `bicep-e2e-dry-run.ps1` PASS (3 stacks); prereqs `validate.ps1` OK (manifest v4); catalog `-Verify` OK; drift check exit 0. |
+
+### Completed this session (SESSION 30)
+| Task | Commit | Outcome |
+|---|---|---|
+| T245b | `5e15c128a` | L2-owned values are config/computed (artifact versions, SPE owner-credential options, L2 KV principal, vendor-key vault, H9 → BffApiUrl/BffBuildId). |
+| T245c | `81c16bd07` | Operator intake required + validated at `POST /api/runs` with handlers' own rules (H11 `UserProvisioningIntake`, H14, mailbox). Owner D14 (Exchange scope group = operator prereq PRQ-C-08) + D15 (user list in run doc, never git). G25 CLOSED. |
+| T225a | `b9fd48bbe` | Model 1 shared-tier Bicep deleted (8 files); workflows + manifest schema + dry-run updated; **Model 1 fails closed at H2a until T225b + T228**. Owner: ci-cd-unit-test-remediation-r1 is CLOSED → r1 resolves its own workflow changes. |
+
+### Owner answers to the open items (2026-10-02, verbatim intent) — NEXT WORK
+| # | Item | Owner said | Next step |
+|---|---|---|---|
+| O1 | **G28** — no SPE owning-app certificate in any readable vault; H0 rejects every run | "I'm not following — what do you need; either create it yourself or direct me how" | Investigate exactly what exists (container type, owning app reg, its credentials, vault) → create what can be created or give precise operator steps; evaluate MI-as-FIC (no certificate) as the alternative to a cert. |
+| O2 | ADR-028 E-1 scope for L2 H0/H8/T6 (spec row PROPOSED) | "If ADR-028 has to be expanded, expand it; if that is a risk, explain why + other options" | Assess risk; if the FIC route removes the need for a certificate, prefer it; else amend ADR-028 (concise + full) — main session (.claude). |
+| O3 | ADR-020 registry version columns (`sprk_bffversion` = build id, `sprk_solutionversion` = fingerprint, `sprk_clientcachebusttoken` = run id) | "Explain the options and your recommendation" | Write options + recommendation. |
+| O4 | Vendor keys (`BingSearch-ApiKey`, `LlamaParse-ApiKey`) must be in the platform vault; nothing seeds them | "You can proceed — or direct me how" | Find where the values live today (name-only checks); seed via `Seed-PlatformKeyVault.ps1` (extend it) or give steps. Never touch BFF-API-ClientSecret / Dataverse-ClientSecret / rollback copies / E-1 secrets. |
+| O5 | `customer.bicep` (H2a) vs `stacks/model2-full.bicep` (`deploy-infrastructure.yml`) — two unreconciled full-stamp templates | "What do I need to provide to reconcile?" | Diff the two; state what the owner must decide/provide. |
 
 ### Critical Context
-G25 is closed: every handler input has one producer (T245a), L2-owned values are configuration or computed (T245b),
-and the operator intake is required and validated at `POST /api/runs` with the handlers' own rules (T245c, owner
-decisions D14 / D15). `RunContextContractTests` has an empty known-gap list; the remaining manifest pins belong to
-T246 (ContentSafety), T225b (secret-free default) and T227 (SPE container ids).
+G25 is closed. Model 1 cannot run until T225b (code path) + T228 (subscription per customer); no run passes H0
+until O1 (SPE owning-app credential) is resolved. Remaining manifest pins: T246 (ContentSafety), T225b (secret-free
+default), T227 (SPE container ids). For T241: the deleted shared stack was last present at `5de91f095`.
 
 ## 📁 Files Modified This Session
 
