@@ -17,6 +17,37 @@
 
 ---
 
+### ISS-004 — the Console rename: engineering identifiers deferred
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | when the active SpaarkeAi worktree count drops, or alongside solution packaging |
+| **Filed** | 2026-10-02 |
+| **Source** | Owner decision 2026-10-02 during ontology-platform-r1 design review (item A) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1095 |
+
+**Description**
+
+The **product** surface is renamed to **Spaarke Console** now. The **engineering identifiers** are not: the
+Dataverse web resource `sprk_spaarkeai` and the source directory `src/solutions/SpaarkeAi/`.
+
+Measured: **32 occurrences across 16 files in `src/`**, plus 3 deploy scripts, 1 workflow and 1 ribbon XML —
+**~21 live files, entirely mechanical.**
+
+**Why it is deferred is concurrency, not difficulty.** `projects/INDEX.md` lists **37 of 62 active projects
+with `SpaarkeAi = Y`**, several actively editing the files that carry the name. The rename would hand those 37
+worktrees a merge conflict they did not ask for.
+
+It is **not** blocked by broken deep links, which was the first reason given and was wrong: R1 is dev-only with
+no managed solutions, and deep links are server-generated in `HandoffUrlBuilder`, so a coordinated redeploy
+regenerates them.
+
+**Must land as one change**: web resource + source directory + ribbon XML + 16 launch points +
+`HandoffUrlBuilder`, deployed together.
+
+---
+
 ## Issues (newly-discovered defects, cross-project)
 
 ### ISS-001 — `suggest-followups` is running a stale prompt in dev

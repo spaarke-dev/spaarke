@@ -106,14 +106,42 @@ No general browsing wrapper over TyMetrix and iManage. Instead: for every item t
 | ~~originate~~ (binding mode) | ⚠️ Prefer **"system of record"** | Palantir-flavoured; SOR is the industry term |
 | ~~field classes~~ | ⚠️ Prefer **"attribute ownership"** | Plainer, and says what it does |
 | ~~typed outcome~~ | ❌ **Drop** → **disposition** `[resolved 2026-10-02, CM-4]` | We already have 8 action dispositions + File/File+Act/Route/Hold/Dismiss for communications; an Inquiry's outcome is the same shape. **Reuse beats a new word** — and ADR-039 already owns this one in shipped code |
-| **Work Item** | ✅ **Adopt** `[2026-10-02]` — the user-facing noun for **one line in the worklist** | Answers the owner's *"what do we call each line item?"*. **Verified free**: zero `sprk_workitem` / `sprk_worklistitem` references in `src/`. Chosen over *Signal* for the UI because *signal* reads as **alert**, and "they alert; we record decisions" is the positioning we are defending. One Work Item = one `sprk_signal` row, rendered. ⚠️ **Never an entity name** — `sprk_workassignment` (141 files), `sprk_todo` (208) and `sprk_event` (284) all exist and all *appear as* Work Items; the superordinate term must not collide with its own members |
-| **Signal** (`sprk_signal`) | ✅ Keep — the **engineering + data** name | The stored evaluation: subject · rule + version · evidence · lifecycle. Same split as ~~ledger~~ → Decision Record and decision 19: one object, a customer-facing name and an engineering identifier |
+| **Signal** (`sprk_signal`) | ✅ Keep — **a condition that held** | The stored result of a rule evaluation: subject · rule + version · evidence · lifecycle. It is the **trigger**, not the task — see §3.1 |
+| **Work Item** | ✅ **Adopt** `[2026-10-02, refined 2026-10-03]` — **the actionable unit a Signal produces** | The thing a person is asked to do something about: one unresolved Signal, with its evidence, its available actions and its disposition. **1:1 with a Signal**, but a different layer — see §3.1. **Verified free**: zero `sprk_workitem` / `sprk_worklistitem` references in `src/` |
 | ~~flag~~ (as a synonym for a signal row) | ❌ **Drop** `[2026-10-02]` | **A genuine collision, found in our own drafts**: `sprk_highpriority` and `sprk_monitor` are *already* called flags — *"a flag says someone cares, not what is wrong"* — and `daily-briefing-ontology-fit.md` uses "flag" for both meanings 17 times. Say **Signal** for the row and **flag** only for the two booleans |
 | **Decide · Do · Know** | ✅ Adopt as the **kinds** of Briefing/worklist content `[2026-10-02]` | Decide and Do are the two **lanes** of the worklist and both are Work Items; **Know is not a Work Item** — it fails row-contract requirement 4 and becomes narrative + Context pane |
 | **reference / mirror** | ✅ Keep | Ordinary data-integration terms, not Palantir's |
 | **Action · gate · disposition** | ✅ Keep | ADR-039, already ours |
 | **Fact / Observation / Precedent / Inference** | ✅ Keep | Insights Engine, already shipped |
 | **Authority** | ✅ Keep | Generic; UAC-adjacent |
+
+### 3.1 The chain, so the mental model and the vocabulary match `[2026-10-03]`
+
+Raised in owner feedback: *"isn't Signal sort of a trigger or condition that results in a Work Item?"* — **Yes,
+and that is the correct model.** The earlier wording ("a Work Item is one line in the worklist") conflated two
+layers and, worse, contradicted D-3, which makes the worklist's **line a matter**. The chain is five steps:
+
+| # | Step | Name | Layer |
+|---|---|---|---|
+| 1 | A rule declares a condition over data | **Policy** + immutable **policy version** | declaration |
+| 2 | Evaluation finds the condition **holds** for some subject | a **Signal** is written (`sprk_signal`) | data — *the trigger* |
+| 3 | An unresolved Signal presents as something to act on | a **Work Item** | presentation / work |
+| 4 | Work Items are **grouped by matter** onto one line | a worklist **row** (= a matter) | layout — D-3 |
+| 5 | Acting **dispositions** the Work Item → closes the Signal → writes a **Decision Record** | | record |
+
+Three consequences worth stating, because each one has already caused a wording error:
+
+- **A Signal is a condition, not a task.** *"Spend reached 118% of budget"* is a Signal. *"Decide what to do
+  about the overrun on Acme v. Northwind"* is the Work Item. Keeping these apart is what lets a Signal
+  auto-close as `ConditionCleared` without anyone having worked it.
+- **A row is not a Work Item.** One row (a matter) can carry several. That is exactly why *"does one decision
+  resolve both?"* is a real question, and why a Decision Record is **1:N** to Signals (D-2).
+- **A Work Item's *subject* is an existing object, and that object is never itself a Work Item** (owner
+  clarification, 2026-10-03). `sprk_event` (task), `sprk_todo`, `sprk_workassignment`, `sprk_matter`,
+  `sprk_communication` and `sprk_servicerequest` (inquiry) are the **subjects or targets** a Signal points at.
+  A To Do is not a Work Item; *"this To Do is 7 days past due and still open"* is. This is the whole reason
+  **Work Item must never become an entity name** — the superordinate term would collide with its own members,
+  and `sprk_workassignment` (141 files), `sprk_todo` (208) and `sprk_event` (284) are all already taken.
 
 ---
 

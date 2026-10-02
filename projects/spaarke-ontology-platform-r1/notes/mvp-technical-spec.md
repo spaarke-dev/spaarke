@@ -165,6 +165,19 @@ This is the whole MVP. Everything in §§2–7 exists to make this run.
 
 ### 2.2 `sprk_spendsignal`
 
+> 🔴 **The inventory below is INCOMPLETE — corrected by live re-verification 2026-10-02.** Two columns exist on
+> this table that no section of this spec listed:
+>
+> | Column | Type | Why it matters |
+> |---|---|---|
+> | **`sprk_spendsignalstatus`** | choice — Active · Acknowledged · Resolved · **Auto Resolved** | **"Auto Resolved" is `ConditionCleared`.** §2.5.1 argues for a new `sprk_resolutiontype` on the premise that *"nothing anywhere closes a flag when the condition clears on its own"* — the **vocabulary** was already here |
+> | **`sprk_resolutionnotes`** | multiline text | the dismissal/resolution reason field §2.5.1 proposes |
+>
+> **What this changes**: CM-9's resolution semantics are **a model to copy onto `sprk_signal`, not to invent**.
+> **What it does not change**: the table holds **0 rows**, so nothing has ever exercised these columns and the
+> *sweep* that would set `Auto Resolved` almost certainly does not exist. The gap is behaviour, not schema —
+> which is a cheaper gap, and a different one from the one §2.5.1 describes.
+
 | Field | Notes |
 |---|---|
 | `sprk_matter` | lookup |
@@ -518,11 +531,11 @@ public sealed record SourceRecord(
 | # | Item | Why it matters |
 |---|---|---|
 | 1 | **`sprk_matter` current schema** — read before adding anything in §5.1 | several fields may already exist under different names |
-| 2 | **`sdkmessagefilters` on `sprk_matter` / `sprk_billingevent`** — is `UpsertMultiple` supported? | bulk messages are not available on every table; plugin registrations can disable them |
+| ~~2~~ | ~~**`sdkmessagefilters`** — is `UpsertMultiple` supported?~~ | ✅ **Moot for R1** — `UpsertMultiple` was the *ingest* mechanism, and there is no ingest in R1 (§7, out of scope). Returns with the mirroring phase |
 | ~~3~~ | ~~**What populates `sprk_spendsnapshot` today?**~~ | ✅ **CLOSED 2026-10-01 — no longer an R1 question.** Budget and spend are **seeded manually in dev** for development testing; R1 does not define their provenance (owner, synopsis §7 item 2). The question returns with the mirroring phase. Replaced by the §8.1 seeding checklist in `design.md`. ⚠️ Seeded data proves the predicate *evaluates*, never that it *fires on reality* |
 | 4 | **Null-budget behaviour** (§4) | decide and test; silent wrong-firing is the failure mode |
 | ~~5~~ | ~~**Which platform is first**~~ | ✅ **Moot for R1 — no connector** (§7). Still customer-determined when the mirroring phase starts |
-| 6 | **Does `sprk_servicerequest` have a direction/outcome model already?** | CM-5 assumed it absorbs Inquiry; unverified |
+| ~~6~~ | ~~**Does `sprk_servicerequest` have a direction/outcome model already?**~~ | ✅ **CLOSED 2026-10-02 — verified ABSENT, both halves.** Live `describe`: **no direction discriminator** and **no outcome/disposition option set**. CM-5's "absorbs Inquiry" therefore requires adding **both**, which is what §8 item 10 already proposes — the proposal is confirmed correct rather than redundant. ⓘ It *does* carry **13 polymorphic `sprk_regarding*` fields** incl. `todo` and `workassignment`, so the subject side of an Inquiry needs nothing |
 | ~~7~~ | ~~**What is the second (cross-source) rule, precisely?**~~ | ✅ **ANSWERED — §11.4** (Path B, rewritten 2026-09-30): a communication classified fee/scope in the window **AND** no `sprk_budgetrevision` in that window. ⚠️ Note the example phrasing in the original cell (*"over budget AND … with no disposition"*) is **exactly the §0.3 failure** — it asserts a budget comparison the predicate never makes. Kept visible as the worked example of the trap |
 | **9** | **How many signal producers at MVP, now that the Do lane is in?** `[new 2026-10-01]` | Three were assumed (spend · communication · memo); BR-2 adds three `Temporal` rules and BR-6 one `Absence` rule. **This strengthens the generic-`sprk_signal` case rather than complicating it** — but it changes "shaped by two producers" to "shaped by six", which is the right time to settle the shape (D-2 / D-7 / D-8) |
 | 8 | **Run the §0 differentiation test retroactively** across §8 Wave 2 / Wave 3 modules in the strategy synopsis before any is specced | Several may fail it the same way budget variance did |
@@ -535,6 +548,10 @@ Queried directly via Dataverse MCP. These are facts, not inferences — earlier 
 contradict them are wrong.
 
 ### 10.1 `sprk_triagecategory` — the taxonomy is data, not code
+
+> ⓘ **Column list and row count below are superseded by §10.7** (live re-verification 2026-10-02): there are
+> **10** rows, not nine — `Unclassified` was omitted — and `sprk_classifierguidance` now exists and is populated
+> on all ten. Both changes were made *by* this project in §14/§16.4; §10.1 simply predates them.
 
 The table has **only** `sprk_name`, `sprk_enabled`, `sprk_priorityweight`. **No description column.**
 Nine rows after this session's additions:
@@ -648,6 +665,42 @@ Only Decision Records turn it into evidence.
 > surface read too early, or not refreshed, shows neither. **A UI that cannot distinguish "not yet
 > enriched" from "enrichment found nothing" will keep generating false defect reports** — worth a visible
 > pending state on the reconciliation surfaces.
+
+---
+
+
+### 10.7 Live re-verification — 2026-10-02 `[authoritative row counts]`
+
+Re-run against the **live dev environment** via Dataverse MCP, because `phase0-codebase-inventory.md` could not
+reach it on 2026-09-19 and used repo docs instead. **Every figure below is LIVE-MCP.** This subsection supersedes
+any schema claim elsewhere in the project notes, including §10.1's earlier column lists.
+
+| Entity | Exists? | Rows | Note |
+|---|---|---|---|
+| `sprk_signal` | ❌ **ABSENT** | — | To be created |
+| `sprk_policy` · `sprk_policyversion` | ❌ **ABSENT** | — | To be created |
+| `sprk_budgetrevision` | ❌ **ABSENT** | — | To be created (CM-10 confirmed) |
+| `sprk_spendsignal` | ✅ | **0** | Replace-not-extend is confirmed free. `sprk_snapshot` lookup is **NOT NULL** → structurally spend-only. ⚠️ Carries `sprk_spendsignalstatus` (incl. **Auto Resolved**) + `sprk_resolutionnotes` — see §2.2 |
+| `sprk_spendsnapshot` | ✅ | **0** | `sprk_budgetamount` · `sprk_invoicedamount` · `sprk_velocitypct` all confirmed, plus `sprk_budgetvariance`/`pct` |
+| `sprk_budget` | ✅ | **2** | `sprk_totalbudget` + status/period/category/year/dates. **No revision history of any kind** |
+| `sprk_billingevent` | ✅ | **1** | `sprk_amount` · `sprk_costtype` (Fee/Expense) · `sprk_rate` · `sprk_timekeeper` · `sprk_vendororg` |
+| `sprk_affinity` | ✅ | 0 | ⚠️ **Collision confirmed**: `sprk_signaltype` *and* `sprk_signalvalue` both exist here |
+| `sprk_servicerequest` | ⚠️ **PARTIAL** | — | **No direction discriminator, no outcome/disposition option set** — both must be added (§9 item 6). Has **13 polymorphic `sprk_regarding*`** fields incl. `todo` + `workassignment` |
+| `sprk_triagecategory` | ✅ | **10** | ⚠️ **Not 9** — §10.1 omitted `Unclassified` (weight 40). **All 10 enabled, all 10 with `sprk_classifierguidance` populated.** Weights: Court/Filing 100 · Scope/budget 85 · Client instruction 80 · Fee/rate 75 · Opposing counsel 70 · Invoice/Billing 60 · Scheduling 50 · Unclassified 40 · Administrative 30 · Marketing/Noise 10 |
+| `sprk_communicationrule` | ✅ | **1** | `sprk_confidencethreshold` · `sprk_taskduedays` · `sprk_taskfinalduedays` · scope + priority |
+| `sprk_gridconfiguration` | ✅ | **22** | Reuse inventory — incl. *My Tasks (Assistant)*, *Communication Reconciliation – Needs Review*, *Event Default – Calendar Widget*, *Invoice Matter Budget Performance* |
+
+**The Do lane has real data to fire on** — which matters, because BR-2's rules were specced before anyone counted:
+
+| Entity | Rows | Due-date column | Status mechanism |
+|---|---|---|---|
+| `sprk_event` | **73** — Draft **48** · Open **17** · Completed 7 · Cancelled 1 | — | `statuscode`: Draft 1 · Open **659490001** · Completed 659490002 · …; type via `sprk_eventtype_ref` |
+| `sprk_todo` | **50** | `sprk_duedate` | `statuscode`: Open 1 · Completed 2 · In Progress 659490001 · Dismissed 659490002 |
+| `sprk_workassignment` | **22** | **`sprk_responseduedate` confirmed** | `sprk_priority`, plus `sprk_monitor` |
+
+⚠️ **[ISS-003](https://github.com/spaarke-dev/spaarke/issues/1050) re-measured: 48 Draft rows, not 49.** Still
+the blocker it was — 48 of 73 `sprk_event` rows are invisible to any Open-filtered query, so a Do-lane overdue
+rule shipped today would under-report by roughly two thirds.
 
 ---
 

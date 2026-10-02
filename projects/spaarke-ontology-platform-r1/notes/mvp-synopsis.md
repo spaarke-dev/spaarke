@@ -201,20 +201,31 @@ main.aspx?appid={guid}&pagetype=webresource&webresourceName=sprk_spaarkeai&navba
 R1 builds and deploys **in dev only**. Packaging is a deployment question for a later phase, not a design
 constraint here.
 
-**Should `sprk_spaarkeai` be renamed to "Console"?** `[new 2026-10-01 — owner item 8-6]` The *concept* is settled:
-**SpaarkeAi becomes the Console** (component model decision 19, `design.md` decision 1). The question is whether
-the **identifier** follows, and the measured blast radius says split the two:
+**Should `sprk_spaarkeai` be renamed to "Console"?** — **RESOLVED 2026-10-02.** The concept was never in doubt:
+**SpaarkeAi becomes the Console** (component model decision 19). The question was whether the *identifier*
+follows, and the answer is a split, because the blast radius is not where it looks:
 
-| Layer | Occurrences | Recommendation |
+| Layer | Blast radius | Decision |
 |---|---|---|
-| **Product / UI surface** — titles, labels, docs, how we talk about it | — | ✅ **Rename now to "Spaarke Console."** Costs nothing and ends the ambiguity |
-| **Live source + config** — `src/**` (16 files), 2 deploy scripts, 1 workflow, 1 ribbon XML | **32 in `src/`**, ~21 files live | ⚠️ **Defer.** Mechanical but not free |
-| **The Dataverse web-resource name `sprk_spaarkeai`** | the deployed artifact | 🔴 **Do not rename in R1.** Deep links are **server-generated** (`HandoffUrlBuilder`), and the name is also embedded in ribbon XML and 16 launch points. Renaming breaks every live link, bookmark and ribbon until everything is republished together |
-| **Historical project docs** | 705 across 256 files repo-wide | Leave. Rewriting history adds risk and no value |
+| **Product / UI surface** — titles, labels, docs, how we talk about it | — | ✅ **Renamed now.** Free |
+| **Live source + config** — `src/**` (16 files), 3 deploy scripts, 1 workflow, 1 ribbon XML | **32 occurrences, ~21 files** | ⏸ **Deferred** → [#1095](https://github.com/spaarke-dev/spaarke/issues/1095) |
+| **The Dataverse web-resource name `sprk_spaarkeai`** | the deployed artifact; deep links **server-generated** in `HandoffUrlBuilder`, plus ribbon XML + 16 launch points | ⏸ **Deferred** → [#1095](https://github.com/spaarke-dev/spaarke/issues/1095) |
+| **Historical project docs** | 705 occurrences / 256 files | ❌ Leave — rewriting history adds risk and no value |
 
-**This is the pattern decision 10 already set** — *"ledger"* → **Decision Record** customer-facing while
-*ledger* stays in engineering docs. Customer-facing name and engineering identifier are allowed to differ, and
-here that is the cheap, reversible option. Revisit the identifier when solution packaging is addressed.
+> ### 🔴 The decisive number is concurrency, not file count
+>
+> The identifier rename is **~21 files and entirely mechanical** — on its own, an afternoon. What makes it
+> expensive is who else is in those files: `projects/INDEX.md` lists **37 of 62 active projects with
+> `SpaarkeAi = Y`**, and several (the whole Compose line, `spaarkeai-assistant-enhancements-r3`/`r4`) are
+> actively editing the exact files that hold the name. Renaming now buys 37 merge conflicts that other projects
+> pay for.
+>
+> It is also **not blocked by the thing I first said blocked it.** R1 is dev-only with no managed solutions, so
+> broken bookmarks are not the constraint — a coordinated redeploy would regenerate every server-generated deep
+> link. The constraint is purely the in-flight worktree count.
+>
+> **Same pattern as decision 10** (~~ledger~~ → Decision Record customer-facing, *ledger* in engineering docs):
+> customer-facing name and engineering identifier are allowed to differ. **Scheduled, not listed**, per §5.0.
 
 > **Architectural dependency to record: the Xrm wrapper is load-bearing.** Because the Console runs inside `main.aspx`, the global `Xrm.WebApi` is available — which is *why* LegalWorkspace sections can self-fetch and why the worklist needs no workspace changes. Every rejected alternative above costs that, which is the real reason this one wins.
 

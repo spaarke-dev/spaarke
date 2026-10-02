@@ -1,12 +1,15 @@
 # Spaarke Legal Operations Intelligence — Ontology Platform R1 · Design
 
-> **Status**: **DRAFT for review — rev 5**, 2026-10-02. Not yet through `/design-to-spec`.
+> **Status**: **DRAFT for review — rev 6**, 2026-10-02. Not yet through `/design-to-spec`.
 > **Evidence base**: [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) (~800 lines — field-level
 > detail, live-verified schema, defect forensics). **This document holds the decisions; the spec holds the
 > evidence.** Where they disagree, this document is newer.
 > **Vocabulary**: [`notes/ontology-component-model.md`](notes/ontology-component-model.md) §3 is authoritative.
 > **Review input**: [`notes/ontology-architecture-feedback.md`](notes/ontology-architecture-feedback.md)
 > (2026-09-30). Rev 3 applies its findings; §8 carries CM-6..CM-11 from its §6.
+> **Rev 6 input** (owner feedback 2026-10-02, item B): [`notes/reuse-verification-2026-10-02.md`](notes/reuse-verification-2026-10-02.md)
+> — three parallel audits against live Dataverse + code. **It corrected four claims in this document**; §1.3 and
+> §3.2 carry the corrections, and `notes/mvp-technical-spec.md` §10.7 carries the live row counts.
 > **Rev 4 inputs** (owner feedback 2026-10-01): [`notes/daily-briefing-ontology-fit.md`](notes/daily-briefing-ontology-fit.md)
 > (how the shipped Briefing's items enter the worklist) · the **Console prototype** at
 > `c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\` (v2.1, findings 1–17) — the
@@ -108,7 +111,18 @@ Decision 15 states the rule in six words: **the LLM classifies, deterministic co
 This section says exactly where each of those happens, because "AI-directed platform" is the kind of phrase
 that hides an architecture rather than describing one.
 
-#### The LLM has exactly one job that the machinery depends on: **classification**
+#### The LLM has **two** jobs, and only one of them the machinery depends on `[corrected rev 6]`
+
+**It reads and it writes.** It *reads* inbound text — classifying it, and proposing which record it belongs to —
+and it *writes* the prose a human reads. Between those two sits deterministic code that owns every decision.
+Earlier revisions said "exactly one job: classification", which undersold the read side (record matching) and
+ignored the write side (prose) altogether — both raised in owner feedback, both real.
+
+Only the **read** side feeds the machinery: a classification is the single model output a predicate consumes.
+The **write** side is downstream of every decision and changes nothing, which is why it is safe — provided §0.3
+holds.
+
+##### The job the machinery depends on: **classification**
 
 A communication (later a memo) arrives. The model reads it and returns a **category chosen from a bounded set**
 — `sprk_triagecategory` rows, resolved **per run** into both the prompt *and* a JSON-Schema `enum` used for
@@ -122,9 +136,9 @@ a new taxonomy row live with **zero deployment**.
 | 1 | **Communication classification** (`triage-email` Action) | `sprk_triagecategory` + priority + obligations + summary | Registry `$choices` → prompt **and** constrained-decoding `enum`; evidence-before-conclusions field order |
 | 2 | **`sprk_memo` classification** (signal source #2) | the same bounded category | Same contract — one new Action row, no new mechanism |
 | 3 | **Classifier guidance** | nothing at runtime; it *shapes* #1 and #2 | `sprk_classifierguidance` text authored per category row and injected into the prompt (the planned `LookupChoicesResolver` extension). Ten rows are authored and currently inert |
-| 4 | **Narrative prose** — the row's sentence and the Briefing-style wrapper | words only | **§0.3**: the sentence may not assert anything the predicate did not read. An Observation is hedged, carries a confidence and cites its passage; a Fact is stated flatly |
+| 4 | **Writing the output prose** — the Work Item's sentence, the *Why this fired* explanation, and the Briefing-style narrative wrapper `[sharpened rev 6, owner item E]` | **words only, over facts it did not compute** | The division is the point: **deterministic code establishes every fact and hands them to the model; the model renders them as prose.** This is the repo's shipped [Playbook-driven LLM Output Pattern](../../docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) (Layer 1 resolves the template, Layer 2 renders the `## Input` section), so it is a pattern to reuse, not invent. Bound by **§0.3** — the prose may not assert anything the predicate did not read — and by the epistemic rules: a Fact is stated flatly, an Observation is hedged with a confidence and a citation |
 | 5 | **Drafting an Inquiry** | a proposed email body the human edits and sends | The gate. Nothing is sent without human confirmation |
-| 6 | **The association ladder's AI rung** (`AiClassificationRung`, shipped) | a *candidate*, never a filing | **Structurally barred** from emitting a record GUID or auto-filing |
+| 6 | **Reading an incoming communication and proposing which record it belongs to** — the 13-rung association ladder's `AiClassificationRung` (shipped) `[expanded rev 6, owner item E]` | a **ranked candidate**, never a filing | **Structurally barred** from emitting a record GUID or auto-filing. Deterministic rungs (`ExplicitReference`, `TrackingTokenRung`, `IdentifierReverseLookup`, …) run first and win; the AI rung only proposes where they are silent. Auto-file stays at **0.85** and the AI rung cannot reach it alone |
 
 #### Where the LLM is deliberately absent
 
@@ -163,9 +177,12 @@ a new taxonomy row live with **zero deployment**.
   definitions, templates, triggers, scheduling, three invocation paths, run records, meta-tools. R1 needs the row
   and the shipped spine (decision 9). If the Action Engine is later built, R1's rows are its **input**, not a
   rewrite — which is what makes deferring it safe rather than merely convenient.
-- **Not the Insights Engine — that already exists** `[rev 4, answering owner item 7]`. Verified 2026-10-01 on
-  master: `Services/Insights/{Graph,LiveFacts,Observations,Precedents}`, `InsightsOrchestrator`,
-  `InsightArtifact`, `EvidenceRef` and the Insight endpoints are shipped. R1 **consumes** it — `ILiveFactResolver`
+- **Not the Insights Engine — that already exists** `[rev 4, answering owner item 7]`. Verified 2026-10-01, refined 2026-10-02:
+  `Services/Insights/{LiveFacts,Observations,Precedents}`, `InsightsOrchestrator`, `InsightArtifact`,
+  `EvidenceRef` and the Insight endpoints are shipped and DI-registered. ⚠️ **One layer is not**:
+  `IInsightGraph` is a **pure stub** — every method throws `NotImplementedException` ("deferred to Phase 1.5",
+  `StubInsightGraph.cs:25-62`). **R1 consumes Facts and the artifact envelope, and never touches the Graph**,
+  so the stub is not a blocker — but "the Insights Engine exists" is true by layer, not uniformly. R1 **consumes** it — `ILiveFactResolver`
   for facts (§5), and the Fact / Observation tiers for the row's epistemic rendering — and **adds one new output
   type**, the signal. What is deferred is not the engine but **CM-1**: moving *Policy evaluation* inside it behind
   an `IPolicyEvaluator` contract, which waits for a second consumer.
@@ -206,6 +223,33 @@ card vs tab — the worklist row is a **card**: a persistent act-on item) ·
 [`COMPONENT-COMPLEXITY.md`](../../docs/standards/COMPONENT-COMPLEXITY.md) (complexity and cohesion, never line
 count). Build guide: [`BUILD-A-NEW-WORKSPACE-WIDGET.md`](../../docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md);
 host contract: [`LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`](../../docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md).
+
+#### 🔴 Three components that already exist and would otherwise be rebuilt `[rev 6 — verified 2026-10-02]`
+
+Found by audit, each with a named file. These are not preferences; building past them is a CLAUDE.md §11
+violation with no cost-of-doing-nothing to cite.
+
+| Need | ❌ Not this | ✅ Extend this |
+|---|---|---|
+| **Count-filter cards** (replacing the retired stat tiles) | A new card — **nor `StatTiles`**, which has **no `onClick` at all** (`StatTiles.tsx:95-111`) and carries the overlapping-lenses semantics we are retiring | **`MetricCard` / `MetricCardRow`** — `Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx:24-222`, **already clickable** (`role="button"`), square, badge-capable |
+| **The row's ⋮ action menu** | A fourth hand-rolled `<Menu>` | **`DocumentRowMenu`** — `Spaarke.UI.Components/src/components/DocumentRowMenu.tsx:150-208`, an action-descriptor table with `disabledActions` filtering. **Three bespoke ⋮ menus already exist** (`DocumentRowMenu`, `NarrativeBullet.tsx:600-645`, `HighPrioritySection.tsx:298-325`) — this is §11's own named anti-pattern |
+| **The post-action outcome surface** (complete / reschedule / reassign / dismiss) | A parallel worklist outcome card | **`OutcomeCard`** — `Spaarke.UI.Components/src/components/SprkChat/OutcomeCard.tsx:93-367`; already status badge + summary + link + next-step chips. Extend with the Signal statuses |
+
+Two components carry forward **as-is, independently of the row that hosts them today**: `NarrativeCitedText`
+(a pure, test-covered text→entity-link segmenter) and `useInlineTodoCreate` — **the only "action that changes
+something" the package already has.**
+
+#### 🔴 The dismiss-path trap — remove it before building the row
+
+`Spaarke.DailyBriefing.Components` still barrel-exports **three hooks that are dead in the live data path** —
+`useBriefingNotifications`, `useBriefingNarration`, `useBriefingActions` — backed by `notificationService.ts`'s
+`appnotification` writes (`markBriefingRemoved` and friends). Dead because `DailyBriefingApp.tsx:64` imports only
+three other hooks, and the live path is `fetchBriefingLive` behind `USE_LIVE_RENDER=true`.
+
+They are still importable and they still **look like** the dismiss mechanism. Wiring the worklist's **Dismiss**
+to `markBriefingRemoved` would write **bell-panel read-state instead of a Decision Record** — silently breaking
+row-contract requirement 5 and starving the suppression input criterion 4 depends on. **Dismissal would appear
+to work and record nothing.** De-barrel or `@deprecated` them *before* the row is built.
 
 **Four rules for anything genuinely new** (the row component, the evidence block, the outcome cards):
 
@@ -274,12 +318,12 @@ bullet 4 — 45.58 MB vs a 45.42 MB recorded baseline, the difference being mast
 
 | Component | Existing overlap | Extend or new? | Cost of doing nothing |
 |---|---|---|---|
-| **Cross-source predicate evaluator** | `SignalEvaluationService` (`ISignalRule` strategy, spend-only, threshold-shaped); `CommunicationRuleGate` (scope + threshold, **no predicate at all**) | **New, modelled on both** — reuse `CommunicationRuleGate`'s scope-match semantics verbatim (blank tenant = all, empty matter = all, lowest `sprk_priority` wins, deterministic id tiebreak, fail-closed) and `ISignalRule`'s strategy shape. Neither can be extended: one is bound to `sprk_spendsnapshot`, the other has no rule body | The differentiated claim is not computable. This is the **only** item whose value is unproven; items below are mechanism |
+| **Cross-source predicate evaluator** | `SignalEvaluationService`; `CommunicationRuleGate` (scope + threshold, **no predicate at all**) | **New, modelled on `CommunicationRuleGate` ONLY** — copy its scope-match semantics verbatim (blank tenant = all `:175-181`, empty matter = all `:183-188`, `OrderBy(sprk_priority ?? 500).ThenBy(Id)` `:129-133`, **fail-closed** `Deny(…, "rule-store-read-failed")` `:108-126`). ⚠️ **Correction, rev 6**: rev 3–5 also said "reuse `ISignalRule`'s strategy shape" — **`ISignalRule` is a private nested interface** (`SignalEvaluationService.cs:268`) whose rules are instantiated in the constructor (`:116-120`). It is **not an extension point**; its XML doc claims a strategy pattern the code does not deliver. ⚠️ Its idempotency key `GenerateDeterministicId(matterId, signalType)` (`:241-258`) also **cannot be reused** — matter+type only, no room for a polymorphic subject | The differentiated claim is not computable. This is the **only** item whose value is unproven; items below are mechanism |
 | **`sprk_policy` + `sprk_policyversion`** | `sprk_communicationrule` — a shipped declarative rule table with enable/priority/scope/threshold | **New, copying its column semantics** — it has **no rule body**; a predicate over arbitrary subjects is a different shape, not a column addition | No versioned, immutable statement of what the rule was when it fired. Without the version, the Decision Record cannot be defended |
 | **Decision Record** | `CommunicationRuleDecision` **already carries the full decision on both authorize and deny paths** and is written to `ILogger` and lost. Also `SessionGate` (ADR-040 — gate ledger, no authority/policy-version/evidence) and `sprk_emailreviewlog` (append-only, domain-specific, apply-time re-validation) | **New table; persist the EXISTING value.** One row inserted from `RuleGatedAssessedConsumer`, which already holds the object — **a line before the branch. The gate is not touched.** `sprk_emailreviewlog` becomes a producer, not a migration | Suppression is impossible (a signal dismissed three times keeps firing → users mute the system). Thresholds stay guesses forever. No answer to *"why did nothing happen?"*, which Dataverse audit structurally cannot give because nothing changed |
 | **`sprk_signal`** (generic) | `sprk_spendsignal` — computed, stored, marked active, **zero client references** | **Replace while it is free** — its `sprk_snapshot` lookup makes it structurally spend-only. ⚠️ `sprk_signaltype`/`sprk_signalvalue` are **taken** (columns on `sprk_affinity`) | A communication- or memo-derived signal will not fit; generalizing later costs a data migration instead of nothing |
 | **Worklist** | `sprk_gridconfiguration` + `<DataGrid configId=… />`; `needs-review.gridconfiguration.json` computes membership in fetchXml and renders via `DataGridOverrides.columnRenderers` | **Reuse the membership mechanism; BUILD the row component.** ⚠️ **Corrected rev 4** — rev 3 said "author a ROW, build no UI". The prototype disproved it (finding 9): the row contract needs expandable evidence tiers, a *Why this fired* disclosure, outcome cards and a gate, none of which a column renderer gives. Membership still comes from configuration; the **row is new UI, built once** (finding 10: one row component carried all three signal shapes) | Signals stay invisible, exactly as `sprk_spendsignal` has been since it shipped |
-| **Fact supply** | **`ILiveFactResolver`** — already keyed on `(subject-scheme, predicate)` with `Matter` / `Invoice` / `Project` implementations, plus `SubjectParser` + `SubjectSchemeCatalogOptions` | **Reuse, extend only if a predicate is missing** | The evaluator would otherwise grow its own per-entity fact readers, and we would end up with the per-entity snapshot tables §5 now rules out |
+| **Fact supply** | **`ILiveFactResolver`** — keyed `(subject-scheme, predicate)`; `Matter` / `Invoice` / `Project` implementations + `SubjectParser` + `SubjectSchemeCatalogOptions` | **Reuse the dispatch; expect to ADD predicates (new code).** ⚠️ **Correction, rev 6**: *dispatch* is config-driven, **predicates are not** — each resolver's set is a closed C# `switch` (`MatterLiveFactResolver.cs:166-174` et al). **Neither Path B conjunct is reachable by adding a `case`**: nothing reads `sprk_communication`, and `sprk_budgetrevision` does not exist. Both halves are new code | Still the right seam — it keeps fact reads in one place and is why we add **predicates**, not per-entity snapshot tables (D-8). But "already generic" oversold it, and a reader could have concluded zero new code |
 | **`sprk_memo` classification** | `triage-email` Action + `$choices` + `LookupChoicesResolver`. ⚠️ `agreement-classify` uses a **bespoke** C# assembler — the anti-pattern not to repeat | **One new Action row, reusing the `$choices` contract** | The commitment made on a phone call is never captured. Human-authored, so accuracy is high and cheap |
 | **Guidance injection** | `LookupChoicesResolver` resolves `sprk_name` only | **Extend** — emit `name — guidance`, schema `enum` unchanged | The ten authored `sprk_classifierguidance` rows are inert; the model still sees bare labels and cannot tell `Fee / rate change` from `Invoice / Billing` |
 
@@ -330,7 +374,7 @@ pointing at stale indices, so numbers are no longer load-bearing anywhere in thi
 | Item | Shape | Note |
 |---|---|---|
 | **Cross-source predicate evaluator** | code + `sprk_policy` / `sprk_policyversion` | ⚠️ **Unblocked rev 4** — D-1 resolved (seed dev data, §8.1). Needs the §8.1 exit pair present before criterion 2 can be demonstrated, but is no longer gated on an investigation |
-| **`Existence` rule type** | one addition to the closed rule-type set + its JSON Schema | **New in rev 3 (CM-7).** The §11.4 predicate is an EXISTS over a related entity; MVP allowed only `Threshold` and `Switch`, and spec §3.5 refuses to save an invalid body — so **the differentiated capability was literally unsavable**. Implemented as a FetchXML `link-entity` filter, so CM-3 holds |
+| **`Existence` rule type** | one addition to the closed rule-type set + its JSON Schema | **New in rev 3 (CM-7).** The §11.4 predicate is an EXISTS over a related entity; MVP allowed only `Threshold` and `Switch`, and spec §3.5 refuses to save an invalid body — so **the differentiated capability was literally unsavable**. Implemented as a FetchXML `link-entity` filter, so CM-3 holds. ⚠️ **Rev 6 — only half of this is proven.** The **EXISTS** half has an in-repo reference (`DataversePrecedentBoard.cs:182-190`, INNER `AddLink` + `LinkCriteria`). The **NOT EXISTS** half has **no prior art anywhere in the repo**: every `ConditionOperator.Null` filters a column on the *primary* entity, and every `LeftOuter` join enriches rather than anti-joins. Treat the `notExists` clause as **new code with no template**, and prove it on real data before anything is built on top |
 | **`sprk_budgetrevision`** | new table, smallest possible | **New in rev 3 (CM-10, now answered).** `sprk_budget` carries `sprk_totalbudget` + `modifiedon` only — **no revision history exists, and Dataverse auditing is not a fallback** (component model §6: zero `RetrieveRecordChangeHistory` usage, no audit policy). Path B's second conjunct is not expressible without it |
 | **Inquiry action** | one Action row + one Binding | **Restored in rev 3 (CM-11).** Present in `mvp-synopsis.md` §4.4 as *data, not build*; it fell out of rev 1 because §5 was rebuilt as "what is left to **build**". Without it the §0 table's fourth row is unexercised and nothing compounds into the Report Card |
 
@@ -391,7 +435,7 @@ overdue tasks would push 5 decisions off the screen.
 
 | Item | Why it is not settled yet |
 |---|---|
-| **Generic `sprk_signal`** | Replacing `sprk_spendsignal` is free **now** (zero client references, no production data) and a migration later. ⚠️ **Two of its three dependencies are now closed (rev 4)**: **D-3** is settled — the worklist **reads signals and groups by matter**, so the shape needs a **polymorphic subject plus an always-populated matter lookup** derived from it — and **D-4** is settled (reuse `sprk_triagecategory`). What remains is **D-2**, plus **BR-1**'s nullable decision reference and **D-7** (sibling of `InsightArtifact`, not subtype). ⚠️ `sprk_signaltype` / `sprk_signalvalue` are **already taken** on `sprk_affinity`. **Per review §1.4 the shape question now also covers resolution semantics, not only columns** (CM-9): a `sprk_dedupekey` alternate key, an `sprk_resolutiontype` option set (`ConditionCleared`/`Acted`/`Dismissed`/`Superseded`/`PolicyRetired`), `sprk_lastevaluated`, and a resolution **sweep** so a flag whose predicate stops holding is closed rather than left to rot. `sprk_spendsignal`'s idempotent upsert works today only because its key is implicitly (matter, signaltype) — that does not survive a polymorphic subject. **Decide before the evaluator writes its first signal** |
+| **Generic `sprk_signal`** | Replacing `sprk_spendsignal` is free **now** (zero client references, no production data) and a migration later. ⚠️ **Two of its three dependencies are now closed (rev 4)**: **D-3** is settled — the worklist **reads signals and groups by matter**, so the shape needs a **polymorphic subject plus an always-populated matter lookup** derived from it — and **D-4** is settled (reuse `sprk_triagecategory`). What remains is **D-2**, plus **BR-1**'s nullable decision reference and **D-7** (sibling of `InsightArtifact`, not subtype). ⚠️ `sprk_signaltype` / `sprk_signalvalue` are **already taken** on `sprk_affinity` — **collision confirmed live 2026-10-02** (choice + text columns on that table). ⚠️ **And the resolution model should be copied, not designed**: live `sprk_spendsignal` already has `sprk_spendsignalstatus` (Active / Acknowledged / Resolved / **Auto Resolved**) + `sprk_resolutionnotes`, which the spec's §2.2 inventory omits. **Per review §1.4 the shape question now also covers resolution semantics, not only columns** (CM-9): a `sprk_dedupekey` alternate key, an `sprk_resolutiontype` option set (`ConditionCleared`/`Acted`/`Dismissed`/`Superseded`/`PolicyRetired`), `sprk_lastevaluated`, and a resolution **sweep** so a flag whose predicate stops holding is closed rather than left to rot. `sprk_spendsignal`'s idempotent upsert works today only because its key is implicitly (matter, signaltype) — that does not survive a polymorphic subject. **Decide before the evaluator writes its first signal** |
 
 ### Out (with rationale)
 
@@ -478,7 +522,7 @@ re-thresholding (review §4.4).
 | ID | Decision | Blocks |
 |---|---|---|
 | **D-2** | Decision Record field list — approve or amend. **Four constraints now**: (i) `sprk_factsnapshot` is **mandatory** — it is what lets you reconstruct *what the data said*, the residual gap left by ruling out bitemporality (**§8.2** explains this); (ii) a **nullable action reference** (a deny-path record has no action); (iii) a **nullable decision reference on the flag**, because a Do-lane item resolved as one's own work closes `Acted` with no Decision Record (briefing analysis §4.2 / BR-1); (iv) **Decision Record → flag is 1:N** — one decision can resolve several flags on a matter, and the gate must record which (prototype finding 4) | **Decision Record** · `sprk_signal` shape |
-| **D-7** | **Is `sprk_signal` an `InsightArtifact` subtype or a sibling table?** `[new rev 4 — owner item 7]` *(Recommend **sibling**: `InsightArtifact` is a response/evidence contract returned from a query, whereas a signal is a durable queue row with a lifecycle — `Open` → `Acted`/`Dismissed`/`ConditionCleared`/`Superseded`/`PolicyRetired` — plus dedupe and suppression. Forcing one shape to serve both repeats the `sprk_spendsignal` mistake in the other direction. A signal **cites** `InsightArtifact`s as evidence)* | `sprk_signal` shape |
+| **D-7** | ✅ **RESOLVED rev 6 — sibling, on code evidence.** `InsightArtifact` is an abstract `[JsonPolymorphic]` record with a `JsonElement` value and **no lifecycle or state** (`InsightArtifact.cs:25-154`); only `ObservationArtifact` is persisted, and only as a side-effect mirror into the *generic* `sprk_analysis` table via a borrowed discriminator column (`DataverseObservationMirror.cs:100-206`). `FactArtifact` is never persisted. A Signal is a durable row with a lifecycle, dedupe and suppression, so it is **not** a subtype — and nothing needs migrating for it to be a sibling. ~~*(Recommend **sibling**: `InsightArtifact` is a response/evidence contract returned from a query, whereas a signal is a durable queue row with a lifecycle — `Open` → `Acted`/`Dismissed`/`ConditionCleared`/`Superseded`/`PolicyRetired` — plus dedupe and suppression. Forcing one shape to serve both repeats the `sprk_spendsignal` mistake in the other direction. A signal **cites** `InsightArtifact`s as evidence)* | `sprk_signal` shape |
 | **D-8** | **Do we need entity-specific fact tables at all?** `[new rev 4 — owner item 5]` *(Recommend **no**. Verified 2026-10-01: `ILiveFactResolver` is already generic — keyed `(subject-scheme, predicate)` with Matter / Invoice / Project implementations — and **CM-3** already says materialize facts as rollup + calculated columns, zero C#. So `sprk_spendsnapshot` is **one materialization, not a pattern**: keep it, read it as evidence, and add no `sprk_*snapshot` sibling per entity. The same logic retires `sprk_spendsignal` in favour of generic `sprk_signal`, with `SignalEvaluationService` becoming one producer among several.)* ⚠️ **One thing to settle inside this**: §8.1's exit condition and the synopsis §2 *compute facts* row both still name `sprk_spendsnapshot` as **the** fact mechanism. If D-8 lands as recommended, those read as the exception, not the rule | `sprk_signal` shape · the evaluator's fact reads |
 | **CM-2** | **Object-definition registry.** *What it is*: a machine-readable description of the ontology's own objects — which entities exist, how they link, which attributes are owned where — so an external consumer can **discover** the model instead of having it hardcoded. *Implication for R1*: **none, and it stays post-MVP**, because its only consumer is the MCP server (out of scope, §5 Out). Worth recording that a seed already exists — `SubjectParser` + `SubjectSchemeCatalogOptions` are a subject-scheme registry — so if a second consumer appears, we extend rather than start | Post-MVP |
 
@@ -491,7 +535,7 @@ per §5.0 (nothing merely listed).
 | ID | Decision | Recommendation | Blocks |
 |---|---|---|---|
 | **BR-1** | Does acting on one's **own assigned work** write a Decision Record? | **No.** Close the flag `Acted` with a **null decision reference**; the object's own history is the record. **Dismissal still writes one**, with a reason, and still counts toward suppression. Amends row-contract requirement 5 to *"acting through a gate writes a Decision Record; acting on one's own assigned work is recorded on the object."* Rationale: 11 overdue tasks against 5 decisions would fill the record with housekeeping, and the Decision Record is what becomes the Matter Report Card | D-2 · `sprk_signal` shape |
-| **BR-2** | Which Do rules ship first | Overdue task · due within 3 days · work assignment past `sprk_responseduedate`. All `Temporal`, all over data Spaarke already holds | Do lane |
+| **BR-2** | Which Do rules ship first | Overdue task · due within 3 days · work assignment past `sprk_responseduedate`. All `Temporal`, all over data Spaarke already holds — and live counts confirm there is data to fire on (`sprk_todo` **50** · `sprk_workassignment` **22** · `sprk_event` **73**; spec §10.7). ⓘ **The framing that keeps this small (rev 6): a predicate migration, not a collector rewrite.** `DailyBriefingCollector`'s query *shape* — entities, columns, joins — is reused verbatim; only its hardcoded predicates move into policy rows: the task-type GUID (`:101`), `statuscode = Open` (`:104`), the **`TaskOverdueDaysPast = 5` C# constant** (`:116`), and `highpriority OR monitor` (`:500-502`). ⚠️ `QueryTodosAsync` (`:999`) is hardcoded to `owninguser = systemUserId` with **no resolver call at all**, because `sprk_todo` carries no membership-bearing fields — so a To Do rule is per-user by construction | Do lane |
 | **BR-3** | `sprk_highpriority` / `sprk_monitor` semantics | Rank input (and optional rule input) · subscription to Know. Retire the separate *Critical Today* list | Rank function · narrative |
 | **BR-4** | When does the Briefing widget get replaced? | Replace the Workspace's *Daily Briefing* tab with the worklist (narrative on) **once Decide and Do lanes both exist**; keep the old widget until then | Console hosting · widget registry |
 | **BR-5** | Lane order and volume | Decide always above Do; each lane its own count filters; the narrative **summarises** Do volume rather than listing it | Worklist layout |
@@ -505,7 +549,7 @@ retired one was the association-engine precision item, now folded into the token
 **Former D-8 is [ISS-001](https://github.com/spaarke-dev/spaarke/issues/1048)** — another domain's to fix, but
 scheduled rather than listed. Two further items that would otherwise have been lost are
 [ISS-002](https://github.com/spaarke-dev/spaarke/issues/1049) (silent `$choices` degradation) and
-[ISS-003](https://github.com/spaarke-dev/spaarke/issues/1050) (49 `sprk_event` rows stranded in Draft).
+[ISS-003](https://github.com/spaarke-dev/spaarke/issues/1050) (**48** `sprk_event` rows stranded in Draft — re-measured live 2026-10-02; was 49).
 
 ### 8.0 From the architecture review (CM-6..CM-11) `[rev 3]`
 
@@ -611,7 +655,7 @@ false negative, and the snapshot records the staleness but cannot repair it.
 | `$choices` resolution is best-effort (NFR-04); a Dataverse read failure degrades **silently** to the pre-2026-09-04 behaviour (category null on 100% of captures) | Medium | Monitor. The failure is invisible by construction |
 | Swallow-and-log paths are undiagnosable without App Insights | Medium | Recorded in `current-task.md`: appId `6a76b012-…`, `traces` for `[comms-policy]`/`[comms-ri]`, `exceptions` for swallowed throws. **This is how the silent `InvalidCastException` was found** |
 | **Classifier recall is the predicate's weakest link** | **High** | The predicate is a conjunction, so it inherits its weakest input — an LLM classifier whose recall nobody has measured. Every other criterion can pass while the claim silently misses a third of real cases. **Criterion 11 makes the floor a gate**, and review §1.6b is the source |
-| **Flags never auto-resolve, so the worklist rots** | **High** | Nothing closes a flag when the condition clears on its own — budget revised, communication later dismissed, matter closed. This is how internal alerting surfaces die, and it also **miscounts suppression**: a flag that auto-cleared is indistinguishable from one a human dismissed, so the three-dismissal rule is wrong in both directions. Addressed by CM-9's `sprk_resolutiontype` + resolution sweep, folded into the `sprk_signal` decision |
+| **Signals never auto-resolve, so the worklist rots** | **Medium** *(was High — downgraded rev 6 on live evidence)* | The failure mode is real and unchanged: nothing closing a Signal when its condition clears on its own (budget revised, communication later dismissed, matter closed) is how internal alerting surfaces die, and it **miscounts suppression** — an auto-cleared Signal is indistinguishable from a human dismissal, so the three-dismissal rule is wrong in both directions. ⚠️ **But the schema is further along than rev 3–5 claimed.** Live re-verification 2026-10-02 found `sprk_spendsignal` already carries **`sprk_spendsignalstatus`** (Active / Acknowledged / Resolved / **Auto Resolved**) and **`sprk_resolutionnotes`** — *Auto Resolved* is precisely `ConditionCleared`. So CM-9 is **vocabulary to copy, not to invent**; what is unverified is whether anything **writes** it (the table has 0 rows, so probably not). Mitigation becomes: carry this status model onto `sprk_signal` verbatim and **build the sweep that sets it** |
 | Recall-first produces notification fatigue | Medium | Thresholds are declared on the rule row; the Decision Record makes tuning evidence-based (criterion 5) |
 | Work surfaced in passing gets buried, missed or lost | **High** | **Owner rule (2026-09-30): every item is either FIXED or SCHEDULED — never merely listed.** Where this project already holds the diagnosis, fixing now is *cheaper* than handing off, so it is the correct choice and scope purity does not override it (that is why the tokenizer and the `reason` string were pulled INTO §5 rather than deferred). Where the work genuinely belongs elsewhere, it is filed in [`notes/defer-issues.md`](notes/defer-issues.md) **and** as a GitHub Issue, and `push-to-github` Step 1.6 refuses to let an entry through without an Issue URL |
 
@@ -660,6 +704,19 @@ Carried from `current-task.md`; full rationale in the notes.
 26. **Reuse first on UI** (§1.3, binding) — shipped components and standards are the default; anything new lands
     in a shared library, justifies itself per CLAUDE.md §11, and is **one component with data-driven variants,
     not a family**
+27. **The Console rename is split** (owner 2026-10-02) — the **product name changes now**; the **engineering
+    identifiers** (`sprk_spaarkeai` web resource, `src/solutions/SpaarkeAi/`) are **deferred to
+    [#1095](https://github.com/spaarke-dev/spaarke/issues/1095)**. The rename itself is ~21 files and mechanical;
+    the cost is concurrency — **37 of 62 active projects declare `SpaarkeAi = Y`** and several are editing those
+    exact files. Not a bookmark problem (R1 is dev-only, no managed solutions) — a merge-conflict problem other
+    projects would pay for. Synopsis §4.5 holds the measurement
+28. **A Signal is a condition that held; a Work Item is the actionable unit it produces; a worklist row is a
+    matter grouping Work Items** (owner clarification 2026-10-03). The Signal's **subject** — `sprk_event`,
+    `sprk_todo`, `sprk_workassignment`, `sprk_matter`, `sprk_communication`, `sprk_servicerequest` — is the
+    target of a Work Item and **never a Work Item itself**. Full chain: component model §3.1
+29. **The LLM reads and writes; deterministic code decides** (§1.2). Read side = classification **and** proposing
+    which record an inbound communication belongs to; write side = the prose, over facts it did not compute.
+    Only the read side feeds the machinery
 
 ---
 
