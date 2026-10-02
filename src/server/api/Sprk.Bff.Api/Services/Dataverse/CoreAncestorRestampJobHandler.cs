@@ -64,6 +64,19 @@ public sealed class CoreAncestorRestampJobHandler : IJobHandler
             return JobOutcome.Success(job.JobId, JobType, elapsed);
         }
 
+        if (report.Failures.Count == 0)
+        {
+            // TRUNCATED only (verifier round 2 item 13): a bound stopped the cascade, and nothing failed. A retry re-lists
+            // the same children from the first page and stops at the same bound, so it can never get further — retrying
+            // would only end in a dead letter. The reconciliation job finishes the rest (it continues a stopped scan
+            // across runs), and the storage resolver refuses a stale copy until it does. Done, with a warning.
+            _logger.LogWarning(
+                "{Prefix} Job {JobId}: the re-stamp of {Entity} {Id} stopped at a bound (examined={Examined} changed={Changed}); "
+                + "the rest is left to the reconciliation job, not retried.",
+                CoreAncestorRestamper.LogPrefix, job.JobId, payload.Entity, payload.Id, report.Examined, report.Changed);
+            return JobOutcome.Success(job.JobId, JobType, elapsed);
+        }
+
         var reason = string.Join("; ", report.Failures.Select(f => $"{f.Entity} {f.Id}: {f.Reason}"))
                      + (report.Truncated ? " (truncated)" : string.Empty);
 

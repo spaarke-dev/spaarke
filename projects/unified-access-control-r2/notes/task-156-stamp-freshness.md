@@ -87,7 +87,7 @@ Children exist only for an EXISTING record, so only update paths matter; a creat
 | sprk_communication | `IncomingAssociationResolver.ApplyDecisionAsync` | **create-time only — no cascade**: both callers run it on a communication created in the same operation (`IncomingCommunicationProcessor` step 4.5 after `CreateCommunicationRaceProofAsync`; `EmailUploadCaptureService` only when `wasDuplicate` is false), so no child can exist. Its stamp now also derives budget / report card targets (`IsStampSourceEntity`). | `Services/Communication/IncomingCommunicationProcessor.cs` ~345; `EmailUploadCaptureService.cs` ~85-105 |
 | sprk_communication | `POST /api/communications/{id}/suggest-associations` | read-only preview (`EvaluateAsync`) | `Api/CommunicationEndpoints.cs` |
 | sprk_communication | enrichment / triage (`CommunicationEnrichmentService` :601, :1662), delivery merge, cross-path link | no root column written (triage fields, owner, mailbox list, `sprk_relatedcommunication` on a document) | the three files |
-| sprk_event | `PUT /api/v1/events/{id}` | writes the pair only, never a root column — the event's root is unchanged (a pair change is the job's) | `Api/Events/EventEndpoints.cs` `UpdateEventInDataverseAsync` |
+| sprk_event | `PUT /api/v1/events/{id}` | writes the pair only, never a root column. **Wired in verifier round 2 (item 8)** — `AfterWriteAsync("sprk_event", …, EventColumnsWritten(request))`: on an event carrying two typed sources the pair decides which one its copy comes from, so a pair change re-stamps the event and everything filed under it in the same request (before: the job's) | `Api/Events/EventEndpoints.cs` `UpdateEventInDataverseAsync` |
 | sprk_invoice | Finance `InvoiceReviewService` (creates a NEW invoice), `InvoiceExtractionJobHandler` (amount fields) | create-time / no root column | `Services/Finance/InvoiceReviewService.cs` :296; `Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs` :558 |
 | sprk_document | Office save / upload finalization / email attachments / Compose (`OfficeDocumentPersistence`, `UploadFinalizationWorker`, `EmailAttachmentProcessor`, `ComposeRecordResolution`) | create-then-associate in one operation (the document id is not known to anyone else yet) or no root column (file metadata, canonical link) | the four files |
 | sprk_analysis | `AnalysisEndpoints`, `AppOnlyAnalysisService`, `WorkingDocumentService` | create-time / document profile fields / working text | the three files |
@@ -146,6 +146,7 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   created without a copy (fail closed — it inherits nothing) and the job stamps it within one cycle (ADR-002 WP-2: the server
   owns the invariant; the client previews). The taxonomy literals pinned to the TypeScript side (`CORE_RECORD_ENTITIES`,
   `CHILD_RECORD_ENTITIES`) are untouched. *Reverse / follow-up:* mirror `IntermediateRootColumns` in the TS derivation.
+  **Still open after verifier round 2 (item 13a)** — see that section for why it is not done in a BFF fix round.
 - **(xiii) A row with a root, ONE intermediate and NO pair is a copy** (rule 5), because every writer that sets a direct root
   together with an intermediate also writes the pair (the Office save, `IncomingAssociationResolver`'s priority — matter /
   project before invoice / event — the outbound sender, the client RegardingResolver). *Reverse:* treat such rows as direct
@@ -164,7 +165,9 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   write. The enqueue holds no Dataverse client; the job runs seconds later and the resolver refuses a stale copy meanwhile.
   This is the one inventory path not re-stamped "in the same operation" — flagged in the task result for the owner.
   **Still open after verifier round 1 (item 6): AC1 is not met for this path until the owner accepts the deviation** — the
-  🔔 block is in the verifier round 1 section below.
+  🔔 block is in the verifier round 1 section below. Verifier round 2 (item 6) checked the block and the window (the
+  resolver refuses 409 stale, including transitive chains and interleaved re-file races; it never misfiles) and confirmed
+  it is the owner's to close.
 - **(xviii) Document `sprk_canonicaldocument` is held, and an analysis's `sprk_documentid` / `sprk_outputfileid` are
   carriers**, by the 155 f3 rule (a column whose target can hang off a root is read and checked, or refused).
 - **(xix) The job's completion marker (ADR-036 A1 rule 3) is scoped to the RUN** (`{job}:{entity}:{id}:{planHash}:{runId}`);
@@ -313,6 +316,115 @@ Delta: **+0.04 MB** for the whole of task 156 (base → round 1; 48 335 bytes in
 Code only — no package, project reference or new assembly, so no new CVE surface. Far below the +5 MB justification and the
 55 / 60 MB thresholds.
 
+## Verifier round 2 (2026-10-02, branch `task/uac-r2-156-r1-r2`)
+
+A second independent verifier re-ran round 1 (`a67263cc7`) on a clean detached worktree: affected suites and NetArchTest
+green, and the full BFF unit suite green (13 516 / 0 / 54) **with its two surviving seeds applied** — the same counts as
+unseeded, which is the finding. Its items, and what this round did with each:
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Method and scope | — |
+| 2 | **AC7 gap, seed V2**: `extra.AddRange(sourceHops.Extra)` removed, the whole suite stayed green. A to-do under a communication whose SECURE matter is named ONLY by the communication's pair then resolves the to-do's business-unit container (#1038 leak class) | **Closed.** Resolver test `SourceWhoseSecureRootIsNamedOnlyByItsPair_ResolvesThatRootsOwnContainer` and a REAL OBO PUT route test of the same shape (`Put_TodoUnderACommunicationWhoseSecureProjectIsNamedOnlyByItsPair_…`); both red under V2. |
+| 3 | **AC7 gap, seed V3**: the analysis carriers (`sprk_documentid` / `sprk_outputfileid`, interpretation xviii) disabled, suite green — only a column-list pin covered them | **Closed.** Behavioural resolver theory (input AND output document of a different SECURE matter → ambiguous) and a real route test; red under V3. Plus an agreeing-carrier test, so a carrier is shown to be read, not refused on sight. |
+| 4 | **AC7 weak, seed V1**: the Source-case `carriers.AddRange(decision.Carriers)` bit only the M13 read-count test | **Closed.** Direct resolver test and real route test of "filed under X (copy fresh), also naming Y whose root is a different SECURE record" → ambiguous; both red under V1. |
+| 5 | V4, V5, V6 bit as expected | Confirmed; nothing to change. |
+| 6 | AC1 deviation: the user-OBO AI update tool enqueues its cascade | **Not closable here** — the owner's (🔔 ADR block in verifier round 1, unchanged: path A proposed, B considered, C rejected). The verifier confirmed escalation trigger 1 correctly did not fire. |
+| 7 | Re-parent inventory complete (independently re-grepped) | Confirmed; nothing to change. |
+| 8 | `PUT /api/v1/events/{id}` writes the pair and never re-stamps; on an event with two typed sources a pair change moves its source | **Closed.** Wired (`CoreAncestorRestamper.EventColumnsWritten` mirrors exactly when `DataverseWebApiService.UpdateEventAsync` writes the pair); real-route tests (`EventRefileRestampRouteTests`: the event AND the to-do under it re-stamped in the request; a rename reads nothing); seeds E1 / E2. Observation below. |
+| 9 | Design risk: a root set directly on a row filed under another record (rule 3, or rule 5) is treated as a copy and reverted / cleared — a child can leave a secure root it was placed under | **Owner decision** — 🔔 below. Not changed: each alternative partly reverses a binding owner decision, so the owner chooses. |
+| 10 | ADR / constraint checks | Confirmed; nothing to change. |
+| 11 | Job never reports ok on a failed scan | Confirmed; nothing to change. |
+| 12 | Resolver never trusts a copy without the live comparison | Confirmed; the two guards it found untested are items 2 and 3, now pinned. |
+| 13a | (xii) the TypeScript stamp mirror is unchanged | **Not closed** — see below. |
+| 13b | POML `<metadata><status>` reads `completed` while AC1 and AC8 are open | **Closed.** `completed-with-escalation` plus a `status-note` — the project's convention for an implemented task with an open owner item (tasks 012, 023, 062, 071). |
+| 13c | `CoreAncestorRestampJobHandler` turns a merely TRUNCATED report into Failure, then Poisoned | **Closed.** Truncated with no failure = Success plus a warning: a retry re-lists from the first page and stops at the same bound, so it can never progress; the reconciliation job finishes the rest. Failures still retry, then dead-letter. Test `TruncatedOnlyCascade_IsCompleted_NeverRetriedOrPoisoned`; seed H2. |
+| 14 | Publish size not re-measured | Re-measured for this round (below). |
+| 15-17 | AC1 / AC7 / AC8 | AC1: item 6 (owner). **AC7: closed** — every guard the verifier named now bites a behavioural test, five of them through a real route. AC8: the main session's live gate. |
+
+**Item 8 — observed, not changed (pre-existing, another writer's contract).** `DataverseWebApiService.UpdateEventAsync` (and
+`CreateEventAsync`) write `sprk_regardingrecordtype` as the API's integer 0-7, while on `sprk_event` that column is a LOOKUP
+to `sprk_recordtype_ref` (the live lookup sweep pinned in `ChildRecordContainerResolutionTests`). A PUT that sets the
+regarding type therefore most likely fails at Dataverse before the cascade is reached (the route answers 500). Not
+verified live: that would be a write. The wiring is correct for the day the pair write succeeds and costs nothing until
+then; fixing the pair write belongs to the event writer's owner.
+
+**Item 13a — not closed in this round, and why.** Mirroring `IntermediateRootColumns` in
+`PolymorphicResolverService.deriveCoreAncestorStamps` is a change to the shared client library (`@spaarke/ui-components`).
+It ships only when the RegardingResolver PCF and the code pages that bundle the library are rebuilt and redeployed. It also
+changes a pinned FR-26 client contract: budget, report card and agreement targets move from `unclassified` to derived, and
+a document whose typed and related links disagree would newly block the save. That is outside the BFF diff two verifiers
+have now checked, and the verifier rated it non-blocking. The owner's freshness rule (R3/R4: minutes) is met without it:
+the stale refusal enqueues a re-stamp that lands in seconds, and the job runs every 5 minutes. The child is born
+fail-closed, refusing uploads and inheriting nothing until then. **Recommended follow-up task:** mirror the table in
+TypeScript, using the same two-roots-of-one-type rule, with jest tests and a C# lock-step test that parses the TS table the
+way `CoreAncestorResolverTests.Taxonomy_MatchesTheTypeScriptSide` parses the taxonomy arrays.
+
+### 🔔 Owner decision — a root set directly on a row filed under another record (verifier round 2 item 9)
+
+- **Situation.** When a row's pair names an intermediate (rule 3), or it has no pair and exactly one intermediate (rule 5),
+  EVERY root column the source can carry is treated as a copy. The cascade and the job set it to the source's root, or
+  clear it when the source names no root of that type. A root a person sets DIRECTLY on such a row is therefore reverted
+  within one cycle. The example is a native form edit that adds a SECURE work assignment or matter beside the
+  communication regarding.
+  - During the window the resolver refuses (409 stale). It never misfiles.
+  - After the repair, the row has left the secure root it was placed under: its access follows the source's root again,
+    and so does its next upload.
+- **Live exposure: none today.** The verifier's read-only query found that all 14 to-dos filed under an intermediate carry
+  a pair naming exactly that source. Choosing a root through the RegardingResolver PCF writes the pair to that root, which
+  makes a DIRECT link (rule 2, never re-stamped), not this shape. The shape needs a raw edit of a stamp column.
+- **Options.**
+  1. **Confirm the rule as shipped.** The pair decides, and a root column on a filed row is always a copy. This keeps
+     option (b) in both directions: a communication moved OUT of a secure matter takes its children with it.
+  2. **Stricter, fail closed.** Never overwrite or clear a copy column whose CURRENT value is a SECURE root other than the
+     source's. Instead treat the row as ambiguous: the job counts it for review, the resolver answers 409 ambiguous
+     (permanent) instead of stale, and nothing is enqueued.
+     - *Cost:* the cascade and the job cannot tell a hand-placed secure root from a stale copy of the source's PREVIOUS
+       secure root. A genuine re-file of an intermediate out of a secure root, or between two secure roots, no longer
+       carries its children. They stay under the old secure root (access stays restricted) and refuse uploads until a
+       person re-files each one. That partly reverses (b).
+     - *Work:* one flag read per differing value in the restamper, the job and the resolver, with tests and seeds.
+  3. **Remove the shape at its source.** Make the four `sprk_regarding{core}` columns read-only on the to-do, event,
+     communication and analysis forms. Choosing a root then goes through the RegardingResolver, which writes the pair and
+     makes a direct link the restamper never touches. This is a form change (not BFF code). Which forms expose the
+     columns has to be checked first.
+- **Recommendation: 1 + 3.** (b) stays whole, misfiled email can be moved out of a secure matter with its follow-ups, and
+  the only input that produces the risky shape is closed. Option 2 is the alternative if the owner prefers the server to
+  refuse whatever the forms allow.
+  - *Rejected as a recommendation:* applying option 2 to the job and the after-write self-revert (xxvi) only. A
+    hand-placed secure root the job left alone would still be overwritten by the next BFF re-file of its source, so the
+    outcome would depend on which path ran.
+
+### Seeds this round (each restored byte-identical from a backup, then touched; SHA-256 re-verified)
+
+The seed runner refuses to report on a failed build. Every seed below compiled.
+
+| Seed | Removed guard | Bit |
+|---|---|---|
+| V1 | Source case: `carriers.AddRange(decision.Carriers)` | `RowFiledUnderASource_AlsoNamingAnIntermediateOfADifferentSecureRoot_IsAmbiguous` + route `Put_TodoUnderACommunicationAlsoNamingAnEventOfTheSecureProject_…` (2 red) |
+| V2 | Source case: `extra.AddRange(sourceHops.Extra)` | `SourceWhoseSecureRootIsNamedOnlyByItsPair_…` + route `Put_TodoUnderACommunicationWhoseSecureProjectIsNamedOnlyByItsPair_…` (2 red) |
+| V3 | `SetLinks(row, rowLinks.CarrierColumns)` → empty | `AnalysisWhoseDocumentBelongsToADifferentSecureRoot_IsAmbiguous` (both columns) + route `Put_TodoUnderAnAnalysisWhoseInputDocumentIsUnderTheSecureProject_…` (3 red) |
+| E1 | the event PUT's `AfterWriteAsync` call | `Put_MovingThePairToTheEventsOtherSource_RestampsTheEventAndItsChildren` |
+| E2 | `EventColumnsWritten` answers nothing | the same route test |
+| H2 | truncated-only → Success | `TruncatedOnlyCascade_IsCompleted_NeverRetriedOrPoisoned` |
+
+### Tests this round
+
+11 new test cases:
+- resolver: 5 (V1, V2, V3 ×2, V3 agreeing);
+- real OBO PUT route: 3 (V1, V2, V3);
+- real event PUT route: 2;
+- queue handler: 1.
+
+Results:
+- Affected suites (filter: `ChildRecordContainerResolutionTests`, `RecordKeyedUpload`, `CoreAncestor`, `RefilePathRestampTests`, `DocumentRefileRestampRouteTests`, `EventRefileRestampRouteTests`, `ServerWriterAncestorStamping`, `OfficeSaveNoTargetContainer`, `OfficeTodoRegarding`, `IncomingAssociation`, `IncomingCommunicationProcessor`, `DataverseUpdateRecordHandler`, `DataverseToolNameFreeze`, `EventEndpoints`, `RecordContainerResolver`): **499 / 499**.
+- Full BFF unit suite **Passed 13527 / Failed 0 / Skipped 54 (Total 13581)**; NetArchTest **337 / 337** (details and one
+  caveat under "Tests" below).
+
+### Publish size (CLAUDE.md §10 item 4)
+
+Recorded in the commit that follows this one: a fresh tree of a commit is needed to measure it.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
 All four new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
@@ -342,6 +454,12 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
 - **Verifier round 1:** 28 new tests (job 11, restamper 7, resolver bounds 2, OBO PUT route 1, Office create 4, inbound
   association 3); affected suites **537 / 537**; full BFF unit **Passed 13516 / Failed 0 / Skipped 54 (Total 13570)**;
   NetArchTest **337 / 337**; 22 seeds, each red (table in the verifier round 1 section).
+- **Verifier round 2:** 11 new test cases (resolver 5, OBO PUT route 3, event PUT route 2, queue handler 1); affected
+  suites **499 / 499** (filter in the verifier round 2 section); full BFF unit **Passed 13527 / Failed 0 / Skipped 54
+  (Total 13581)**, which is round 1's 13516 + 11; NetArchTest **337 / 337**; 6 seeds, each red.
+  - One honest caveat: the first full run, made while NetArchTest ran in parallel on the same machine, reported 1 failure
+    whose name the truncated console output did not keep. The re-run on its own was clean. Nothing in this round's diff
+    is timing-dependent.
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,

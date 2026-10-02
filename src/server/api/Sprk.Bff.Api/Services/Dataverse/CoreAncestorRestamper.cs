@@ -710,6 +710,21 @@ public sealed class CoreAncestorRestamper
     }
 
     /// <summary>
+    /// The <c>sprk_event</c> columns an <see cref="UpdateEventRequest"/> writes that can move a stamp: the regarding pair,
+    /// which <c>DataverseWebApiService.UpdateEventAsync</c> writes (id, type and name together) exactly when
+    /// <see cref="UpdateEventRequest.RegardingRecordType"/> has a value. The update never writes a typed source or root
+    /// column, so nothing else it writes can move a stamp (verifier round 2 item 8).
+    /// </summary>
+    public static IReadOnlyList<string> EventColumnsWritten(UpdateEventRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        return request.RegardingRecordType.HasValue
+            ? [CoreAncestorResolver.RegardingRecordIdColumn, CoreAncestorResolver.RegardingRecordTypeColumn, "sprk_regardingrecordname"]
+            : [];
+    }
+
+    /// <summary>
     /// The logical column names behind a write's keys: <c>sprk_Matter@odata.bind</c> → <c>sprk_matter</c>,
     /// <c>_sprk_matter_value</c> → <c>sprk_matter</c>, any case → lower.
     /// </summary>

@@ -77,6 +77,41 @@ public class CoreAncestorRestampJobHandlerTests
         (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Poisoned);
     }
 
+    [Fact(DisplayName = "Task 156 (verifier round 2 item 13): a cascade stopped ONLY by its bound is done, not retried — a retry stops at the same bound, so Failed would only end in a dead letter; the reconciliation job finishes the rest")]
+    public async Task TruncatedOnlyCascade_IsCompleted_NeverRetriedOrPoisoned()
+    {
+        var todos = new[]
+        {
+            Guid.Parse("15600000-0000-0000-0000-000000000111"),
+            Guid.Parse("15600000-0000-0000-0000-000000000112"),
+            Guid.Parse("15600000-0000-0000-0000-000000000113"),
+        };
+        var world = new StampWorld()
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)]);
+        foreach (var todo in todos)
+        {
+            world.Row("sprk_todo", todo,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
+        }
+
+        // One child per page, two per source: the third child is past the bound on every attempt.
+        var handler = new CoreAncestorRestampJobHandler(
+            world.RestamperWith(childPageSize: 1, childrenPerSourceBound: 2), NullLogger<CoreAncestorRestampJobHandler>.Instance);
+        var job = Job(new CoreAncestorRestampPayload("sprk_communication", Communication, ["sprk_regardingmatter"]));
+
+        (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+
+        job.Attempt = job.MaxAttempts;
+        (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed,
+            "a truncation is not a failure, so it is never dead-lettered");
+
+        world.Lookup("sprk_todo", todos[0], "sprk_regardingmatter").Should().Be(MatterB);
+        world.Lookup("sprk_todo", todos[1], "sprk_regardingmatter").Should().Be(MatterB);
+        world.Lookup("sprk_todo", todos[2], "sprk_regardingmatter").Should().Be(MatterA,
+            "past the bound on every attempt — left to the reconciliation job (the resolver refuses it as stale meanwhile)");
+    }
+
     [Fact(DisplayName = "Task 156 queue: what the storage resolver and the AI tool ENQUEUE is what this handler consumes — a stale child and an after-write cascade both round-trip to a re-stamp")]
     public async Task EnqueuedMessages_RoundTripThroughTheHandler()
     {

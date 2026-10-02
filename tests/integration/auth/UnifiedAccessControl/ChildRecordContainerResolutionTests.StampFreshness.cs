@@ -572,4 +572,121 @@ public partial class ChildRecordContainerResolutionTests
         IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeFalse();
         unstamped.Queue.Children.Should().ContainSingle().Which.Should().Be(("sprk_communication", CommunicationId));
     }
+
+    // =============================================================================================
+    // Verifier round 2 (AC7): three guards in the Source branch that no test pinned. Each test below is the shape the
+    // guard exists for; with the guard removed each one resolves a SHARED container where a secure record is involved
+    // (the #1038 leak class). Seeds V1-V3 in notes/task-156-stamp-freshness.md.
+    // =============================================================================================
+
+    [Fact(DisplayName = "Task 156 (verifier round 2, V2): a to-do under a communication whose SECURE matter is named ONLY by the communication's polymorphic pair resolves that matter's own container — never the to-do's business unit")]
+    public async Task SourceWhoseSecureRootIsNamedOnlyByItsPair_ResolvesThatRootsOwnContainer()
+    {
+        // Live: 161 of 276 communications carry the pair. CoreAncestorResolver copies only TYPED root columns, so the
+        // to-do's copy is empty and so is the communication's typed root: the copy is fresh. The record the pair alone
+        // names is not part of the copy, but it must still be WALKED for its flag — that is the guard.
+        var world = new World()
+            .WithRow("sprk_todo", ChildId, [("sprk_regardingcommunication", "sprk_communication", IntermediateId)],
+                pairId: IntermediateId.ToString())
+            .WithRow("sprk_communication", IntermediateId, [],
+                pairId: MatterId.ToString("D").ToUpperInvariant(), pairType: MatterTypeRef)
+            .WithRecordType(MatterTypeRef, "sprk_matter")
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var decision = await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+            decision.ContainerId.Should().Be(RootContainer,
+                "a child of a secure record is secure (C10 part 2), however the record above names that root");
+        }
+
+        world.Reads("sprk_matter").Should().Be(2, "the matter the communication's pair names is read for its flag (once per resolution)");
+        world.Reads("businessunit").Should().Be(0, "a shared container must never be in scope");
+        world.Queue.Children.Should().BeEmpty("the copy is fresh: neither side names a typed root");
+    }
+
+    [Theory(DisplayName = "Task 156 (verifier round 2, V3): a to-do under an analysis filed under a NON-secure matter, whose input or output document belongs to a different SECURE matter → container_ancestor_ambiguous, no container (interpretation xviii)")]
+    [InlineData("sprk_documentid")]
+    [InlineData("sprk_outputfileid")]
+    public async Task AnalysisWhoseDocumentBelongsToADifferentSecureRoot_IsAmbiguous(string documentColumn)
+    {
+        // The analysis's copy source is its own regarding (the plain matter); the document it analyses (or produced) is a
+        // CARRIER — the analysis's NOT NULL sprk_documentid / sprk_outputfileid. Unread, the to-do would resolve the plain
+        // matter's business-unit container while its content concerns a document of the SECURE matter.
+        var world = new World()
+            .WithRow("sprk_todo", ChildId,
+                [("sprk_regardinganalysis", "sprk_analysis", IntermediateId), ("sprk_regardingmatter", "sprk_matter", OtherMatterId)],
+                pairId: IntermediateId.ToString())
+            .WithRow("sprk_analysis", IntermediateId,
+                [("sprk_regardingmatter", "sprk_matter", OtherMatterId), (documentColumn, "sprk_document", CarrierId)])
+            .WithRow("sprk_document", CarrierId, [("sprk_matter", "sprk_matter", MatterId)])
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorAmbiguousCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("sprk_document").Should().Be(2, "the analysis's document is read live as a carrier (once per resolution)");
+        world.Reads("businessunit").Should().Be(0, "a shared container must never be in scope");
+        world.Queue.Children.Should().BeEmpty("the copy is fresh — this is a disagreement, not a stale copy");
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 2, V3): the same analysis whose document belongs to the SAME matter as the analysis agrees — the to-do resolves its business-unit container (a carrier is read, not refused on sight)")]
+    public async Task AnalysisWhoseDocumentBelongsToTheSameRoot_Resolves()
+    {
+        var world = new World()
+            .WithRow("sprk_todo", ChildId,
+                [("sprk_regardinganalysis", "sprk_analysis", IntermediateId), ("sprk_regardingmatter", "sprk_matter", OtherMatterId)],
+                pairId: IntermediateId.ToString())
+            .WithRow("sprk_analysis", IntermediateId,
+                [("sprk_regardingmatter", "sprk_matter", OtherMatterId), ("sprk_documentid", "sprk_document", CarrierId)])
+            .WithRow("sprk_document", CarrierId, [("sprk_matter", "sprk_matter", OtherMatterId)])
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        (await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId)).ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_document").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 156 (verifier round 2, V1): a to-do filed under a communication (copy FRESH, a NON-secure matter) that ALSO names an event of a different SECURE matter → container_ancestor_ambiguous, no container")]
+    public async Task RowFiledUnderASource_AlsoNamingAnIntermediateOfADifferentSecureRoot_IsAmbiguous()
+    {
+        // The pair names the communication, so it is the copy's source; the event set beside it is a CARRIER
+        // (ClassifyStampSource rule 3). Unread, the to-do would resolve the plain matter's business-unit container.
+        var world = new World()
+            .WithRow("sprk_todo", ChildId,
+            [
+                ("sprk_regardingcommunication", "sprk_communication", IntermediateId),
+                ("sprk_regardingevent", "sprk_event", CarrierId),
+                ("sprk_regardingmatter", "sprk_matter", OtherMatterId),
+            ], pairId: IntermediateId.ToString())
+            .WithRow("sprk_communication", IntermediateId, [("sprk_regardingmatter", "sprk_matter", OtherMatterId)])
+            .WithRow("sprk_event", CarrierId, [("sprk_regardingmatter", "sprk_matter", MatterId)])
+            .WithRoot("sprk_matter", OtherMatterId, isSecure: false, containerId: null)
+            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        foreach (var fallback in new[] { null, ArchiveContainer })
+        {
+            var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId, fallback);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be(RecordContainerResolver.AncestorAmbiguousCode);
+            ex.StatusCode.Should().Be(409);
+        }
+
+        world.Reads("sprk_event").Should().Be(2, "the event beside the copy's source is read live as a carrier (once per resolution)");
+        world.Reads("businessunit").Should().Be(0, "a shared container must never be in scope");
+        world.Queue.Children.Should().BeEmpty("the copy is fresh — this is a disagreement, not a stale copy");
+    }
 }

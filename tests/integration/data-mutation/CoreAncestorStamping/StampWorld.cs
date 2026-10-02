@@ -256,6 +256,14 @@ internal sealed class StampWorld
         return this;
     }
 
+    /// <summary>Set (or clear, with null) a row's pair id — the write a pair-only update (<c>PUT /api/v1/events/{id}</c>) makes.</summary>
+    public StampWorld SetPair(string entity, Guid id, string? pairId)
+    {
+        if (pairId is null) _rows[(entity, id)].Attributes.Remove(CoreAncestorResolver.RegardingRecordIdColumn);
+        else _rows[(entity, id)][CoreAncestorResolver.RegardingRecordIdColumn] = pairId;
+        return this;
+    }
+
     public IEnumerable<(string Entity, Guid Id, Dictionary<string, object> Fields)> PatchesTo(string entity, Guid id)
         => Patches.Where(p => p.Entity == entity && p.Id == id);
 
