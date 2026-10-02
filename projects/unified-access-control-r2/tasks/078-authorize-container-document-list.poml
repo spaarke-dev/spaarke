@@ -136,5 +136,5 @@ route. All restored.
 
 Verification: build 0 warnings; 7/7 task tests; 41/41 with resolver neighbours; 10/10 RouteAuthorizationGuardTests;
 ArchTests 121 passed / 6 failed == clean-tree baseline (proven by git stash); publish 45.12 MB compressed
-incl. PDBs (+0.16 vs 44.96 baseline, ceiling 60); no vulnerable packages; no packages added.
+incl. PDBs (+0.16 vs 44.96 baseline, ceiling 60); no vulnerable packages; no packages added.</notes>
 </task>

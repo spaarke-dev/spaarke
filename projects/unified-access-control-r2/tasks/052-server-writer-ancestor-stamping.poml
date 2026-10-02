@@ -126,7 +126,7 @@ Three things this POML got wrong, recorded per project convention:
 
 New finding F-052-1: sprk_communicationthread taxonomy question -> task 056.
 New finding F-052-2 (low): EmailDraftToolHandler derives app-only under a user-context write.
-F-050-2 (sprk_todo has no service-request column) confirmed server-side; reported as unstampable, not fatal.
+F-050-2 (sprk_todo has no service-request column) confirmed server-side; reported as unstampable, not fatal.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

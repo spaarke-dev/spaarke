@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="153" project="unified-access-control-r2">
+  <metadata>
+    <title>Access-status indicator — a red form banner when a project, matter or work assignment is SECURE and/or under a No Access restriction, a No Access banner on Organization and Contact forms that entries name, and a clickable indicator in TrackingFieldTrio that opens Manage Access; fed by one read-tier BFF summary that renders "unavailable", never "not restricted", when it cannot answer</title>
+    <phase>Register-driven (authored 2026-10-01, session 27; owner round 3b UX requirements; disposition row 3 of notes/session27-ux-research-ethical-wall-secure.md)</phase>
+    <gate>blocked — requires 064 (with its UX amendment: the record-scoped No Access read AND its Read-gated SUMMARY route, which covers organization and contact records), 067 (with its UX amendment: open Manage Access directly at the No Access section), 150 (sprk_issecure field-level security, readers unmasked) and 154 (the Organization/Contact NO ACCESS sections the org/contact banner points at) merged. Rebase after 138 (edits TrackingFieldTrio.tsx :335-367 and the PCF index.ts :945-963). Escalation trigger (O1) needs the owner's answer before step 4 and step 6 (O1 is under owner investigation, research note :75-77). (O2) was ACCEPTED as recommended on 2026-10-01 (research note :74); step 0 confirms the recorded answer still stands.</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends a BFF route on the authorization read path (disclosure to readers), .ts/.tsx changes to a shared component and a PCF, a new form web resource; tags bff-api, auth, security, pcf, frontend.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-adjacent read surface whose likeliest failure is SILENT and fail-open: a masked sprk_issecure or a faulted deny-list read rendered as "no banner" tells every viewer a secure or walled record is unrestricted. The tri-state (applies / does not apply / unknown) must survive four layers (Dataverse read, composer, DTO, two clients).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies TrackingFieldTrio.tsx/types.ts and src/client/pcf/TrackingFieldTrio/index.ts (shared with 138, 139, 142) and consumes AccessGrantModal's section prop added by 067 (AccessGrantModal.tsx shared with 138, 139, 140, 142). Extends 064's summary route and DTO (064 owns them; 143 also edits NoAccessListReader.cs, which this task does not touch). Registers a library on the project/matter/work-assignment main forms (142 registers sprk_assignedaccess_postsave.js and 150 adds ribbon commands there) and on the Organization/Contact main forms (154 edits them first). Run after 138, 067, 150 and 154.</parallel-reason>
+    <deps>064, 067, 150, 154</deps>
+    <tags>bff-api, auth, security, pcf, frontend, fluent-ui, webresource, dataverse, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Owner round 3b (notes/session27-owner-decisions-and-research.md:78-86): "a red notification banner on any record subject to a No Access restriction, linking to a No Access list modal" and "a red notification banner showing a record is secure, linking to Share/Manage Access if possible". Disposition row 3 and open question O1 (notes/session27-ux-research-ethical-wall-secure.md:69, :74).</origin>
+  </metadata>
+
+  <prompt>Show every person who opens a project, matter or work assignment, in the standard form banner, that the record is SECURE and/or that a No Access restriction applies to it; show the same kind of banner on an Organization or Contact form when No Access entries name that organization or contact. Add, inside TrackingFieldTrio, a clickable indicator that opens Manage Access at the right section. Both surfaces read ONE BFF summary that any reader of the record may call. When that summary cannot be obtained or any part of it is unknown, the form shows a neutral "access status unavailable" notice — never silence that reads as "not restricted".</prompt>
+
+  <role>SPAARKE platform developer — BFF ExternalAccess read path and endpoint filters, classic form web resources over Spaarke.BffAuth, the TrackingFieldTrio PCF and its shared Fluent v9 core. Fail closed (ADR-003); the absence of a banner is itself a claim.</role>
+
+  <goal>(1) 064's Read-gated `GET` No Access SUMMARY route, extended by this task with the Secure signal and a closed signal block, returns, for a project, matter, work assignment, organization or contact the CALLER can Read, a closed set of signals each in state `applies` / `doesNotApply` / `unknown`, echoing the record id, with no entry ids, subject or object names and no reasons. (2) A thin on-load/post-save web resource on the five main forms maps those states to fixed red (ERROR) notifications, and maps any `unknown`, a non-200 response, a missing auth helper or a thrown call to one neutral INFO "access status unavailable" notification. (3) TrackingFieldTrio renders a Secure / No Access / unavailable indicator in its header row; for a caller the server says may manage access, clicking it opens AccessGrantModal through 067's section plumbing, at the No Access section (No Access) or at the top, Current Access (Secure); for everyone else it is a non-clickable indicator with a tooltip. (4) A live manual gate proves the banner on all five forms, under 150's field-level security, for a Read-only user and a Write user.</goal>
+
+  <context>
+    <background>WHAT THE OWNER ASKED (round 3b, BINDING; session27 note :78-86). A red banner on any record subject to a No Access restriction, linking to the No Access list; a red banner showing a record is secure, linking to Share/Manage Access if possible. The research note (session27-ux-research-ethical-wall-secure.md) assigns the indicator to this task (disposition row 3) and leaves O1 open (:74): the standard form banner is text-only, so a clickable indicator has to live inside TrackingFieldTrio.
+
+WHAT EXISTS TODAY (verified 2026-10-01 against this branch).
+- No authored code calls `setFormNotification` or `addNotification`: a Grep of src/ (node_modules excluded) matches only compiled PCF artifacts (`src/client/pcf/*/Solution/Controls/**/bundle.js`, 9 files). There is no on-form access signal except the header Owner and one line inside the Manage Access modal (`AccessGrantModal.tsx:1170-1178`, "Secure record — Owner … · Business Unit …").
+- The modal's designed banner states are Fluent v9 `MessageBar intent="error"` with `MessageBarTitle` (`AccessGrantModal.tsx:1145-1168`: Restricted, then the delegation/auth deny state). That is the visual precedent for a red access state.
+- TrackingFieldTrio (shared core) renders its governance icons in the header row: `TrackingFieldTrio.tsx:253-287` (person icon "Grant access" `:256-273`, email icon `:274-285`), placed by `:297-302`. The person icon is enabled only when `canGrantAccess === true` (`:248`, task 118 fail-closed). Props contract: `TrackingFieldTrio/types.ts:26-93` (`onOpenGrantModal` `:71`, `canGrantAccess` `:92`). Existing consumers that do not pass the governance props see no toolbar (`types.ts:59-66`); the email reading pane is one such consumer.
+- The PCF host (`src/client/pcf/TrackingFieldTrio/index.ts`) binds to project, matter and work assignment (`GRANT_ROOT_BY_ENTITY` `:211-213`, `resolveGrantRoot()` `:459`). It asks the server whether the caller may manage access (`evaluateGrantGate()` `:594-657`: `GET /api/v1/external-access/can-manage-access`, every non-200 or unexpected body → false, the answer must echo THIS record id via `normalizeRecordId` `:639-648`, stale answers dropped by `setGrantGate` `:669-676`). That is the pattern this task's status fetch copies. The modal is opened by `onOpenGrantModal` (`:1102-1105`) and mounted with its props at `:1170-1207`. The host renders under a hard-coded `webLightTheme` (`:1135`). Its `fetchSecureOwnerInfo` (`:945-963`) reads `sprk_issecure` in user context and returns null on ANY failure — fail-soft by design for a display line, so it must NOT become the banner's source.
+- SERVER. The `/api/v1/external-access` management group (`ExternalAccessEndpoints.cs:123-126`) carries `DelegationRuleFilter`, whose required right is Write (`DelegationRuleFilter.cs:86`, check `:170-179`). `can-manage-access` (`RecordAccessGateEndpoint.cs:63-108`) answers the Write question and says of itself that it is not a permissions API and must not become one (`:27-32`). A Read-only viewer therefore cannot get a status from any route on that group, and a banner built on it would be blank for exactly the people who most need it.
+- The root-flag reader cannot express "unknown". `ExternalParticipationService.GetRootRecordFlagsAsync` (`:541-624`) maps a row to `IsSecure: row.sprk_issecure == true` (`:605`), so a masked or NULL flag reads NOT secure, and maps an unreadable/unreturned row to `RootRecordFlags.Unreadable` = secure AND restricted (`ExternalCallerContext.cs:149`). Both are correct for a VETO and both are wrong for a banner: one would hide a secure record's banner, the other would show "SECURE" on a record nobody could read. Task 138 is adding a Limited signal to the same struct (`ExternalCallerContext.cs:139-153`).
+- The deny reader answers only "which of these candidate records is this SUBJECT denied" (`NoAccessListReader.cs:128-155`; select list `:180-182`; subject filter `:191-206`; object filters `:209-222`; `GetDeniedRecordsAsync` `:268`). It has no record-scoped or subject-scoped listing. Task 064's UX amendment (`tasks/064-provenance-read-and-denylist-endpoints.poml`, amendment n="UX", lines 111-144) now owns ALL of it:
+  - a record-scoped method on `NoAccessListReader` (064 RULES "Reuse, do not fork");
+  - for a root record, its own entries plus organization walls over its referenced organizations (064 items (1)-(2));
+  - for an sprk_organization record, entries naming it as subject or object organization; for a contact, entries naming it as subject contact plus entries whose subject organization is one of its ACTIVE organizations (064 item (3));
+  - a SUMMARY tier route OUTSIDE the Write-gated group, gated on the caller's Read through `RecordRouteAccessAuthorizationFilter` with one new Read-mapped `OperationAccessPolicy` key (064 "Authorization"), returning "whether any active entry applies, and counts by subject kind and by object path", with no Reason and no subject identities (064 item "SUMMARY block");
+  - fail closed: any read fault returns ProblemDetails, never an empty or negative summary (064 RULES);
+  - 064 itself says STOP and escalate before widening the shared entity-set map for the organization summary (064 "Authorization", last bullet).
+  The SUMMARY route carries no Secure signal; adding it, and the closed signal block both clients read, is this task's server work.
+- Record-side organizations for a wall: `GetReferencedOrganizationIdsAsync` (`ExternalParticipationService.cs:710`) over `sprk_assignedlawfirm1/2` (`:661-667`), returning `Unreadable` per record on a fault. A contact's active organizations: `QueryActiveOrgIdsAsync` (`:1081`).
+- Per-record caller rights: `CallerRecordAccessProbe.GetCallerRightsAsync` (`CallerRecordAccessProbe.cs:210`), which collapses every "could not answer" into `AccessRights.None`. The route-keyed gate 064 reuses is `RecordRouteAccessAuthorizationFilter` (`Api/Filters/RecordRouteAccessAuthorizationFilter.cs:24-35` registration with an operation key, `:124-232` decision). Three facts constrain it here:
+  - its insufficient-rights 403 copy is upload-specific ("You do not have permission to add content to this record.", `:221-224`);
+  - it resolves entity sets ONLY through `EntityAccessFilter.TryResolveEntitySet` (`EntityAccessFilter.cs:167`), and its own remarks forbid a map of its own ("there were already three in the codebase before task 076 and a fourth is a review failure", `:58-63`);
+  - that shared map (`EntityAccessFilter.cs:123-147`) has `contact` (`:123`) but no `sprk_organization`, and carries a LOCKSTEP INVARIANT with `DocumentAssociationMap` (`:111-122`). `DocumentAssociationMap` has no organization entry (Grep of `src/server/shared/Spaarke.Dataverse` for "organization" in `DocumentAssociationMap*.cs`: no match), so adding `sprk_organization` to the shared map would authorize document filing to organizations that can never be associated.
+  So the Organization banner's read gate is an open design tension (escalation (f)), not a choice this task makes alone.
+- AUTH SCHEME. A CIAM token cannot reach the workforce-default `/api/v1/external-access` group (`AuthorizationModule.cs:334-343`). The new route is workforce-only in the same way.
+- WEB RESOURCE PATTERNS. On-load + `Spaarke.BffAuth`: `src/solutions/webresources/sprk_matter_kpi_refresh.js` (header `:1-29`). `addOnPostSave`: `sprk_kpiassessment_quickcreate.js:160-215`. The auth helper's file is `src/solutions/webresources/sprk_bff_auth.js`; its WEB RESOURCE NAME, the one registered on forms, is `sprk_/scripts/bff_auth.js` (`:4`, `:20-25`). Token: `getToken` (`:178`) and `authenticatedFetch` (`:234`).
+  - ⚠️ `getToken` never throws and never prompts: on a cold cache or any failure it resolves `null` (`:45-46`, `:172-221`), and `authenticatedFetch` then resolves `null` WITHOUT calling fetch (`:226-239`). A null token or a null Response is therefore a normal outcome that this task must render as "unavailable".
+  - ⚠️ `sprk_kpiassessment_quickcreate.js:282-293` SKIPS the call when the helper is absent or the token is null — fail-soft, correct for a KPI recalculation and wrong for a banner.
+- FORM NOTIFICATION MECHANISMS (O1 is under owner investigation, research note :75-77; findings in the researcher's memory `.claude/agent-memory/researcher/mda-clickable-form-banner-options-2026-09-30.md`, Microsoft Learn sources listed there, NOT repo-verified):
+  - `formContext.ui.setFormNotification(message, level, uniqueId)` — documented text-only, form-scoped, leaves with the form. An undocumented fourth "actions" parameter exists (community only, UNSUPPORTED; do not use).
+  - `Xrm.App.addGlobalNotification({ type: 2, level, message, action: { actionLabel, eventHandler } })` — the only documented banner with a clickable action. It is APP-wide, not form-scoped, persists across in-app navigation, and there is no form unload event to clear it. Repo precedent without an action: `src/client/webresources/js/sprk_registrationribbon.js:270-282`. Its handler runs in the web resource's context and cannot open AccessGrantModal, which lives inside the TrackingFieldTrio PCF (`index.ts:1170-1207`).
+  - `control.addNotification` (RECOMMENDATION is the only clickable level and is not red), `appnotification` (per-user bell/toast, not record-scoped) and Power Fx `Notify` (no action, cannot fire on form load) do not fit. ⚠️ `.claude/constraints/webresource.md` "Authentication" still says web-resource-called endpoints must be `.AllowAnonymous()`; that section predates `Spaarke.BffAuth` (task 030 / FR-17) and is superseded by it. Do not follow it here (CLAUDE.md §9: every endpoint requires auth).
+- After 150, `sprk_issecure` is field-secured with Read granted to every user and to the BFF app identity (150 goal (1), constraint "None may be masked"). A masked read is therefore a configuration fault, and this task must render it as unknown, not as "not secure".
+- A masked attribute and a stored NULL come back the same way from a Web API read (null or absent), so the Secure read cannot tell them apart. Rows whose `sprk_issecure` is NULL (for example rows that predate the column) would therefore show "Access status unavailable" permanently. Step 1 counts them live; escalation (g) applies if any exist.
+- Opening the OOB Share dialog from a banner is not recommended (research note :59: no supported API, and it would bypass task 139's grantor cap and task 143's guard). Manage Access is the target.</background>
+    <relevant-files>
+      <file role="modify">064's SUMMARY route handler and its response DTO (paths as 064 lands them, e.g. `GET /api/v1/records/{entityLogicalName}/{recordId}/no-access-summary`): add the closed signal block (signal-kind and state enums), the Secure signal and the record-id echo. No new endpoint file.</file>
+      <file role="modify">064's record-scoped read composer (path as 064 lands it): add the single-row Secure read for root records. It is reused, not duplicated; no new method on `NoAccessListReader`.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/RecordRouteAccessAuthorizationFilter.cs (ONLY if 064 shipped the summary route with the upload-specific 403 copy at :221-224: make the insufficient-rights detail operation-specific, leaving the upload routes' existing text unchanged)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (registrations, if any)</file>
+      <file role="new">src/solutions/webresources/sprk_accessstatus_banner.js (web resource name `sprk_/scripts/accessstatus_banner.js`; OnLoad + data OnLoad + OnPostSave on the five main forms; registered after `sprk_/scripts/bff_auth.js`)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx (header-row indicator)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts (one opt-in `accessStatus` prop; the click reuses 067's section-aware `onOpenGrantModal`)</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts (fetch the summary like evaluateGrantGate; pass `accessStatus`; open AccessGrantModal through 067's section plumbing) + ControlManifest.Input.xml and the PCF version in all four locations (pcf-deploy skill)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.toolbar.test.tsx (indicator states, click gating)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (Secure tri-state + signal mapping in the composer) and tests/integration/auth/UnifiedAccessControl/ (summary-route authorization through the real pipeline, beside RecordAccessGateTests.cs)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-153-access-status-banner.md (owner answers O1/O2, step-1 decisions, live gate evidence)</file>
+      <file role="canonical-reference">src/client/pcf/TrackingFieldTrio/index.ts:594-676 (evaluateGrantGate / setGrantGate — fail-closed, record-echo, stale-drop)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx:1145-1168 (red designed state)</file>
+      <file role="canonical-reference">src/solutions/webresources/sprk_matter_kpi_refresh.js and sprk_kpiassessment_quickcreate.js:160-215 (+ sprk_bff_auth.js)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs:108-167 (the lockstep map NOT to widen)</file>
+      <file role="read">projects/unified-access-control-r2/tasks/064-provenance-read-and-denylist-endpoints.poml (amendment n="UX") and 067-access-modal-denylist-and-standing-levels.poml (amendment n="UX") — the contracts this task builds on</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">Its UX amendment (disposition row 1, research note :67) supplies the record-scoped No Access read for root, organization and contact records, the Read-gated SUMMARY route and its fail-closed rules. This task extends that route and composer; it never builds a second deny reader, a second composer or a second summary route.</dependency>
+      <dependency task="067" status="pending">Its UX amendment (disposition row 2, :68) adds an optional initial section to `onOpenGrantModal`, the PCF host and `IAccessGrantModalProps`, and opens the modal at the No Access section. The TrackingFieldTrio indicator calls that plumbing; without it the click lands on the wrong section.</dependency>
+      <dependency task="150" status="pending">Field-level security on sprk_issecure with Read for every user and the BFF app identity. The banner's Secure signal reads the flag app-only and must distinguish "false" from "absent".</dependency>
+      <dependency task="154" status="pending">Builds the Organization and Contact NO ACCESS sections the org/contact banner text points at, and applies O2 (who can read entries; accepted as recommended 2026-10-01).</dependency>
+      <dependency task="138" status="pending (rebase)">Edits TrackingFieldTrio.tsx :335-367, the PCF index.ts :945-963/:1204 and RootRecordFlags (ExternalCallerContext.cs:139-153). Rebase onto it; do not reintroduce what it changes.</dependency>
+      <dependency task="142" status="pending (coordination)">Its "Update Access" ribbon command and form post-save refresh the form; the banner re-evaluates on data OnLoad, so no call from 142 into this library is needed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 fail closed (owner directive)">Scope: the endpoint, the web resource and the TrackingFieldTrio indicator. Each signal is exactly one of `applies`, `doesNotApply`, `unknown`.
+- Server: a fault, timeout, non-success status, missing row, masked/NULL `sprk_issecure`, `RootRecordFlags.Unreadable`, `ReferencedOrganizations.Unreadable`, a `NoAccessListResult.FailedClosed` result, or an unreadable organization membership makes THAT signal `unknown`. Never `doesNotApply`, and never `applies` (an unreadable record is not evidence that it is secure).
+- 064's rule stands: a fault in the No Access read returns ProblemDetails for the whole request, never a 200 with a negative signal. Inside a 200, a signal is `unknown` only where that one signal could not be established while the others could (e.g. a masked or NULL Secure flag).
+- Client: a non-200 (including 403 and 404), an unparseable body, a body whose recordId does not name this record (compare through `normalizeRecordId`), a missing `Spaarke.BffAuth`, an unresolved BFF base URL, a `null` token or `null` Response from `Spaarke.BffAuth.authenticatedFetch` (`sprk_bff_auth.js:226-239`), or a thrown call renders the unavailable notice. A signal kind missing from the body, or an unrecognised state value, is `unknown`.
+- `doesNotApply` renders NOTHING for that signal; no surface ever prints "not secure", "not restricted" or similar.</constraint>
+    <constraint source="owner round 3b + O2 (disclosure)">Scope: the summary response and every string rendered from it. The response carries no entry ids, no subject or object ids or names, no reasons and no per-entry enforcement detail. The counts 064's SUMMARY block defines (by subject kind and by object path) may remain in the payload as 064 specifies; this task adds no other field beyond the signal block, the Secure signal and the record-id echo, and NEITHER client renders a count. The No Access list itself stays behind Manage Access (064's entries tier + 067, Write) and the NO ACCESS sections (154, access administrators per O2).</constraint>
+    <constraint source="ADR-008 / ADR-003 (read-tier gate)">Scope: the summary route. The gate is 064's: the caller must hold Read on the named record, evaluated as the caller over OBO through `CallerRecordAccessProbe.GetCallerRightsAsync`, in `RecordRouteAccessAuthorizationFilter` with 064's Read-mapped `OperationAccessPolicy` key, before the handler runs. This task adds no filter and no operation key.
+- Every "could not answer" is a 403 ProblemDetails (ADR-019, stable reason code, trace id). Write is NOT required.
+- The 403 detail must not say "add content": if 064 shipped with the upload copy (`RecordRouteAccessAuthorizationFilter.cs:221-224`), make that detail operation-specific, with the upload routes' text unchanged.
+- The route is not on the `/api/v1/external-access` adminGroup (`ExternalAccessEndpoints.cs:123-126`), is workforce-scheme only (a CIAM token is refused, as at `AuthorizationModule.cs:334-343`), and is never `.AllowAnonymous()`.
+- Entity sets: project, matter, work assignment and contact resolve through `EntityAccessFilter.TryResolveEntitySet` (`EntityAccessFilter.cs:167`). `sprk_organization` follows escalation (f): neither the shared map nor a route-local map is added without that resolution.
+- Any other entity type → 403. Never a 400, and never a pass-through.</constraint>
+    <constraint source="closed signal set">Scope: the DTO, both clients and the tests. Every No Access kind is derived from 064's record-scoped read (its items (1)-(3)); this task only maps that result to kinds and states. Per entity type the response carries exactly these kinds, always all of them:
+- sprk_project / sprk_matter / sprk_workassignment: `secure`; `noAccessOnRecord` = an active entry whose object record is this record, OR whose object organization is one of this record's referenced organizations (`GetReferencedOrganizationIdsAsync`).
+- sprk_organization: `organizationDenied` (active entry with `sprk_subjectorganization` = this organization) and `organizationWall` (active entry with `sprk_objectorganization` = this organization).
+- contact: `contactDenied` (active entry with `sprk_subjectcontact` = this contact) and `contactMemberOfDeniedOrganization` (active entry whose subject organization is one of this contact's ACTIVE organizations, via `QueryActiveOrgIdsAsync`).
+Only ACTIVE entries count (`statecode eq 0`, as `CombineFilter` does at `NoAccessListReader.cs:233-234`). A malformed entry (Business Rule 1 of the schema doc) counts for `noAccessOnRecord` exactly as the reader treats it: it denies nothing, so it does not make the signal `applies`.</constraint>
+    <constraint source="CLAUDE.md §11 — one composer, one route">Scope: server. Every No Access signal comes from 064's record-scoped read; the Secure signal is one added single-row read in 064's composer. This task adds no endpoint file, no route, no method on `NoAccessListReader`, no second deny reader and no second HTTP reader of `sprk_noaccessentries`. It extends 064's SUMMARY route and DTO. If 064 merged without that route, or without item (3) (organization and contact records), escalation (c) applies; this task does not build a substitute. Do not add sprk_noaccessentry columns to `NoAccessListReader.RowSelect` (`:180-182`): a column missing in an environment turns every deny read into a fail-closed outage.</constraint>
+    <constraint source="owner R3/R4 — minutes, not hours">Scope: server. The summary is computed per request (no new cache, the 064 "compute, don't store" rule). A change to an entry or to the Secure flag shows on the next form load or refresh.</constraint>
+    <constraint source="the Secure signal">Scope: server. Read `sprk_issecure` app-only for the one record and keep three outcomes: true → `applies`; false → `doesNotApply`; absent, NULL, unreadable or unreturned → `unknown`. Do not derive it from `RootRecordFlags` as it stands (`ExternalCallerContext.cs:139-153`). If task 138 or 150 has added a readability discriminator to that struct or to `GetRootRecordFlagsAsync`, use it; otherwise read the single row in the composer. Do not change `GetRootRecordFlagsAsync`'s veto semantics. Never map NULL to `doesNotApply`, even where NULL is a legacy value: NULL rows are handled by escalation (g), not by the read.</constraint>
+    <constraint source="banner copy (closed set — proposed, confirmed under escalation O1)">Scope: sprk_accessstatus_banner.js. Use exactly these notifications, with fixed unique ids. Each is cleared when its signal is not `applies`.
+- `secure` (level ERROR, id `sprk_access_secure`): "SECURE RECORD — only people given access explicitly can see this record. People who can manage access see and change who has access in Manage Access (the person icon in the tracking panel)."
+- `noAccessOnRecord` (ERROR, id `sprk_access_noaccess`): "NO ACCESS RESTRICTION — named people or organizations are blocked from this record. People who can manage access see the list in Manage Access › No Access (the person icon in the tracking panel)."
+(The copy names who can act, because the person icon is disabled for a caller without Write, `TrackingFieldTrio.tsx:248`, `:267`; it must not tell a Read-only viewer to click something they cannot.)
+- `organizationDenied` (ERROR, id `sprk_access_org_denied`): "NO ACCESS — this organization is on the No Access list: its active members are blocked from specific records. Access administrators manage the entries in the NO ACCESS section."
+- `organizationWall` (ERROR, id `sprk_access_org_wall`): "ETHICAL WALL — named people or organizations are blocked from every record that references this organization. Access administrators manage the entries in the NO ACCESS section."
+- `contactDenied` (ERROR, id `sprk_access_contact_denied`): "NO ACCESS — this contact is on the No Access list and is blocked from specific records. Access administrators manage the entries in the NO ACCESS section."
+- `contactMemberOfDeniedOrganization` (ERROR, id `sprk_access_contact_org_denied`): "NO ACCESS — this contact belongs to an organization on the No Access list, so it is blocked wherever that organization is."
+- Any `unknown`, or any client failure (INFO, id `sprk_access_unavailable`): "Access status unavailable — whether this record is secure or under a No Access restriction could not be checked. Do not assume it is unrestricted; reload the form to try again."
+The owner's O1/O2 answers may revise this wording; implement the revised wording verbatim. Do not compose other strings.</constraint>
+    <constraint source="ADR-006 / webresource.md / §6.5 path C">Scope: sprk_accessstatus_banner.js. A form event handler (permitted for web resources), thin: no rule evaluation in the browser. The server decides each state; the script maps a state to a fixed string.
+- `"use strict"`, `Spaarke.AccessStatus` namespace, every handler wrapped in try/catch, and the form never breaks.
+- Registered on the main form of each of the five tables, after `sprk_/scripts/bff_auth.js`. Events: OnLoad, `formContext.data.addOnLoad` (re-run after a data refresh, e.g. 142's and 150's ribbon commands call `formContext.data.refresh(false)`, 142 POML :319), and `addOnPostSave`. Handlers are added once per form load, not once per event.
+- Each evaluation first clears all seven notification ids, then shows the result. A late answer for a record the form has left, or an answer older than a newer evaluation, is dropped.
+- No call on a create form with no record id. Main forms only, not quick-create forms.
+- Do NOT copy the fail-soft skip at `sprk_kpiassessment_quickcreate.js:282-293`: a missing helper, a `null` token or a `null` Response shows the unavailable notice.
+- Superseded rule: `.claude/constraints/webresource.md` (`:34`, `:41-47`) says web-resource-called endpoints MUST be `.AllowAnonymous()`. That rule predates `Spaarke.BffAuth` and contradicts CLAUDE.md §9; it does not apply. Use `Spaarke.BffAuth.authenticatedFetch`. (Fixing that constraint file is the main session's job; `.claude/` is outside this task.)</constraint>
+    <constraint source="O1 (escalation) — TrackingFieldTrio indicator">Scope: TrackingFieldTrio.tsx/types.ts and the PCF index.ts.
+- ONE new opt-in prop, `accessStatus` (the closed signal states, or an explicit unavailable value). The click reuses 067's section-aware `onOpenGrantModal(section?)`; no second open callback is added. A consumer that does not pass `accessStatus` renders exactly as today; the email reading pane is unchanged. The indicator is clickable only when `onOpenGrantModal` is also supplied.
+- Rendered in the header row beside the governance icons (`:297-302`).
+- States: Secure and/or No Access shown in red, using `tokens.colorPaletteRedBackground2` (the palette already used at `:72-76`) with `tokens.colorNeutralForeground1` text. Unavailable shown neutral (`tokens.colorNeutralForeground3`), never red and never absent. Nothing is shown when every signal is `doesNotApply`.
+- Clickable ONLY when `canGrantAccess === true` (`:248`): a No Access click opens AccessGrantModal at 067's No Access section; a Secure click opens it with no section, i.e. at the top (Current Access), as the person icon does. When both apply, the click targets No Access. Otherwise no handler is attached, and a tooltip says the caller cannot manage access here — the same discipline as the person icon (`:256-273`). The unavailable state is never clickable.
+- The PCF fetches the summary with `evaluateGrantGate`'s rules (`index.ts:594-676`): fail closed, record-id echo, stale answers dropped.</constraint>
+    <constraint source="ADR-021 / ADR-022 / pcf.md">Scope: all UI touched. Fluent v9 semantic tokens only, no hard-coded colours, icons via `currentColor`. React 16-safe primitives in the shared core (the header comment `TrackingFieldTrio.tsx:28-32`); PCF platform libraries are not bundled. The PCF host's `webLightTheme` (`index.ts:1135`) is not changed by this task.</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: whole task. No Dataverse plugin, flow or service endpoint. No Dataverse test in CI: live proof is the MANUAL gate, using existing non-admin test users in their current BUs (no relocation).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement statement against `.claude/constraints/bff-extensions.md` (extension of 064's summary route in BFF; no new endpoint, service or package). Publish size: fresh-master vs fresh-branch worktrees at short paths, Compress-Archive, both sizes, delta and both file counts, ≤ 60 MB. No new HIGH CVE. Tests under tests/unit/Sprk.Bff.Api.Tests/ for the reader/composer change.</constraint>
+    <constraint source="ADR-038">Scope: tests. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no ctor null-check tests. Use the reader's `QueryChunkAsync` override seam and the participation-service subclass seam (`GetRootRecordFlagsAsync`/`GetReferencedOrganizationIdsAsync` are virtual).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>(1) Endpoint: the only per-record access answer a client can ask for is `can-manage-access` (`RecordAccessGateEndpoint.cs:63-108`), which is Write-gated by the group's `DelegationRuleFilter` (`DelegationRuleFilter.cs:86`) and documents itself as "not a permissions API" (`:27-32`). A Grep of `Api/ExternalAccess` for `MapGet(` finds no access-status route today. 064's UX amendment adds the Read-gated No Access SUMMARY route for root, organization and contact records, but it carries no Secure signal and no record-id echo. (2) Reader: `NoAccessListReader` (`:128-155`) is principal-keyed; 064 adds the record-scoped method this task consumes. (3) Web resource: no authored `setFormNotification` anywhere in src/. The on-load libraries on these forms are KPI-specific (`sprk_matter_kpi_refresh.js`) or assigned-access post-save on three forms only (task 142's `sprk_assignedaccess_postsave.js`). (4) Indicator: TrackingFieldTrio's header row holds only the person and email icons (`TrackingFieldTrio.tsx:253-287`).</existing>
+    <extension>(1) Server: extended, not added — 064's SUMMARY route, DTO and composer gain the Secure signal, the closed signal block and the record-id echo; no endpoint, filter, operation key or reader method is added. `can-manage-access` cannot be extended because its Write gate would hide the banner from Read-only viewers. (2) Indicator: extends the existing TrackingFieldTrio component and PCF with one opt-in prop and reuses 067's section-aware open callback; no new control. (3) Web resource: a new thin library, because the form-banner concern spans five forms and no existing library is registered on all of them. A `setFormNotification` banner cannot be produced by a PCF on the form, and ADR-006 permits a thin form event handler.</extension>
+    <cost-of-doing-nothing>A Read-only attorney opening a secure matter, or a matter that sits behind an ethical wall, gets no signal on the form. The Manage Access modal's Secure line (`AccessGrantModal.tsx:1170-1178`) is behind a person icon that is disabled for them (`TrackingFieldTrio.tsx:248`), and nothing anywhere tells them about the wall. On Organization and Contact forms, entries naming that organization or contact are invisible to everyone except access administrators once O2 removes core users' table Read (0 No Access components today, research note :29). The owner's round-3b banner requirement fails outright.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-ux-research-ethical-wall-secure.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/tasks/064-provenance-read-and-denylist-endpoints.poml</file>
+      <file>projects/unified-access-control-r2/tasks/067-access-modal-denylist-and-standing-levels.poml</file>
+      <file>projects/unified-access-control-r2/tasks/150-lock-issecure-field-level-security.poml</file>
+      <file>projects/unified-access-control-r2/tasks/154-no-access-management-forms.poml</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="fail-closed server question from a PCF" location="src/client/pcf/TrackingFieldTrio/index.ts:594-676">Every non-answer is a denial (here: unavailable); the answer must name this record; stale answers are dropped.</pattern>
+      <pattern name="designed red state" location="src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx:1145-1168">MessageBar intent="error" + MessageBarTitle — the visual language the indicator's red state matches.</pattern>
+      <pattern name="header-row governance icons, gated click" location="src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx:248-302">A disabled control has no handler; a tooltip explains why.</pattern>
+      <pattern name="form web resource over Spaarke.BffAuth" location="src/solutions/webresources/sprk_matter_kpi_refresh.js; src/solutions/webresources/sprk_kpiassessment_quickcreate.js:160-215">Namespace, try/catch, registration order after sprk_bff_auth.js — but NOT its fail-soft skip at :282-288.</pattern>
+      <pattern name="route-keyed caller-rights gate" location="src/server/api/Sprk.Bff.Api/Api/Filters/RecordRouteAccessAuthorizationFilter.cs:124-232">Probe-before-handler, every failure a 403. 064 attaches it to the summary route with a Read key; this task only makes its insufficient-rights copy operation-specific if needed.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm 064 (with the record-scoped read and the SUMMARY route), 067 (with open-at-section), 150 and 154 are merged, and rebase onto 138. Put O1 to the owner (escalation; record the investigation outcome) and confirm that the O2 answer recorded in research note :74 still stands; record both in notes/task-153-access-status-banner.md.</step>
+    <step order="1">Read 064's landed composer, summary route and DTO; record in the notes which methods this task extends (escalation (c) if any piece is missing) and how 064 resolved the organization gate (escalation (f)). Live, read-only (spaarkedev1):
+- confirm TrackingFieldTrio is on the main form of each of project, matter and work assignment (escalation e);
+- list the main forms of sprk_organization and contact that the Spaarke app(s) use;
+- confirm 150's field-level security leaves `sprk_issecure` readable by the BFF app identity;
+- count rows with `sprk_issecure` NULL on each of sprk_project, sprk_matter and sprk_workassignment (escalation g).</step>
+    <step order="2">Server: in 064's DTO, the closed kind/state enums, the signal block and the record-id echo; in 064's composer, the Secure tri-state single read and the mapping of 064's No Access result to the closed kinds; the operation-specific 403 copy if needed. Organization records only as escalation (f) resolves.</step>
+    <step order="3">Server tests per the acceptance test-scope clause, including the route through the real pipeline.</step>
+    <step order="4">After O1 is answered: sprk_accessstatus_banner.js with the closed copy, the events and the fail-closed client rules, using the banner mechanism O1 settles (the recommendation: `setFormNotification`). Register it on the five main forms after `sprk_/scripts/bff_auth.js`; deploy via the dataverse-deploy skill.</step>
+    <step order="5">BFF build, ArchTests, publish size and CVE (§10). Deploy the BFF to dev before step 4's library is published (the library treats a 404 as unavailable, never as "not restricted").</step>
+    <step order="6">After O1 is answered: TrackingFieldTrio props and rendering, the PCF fetch and modal-section wiring, component tests, version bump in all four locations, `npm run build:prod`, deploy via the pcf-deploy skill.</step>
+    <step order="7">MANUAL live gate (criterion 12). Record the evidence in the notes file.</step>
+    <step order="8">Update TASK-INDEX.md: this task's cell to `✅ [done]`. Record deviations in the notes file.</step>
+  </steps>
+
+  <escalation>
+    <trigger>(O1) OPEN OWNER QUESTION, under owner investigation (research note :75-77) — must the banner itself be clickable? The owner believes OOB notifications can carry links. The findings (background "FORM NOTIFICATION MECHANISMS"; not repo-verified): `setFormNotification` is documented text-only; `Xrm.App.addGlobalNotification` takes a clickable action but is app-wide, persists across navigation with no unload event to clear it, and its handler cannot open AccessGrantModal, which exists only inside the TrackingFieldTrio PCF (`index.ts:1170-1207`); the other candidates do not fit. RECOMMENDATION: BOTH. (1) The standard red `setFormNotification` banner at the top of the form, naming the action and who can take it, visible to every reader. (2) A clickable indicator inside TrackingFieldTrio, the only Manage Access entry point (`TrackingFieldTrio.tsx:253-273`), that opens Manage Access at the No Access section (No Access) or at the top (Secure), clickable only for callers the server says may manage access. Do not use the undocumented fourth `setFormNotification` parameter under any answer (unsupported). If the owner chooses `addGlobalNotification`, record how it is cleared when the user leaves the record (e.g. clear on every OnLoad and check `Xrm.Utility.getPageContext()`), and prove it in the live gate. Also ask the owner to confirm or revise the closed banner copy. STOP before step 4 and step 6 until answered. Steps 2, 3 and 5 may proceed, because the server summary is needed under every answer.</trigger>
+    <trigger>(O2) OWNER QUESTION — ANSWERED 2026-10-01: ACCEPTED as recommended (research note :74; task 154 applies it). The question: should the No Access list, including Reason, stay readable by every core user (Global Read on "Spaarke Core User" today)? RECOMMENDATION (accepted): no. Remove Read from Spaarke Core User, grant Read/Write to a dedicated access-administrator role, everyone else sees this task's banner, and Write-holders see the entries through Manage Access (the BFF reads on their behalf). This task's summary is computed server-side after the caller's Read gate, so it works under either answer; only the org/contact copy ("Access administrators manage the entries in the NO ACCESS section") depends on it. At step 0, confirm the note still records ACCEPTED. If it does not, or the owner revises O2, STOP before finalizing that copy and record the revised answer.</trigger>
+    <trigger>(c) If 064 has merged WITHOUT the record-scoped No Access read, WITHOUT its Read-gated SUMMARY route, or WITHOUT item (3) (organization and contact records), STOP and report the dependency gap to the orchestrator. Do not build a second deny reader, a second composer or a second summary route here.</trigger>
+    <trigger>(d) If the live gate shows that a `setFormNotification` ERROR-level notification does not render as the red form banner on any of the five forms (e.g. suppressed by form configuration), STOP and report it with a screenshot, rather than substituting another surface.</trigger>
+    <trigger>(e) If TrackingFieldTrio is NOT on the live main form of project, matter or work assignment, STOP and report which form lacks it. RECOMMENDATION: add the control to that form (it carries Manage Access too), but a form-layout change is the owner's call.</trigger>
+    <trigger>(f) ADR/§11 TENSION — the Organization banner's Read gate (CLAUDE.md §6.5). 064 says STOP and escalate before widening the shared map for the organization summary. If 064 has landed a resolution, follow it and record it. Otherwise STOP and present the §6.5 block:
+- the rule in question: `RecordRouteAccessAuthorizationFilter` declares no map of its own (`:58-63`), and `EntityAccessFilter`'s map is held in lockstep with `DocumentAssociationMap` (`:111-122`), which has no organization entry;
+- the options:
+  (A) a narrowly scoped, documented exception: the summary route alone passes a Read-only `sprk_organization` → `sprk_organizations` resolution to the filter, with a comment citing both invariants;
+  (B) amend the lockstep rule so a type can be authorizable for READ without being a document-association target;
+  (C) ship the Organization banner later and the other four forms now;
+- RECOMMENDATION: (A), recorded as a project-scoped exception in the design and the PR.
+Never widen the shared map, never weaken `DelegationRuleFilter`, and never authorize an organization record app-only in place of the caller's gate.</trigger>
+    <trigger>(g) If step 1 finds rows whose `sprk_issecure` is NULL on any of the three root tables, STOP and report the counts. Those rows would show "Access status unavailable" permanently, because a NULL read cannot be told apart from a masked one. RECOMMENDATION: a one-time, owner-approved backfill of NULL to false, run by an operator script under an identity that 150's field-level security permits to write the field (no plugin, no flow), with the before/after counts recorded, before the banner is published. Rejected alternative: reading NULL as "not secure", which fails open if the flag is ever masked.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF.</tool>
+    <tool name="npm">`npm run build:prod` for the PCF (never `npm run build`); jest for the shared component.</tool>
+    <tool name="dataverse-deploy skill">Publish sprk_accessstatus_banner.js and register it on the five main forms.</tool>
+    <tool name="pcf-deploy skill">Version-bump and deploy TrackingFieldTrio.</tool>
+    <tool name="mcp__dataverse__read_query">Read-only live checks in step 1 (forms, field-level security).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">064's summary route handler, response DTO and record-scoped composer (paths as 064 lands them), extended</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/RecordRouteAccessAuthorizationFilter.cs (only if the 403 copy needs to be operation-specific)</output>
+    <output type="code">src/solutions/webresources/sprk_accessstatus_banner.js</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/types.ts</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ (Secure tri-state + signal mapping)</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ (summary-route authorization, extending 064's route tests where they exist)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.toolbar.test.tsx</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-153-access-status-banner.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. For a project, matter and work assignment, the response carries exactly `secure` and `noAccessOnRecord`; for an organization exactly `organizationDenied` and `organizationWall`; for a contact exactly `contactDenied` and `contactMemberOfDeniedOrganization`. Every state is one of applies / doesNotApply / unknown. The body echoes the record id. No entry id, subject or object id or name, or reason appears in the body (asserted on the serialized JSON); the only counts present are 064's SUMMARY counts, and neither client renders them. A No Access read fault returns 064's ProblemDetails, never a 200 with `doesNotApply`.</criterion>
+    <criterion testable="true">2. Secure tri-state: `sprk_issecure` true → `applies`; false → `doesNotApply`; attribute absent (masked), NULL, row unreturned or read faulted → `unknown`. Each case is tested, and none of the unknown cases yields `applies` or `doesNotApply`.</criterion>
+    <criterion testable="true">3. `noAccessOnRecord`: an active entry whose object record is R → `applies`; an active entry whose object organization is one of R's referenced organizations → `applies`; only inactive or malformed entries → `doesNotApply`; R's referenced organizations unreadable, or a fail-closed deny read → `unknown`. The signal is computed by 064's composer; the notes name the composer method reused; this task adds no method to `NoAccessListReader` (diff); and no class other than `NoAccessListReader` issues a request to `sprk_noaccessentries` (Grep of src/server recorded in the notes).</criterion>
+    <criterion testable="true">4. Organization: an active entry with subject organization O → `organizationDenied` applies; an active entry with object organization O → `organizationWall` applies; each kind is independent. Contact: an active entry with subject contact C → `contactDenied` applies; an active entry whose subject organization is one of C's ACTIVE organizations → `contactMemberOfDeniedOrganization` applies (an INACTIVE membership does not count); an unreadable membership → `unknown`.</criterion>
+    <criterion testable="true">5. Route authorization, tested THROUGH the real pipeline. A caller with Read but not Write on R gets 200. A caller without Read → 403 ProblemDetails with a reason code, and its detail does not mention adding content. A probe fault → 403. Unauthenticated → 401. A CIAM-scheme token → refused. A request with no caller bearer token is denied, never answered app-only. An unsupported entity type → 403 (not 400). `EntityAccessFilter`'s map is unchanged (diff shows no new entry; its existing tests pass). Organization records are authorized exactly as escalation (f) resolved, with a positive (Read) and a negative (no Read) test for an organization.</criterion>
+    <criterion testable="true">6. A change takes effect without waiting on a cache: the summary for R reflects an entry added, or the Secure flag changed, immediately before the request (no new cache key is introduced — asserted).</criterion>
+    <criterion testable="true">7. Web resource, live: on each of the five main forms, every `applies` signal shows its closed-set ERROR notification, with exactly the text and id in the copy constraint (or the owner's revision). `doesNotApply` shows nothing and clears a prior notification with that id. Any `unknown`, a 403/404/500, a missing `Spaarke.BffAuth`, a `null` token or `null` Response from `authenticatedFetch`, an unresolved BFF base URL, or an answer naming another record shows only the INFO unavailable notification (and clears every ERROR id). No text anywhere says "not secure" or "not restricted". No count, name or reason is shown. The form still loads and saves when the script throws.</criterion>
+    <criterion testable="true">8. The banner re-evaluates after a save (OnPostSave) and after a data refresh (`formContext.data.addOnLoad`): saving an entry, or securing a record through 150's ribbon command, then refreshing, updates the banner without a full page reload. A create form with no record id makes no call.</criterion>
+    <criterion testable="true">9. TrackingFieldTrio indicator (per O1): Secure and/or No Access shown in red, unavailable shown neutral, nothing when every signal is `doesNotApply`. With `canGrantAccess === true`, a No Access click (or a click when both apply) opens AccessGrantModal at 067's No Access section and a Secure-only click opens it at the top, both through 067's section-aware `onOpenGrantModal`. With anything else, or in the unavailable state, there is no click handler and a tooltip says the caller cannot manage access. A consumer that does not pass `accessStatus` renders exactly as before (existing TrackingFieldTrio tests unchanged and green). No second open callback prop exists (types.ts diff).</criterion>
+    <criterion testable="true">10. The PCF's status fetch follows `evaluateGrantGate`'s rules: every non-200, unparseable body, missing kind or record-id mismatch → unavailable; an answer for a record the control has left is dropped. Component tests cover each.</criterion>
+    <criterion testable="true">11. Test scope: cover the stated contract plus the edge cases named in criteria 1-10 (tri-state per signal, masked flag, unreadable referenced orgs, inactive and malformed entries, inactive membership, read-tier authorization negatives through the real pipeline, client failure modes, click gating). No criterion is met by a test that only asserts a mock was called with arguments the test itself supplied. Anything beyond that needs a one-line justification in the notes. No ADR-038-banned shapes. BFF build, full unit suite, ArchTests and the shared-library jest suite are green; `npm run build:prod` succeeds for the PCF. Publish size reported (fresh-master vs fresh-branch, both sizes, delta, zip tool, both file counts) ≤ 60 MB. No new HIGH CVE. No plugin or flow.</criterion>
+    <criterion testable="true">12. MANUAL live gate on spaarkedev1, using existing non-admin test users in their current BUs, with the evidence (screenshots + network captures) recorded:
+(i) a Read-only user opens a secure project and sees the SECURE banner; the indicator is not clickable;
+(ii) a Write user on a matter with an active entry (object = the matter) sees the NO ACCESS RESTRICTION banner, clicks the indicator, and lands in Manage Access at No Access;
+(iii) a work assignment referencing an organization that carries an ethical wall shows the No Access banner;
+(iv) an Organization form with an entry naming it as subject, and another naming it as object, shows both banners; a Contact form for a contact named as subject shows its banner;
+(v) with the BFF route blocked in the browser dev tools, each form shows ONLY the unavailable notice;
+(vi) a Read-only user on the matter in (ii) sees the banner, the indicator is not clickable, and the network capture shows no request to 064's entries route (067 criterion (e));
+(vii) after navigating from a secure or walled record to an unrestricted one, no banner from the first record remains (this matters most if O1 chose `addGlobalNotification`);
+(viii) dark mode per the ui-tests.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Secure banner for a Read-only viewer">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_project&amp;id={secure-project-id}</url>
+      <steps>
+        <step>Sign in as an existing non-admin test user who can Read but not Write the secure project</step>
+        <step>Open the project form and wait for the form to finish loading</step>
+        <step>Check the browser console for errors</step>
+      </steps>
+      <expected>A red form notification reads exactly the SECURE RECORD copy; the TrackingFieldTrio indicator shows Secure in red and has no click action (its tooltip says the user cannot manage access here); no console errors.</expected>
+    </test>
+    <test name="No Access banner and indicator open Manage Access at No Access">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={walled-matter-id}</url>
+      <steps>
+        <step>Sign in as a non-admin test user with Write on the matter, which has an active No Access entry naming it</step>
+        <step>Verify the NO ACCESS RESTRICTION form notification</step>
+        <step>Click the No Access indicator in the tracking panel header</step>
+      </steps>
+      <expected>The banner text matches the closed copy; Manage Access opens directly at the No Access section; the banner names no person, organization or reason.</expected>
+    </test>
+    <test name="Organization and Contact banners">
+      <steps>
+        <step>Open an Organization that is the subject of one active entry and the object of another</step>
+        <step>Open a Contact that is the subject of an active entry; then a Contact that is only an active member of a denied organization</step>
+      </steps>
+      <expected>The Organization shows both the NO ACCESS and the ETHICAL WALL notifications; the first Contact shows the contact-denied notification; the second shows the member-of-denied-organization notification.</expected>
+    </test>
+    <test name="Fail closed: status unavailable">
+      <steps>
+        <step>In the browser dev tools, block requests to the access-status route</step>
+        <step>Reload a secure project form, an Organization form and a Contact form</step>
+      </steps>
+      <expected>Each form shows only the neutral "Access status unavailable" INFO notification; the indicator shows the neutral unavailable state; nothing says the record is unrestricted.</expected>
+    </test>
+    <test name="Read-only viewer cannot reach the No Access list">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={walled-matter-id}</url>
+      <steps>
+        <step>Sign in as an existing non-admin test user with Read but not Write on the walled matter</step>
+        <step>Hover and click the No Access indicator; watch the network tab</step>
+      </steps>
+      <expected>The NO ACCESS RESTRICTION banner shows; the indicator has no click action and its tooltip says the user cannot manage access here; Manage Access does not open; no request is sent to 064's entries route.</expected>
+    </test>
+    <test name="No banner carried to the next record">
+      <steps>
+        <step>Open a secure project, then navigate within the app to a non-secure project with no No Access entries</step>
+      </steps>
+      <expected>The second form shows no SECURE or NO ACCESS banner and no unavailable notice.</expected>
+    </test>
+    <test name="Refresh after an access change">
+      <steps>
+        <step>On a non-secure work assignment, use 150's Make Secure ribbon command (or deactivate the record's only No Access entry in another tab, then refresh the form)</step>
+      </steps>
+      <expected>After the form's data refresh the banner updates (SECURE appears, or NO ACCESS RESTRICTION disappears) without a full page reload.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render the TrackingFieldTrio indicator in a host using a Fluent dark theme (the shared component under its jest render with webDarkTheme, and any React-19 host that consumes it)</step>
+        <step>Verify the red and neutral states are legible and use semantic tokens (no hard-coded colours; icons use currentColor)</step>
+      </steps>
+      <expected>All colours resolve from Fluent v9 tokens in light and dark themes.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Owner round 3b (session27-owner-decisions-and-research.md:78-86) and disposition row 3 + O1 (session27-ux-research-ethical-wall-secure.md:69, :74). Coordination the orchestrator must act on:
+- 064's UX amendment (now in its POML) supplies the record-scoped read and the Read-gated SUMMARY route this task extends. 064 and this task share the organization-gate escalation (f); resolve it once.
+- 067's UX amendment (now in its POML) adds the optional initial section through `onOpenGrantModal`, the PCF host and the modal; this task calls it rather than adding a second callback.
+- O2 was accepted 2026-10-01; 154 applies it and names the NO ACCESS sections the org/contact copy points at.
+- `.claude/constraints/webresource.md` (`:34`, `:41-47`) still prescribes `.AllowAnonymous()` for web-resource-called endpoints, contradicting CLAUDE.md §9 and `Spaarke.BffAuth`; the main session should correct it.
+- Both clients fetch the summary on a root form (the banner script and the PCF), plus the PCF's existing can-manage-access call: three BFF calls per form load. Accepted for now because the two run in separate contexts; revisit if the live gate shows load-time cost.
+- 142's Update Access and 150's Make/Remove Secure ribbon commands must refresh the form's data (the banner re-runs on data OnLoad); neither needs to call this library.
+- 143's enforcement outcome ("not enforced", N5) is not part of the banner. It belongs to Manage Access (067) and the entry form (154).
+The banner deliberately never shows who is walled, why, or how many: the list stays behind Manage Access and the NO ACCESS sections (O2).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist. Load the fluent-v9-component skill before step 6.</protocol>
+  </execution>
+  <amendments>
+    <amendment n="O1-final" date="2026-10-01" source="owner — BINDING; supersedes escalation (O1) and the TrackingFieldTrio indicator steps">
+    OWNER: "a text-only banner is sufficient; no banner in the PCF; no app level banner."
+    (1) BANNER = the standard red `setFormNotification` (ERROR) text banner only, from sprk_accessstatus_banner.js, on the
+    project, matter, work-assignment, organization and contact main forms. NO clickable indicator, NO MessageBar or tag added to
+    TrackingFieldTrio for the banner, NO `Xrm.App.addGlobalNotification`, never the undocumented fourth parameter. Remove the
+    TrackingFieldTrio indicator steps (old steps 4 and 6) and their criteria; Manage Access is still opened from the existing
+    person icon.
+    (2) ACCESS-PERMISSION PILL (TrackingFieldTrio, owner "yes update access permissions"): when the record is secure the closed
+    pill label reads "Secure" in red — for BOTH secure and secure+Restricted (owner: "Secure-Restricted ... won't fit inside the
+    pill width without changing the spacing of the other trio fields"); the pill's open menu may list "Secure" and
+    "Secure – Restricted" (menu items are not width-bound); securing/unsecuring itself stays with task 150's ribbon command.
+    No "No Access (n)" tag.
+    (3) MANAGE ACCESS MODAL: its existing message bar shows "Secure – Restricted" with the explanation when the record is secure
+    AND Restricted (as it does for Restricted today), and a "Secure" explanation when secure only. Coordinate with 138, which
+    owns the Limited/Secure message bar in the modal — one bar, no duplicates.
+    (4) Escalation (g) FIRED at authoring: live counts of NULL sprk_issecure on 2026-10-01 — sprk_project 9, sprk_matter 18,
+    sprk_workassignment 11. The backfill recommendation stands and is put to the owner; the banner does not publish until
+    answered.
+    </amendment>
+  </amendments>
+  <amendments>
+    <amendment n="Q12" date="2026-10-01" source="owner — BINDING">Escalation (g) ANSWERED: one-time cleanup of NULL sprk_issecure to No (live 2026-10-01: 9 projects, 18 matters, 11 work assignments), and the column default set to No in the solution. Run it as an operator script that records the before/after counts and ids, under an identity that 150's field-level security permits, BEFORE the banner publishes; coordinate with 150 if the lock lands first. Escalation (f) ANSWERED: option (A). The summary route alone passes a Read-only sprk_organization → sprk_organizations resolution to its filter, with a comment citing both invariants, recorded as a project-scoped section 6.5 path-A exception in design.md and the PR. Never widen the shared EntityAccessFilter map.</amendment>
+  </amendments>
+</task>

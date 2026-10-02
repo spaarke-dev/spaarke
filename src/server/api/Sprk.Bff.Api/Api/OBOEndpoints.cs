@@ -114,8 +114,16 @@ public static class OBOEndpoints
                 // Throws SdapProblemException for every refusal, which the global handler renders as
                 // canonical ProblemDetails (ADR-019): secure_record_container_missing (409, a secure
                 // record with no container of its own — FAIL CLOSED, never a fallback),
-                // container_record_not_found (404), container_ownership_ambiguous /
+                // container_record_not_found (404), container_entity_unknown (400 — a name that is neither
+                // an alias nor a real entity; task 151), container_ownership_ambiguous /
                 // container_ownership_indeterminate (409).
+                //
+                // The route value is passed AS-IS, alias or logical name. The record route filter authorized
+                // it through EntityAccessFilter.EntitySetByType, and the resolver maps it through
+                // DocumentAssociationMap — two tables held in lockstep — so "project" authorizes sprk_projects
+                // and resolves sprk_project: the same record (task 151, #1038). Before that mapping an alias
+                // read as "not securable" and this handler answered a misleading "No storage container is
+                // configured" 409 for a record whose container was derivable.
                 var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
 
                 if (decision.Outcome == ContainerDecisionOutcome.Unresolved || decision.ContainerId is null)
@@ -359,7 +367,8 @@ public static class OBOEndpoints
                     "OBO record-keyed upload session starting - {Entity} {RecordId}, Path: {Path}",
                     entityLogicalName, recordId, path);
 
-                // Identical resolution to the small route, deliberately — one contract, two sizes.
+                // Identical resolution to the small route, deliberately — one contract, two sizes (including
+                // the alias mapping and the container_entity_unknown refusal, task 151).
                 var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
 
                 if (decision.Outcome == ContainerDecisionOutcome.Unresolved || decision.ContainerId is null)

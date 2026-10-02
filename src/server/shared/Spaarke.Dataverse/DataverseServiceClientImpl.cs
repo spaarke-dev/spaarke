@@ -2268,6 +2268,34 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
+    /// <summary>
+    /// Not implemented here by design — same single-live-implementation rule as
+    /// <see cref="UpdateRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
+    /// </summary>
+    public Task UpdateExistingRecordFieldsAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateExistingRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
+    /// <summary>
+    /// Not implemented here by design — same single-live-implementation rule as
+    /// <see cref="UpdateExistingRecordFieldsAsync"/>. <see cref="DataverseWebApiService"/> owns it.
+    /// </summary>
+    public Task UpdateRecordFieldsIfUnchangedAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        long expectedVersion,
+        CancellationToken ct = default)
+    {
+        throw new NotImplementedException("UpdateRecordFieldsIfUnchangedAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
+    }
+
     // ========================================
     // Generic Entity Operations (Finance Intelligence Module R1)
     // ========================================

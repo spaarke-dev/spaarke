@@ -1,0 +1,316 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="154" project="unified-access-control-r2">
+  <metadata>
+    <title>No Access management on the Organization and Contact forms, plus a usable No Access entry: NO ACCESS subgrids beside SYSTEM ACCESS/MEMBERS, a main form with a record PICKER (not a typed GUID), real views, a site map entry in the right app, and authoring rights per O2 with enforcement per record per N5</title>
+    <phase>Register-driven (authored 2026-10-01, session 27; owner round 3b UX requirements; disposition row 5 of notes/session27-ux-research-ethical-wall-secure.md)</phase>
+    <gate>blocked — requires 143's SERVER and SCHEMA work landed (its steps 2-7: the `sprk_subjectsystemuser` column, the three-subject malformed-row rule, the enforce endpoint and the enforcer), NOT 143's form steps or live gate: 143 depends on THIS task's form for those (143 amendment n="UX", "PARTIAL dependency"), so waiting for all of 143 would deadlock. Also requires 064 (the BFF deny-list endpoints and their entry validation) merged. O2 was ACCEPTED as recommended on 2026-10-01 (research note :74); step 0 confirms the recorded answer before step 6 (security roles). Runs BEFORE 153, whose Organization/Contact banner points at the sections built here, and before 143's form steps and live gate.</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-role change on an ethical-wall table (O2, accepted), a new PCF control, a new Dataverse column, form/view/site-map customization of three tables; tags pcf, frontend, security, auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>An ethical-wall authoring surface whose mistakes fail OPEN without a trace: a picker that writes an id the reader never matches, an object type no reader evaluates, or a quick-create path that skips 143's enforcement each produce a saved "wall" that walls nothing. The O2 role change also removes a privilege from every core user.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the sprk_noaccessentry main form and its single form library `sprk_noaccessentry_postsave.js` (shared with 143; whichever of the two reaches it first creates it — see escalation (g)), `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md` (edited by 143), the live Organization and Contact main forms (153 registers its banner library on them afterwards), and security roles ("Spaarke Core User"). Run after 143's server work and 064, before 153 and before 143's form steps.</parallel-reason>
+    <deps>143, 064</deps>
+    <tags>dataverse, solution, fields, pcf, frontend, fluent-ui, webresource, security, auth, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Owner round 3b (notes/session27-owner-decisions-and-research.md:79-83): "a way to ADD users/contacts/organizations to the No Access list of a record or an organization; a way to SEE who is on it", and "how is No Access enforced and surfaced at the ORGANIZATION level (does sprk_organization carry the components?)". Disposition row 5 and O2 (notes/session27-ux-research-ethical-wall-secure.md:71, :75-76). Absorbs 143's form dependency.</origin>
+  </metadata>
+
+  <prompt>Make the No Access list manageable where people already manage access. Put NO ACCESS subgrids on the Organization form (walls ON this organization, and this organization DENIED), next to SYSTEM ACCESS and MEMBERS, and on the Contact form (this contact denied). Make the No Access entry form usable: subject (contact, organization or user), object (organization, or a specific record chosen with a picker instead of a typed GUID), and reason. Add real views and a site map entry in the app access administrators use, and set authoring rights per the owner's answer to O2. 143's enforcement keeps running on save, and the per-record "not enforced" outcome (N5) stays visible.</prompt>
+
+  <role>SPAARKE platform developer — Dataverse forms, views, site maps and security roles via solution customization; a field-bound PCF on Fluent v9 shared components; classic form libraries. Fail closed (ADR-003): a saved wall that walls nothing is the failure to design against.</role>
+
+  <goal>(1) The Organization main form has a NO ACCESS section beside SYSTEM ACCESS / MEMBERS with two subgrids: "Ethical walls on this organization" (`sprk_objectorganization` = this) and "This organization denied" (`sprk_subjectorganization` = this). The Contact main form has a NO ACCESS section with "This contact denied" (`sprk_subjectcontact` = this). Each "+ New" opens the entry main form with the lookup prefilled. (2) The sprk_noaccessentry main form shows Subject (contact / organization / user, exactly one), Object (organization, or a record picked through a new field-bound PCF that writes `sprk_objectrecordtype` + `sprk_objectrecordid` + the display column `sprk_objectrecordname`, exactly one), Reason, Status and 143's enforcement outcome. It refuses to save a malformed entry and keeps 143's post-save enforcement. (3) Real views and a site map entry. (4) Authoring and reading rights per O2. (5) The schema doc answers the owner's organization-level question. (6) A manual live gate proves it.</goal>
+
+  <context>
+    <background>WHAT THE OWNER ASKED (round 3b, BINDING; session27 note :79-83). A way to ADD users, contacts or organizations to the No Access list of a record or an organization; a way to SEE who is on it; and how No Access works at the ORGANIZATION level. Record-level add and view run through Manage Access (tasks 064/067, gated on Write on the record). This task covers the organization and contact level and the entry itself.
+
+WHAT EXISTS TODAY (research note :18-36, checked live against spaarkedev1 2026-10-01; repo facts re-verified on this branch).
+- The table: `sprk_noaccessentry` is ORGANIZATION-owned (`src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:31`).
+  - Subject: exactly one of `sprk_subjectcontact` / `sprk_subjectorganization` (`:56-61`), plus `sprk_subjectsystemuser` after task 143.
+  - Object: exactly one of `sprk_objectorganization` or the pair `sprk_objectrecordtype` (lookup → `sprk_recordtype_ref`) + `sprk_objectrecordid` (String(50), GUID as text) (`:63-69`). Matching is by id alone (`:69`).
+  - `sprk_reason` is a Memo (`:75`); `sprk_name` is required and entered manually (`:48`).
+  - Exactly-one is NOT enforced at schema level; the schema doc says the reader logs and ignores a malformed row, so it denies nothing (`:105-112`). Deactivation lifts the veto (`:113-115`).
+  - ⚠️ CODE vs DOC TODAY: the reader classifies only the OBJECT shape (`NoAccessListReader.cs:390-406`: exactly one of object organization / object record type + id, else excluded; an unparseable id is excluded at `:429-436`). It does NOT check the subject shape: the subject is matched by the `$filter` (`:191-206`), so a row naming both a contact and an organization denies BOTH today, and a row with no subject matches nobody. Task 143 criterion 1 makes zero or two-plus subjects malformed (denies nothing, logged). This task's "Incomplete Entries — deny nothing" view is accurate only after that lands (escalation (h)).
+  - The subgrid relationships exist (`:134-137`): `sprk_contact_sprk_noaccessentry_subjectcontact`, `sprk_sprk_organization_sprk_noaccessentry_subjectorganization`, `sprk_sprk_organization_sprk_noaccessentry_objectorganization`.
+- The reader: `NoAccessListReader.RowSelect` (`Infrastructure/ExternalAccess/NoAccessListReader.cs:180-182`); the record-object filter `sprk_objectrecordid eq '{id}'` uses .NET's lowercase, unbraced "D" format (`:221-222`).
+  - Deny candidates are built only for the root entity type being composed (`AccessibleRecordSetService.cs:596-672`, candidate at `:647`); only sprk_project, sprk_matter and sprk_workassignment are composed for access (task 142 background, `CallerPrincipalResolver.cs:520-524`).
+  - An object record of any other type is stored and never evaluated. The schema doc's own example 2 (a `sprk_communication` per-child revocation, `:97`) is one such entry.
+  - The ethical wall over an object organization covers every root that references it through `sprk_assignedlawfirm1/2` (`ExternalParticipationService.cs:661-667`, `:710`).
+- Authoring today: only System Administrator, System Customizer and Service Writer hold Create/Write. "Spaarke Core User" holds GLOBAL Read, including Reason (research :22-28), which conflicts with task 143's rule that a refusal must not reveal the reason. The table is in no site map; no form has a No Access subgrid; the main form ("Information") holds only Name; the views are the generated defaults; 0 entries in dev.
+- O2 (owner, 2026-10-01, research note :74): ACCEPTED as recommended. Remove Read on `sprk_noaccessentry` from Spaarke Core User; a dedicated access-administrator role holds Read/Write; everyone else sees task 153's banner; Write-holders see a record's entries through Manage Access (064's entries tier, the BFF reading on their behalf).
+- 064's UX amendment (last paragraph) warns that standard subgrids read the table directly and show nothing to non-administrators once O2 removes core users' Read, and asks whether 154 must read through 064's routes. Under the accepted O2 it need not: the NO ACCESS sections are the access administrators' authoring surface and they hold table Read; non-administrators get 153's banner, and constraint "no false empty" keeps them from seeing an empty grid. No BFF read is added here.
+- The Organization form has SYSTEM ACCESS (Access Permission Grant, Standing Grant), MEMBERS (contact memberships) and a hidden To Dos tab, and no No Access components (research :29-31). Forms and site maps are NOT in source control: a Grep of src/ finds no sprk_organization form XML and no site map; the only site-map precedent is `infrastructure/dataverse/solutions/EventsSitemap/Deploy-EventsSitemap.ps1`. The documentation precedent for views/subgrids/quick-create is `src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md` (`:170-231`).
+- Task 143 (BINDING contract this task keeps):
+  - it adds `sprk_subjectsystemuser`, `POST /api/v1/external-access/no-access/enforce {entryId}`, and `src/solutions/webresources/sprk_noaccessentry_postsave.js` (sprk_noaccessentry main form OnPostSave → enforce);
+  - the enforce route is gated by `DelegationRuleFilter` on caller Write on the ENTRY row (143 constraint "enforce endpoint");
+  - per N5 (owner round 3b), removal is enforced only on records where the entry's author holds Write; elsewhere the entry is saved as "not enforced" with a notice (143 amendment R3b). For an organization wall this is decided per covered record;
+  - SEQUENCING (143 amendment n="UX"): 143's server work does not wait for this task; its form-registered post-save script, its ui-test and its live gate 14 (ii)-(v) DO wait for this task's form. "Whichever of the two lands second puts [`sprk_subjectsystemuser`] on 154's form"; since this task follows 143's schema step, this task puts it there.
+- WHY A PICKER IS NOT A REUSE OF RegardingResolver. `src/client/pcf/RegardingResolver` is bound to `sprk_regardingrecordtype` (`RegardingResolver/ControlManifest.Input.xml:7`). It writes fixed `sprk_regarding*` columns, an entity-specific lookup and the FR-26 core-ancestor stamp (`:3`; `handlers/ResolverWriteHandler.ts:350` `applyRegardingSelection`, `:456-459`, `:485-525`). On a No Access entry those columns do not exist and a core-ancestor stamp would be wrong. The reusable pieces are the shared ones:
+  - `DataverseLookupField` (`src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx:1-60`; opens `Xrm.Utility.lookupObjects` via `INavigationService.openLookup`, Fluent v9, tokens only);
+  - `resolveRecordType` (`services/PolymorphicResolverService.ts:161-187`, `sprk_recordtype_ref` by logical name, returns null on failure);
+  - `cleanGuid` (`:367-370`, lowercase, unbraced).
+- WRITE-PATH RULES. `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` §5: every write-path invariant has one server owner (WP-1); client checks are preview only (WP-2). The No Access entry shape ("exactly one subject, exactly one object") has no registry row. Its server-side handling today is the reader's malformed-row rule plus (after 064) the endpoint's validation.</background>
+    <relevant-files>
+      <file role="new">src/client/pcf/ObjectRecordPicker/ (field-bound PCF: ControlManifest.Input.xml, index.ts, the React host, __tests__) — bound to sprk_objectrecordtype, sprk_objectrecordid and sprk_objectrecordname, plus sprk_objectorganization (bound so the picker can clear it through outputs); React 16 platform libraries (ADR-022)</file>
+      <file role="modify">src/solutions/webresources/sprk_noaccessentry_postsave.js (the ONE sprk_noaccessentry form library, shared with 143): add the OnSave shape check and the default-name suggestion; keep 143's post-save enforce call and its notice. If 143 has not created it yet, see escalation (g).</file>
+      <file role="new">src/solutions/webresources/sprk_noaccess_sections.js (Organization/Contact OnLoad: show the NO ACCESS section only to a user who can read entries) — ONLY if step 1's live check shows a subgrid that renders as an empty list for a user without Read (see constraint "no false empty")</file>
+      <file role="modify">Dataverse (SpaarkeCore, Spaarke publisher): sprk_noaccessentry main form, views and the "Allow quick create" setting; the new column `sprk_objectrecordname`; the Organization and Contact main forms; the site map of the app chosen in step 1; security roles per O2</file>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md (new column, form, quick-create off, roles, site map, "How No Access works at the organization level")</file>
+      <file role="new">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/views-forms-schema.md (views, form layout, subgrids on Organization/Contact, site map entry, deployment steps — modelled on sprk_externalrecordaccess/views-schema.md)</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5 (a registry row for the No Access entry shape: server owners = the reader's malformed-row rule + 064's endpoint validation; client preview = the form OnSave check)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-154-no-access-management-forms.md (O2 answer, step-1 live inventory, before/after role privileges, live gate evidence)</file>
+      <file role="canonical-reference">src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx</file>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/ (layout and manifest conventions only — not its write handler)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="143" status="pending (server + schema steps only)">Supplies `sprk_subjectsystemuser`, the three-subject malformed-row rule, the enforce endpoint, the form library this task extends (or co-creates, escalation (g)), and the N5 outcome this task displays. 143's form steps and live gate run AFTER this task, on this task's form (143 amendment n="UX").</dependency>
+      <dependency task="064" status="pending">Deny-list endpoints (record-level management through Manage Access) and their entry validation, which is the server-side owner of the entry shape for BFF writes.</dependency>
+      <dependency task="067" status="pending (coordination)">Manage Access is the record-level surface for Write-holders. This task does not duplicate it on project, matter or work-assignment forms.</dependency>
+      <dependency task="153" status="pending (downstream)">Registers its banner library on the Organization and Contact forms after this task, and its copy points at the NO ACCESS section built here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 — no silent walls">Scope: the entry form, the picker and every MDA path that creates an entry.
+- An entry saved from MDA has exactly one subject (contact, organization or user) and exactly one object (an organization, or a COMPLETE record type + id pair). A half pair (type without id, or id without type) and an id that is not a GUID are malformed too (`NoAccessListReader.cs:390-406`, `:429-436`). The form's OnSave handler prevents a save that breaks this (`getEventArgs().preventDefault()`), with a form notification naming the problem.
+- The OnSave check is a PREVIEW (WP-2). The reader's malformed-row rule and 064's validation stay the server-side owners, and the new §5 registry row says so.
+- Every MDA form that can create an entry carries 143's post-save enforce call. Quick create is turned OFF for sprk_noaccessentry, so a subgrid "+ New" opens the main form; verify live.</constraint>
+    <constraint source="picker contract">Scope: the ObjectRecordPicker PCF.
+- It offers ONLY the object types some deny reader evaluates, verified in step 1. Today that is sprk_project, sprk_matter and sprk_workassignment (`AccessibleRecordSetService.cs:596-672`); see escalation (d) for child types.
+- It writes, through bound outputs only (no `Xrm.WebApi` side writes, no core-ancestor stamp, no entity-specific lookup):
+  - `sprk_objectrecordtype` = the `sprk_recordtype_ref` row for the chosen type (`resolveRecordType`);
+  - `sprk_objectrecordid` = the picked id through `cleanGuid` (lowercase, unbraced, matching `NoAccessListReader.cs:221-222`);
+  - `sprk_objectrecordname` = the record's display name.
+- If the record type cannot be resolved, it writes NOTHING and shows an inline error. It never writes a half pair.
+- Choosing a record object clears `sprk_objectorganization` (through its bound output), and the form library's OnChange on `sprk_objectorganization` clears the record pair and name when an organization is chosen, so exactly one object survives. The OnSave check still runs either way.
+- Read-only rendering when the form or field is disabled.</constraint>
+    <constraint source="CLAUDE.md §11 — display column only">Scope: `sprk_objectrecordname`.
+- A display snapshot for views, subgrids and the form, created under the Spaarke publisher in SpaarkeCore and verified with describe().
+- It is NEVER added to `NoAccessListReader.RowSelect` (`:180-182`) and never used for matching. The reader and its fail-closed behaviour are unchanged.
+- The schema doc states that it is a snapshot (it can be stale after a rename) and not a key.</constraint>
+    <constraint source="owner round 3b — placement">Scope: the Organization and Contact forms.
+- The Organization NO ACCESS section sits on the same tab as SYSTEM ACCESS and MEMBERS, after MEMBERS, with exactly two subgrids:
+  - "Ethical walls on this organization" (relationship `…_objectorganization`; columns: Name, Subject Contact, Subject Organization, Subject User, Status, Created By, Created On);
+  - "This organization denied" (relationship `…_subjectorganization`; columns: Name, Object Organization, Object Record Type, Object Record, Status, Created By, Created On).
+- The Contact NO ACCESS section has one subgrid, "This contact denied" (relationship `…_subjectcontact`; columns as "This organization denied"). It sits on the tab holding the contact's organization memberships / access components, as found in step 1; if no such tab exists, it goes after the first tab's sections and the notes record that.
+- Subgrids show active entries by default, and "+ New" prefills the relationship's lookup.
+- Reason is not a subgrid column. It is on the entry form only, governed by O2.</constraint>
+    <constraint source="views (closed set)">Scope: sprk_noaccessentry.
+- Public views:
+  - "Active No Access Entries" (default; columns: Name, Subject Contact, Subject Organization, Subject User, Object Organization, Object Record Type, Object Record, Created By, Created On);
+  - "Inactive No Access Entries" (same columns plus Modified On);
+  - "Ethical Walls (Organization Objects)" (active, object organization not null);
+  - "Record-level Entries" (active, object record id not null);
+  - "Incomplete Entries — deny nothing" (active rows with zero subjects, more than one subject, zero objects, both object forms, or a half record pair). This is the reader's malformed-row set once 143's three-subject rule has landed (escalation (h)), visible to administrators. An object record id that is present but not a GUID is also malformed but cannot be expressed in a view filter; the form's OnSave check is its only preview.
+- The subgrid views of the placement constraint.
+- The lookup view (Name, Subject …, Object …).
+- If 143 persists the N5 enforcement outcome on the row, it appears as a column in "Active No Access Entries" and on the form (read-only).
+- Every view is documented in views-forms-schema.md.</constraint>
+    <constraint source="site map">Scope: the app chosen in step 1. Add a "No Access Entries" subarea (default view "Active No Access Entries") to the site map of the model-driven app(s) whose site map lists Access Permission Grants (`sprk_externalrecordaccess`) or Organizations. If none or more than one app qualifies, escalation (c) applies. Under the accepted O2, the subarea is effectively for the access-administrator role: MDA hides a subarea whose table the user cannot read. Verify that live; if a non-administrator still sees the subarea, set its privilege requirement explicitly rather than leaving it.</constraint>
+    <constraint source="O2 (owner answer 2026-10-01: ACCEPTED as recommended) — authoring and reading rights">Scope: security roles. Apply ONLY the owner's answer to O2, as recorded in research note :74 and confirmed at step 0; record each affected role's privileges on sprk_noaccessentry before and after in the notes.
+- The accepted recommendation:
+  - "Spaarke Core User" (and every other non-administrator role that step 1 finds holding Read) loses Read on sprk_noaccessentry;
+  - a new "Spaarke Access Administrator" role holds Create, Read, Write, Append and AppendTo on sprk_noaccessentry at Organization depth, plus the AppendTo on contact, sprk_organization, systemuser and sprk_recordtype_ref needed to set its lookups; no Delete (deactivation is how a wall is lifted);
+  - the BFF app identity's reads are unaffected (its app users hold System Administrator, owner-decisions note :101) — prove it with a live deny-read after the change;
+  - the new role is assigned IN ADDITION to a user's existing roles, which already supply Read on the lookup target tables.
+- Never remove System Administrator from anyone. Never relocate users between BUs.</constraint>
+    <constraint source="no false empty (fail closed)">Scope: the Organization and Contact NO ACCESS sections. A user who cannot read entries must never see an empty grid that reads as "nobody is denied". In step 1, observe live how a subgrid renders for a user without Read on the table.
+- If the platform hides it or shows a permission message: build nothing.
+- If it renders an empty list: add `sprk_noaccess_sections.js`, which on OnLoad shows the section only after a `Xrm.WebApi.retrieveMultipleRecords('sprk_noaccessentry', '?$top=1&amp;$select=sprk_noaccessentryid')` probe succeeds, and hides it on any failure.
+- 153's banner remains the signal for everyone.</constraint>
+    <constraint source="N5 (owner round 3b) — enforcement per record">Scope: the entry form. This task does not change enforcement. It keeps 143's post-save enforce call and its "not enforced" notice working on the redesigned form. For an organization wall, the notice and the persisted outcome report per covered record (enforced, or not enforced because the author lacks Write). Verify both in the live gate. Do NOT create a second store for the outcome; see escalation (e).</constraint>
+    <constraint source="ADR-006 / ADR-021 / ADR-022 / webresource.md">Scope: UI.
+- The picker is a PCF (form binding is required), React 16 platform libraries, Fluent v9 semantic tokens only, dark-mode correct, and mirrors `DataverseLookupField`'s chip-and-select look.
+- Form scripts are event handlers only: `"use strict"`, a `Spaarke.*` namespace, try/catch, the form never breaks.
+- The form's default-name suggestion fills `sprk_name` only when it is empty ("{subject} — {object}") and stays editable.</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: whole task. No Dataverse plugin, flow, business-rule-as-enforcement or service endpoint. No Dataverse test in CI: live proof is the MANUAL gate with existing non-admin test users in their current BUs. Deploy the schema (new column) BEFORE the PCF that writes it.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. This task changes no BFF code. If any step turns out to need a BFF change, STOP and escalate rather than adding it here.</constraint>
+    <constraint source="ADR-038">Scope: tests. Component tests for the picker cover the write contract (normalized id, the pair is written together or not at all, the object forms are mutually exclusive, the type list is the verified set, read-only rendering). No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>(1) Picker: the only polymorphic record picker PCF is RegardingResolver, which binds `sprk_regardingrecordtype` and writes `sprk_regarding*`, an entity-specific lookup and the core-ancestor stamp (`ControlManifest.Input.xml:3,:7`; `ResolverWriteHandler.ts:350`, `:456-459`). The shared `DataverseLookupField` (`LookupField/DataverseLookupField.tsx`) is a component, not a form-bound control. (2) Column: sprk_noaccessentry has no display column for the object record (entity-schema.md:63-69); views can show only the GUID text. (3) Form library: 143's `sprk_noaccessentry_postsave.js` is the sprk_noaccessentry form library; it is extended, not duplicated. (4) Section script: nothing on the Organization or Contact forms decides section visibility today (no authored form script on either is in src/). (5) Role: no Spaarke role is scoped to ethical-wall administration; only System Administrator, System Customizer and Service Writer can create entries (research :22).</existing>
+    <extension>(1) Extending RegardingResolver would put a second, opposite write contract into its write handler: no stamp, no lookup, different columns — a divergent responsibility (CLAUDE.md §11.5). The new PCF composes the shared `DataverseLookupField`, `resolveRecordType` and `cleanGuid` instead. (2) The display column cannot be derived at view time: `sprk_objectrecordid` is text, not a lookup, so views cannot join to the record. (3) The form library is extended. (4) The section script is conditional on a live observation (constraint "no false empty"). (5) The role exists only under O2's recommendation.</extension>
+    <cost-of-doing-nothing>Today nobody but administrators can author an entry. Even they must type a GUID into `sprk_objectrecordid` on a form that shows only Name, and an id with braces or an unpickable type saves a wall that the reader never matches: a silent fail-open ethical wall. Organization walls and denied organizations are invisible on the Organization form. Every core user can read every entry's Reason (research :28), contradicting task 143's refusal rule. The owner's round-3b "add / see" requirement fails for organizations and contacts.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-ux-research-ethical-wall-secure.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/tasks/143-no-access-internal-secure-shares.poml</file>
+      <file>projects/unified-access-control-r2/tasks/064-provenance-read-and-denylist-endpoints.poml</file>
+      <file>projects/unified-access-control-r2/tasks/067-access-modal-denylist-and-standing-levels.poml</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>.claude/patterns/pcf/theme-management.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="lookup chip + native lookup pane" location="src/client/shared/Spaarke.UI.Components/src/components/LookupField/DataverseLookupField.tsx">The visual and interaction anchor for the picker: a "Select" button opening Xrm.Utility.lookupObjects, a dismissible chip when set, tokens only.</pattern>
+      <pattern name="record-type resolution + GUID normalization" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts:161-187, :367-370">resolveRecordType (null on failure → write nothing) and cleanGuid.</pattern>
+      <pattern name="views/subgrid/quick-create documentation" location="src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/views-schema.md">Table-per-view, subgrid properties, placement, deployment steps.</pattern>
+      <pattern name="schema creation under the Spaarke publisher" location="src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:180-204">The Web API + MSCRM.SolutionUniqueName method, verified with describe(); never mcp create_table.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm 143's server and schema steps and 064 are merged; read 143's form library (or record that it does not exist yet, escalation (g)), its enforce contract, its malformed-row rule (escalation (h)) and where it persists the N5 outcome. Confirm that the O2 answer recorded in research note :74 (ACCEPTED as recommended) still stands, and record it in notes/task-154-no-access-management-forms.md.</step>
+    <step order="1">Live, read-only inventory (spaarkedev1), recorded in the notes:
+- the main forms of sprk_organization and contact used by the Spaarke app(s), and where SYSTEM ACCESS / MEMBERS sit;
+- the app modules whose site maps list sprk_externalrecordaccess or sprk_organization;
+- every security role's privileges on sprk_noaccessentry;
+- whether quick create is enabled for the table;
+- how a subgrid on a table the user cannot read renders, observed for an existing non-admin test user;
+- the object types any deny reader evaluates (Grep of src/server for `NoAccessCandidateRecord` and `GetDeniedRecordsAsync` callers).
+Also Grep src/client for any client reader of sprk_noaccessentry: O2 must not break one.</step>
+    <step order="2" name="schema (prescriptive within the step)">Create `sprk_objectrecordname` (String, display-only) under the Spaarke publisher in SpaarkeCore, publish it, verify with describe(), and update entity-schema.md. Turn off quick create for sprk_noaccessentry and verify.</step>
+    <step order="3">Build the ObjectRecordPicker PCF (shared components, bound outputs, verified type list) with component tests; `npm run build:prod`; deploy via the pcf-deploy skill.</step>
+    <step order="4">Rebuild the sprk_noaccessentry main form: Subject section (contact / organization / user — this task places `sprk_subjectsystemuser`, per 143's sequencing), Object section (organization, or the picker bound to the record pair + name), Reason, Status, and 143's outcome if persisted. Keep 143's library registration (after `sprk_/scripts/bff_auth.js`), or create the shared library per escalation (g), and add the OnSave shape check, the OnChange mutual exclusion and the name suggestion. Build the views. Publish.</step>
+    <step order="5">Organization and Contact forms: add the NO ACCESS sections and subgrids per the placement constraint. Add the site map subarea to the app chosen in step 1. Add `sprk_noaccess_sections.js` only if step 1 observed an empty-list render. Export to and import from SpaarkeCore via the dataverse-deploy skill. Write views-forms-schema.md.</step>
+    <step order="6">Apply O2 as confirmed in step 0: the role changes, record before/after privileges, and prove the BFF deny read still works live (an existing walled contact is still denied on the SPA plane).</step>
+    <step order="7">Docs: add to entity-schema.md a section "How No Access works at the organization level", covering:
+- subject organization → every ACTIVE member contact (and, per 143 (b), a linked internal user) is denied;
+- object organization → an ethical wall over every project, matter and work assignment referencing it in any organization lookup (today `sprk_assignedlawfirm1/2`);
+- enforcement on secure records per covered record, per N5;
+- the read-time veto on the Teams/SPA planes.
+Also add the §5 invariant-registry row to DATAVERSE-WRITE-PATH-ARCHITECTURE.md.</step>
+    <step order="8">MANUAL live gate (criterion 11). Record the evidence in the notes file.</step>
+    <step order="9">Update TASK-INDEX.md: this task's cell to `✅ [done]`. Record deviations in the notes file.</step>
+  </steps>
+
+  <escalation>
+    <trigger>(O2) OWNER QUESTION — ANSWERED 2026-10-01: ACCEPTED as recommended (research note :74). The question: should the No Access list, including Reason, stay readable by every core user? Today "Spaarke Core User" holds Global Read on sprk_noaccessentry (research :27-28), so every core user can read every entry's subject, object and Reason, which contradicts task 143's rule that a refusal must not reveal the reason. RECOMMENDATION (accepted): no. (1) Remove Read on sprk_noaccessentry from Spaarke Core User and every other non-administrator role. (2) Grant Create/Read/Write/Append/AppendTo (no Delete) to a dedicated "Spaarke Access Administrator" role. (3) Everyone else sees task 153's banner. (4) Write-holders on a record see and manage that record's entries through Manage Access, where the BFF reads on their behalf (064/067). The trigger still fires, and step 6 STOPS, if: step 0 finds the note no longer records ACCEPTED or the owner has revised O2; step 1 finds a client or server reader that would break when core users lose Read (other than the BFF app identity); or step 1 finds a non-administrator role other than Spaarke Core User holding Read or Write. In each case report what was found, with this recommendation, and wait for the owner. If the owner reverses to keeping Global Read, record that the Reason stays readable to all core users, and skip the role creation and the section script.</trigger>
+    <trigger>(b) OPEN OWNER QUESTION — who may author an ORGANIZATION wall from the Organization form? Settled by N5 in principle (research :76): an entry is enforced only on covered records where its author holds Write, per record. Under O2's recommendation, though, only the access-administrator role can create entries at all, so an administrator without Write on a covered record writes a wall that the read-time veto honours but that removes no shares there. If the live gate shows an organization wall that is "not enforced" on most covered records for a typical administrator, STOP and report the counts. Recommendation: accept it (N5 as decided) and make the per-record outcome visible, which this task does.</trigger>
+    <trigger>(c) If step 1 finds no app whose site map lists Access Permission Grants or Organizations, or finds more than one, STOP and present the candidates. Recommendation: the app where Access Permission Grants are administered.</trigger>
+    <trigger>(d) If step 1 confirms that no deny reader evaluates child object types (today only the three roots, `AccessibleRecordSetService.cs:596-672`), the picker offers the three roots only. Report to the orchestrator that the schema doc's per-child example (`entity-schema.md:97`, a `sprk_communication` revocation) is stored but enforced nowhere. Whether child-level evaluation should be built is an owner decision for a server task. Do not offer a type no reader evaluates.</trigger>
+    <trigger>(e) If 143 persists the N5 enforcement outcome nowhere readable (no column, no related row), STOP before step 4's outcome display. The owner's N5 wording is "save as 'not enforced'", which needs a stored state. Report it to the orchestrator rather than inventing a second store here. Likewise, if 143's post-save notice for an organization wall does not report the outcome PER COVERED RECORD, STOP before criterion 10: this task may not change BFF code to add it (constraint "CLAUDE.md §10").</trigger>
+    <trigger>(f) If the Organization or Contact main form used by the Spaarke apps differs per app (several main forms), STOP and list them before editing. Recommendation: edit every main form the Spaarke apps expose.</trigger>
+    <trigger>(g) If `src/solutions/webresources/sprk_noaccessentry_postsave.js` does not exist when step 4 starts (143 may hold it for its form steps), do NOT create a second library for the same form. Create that file, under 143's file name, web resource name and namespace, with this task's OnSave, OnChange and name-suggestion handlers only. Record the hand-off in the notes and tell the orchestrator, so 143's form steps add the OnPostSave enforce handler to the same file. This mirrors 143's own "whichever lands second" rule. If 143's POML or notes name a different file or namespace by then, follow them.</trigger>
+    <trigger>(h) If step 0 finds that 143's malformed-row rule over subjects (143 criterion 1: zero or two-plus subjects deny nothing) has NOT landed, then today's reader still denies BOTH subjects of a two-subject row (`NoAccessListReader.cs:191-206`, `:390-406`), and "Incomplete Entries — deny nothing" would mislabel such rows. STOP before building that view and report it. Recommendation: wait for 143's rule; meanwhile the form's OnSave check prevents new two-subject rows from MDA. Also report that the schema doc's Business Rule 1 (`entity-schema.md:105-110`) claims the subject check already exists.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-create-schema skill">Create sprk_objectrecordname under the Spaarke publisher.</tool>
+    <tool name="mcp__dataverse__describe">Verify the column live before deploying the PCF.</tool>
+    <tool name="mcp__dataverse__read_query">Step-1 read-only inventory (forms, app modules, site maps, role privileges).</tool>
+    <tool name="dataverse-deploy skill">Forms, views, site map, roles and web resources via SpaarkeCore export/import.</tool>
+    <tool name="pcf-deploy skill">Build (npm run build:prod) and deploy ObjectRecordPicker.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/ObjectRecordPicker/</output>
+    <output type="code">src/solutions/webresources/sprk_noaccessentry_postsave.js</output>
+    <output type="code">src/solutions/webresources/sprk_noaccess_sections.js (conditional, per constraint "no false empty")</output>
+    <output type="test">src/client/pcf/ObjectRecordPicker/__tests__/</output>
+    <output type="docs">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</output>
+    <output type="docs">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/views-forms-schema.md</output>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-154-no-access-management-forms.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. `sprk_objectrecordname` exists live under the Spaarke publisher in SpaarkeCore, verified by describe() before the PCF deployed. `NoAccessListReader.RowSelect` is unchanged (diff). The schema doc records the column as a display snapshot, not a key.</criterion>
+    <criterion testable="true">2. Picker: choosing a project, matter or work assignment writes `sprk_objectrecordtype` (that type's `sprk_recordtype_ref` row), `sprk_objectrecordid` (lowercase, unbraced GUID) and `sprk_objectrecordname` together, and clears `sprk_objectorganization`. A failed record-type resolution writes none of them and shows an inline error. Only the step-1-verified types are offered. The control renders read-only when disabled. Each case is covered by a component test.</criterion>
+    <criterion testable="true">3. An entry created through the picker for record R walls a contact named as subject: the SPA/Teams plane denies that contact on R after save (live). This proves the stored id matches the reader's filter (`NoAccessListReader.cs:221-222`).</criterion>
+    <criterion testable="true">4. The entry form refuses to save, with a form notification naming the problem, when it has zero or more than one subject, zero objects, both object forms, a half record pair, or an object record id that is not a GUID. Choosing an organization clears the record pair and name. A well-formed entry saves, and 143's post-save enforce call still runs and shows its notice. Exactly one form library is registered on the sprk_noaccessentry main form besides `sprk_/scripts/bff_auth.js`.</criterion>
+    <criterion testable="true">5. Quick create is off for sprk_noaccessentry. "+ New" on each of the three subgrids opens the main form with the right lookup prefilled (object organization, subject organization or subject contact).</criterion>
+    <criterion testable="true">6. The Organization form shows the NO ACCESS section on the SYSTEM ACCESS / MEMBERS tab with the two subgrids and their columns; the Contact form shows its section with one subgrid. Reason is not a subgrid column. Every subgrid lists active entries only.</criterion>
+    <criterion testable="true">7. The closed set of views exists with the stated columns. "Incomplete Entries — deny nothing" lists exactly the malformed rows (live, seeded through the Web API as an access administrator, since the form refuses them: one row with two subjects, one with no object, one with a half record pair; all three appear, and a well-formed row does not; then deactivate the seeded rows). Built only after escalation (h) clears. The lookup view shows subject and object.</criterion>
+    <criterion testable="true">8. The site map of the app chosen in step 1 has a "No Access Entries" subarea opening "Active No Access Entries". Under O2's recommendation, a user without Read does not see it.</criterion>
+    <criterion testable="true">9. O2 applied as answered (accepted 2026-10-01), with before/after privileges recorded for each role. Under the accepted recommendation:
+- a non-administrator test user cannot open an entry, cannot create one, and a Web API read of `sprk_noaccessentries` is refused with a privilege error (not a 200 with an empty list);
+- an access-administrator test user can create, read, update and deactivate entries but not delete them;
+- the BFF deny read still denies a walled contact on the SPA plane (live).
+Per constraint "no false empty", a user without Read never sees an empty NO ACCESS grid.</criterion>
+    <criterion testable="true">10. N5 on the new form, live. An entry whose author holds Write on record R is enforced on R. An organization wall whose author lacks Write on some covered records shows the per-record "not enforced" outcome for exactly those records, in the notice and (if 143 persists it) on the form and the view.</criterion>
+    <criterion testable="true">11. MANUAL live gate on spaarkedev1, using existing non-admin test users in their current BUs, with screenshots recorded:
+(i) an access administrator opens an Organization, adds an ethical wall naming a contact through "Ethical walls on this organization", and the contact is then denied on a matter referencing that organization;
+(ii) the same administrator adds the organization as a denied subject against a specific project through the picker;
+(iii) adds a contact as denied from the Contact form;
+(iv) opens "Active No Access Entries" from the site map and sees all three entries with readable object names (no raw GUIDs);
+(v) a non-administrator user opening the same Organization sees no entries and no empty NO ACCESS grid;
+(vi) dark mode per the ui-tests.</criterion>
+    <criterion testable="true">12. Test scope: cover the stated contract plus the edge cases named in criteria 2, 4, 5, 7 and 9 (type resolution failure, mutually exclusive objects, GUID normalization, malformed shapes, prefill per subgrid, role negatives). No criterion is met by a test that only asserts a mock was called with arguments the test itself supplied. Anything beyond that needs a one-line justification in the notes. No ADR-038-banned test shapes. `npm run build:prod` succeeds and the picker's jest suite is green. No BFF change, no plugin, no flow. The entity-schema.md organization-level section and the §5 registry row are written.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Add an ethical wall from the Organization form">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_organization&amp;id={organization-id}</url>
+      <steps>
+        <step>Sign in as the access-administrator test user (an existing non-admin test user, in its current BU, given the new "Spaarke Access Administrator" role per O2)</step>
+        <step>Open the tab with SYSTEM ACCESS and MEMBERS; locate the NO ACCESS section</step>
+        <step>Click "+ New" on "Ethical walls on this organization"; verify Object Organization is prefilled; choose a Subject Contact; enter a Reason; save</step>
+        <step>Check the browser console for errors</step>
+      </steps>
+      <expected>The main form (not a quick create) opened with the object prefilled; the save succeeded; 143's enforcement notice appeared; the subgrid lists the new entry; no console errors.</expected>
+    </test>
+    <test name="Pick an object record instead of typing a GUID">
+      <steps>
+        <step>From "This organization denied", click "+ New"</step>
+        <step>In the Object section, use the record picker: choose type Matter, then pick a matter in the lookup pane</step>
+        <step>Save; open "Active No Access Entries"</step>
+      </steps>
+      <expected>The picker offers only Project, Matter and Work Assignment (or the step-1-verified set); the chosen matter shows as a chip; Object Organization is cleared; the view shows the matter's name, not a GUID.</expected>
+    </test>
+    <test name="Malformed entry is refused">
+      <steps>
+        <step>Create an entry with both a Subject Contact and a Subject Organization; try to save</step>
+        <step>Create an entry with no object; try to save</step>
+      </steps>
+      <expected>Each save is blocked with a form notification naming the problem; nothing is created.</expected>
+    </test>
+    <test name="Contact form NO ACCESS section">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=contact&amp;id={contact-id}</url>
+      <steps>
+        <step>As the access administrator, open a Contact; use "+ New" on "This contact denied"; pick a project as the object; save</step>
+      </steps>
+      <expected>The entry is created with the contact prefilled and appears in the subgrid.</expected>
+    </test>
+    <test name="Non-administrator sees no false empty grid">
+      <steps>
+        <step>Sign in as an existing non-administrator test user; open the same Organization</step>
+      </steps>
+      <expected>No entries are visible and no empty NO ACCESS grid suggests that nobody is denied (the section is hidden or shows a permission message).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; open an entry with a picked object record</step>
+        <step>Verify the picker's chip, button and error text adapt (no hard-coded colours; icons use currentColor)</step>
+      </steps>
+      <expected>All picker colours use Fluent v9 semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Owner round 3b (session27-owner-decisions-and-research.md:79-83) and disposition row 5 + O2 (session27-ux-research-ethical-wall-secure.md:71, :75-76). Coordination the orchestrator must act on:
+- 143's form dependency is absorbed here. 143 keeps ownership of the enforce endpoint, its post-save call and the persisted N5 outcome; this task extends 143's form library with the OnSave check, and keeps it registered.
+- 143 ↔ 154 is a two-way PARTIAL dependency: 154 needs 143's server and schema steps; 143's form steps and live gate need 154's form. TASK-INDEX should show 154's dep on 143 as "143 (server + schema steps)" and 143's on 154 as "154 (form steps only)", or the two block each other.
+- 064's question to the orchestrator (do 154's subgrids need to read through 064's routes once O2 lands?) is answered here: no — the sections serve access administrators, who keep table Read; everyone else gets 153's banner.
+- Schema-doc drift to fix with 143: Business Rule 1 (`entity-schema.md:105-110`) says the reader excludes rows with neither or both SUBJECT fields, but today's reader checks only the object shape (`NoAccessListReader.cs:390-406`); 143 criterion 1 closes it.
+- 064's endpoints are the BFF write path. Its entry validation and the reader's malformed-row rule are the server-side owners of the entry shape (new §5 registry row).
+- 153 registers its banner library on the Organization and Contact forms after this task, and its copy points at the NO ACCESS section.
+- If escalation (d) confirms per-child objects are evaluated nowhere, the orchestrator decides whether to raise a server task.
+The organization-level answer the owner asked for lands in entity-schema.md (step 7) and should be quoted back to the owner.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist. Load the fluent-v9-component skill before step 3.</protocol>
+  </execution>
+</task>

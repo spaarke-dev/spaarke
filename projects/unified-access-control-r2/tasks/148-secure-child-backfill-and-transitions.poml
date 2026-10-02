@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="148" project="unified-access-control-r2">
+  <metadata>
+    <title>C10 part 2 (transitions + backfill) — re-own EXISTING children when a record becomes secure (provisioning) and when it stops being secure (unsecure), for projects, matters and work assignments, plus a one-time backfill of every existing secure record's children: one engine, idempotent, resumable, reported, manual live gate</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "backfill and transitions")</phase>
+    <gate>after 144 (named team, generalized provisioning/unsecure, root migration applied in dev), 145 (child privileges), 146 (owner rule for children) and 149 (sharee mirror + reconcile) are merged.</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Irreversible-in-effect live ownership changes on the secure-isolation boundary; modifies the provisioning and unsecure endpoints (tags bff-api, auth, security); adds a scheduled job.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ordering-sensitive state transitions on a security boundary (a wrong order locks users out or leaves children exposed) plus a bulk live data change whose mistakes are silent.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ProvisionProjectEndpoint.cs and UnsecureProjectEndpoint.cs (also edited by 133, 139, 143, 144, 149 and the sprk_issecure-lock task 150) and registers its job in Infrastructure/DI/ExternalAccessModule.cs (ExternalAccess exclusive zone — also edited by amended task 056); adds the reconciliation job that task 147 schedules. Serialize with each; whichever runs second rebases.</parallel-reason>
+    <deps>144, 145, 146, 149</deps>
+    <tags>bff-api, auth, security, dataverse, job, migration, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+    <origin>Session 27 C10 research gap 4 ("No backfill at provision or unsecure time"); owner round 2 item 6.</origin>
+  </metadata>
+
+  <prompt>Task 146 makes NEW children of a secure record secure. Children that already exist when a record becomes secure — and children of records that are already secure today — are still owned in ordinary business units. Build ONE server-side engine that brings every existing child of a root into the state task 146 would have given it (owner + mirrored shares), call it when a root is provisioned secure and when it is unsecured, and run it once over every existing secure record.</prompt>
+
+  <role>SPAARKE platform developer on the Dataverse write path and the secure-isolation boundary. Expert in Dataverse assign semantics, POA shares, and ADR-036 scheduled jobs. Fail closed; verify every write by read-back.</role>
+
+  <goal>A `SecureChildReconciler` engine that, for one root, finds every child and grandchild (per live metadata and the FR-26 taxonomy), assigns each to the owner the task-146 rule gives it, and applies task 149's reconcile(root) — is called by provisioning (all three root types) after the root is isolated and shared, and by unsecure before the flag is cleared; a report-only-by-default sweep job runs it over every `sprk_issecure = true` root; every run is idempotent, resumable, and produces a per-root, per-table report; dev is backfilled and verified by hand.</goal>
+
+  <context>
+    <background>TRANSITION 1 — BECOMING SECURE. `Api/ExternalAccess/ProvisionProjectEndpoint.cs` re-owns only the root row (Step 5 `:474-508` → `AssignOwnerToSecureTeamAsync` `:597-616`), then shares it to the creator and colleagues (Step 5.5 `:510-521`), then creates and records the container (`:523-560`). Task 144 generalizes this to sprk_matter and sprk_workassignment and switches the owner to the named team. Nothing touches the root's EXISTING children: a project flagged secure after it already has documents, events, to-dos and communications leaves all of them in ordinary BUs.
+
+TRANSITION 2 — STOPPING BEING SECURE. `Api/ExternalAccess/UnsecureProjectEndpoint.cs` (sequence `:17-22`): reads the root (`:103-148`), resolves the new owner (`:150-166`), assigns the root to that user and verifies (`:168-226`), revokes every POA share on the root (`:227`, revoke `:373`), clears `sprk_issecure` last (`:231-262`). Its remarks explain the ordering: ownership moves BEFORE shares are revoked so the record is never reachable by nobody, and the flag clears last so the label never lies (`:28-43`). After task 146, the root's children are owned by the memberless Secure team and carry mirrored shares (task 149); unsecure leaves them there — orphaned, reachable by nobody once the root's shares are gone. Task 144 generalizes unsecure to matters and work assignments.
+
+TRANSITION 3 — THE RECORDS THAT ARE ALREADY SECURE. Task 144's migration moves existing secure ROOTS to the named team; their children were never touched by anything. Dev today: 1 secure project, 0 documents linked to any secure root (session27 live facts) — the backfill must still be proven on seeded probe children, because production-shaped environments will not be empty.
+
+WHAT "EVERY CHILD" MEANS. design.md §5.1d (`design.md:552-603`) enumerated 18 entities / 19 lookups on sprk_project from live metadata; matter and work assignment have their own sets (task 146 step 2 records all three). Children link three ways: (a) direct root lookups (`sprk_document`: `sprk_project`, `sprk_relatedproject`, `sprk_matter`, `sprk_workassignment`; `sprk_invoice`: `sprk_matter`, `sprk_project`); (b) FR-26 `sprk_regarding{core}` stamps on todo/event/communication/analysis (`Services/Dataverse/CoreAncestorResolver.cs:74-100`); (c) GRANDCHILDREN reached only through a child — `sprk_document` and `sprk_invoice` carry NO stamp columns (`notes/phase3-backfill-runbook.md` §1b), so a to-do regarding a document on a secure project has no stamp pointing at the project and is found only by walking document → to-do. Rows owned per-user by design (task 146's census waivers) and ROOT records with their own `sprk_issecure` (e.g. a work assignment under a project) are excluded as task 146 classifies them.
+
+PRECEDENTS TO REUSE, NOT COPY. `scripts/Backfill-CoreAncestorStamps.ps1` (task 053 — dry-run default, idempotent, metadata-discovered columns) and word-add-in-r1's `scripts/Backfill-RecordOwnership.ps1` (write-ahead reversal manifest, read-back per assign, `-MaxWritesPerRun` sample cap — note 080 §6.9) show the operational shape. But the RULE must be the BFF's: the write-path architecture's key property is that inline (L1), fix-up (L3) and reconciliation (L4) call the SAME invariant owner classes (`DATAVERSE-WRITE-PATH-ARCHITECTURE.md:81`). ADR-036 job precedents in this BFF: `Services/ExternalAccess/ExternalAccessReconciliationJob.cs:94` (registered disabled, writes report-only by default) and `Services/Ai/Membership/MembershipReconciliationJob.cs:146`.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectResponse.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/UnsecureProjectResponse.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (ADR-036 IScheduledJob; registered disabled, report-only by default)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (job registration beside ExternalAccessReconciliationJob)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (job options, documented with the file's "_…_comment" sibling-key convention)</file>
+      <file role="new">tests/integration/data-mutation/ExternalAccess/SecureChildTransitionTests.cs</file>
+      <file role="modify">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md (operator runbook: backfill dry run, apply, verification)</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-2 row: L1/L4 state)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-148-secure-child-backfill.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs</file>
+      <file role="canonical-reference">scripts/Backfill-CoreAncestorStamps.ps1</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs (the owner rule after 144/146)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="DATAVERSE-WRITE-PATH-ARCHITECTURE §3 / CLAUDE.md §11">Scope: the rule. The reconciler decides each child's owner ONLY by calling `IRecordOwnershipResolver` with the same inputs task 146's writers pass, and applies shares ONLY through task 149's reconcile(root). No second implementation of either rule — not in the job, not in a PowerShell script. A script, if any, only triggers or reports.</constraint>
+    <constraint source="project">Scope: transition ordering. PROVISIONING: root isolated (Step 5) → root shared (Step 5.5) → child shares mirrored (task 149 mechanism) → children re-owned → reconcile(root) verifies → (container steps unchanged). Mirroring BEFORE the re-own is deliberate: POA shares survive an Assign, so sharees never lose a child mid-pass — task 149 Part A must confirm that shares survive Assign; if it shows they do not, the order becomes re-own → mirror and the transient under-share (never an over-share) is recorded in the note. UNSECURE: root re-owned (Step 3) → children re-owned to their non-secure owner → child mirrored shares removed → root shares revoked (Step 4) → flag cleared last (Step 5). INVARIANT at every moment of either transition: no child is readable by a principal who is not entitled to it (no over-share, ever); a former secure child is never reachable by nobody at the END of an unsecure pass; a partially complete pass fails toward under-share and reports it (ADR-003).</constraint>
+    <constraint source="ADR-003">Scope: every transition response. A child pass that does not complete is NOT reported as success: the response carries a stable reason code and a message with per-table counts of children re-owned / remaining, not a bare 500. Unsecure with a failed child pass does NOT clear `sprk_issecure` (the flag keeps meaning "children may still be isolated"). The root steps already committed are not rolled back.</constraint>
+    <constraint source="project">Scope: resumability. Every operation is idempotent (a child already in its target state is skipped and counted); re-invoking provisioning or unsecure on a root whose child pass is incomplete completes the pass instead of returning 409/200-no-op, and the sweep job completes it regardless. Coordinate with task 133 (C11 — creator lock-out / resumable provisioning on the same endpoint) — do not implement two resume paths.</constraint>
+    <constraint source="ADR-036 / ADR-052">Scope: the sweep. It is an `IScheduledJob` in the BFF (no hand-rolled BackgroundService), registered DISABLED with writes REPORT-ONLY by default (the ExternalAccessReconciliationJob posture), running every `sprk_issecure = true` root of all three types, ordered by root id, with a per-run cap and a progress log so an interrupted run resumes. Placement decision recorded per ADR-052.</constraint>
+    <constraint source="project">Scope: every assign. Owner changes are separate assign operations verified by read-back (`ProvisionProjectEndpoint.cs:597-616` rationale), never folded into a field PATCH. Each changed row's previous owner is recorded in the run report before the write (reversal evidence).</constraint>
+    <constraint source="owner round 2">Scope: data. Unfiled documents (no parent) are never touched. Do not relax the alternate key on the SPE item id. A failed revoke returns a message, not a bare 500.</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: all of it. No Dataverse plugin. Live verification is a MANUAL gate (no Dataverse in CI); existing non-admin test users in their current BU; never propose relocating users. Probe records are deleted afterwards and the deletion recorded.</constraint>
+    <constraint source="ADR-038">Scope: tests. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests. Transition tests under `tests/integration/data-mutation/**` using the existing provisioning fixtures.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement decision citing bff-extensions.md and ADR-052; publish-size delta vs a fresh master build (short path, Compress-Archive, both sizes, file counts), ≤60 MB; CVE scan.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/phase3-backfill-runbook.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/tasks/144-secure-named-owner-team.poml</file>
+      <file>projects/unified-access-control-r2/tasks/146-server-child-writers-secure-owner.poml</file>
+      <file>projects/unified-access-control-r2/tasks/149-secure-child-sharee-access.poml</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="report-only reconciliation job" location="src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs">Registered disabled; WritesEnabled defaults false; reports what it would change.</pattern>
+      <pattern name="ownership-first ordering" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs">Remarks :28-43 — move ownership before revoking shares; clear the label last.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm 144 (including its dev root migration), 145, 146, 149 merged; read the child census and lookup sets task 146 recorded.</step>
+    <step order="1">Build `SecureChildReconciler.ReconcileAsync(rootType, rootId, mode)`: enumerate children through direct lookups, stamps, and one further hop through document/invoice/communication/event hosts; for each, ask the resolver for its owner; when the target is the Secure team, first mirror the root's sharee access onto the child (149's mechanism), then assign if different (read-back); when leaving secure, assign first, then remove the mirrored shares; finish with 149's reconcile(root) — the ordering constraint governs. Return a per-table report (examined / already correct / changed / refused / failed) with previous owners.</step>
+    <step order="2">Wire provisioning (all three root types) and unsecure in the ordering the constraint fixes; add counts and reason codes to the responses; make re-invocation on an incomplete child pass resume it.</step>
+    <step order="3">Add `SecureChildReconciliationJob` (disabled, report-only by default) sweeping every secure root; per-run cap; progress log.</step>
+    <step order="4">Tests: provisioning re-owns existing children and grandchildren and mirrors shares; unsecure returns children to the non-secure owner and removes mirrored shares before revoking the root's; a failed child pass reports counts and (unsecure) keeps the flag; second run changes nothing; report-only writes nothing; excluded rows (unfiled documents, per-user rows, secure-flagged child roots) untouched.</step>
+    <step order="5">Operator runbook in the guide; I-2 row update. Build, tests, publish size, CVE.</step>
+    <step order="6" mode="prescriptive">MANUAL LIVE GATE (dev, after deploy): seed probe children (document via `sprk_project`, document via `sprk_relatedproject`, event, to-do regarding the document, communication, memo) under an ordinary project, matter and work assignment owned by an existing non-admin test user; provision each secure; record owner read-back + share mirror + that a non-sharee test user is denied; unsecure one of them and record the reverse; run the sweep report-only over all secure roots and record the plan; run it with writes on for dev's existing secure roots; run it again and record zero changes; delete probes and record the deletion.</step>
+    <step order="7">Update TASK-INDEX.md (`✅ [done]`) and the POML status; write the task note (reports attached).</step>
+  </steps>
+
+  <escalation>
+    <trigger>The dev report-only sweep finds existing children of a secure root whose CONTENT sits in a shared SPE container (documents created before the root's own container): re-owning the Dataverse row does not move bytes already in shared storage. Report rows and locations and ask before applying. RECOMMENDATION: apply the row re-own anyway (it strictly reduces exposure and does not touch bytes), and present moving the content into the root's own container as an owner decision to be added to THIS task's scope (owner: nothing deferred) — cross-reference task 144's identical trigger for secure roots.</trigger>
+    <trigger>Re-owning a child is refused by Dataverse naming a privilege task 145 did not grant: STOP — the fix belongs in 145's codified set, not in a wider role here.</trigger>
+    <trigger>A root→child relationship cascades Assign (task 149 Part A records it): the root re-own already moved some children; reconcile the two behaviours with the owner before applying the sweep.</trigger>
+    <trigger>Task 133's (C11) provisioning change is being implemented concurrently and conflicts with this task's resume behaviour on ProvisionProjectEndpoint.cs: coordinate before editing; do not ship two resume paths.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No component re-owns or re-shares existing children: grep `sprk_documents|sprk_events|sprk_todos` in `ProvisionProjectEndpoint.cs` and `UnsecureProjectEndpoint.cs` → none (both touch `sprk_projects` only, `:80` / `:46`). Nearest neighbours: `scripts/Backfill-CoreAncestorStamps.ps1` (stamps, not owners) and word-add-in-r1's `scripts/Backfill-RecordOwnership.ps1` (app-owned rows only, not on this branch, PowerShell reimplementation of the rule). Jobs: `ExternalAccessReconciliationJob.cs:94` (grant rows), `MembershipReconciliationJob.cs:146` (membership junction) — different invariants.</existing>
+    <extension>No existing class owns "bring a root's children to their invariant state": extending the provisioning endpoint alone would leave unsecure and the backfill with a second copy, and neither reconciliation job reconciles ownership. One engine (`SecureChildReconciler`) called from three triggers is the write-path architecture's L1/L4 shape; the job is the ADR-036 form of the L4 trigger (task 147 reuses it as the safety net).</extension>
+    <cost-of-doing-nothing>A project, matter or work assignment made secure after it has children leaves every one of them readable by ordinary users in MDA; an unsecured record leaves its children owned by a memberless team and reachable by nobody; and every record that is secure today keeps its children exposed permanently.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/SecureChildTransitionTests.cs</output>
+    <output type="docs">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-148-secure-child-backfill.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a root with existing children (direct-lookup, stamped, and a grandchild reached only through a document), provisioning it secure (project, matter, work assignment) leaves every child owned by the named Secure team (read-back) with shares equal to the root's (task 149 rule), and the response reports per-table counts.</criterion>
+    <criterion testable="true">Given a secure root with secure-team-owned children, unsecure re-owns every child to the owner task 146's rule gives a non-secure parent, removes the mirrored child shares, then revokes the root's shares and clears the flag — in that order (asserted by call-order in the test).</criterion>
+    <criterion testable="true">NEGATIVE: a child pass that cannot complete returns a stable reason code and a message with re-owned/remaining counts (never a bare 500); unsecure in that state leaves `sprk_issecure = true`; a second invocation completes the pass.</criterion>
+    <criterion testable="true">NEGATIVE: unfiled documents, per-user rows, children of other roots, and child roots carrying their own `sprk_issecure` are never re-owned (fixtures include each as a decoy).</criterion>
+    <criterion testable="true">NEGATIVE (never over-share): at no step of provisioning, unsecure or the sweep does a principal not shared on the root gain access to any child (asserted over the recorded call sequence in the transition tests, including an interrupted pass); an interrupted provisioning pass leaves children under-shared or still in their old owner, never readable by a new principal.</criterion>
+    <criterion testable="true">Idempotence: a second reconcile or sweep run over the same state changes nothing and reports zero changes.</criterion>
+    <criterion testable="true">The sweep job is registered disabled and report-only by default; in report-only mode it writes nothing and reports every change it would make; with writes enabled it applies them with read-back and records previous owners.</criterion>
+    <criterion testable="true">AUTHORIZATION: provisioning and unsecure keep their existing delegation gate (Write on the SAME root, as the caller); a caller without it gets 403 and no child is touched.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE (dev): the step-6 sequence is recorded — provision and unsecure transitions on seeded children for all three root types (owner read-back, share mirror, a non-sharee existing non-admin test user denied), the report-only sweep plan, the applied sweep over dev's existing secure roots, and a second sweep with zero changes; probes deleted and the deletion recorded.</criterion>
+    <criterion testable="true">The guide contains the operator runbook (dry run, apply, verify); the write-path I-2 row states the L1 and L4 owners.</criterion>
+    <criterion testable="true">BFF unit/integration/ArchTests green; publish size reported per CLAUDE.md §10 and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: the two transitions, the failure/resume, the exclusion decoys, idempotence and the job's two modes named above. Anything beyond needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C10 half 2 (session26 note §C10 half 2; session27 note C10 research gap 4 and "Secure matters and work assignments are never re-owned"). Depends on 144 (named team, generalized endpoints, root migration), 145 (privileges), 146 (owner rule), 149 (share mirror). Task 147 turns this task's job into the scheduled L4 safety net for client-created children. Related: task 133 / C11 (creator-share failure / resumability on the same endpoint), task 150 (sprk_issecure lock — makes these two endpoints the only transitions).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge before starting. Live writes in step 6 only after deploy to dev, in the stated order.</protocol>
+  </execution>
+</task>

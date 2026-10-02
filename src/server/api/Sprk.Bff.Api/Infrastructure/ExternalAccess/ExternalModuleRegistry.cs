@@ -95,6 +95,51 @@ public sealed class ExternalModuleDescriptor
     public IReadOnlyList<ScopeDimension>? ScopeDimensions { get; init; }
 
     /// <summary>
+    /// The primary-NAME attribute of <see cref="RecordEntity"/> (Dataverse
+    /// <c>EntityDefinitions.PrimaryNameAttribute</c>) — e.g. <c>sprk_projectnumber</c>, NOT
+    /// <c>sprk_projectname</c>. Unified-access-control-r2 task 134: the no-<c>$select</c> <c>/record</c>
+    /// read projects primary id + primary name, so <see cref="ExternalModuleRegistry.Register"/> refuses a
+    /// descriptor whose <see cref="ReadableColumns"/> lacks it (otherwise the default projection is stripped
+    /// to an id-only record). It is metadata, not derivable from the entity name, so each descriptor
+    /// declares it and <c>ExternalModuleColumnAllowListTests</c> pins every production declaration against
+    /// the live metadata.
+    /// </summary>
+    public required string PrimaryNameAttribute { get; init; }
+
+    private readonly IReadOnlySet<string>? _readableColumns;
+
+    /// <summary>
+    /// The COLUMN scope of the module (unified-access-control-r2 task 134, defect C6): the exact
+    /// attributes of <see cref="RecordEntity"/> an external caller may read through the module read seam.
+    /// Row scope (<see cref="ScopeDimensions"/>) says WHICH records; this says WHICH FIELDS of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Enforced twice by <c>ExternalModuleDataEndpoints</c>: a caller-authored FetchXML or <c>$select</c>
+    /// naming anything else is refused BEFORE execution, and every executed result is stripped to these
+    /// keys AFTER Tier-2 scoping. Both are needed because reads on that seam execute app-only, which
+    /// bypasses field-level security — without this list, a granted contact could project SPE pointers
+    /// (<c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c> / <c>sprk_filepath</c>) or any internal column.
+    /// </para>
+    /// <para>
+    /// Required, and validated at <see cref="ExternalModuleRegistry.Register"/>: non-empty, contains every
+    /// scope-dimension attribute, the primary-id attribute and the declared
+    /// <see cref="PrimaryNameAttribute"/>, and contains no SPE/Graph pointer column
+    /// (<see cref="ExternalModuleRegistry.PointerColumns"/>). Compared case-insensitively — the value is
+    /// copied into an <see cref="StringComparer.OrdinalIgnoreCase"/> set on init, whatever comparer the
+    /// caller's set used. A <c>null</c> value is kept as null so <c>Register</c> can refuse it (fail-closed:
+    /// "no list" never means "all columns").
+    /// </para>
+    /// </remarks>
+    public required IReadOnlySet<string> ReadableColumns
+    {
+        get => _readableColumns!;
+        init => _readableColumns = value is null
+            ? null
+            : new HashSet<string>(value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
     /// or a one-element list built from the <see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>
     /// shorthand. Throws if neither is configured (a wiring bug — fail fast).
@@ -260,8 +305,32 @@ public sealed class ExternalModuleRegistry
     public IReadOnlyCollection<ExternalModuleDescriptor> Modules => _byName.Values;
 
     /// <summary>
+    /// SharePoint Embedded / Graph pointer columns that MUST NOT appear on any external module's
+    /// <see cref="ExternalModuleDescriptor.ReadableColumns"/> (broker-only invariant, ADR-028 A1-A3).
+    /// File access stays on the document-id-keyed routes; a caller never receives a drive, item,
+    /// container or webUrl identifier. Verified against the live sprk_document / root schemas
+    /// 2026-09-30 (task 134 notes): the drive/item/container/path columns plus the container lookup and
+    /// the viewer id.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> PointerColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "sprk_graphdriveid",
+        "sprk_graphitemid",
+        "sprk_filepath",
+        "sprk_containerid",
+        "sprk_specontainerid",
+        "sprk_containername",
+        "sprk_driveitemid",
+        "sprk_parentgraphitemid",
+        "sprk_parentfolderid",
+        "spk_fileviewerid",
+    };
+
+    /// <summary>
     /// Registers a module. Throws on a duplicate module name OR a duplicate record entity — each module
     /// owns a distinct name and a distinct Tier-2 entity, so a collision is a wiring bug (fail-fast).
+    /// Also refuses a module whose column allow-list is missing or unsafe (task 134) — see
+    /// <see cref="ValidateReadableColumns"/>.
     /// </summary>
     public void Register(ExternalModuleDescriptor descriptor)
     {
@@ -276,7 +345,8 @@ public sealed class ExternalModuleRegistry
         }
         // Validate the scope model resolves (either ScopeDimensions or the single-attribute shorthand) —
         // EffectiveDimensions throws a descriptive InvalidOperationException if neither is configured.
-        _ = descriptor.EffectiveDimensions;
+        var dimensions = descriptor.EffectiveDimensions;
+        ValidateReadableColumns(descriptor, dimensions);
         if (!_byName.TryAdd(descriptor.Name, descriptor))
         {
             throw new InvalidOperationException(
@@ -288,6 +358,83 @@ public sealed class ExternalModuleRegistry
             throw new InvalidOperationException(
                 $"An external module for entity '{descriptor.RecordEntity}' is already registered " +
                 $"(by module '{_byEntity[descriptor.RecordEntity].Name}').");
+        }
+    }
+
+    /// <summary>
+    /// Fail-closed validation of a module's column allow-list (task 134 / ADR-003). Refuses, at startup:
+    /// <list type="bullet">
+    ///   <item>no list, or an empty one — "no list" must never be read as "all columns";</item>
+    ///   <item>a blank entry;</item>
+    ///   <item>a list missing a scope-dimension attribute — the Tier-2 injector filters on it and
+    ///   <c>ScopeRows</c> needs it projected, so a module that could not read it would return nothing;</item>
+    ///   <item>a list missing the primary-id attribute (<c>{RecordEntity}id</c>) — the first column of the
+    ///   no-<c>$select</c> default projection, and the key every grid row is identified by;</item>
+    ///   <item>a blank <see cref="ExternalModuleDescriptor.PrimaryNameAttribute"/> declaration, or a list
+    ///   missing it — the second column of that default projection;</item>
+    ///   <item>any <see cref="PointerColumns"/> entry.</item>
+    /// </list>
+    /// The primary name is metadata, not derivable from the entity name, so the descriptor declares it and
+    /// <c>ExternalModuleColumnAllowListTests</c> pins each production declaration against the live
+    /// <c>EntityDefinitions.PrimaryNameAttribute</c>.
+    /// </summary>
+    private static void ValidateReadableColumns(
+        ExternalModuleDescriptor descriptor, IReadOnlyList<ScopeDimension> dimensions)
+    {
+        var columns = descriptor.ReadableColumns;
+        if (columns is null || columns.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' must declare a non-empty ReadableColumns allow-list. " +
+                "There is no 'all columns' default on the external read seam.");
+        }
+
+        if (columns.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' ReadableColumns contains a blank column name.");
+        }
+
+        var missingScope = dimensions
+            .Select(d => d.Attribute)
+            .Where(attribute => !columns.Contains(attribute))
+            .ToList();
+        if (missingScope.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' ReadableColumns must include every scope-dimension " +
+                $"attribute; missing [{string.Join(",", missingScope)}].");
+        }
+
+        var primaryId = descriptor.RecordEntity + "id";
+        if (!columns.Contains(primaryId))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' ReadableColumns must include the primary-id attribute " +
+                $"'{primaryId}' (part of the /record default projection).");
+        }
+
+        var primaryName = descriptor.PrimaryNameAttribute;
+        if (string.IsNullOrWhiteSpace(primaryName))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' must declare its PrimaryNameAttribute " +
+                "(EntityDefinitions.PrimaryNameAttribute of the record entity) so ReadableColumns can be " +
+                "checked against the /record default projection.");
+        }
+        if (!columns.Contains(primaryName))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' ReadableColumns must include the primary-name attribute " +
+                $"'{primaryName}' (part of the /record default projection).");
+        }
+
+        var pointers = columns.Where(PointerColumns.Contains).ToList();
+        if (pointers.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' ReadableColumns must not include SPE/Graph pointer " +
+                $"columns [{string.Join(",", pointers)}] — file access stays on the document-id-keyed routes.");
         }
     }
 

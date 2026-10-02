@@ -29,9 +29,12 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///
 /// <para><b>Fail-closed contract.</b> Any failure to DETERMINE securability (metadata unavailable, record
 /// read failed, empty id, indeterminate ownership) throws rather than defaulting to "not secure". An unknown
-/// answer read as not-secure is the same isolation failure with an extra step. Error codes:
+/// answer read as not-secure is the same isolation failure with an extra step. The same holds for the entity
+/// NAME: an alias is mapped to its logical name, and a name that is not a real entity is refused rather than
+/// read as "not securable" (task 151, #1038). Error codes:
 /// <c>secure_record_container_missing</c> (409), <c>container_record_not_found</c> (404),
-/// <c>container_ownership_ambiguous</c> (409), <c>container_ownership_indeterminate</c> (409).</para>
+/// <c>container_entity_unknown</c> (400), <c>container_ownership_ambiguous</c> (409),
+/// <c>container_ownership_indeterminate</c> (409).</para>
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
 /// <see cref="IDocumentStorageResolver"/>). Unconditional registration is deliberate: a feature-gated
@@ -140,19 +143,48 @@ public sealed class RecordContainerResolver
             throw new ArgumentException("Entity logical name is required.", nameof(entityLogicalName));
         }
 
-        var normalizedEntity = entityLogicalName.Trim().ToLowerInvariant();
+        // ALIASES FIRST (task 151, #1038). A caller may name an association type by its friendly alias
+        // ("project") rather than its logical name ("sprk_project"); the securable registry is keyed on logical
+        // names only, so before this mapping "project" read as "not securable" and a SECURE project's content
+        // resolved to a shared container. DocumentAssociationMap is THE alias table — the record-keyed upload
+        // filter's EntitySetByType is held in lockstep with it (pinned key-by-key and entity-by-entity by
+        // AssociationTypeLockstepTests) — so the record the route AUTHORIZED and the record this resolver READS
+        // are the same record. A name that is not an alias passes through lower-cased, exactly as before. The
+        // alias table WINS for a name that is both an alias and a real logical name ("invoice") — see
+        // NormalizeEntityName.
+        var normalizedEntity = NormalizeEntityName(entityLogicalName);
 
-        // An entity that cannot carry sprk_issecure cannot be secure, so there is nothing to read and no
-        // decision to make beyond the fallback. Note this also means a non-securable entity costs ZERO extra
-        // Dataverse round trips, which is what keeps the seam cheap enough to put on every upload path.
+        // ONE registry question, ONE catalog lookup (task 151 review): "is this an entity at all, and can it be
+        // secure?" answered together. Until task 151 the only question was "is it securable?", and "no" was
+        // also the answer for a name that is NOT AN ENTITY AT ALL — a misspelling, an entity SET name
+        // ("sprk_projects"), an unmapped alias — so a secure record named any of those ways got a non-secure
+        // decision. Asking the two halves as two calls fixed that but fetched the catalog twice, so with Redis
+        // down every ordinary non-securable upload paid for two full-org metadata round trips. Keep it one call.
         //
-        // A metadata failure here PROPAGATES rather than being read as "not securable" — see
+        // A metadata failure here PROPAGATES rather than being read as "not an entity" or "not securable" — see
         // ISecurableEntityRegistry's fail-closed contract.
-        if (!await _securableEntities.IsSecurableAsync(normalizedEntity, ct).ConfigureAwait(false))
+        var securability = await _securableEntities
+            .ClassifyEntityAsync(normalizedEntity, ct)
+            .ConfigureAwait(false);
+
+        if (securability == EntitySecurability.NotAnEntity)
         {
+            // REFUSE rather than guess: an unknown answer is never "not secure".
+            throw UnknownEntity(entityLogicalName);
+        }
+
+        if (securability == EntitySecurability.NotSecurable)
+        {
+            // An entity that cannot carry sprk_issecure cannot be secure, so there is nothing to read and no
+            // decision to make beyond the fallback. A non-securable entity therefore costs ZERO Dataverse RECORD
+            // round trips, which is what keeps the seam cheap enough to put on every upload path.
             return SecureContainerDecision.Decide(
                 isSecure: false, ownContainerId: null, fallbackContainerId: nonSecureFallbackContainerId);
         }
+
+        // Securable — and, deliberately, any value not handled above: the secure path READS the
+        // record's own flag, which is the fail-closed direction (an entity without sprk_issecure makes that
+        // read fault rather than resolve to a shared container).
 
         // Guid.Empty cannot identify a record. A securable entity with an unusable id is an
         // indeterminate-securability case, so it refuses rather than falling through to the fallback.
@@ -274,6 +306,81 @@ public sealed class RecordContainerResolver
         }
 
         return decision;
+    }
+
+    /// <summary>
+    /// The stable problem code for a name that is neither a <see cref="DocumentAssociationMap"/> alias nor a
+    /// real entity logical name (task 151, #1038). 400, distinct from <c>container_record_not_found</c> (404)
+    /// and <c>secure_record_container_missing</c> (409), which existing clients branch on: a name that is not
+    /// an entity is a malformed request, not a missing record or a missing container.
+    /// </summary>
+    internal const string UnknownEntityCode = "container_entity_unknown";
+
+    /// <summary>
+    /// The logical name for <paramref name="entityName"/>: the <see cref="DocumentAssociationMap"/> alias
+    /// mapping when it is one, otherwise the trimmed, lower-cased input. Deliberately NOT a second alias table
+    /// (CLAUDE.md §11) — anything the shared map does not know passes through and is then checked against the
+    /// org's real entities.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>THE ALIAS TABLE WINS — the one stated exception to "a real logical name resolves byte-for-byte as
+    /// before".</b> The alias lookup runs FIRST and is not second-guessed by the org's entity catalog. For every
+    /// alias but one that is moot, because the alias is not also a real logical name (<c>project</c>,
+    /// <c>matter</c>, <c>workassignment</c>, <c>event</c>, <c>todo</c>) or maps to itself (<c>contact</c>). The
+    /// exception is the bare name <c>invoice</c>: it is ALSO the logical name of the out-of-the-box Dynamics 365
+    /// Sales Invoice entity, which exists in any org with Sales installed. Here it resolves to
+    /// <c>sprk_invoice</c>, never to the OOB entity.</para>
+    ///
+    /// <para>That is correct, not merely tolerated: every Spaarke caller that says <c>invoice</c> means
+    /// <c>sprk_invoice</c> (it is the Office save / association wire's friendly type, and the record-keyed route
+    /// filter's <c>EntityAccessFilter.EntitySetByType</c> authorizes <c>invoice</c> against <c>sprk_invoices</c>
+    /// — so resolving it anywhere else would read a DIFFERENT record from the one the caller was authorized
+    /// on). No caller passes the OOB Sales invoice: it has no <c>sprk_document</c> lookup and no container
+    /// semantics. spaarkedev1 has no <c>invoice</c> entity at all (read-only metadata check, 2026-09-30:
+    /// <c>EntityDefinitions(LogicalName='invoice')</c> → 404). Pinned by
+    /// <c>RecordContainerResolverTests.BareInvoice_ResolvesAsSprkInvoice_EvenWhenTheOrgHasTheOobInvoiceEntity</c>.
+    /// Any NEW alias that collides with a real OOB logical name joins this exception and needs the same
+    /// justification.</para>
+    /// </remarks>
+    private static string NormalizeEntityName(string entityName)
+        => DocumentAssociationMap.ToLogicalName(entityName) ?? entityName.Trim().ToLowerInvariant();
+
+    private SdapProblemException UnknownEntity(string suppliedName)
+    {
+        var safeName = SanitizeForMessage(suppliedName);
+
+        // Warning, not Error: the content was REFUSED, so nothing was mis-stored — but a caller passing a name
+        // that is not an entity is a defect at that call site, and the supplied spelling is what finds it.
+        _logger.LogWarning(
+            "[SECURE-CONTAINER] REFUSED to resolve a storage container: '{SuppliedEntity}' is neither a known "
+            + "association alias nor an entity logical name in this org ({Code}). Not read as 'not "
+            + "securable' — a secure record named this way would otherwise land in a shared container.",
+            safeName, UnknownEntityCode);
+
+        return new SdapProblemException(
+            code: UnknownEntityCode,
+            title: "Unknown entity",
+            detail: $"'{safeName}' is not an entity this service recognises, so it cannot be determined whether "
+                    + "the record is secure. Name the record's entity by its logical name (for example "
+                    + "'sprk_project') or a supported association type (for example 'project').",
+            statusCode: 400);
+    }
+
+    /// <summary>
+    /// The supplied name is caller-controlled (a route segment on the record-keyed upload routes), so it is
+    /// reduced to identifier characters and bounded before it reaches a log line or a response body.
+    /// </summary>
+    private static string SanitizeForMessage(string value)
+    {
+        const int maxLength = 64;
+
+        var trimmed = value.Trim();
+        var chars = trimmed
+            .Take(maxLength)
+            .Select(c => char.IsLetterOrDigit(c) || c == '_' ? c : '?')
+            .ToArray();
+
+        return trimmed.Length > maxLength ? new string(chars) + "…" : new string(chars);
     }
 
     /// <summary>

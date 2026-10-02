@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="unified-access-control-r2">
+  <metadata>
+    <title>C3 — the grant cache drops DirectAccessLevel, so a DIRECT grant on a secure root reads as None on every cache hit: carry the field, bump CacheVersion 4→5, and prove miss/hit parity through the real cache</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; verified defect C3 from session 26)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs change (the external grant cache feeds AccessibleRecordSetService's Secure suppression); tags bff-api/auth/testing.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-boundary cache shape. The obvious one-line "fix" (default DirectAccessLevel to AccessLevel on read) is an OVER-GRANT on secure roots, and this exact bug class has already shipped twice (task 032 for AccessLevel, task 037 for DirectAccessLevel) with the suite green both times.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ExternalParticipationService.cs, which task 132 (C12), task 109 (junction read), task 135 (CIAM veto pipeline) and task 137 (C5 revocation / grant-cache invalidation) also edit; Infrastructure/ExternalAccess/** is parallel-unsafe in this project. Tasks 132, 135 and 136 list this task as a dependency.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, security, caching, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>Session 26 verified defect C3 (notes/session26-uac-defects-and-synopsis.md § C3), CONFIRMED by 3 adversarial skeptics; untracked (no task, no ISS entry, no GitHub issue). Owner round-2 decisions 2026-09-30 (notes/session27-owner-decisions-and-research.md) — "no scope cuts, nothing deferred".</origin>
+  </metadata>
+
+  <prompt>The external grant cache persists only (id, AccessLevel) per grant. DirectAccessLevel — the field Secure suppression reads — is dropped on write and comes back null on every cache hit, so a legitimate DIRECT grant on a secure project/matter/work assignment silently becomes AccessRights.None for most of every 60-second window. Carry the field through the cache, bump the cache version so no old-shape entry is ever read, and add the test that would have caught this: a real round trip through the production ITenantCache proving rights are identical on a miss and a hit.</prompt>
+
+  <role>SPAARKE platform developer — external-access grant evaluation and its Redis data cache. You are fixing a cache SHAPE on the authorization boundary: an under-grant today, and an over-grant one careless default away.</role>
+
+  <goal>For every grant the service returns, a cache HIT yields exactly the same ExternalGrantSet as the MISS that populated it — AccessLevel AND DirectAccessLevel, on projects, matters and work assignments — so AccessibleRecordSetService composes identical rights on miss and hit; CacheVersion is 5 so no v4 entry is ever served; and a shape-parity guard fails the build the next time a property is added to a grant type without being carried by the cache.</goal>
+
+  <context>
+    <background>🔴 THE DEFECT (verified against HEAD 2026-09-30 by this task's author; re-verify before editing).
+
+The write projection, `CacheGrantSetAsync` (`src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs:1134-1168`), copies only `ProjectId`/`RecordId` + `AccessLevel` (`:1144`, `:1149`, `:1152`). The cached DTOs `CachedParticipation` (`:1242-1252`) and `CachedRootGrant` (`:1258-1268`) have NO `DirectAccessLevel` property, so `ToParticipation()` / `ToGrant()` leave it null. The miss path sets it (`:877`, `:896`, `:905`; org-inherited rows deliberately null at `:926`, `:933`, `:940`; dedupe carries both levels at `:959`, `:1009`). The hit path returns `cached.ToGrantSet()` (`:201-208`). `CacheVersion` is still 4 (`:39`) although task 037 changed the grant shape — contrary to the class's own rule at `:1281` ("CacheVersion MUST be bumped whenever this shape changes").
+
+WHY IT MATTERS. `AccessibleRecordSetService.GrantedRightsFor` (`AccessibleRecordSetService.cs:237-259`) uses `isSecure(id) ? DirectAccessLevel : AccessLevel` (`:244`, `:250`, `:256`). On a HIT, DirectAccessLevel is null → `ExternalAccessLevels.ToAccessRights(null)` → `AccessRights.None` (`ExternalCallerContext.cs:207-213`). `AccumulateTerm` keeps the key (`AccessibleRecordSetService.cs:308-317`), so presence-gated reads still pass while rights-gated routes return 403 — to-do list/create/PATCH, document upload, event create (`ExternalProjectDataEndpoints.cs:399-401`, `:433-440`, `:570-582`, `:797-804`, `:897-909`). The cache is filled fire-and-forget (`:223`) and a workforce request runs three compositions in sequence (`CallerPrincipalResolver.cs:519-546`), so the answer can flip MID-REQUEST. Called from both workforce composers (`AccessibleRecordSetService.cs:1031`, `:1130`).
+
+SCOPE OF IMPACT (from the skeptics): fails CLOSED (under-grant only); hits BOTH workforce planes — the contact-only plane (`ComposeForContactAsync`, grant term at `AccessibleRecordSetService.cs:1264`; session 26's own scenario is a contact-only Teams user on a secure matter) and the systemuser plane via the linked contact (`:1061`); the CIAM plane is unaffected TODAY because it reads only AccessLevel (`CallerPrincipalResolver.cs:378-429`) — but task 135 (CIAM plane onto the unified veto pipeline) makes the CIAM plane read DirectAccessLevel too, which is why 135 depends on this task; masked for a systemuser who also holds ADR-034 membership on the record; the cache is live whenever a `tid` claim is present and Redis is mandatory in deployed environments.
+
+WHY NO TEST CAUGHT IT. Every existing consumer test substitutes `GetGrantSetAsync` wholesale — `UnifiedEvaluatorSeamTests.cs:892`, `StandingGrantRuntimeUnionSeamTests.cs:280`, `AccessibleRecordSetServiceTests.cs:1867`/`:1968`, `MembershipPagingCharacterizationTests.cs:673`, `ExternalAccessContractTests.cs:763` — so the cache is bypassed in every test in the repo. This is the THIRD time the pattern has bitten: the `:1273-1284` remarks record task 032 fixing the identical bug for AccessLevel ("correct on a miss, None on a hit … invisible to CI"). A fix without a round-trip test through the production cache would leave the door open for the fourth.
+
+🔴 ORDERING WITH C2. Session 26 (§ Cross-links, § Consolidator notes): C2's presence-only read gates currently MASK this defect. When the C2 task (136, rights-based external read gates) makes reads rights-based, every C3 cache hit becomes a FULL denial (reads included). This task must land WITH or BEFORE 136 and 135; both already list it as a dependency.
+
+DOC DRIFT IN THE SAME FACT. `docs/architecture/uac-access-control.md:67` still says the external participation cache is "version 3" (it is 4 today, 5 after this task). Correct it in this change so the version history in docs matches the constant.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/TenantCache.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProjectClosureEndpoint.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs</file>
+      <file role="modify">docs/architecture/uac-access-control.md</file>
+      <file role="create">tests/integration/seam/ExternalAccess/GrantCacheRoundTripSeamTests.cs</file>
+      <file role="read">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</file>
+      <file role="read">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Cache/TenantCacheMetricsTests.cs</file>
+      <file role="read">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/ExternalParticipationServiceInvalidationTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 / spec NFR-01">Scope: restoring a cached grant. A null DirectAccessLevel in the cache MUST restore as null — never defaulted to AccessLevel, never inferred. An org-inherited-only grant on a secure root MUST still compose to AccessRights.None (no key rights) on a hit, exactly as on a miss. Defaulting the missing field upward is an over-grant on every secure record reached only through an organization.</constraint>
+    <constraint source="ExternalParticipationService.cs:1281">Scope: the cached shape. CacheVersion goes 4 → 5 in the SAME change that adds the field. It is the single public constant every invalidator references (`GrantExternalAccessEndpoint.cs:41`, `RevokeExternalAccessEndpoint.cs:36`, `ProjectClosureEndpoint.cs:41` alias it as `private const int CacheVersion = ExternalParticipationService.CacheVersion;`, and `SetRecordShareExpiryEndpoint.cs:345` uses it directly). Those aliases are references and stay as they are (task 137 owns consolidating the invalidation routine); do not introduce a literal version number anywhere.</constraint>
+    <constraint source="task 037 design (ExternalCallerContext.cs:75-90)">Scope: the model. Keep DirectAccessLevel as an additive field on the existing grant types. Do NOT change the dedupe to emit two entries per record id or collapse both levels into one — the remarks at `ExternalCallerContext.cs:83-88` explain why that yields list-order-dependent authorization.</constraint>
+    <constraint source="ADR-038 §7 (B1, B8)">Scope: tests. No Mock&lt;HttpMessageHandler&gt; (B1) and no reflection into private members (B8). The miss path is reached by subclassing the PRODUCTION service and overriding a data-read seam — the convention every existing ExternalParticipationService double uses (`UnifiedEvaluatorSeamTests.cs:860-893`). If the grant query has no overridable seam, make the query method `internal virtual` (InternalsVisibleTo already covers the test assembly); do NOT override `GetGrantSetAsync` — that is precisely the method whose cache logic is under test. No DI-registration or ctor null-check tests.</constraint>
+    <constraint source="tests/CLAUDE.md TimeProvider rule">Scope: the round-trip test. No Thread.Sleep / Task.Delay / Stopwatch waits. The production cache write is fire-and-forget (`ExternalParticipationService.cs:223`). The test must be deterministic: assert the v5 entry exists (read it back through the same TenantCache) BEFORE the second call, so an unwritten entry fails loudly instead of silently re-running the miss. If that cannot be made deterministic without changing production behaviour, record the chosen approach and its rationale in the task notes.</constraint>
+    <constraint source="ADR-038 KEEP paths">Scope: test location. The composition-level miss/hit test is a vertical-slice seam test → `tests/integration/seam/ExternalAccess/` (compiled into Sprk.Bff.Api.Tests via `Sprk.Bff.Api.Tests.csproj:149`). Use the PRODUCTION `TenantCache` over `MemoryDistributedCache` (construction pattern: `TenantCacheMetricsTests.cs:106-108`), not `InMemoryTenantCache` — the point is to exercise the production serializer.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision (in-place fix of an existing BFF cache; no new service, endpoint, package or DI registration). Measure publish size against a FRESH master worktree from a SHORT path, both sides zipped with Compress-Archive, file counts equal on both sides; report both absolute sizes and the delta; ≤60 MB. `dotnet list package --vulnerable --include-transitive`: no new HIGH CVE.</constraint>
+    <constraint source="owner 2026-09-30 (binding)">Scope: completeness. This task delivers a 100% fix of C3 — every root type (project, matter, work assignment), both levels, both the cache write and the cache read. Anything discovered during execution that is part of the same defect is added here, not deferred.</constraint>
+    <constraint source="owner 2026-09-10 (binding)">Scope: Dataverse verification. No Dataverse test in CI. Live verification is the MANUAL gate below, using existing non-admin test users in their current business unit — do not relocate users.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/task-037-restricted-secure-vetoes.md</file>
+    </files>
+    <patterns>
+      <pattern name="The prior fix of the same bug class" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">Remarks at `:1270-1292` (task 032) — same failure, same fix shape (carry the field + bump the version). Read before editing.</pattern>
+      <pattern name="Production-service subclass seam" location="tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs">`ParticipationWorld` (`:860-930`) — subclass the real service, override data reads, run the REAL AccessibleRecordSetService composition. Your double differs in one way: it must leave GetGrantSetAsync (and its cache logic) un-overridden.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Re-verify every anchor in the background against HEAD — this project has recorded repeated premise rot; the code wins.</step>
+    <step order="1">Add a nullable DirectAccessLevel to CachedParticipation and CachedRootGrant; write it in CacheGrantSetAsync and restore it in ToParticipation()/ToGrant() for projects, matters and work assignments, preserving null as null.</step>
+    <step order="2">Bump CacheVersion 4 → 5 and extend the class remarks (`:29-38`, `:1270-1292`) with a v5 entry naming task 037's field and this task, so the version history stays complete. Confirm every invalidator still references the shared constant. Correct `docs/architecture/uac-access-control.md:67` ("version 3") to the current version.</step>
+    <step order="3">Give the grant query an overridable seam if it has none (internal virtual), without changing its behaviour.</step>
+    <step order="4">Write the seam tests per the closed set below: a production-service subclass that overrides only the query + flag/org reads, a real TenantCache over MemoryDistributedCache, an HttpContextAccessor carrying a `tid` claim, and the REAL AccessibleRecordSetService composition run once on a miss and once on a hit.</step>
+    <step order="5">Add the shape-parity guard (criterion 7) and prove it bites by temporarily adding a dummy property to ExternalRootGrant (then revert).</step>
+    <step order="6">Perturbation checks (criterion 9), each reverted before completion.</step>
+    <step order="7">Build; full BFF unit suite; ArchTests; publish-size measurement per §10; CVE check.</step>
+    <step order="8">Deploy to dev (bff-deploy skill) and run the MANUAL live gate (criterion 11); record the evidence in notes.</step>
+    <step order="9">Record deviations and the determinism approach in projects/unified-access-control-r2/notes/task-131-grant-cache-direct-level.md. Update TASK-INDEX.md status to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If restoring DirectAccessLevel on a hit changes ANY composed right beyond the C3 scenario (e.g. an org-only secure grant starts conferring rights, or a non-secure root's rights change), STOP — that is a second defect in the composition, not part of this fix. Report it with the reproducing test.</trigger>
+    <trigger>If task 136 (C2 rights-based read gates) or task 135 (CIAM veto pipeline) has merged before this task — despite both listing it as a dependency — C3 hits are already FULL denials (136) or reach the CIAM plane (135) in any environment running that build. Report this to the owner immediately as a live regression, then CONTINUE: the fix is unchanged; only the deployment urgency changes.</trigger>
+    <trigger>If no existing non-admin dev test user can exercise the live gate, STOP and ask the owner which user/record to use. "Can exercise" means: the user resolves to a contact (via sprk_primarycontact, or the verified-email fallback at `AccessibleRecordSetService.cs:1022-1027`), and a provisioned secure root exists that is NOT Restricted (Restricted vetoes all contact access — owner round 2 item 3) and on which the user holds no other membership. Do not create, relink or relocate users. Adding a DIRECT grant for that existing test contact on the dev secure test record through the product's own grant flow (and revoking it after the gate, both recorded in notes) is permitted test setup; editing any other grant is not.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</output>
+    <output type="test">tests/integration/seam/ExternalAccess/GrantCacheRoundTripSeamTests.cs</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-131-grant-cache-direct-level.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. POSITIVE (the C3 scenario): a contact holding a DIRECT Collaborate grant on a secure project composes Read|Create|Write on the cache MISS and identically on the subsequent cache HIT through the production TenantCache. The same assertion holds for a secure MATTER and a secure WORK ASSIGNMENT, and on BOTH workforce planes: the contact-only plane (ComposeForContactAsync) and the systemuser plane via a linked contact that holds no membership on the record (so the membership term cannot mask the result).</criterion>
+    <criterion testable="true">2. NEGATIVE / authorization (no over-grant): a contact whose ONLY grant on a secure root is org-inherited composes AccessRights.None on the miss AND on the hit — DirectAccessLevel restores as null, not as AccessLevel.</criterion>
+    <criterion testable="true">3. MIXED provenance: a ViewOnly DIRECT grant plus a Collaborate ORG grant on the same secure root composes Read only, on both miss and hit (the two levels survive the round trip independently).</criterion>
+    <criterion testable="true">4. NON-SECURE root unchanged: an org-inherited Collaborate grant on a non-secure root composes Read|Create|Write on both miss and hit (AccessLevel path unaffected).</criterion>
+    <criterion testable="true">5. NULL-LEVEL matter/WA row: a matter grant whose level is null keeps its id and composes None on both miss and hit (task 032's deliberate asymmetry preserved).</criterion>
+    <criterion testable="true">6. VERSIONING: CacheVersion == 5; an entry seeded under the v4 key is NOT served by GetGrantSetAsync (the service re-queries), and every grant-cache invalidator in `Api/ExternalAccess/` obtains its version from `ExternalParticipationService.CacheVersion` — directly or through a `= ExternalParticipationService.CacheVersion` alias — with zero integer literals (grep evidence recorded in notes). `docs/architecture/uac-access-control.md:67` states the current version.</criterion>
+    <criterion testable="true">7. SHAPE-PARITY GUARD: a test enumerates the PUBLIC init/settable properties of ExternalParticipation, ExternalRootGrant and ExternalGrantSet (the derived get-only views `Matters` / `WorkAssignments` excluded by name, with the reason in a comment), builds a grant set with a non-default value for each, round-trips it through the production write/read path, and asserts every property survives. Adding a property to any of the three types without carrying it through the cache fails this test (demonstrated once, then reverted). Any future exclusion must be named in the test with its reason (task 132's never-cached fault flag is the expected first one).</criterion>
+    <criterion testable="true">8. The round-trip tests do not override GetGrantSetAsync, use no Mock&lt;HttpMessageHandler&gt;, no reflection into private members, and no sleep/delay; the pre-hit assertion that the v5 entry exists is present.</criterion>
+    <criterion testable="true">9. PERTURBATION: removing the DirectAccessLevel write (or the read) reddens criteria 1 and 7; restoring DirectAccessLevel as AccessLevel when null reddens criterion 2. Both reverted before completion.</criterion>
+    <criterion testable="true">10. Build green; full BFF unit suite green; ArchTests green; publish size reported (fresh master vs branch, short path, Compress-Archive, equal file counts) and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="false">11. MANUAL LIVE GATE (dev, after deploy): with an existing non-admin test user in its current BU whose linked contact holds a DIRECT Collaborate grant on a provisioned, non-Restricted secure root and no other membership on it (setup per the escalation trigger), repeat the Teams/SPA to-do list + to-do create on that record at least five times within one 60-second window, starting from a cold key (first call after deploy or after a grant write that invalidates it). Every call succeeds (no 403 insufficient_rights). NEGATIVE half: the same user on a secure root reached ONLY through an organization grant (if one exists in dev; otherwise state that none exists) gets 403 on to-do create on every call, miss and hit alike. Record user (by role, not name), record ids, timestamps, responses, and — where observable — evidence that later calls were cache hits (the v5 key present in Redis, or the HIT log line). Pre-fix baseline, if reproducible, recorded alongside.</criterion>
+    <criterion testable="true">12. Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C3 — `notes/session26-uac-defects-and-synopsis.md` § "[MEDIUM] C3"; owner decisions `notes/session27-owner-decisions-and-research.md` (rounds 1 and 2 binding). Introduced by commit 392fc251b1 (task 037), already on origin/master.
+
+ORDERING: land with or before task 136 (C2 rights-based read gates; session 26: "Fix C3 with or before C2") and task 135 (CIAM veto pipeline); both already list this task as a dependency. Task 132 (C12, fault caching) depends on this task and edits the same file. Tasks 109 and 137 also edit ExternalParticipationService.cs — sequence and rebase, never run in parallel; whichever lands later re-runs this task's round-trip and shape-parity tests.
+
+No new component: this modifies two private DTOs and one constant in an existing class; the optional `internal virtual` on the query is a test seam on an existing method, not new surface — CLAUDE.md §11 justification not required.
+
+GitHub: none exists (searched 2026-09-30); a new issue is proposed in this task's summary.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before starting. FULL rigor — code-review + adr-check at Step 9.5.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-131" status="code-complete; live gate pending">
+      Code complete. Live gate (criterion 11) is a PENDING MANUAL GATE: this run forbade deploys and live writes.
+      Full record: projects/unified-access-control-r2/notes/task-131-grant-cache-direct-level.md.
+      - Fix: CachedParticipation and CachedRootGrant carry int? DirectAccessLevel. It is written for projects,
+        matters and work assignments, and restored null-as-null (never defaulted to AccessLevel).
+        CacheVersion is 5, with the version history extended. QueryGrantSetAsync is internal virtual (test seam).
+        The stale "version 3" is corrected in docs/architecture/uac-access-control.md and in
+        src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md (same fact, not listed in
+        the POML). The InvalidateAsync doc comment said ":v1"; it now says ":v{CacheVersion}".
+      - Tests: tests/integration/seam/ExternalAccess/GrantCacheRoundTripSeamTests.cs, 19 cases covering
+        criteria 1-7, all green. They run the production TenantCache over MemoryDistributedCache and the REAL
+        AccessibleRecordSetService, and GetGrantSetAsync is not overridden. Before each hit, the tests read the
+        v5 entry back and assert the Dataverse read ran exactly once.
+      - Perturbations, all reverted:
+        A. Remove the write: 10 of 19 red (criteria 1, 3, 7).
+        B. Remove the read: the same 10 red.
+        C. Default null to AccessLevel: criterion 2 red on all 3 roots.
+        D. Add a dummy ExternalRootGrant property: criterion 7 red.
+      - Escalation triggers: none fired. 135/136 are still open, and GrantedRightsFor is the only DirectAccessLevel reader.
+      - Not done (per run rules): deploy, live gate, publish-size measurement (no NuGet change), and the
+        TASK-INDEX/current-task updates, which the main session owns.
+    </outcome>
+  </execution>
+</task>
