@@ -202,7 +202,7 @@ Related: tasks 029, 032, 037, 039, 042, 070, 107, 131, 135, 137, 138, 140 (conta
         Seeded both RemoveEntriesWithoutRead calls out: 3 of 3 cases red at the miss NotContainKey line; restored,
         19 / 19. Re-swept all 16 RightsFor(..) == None sites in tests/: every one now asserts absence (notes §5).
         Stale test names in notes/task-131 rows 2 and 5 updated to the renamed tests.
-      - Status: <status> moved from completed back to pending. The first outcome's own status said code-complete
+      - Status: &lt;status&gt; moved from completed back to pending. The first outcome's own status said code-complete
         with the live gate and 037/039 pending, and criterion 15 says 136 is not complete until 037 and 039 are
         closed, so "completed" overstated it. It also now matches the TASK-INDEX 🔲 [open] row (no drift).
       - Null-level trigger re-confirmed READ-ONLY (read_query, 2026-10-01): 0 sprk_externalrecordaccess rows with a
