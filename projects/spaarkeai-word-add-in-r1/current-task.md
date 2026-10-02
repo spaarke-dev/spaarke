@@ -18,11 +18,14 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: task 079 (record integrity reconciliation) — not started
+### 🔄 ACTIVE: task 079 (record integrity reconciliation) — IN PROGRESS (started 2026-10-02)
 
 | Field | Value |
 |---|---|
-| **Task** | 079, `tasks/079-record-integrity-reconciliation.poml`. Start via `task-execute` |
+| **Task** | 079, `tasks/079-record-integrity-reconciliation.poml`. FULL · opus/xhigh · directional. Owner: "yes proceed with next tasks" |
+| **Dependency deviation** | 079 deps 076/077/078; **076 is 🔲 awaiting the owner's three numbering answers**. Proceeding anyway (owner's go); FR-13 is recorded as *pending 076, owner-held* rather than reconciled |
+| **Progress** | Step 1 ✅ validator baseline: **86 scanned, 50 clean, 10 errors, 32 warnings**. Step 2 ✅ **0 errors** (58 clean, 34 warnings): 5 malformed = unescaped `<` in prose (005 had TWO); **7** missing `<steps>` (018 + 028 were hidden behind parse errors), given a labelled placeholder step. Step 3 ✅ 7 drifts + 065 synced from close commits; 057/061/066/081 closed for this project (➡️ [done], handed off/superseded/obsolete); ASCII token added to all 86 status cells (task-create mandate); 082's 27-line row joined. Fixed drift parser (customer-provisioning `233ff9341`, unmerged) reads **86/86, no drift**; master's parser still misreads (risk table). Step 4: evidence gathered (subagent); verdicts drafted — no reopen needed (see notes to write). Step 5: **owner signed off FR-12 + FR-16** (2026-10-02) → written in spec.md (FR-12, SC-6, Assumption, new FR-12 ADR-Tensions row, "other eight"; FR-16 rewritten accurate: documents = KNN, records = topic via profile keywords; Owner-Clarification + Run-Index question resolved). **Owner asked instead of deciding: FR-15** ("how much work to add Outlook or open the Spaarke email?") and **FR-10** ("explain the UX and options") — answer in the turn report; **FR-18/SC-12 "CI gates"** wording also needs sign-off. 042 tally: SC-6 evidence corrected (PASS on amended criterion), SC-8 → **FAIL** (number), corrected tally 5/4/2/2. Step 6 partly: 040 AC1 reworded (original kept in comment) + parity-checklist §6.1. **Next**: 010/021 index rows; defer-issues owners; TodoSourceAccessFilter comment; notes/079; counts + board; validator |
+| **Files modified (uncommitted)** | tasks/005,009,010,014,017,018,019,025,028,031,037,040,043,044,050,051,053,054,057,061,065,066,081 `.poml`; tasks/TASK-INDEX.md; spec.md; notes/042-uat-results.md; notes/parity-checklist.md; current-task.md |
 | **Branch** | `work/spaarkeai-word-add-in-r1` = master `5e39f2bea` (clean). Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` passes and nothing is pending |
 | **Scope (from TASK-INDEX)** | SC-6 / SC-8 cite contradictory test assertions; FR-12's §6.5 path-A deviation has no ADR-Tensions row; 14 ✅ tasks with claims the review found unsupported; 7 POMLs `not-started` while ✅; **10 POMLs do not parse** (`Validate-TaskPoml.ps1` lists 005, 009, 010, 017, 018, 019, 028, 043, 044, 053) |
 | **Queue after 079** | 090 (wrap-up, `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |

@@ -179,6 +179,18 @@ The POML's OWN acceptance criterion #1 also allows hits "confined to `shared/ada
 of the above are in `shared/adapters/`; all nine are in `shared/taskpane/**`, which is why this is reported
 as a deviation rather than a pass.
 
+### 6.1 Reconciled 2026-10-02 by task 079 — classification CONFIRMED, AC1 reworded
+
+The same grep re-run on HEAD (non-test files) returns the **same 9 code comparisons**, only moved: `SaveFlow.tsx`
+1309 (Email/Document label), 1315 (sender), 1320 (sent date), 1451 (attachments — inert on Word, where
+`getAttachments()` returns `[]`); `SaveView.tsx` 168 / 207 (which adapter getters to call — the value-producing calls
+inside are capability-gated); `useSaveFlow.ts` 949 / 1101 / 1110 (request shape: `contentType`, `sourceType`,
+`includeBody`). Plus 4 comment-only lines (`SaveFlow.tsx` 521, 1296; `SaveView.tsx` 162; `useRelatedRecord.ts` 71).
+**None reads `Office.context.host`; none decides whether a feature is available.** The main-session review asked
+for above is given: §3's reasoning holds for all nine. Task 040's AC1 was reworded to say what it was always
+testing for — no capability decision by host type — and keeps the original wording in a comment. The live half of
+this checklist (§4's per-host rows, §5's `<ui-tests>`) stays with task 042's UAT.
+
 ---
 
 ## 7. Other findings
