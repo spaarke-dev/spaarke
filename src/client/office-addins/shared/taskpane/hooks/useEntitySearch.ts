@@ -38,6 +38,15 @@ export interface EntitySearchResult {
   displayInfo?: string;
   /** Icon URL or identifier */
   iconUrl?: string;
+  /**
+   * Whether the caller can FILE a document to this record (task 084 / #1037 — "pickable equals
+   * savable"). Present only when the server was asked for it: `GET /api/office/search/entities` with
+   * `access=file` (the Save picker only), or the suggestions route's `filingAccess` map.
+   * - `false` → `POST /api/office/save` would refuse this record as the target (filing needs
+   *   AppendTo). The picker shows the row DISABLED with the reason; it is never selectable.
+   * - `true`, `null` or absent → selectable, exactly as before (the save still enforces).
+   */
+  canFile?: boolean | null;
 }
 
 /**

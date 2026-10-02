@@ -4,7 +4,7 @@
     <title>Two more pieces of in-process state that assume a single long-lived instance — the profile dispatcher's fire-and-forget and per-instance SSE sequence numbers</title>
     <phase>5 Remediation — durability</phase>
     <gate>blocked — requires 060 (same durability surface; 060 defines the store)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Removes a service and re-routes work onto the job queue. Tags include bff-api + job + worker. Modifies `.cs`.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -87,14 +87,35 @@
     <step>Write `notes/068-durability-siblings.md`. Update TASK-INDEX.md: 068 → ✅.</step>
   </steps>
 
+  <ui-tests>
+    <test name="Generate Profile survives a restart (live; needs the next BFF deploy from master)">
+      <steps>
+        <step>In Word, open a saved document whose profile is Failed or Completed. Click Generate Profile: the button answers at once (202).</step>
+        <step>Within ten seconds, restart the BFF App Service.</step>
+        <step>Within about six minutes the document's profile status reads Completed (reopen the pane, or read GET /api/v1/documents/{id} summaryStatus). App Insights shows one "Office Generate Profile: … queued as job" line and an AppOnlyDocumentAnalysis run for that job id that completed.</step>
+        <step>Click Generate Profile twice in a row: two jobs are queued and both run (two "completed in" lines for the document).</step>
+      </steps>
+    </test>
+  </ui-tests>
+
   <relevant-files>
     <file role="delete">src/server/api/Sprk.Bff.Api/Services/Office/OfficeProfileDispatcher.cs</file>
+    <file role="new">src/server/api/Sprk.Bff.Api/Services/Office/OfficeProfileQueue.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/AppOnlyDocumentAnalysisJobHandler.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobStatusService.cs</file>
     <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
     <file role="edit">src/server/api/Sprk.Bff.Api/Services/Jobs/JobStatusService.cs</file>
     <file role="edit">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
     <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
     <file role="new">projects/spaarkeai-word-add-in-r1/notes/068-durability-siblings.md</file>
   </relevant-files>
+
+  <justification>
+    <existing>`OfficeProfileDispatcher` (deleted) did this job in-process; `OfficeJobQueue` (`Services/Office/OfficeJobQueue.cs`) writes the save's finalization message with a raw `ServiceBusClient`; `JobSubmissionService` is the ADR-004 producer for `sdap-jobs`, used directly by `UploadFinalizationWorker` and `DocumentOperationsEndpoints`.</existing>
+    <extension>Not `OfficeJobQueue`: it targets a different queue through a different client, has no AI-availability concern, and three test fixtures (two in a file UAC-r2 also edits) construct it directly. `OfficeProfileQueue` replaces the deleted dispatcher one-for-one, so `OfficeService` gains one required dependency for the three optional ones it loses.</extension>
+    <cost-of-doing-nothing>A Generate Profile click whose process restarts before the profile finishes is lost with no status recorded (reproduced: `Issue1086_OfficeBackgroundWorkRestartTests`, "the collection is empty"); the pane's 202 promises a profile that never arrives.</cost-of-doing-nothing>
+  </justification>
 
   <knowledge>
     <files>

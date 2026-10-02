@@ -2,15 +2,21 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Services.Ai.Jobs;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Jobs;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
@@ -33,11 +39,9 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// module-boundary doubles on top of the shared base fixture: <see cref="IAccessDataSource"/> (the
 /// <c>DocumentAuthorizationFilter</c>'s data seam — same seam <c>OfficeVersionSaveTestWebAppFactory</c>
 /// uses) so the resource-authorization decision is controllable per test, and
-/// <see cref="IDocumentProfileAi"/> (the ADR-013 facade the background dispatch calls) so the test never
-/// makes a real AI/OBO call and can observe the dispatch deterministically via a
-/// <see cref="TaskCompletionSource"/> — the same idiom used in
-/// <c>DispatchSessionEndpointContractTests.Post_ClientDisconnectsMidReview_LedgerWriteStillCompletes</c>.
-/// No <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 B1).
+/// <see cref="JobSubmissionService"/> (the job queue the request goes to since task 068, #1086), recording each
+/// queued job. The job is queued before the 202, so the tests assert at once. <see cref="IDocumentProfileAi"/> stays
+/// registered: its presence is what says profiling is available. No <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038 B1).
 /// </para>
 /// </remarks>
 public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGenerateProfileTestWebAppFactory>
@@ -65,7 +69,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_GenerateProfile_WithAuthorizedCaller_Returns202_AndDispatchesTheSameProfileFacadeComposeUses()
+    public async Task Post_GenerateProfile_WithAuthorizedCaller_Returns202_AndQueuesOneProfileJobForTheDocument()
     {
         _factory.GrantWrite(DocumentId);
         var client = AuthorizedClient();
@@ -75,14 +79,22 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         var body = await ReadJsonAsync(response);
         body.GetProperty("documentId").GetGuid().Should().Be(DocumentId);
-        body.GetProperty("correlationId").GetString().Should().NotBeNullOrEmpty();
+        var correlationId = body.GetProperty("correlationId").GetString();
+        correlationId.Should().NotBeNullOrEmpty();
 
-        // The dispatch is fire-and-forget — wait for the detached background task to reach the facade
-        // rather than asserting immediately (the 202 above already proves the response never waited).
-        (await _factory.WaitForDispatchAsync()).Should().BeTrue("the background dispatch must reach IDocumentProfileAi");
+        // Task 068 (#1086): the request is on the job queue before the 202, so a restart cannot lose it. The 202 names
+        // the job, and its Location is the document read, where this job type records its status (ADR-017).
+        var job = _factory.QueuedJobs.Should().ContainSingle().Subject;
+        body.GetProperty("jobId").GetGuid().Should().Be(job.JobId);
+        response.Headers.Location!.ToString().Should().Be($"/api/v1/documents/{DocumentId}");
+        job.JobType.Should().Be(AppOnlyDocumentAnalysisJobHandler.JobTypeName);
+        job.SubjectId.Should().Be(DocumentId.ToString());
+        job.CorrelationId.Should().Be(correlationId);
+        job.IdempotencyKey.Should().Be(AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(DocumentId, job.JobId));
         _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(DocumentId, It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+            p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the profile runs on the job queue, not in this process");
     }
 
     [Fact]
@@ -96,10 +108,8 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         var response = await client.PostAsync(RouteForDocument(DocumentId), content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
-        (await _factory.WaitForDispatchAsync()).Should().BeTrue();
-        _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(DocumentId, It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+        _factory.QueuedJobs.Should().ContainSingle(job => job.SubjectId == DocumentId.ToString(),
+            "the request's own key means an already-profiled document is profiled again");
     }
 
     // ── Negative: authentication / authorization ────────────────────────────────────────────────────────
@@ -113,9 +123,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         var response = await client.PostAsync(RouteForDocument(DocumentId), content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-        _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _factory.QueuedJobs.Should().BeEmpty();
     }
 
     [Fact]
@@ -133,9 +141,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         var problem = await ReadProblemAsync(response);
         problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be("sdap.access.deny.no_caller_token");
-        _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _factory.QueuedJobs.Should().BeEmpty();
     }
 
     [Fact]
@@ -152,9 +158,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         var body = await response.Content.ReadAsStringAsync();
         body.Should().NotContain(DocumentId.ToString(), "a denial must not echo the resource id back to an unauthorized caller");
-        _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _factory.QueuedJobs.Should().BeEmpty();
     }
 
     // ── Negative: validation ────────────────────────────────────────────────────────────────────────────
@@ -174,9 +178,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
         var problem = await ReadProblemAsync(response);
         problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_PROFILE_001");
-        _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _factory.QueuedJobs.Should().BeEmpty();
     }
 
     [Fact]
@@ -191,9 +193,7 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         var response = await client.PostAsync("/api/office/documents/not-a-guid/generate-profile", content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-        _factory.ProfileAi.Verify(
-            p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+        _factory.QueuedJobs.Should().BeEmpty();
     }
 
     // ── Negative: feature-gated dependency unavailable (coordinator-review fix) ────────────────────────────
@@ -225,6 +225,28 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
         problem.Should().ContainKey("correlationId").WhoseValue.Should().NotBeNullOrEmpty();
     }
 
+    /// <summary>
+    /// Task 068 (#1086): a request the job queue refuses was not accepted, so it is a retryable 503 with the route's own
+    /// error code, never a 202 and never the global handler's anonymous 500.
+    /// </summary>
+    [Fact]
+    public async Task Post_GenerateProfile_WhenTheJobQueueRefuses_Returns503Retryable_NeverA202()
+    {
+        _factory.GrantWrite(DocumentId);
+        _factory.RefuseNextSubmit();
+        var client = AuthorizedClient();
+
+        var response = await client.PostAsync(RouteForDocument(DocumentId), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_PROFILE_004");
+        var body = await ReadJsonAsync(response);
+        body.GetProperty("retryable").GetBoolean().Should().BeTrue();
+        _factory.QueuedJobs.Should().BeEmpty();
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────────
 
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response)
@@ -252,17 +274,25 @@ public class OfficeGenerateProfileContractTests : IClassFixture<OfficeGeneratePr
 public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFactory
 {
     private readonly Dictionary<string, Spaarke.Dataverse.AccessRights> _grants = new(StringComparer.OrdinalIgnoreCase);
-    private TaskCompletionSource _dispatchReached = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly List<JobContract> _queuedJobs = new();
+    private bool _refuseNextSubmit;
 
     public Mock<IDocumentProfileAi> ProfileAi { get; } = new(MockBehavior.Loose);
 
-    /// <summary>Resets per-test state (grants + the dispatch signal + the mock's recorded calls).</summary>
+    /// <summary>The jobs the route put on the job queue, in order.</summary>
+    public IReadOnlyList<JobContract> QueuedJobs => _queuedJobs;
+
+    /// <summary>Resets per-test state (grants, the queued jobs, the refusal, the facade's recorded calls).</summary>
     public void Reset()
     {
         _grants.Clear();
-        _dispatchReached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _queuedJobs.Clear();
+        _refuseNextSubmit = false;
         ProfileAi.Invocations.Clear();
     }
+
+    /// <summary>The next submit fails as a busy Service Bus namespace does.</summary>
+    public void RefuseNextSubmit() => _refuseNextSubmit = true;
 
     /// <summary>Grants <c>write</c> (and <c>read</c>) on the given document id — the ADR-008 filter passes.</summary>
     public void GrantWrite(Guid documentId) =>
@@ -271,18 +301,6 @@ public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFac
     /// <summary>Grants only <c>read</c> — the ADR-008 filter (operation "write") denies with 403.</summary>
     public void GrantReadOnly(Guid documentId) =>
         _grants[documentId.ToString("D")] = Spaarke.Dataverse.AccessRights.Read;
-
-    /// <summary>
-    /// Waits for the detached background dispatch to reach <see cref="IDocumentProfileAi"/>. Deterministic
-    /// (a <see cref="TaskCompletionSource"/> set from the mock's own callback) — no <c>Task.Delay</c>
-    /// polling, per the tests module's TimeProvider-over-Stopwatch convention (this is a completion signal,
-    /// not a timing measurement).
-    /// </summary>
-    public async Task<bool> WaitForDispatchAsync()
-    {
-        var completed = await Task.WhenAny(_dispatchReached.Task, Task.Delay(TimeSpan.FromSeconds(5)));
-        return completed == _dispatchReached.Task;
-    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -303,23 +321,44 @@ public sealed class OfficeGenerateProfileTestWebAppFactory : OfficeTestWebAppFac
             services.RemoveAll<IAccessDataSource>();
             services.AddSingleton(access.Object);
 
-            ProfileAi
-                .Setup(p => p.ProfileDocumentAsUserAsync(It.IsAny<Guid>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
-                .Callback(() => _dispatchReached.TrySetResult())
-                .ReturnsAsync(DocumentProfileOutcome.Succeeded());
+            // Registered, so profiling is available; never called (the profile runs on the job queue).
             services.RemoveAll<IDocumentProfileAi>();
             services.AddScoped(_ => ProfileAi.Object);
+
+            var queue = new Mock<JobSubmissionService>(
+                MockBehavior.Loose,
+                Options.Create(new ServiceBusOptions { QueueName = "sdap-jobs" }),
+                Mock.Of<ILogger<JobSubmissionService>>(),
+                new Mock<ServiceBusClient>().Object);
+            queue
+                .Setup(q => q.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>()))
+                .Returns((JobContract job, CancellationToken _) =>
+                {
+                    if (_refuseNextSubmit)
+                    {
+                        _refuseNextSubmit = false;
+                        throw new ServiceBusException("The namespace is busy.", ServiceBusFailureReason.ServiceBusy);
+                    }
+
+                    lock (_queuedJobs)
+                    {
+                        _queuedJobs.Add(job);
+                    }
+
+                    return Task.CompletedTask;
+                });
+            services.RemoveAll<JobSubmissionService>();
+            services.AddSingleton(queue.Object);
         });
     }
 }
 
 /// <summary>
 /// Coordinator-review fix fixture: a host where <see cref="IDocumentProfileAi"/> is REMOVED and never
-/// re-registered — simulating the compound AI gate being off. <c>OfficeService</c>'s
-/// <c>documentProfileAi</c> constructor parameter is optional-nullable (ADR-032 optional-via-null-
-/// tolerance), so DI resolves it to <see langword="null"/> rather than failing to construct the host,
-/// which is exactly the production condition <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/>
-/// exists to answer honestly instead of with a false 202.
+/// re-registered — simulating the compound AI gate being off. <c>OfficeProfileQueue</c>'s
+/// <c>profiling</c> constructor parameter is optional-nullable, so DI resolves it to <see langword="null"/>
+/// rather than failing to construct the host, which is exactly the production condition
+/// <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> exists to answer honestly instead of with a false 202.
 /// </summary>
 public sealed class OfficeGenerateProfileFacadeUnavailableTestWebAppFactory : OfficeTestWebAppFactory
 {

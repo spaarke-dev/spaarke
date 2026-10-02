@@ -1350,6 +1350,25 @@ public sealed class OfficeVersionSaveWorld
         }
     }
 
+    /// <summary>
+    /// Every <c>sprk_processingjob</c> column a create or update wrote, keyed by the request property name
+    /// (<c>Status</c>, <c>Result</c>, <c>CurrentStage</c>, …), exactly as <c>DataverseServiceClientImpl</c> maps
+    /// them to <c>sprk_{name}</c> (task 060). The row is what a job read returns, so it must hold what was written.
+    /// </summary>
+    public Dictionary<Guid, Dictionary<string, object?>> JobRows { get; } = new();
+
+    /// <summary><c>createdon</c> per job row; the effective-state rule's abandoned-save check reads it (task 060).</summary>
+    public Dictionary<Guid, DateTime> JobCreatedOn { get; } = new();
+
+    /// <summary>When set, the NEXT job-row create fails, as it does when Dataverse is unavailable (task 060).</summary>
+    public bool FailNextJobCreate { get; set; }
+
+    /// <summary>
+    /// <c>sprk_payload</c>'s maximum length in Dataverse. A longer value makes the CREATE fail, the production
+    /// failure task 060 found: 27 of 40 saves in 60 days, because the payload carried the document's bytes.
+    /// </summary>
+    public const int PayloadMaxLength = 50_000;
+
     internal Guid RecordJob(object job)
     {
         lock (_gate)
@@ -1358,14 +1377,90 @@ public sealed class OfficeVersionSaveWorld
             var name = (string?)type.GetProperty("Name")?.GetValue(job) ?? string.Empty;
             var key = (string?)type.GetProperty("IdempotencyKey")?.GetValue(job) ?? string.Empty;
             var status = type.GetProperty("Status")?.GetValue(job) as int? ?? 0;
+            if (FailNextJobCreate)
+            {
+                FailNextJobCreate = false;
+                throw new InvalidOperationException("Dataverse unavailable (test)");
+            }
+
+            var payload = type.GetProperty("Payload")?.GetValue(job) as string;
+            if (payload is { Length: > PayloadMaxLength })
+            {
+                // Dataverse's own validation message (App Insights, 2026-09-30), so the save path sees what it sees live.
+                throw new InvalidOperationException(
+                    "A validation error occurred.  The length of the 'sprk_payload' attribute of the 'sprk_processingjob' "
+                    + $"entity exceeded the maximum allowed length of '{PayloadMaxLength}'.");
+            }
+
             var id = Guid.NewGuid();
             Jobs.Add((name, key));
             JobStatuses[id] = status;
+            JobRows[id] = type.GetProperties().ToDictionary(p => p.Name, p => p.GetValue(job));
+            JobCreatedOn[id] = DateTime.UtcNow;
             // Last write wins, so a key maps to its NEWEST job — the row the real query returns first
             // (DataverseServiceClientImpl.GetProcessingJobByIdempotencyKeyAsync orders by createdon desc, task 039).
             _jobIdsByKey[key] = id;
             return id;
         }
+    }
+
+    /// <summary>
+    /// Copies a job row to a NEW id that this process never created (task 060). A process that restarts, or a second
+    /// instance, holds no in-memory copy of a job it did not create itself, and reading that id is exactly that
+    /// situation, with the row byte-identical to the one the real save wrote.
+    /// </summary>
+    public Guid CloneJobRowAsAnotherProcessWouldSeeIt(Guid jobId)
+    {
+        lock (_gate)
+        {
+            var clone = Guid.NewGuid();
+            JobRows[clone] = new Dictionary<string, object?>(JobRows[jobId]);
+            JobStatuses[clone] = JobStatuses[jobId];
+            JobCreatedOn[clone] = JobCreatedOn[jobId];
+            return clone;
+        }
+    }
+
+    /// <summary>
+    /// The job read, as <c>DataverseServiceClientImpl.GetProcessingJobAsync</c> returns it: a typed
+    /// <see cref="ProcessingJobRecord"/> built from what the save wrote (task 060).
+    /// </summary>
+    /// <remarks>
+    /// Before task 060 production returned an ANONYMOUS type that the BFF read through <c>dynamic</c>, and this double
+    /// returned the same shape, so the reproduce-first tests went red exactly as production failed: a 404 on the status
+    /// poll, and an undetected duplicate (notes/060 §6). With no creator systemuser resolved here,
+    /// <c>InitiatedByOid</c> is null, as it is for any caller the resolver cannot map.
+    /// </remarks>
+    internal ProcessingJobRecord? ReadJob(Guid id)
+    {
+        lock (_gate)
+        {
+            return JobRows.ContainsKey(id) ? ToRecord(id) : null;
+        }
+    }
+
+    /// <summary>A stored row as the production reads return it. Callers hold <c>_gate</c>.</summary>
+    private ProcessingJobRecord ToRecord(Guid id)
+    {
+        var row = JobRows[id];
+        return new ProcessingJobRecord
+        {
+            Id = id,
+            Name = row.GetValueOrDefault("Name") as string,
+            JobType = row.GetValueOrDefault("JobType") as int?,
+            Status = JobStatuses.TryGetValue(id, out var status) ? status : 0,
+            Progress = row.GetValueOrDefault("Progress") as int?,
+            CurrentStage = row.GetValueOrDefault("CurrentStage") as string,
+            IdempotencyKey = row.GetValueOrDefault("IdempotencyKey") as string,
+            CorrelationId = row.GetValueOrDefault("CorrelationId") as string,
+            InitiatedBy = row.GetValueOrDefault("InitiatedBy") as Guid?,
+            InitiatedByOid = null,
+            Result = row.GetValueOrDefault("Result") as string,
+            ErrorCode = row.GetValueOrDefault("ErrorCode") as string,
+            ErrorMessage = row.GetValueOrDefault("ErrorMessage") as string,
+            CreatedOn = JobCreatedOn.TryGetValue(id, out var createdOn) ? createdOn : null,
+            CompletedDate = row.GetValueOrDefault("CompletedDate") as DateTime?,
+        };
     }
 
     /// <summary>
@@ -1380,24 +1475,36 @@ public sealed class OfficeVersionSaveWorld
         {
             if (update.GetType().GetProperty("Status")?.GetValue(update) is int status)
                 JobStatuses[id] = status;
+            // Task 060: every non-null column the update wrote (the real mapper skips nulls, so they leave the column
+            // unchanged). An update to a row that was never created is what Dataverse refuses: "Does Not Exist".
+            if (JobRows.TryGetValue(id, out var row))
+            {
+                foreach (var property in update.GetType().GetProperties())
+                {
+                    if (property.GetValue(update) is { } value)
+                        row[property.Name] = value;
+                }
+            }
         }
     }
 
-    internal object? FindJobByIdempotencyKey(string key)
+    internal ProcessingJobRecord? FindJobByIdempotencyKey(string key)
     {
         lock (_gate)
         {
             if (!_jobIdsByKey.TryGetValue(key, out var id))
                 return null;
-            dynamic existing = new System.Dynamic.ExpandoObject();
-            existing.Id = id;
-            // The row's REAL status (task 039, finding 2). This fixture used to answer Completed for every key,
-            // which hid the failed-job replay: a same-key retry after a failure was answered from a row the
-            // fixture claimed had succeeded.
-            existing.Status = JobStatuses.TryGetValue(id, out var status) ? status : 0;
-            existing.JobType = 0;
-            existing.Progress = 100;
-            return (object)existing;
+            // Task 060: the production shape. This used to return an ExpandoObject, which is public and fully dynamic, so
+            // the `dynamic` read succeeded here and failed in production (RuntimeBinderException, 2026-08-25). The row's
+            // REAL status (task 039, finding 2) and everything else the save wrote.
+            return JobRows.ContainsKey(id)
+                ? ToRecord(id)
+                : new ProcessingJobRecord
+                {
+                    Id = id,
+                    IdempotencyKey = key,
+                    Status = JobStatuses.TryGetValue(id, out var status) ? status : 0,
+                };
         }
     }
 
@@ -1832,6 +1939,11 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
             dataverse
                 .Setup(d => d.GetProcessingJobByIdempotencyKeyAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string key, CancellationToken _) => world.FindJobByIdempotencyKey(key));
+            // Task 060: the job read the status endpoint makes when it has no copy of its own. Unset before, so the loose
+            // mock answered null and the read was never exercised against a row the save had written.
+            dataverse
+                .Setup(d => d.GetProcessingJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, CancellationToken _) => world.ReadJob(id));
             // Task 039: the job's status is state the save path WRITES (Failed / Completed) and later READS back
             // through the idempotency lookup, so the world records it rather than letting the loose mock drop it.
             dataverse

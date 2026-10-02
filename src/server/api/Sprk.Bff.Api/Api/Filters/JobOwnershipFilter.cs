@@ -39,9 +39,12 @@ public static class JobOwnershipFilterExtensions
 /// Follows ADR-008: Use endpoint filters for resource-level authorization.
 /// </para>
 /// <para>
-/// Job ownership is determined by:
-/// 1. User created the job (sprk_createdby matches userId)
-/// 2. User is in the same tenant (future: team-based access)
+/// Job ownership is ONE rule: the job's recorded creator must equal the caller's Entra object id. The creator is the OID
+/// the save authenticated, kept in its view of the job (<c>sprk_result</c>, task 060). For a row written before that, it
+/// is the Entra OID of the <c>sprk_initiatedby</c> systemuser (task 067). There is no tenant or team rule, and a job
+/// that records no creator is refused.
+/// (Corrected 2026-10-01, task 060: this listed <c>sprk_createdby</c>, which is not the column, and a same-tenant rule
+/// the code has never had.)
 /// </para>
 /// <para>
 /// This filter expects:
@@ -169,9 +172,9 @@ public class JobOwnershipFilter : IEndpointFilter
         // because it reads as protection.
         //
         // The rule now: ownership must be positively PROVEN. Absent, blank or unreadable ownership data
-        // is a refusal, not a pass. The creator is persisted at create time (OfficeService.SaveAsync →
-        // sprk_initiatedby) and mapped back on the fallback read, so proving it is normally possible;
-        // when it is not, refusing is correct.
+        // is a refusal, not a pass. The creator is persisted at create time (OfficeService.SaveAsync → the save's view
+        // in sprk_result since task 060, and sprk_initiatedby since task 067) and read back from the job's row on every
+        // instance, so proving it is normally possible; when it is not, refusing is correct.
         var recordedOwner = jobStatus.CreatedBy;
         var ownerWasRecorded = !string.IsNullOrWhiteSpace(recordedOwner);
         var ownershipProven = ownerWasRecorded
@@ -179,10 +182,15 @@ public class JobOwnershipFilter : IEndpointFilter
 
         if (!ownershipProven)
         {
-            // Two distinct reason codes, ONE status and one caller-visible message. The split exists so
-            // operators can tell "this row predates the creator column" (expected, finite, drains as old
-            // jobs expire) from "someone asked for a job that is not theirs" (worth alerting on) without
-            // telling the caller anything extra — both are the same 403 with the same detail text.
+            // Two distinct reason codes, ONE status and one detail text. The split exists so operators can tell
+            // "this row records no creator" (rows written before task 067) from "someone asked for a job that is not
+            // theirs" (worth alerting on).
+            //
+            // ⚠️ CORRECTED 2026-10-01 (task 060): this said the split tells the caller "nothing extra". It does: the
+            // reasonCode is written into the 403 body below, as every Spaarke 403 writes its reasonCode, so a caller
+            // can see whether the job records a creator. That is little, because 403 versus 404 already tells a caller
+            // that the job exists, but the old comment was wrong. Rows without a creator do not "drain" either: job rows
+            // are durable and never expire, so they stay refused.
             var reasonCode = ownerWasRecorded
                 ? "sdap.office.job.ownership_mismatch"
                 : "sdap.office.job.ownership_unproven";
@@ -199,7 +207,7 @@ public class JobOwnershipFilter : IEndpointFilter
                 // LEGACY-ROW RULE (task 067): a job created before the creator was persisted has no
                 // owner to compare against, so it is refused — including to the user who really did
                 // create it. Refusing a legitimate poll on a pre-existing job is the acceptable cost;
-                // serving every job to everyone is not. These rows age out with normal job expiry.
+                // serving every job to everyone is not.
                 _logger?.LogWarning(
                     "Job ownership check failed CLOSED: job {JobId} records no creator, so ownership " +
                     "cannot be proven for user {UserId}. This is expected for jobs created before the " +

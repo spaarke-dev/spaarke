@@ -15,11 +15,12 @@ import { summaryStatusFromCode, type DocumentSummaryStatusName } from '../servic
  * identity, or hasn't resolved yet) — acceptance criterion "makes no profile read call" for the
  * no-identity case.
  *
- * Task 022 adds `generateProfile()`: POSTs the new `/api/office/documents/{id}/generate-profile`
- * trigger (fire-and-forget, 202 Accepted, mirrors Compose's shipped `refresh-profile` semantics —
- * unconditional overwrite, no confirmation). On a 202 the displayed status moves to Pending
- * immediately and the hook re-reads the record, per task 021's SAME status mapping — no second
- * status table.
+ * Task 022 adds `generateProfile()`: POSTs `/api/office/documents/{id}/generate-profile` (202 Accepted,
+ * unconditional overwrite, no confirmation). Since task 068 the 202 means a profile job is on the job
+ * queue, where it survives a server restart, and that job records `sprk_filesummarystatus` Pending →
+ * Completed or Failed. On a 202 the displayed status moves to Pending immediately and the hook re-reads
+ * the record ONCE, per task 021's SAME status mapping — no second status table. It does not poll, so
+ * the job's later status shows on the next read (#1090).
  *
  * Task 033 (§11 decision, recorded in `notes/033-find-index-gating-decisions.md`): the Find tab's
  * three-state gate needs `sprk_searchindexed` (and, for display, `sprk_searchindexname`) for the
