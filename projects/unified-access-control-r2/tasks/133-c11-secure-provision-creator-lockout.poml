@@ -4,7 +4,7 @@
     <title>C11 — secure provisioning can no longer lock the creator out: share before the owner move, verify the share survived, compensate on failure, and make a partially-provisioned record resumable instead of 409 — while a genuinely provisioned record still gets 409 already_provisioned</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C11)</phase>
     <gate>after-144 (task 144 rewrites Step 3 of the same endpoint to a named non-default owner team and generalizes provisioning to sprk_matter and sprk_workassignment; this task's fix must cover every root type provisioning handles once 144 lands)</gate>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-boundary .cs change (tags bff-api, auth, security) that reorders mutations on the secure-record isolation path and changes the idempotency contract of a live endpoint.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -209,6 +209,68 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL). The PR description states the ADR-003 path-C reasoning from the adr-tensions block.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-133">
+      COMPLETED-WITH-ESCALATION: code, tests, client, guide and the live-gate script are done. The live proof (steps 2 and
+      8) is a PENDING MANUAL GATE: this run was read-only against Dataverse by instruction, and the gate needs task 144's
+      live cutover first (the named team "Secure Record Owners" does not exist in dev yet). One owner decision is open
+      (F8 follow-up, below). Full record: notes/task-133-provision-creator-lockout.md.
+
+      CODE (ProvisionProjectEndpoint, all three roots).
+      (1) Before any write: WhoAmI (403 creator_unresolved, nothing written), the record's owner (owninguser or
+          owningteam; unreadable = 500 record_owner_unreadable), the creator's current share via the complete-or-throw
+          read, and SharePointEmbedded:ContainerTypeId (500 container_type_not_configured).
+      (2) SHARE-FIRST: the creator gets exactly CreatorAccessRights before the owner move (Grant, or Modify for an
+          existing share with other rights; read back). If the pre-call share set is unreadable, share-first is skipped
+          and the grant happens after the move. If the share to a creator who OWNS the record fails, it falls back to the
+          post-move grant (live gate (a) unproven) - otherwise it stops with nothing moved (creator_share_failed).
+      (3) Owner move, ALWAYS read back (even when the PATCH threw): moved / not moved (share-first grant taken back;
+          owner_assignment_failed|not_applied, "read back and is unchanged") / unverified (creator share kept or issued;
+          owner_assignment_unverified; if no share can be issued: creator_share_failed_resumable + CRITICAL log).
+      (4) Step 5.5 PROVES the creator holds exactly the creator mask on the moved record (re-issues it if the move dropped
+          it - live gate (b) unproven). If it cannot: COMPENSATE - owner back to the pre-call owner, read back, and the
+          creator's share restored to its pre-call mask (revoked if none, Modify back otherwise), read back -
+          creator_share_failed, "the same caller may retry". If the move back fails: creator_share_failed_resumable,
+          CRITICAL, administrator resume.
+      (5) Marker: owned by the named team AND sprk_containerid set = 409 already_provisioned, zero writes (existing test
+          unmodified). Owned with NO container = RESUME: share to the record's createdby (enabled, non-application user;
+          otherwise 409/500 resume_creator_unavailable with creatorState, nothing written, never the caller instead),
+          colleagues, container, record; response Resumed=true.
+      (6) Container failures: container_creation_failed (resumable by the same caller); container_not_recorded now
+          resumable (the named container is empty). sprk_issecure is never written on any path.
+      (7) Every false statement listed in the background corrected (7 named phrases: 0 hits in src), plus the
+          SummarizeFilesDialog "documents would go to the shared container" warning, projectService's container-cascade
+          comments and secure-project-fields-schema.md, found during execution.
+      (8) Client: provisioningService classifies all 22 codes to a state + `retryable`; messages describe state and never
+          advise retrying. New SecureProvisioningOutcome renders the advice and the "Try securing again" button only
+          when retryable, re-calls for the same project id, shows success; used by CreateProjectWizard and
+          SummarizeFilesDialog. SecureProjectSection reordered (sharing first). Guide SECURE-PROJECT-ENVIRONMENT-SETUP.md
+          section 7a: every reasonCode, the state it leaves, who recovers and how.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11). All server code in the existing endpoint; no new endpoint, service,
+      DI registration, option, job, package, column or interface. New surface: 6 reason codes (each a distinct recovery
+      the client must tell apart); RecordShareLevels.MaskForRightsCsv/RightsCsvForMask (extends the ONE mask table with
+      Share/Assign/Create - needed to confirm and restore the creator share exactly); ProvisionProjectResponse.Resumed
+      (additive; tells a resume from a forward run); SecureProvisioningOutcome.tsx (deviation from "no new component":
+      the wizard success config is static, so the stateful retry action needs a component; grep found no provisioning
+      retry anywhere; without it the server's "same caller may retry" is unactionable). Publish size: not measured (main
+      session).
+
+      ESCALATIONS. sharetopreviousowneronassign = False (did not fire). App-created roots: fires literally (1 matter
+      created by # mi-bff-api-dev) - answered by owner F8 (interim default shipped: refuse with its own code); verified
+      live that createdonbehalfby is EMPTY, so OWNER DECISION OPEN: option (a), a server-stamped creator column, is the
+      remaining persisted source. Team-owned non-provisioning container / create-time writer: did not fire (0 rows, 0
+      field-mapping rules, no code writer). Assign cascade (project/matter -> team, sharepointdocumentlocation,
+      sharepointdocument): fires literally; treated as answered by owner round 4 item 3; residual flagged. Share
+      reliability: not evaluable read-only; design does not depend on it.
+
+      TESTS. See the note section 8 (rewritten tests, each with its reason) and 8a (perturbation sweep 19/19 bite).
+      Final runs: BFF unit suite 13,586 passed / 0 failed / 54 skipped (13,640); NetArchTest 341/341; affected classes 126/126; Spaarke.UI.Components jest for the wizard folders 76/76 (CreateProjectWizard + SummarizeFilesWizard); package build (tsc) clean. Full package jest: 16 failures in 11 suites, all pre-existing and unrelated (none imports a changed file: surfaceLaunchRegistry drift, todoScoring sha256, AccessGrantModal, RecordHeader, ...).
+
+      PENDING MANUAL GATES (main session; after 144's cutover + a BFF deploy): notes/task-133-live-gate.ps1
+      -Step ShareFirstProof (a)(b)(e); wizard-created secure project + -Step Inspect (b); -Step StrandForResume + admin
+      provision call + Inspect (c); second provision call -> 409 with modifiedon/shares unchanged (d); the retry call on a
+      container-less stranded record (f). Task 143: the four share-writer sites are listed in note section 7.
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>

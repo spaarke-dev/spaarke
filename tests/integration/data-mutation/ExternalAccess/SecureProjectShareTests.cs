@@ -47,6 +47,12 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         return problem.RootElement.TryGetProperty("reasonCode", out var reason) ? reason.GetString() : null;
     }
 
+    private static async Task<string> DetailOf(HttpResponseMessage response)
+    {
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return problem.RootElement.TryGetProperty("detail", out var detail) ? detail.GetString() ?? "" : "";
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Provisioning: the creator's share is what makes the project reachable
     // ─────────────────────────────────────────────────────────────────────────
@@ -124,8 +130,12 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
             "a secure project that provisioning quietly shared with anyone else would defeat its own point");
     }
 
+    /// <summary>
+    /// <b>Rewritten by task 133 (C11)</b>: the identity is now resolved BEFORE any mutation, so this refusal moves
+    /// nothing — it used to run after the owner move, and leave the locked box its name says it prevents.
+    /// </summary>
     [Fact]
-    public async Task Provisioning_WhenTheCallersIdentityCannotBeEstablished_FailsRatherThanLeavingALockedBox()
+    public async Task Provisioning_WhenTheCallersIdentityCannotBeEstablished_RefusesBeforeChangingAnything()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -137,16 +147,28 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorUnresolved);
 
+        _fixture.Updates.Should().BeEmpty("the creator is resolved before the owner move, so nothing moved");
         _fixture.Grants.Should().BeEmpty();
-        _fixture.CreatedContainerDisplayNames.Should().BeEmpty(
-            "the share step runs BEFORE container creation precisely so a share failure orphans nothing");
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
     }
 
+    /// <summary>
+    /// <b>Rewritten by task 133 (C11)</b>: a creator-share failure used to leave the record owned by the memberless
+    /// team with nobody shared, and say "retry" to a creator who could no longer pass the Write gate. Now the record's
+    /// owner and the creator's share are back where they were — read back — and the same caller's next call succeeds.
+    /// </summary>
+    /// <remarks>
+    /// The record is owned by an ordinary business-unit team here, so the share-first grant is the one that fails and
+    /// the run stops before the move: no owner PATCH is sent at all.
+    /// </remarks>
     [Fact]
-    public async Task Provisioning_WhenTheCreatorsShareFails_FailsAndCreatesNoContainer()
+    public async Task Provisioning_WhenTheCreatorsShareFailsBeforeTheMove_ChangesNothing_AndTheSameCallerCanRetry()
     {
         var projectId = Guid.NewGuid();
-        _fixture.SeedProject(projectId);
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
         _fixture.FailShareForPrincipal = ProvisionProjectTestFixture.CallerSystemUserId;
         var client = _fixture.CreateAuthenticatedClient();
 
@@ -154,7 +176,273 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
 
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        (await DetailOf(response)).Should().Contain("BEFORE moving it").And.Contain("as it was before the call");
+        _fixture.Updates.Should().BeEmpty("share-first stops the run before the owner move");
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.SharesOn(projectId).Should().BeEmpty();
+        _fixture.IsSecureOf(projectId).Should().BeTrue("provisioning never clears the secure flag");
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        _fixture.FailShareForPrincipal = null;
+        var retry = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+    }
+
+    /// <summary>
+    /// The creator owns the record and every share to them fails. Share-first falls back to the post-move grant
+    /// (a share to a record's current owner is live gate (a)); that fails too, so the move is UNDONE: owner read back
+    /// as the creator, no share left behind, no container — and the same caller's next call succeeds.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheCreatorsShareFailsAfterTheMove_MovesTheRecordBack_AndTheSameCallerCanRetry()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId); // owned by the caller, as the wizard creates it
+        _fixture.FailShareForPrincipal = ProvisionProjectTestFixture.CallerSystemUserId;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        (await DetailOf(response)).Should().Contain("the move was undone").And.Contain("The same caller may retry");
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId,
+            "compensation moves the record back to its pre-call owner, verified by read-back");
+        _fixture.OwningTeamOf(projectId).Should().BeNull();
+        _fixture.SharesOn(projectId).Should().BeEmpty("the pre-call share set was empty");
+        _fixture.IsSecureOf(projectId).Should().BeTrue();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        _fixture.FailShareForPrincipal = null;
+        var retry = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// Compensation when the pre-call owner is a TEAM, not the creator: the share-first grant succeeded, the post-move
+    /// read-back of the shares then throws (treated as a failure, never as "share present"), so the move is undone AND
+    /// the share this call issued is revoked — the creator ends holding nothing they did not hold before.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenThePostMoveShareReadThrows_UndoesTheMove_AndRevokesTheShareItIssued()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0,
+            "a share-first grant must never outlive a compensated run — on a team-owned record it would hand the " +
+            "creator ShareAccess they did not hold before");
+        _fixture.Revokes.Should().ContainSingle(r => r.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The creator held a share with OTHER rights before the call. The share-first step sets it to exactly the
+    /// creator rights; when the run is compensated it is put back to exactly what it was — the pre-call share SET, not
+    /// merely "a share".
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenCompensated_RestoresTheCreatorsPreCallShareRights()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.SeedShare(projectId, DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId),
+            "ReadAccess,WriteAccess,AppendAccess,AppendToAccess,DeleteAccess");
+        var before = _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        _fixture.Modifies.Should().HaveCount(2, "set to the creator rights, then restored");
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(before);
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+    }
+
+    /// <summary>
+    /// The pre-call share set cannot be read: share-first is NOT attempted (it could not be undone exactly), and the
+    /// creator's share is issued after the owner move instead.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenThePreCallSharesCannotBeRead_GrantsAfterTheMoveInstead()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.FailNextStrictShareReads = 1; // the pre-call read
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var ownerMove = _fixture.Updates.Single(u => u.Payload.ContainsKey("ownerid@odata.bind")).Sequence;
+        _fixture.Grants.Should().ContainSingle()
+            .Which.Sequence.Should().BeGreaterThan(ownerMove, "no grant may precede the owner move on this path");
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The share AND the compensating move both fail: the record is owned by the memberless team without a creator
+    /// share. A distinct reason code, a detail that names that state, never "nothing moved" and never "retry" (the
+    /// creator no longer passes the Write gate), and a CRITICAL log line for the operator.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheShareAndTheCompensationBothFail_SaysSoWithItsOwnReasonCode()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailOwnerBindTo = businessUnitTeam;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        var detail = await DetailOf(response);
+        detail.Should().Contain("without a confirmed creator share").And.Contain("calls provisioning again");
+        detail.Should().NotContainEquivalentOf("nothing").And.NotContainEquivalentOf("retry");
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.Logs.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(projectId.ToString()));
+    }
+
+    /// <summary>
+    /// Live gate (a) disproved: Dataverse refuses a share to the record's CURRENT owner. Provisioning still succeeds
+    /// for a creator-owned record — the share is issued once the team owns it.
+    /// </summary>
+    /// <remarks>Beyond the stated contract: the design hedges the unproven platform behaviour the live gate decides.</remarks>
+    [Fact]
+    public async Task Provisioning_WhenAShareToTheCurrentOwnerIsRefused_GrantsAfterTheMove()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.GrantToCurrentOwnerRefused = true;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Live gate (b) disproved: the reassignment drops the share-first grant. The post-move proof sees it missing and
+    /// re-issues it; the run succeeds with the creator holding exactly the creator rights.
+    /// </summary>
+    /// <remarks>Beyond the stated contract: the design hedges the unproven platform behaviour the live gate decides.</remarks>
+    [Fact]
+    public async Task Provisioning_WhenTheMoveDropsTheShare_ReissuesIt()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.AssignDropsShareOf = ProvisionProjectTestFixture.CallerSystemUserId;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Where(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId).Should().HaveCount(2);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+    }
+
+    /// <summary>
+    /// The owner PATCH is refused and the read-back shows the record NOT moved: nothing moved, and the share-first grant
+    /// is taken back so the creator holds exactly what they held before.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheOwnerMoveIsRefused_TakesTheShareFirstGrantBack()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.FailOwnerBindTo = ProvisionProjectTestFixture.SecureOwnerTeamId;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentFailed);
+        (await DetailOf(response)).Should().Contain("read back and is unchanged");
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SharesOn(projectId).Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A row read without any owner cannot be moved safely — the move could not be undone — so it is refused before
+    /// any change.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheRecordsOwnerCannotBeRead_RefusesBeforeChangingAnything()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningUserId: Guid.Empty);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonRecordOwnerUnreadable);
+        _fixture.Updates.Should().BeEmpty();
+        _fixture.Grants.Should().BeEmpty();
+    }
+
+    /// <summary>Named colleagues are shared only once the creator's share is proven — after the owner move.</summary>
+    [Fact]
+    public async Task Provisioning_SharesColleagues_OnlyAfterTheCreatorsShareIsProvenOnTheMovedRecord()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            ProvisionRoute, new { projectId, sharePrincipalIds = new[] { colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var ownerMove = _fixture.Updates.Single(u => u.Payload.ContainsKey("ownerid@odata.bind")).Sequence;
+        _fixture.Grants.Single(g => g.Principal.Id == colleague).Sequence.Should().BeGreaterThan(ownerMove);
+    }
+
+    /// <summary>
+    /// When a creator share fails, a named colleague is never shared to: colleagues follow a PROVEN creator share, so
+    /// they cannot change the outcome of a refused run.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheCreatorsShareFails_SharesNoColleague()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.FailShareForPrincipal = ProvisionProjectTestFixture.CallerSystemUserId;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            ProvisionRoute, new { projectId, sharePrincipalIds = new[] { colleague } });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == colleague);
     }
 
     [Fact]

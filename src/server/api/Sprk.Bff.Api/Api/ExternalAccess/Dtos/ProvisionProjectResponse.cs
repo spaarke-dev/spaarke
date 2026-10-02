@@ -49,6 +49,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="RecordType">The provisioned record's type token: <c>project</c> | <c>matter</c> | <c>workassignment</c>.</param>
 /// <param name="RecordId">The provisioned record's id.</param>
+/// <param name="Resumed">
+/// True when this call FINISHED an earlier run that stopped after the owner move (task 133): the record was already
+/// owned by the owner team with no container recorded. <c>SharedToCreatorSystemUserId</c> is then the record's
+/// <c>createdby</c> user, not necessarily the caller. Additive to the JSON contract.
+/// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
@@ -58,4 +63,5 @@ public record ProvisionProjectResponse(
     Guid SharedToCreatorSystemUserId,
     int AdditionalPrincipalsShared,
     string RecordType,
-    Guid RecordId);
+    Guid RecordId,
+    bool Resumed = false);

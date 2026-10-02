@@ -105,6 +105,86 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Every share the endpoint revoked, in order.</summary>
     public ConcurrentBag<RecordedShare> Revokes { get; } = new();
 
+    /// <summary>Every ModifyAccess the endpoint issued (task 133: an existing share set to exact rights, or restored).</summary>
+    public ConcurrentBag<RecordedShare> Modifies { get; } = new();
+
+    /// <summary>
+    /// The POA shares as they stand: (record, principal) → the rights mask Dataverse would store. Grants union into it,
+    /// modifies replace, revokes remove — and BOTH share reads answer from it, so a read sees what the writes did
+    /// (task 133; before it the reads were derived from <see cref="Grants"/>, which a revoke never shrank).
+    /// </summary>
+    private readonly ConcurrentDictionary<(Guid RecordId, DataversePrincipalRef Principal), int> _shares = new();
+
+    /// <summary>Seeds a share that exists before the call (task 133: the pre-call share set compensation restores).</summary>
+    public void SeedShare(Guid recordId, DataversePrincipalRef principal, string accessRightsCsv)
+        => _shares[(recordId, principal)] = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
+
+    /// <summary>The mask <paramref name="systemUserId"/>'s share on the record carries now (0 = no share).</summary>
+    public int ShareMaskOf(Guid recordId, Guid systemUserId)
+        => _shares.TryGetValue((recordId, DataversePrincipalRef.User(systemUserId)), out var mask) ? mask : 0;
+
+    /// <summary>
+    /// The owner's S5 invariant (session 27 round 3; task 133 amendment R3): at least one person can open the record.
+    /// True when it is NOT owned by the memberless secure owner team (its pre-call owner — the creator or their
+    /// business-unit team — still reaches it), or when some systemuser holds a share carrying Read.
+    /// </summary>
+    public bool SomeoneCanOpen(Guid recordId)
+        => OwningTeamOf(recordId) != SecureOwnerTeamId
+           || _shares.Any(s => s.Key.RecordId == recordId
+                               && s.Key.Principal.Kind == DataversePrincipalKind.SystemUser
+                               && (s.Value & 1) == 1);
+
+    /// <summary>Every principal holding a share on the record now, with its mask.</summary>
+    public IReadOnlyDictionary<DataversePrincipalRef, int> SharesOn(Guid recordId)
+        => _shares.Where(k => k.Key.RecordId == recordId).ToDictionary(k => k.Key.Principal, k => k.Value);
+
+    // ── Task 133: the platform behaviours the live gate proves, and the faults compensation must survive ──
+
+    /// <summary>Live gate (a) disproved: GrantAccess to the record's CURRENT owning user is refused.</summary>
+    public bool GrantToCurrentOwnerRefused { get; set; }
+
+    /// <summary>Live gate (b) disproved: an owner change drops this principal's share on the record.</summary>
+    public Guid? AssignDropsShareOf { get; set; }
+
+    /// <summary>GrantAccess / ModifyAccess for this principal throws while the secure owner team owns the record.</summary>
+    public Guid? FailShareWhileSecureOwned { get; set; }
+
+    /// <summary>The STRICT share read throws while the secure owner team owns the record.</summary>
+    public bool FailStrictShareReadWhileSecureOwned { get; set; }
+
+    /// <summary>The next N STRICT share reads throw (the pre-call read is the first one provisioning issues).</summary>
+    public int FailNextStrictShareReads { get; set; }
+
+    /// <summary>An <c>ownerid</c> PATCH binding to this principal throws (recorded first) — a failed compensation.</summary>
+    public Guid? FailOwnerBindTo { get; set; }
+
+    /// <summary>
+    /// The owner read-back throws: any root read whose projection omits <c>sprk_issecure</c> (Step 1 reads it; the
+    /// read-back after an assignment does not).
+    /// </summary>
+    public bool OwnerReadBackFails { get; set; }
+
+    /// <summary>Systemusers a resume may look up by id, as (disabled, application user). The caller is seeded by Reset.</summary>
+    public Dictionary<Guid, (bool IsDisabled, bool IsApplicationUser)> SystemUsers { get; } = new();
+
+    /// <summary>When false, a systemuser read by id throws (task 133: an unreadable createdby).</summary>
+    public bool SystemUserByIdReadSucceeds { get; set; } = true;
+
+    /// <summary>The container type the host is configured with; <see cref="Reset"/> restores it.</summary>
+    public const string ConfiguredContainerTypeId = "11111111-2222-3333-4444-555555555555";
+
+    /// <summary>
+    /// Changes <c>SharePointEmbedded:ContainerTypeId</c> on the running host — the endpoint reads it per request
+    /// (task 133: an unconfigured container type is refused before any change).
+    /// </summary>
+    public void SetContainerTypeId(string? value)
+    {
+        Services.GetRequiredService<IConfiguration>()["SharePointEmbedded:ContainerTypeId"] = value;
+        _containerTypeChanged = true;
+    }
+
+    private bool _containerTypeChanged;
+
     /// <summary>When false, the caller's Dataverse identity cannot be established.</summary>
     public bool CallerSystemUserIdResolves { get; set; } = true;
 
@@ -126,9 +206,15 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Captured log entries, so a test can assert a warning was actually WRITTEN.</summary>
     public LogCapture Logs { get; } = new();
 
-    /// <summary>One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke.</summary>
+    /// <summary>
+    /// One recorded POA operation. <c>AccessRightsCsv</c> is null for a revoke. <c>Sequence</c> shares
+    /// <see cref="RecordedUpdate"/>'s counter, so a test can order a share against an owner PATCH (task 133).
+    /// </summary>
     public sealed record RecordedShare(
-        string EntitySet, Guid RecordId, DataversePrincipalRef Principal, string? AccessRightsCsv);
+        string EntitySet, Guid RecordId, DataversePrincipalRef Principal, string? AccessRightsCsv, int Sequence = 0);
+
+    /// <summary>The next value of the counter <see cref="RecordedUpdate"/> and <see cref="RecordedShare"/> share.</summary>
+    internal int NextSequence() => Interlocked.Increment(ref _updateSequence);
 
     /// <summary>Container display names passed to SPE, so a test can prove a container was created.</summary>
     public ConcurrentBag<string> CreatedContainerDisplayNames { get; } = new();
@@ -186,32 +272,41 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
     private sealed record SeededRecord(
         string EntitySet, Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
-        Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null);
+        Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null, Guid? CreatedBy = null);
 
-    /// <summary>Seeds a project row.</summary>
+    /// <summary>
+    /// Seeds a project row. Every Dataverse row has an owner and a creator, so a row seeded without an owning team is
+    /// owned by the caller (the wizard's own create), and every row is created by the caller unless
+    /// <paramref name="createdBy"/> says otherwise (task 133: what compensation restores, and who a resume shares to).
+    /// </summary>
     public void SeedProject(
         Guid projectId,
         Guid? owningTeamId = null,
         string? containerId = null,
         Guid? legacySecurityBuId = null,
         bool isSecure = true,
-        Guid? owningBusinessUnitId = null)
-        => Seed(ProjectEntitySet, projectId, owningTeamId, containerId, legacySecurityBuId, isSecure, owningBusinessUnitId);
+        Guid? owningBusinessUnitId = null,
+        Guid? owningUserId = null,
+        Guid? createdBy = null)
+        => Seed(ProjectEntitySet, projectId, owningTeamId, containerId, legacySecurityBuId, isSecure, owningBusinessUnitId,
+            owningUserId, createdBy);
 
     /// <summary>Seeds a matter row (task 144).</summary>
     public void SeedMatter(Guid matterId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true)
-        => Seed(MatterEntitySet, matterId, owningTeamId, containerId, null, isSecure, null);
+        => Seed(MatterEntitySet, matterId, owningTeamId, containerId, null, isSecure, null, null, null);
 
     /// <summary>Seeds a work-assignment row (task 144).</summary>
     public void SeedWorkAssignment(Guid workAssignmentId, Guid? owningTeamId = null, string? containerId = null, bool isSecure = true)
-        => Seed(WorkAssignmentEntitySet, workAssignmentId, owningTeamId, containerId, null, isSecure, null);
+        => Seed(WorkAssignmentEntitySet, workAssignmentId, owningTeamId, containerId, null, isSecure, null, null, null);
 
     private void Seed(
         string entitySet, Guid id, Guid? owningTeamId, string? containerId, Guid? legacySecurityBuId, bool isSecure,
-        Guid? owningBusinessUnitId)
+        Guid? owningBusinessUnitId, Guid? owningUserId, Guid? createdBy)
         => _records[id] = new SeededRecord(
             entitySet, id, owningTeamId, containerId, legacySecurityBuId, isSecure,
-            OwningBusinessUnitId: owningBusinessUnitId ?? BusinessUnitOf(owningTeamId));
+            OwningUserId: owningTeamId is null ? owningUserId ?? CallerSystemUserId : null,
+            OwningBusinessUnitId: owningBusinessUnitId ?? BusinessUnitOf(owningTeamId),
+            CreatedBy: createdBy ?? CallerSystemUserId);
 
     /// <summary>The BU a team owner places a record in — what Dataverse derives <c>owningbusinessunit</c> from.</summary>
     private static Guid? BusinessUnitOf(Guid? owningTeamId) =>
@@ -260,6 +355,21 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         _updateSequence = 0;
         Grants.Clear();
         Revokes.Clear();
+        Modifies.Clear();
+        _shares.Clear();
+        GrantToCurrentOwnerRefused = false;
+        AssignDropsShareOf = null;
+        FailShareWhileSecureOwned = null;
+        FailStrictShareReadWhileSecureOwned = false;
+        FailNextStrictShareReads = 0;
+        FailOwnerBindTo = null;
+        OwnerReadBackFails = false;
+        SystemUsers.Clear();
+        SystemUsers[CallerSystemUserId] = (false, false);
+        SystemUserByIdReadSucceeds = true;
+        if (_containerTypeChanged)
+            SetContainerTypeId(ConfiguredContainerTypeId);
+        _containerTypeChanged = false;
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
         FailShareForPrincipal = null;
@@ -281,7 +391,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 // names are honoured.
                 ["SecureRecord:BusinessUnitName"] = SecureBuName,
                 ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
-                ["SharePointEmbedded:ContainerTypeId"] = "11111111-2222-3333-4444-555555555555"
+                ["SharePointEmbedded:ContainerTypeId"] = ConfiguredContainerTypeId
             });
         });
 
@@ -363,6 +473,14 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         var flat = Flatten(payload);
         Updates.Add(new RecordedUpdate(entitySet, id, flat, Interlocked.Increment(ref _updateSequence)));
 
+        if (FailOwnerBindTo is { } refusedOwner
+            && flat.TryGetValue("ownerid@odata.bind", out var refusedBind)
+            && refusedBind is not null
+            && ParseIdFromBind(refusedBind) == refusedOwner)
+        {
+            throw new InvalidOperationException("Dataverse 403: simulated refusal of the ownership assignment.");
+        }
+
         if (flat.ContainsKey("sprk_containerid") && !ContainerStampSucceeds)
         {
             throw new InvalidOperationException(
@@ -383,6 +501,10 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     _records[id] = ownerBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
                         ? record with { OwningUserId = parsed, OwningTeamId = null, OwningBusinessUnitId = null }
                         : record with { OwningTeamId = parsed, OwningUserId = null, OwningBusinessUnitId = BusinessUnitOf(parsed) };
+
+                    // Live gate (b) disproved: the reassignment drops this principal's share.
+                    if (AssignDropsShareOf is { } dropped)
+                        _shares.TryRemove((id, DataversePrincipalRef.User(dropped)), out _);
                 }
             }
 
@@ -444,7 +566,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         "sprk_issecure", "sprk_accesspermission", "sprk_containerid", "sprk_searchindexname",
         "_sprk_securitybu_value", "_sprk_externalaccount_value", "_sprk_mattertype_value",
         "_sprk_practicearea_value", "statecode", "statuscode", "createdon", "modifiedon",
-        "ownerid", "_owningteam_value", "_owninguser_value", "_owningbusinessunit_value"
+        "ownerid", "_owningteam_value", "_owninguser_value", "_owningbusinessunit_value", "_createdby_value"
     };
 
     /// <summary>The <c>sprk_matter</c> columns these endpoints may read (live metadata 2026-10-01, task 144).</summary>
@@ -452,7 +574,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     {
         "sprk_matterid", "sprk_mattername", "sprk_matternumber", "sprk_issecure", "sprk_accesspermission",
         "sprk_containerid", "_sprk_securitybu_value", "statecode", "statuscode", "createdon", "modifiedon",
-        "ownerid", "_owningteam_value", "_owninguser_value", "_owningbusinessunit_value"
+        "ownerid", "_owningteam_value", "_owninguser_value", "_owningbusinessunit_value", "_createdby_value"
     };
 
     /// <summary>
@@ -463,7 +585,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     {
         "sprk_workassignmentid", "sprk_name", "sprk_issecure", "sprk_accesspermission", "sprk_containerid",
         "_sprk_securitybu_value", "statecode", "statuscode", "createdon", "modifiedon",
-        "ownerid", "_owningteam_value", "_owninguser_value", "_owningbusinessunit_value"
+        "ownerid", "_owningteam_value", "_owninguser_value", "_owningbusinessunit_value", "_createdby_value"
     };
 
     /// <summary>
@@ -527,6 +649,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                          && filter is not null
                          && filter.Contains(r.Id.ToString(), StringComparison.OrdinalIgnoreCase));
 
+                if (seeded is not null && OwnerReadBackFails
+                    && !(select ?? string.Empty).Contains("sprk_issecure", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Dataverse 503: simulated failure reading the owner back.");
+                }
+
                 if (seeded is not null)
                 {
                     var (idColumn, nameColumn, displayName) = entitySet switch
@@ -557,6 +685,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
                     if (seeded.OwningBusinessUnitId is { } owningBu)
                         row["_owningbusinessunit_value"] = owningBu;
+
+                    if (seeded.CreatedBy is { } createdBy && createdBy != Guid.Empty)
+                        row["_createdby_value"] = createdBy;
 
                     payload.Add(row);
                 }
@@ -627,6 +758,23 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     {
                         ["systemuserid"] = m
                     }));
+                }
+                break;
+
+            case "systemusers" when filter is not null && filter.Contains("systemuserid eq ", StringComparison.OrdinalIgnoreCase):
+                // Task 133: a resume reads the record's createdby by id.
+                if (!SystemUserByIdReadSucceeds)
+                    throw new InvalidOperationException("Dataverse 503: simulated systemuser read failure.");
+
+                foreach (var (userId, (isDisabled, isApplicationUser)) in SystemUsers)
+                {
+                    if (!filter.Contains(userId.ToString(), StringComparison.OrdinalIgnoreCase)) continue;
+                    payload.Add(new Dictionary<string, object?>
+                    {
+                        ["systemuserid"] = userId,
+                        ["isdisabled"] = isDisabled,
+                        ["applicationid"] = isApplicationUser ? Guid.Parse("a0000000-0000-0000-0000-0000000000a9") : null
+                    });
                 }
                 break;
 
@@ -758,10 +906,21 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             string entitySetName, Guid recordId, DataversePrincipalRef principal,
             string accessRightsCsv, CancellationToken ct = default)
         {
-            if (_fixture.FailShareForPrincipal == principal.Id)
-                throw new InvalidOperationException($"Seeded share failure for {principal.Id}.");
+            ThrowIfWriteRefused(recordId, principal);
 
-            _fixture.Grants.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv));
+            if (_fixture.GrantToCurrentOwnerRefused
+                && principal.Kind == DataversePrincipalKind.SystemUser
+                && _fixture.OwningUserOf(recordId) == principal.Id)
+            {
+                throw new InvalidOperationException($"Seeded refusal: {principal.Id} owns the record.");
+            }
+
+            _fixture.Grants.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv, _fixture.NextSequence()));
+
+            // GrantAccess on an existing share is not documented to replace its rights; the double unions them, the
+            // conservative reading for a test that asserts what a share may carry.
+            var mask = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
+            _fixture._shares.AddOrUpdate((recordId, principal), mask, (_, existing) => existing | mask);
             return Task.CompletedTask;
         }
 
@@ -773,7 +932,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             if (_fixture.FailRevokeForPrincipal == principal.Id)
                 throw new InvalidOperationException($"Seeded revoke failure for {principal.Id}.");
 
-            _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null));
+            _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence()));
+            _fixture._shares.TryRemove((recordId, principal), out _);
             return Task.CompletedTask;
         }
 
@@ -787,29 +947,55 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             }
 
             return Task.FromResult<IReadOnlyList<DataversePrincipalAccess>>(
-                _fixture.Grants
-                    .Where(g => g.RecordId == recordId)
-                    .Select(g => new DataversePrincipalAccess(g.Principal, 1, DateTimeOffset.UtcNow))
+                _fixture._shares
+                    .Where(s => s.Key.RecordId == recordId)
+                    .Select(s => new DataversePrincipalAccess(s.Key.Principal, s.Value, DateTimeOffset.UtcNow))
                     .ToList());
         }
 
-        // Provisioning creates shares and never changes one, so a call here means the endpoint's behaviour changed.
+        // Task 133: provisioning sets an EXISTING creator share to exact rights, and restores one on compensation.
         public Task ModifyAccessAsync(
             string entitySetName, Guid recordId, DataversePrincipalRef principal,
             string accessRightsCsv, CancellationToken ct = default)
-            => throw new NotSupportedException("Provisioning creates shares; it never modifies one.");
+        {
+            ThrowIfWriteRefused(recordId, principal);
+
+            _fixture.Modifies.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv, _fixture.NextSequence()));
+            _fixture._shares[(recordId, principal)] = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
+            return Task.CompletedTask;
+        }
 
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(
             string entityLogicalName, Guid recordId, CancellationToken ct = default)
         {
-            if (!_fixture.StrictShareReadSucceeds)
+            if (!_fixture.StrictShareReadSucceeds
+                || (_fixture.FailStrictShareReadWhileSecureOwned
+                    && _fixture.OwningTeamOf(recordId) == SecureOwnerTeamId))
             {
                 throw new InvalidOperationException(
                     $"The shares on {entityLogicalName}({recordId}) could not be read completely: " +
                     "seeded refusal.");
             }
 
+            if (_fixture.FailNextStrictShareReads > 0)
+            {
+                _fixture.FailNextStrictShareReads--;
+                throw new InvalidOperationException(
+                    $"The shares on {entityLogicalName}({recordId}) could not be read completely: " +
+                    "seeded one-off refusal.");
+            }
+
             return GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
+        }
+
+        /// <summary>The write refusals Grant and Modify share (a creator share is written by either).</summary>
+        private void ThrowIfWriteRefused(Guid recordId, DataversePrincipalRef principal)
+        {
+            if (_fixture.FailShareForPrincipal == principal.Id)
+                throw new InvalidOperationException($"Seeded share failure for {principal.Id}.");
+
+            if (_fixture.FailShareWhileSecureOwned == principal.Id && _fixture.OwningTeamOf(recordId) == SecureOwnerTeamId)
+                throw new InvalidOperationException($"Seeded share failure for {principal.Id} on a team-owned record.");
         }
     }
 

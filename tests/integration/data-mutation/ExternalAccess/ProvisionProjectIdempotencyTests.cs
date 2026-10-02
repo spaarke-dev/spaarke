@@ -427,29 +427,243 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
     }
 
     /// <summary>
-    /// Claimed-but-incomplete is still refused, and the refusal says which state it found.
+    /// Claimed-but-incomplete is RESUMED: the share goes to the record's <c>createdby</c> user (exactly the creator
+    /// rights), a container is created and recorded, 200 — and the caller, an administrator here, gets no share.
     /// </summary>
     /// <remarks>
-    /// Ownership without a container means an earlier run claimed the project and then failed. A blind
-    /// re-run is where the most damage happens, so it is refused — but the operator has to be able to
-    /// tell "this already worked" from "this half-worked", or the natural response is to try again.
+    /// <b>Rewritten by task 133 (C11).</b> This test pinned a 409 for this state. That refusal WAS the lock-out: a
+    /// record owned by the memberless team with no creator share could not be finished by its creator (no Write) nor
+    /// by anyone else (409). Task 076 made Step 7 the only writer of <c>sprk_containerid</c>, so "owned, no container"
+    /// now reliably means "an earlier run stopped after the move", which is safe to finish.
     /// </remarks>
     [Fact]
-    public async Task ProvisionProject_WhenOwnershipWasClaimedButNoContainerRecorded_IsRefusedAndSaysSo()
+    public async Task ProvisionProject_WhenOwnershipWasClaimedButNoContainerRecorded_ResumesForTheRecordsCreator()
     {
         var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        _fixture.SystemUsers[creator] = (false, false);
         _fixture.SeedProject(
             projectId,
             owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
-            containerId: null);
+            containerId: null,
+            createdBy: creator);
+        using var client = _fixture.CreateEntitledClient(); // the caller is NOT the creator
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().ContainSingle().Which.Should().Match<ProvisionProjectTestFixture.RecordedShare>(g =>
+            g.Principal.Id == creator && g.AccessRightsCsv == ProvisionProjectEndpoint.CreatorAccessRights);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0,
+            "a resume never widens the access list to whoever called it (owner decision F8)");
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.Updates.Should().NotContain(u => u.Payload.ContainsKey("ownerid@odata.bind"),
+            "the record is already owned by the team");
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("sharedToCreatorSystemUserId").GetGuid().Should().Be(creator);
+    }
+
+    /// <summary>A resume whose creator already holds exactly the creator rights writes no second share.</summary>
+    [Fact]
+    public async Task ProvisionProject_WhenResumingAndTheCreatorShareExists_IssuesNoSecondGrant()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.SeedShare(projectId, Spaarke.Dataverse.DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId),
+            ProvisionProjectEndpoint.CreatorAccessRights);
         using var client = _fixture.CreateEntitledClient();
 
         var response = await ProvisionAsync(client, projectId);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("no SPE container recorded",
-            "the operator needs to distinguish a completed provision from a claimed-then-failed one");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.Modifies.Should().BeEmpty();
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// A resume whose <c>createdby</c> is not a usable person refuses with its own reason code — and shares to nobody,
+    /// least of all the caller — creating nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("application-user")]
+    [InlineData("absent")]
+    [InlineData("unreadable")]
+    public async Task ProvisionProject_WhenResumingAndTheCreatorIsNotAUsablePerson_RefusesAndSharesToNobody(string state)
+    {
+        var projectId = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        switch (state)
+        {
+            case "disabled": _fixture.SystemUsers[creator] = (true, false); break;
+            case "application-user": _fixture.SystemUsers[creator] = (false, true); break;
+            case "unreadable": _fixture.SystemUsers[creator] = (false, false); _fixture.SystemUserByIdReadSucceeds = false; break;
+        }
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId, createdBy: creator);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        response.IsSuccessStatusCode.Should().BeFalse();
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("creatorState").GetString().Should().Be(state);
+        _fixture.Grants.Should().BeEmpty("it is never shared to the caller as a substitute");
+        _fixture.Updates.Should().BeEmpty();
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// A resume runs every ensure step the forward path runs: the creator share, the named colleagues, the container
+    /// and its record — everything but the owner move it no longer needs.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_Resume_RunsEveryStepTheForwardPathRunsExceptTheMove()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId);
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await client.PostAsJsonAsync(Route, new { projectId, sharePrincipalIds = new[] { colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Select(g => (g.Principal.Id, g.AccessRightsCsv)).Should().BeEquivalentTo(new[]
+        {
+            (ProvisionProjectTestFixture.CallerSystemUserId, ProvisionProjectEndpoint.CreatorAccessRights),
+            (colleague, ProvisionProjectEndpoint.CollaboratorAccessRights)
+        });
+        _fixture.CreatedContainerDisplayNames.Should().ContainSingle();
+        _fixture.Updates.Should().ContainSingle().Which.Payload.Should().ContainKey("sprk_containerid");
+    }
+
+    /// <summary>
+    /// Self-service resume after a container failure: the record is left secured and shared with no container; the
+    /// CREATOR's own next call (their Write comes from that share) completes it, without a second creator grant.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_AfterAContainerFailure_TheCreatorsOwnRetryResumesAndCompletes()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.SpeContainerCreationSucceeds = false;
+        using var client = _fixture.CreateEntitledClient();
+
+        var first = await ProvisionAsync(client, projectId);
+
+        (await ReasonCodeOf(first)).Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        (await first.Content.ReadAsStringAsync()).Should().Contain("resumes from here");
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue("the creator's share is in place");
+
+        _fixture.SpeContainerCreationSucceeds = true;
+        var retry = await ProvisionAsync(client, projectId);
+
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+        _fixture.Grants.Where(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().ContainSingle("the resumed run finds the share and does not issue it again");
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// After a container that could not be RECORDED, the next call resumes too, and records a new container.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_AfterTheContainerCouldNotBeRecorded_TheNextCallResumesAndRecordsOne()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.ContainerStampSucceeds = false;
+        using var client = _fixture.CreateEntitledClient();
+
+        var first = await ProvisionAsync(client, projectId);
+        (await ReasonCodeOf(first)).Should().Be(ProvisionProjectEndpoint.ReasonContainerNotRecorded);
+
+        _fixture.ContainerStampSucceeds = true;
+        var retry = await ProvisionAsync(client, projectId);
+
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// The owner PATCH committed but its read-back threw: the response no longer says nothing was provisioned — it says
+    /// the outcome is unverified and the creator's share is in place — and the next call behaves by the OBSERVED state
+    /// (here: owned by the team, no container → resume).
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheOwnerReadBackThrows_SaysUnverified_AndTheNextCallResumes()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.OwnerReadBackFails = true;
+        using var client = _fixture.CreateEntitledClient();
+
+        var first = await ProvisionAsync(client, projectId);
+
+        (await ReasonCodeOf(first)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        var detail = await first.Content.ReadAsStringAsync();
+        detail.Should().NotContain("Nothing has been provisioned").And.Contain("is not known");
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask, "the share-first grant is kept: S5");
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        _fixture.OwnerReadBackFails = false;
+        var next = await ProvisionAsync(client, projectId);
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+    }
+
+    /// <summary>
+    /// An unconfigured container type is certain to stop Step 6, so it is refused BEFORE any change (task 133) — never
+    /// after the record is owned by a memberless team.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheContainerTypeIsNotConfigured_RefusesBeforeChangingAnything()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.SetContainerTypeId("not-a-guid");
+        using var client = _fixture.CreateEntitledClient();
+
+        var response = await ProvisionAsync(client, projectId);
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonContainerTypeNotConfigured);
+        _fixture.Updates.Should().BeEmpty();
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The same unverified read-back, when the PATCH had in fact NOT landed: the next call sees an unprovisioned record
+    /// and provisions it from the start.
+    /// </summary>
+    [Fact]
+    public async Task ProvisionProject_WhenTheOwnerReadBackThrowsAndThePatchDidNotLand_TheNextCallStartsOver()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.OwnerReadBackFails = true;
+        _fixture.OwnershipPatchIsApplied = false;
+        using var client = _fixture.CreateEntitledClient();
+
+        (await ReasonCodeOf(await ProvisionAsync(client, projectId)))
+            .Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+
+        _fixture.OwnerReadBackFails = false;
+        _fixture.OwnershipPatchIsApplied = true;
+        var next = await ProvisionAsync(client, projectId);
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeFalse();
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
     }
 
     /// <summary>
@@ -540,6 +754,9 @@ public class ProvisionProjectIdempotencyTests : IClassFixture<ProvisionProjectTe
             "ownership by the secure owner team IS the idempotency marker — without this column the " +
             "guard cannot fire at all");
         select.Should().Contain("sprk_containerid");
+        select.Should().Contain("_owninguser_value",
+            "task 133: with _owningteam_value, the pre-call owner a failed provisioning moves the record back to");
+        select.Should().Contain("_createdby_value", "task 133: the person a resumed provisioning shares to");
         select.Should().Contain("_sprk_securitybu_value",
             "still read, to refuse projects provisioned by the retired BU-per-project mechanism");
 

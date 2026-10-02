@@ -42,9 +42,13 @@ internal sealed record SecureRecordRoot(
     /// The columns provisioning reads in Step 1. Every name here exists on all three tables (live metadata). Pinned
     /// for the project table by <c>ProjectProvisioningSelect_NamesOnlyColumnsThatExistOnTheTable</c>.
     /// </summary>
+    /// <remarks>
+    /// Task 133 added <c>_owninguser_value</c> (with <c>_owningteam_value</c>, the owner a failed provisioning moves the
+    /// record back to) and <c>_createdby_value</c> (the person a resumed provisioning shares to).
+    /// </remarks>
     public string ProvisioningSelect =>
         $"{IdColumn},{NameColumn},sprk_issecure,sprk_containerid," +
-        "_sprk_securitybu_value,_owningteam_value,_owningbusinessunit_value";
+        "_sprk_securitybu_value,_owningteam_value,_owninguser_value,_owningbusinessunit_value,_createdby_value";
 
     /// <summary>The SPE container display name for a record of this type.</summary>
     public string ContainerDisplayName(string recordName) => $"Secure {DisplayLabel} — {recordName}";

@@ -15,6 +15,9 @@
 > membership Dataverse maintains from each user's business unit and which cannot be curated. The business unit must
 > also hold **no users**. Provisioning refuses unless both hold; a scheduled census job reports any drift. §4 is the
 > cutover; §7 the checks.
+> **Updated 2026-10-01** by `unified-access-control-r2` task 133 (C11). Provisioning can no longer lock the creator
+> out: share before the move, undo the move if the share cannot be proven, resume a record left team-owned without a
+> container. §7a lists every failure state and who recovers it.
 
 ---
 
@@ -503,6 +506,39 @@ Two defences, use both:
 A control run is worth the minute it costs: strip the privilege entirely and confirm you get a
 **denial**. If a role with no privileges still allows the assignment, every other reading in that
 session is void.
+
+---
+
+## 7a. Provisioning failure states and recovery (task 133)
+
+Provisioning (`POST /api/v1/external-access/provision-project`) is the only thing that moves a secure record into the
+team. The owner's rule (session 27, S5): **a secure record must always keep at least one person who can open it.** So
+the creator's share is issued BEFORE the owner move, proven after it, and if it cannot be proven the move is undone
+(read back). A record owned by the team with **no container recorded** is not refused — the next call **resumes** it:
+it shares to the record's `createdby` user (never to the caller instead), then creates and records the container. A
+record owned by the team **with** a container recorded is provisioned: 409, nothing written.
+
+`sprk_issecure` is never written by provisioning. A secure-requested record that failed stays flagged, so uploads to it
+are refused until it has its own container (fail closed).
+
+| `reasonCode` (`sdap.provision.*`) | State the record is left in | Who recovers, and how |
+|---|---|---|
+| `secure_bu_not_found`, `secure_bu_ambiguous`, `secure_owner_team_not_found`, `secure_owner_team_ambiguous`, `secure_owner_team_has_members`, `secure_owner_team_membership_unreadable`, `secure_bu_has_users`, `secure_bu_users_unreadable`, `container_type_not_configured` | Unchanged — refused before any write | Administrator fixes the environment (§3–§5, `SharePointEmbedded:ContainerTypeId`), then provisioning is called again |
+| `legacy_per_project_bu` | Unchanged | Administrator migrates the record off its per-project BU (manual) |
+| `already_provisioned` | Provisioned: owned by the team, container recorded | Nothing to do |
+| `owned_by_other_secure_team` | Owned by the retired default team | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) |
+| `creator_unresolved`, `record_owner_unreadable` | Unchanged — refused before any write | **The same caller** calls again (the wizard's "Try securing again") |
+| `creator_share_failed` | The move was undone or never made: owner read back as before the call; the creator's share as before (`sharesRestored: false` means a share this call issued could not be confirmed removed — check Manage Access). On a resume: unchanged by the call | **The same caller** calls again — they still pass the Write check |
+| `owner_assignment_failed`, `owner_assignment_not_applied` | Owner read back unchanged; nothing moved | Administrator checks the `Secure Record Owner` role (§5) and §7 item 6; calling again repeats the same refusal |
+| `owner_assignment_unverified` | Unknown whether the team owns it; the creator's share **is** in place | **The same caller** calls again: a record the team now owns is resumed, one it does not is provisioned from the start |
+| `container_creation_failed` | Owned by the team, shared to its creator, no container | **The same caller** calls again: it resumes |
+| `container_not_recorded` | Owned by the team, shared to its creator, no container recorded; the error names a container that holds nothing | **The same caller** calls again: it resumes and records a NEW container. Delete the named empty container |
+| `creator_share_failed_resumable` | 🔴 Owned by the memberless team **without a confirmed creator share** — possibly nobody can open it (logged CRITICAL `[PROVISION]`). The creator no longer passes the Write check | **An administrator** (who holds Write through their role) calls provisioning again for the record: it resumes and shares to the record's `createdby` user |
+| `resume_creator_unavailable` (`creatorState`: `absent` / `disabled` / `application-user` / `unreadable`) | Owned by the team, no container; the record's `createdby` cannot be shared to — it is never shared to the caller instead | **An administrator** shares the record (Manage Access) to the person who should hold it, then calls provisioning again. App-created rows (Office quick-create: `createdby` is the BFF app user) always land here — the persisted human creator for them is an open owner decision (task 133 note) |
+
+**Calling provisioning as an administrator** (the resume path): `POST {bff}/api/v1/external-access/provision-project`
+with body `{ "recordType": "project" | "matter" | "workassignment", "recordId": "<guid>" }` and a user token for the BFF
+API. The caller must hold Write on the record (the delegation filter); a System Administrator does through their role.
 
 ---
 

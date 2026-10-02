@@ -151,4 +151,68 @@ internal static class RecordShareLevels
 
     /// <summary>Whether these rights are worth writing as a share at all: without Read, a share grants nothing readable.</summary>
     internal static bool IsGrantable(RecordShareRights rights) => (rights.AccessRightsMask & Read) == Read;
+
+    /// <summary>
+    /// Every right a POA share row can carry, as the Web API <c>AccessMask</c> name and the bit Dataverse stores —
+    /// the level rights plus the three no level carries (Create, Share, Assign). Same numbers as the constants above.
+    /// </summary>
+    private static readonly (string Name, int DataverseBit)[] AllShareRights =
+    {
+        ("ReadAccess", Read),
+        ("WriteAccess", Write),
+        ("AppendAccess", Append),
+        ("AppendToAccess", AppendTo),
+        ("CreateAccess", 32),
+        ("DeleteAccess", Delete),
+        ("ShareAccess", 262144),
+        ("AssignAccess", 524288),
+    };
+
+    /// <summary>
+    /// The mask Dataverse stores for an <c>AccessMask</c> literal — so a caller can confirm a write by comparing the
+    /// stored mask with what it asked for (unified-access-control-r2 task 133: the provisioning creator share, which
+    /// carries <c>ShareAccess</c> and so has no level).
+    /// </summary>
+    /// <exception cref="ArgumentException">A name in the literal is not a Dataverse access right. An unknown name
+    /// never becomes a guessed bit.</exception>
+    internal static int MaskForRightsCsv(string accessRightsCsv)
+    {
+        var mask = 0;
+        foreach (var name in accessRightsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var match = Array.FindIndex(AllShareRights, r => string.Equals(r.Name, name, StringComparison.Ordinal));
+            if (match < 0)
+                throw new ArgumentException($"'{name}' is not a Dataverse access right.", nameof(accessRightsCsv));
+
+            mask |= AllShareRights[match].DataverseBit;
+        }
+
+        return mask;
+    }
+
+    /// <summary>
+    /// The <c>AccessMask</c> literal that restores a share to exactly <paramref name="accessRightsMask"/> through
+    /// ModifyAccess — the inverse of <see cref="MaskForRightsCsv"/> (task 133: compensation puts a creator's share
+    /// back to the mask read before the call).
+    /// </summary>
+    /// <exception cref="ArgumentException">The mask carries a bit no access right names, or is zero (a zero mask is
+    /// a revoke, not a modify).</exception>
+    internal static string RightsCsvForMask(int accessRightsMask)
+    {
+        var names = new List<string>(AllShareRights.Length);
+        var covered = 0;
+        foreach (var (name, bit) in AllShareRights)
+        {
+            if ((accessRightsMask & bit) == 0)
+                continue;
+
+            names.Add(name);
+            covered |= bit;
+        }
+
+        if (accessRightsMask == 0 || covered != accessRightsMask)
+            throw new ArgumentException($"Mask {accessRightsMask} is not expressible as Dataverse access rights.", nameof(accessRightsMask));
+
+        return string.Join(",", names);
+    }
 }

@@ -233,11 +233,11 @@ export class ProjectService {
    * @odata.bind syntax for each lookup field.
    *
    * BU cascade (FR-WIZ-02, fixes latent gap G2): when `cascadeDefaults` is provided,
-   * applies `sprk_containerid` AND `sprk_searchindexname` from the user's owning
-   * Business Unit to the create payload via
-   * {@link EntityCreationService.applyUserBuDefaults}. Both fields are guarded by
-   * INV-5 — explicit values pre-existing on the payload are preserved (never
-   * overwritten). Callers (typically `CreateProjectWizard.tsx`) resolve the
+   * applies `sprk_searchindexname` from the user's owning Business Unit to the create
+   * payload via {@link EntityCreationService.applyUserBuDefaults}, guarded by INV-5 —
+   * an explicit value pre-existing on the payload is preserved. `sprk_containerid` is
+   * NOT written here (task 076): provisioning's Step 7 is its only writer, which is what
+   * lets the server read "owned by the secure team, no container" as resumable (task 133). Callers (typically `CreateProjectWizard.tsx`) resolve the
    * defaults via {@link EntityCreationService.resolveUserBuDefaults}.
    *
    * Returns ICreateProjectResult — never throws.
@@ -284,10 +284,9 @@ export class ProjectService {
       entity['sprk_issecure'] = true;
     }
 
-    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_containerid` AND
-    // `sprk_searchindexname` from the current user's owning Business Unit.
-    // INV-5 is enforced per-field by applyUserBuDefaults — explicit override
-    // values already on the payload are preserved.
+    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_searchindexname` from the current
+    // user's owning Business Unit (INV-5: an explicit value is preserved). Not
+    // `sprk_containerid` — task 076 removed that write; the server owns it.
     if (cascadeDefaults) {
       const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
       console.info('[ProjectService] BU cascade applied:', applied);
