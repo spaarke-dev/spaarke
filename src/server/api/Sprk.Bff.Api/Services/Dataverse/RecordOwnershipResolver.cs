@@ -128,7 +128,16 @@ public interface IRecordOwnershipResolver
     /// A refusal WITHOUT having run <paramref name="applyChange"/> — the caller refuses in its own contract.
     /// Otherwise the resolution after the change and any reassignment succeeded.
     /// </returns>
-    /// <exception cref="InvalidOperationException">The reassignment did not read back as applied.</exception>
+    /// <remarks>
+    /// <b>A failed assignment is rolled back, never left half-done</b> (task 146 b1). When the owner assignment (or its
+    /// read-back) fails AFTER <paramref name="applyChange"/> wrote the change — a Secure Record Owner role still missing
+    /// Read on the table is the expected cause until gate G146-1 runs — the columns the change moved (its parent lookups
+    /// and <see cref="RecordReparent.AttachColumns"/>) are written back to their previous values, so the row's filing
+    /// matches the owner it still has, and the failure is logged CRITICAL (<c>ReparentOwnerAssignmentFailed</c>; a restore
+    /// that also fails is <c>ReparentLeftInconsistent</c>, for manual repair). The original failure then propagates.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The reassignment did not read back as applied (the change was rolled
+    /// back first).</exception>
     Task<RecordOwnerResolution> ReparentAsync(
         RecordReparent request, Func<CancellationToken, Task> applyChange, CancellationToken ct);
 }
@@ -357,6 +366,14 @@ public sealed record RecordReparent
     /// children of its record). Added to the row's current parents.
     /// </summary>
     public IReadOnlyList<RecordOwnershipParent> InheritedParents { get; init; } = Array.Empty<RecordOwnershipParent>();
+
+    /// <summary>
+    /// Columns the change writes to ATTACH the row to its <see cref="InheritedParents"/> — a message's thread lookup when
+    /// it joins a record thread. They are not parent lookups, so the resolver cannot see them in
+    /// <see cref="ParentChanges"/>; naming them lets <see cref="IRecordOwnershipResolver.ReparentAsync"/> put them back,
+    /// with the parent columns, when the owner assignment that must follow the change fails (task 146 b1).
+    /// </summary>
+    public IReadOnlyList<string> AttachColumns { get; init; } = Array.Empty<string>();
 
     /// <summary>The acting user, for a row left with no parent at all.</summary>
     public Guid? CallerSystemUserId { get; init; }
@@ -761,6 +778,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
         }
 
+        // What the row was filed under BEFORE the change, for every column the change moves — so a failed owner
+        // assignment after the change can put the row back where its CURRENT owner belongs (CompensateAsync).
+        var restore = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        void Remember(string column) =>
+            restore[column] = current.Attributes.TryGetValue(column, out var before) && before is not null
+                ? before
+                : DBNull.Value;
+
         // A change that sets a parent, or clears one the row holds, is a parent change. A null for a column that holds
         // no parent (a cleared text column a generic writer could not tell from a lookup) is not.
         var changesAParent = request.InheritedParents.Any(p => p.IsSpecified && IsOwnershipParent(p.EntityLogicalName));
@@ -768,13 +793,23 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         {
             if (value is null || value.Id == Guid.Empty)
             {
-                changesAParent |= byColumn.Remove(column);
+                if (byColumn.Remove(column))
+                {
+                    changesAParent = true;
+                    Remember(column);
+                }
             }
             else if (IsOwnershipParent(value.LogicalName))
             {
                 byColumn[column] = new RecordOwnershipParent(value.LogicalName, value.Id);
                 changesAParent = true;
+                Remember(column);
             }
+        }
+
+        foreach (var column in request.AttachColumns.Where(c => !string.IsNullOrWhiteSpace(c)))
+        {
+            Remember(column);
         }
 
         if (!changesAParent)
@@ -827,25 +862,89 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // Ownership is assigned on its own, not folded into the field update: Dataverse treats an owner change as a
         // distinct operation, and combining them is a documented way to have one of the two quietly not happen
         // (the ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync rationale).
-        await _dataverse.UpdateAsync(
-            request.EntityLogicalName,
-            request.RecordId,
-            new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, teamId) },
-            ct).ConfigureAwait(false);
-
-        var readBack = await _dataverse.RetrieveAsync(
-            request.EntityLogicalName, request.RecordId, new[] { OwningTeamColumn }, ct).ConfigureAwait(false);
-        if (readBack?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id != teamId)
+        try
         {
-            throw new InvalidOperationException(
-                $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as team {teamId:D} "
-                + "after the reassignment; the re-filed row may be readable outside its new parent's team (task 146).");
+            await _dataverse.UpdateAsync(
+                request.EntityLogicalName,
+                request.RecordId,
+                new Dictionary<string, object> { [OwnerColumn] = new EntityReference(TeamEntity, teamId) },
+                ct).ConfigureAwait(false);
+
+            var readBack = await _dataverse.RetrieveAsync(
+                request.EntityLogicalName, request.RecordId, new[] { OwningTeamColumn }, ct).ConfigureAwait(false);
+            if (readBack?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id != teamId)
+            {
+                throw new InvalidOperationException(
+                    $"The owner of {request.EntityLogicalName} {request.RecordId:D} did not read back as team {teamId:D} "
+                    + "after the reassignment; the re-filed row may be readable outside its new parent's team (task 146).");
+            }
+        }
+        catch (Exception assignFailure)
+        {
+            // The change is already written and the owner is not: the row is filed under its NEW parents while still
+            // owned for its OLD ones — for a move under a secure record, readable in an ordinary business unit (ADR-003
+            // fail-open, task 146 b1 verifier item). Put the filing back first, then surface the failure.
+            await CompensateAsync(request, restore, teamId, assignFailure).ConfigureAwait(false);
+            throw;
         }
 
         _logger.LogInformation(
             "Re-filed {Entity} {RecordId}: owner reassigned to team {TeamId}.",
             request.EntityLogicalName, request.RecordId, teamId);
         return resolution;
+    }
+
+    /// <summary>Event id of a re-file whose owner assignment failed AFTER the change was written (task 146 b1).</summary>
+    public static readonly EventId ReparentOwnerAssignmentFailed = new(14601, nameof(ReparentOwnerAssignmentFailed));
+
+    /// <summary>Event id of a re-file that could NOT be put back after its owner assignment failed — the row needs
+    /// manual repair: it is filed under its new parents but owned for its old ones (task 146 b1).</summary>
+    public static readonly EventId ReparentLeftInconsistent = new(14602, nameof(ReparentLeftInconsistent));
+
+    /// <summary>
+    /// After a failed owner assignment, writes back what the row was filed under before the change — the columns the
+    /// change moved (<paramref name="restore"/>: the parent lookups it set or cleared, and its
+    /// <see cref="RecordReparent.AttachColumns"/>) — so the row's filing matches the owner it still has. App-only, with
+    /// no cancellation (the caller's token may be what failed). Every outcome is a CRITICAL log naming the row; a
+    /// restore that itself fails is logged under <see cref="ReparentLeftInconsistent"/> for manual repair. Never throws:
+    /// the caller rethrows the original failure, which the writer reports in its own contract.
+    /// </summary>
+    private async Task CompensateAsync(
+        RecordReparent request, IReadOnlyDictionary<string, object> restore, Guid teamId, Exception assignFailure)
+    {
+        if (restore.Count == 0)
+        {
+            _logger.LogCritical(
+                ReparentLeftInconsistent, assignFailure,
+                "Re-file of {Entity} {RecordId}: the change was written but the owner could not be assigned to team "
+                + "{TeamId}, and the change named no column to put back. The row may be readable outside its new "
+                + "parent's team until it is re-owned (task 146).",
+                request.EntityLogicalName, request.RecordId, teamId);
+            return;
+        }
+
+        try
+        {
+            await _dataverse.UpdateAsync(
+                request.EntityLogicalName, request.RecordId, new Dictionary<string, object>(restore),
+                CancellationToken.None).ConfigureAwait(false);
+
+            _logger.LogCritical(
+                ReparentOwnerAssignmentFailed, assignFailure,
+                "Re-file of {Entity} {RecordId} ROLLED BACK: the owner could not be assigned to team {TeamId} after the "
+                + "change, so its filing columns ({Columns}) were restored to match the owner it still has. The caller "
+                + "receives the failure (task 146).",
+                request.EntityLogicalName, request.RecordId, teamId, string.Join(", ", restore.Keys));
+        }
+        catch (Exception restoreFailure)
+        {
+            _logger.LogCritical(
+                ReparentLeftInconsistent, restoreFailure,
+                "Re-file of {Entity} {RecordId} is INCONSISTENT and needs manual repair: the owner could not be assigned "
+                + "to team {TeamId} ({AssignFailure}) and restoring its filing columns ({Columns}) also failed. It is filed "
+                + "under its new parents while owned for its old ones (task 146).",
+                request.EntityLogicalName, request.RecordId, teamId, assignFailure.Message, string.Join(", ", restore.Keys));
+        }
     }
 
     /// <summary>
@@ -966,10 +1065,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var lineage = await ReadUnownedChildLineageAsync(facts, ct).ConfigureAwait(false);
         if (lineage.Unresolved is { } unresolved)
         {
-            return RecordOwnerResolution.Refused(
-                RecordOwnerRefusal.ParentUnresolved,
-                $"the parent {unresolved.EntityLogicalName} {unresolved.RecordId:D} (an ancestor of this record) does not "
-                + "exist or has no owning business unit");
+            return lineage.TooDeep
+                ? RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the record's filing runs through more than {MaxLineageDepth} levels of records that are not team-owned "
+                    + $"(still unresolved at {unresolved.EntityLogicalName} {unresolved.RecordId:D}), so whether it sits "
+                    + "under a secure record cannot be decided")
+                : RecordOwnerResolution.Refused(
+                    RecordOwnerRefusal.ParentUnresolved,
+                    $"the parent {unresolved.EntityLogicalName} {unresolved.RecordId:D} (an ancestor of this record) does not "
+                    + "exist or has no owning business unit");
         }
 
         var decisive = facts.Concat(lineage.Facts).ToList();
@@ -1017,7 +1122,14 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// owner already IS the resolver's answer for its own filing. <c>Unresolved</c> names an ancestor that could not be
     /// read; a Dataverse fault propagates.
     /// </summary>
-    private async Task<(IReadOnlyList<ParentFacts> Facts, RecordOwnershipParent? Unresolved)> ReadUnownedChildLineageAsync(
+    /// <remarks>
+    /// <b>The depth limit refuses; it never answers "ordinary"</b> (task 146 b1, verifier LOW item). A chain still
+    /// un-team-owned after <see cref="MaxLineageDepth"/> levels has an UNREAD filing above it, which might be secure —
+    /// read as ordinary, it would hand a secure record's descendant an ordinary team (ADR-003). So a frontier left over
+    /// at the limit comes back as <c>Unresolved</c> with <c>TooDeep</c>, and the resolver refuses
+    /// (<see cref="RecordOwnerRefusal.ParentUnresolved"/>).
+    /// </remarks>
+    private async Task<(IReadOnlyList<ParentFacts> Facts, RecordOwnershipParent? Unresolved, bool TooDeep)> ReadUnownedChildLineageAsync(
         IReadOnlyList<ParentFacts> facts, CancellationToken ct)
     {
         var lineage = new List<ParentFacts>();
@@ -1032,7 +1144,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 var filing = await ReadOwnershipParentsOfAsync(child, ct).ConfigureAwait(false);
                 if (filing is null)
                 {
-                    return (lineage, child);
+                    return (lineage, child, false);
                 }
 
                 foreach (var ancestor in filing.Select(p => p with { EntityLogicalName = p.EntityLogicalName.ToLowerInvariant() }))
@@ -1043,7 +1155,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                     var fact = await ReadParentAsync(ancestor, ct).ConfigureAwait(false);
                     if (fact is null)
                     {
-                        return (lineage, ancestor);
+                        return (lineage, ancestor, false);
                     }
 
                     lineage.Add(fact);
@@ -1055,7 +1167,16 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             frontier = next;
         }
 
-        return (lineage, null);
+        if (frontier.Count > 0)
+        {
+            _logger.LogWarning(
+                "Refusing to resolve an owning team: the filing chain is still not team-owned after {MaxDepth} levels "
+                + "(at {Entity} {RecordId}); whether it sits under a secure record cannot be decided (task 146).",
+                MaxLineageDepth, frontier[0].EntityLogicalName, frontier[0].RecordId);
+            return (lineage, frontier[0], true);
+        }
+
+        return (lineage, null, false);
 
         static bool IsUnownedChild(ParentFacts fact) =>
             !fact.HasOwningTeam && IsReparentableChild(fact.Parent.EntityLogicalName);
