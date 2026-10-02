@@ -387,6 +387,47 @@ public class GrantorCeilingTests
         _dataverse.Creates.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The No Access check THROWS — not absorbed inside the deny-veto code, as the two faults above are. The veto code
+    /// rethrows every <see cref="OperationCanceledException"/>, so an HttpClient timeout (a
+    /// <see cref="TaskCanceledException"/> while the CALLER has not cancelled) in either of its reads reaches the
+    /// handler. That catch is the real fail-closed path for timeouts (ADR-003): it must refuse, never grant.
+    /// The positive twin is <see cref="Grant_ToAContactNotOnTheList_IsWritten"/> — same request, reads answer.
+    /// </summary>
+    [Theory]
+    [InlineData("referenced-organizations-timeout")]
+    [InlineData("no-access-list-timeout")]
+    public async Task Grant_WhenTheNoAccessCheckThrowsATimeout_Is422GranteeDenied_AndWritesNothing(string fault)
+    {
+        var timeout = new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
+        if (fault == "referenced-organizations-timeout")
+            _participations.ReferencedOrganizationsThrow = timeout;
+        else
+            _denyReader.Throws = timeout;
+
+        var result = await Grant(ContactGrant(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        Problem(result).Should().Be((422, ExternalGrantLifecycle.GranteeDeniedReasonCode));
+        _dataverse.Creates.Should().BeEmpty("a No Access check that could not finish must never grant");
+        _dataverse.Updates.Should().BeEmpty();
+        if (fault == "no-access-list-timeout")
+            _denyReader.Queries.Should().BePositive("the throw came from the shared deny-list reader itself");
+    }
+
+    /// <summary>The same timeout on <c>/invite-and-grant</c>: refused before onboarding, nothing created or bound.</summary>
+    [Fact]
+    public async Task InviteAndGrant_WhenTheNoAccessCheckThrowsATimeout_Is422BeforeOnboarding()
+    {
+        _dataverse.SeedContact(ContactId, InviteeEmail, oid: null);
+        _participations.ReferencedOrganizationsThrow =
+            new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
+
+        var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        Problem(result).Should().Be((422, ExternalGrantLifecycle.GranteeDeniedReasonCode));
+        AssertNothingOnboardedOrWritten();
+    }
+
     [Fact]
     public async Task InviteAndGrant_ForAnExistingContactOnTheList_Is422BeforeOnboarding()
     {

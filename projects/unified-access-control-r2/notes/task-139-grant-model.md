@@ -101,7 +101,7 @@ No `.WithClientSecret(...)`; `GrantMembershipAsync` untouched (still zero caller
 | 2 Collaborate sharee can hand out a right they lack via MDA Share | **Pending live gate**. |
 | 3 Backfill finds team shares at 23/65559 or non-level masks | **Did not fire** on the 2026-10-02 dev dry-run (below): 2 shares, both at current level masks; 0 to upgrade; 0 team; 0 non-level. |
 | 4 Task 143 landed and expects `/share-user` to refuse denied systemusers | Not landed on this branch. The internal-user No Access list on `/share-user` is task 143 (owner Q4); NOT implemented here. |
-| 5 Task 133/144 changed the provisioning share step in a conflicting way | **Did not fire.** 144 (merged) did not touch the share constants. 133 (`task/uac-r2-133-r1-r2`, not merged here) keeps both constant NAMES and adds `CreatorAccessMask = MaskForRightsCsv(CreatorAccessRights)` — with this task that is 262167 = the Collaborate mask, consistent. Expect a textual merge near `RecordShareLevels.cs`'s end (133 appends `MaskForRightsCsv`/`RightsCsvForMask`) and `ProvisionProjectEndpoint.cs` :135-160 (this task's remark rewrite). Semantics agree. |
+| 5 Task 133/144 changed the provisioning share step in a conflicting way | **Did not fire.** 144 (merged) did not touch the share constants. 133 (`task/uac-r2-133-r1-r2`, not merged here) keeps both constant NAMES and adds `CreatorAccessMask = MaskForRightsCsv(CreatorAccessRights)` — with this task that is 262167 = the Collaborate mask, consistent. Expect a textual merge near `RecordShareLevels.cs`'s end (133 appends `MaskForRightsCsv`/`RightsCsvForMask`) and `ProvisionProjectEndpoint.cs` :135-160 (this task's remark rewrite). Semantics agree **only if 139's `CreatorAccessRights` line wins** — see §8 (r1 merge hazard). |
 
 ## 5. Backfill dry-run (dev, 2026-10-02, operator identity ralph.schroeder@spaarke.com, READ-ONLY)
 ```
@@ -167,3 +167,50 @@ than reuse the root-BU accounts).
 - (e) `.\scripts\Upgrade-LegacyRecordShareMasks.ps1` (dry run) then `-Apply`; record counts; a previously shared colleague can then use MDA Share.
 - (f) Run U-3 as rewritten in `notes/phase4-uat-acceptance.md`.
 - (g, S5) On a secure project with a single user share, `/unshare-user` that user → 409 `last_reader_on_secure_record`.
+
+## 8. Verifier round 1 (r1, branch `task/uac-r2-139-r1`, 2026-10-02)
+
+**Fail-closed catches now proven (findings 3, 4, 17).** Both catches were real paths that no test reached:
+- `GrantExternalAccessEndpoint.CheckGrantAsync` step (4). `ResolveDenyVetoAsync` (and `NoAccessListReader`) rethrow EVERY
+  `OperationCanceledException`, so an HttpClient timeout (`TaskCanceledException`, caller not cancelled) in the
+  referenced-organization read or the deny-list read reaches the handler's catch. The existing `reader-fault` /
+  `memberships-unreadable` cases are absorbed inside `AccessibleRecordSetService` and never got there. New:
+  `GrantorCeilingTests.Grant_WhenTheNoAccessCheckThrowsATimeout_Is422GranteeDenied_AndWritesNothing` (Theory: referenced-org
+  timeout, deny-list timeout) and `InviteAndGrant_WhenTheNoAccessCheckThrowsATimeout_Is422BeforeOnboarding`. Positive twin:
+  `Grant_ToAContactNotOnTheList_IsWritten`. Seams: `FlagStubParticipationService.ReferencedOrganizationsThrow` and
+  `SeamNoAccessListReader.Throws` (test doubles only; the REAL `AccessibleRecordSetService` and `NoAccessListReader` run).
+- `InternalShareEndpoints.LastReaderRefusalAsync` flag read. New:
+  `InternalUserShareTests.Unshare_WhenTheSecureFlagReadThrows_AppliesTheLastPersonRule` (`ThrowOnRead = true` → 409
+  `last_reader_on_secure_record`, the read was attempted, nothing removed) — the twin of the existing `Unreadable` case.
+
+Perturbation (seeded, run, restored from HEAD, files touched): `denied = true` → `denied = false` in the step-(4) catch AND
+`isSecure = true` → `isSecure = false` in the S5 catch → exactly the 4 new tests went red (3 + 1); the other 126 in the two
+classes stayed green. Restored → 130/130.
+
+**Merge hazard with task 133 (finding 5) — main session, at the 133 merge.** Every 133 branch (`task/uac-r2-133`, `-r1`,
+`-r1-r2`) still has
+`internal const string CreatorAccessRights = RecordShareLevels.CollaborateRights + ",ShareAccess";`.
+Since this task, `CollaborateRights` already ends in `ShareAccess`, so keeping 133's line produces
+`...,AppendToAccess,ShareAccess,ShareAccess`. **Resolve by taking 139's line:
+`internal const string CreatorAccessRights = RecordShareLevels.CollaborateRights;`** (133's
+`CreatorAccessMask = MaskForRightsCsv(CreatorAccessRights)` is then 262167, as intended). A wrong resolution is caught by the
+literal assertions in `InternalUserShareTests` (`CreatorAccessRights.Should().Be(collaborateLiteral)`) and
+`SecureProjectShareTests`; run both after the merge. Nothing on the 133 branches was edited here.
+
+**Accepted, no change (findings 6, 7, 8, 9).**
+- 6: never-lower counts every ACTIVE row, including one past its expiry date — a narrowed re-grant over an expired higher row
+  gets 409 although the grantee holds nothing effective; an explicit lower-level request still works (over-refusal is the safe
+  direction).
+- 7: a row with a null level never blocks (`AccessLevel ?? 0`) — that direction can only raise a grant, never lower one.
+- 8: `PolymorphicGrantWriteTests.cs` was listed as "modify" but needed no change: it compiles against the REQUIRED
+  `GrantCeiling` and passes; the task-139 coverage lives in `GrantorCeilingTests`.
+- 9: the "onboarding not called" check stays indirect (null `CiamUserProvisioningService` / `RegistrationEmailService` → a
+  call would surface as 500, plus `Creates`/`Updates` asserted empty). Both are concrete classes; an explicit call count would
+  need new subclass doubles over them, which the verifier judged unnecessary.
+
+**AC14 (finding 16), partly closed.** `dotnet list src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj package --vulnerable
+--include-transitive` (2026-10-02, nuget.org): "has no vulnerable packages" — no HIGH CVE (task 139 adds no package). The
+publish-size delta remains with the main session (fresh master worktree, short path, Compress-Archive, equal file counts).
+
+**AC13 (finding 15) — still pending**: the §7 manual live gate, the BFF + PCF v1.0.33 deploy and the backfill `-Apply` (live
+writes; main session).

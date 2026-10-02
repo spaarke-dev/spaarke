@@ -365,10 +365,35 @@ The numeric value of each mask is derived from the Dataverse AccessRights values
         B-14a; SUPERSEDED banners on task-063 note §4 and 063 POML); AC12 grep over src/ and tests/: 0 hits. Docs: EXTERNAL-ACCESS-ADMIN-SETUP
         §7.1b (POA level table + ceiling outcomes), uac-access-control.md "The Grant Model".
       - Escalations: 1 and 2 pending live gate; 3 did not fire; 4 not landed (internal-user No Access on /share-user stays task 143);
-        5 did not fire (133 keeps both constant names; its CreatorAccessMask = 262167 agrees).
+        5 did not fire (133 keeps both constant names; its CreatorAccessMask = 262167 agrees ONLY if 139's CreatorAccessRights line
+        wins the merge; see the r1 outcome below).
       - Placement: BFF; no new endpoint/service/DI registration/option/job/package. §11 justification per new member in the notes §2.
         ADR-008 tension: path C (narrowing in handler + core, allow/deny unchanged in DelegationRuleFilter; task 063 precedent).
       - Tests: see the commit message / notes §6 for exact counts; every new guard proven by perturbation (notes §6 table).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-139-r1" base="task/uac-r2-139 @ 5e9b7e28c" status="verifier round 1 addressed; criterion 13 live gate (deploy, backfill -Apply) and the criterion 14 publish-size measurement remain with the main session">
+      Full record: notes/task-139-grant-model.md §8. No production code changed in r1; tests and notes only.
+      - Findings 3 + 17 (ADR-003, CheckGrantAsync step-4 catch): new GrantorCeilingTests
+        Grant_WhenTheNoAccessCheckThrowsATimeout_Is422GranteeDenied_AndWritesNothing (referenced-org read timeout; deny-list read
+        timeout — a TaskCanceledException without caller cancellation, which ResolveDenyVetoAsync and NoAccessListReader rethrow)
+        and InviteAndGrant_WhenTheNoAccessCheckThrowsATimeout_Is422BeforeOnboarding. Seams added to the test doubles only:
+        FlagStubParticipationService.ReferencedOrganizationsThrow, SeamNoAccessListReader.Throws.
+      - Findings 4 + 17 (S5, LastReaderRefusalAsync flag-read catch): new InternalUserShareTests
+        Unshare_WhenTheSecureFlagReadThrows_AppliesTheLastPersonRule (ThrowOnRead = true -&gt; 409 last_reader_on_secure_record,
+        nothing removed).
+      - Perturbation: denied = false in the step-4 catch + isSecure = false in the S5 catch -&gt; exactly the 4 new tests red,
+        126 others green; restored, files touched -&gt; 130/130.
+      - Finding 5 (133 merge hazard): recorded for the main session. Every 133 branch has CreatorAccessRights =
+        RecordShareLevels.CollaborateRights + ",ShareAccess"; the 133 merge MUST take 139's
+        CreatorAccessRights = RecordShareLevels.CollaborateRights (else the CSV ends ",ShareAccess,ShareAccess"). The literal
+        assertions in InternalUserShareTests / SecureProjectShareTests catch a wrong resolution. 133 branches not edited.
+      - Findings 6, 7, 8, 9: accepted with no change (expired higher row still blocks a narrowed re-grant; a null-level row never
+        blocks; PolymorphicGrantWriteTests needed no edit; the onboarding-not-called check stays indirect over concrete services).
+      - Finding 16 (AC14): HIGH-CVE scan done — dotnet list package --vulnerable --include-transitive on Sprk.Bff.Api: no vulnerable
+        packages. Publish-size delta still with the main session.
+      - Finding 15 (AC13): unchanged, pending the main session's live gate (notes §7).
+      - Placement / justification (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job or package; the two
+        new members are test-double properties.
     </outcome>
   </execution>
   <ui-tests>

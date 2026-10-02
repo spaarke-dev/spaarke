@@ -59,6 +59,13 @@ internal static class GrantPolicyTestDoubles
         /// <summary>Task 139: the organizations a record references (the ethical-wall object side).</summary>
         public ConcurrentDictionary<Guid, Guid[]> RecordOrganizations { get; } = new();
 
+        /// <summary>
+        /// Task 139 r1: when set, the referenced-organization read THROWS this exception — e.g. a
+        /// <see cref="TaskCanceledException"/> with no caller cancellation, the shape of an HttpClient timeout, which
+        /// the deny-veto code rethrows rather than absorbing.
+        /// </summary>
+        public Exception? ReferencedOrganizationsThrow { get; set; }
+
         public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
         {
@@ -91,12 +98,17 @@ internal static class GrantPolicyTestDoubles
 
         public override Task<IReadOnlyDictionary<Guid, ReferencedOrganizations>> GetReferencedOrganizationIdsAsync(
             string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
+        {
+            if (ReferencedOrganizationsThrow is { } ex)
+                return Task.FromException<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(ex);
+
+            return Task.FromResult<IReadOnlyDictionary<Guid, ReferencedOrganizations>>(
                 recordIds.Distinct().ToDictionary(
                     id => id,
                     id => RecordOrganizations.TryGetValue(id, out var orgs)
                         ? new ReferencedOrganizations(orgs, Unreadable: false)
                         : ReferencedOrganizations.None));
+        }
     }
 
     /// <summary>
@@ -120,6 +132,13 @@ internal static class GrantPolicyTestDoubles
         /// <summary>When set, every query faults (<c>null</c>, the reader's own fail-closed signal).</summary>
         public bool Faults { get; set; }
 
+        /// <summary>
+        /// Task 139 r1: when set, every query THROWS this exception instead of answering — e.g. a
+        /// <see cref="TaskCanceledException"/> with no caller cancellation (an HttpClient timeout), which the reader
+        /// rethrows rather than turning into its own fail-closed <c>null</c>.
+        /// </summary>
+        public Exception? Throws { get; set; }
+
         /// <summary>How many chunk queries ran — proves the shared reader was consulted.</summary>
         public int Queries { get; private set; }
 
@@ -135,6 +154,8 @@ internal static class GrantPolicyTestDoubles
             string subjectFilter, string objectFilter, CancellationToken ct)
         {
             Queries++;
+            if (Throws is { } ex)
+                return Task.FromException<List<NoAccessEntryRow>?>(ex);
             if (Faults)
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
 

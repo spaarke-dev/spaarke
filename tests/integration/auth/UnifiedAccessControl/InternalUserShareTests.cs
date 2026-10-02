@@ -828,6 +828,22 @@ public class InternalUserShareTests
         _shares.Writes.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// The twin of the case above for a flag read that THROWS (not one that answers Unreadable): the catch around the
+    /// read must also treat the record as secure. Without this, a regression of that catch to "not secure" would let
+    /// the last person go from a secure record whenever the flag read faults (S5 / ADR-003).
+    /// </summary>
+    [Fact]
+    public async Task Unshare_WhenTheSecureFlagReadThrows_AppliesTheLastPersonRule()
+    {
+        _flags.ThrowOnRead = true;
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.LastReaderOnSecureRecordReasonCode));
+        _flags.Reads.Should().Contain((MatterTable, MatterId), "the flag read must actually have been attempted");
+        _shares.Writes.Should().BeEmpty();
+    }
+
     /// <summary>If the other sharers cannot be checked, nothing is removed — never a guess that someone remains.</summary>
     [Fact]
     public async Task Unshare_OnASecureRecord_WhenTheOtherSharersCannotBeRead_Is500AndRemovesNothing()
