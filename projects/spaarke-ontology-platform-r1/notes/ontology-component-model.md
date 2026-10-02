@@ -105,29 +105,11 @@ No general browsing wrapper over TyMetrix and iManage. Instead: for every item t
 | ~~ledger~~ (customer-facing) | ❌ → **Decision Record** | "Ledger" connotes append-only correctly but describes nothing. Keep *ledger* in engineering docs |
 | ~~originate~~ (binding mode) | ⚠️ Prefer **"system of record"** | Palantir-flavoured; SOR is the industry term |
 | ~~field classes~~ | ⚠️ Prefer **"attribute ownership"** | Plainer, and says what it does |
-| ~~typed outcome~~ | ⚠️ Consider reusing **"disposition"** | We already have 8 action dispositions + File/File+Act/Route/Hold/Dismiss for communications; an Inquiry's outcome is the same shape |
-
-> ### 📌 The *disposition* question, settled as far as this file can settle it `[2026-10-01]`
->
-> Raised in owner feedback: *"I thought we changed the terminology including not using disposition."*
->
-> **The record says otherwise, and the record is this table.** Two rows above: **"Action · gate · disposition" is
-> ✅ Keep** (it is ADR-039's own vocabulary — eight action dispositions, plus File / File+Act / Route / Hold /
-> Dismiss for communications), and only ***typed outcome*** carries a ⚠️. What this file retired was
-> **~~ledger~~ → Decision Record** (customer-facing), plus ~~binding registry~~, ~~connector manifest~~,
-> ~~originate~~ and ~~field classes~~. *Disposition* was never among them — it is a term we **kept because we
-> already own it in shipped code**.
->
-> **Recommended resolution of CM-4** (`design.md` §8.0a), which is this row's own suggestion taken: use
-> **disposition** for an Inquiry's outcome and **drop *typed outcome* as a separate term**, then sweep *typed
-> outcome* out of `design.md` criterion 10, `mvp-synopsis.md` §6 and the architecture review. One word, one
-> meaning, already in the code.
->
-> ⚠️ **Not applied yet — it needs the owner's explicit confirmation**, precisely because the premise differs from
-> recollection. If the preference is instead to retire *disposition*, that is an amendment to **this table**, and
-> it carries a real cost to name: ADR-039's dispatch vocabulary and the communication outcomes would then
-> disagree with the ontology's. Either answer is defensible; the one thing that is not is leaving both words in
-> circulation, which is the state owner item 9 objected to.
+| ~~typed outcome~~ | ❌ **Drop** → **disposition** `[resolved 2026-10-02, CM-4]` | We already have 8 action dispositions + File/File+Act/Route/Hold/Dismiss for communications; an Inquiry's outcome is the same shape. **Reuse beats a new word** — and ADR-039 already owns this one in shipped code |
+| **Work Item** | ✅ **Adopt** `[2026-10-02]` — the user-facing noun for **one line in the worklist** | Answers the owner's *"what do we call each line item?"*. **Verified free**: zero `sprk_workitem` / `sprk_worklistitem` references in `src/`. Chosen over *Signal* for the UI because *signal* reads as **alert**, and "they alert; we record decisions" is the positioning we are defending. One Work Item = one `sprk_signal` row, rendered. ⚠️ **Never an entity name** — `sprk_workassignment` (141 files), `sprk_todo` (208) and `sprk_event` (284) all exist and all *appear as* Work Items; the superordinate term must not collide with its own members |
+| **Signal** (`sprk_signal`) | ✅ Keep — the **engineering + data** name | The stored evaluation: subject · rule + version · evidence · lifecycle. Same split as ~~ledger~~ → Decision Record and decision 19: one object, a customer-facing name and an engineering identifier |
+| ~~flag~~ (as a synonym for a signal row) | ❌ **Drop** `[2026-10-02]` | **A genuine collision, found in our own drafts**: `sprk_highpriority` and `sprk_monitor` are *already* called flags — *"a flag says someone cares, not what is wrong"* — and `daily-briefing-ontology-fit.md` uses "flag" for both meanings 17 times. Say **Signal** for the row and **flag** only for the two booleans |
+| **Decide · Do · Know** | ✅ Adopt as the **kinds** of Briefing/worklist content `[2026-10-02]` | Decide and Do are the two **lanes** of the worklist and both are Work Items; **Know is not a Work Item** — it fails row-contract requirement 4 and becomes narrative + Context pane |
 | **reference / mirror** | ✅ Keep | Ordinary data-integration terms, not Palantir's |
 | **Action · gate · disposition** | ✅ Keep | ADR-039, already ours |
 | **Fact / Observation / Precedent / Inference** | ✅ Keep | Insights Engine, already shipped |
@@ -223,7 +205,7 @@ MCP gives session-scoped, user-permissioned retrieval — no enumeration, no CDC
 |---|---|---|
 | **Document** | reference | **MCP** — the one case where it is right (iManage, NetDocuments both ship servers) |
 | **Matter** | mirror | vendor REST API (Aderant, Elite 3E, ProLaw) · DB read replica for on-prem · scheduled export |
-| **Invoice** | mirror | **LEDES file drop** — vendor-neutral, zero connector; most orgs already produce it monthly |
+| **Invoice** | mirror | ⚠️ **Superseded 2026-10-01 (decision 21).** ~~LEDES file drop — vendor-neutral, zero connector~~. Invoice, budget and spend-variance arrive from the e-billing platform as **computed metrics**; we do not parse LEDES. Kept struck-through because the *binding mode* (mirror) is unchanged — only the transport is |
 
 ### 4.8 Policy
 
@@ -414,7 +396,7 @@ Which cascades: the worklist becomes a **Dataverse view** filtered on `budgetVar
 
 **Limits to respect:** rollups recalculate on a schedule (~hourly) and cannot traverse many hops; calculated columns cannot express everything. Both are fine at MVP scale. `ILiveFactResolver` remains the path for facts that outgrow them — and the policy's input vocabulary is unchanged either way, so outgrowing a rollup is an implementation swap, not a redesign.
 
-**Note on the budget itself:** LEDES carries invoice *lines*, not budgets. Budget is a separate input — a column the customer populates for MVP; a second binding, or a `sprk_budget` entity with phases, later.
+**Note on the budget itself** `[revised 2026-10-01]`**:** budget is a **separate input** from invoice values, whatever the transport — a column the customer populates for R1 (seeded manually in dev; `design.md` §8.1), with a second binding or a phased `sprk_budget` later. *(The original note reached this conclusion via "LEDES carries invoice lines, not budgets". The premise is retired with decision 21 — we no longer parse LEDES — but the conclusion stands on its own and is now load-bearing: Path B's second conjunct reads `sprk_budgetrevision`, a table that does not yet exist, because `sprk_budget` carries no revision history and auditing is not wired.)*
 
 **Landing pattern — direct, with raw retained:**
 
@@ -621,7 +603,7 @@ So the worklist's data is a **flag entity**; the Decision Record is written when
 2. **MVP binding slice = two object classes × two modes** — Matter mirror, Document reference. Not a manifest covering every class.
 3. **MCP for reference, API/export for mirror.** MCP structurally cannot feed state.
 4. **Rent the transport; own the landing contract, resolution, projection and freshness.** A hand-built ingestion framework competes with ADF and loses.
-5. **The connector count is ~6, not ~30** — one MCP client + one LEDES parser + ~6 MM mappings. We build an *index entry* (10–15 projected fields), not a warehouse row.
+5. **The connector count is ~6, not ~30** — ~~one MCP client + one LEDES parser + ~6 MM mappings~~. We build an *index entry* (10–15 projected fields), not a warehouse row. ⚠️ **The count is a later-phase estimate, and its LEDES-parser term is retired** (decisions 20–21): **R1 builds no connectors at all**. The *index entry, not warehouse row* principle is unaffected and still governs the landing contract.
 6. **Build for departments; bind for firms.** Firm-side consolidation layers (Entegrata, Intapp, Iridium) already exist — bind to them; one binding replaces six. Departments typically have none.
 7. **Policy: seven closed rule types.** Adding one is a code change with review.
 8. **LLM at author time, deterministic at run time.**
@@ -640,7 +622,10 @@ So the worklist's data is a **flag entity**; the Decision Record is written when
 21. **No LEDES intake** `[2026-10-01]` — invoice / budget / spend-variance arrive as **computed metrics** from the e-billing platform. This supersedes decision 5's *"one LEDES parser"* as part of the connector count.
 22. **No per-entity fact or signal tables** `[2026-10-01]` — `ILiveFactResolver` is already generic (keyed `(subject-scheme, predicate)`; Matter / Invoice / Project implementations), and decision/CM-3 already makes facts rollup + calculated columns. `sprk_spendsnapshot` is **one materialization, not a pattern**; generic `sprk_signal` replaces `sprk_spendsignal`, with `SignalEvaluationService` as one producer among several.
 23. **The worklist reads signals and groups them by matter** `[2026-10-01]` — rows are **matters** (Console prototype, D-3). One-row-per-communication strands the shapes that have no communication subject; one-row-per-flag hides that one inquiry can answer two flags. Consequence: `sprk_signal` needs a **polymorphic subject plus an always-populated matter lookup** derived from it. **Both surfaces, split by verb**: Console acts; the MDA authors, administers and audits.
-24. **The Briefing dissolves into the worklist** `[2026-10-01]` — see §6.2. Work becomes lanes, news becomes narrative and Context, tiles become filters, and the model stops choosing priority.
+24. **The Briefing's items are enhanced into Work Items** `[2026-10-01; wording aligned 2026-10-02]` — see §6.2. Nothing is deleted or merged: each one-dimensional line becomes **actionable** and renders through the **same row component and row contract** as every other Work Item. Three things change per line — membership comes from a declared rule, the line states a reason, the line carries an action. A line that cannot be given an action becomes **Know** (narrative + Context pane), which is the only content that leaves the list.
+25. **Vocabulary for the worklist** `[2026-10-02]` — a line is a **Work Item** (user-facing); the row behind it is a **Signal** (`sprk_signal`, engineering); **"flag" is retired** as a synonym for either, because `sprk_highpriority` / `sprk_monitor` already own it. Decide and Do are lanes; Know is not a Work Item. §3 is the authority.
+26. **`disposition`, not "typed outcome"** `[2026-10-02, CM-4]` — reuse ADR-039's shipped vocabulary rather than adding a term.
+27. **Reuse first on UI** `[2026-10-02]` — shipped components (`SprkModal` + presets, `DataGrid`, `WorkspaceWidgetRegistry`, `PaneEventBus`, the Briefing components) and the `docs/standards/` UI set are the default. New components land in a **shared library**, justify themselves per CLAUDE.md §11, and are **one component with data-driven variants, not a family**. `design.md` §1.3 is the binding statement.
 
 ---
 
@@ -660,7 +645,7 @@ So the worklist's data is a **flag entity**; the Decision Record is written when
 | **CM-1** | **Policy: a component inside Insights Engine, or a fourth engine?** | Recommended: inside Insights — a policy evaluation *is* a claim, `Services/Insights/` is already Zone B (D-F0-compatible), and §11 says extend before adding. **Counter:** if `match` is a pipeline stage peer to bind/fact/act, symmetry argues for an engine; it has 2 entities, 7 rule types, an evaluator and an authoring surface |
 | **CM-2** | **Is an object-definition registry needed?** | Only if the assembled definition must be queryable as a unit — the MCP server may need it to describe itself |
 | ~~**CM-3**~~ | ~~Rule body form — bespoke JSON DSL or Dataverse filter?~~ | **CLOSED for MVP (2026-09-24): a Dataverse filter.** Materializing the fact as a rollup + calculated column (§4.15.1) removes the "breaks down for computed facts" objection, and Dataverse becomes the evaluator. Revisit only when a fact outgrows a rollup |
-| **CM-4** | **Reuse "disposition" for an Inquiry's typed outcome?** | We already have 8 action dispositions + the communication set |
+| ~~**CM-4**~~ | ✅ **RESOLVED 2026-10-02 — yes, use `disposition`.** ~~Reuse "disposition" for an Inquiry's outcome?~~ | We already have 8 action dispositions + the communication set |
 | **CM-5** | **Are Inquiry and Request one object with a direction discriminator?** | Structural mirror images; would also settle `sprk_servicerequest` vs `sprk_legalrequest` |
 
 Carried from the strategy synopsis and still open: D-f (binding-mode promotion), D-g (benchmarking consent), D-m (Wave 1.5 registry), D-o…D-v.
@@ -683,27 +668,37 @@ The **full ontology specification** (object catalog, link taxonomy, ERD) should 
 
 ---
 
-## 11. MVP scope `[2026-09-24]`
+## 11. MVP scope `[2026-09-24 · rewritten 2026-10-02]`
 
-> **LEDES invoice ingest → threshold policy → worklist → inquiry action → Decision Record**
+> **Policy → Signal → Work Item → gated action → Decision Record**
+>
+> 🔴 **This heading replaces** *"LEDES invoice ingest → threshold policy → worklist → inquiry action → Decision
+> Record."* The MVP **does not start with ingest of any kind.** Owner decisions 2026-10-01 (recorded as
+> decisions 20–21): **R1 is intelligence-forward** — it builds from the Spaarke data model out and assumes the
+> data is present, either because Spaarke is the system of record or because a later phase mirrors it in — and
+> **there is no LEDES intake**, because invoice / budget / spend-variance arrive from the e-billing platform as
+> **computed metrics**. The old heading also carried the *"needs zero vendor connectors"* boast, which was true
+> only because LEDES is a file; the replacement is stronger — **R1 needs no vendor cooperation at all.**
 
-One slice that exercises **all six pipeline stages end to end**, needs **zero vendor connectors**, and is §8's second bootcamp SKU — *"if the buyer's pain is spend, run a LEDES drop plus the inquiry loop."*
+One slice that exercises the pipeline **from the data model forward**, and is §8's second bootcamp SKU.
 
 | In | Out — and why |
 |---|---|
-| File-drop ingest (SFTP / upload) | Matter mirror + MM connectors — LEDES needs no vendor cooperation |
-| `matter.budget` column + rollup + calculated variance | `ILiveFactResolver` extension — native Dataverse covers MVP (§4.15.1) |
-| Policy as a stored filter + action + version | The full seven rule types |
+| **Landing contract only** — pointer columns (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) + attribute ownership, with `sourceasof` **surfaced as a gap when stale** | **All ingest**: file-drop, LEDES parsing, MM connectors, the sync engine, raw-payload retention. A later phase, with the customer |
+| `matter.budget` + rollup + calculated variance; facts via the **existing generic `ILiveFactResolver`** | **Per-entity fact tables.** `sprk_spendsnapshot` is one materialization, not a pattern (decision 22) |
+| Policy as a stored filter + action + version; rule types `Threshold`, `Switch`, **`Existence`** | The other four rule types |
 | Policy authoring as a **model-driven form** | A custom authoring UI |
-| One **worklist** widget + flag entity | The other widget archetypes |
+| **One row component** rendering every Work Item, with membership from configuration; generic **`sprk_signal`** | **"Zero new UI code"** — conceded false (prototype finding 9). The other widget archetypes are still out |
 | **Decision Record** entity + subgrid on parent + list view | — |
-| Inquiry action through the existing gate | — |
+| Inquiry action through the existing gate, resolving with a **disposition** | — |
+| **The Briefing's items enhanced into Work Items** — Do-lane `Temporal` policies, Know → narrative + Context, *Critical Today* retired as a list, the LLM "Top action" removed | — |
 | | **Authority** — while every action needs human confirmation, *the human is the authority* and Dataverse security answers "may this person confirm." Post-MVP |
-| | **Writeback** (Patterns C/D) · **MCP egress** · **Fabric IQ projection** · **party/org resolution** |
+| | **Writeback** (Patterns C/D) · **MCP egress** · **Fabric IQ projection** · **party/org resolution** · the **Action Engine** (the management plane; R1 needs an Action *row* on the shipped dispatch spine) |
 
-**Two things to do now because they are free and expensive later:**
+**Three things to do now because they are free and expensive later:**
 1. **Key any decision/approval table on `systemuserid`**, so humans and agent users share one model when authority arrives.
-2. **Pointer fields + `sourceasof` on any entity the ingest touches**, per §4.4.
+2. **Pointer fields + `sourceasof` on any entity a later ingest will touch**, per §4.4 — and surface staleness as a gap, because an `Absence` rule over a stale source is a **false negative wearing a confident face**.
+3. **Settle the `sprk_signal` shape before the evaluator writes its first row** — polymorphic subject + always-populated matter lookup (decision 23), dedupe key, `sprk_resolutiontype`, and a **nullable** decision reference. Taken late, each of these is a data migration.
 
 ### 11.1 Workspace assessment — the one open question
 
@@ -740,5 +735,6 @@ Four concerns raised on 2026-09-24 reduced to one after review:
 |---|---|
 | 2026-09-24 | Created from the 09-21 → 09-24 design sessions. Supersedes scattered terminology in the strategy synopsis §§1.4, 4.7–4.8, 5.5, 6.6 |
 | 2026-09-24 (b) | Added §1.1 naming (**Spaarke Console**) · §1.2 value hierarchy (orchestration vs linked evidence vs co-display) · §4.15 how third-party data lands and why Policies/Actions work over it · §4.16 the seven-step ingest template · §6.1 one widget archetype + Daily Briefing as upgrade target · writeback mechanism sketch in §5.1 · decisions 15–19 |
+| **2026-10-02** | Owner feedback round 3. **§3** — **CM-4 resolved**: `disposition` adopted, *typed outcome* dropped, and the explanatory note removed (the decision is the record now). **§3** also gains the worklist vocabulary: **Work Item** (user-facing line) vs **Signal** (`sprk_signal`, engineering), **"flag" retired** as a synonym for either — a collision found in our own drafts, where `sprk_highpriority`/`sprk_monitor` are *also* called flags — plus **Decide / Do / Know** as the kinds. **§11 rewritten**: the MVP **no longer starts with LEDES invoice ingest**; the slice is *Policy → Signal → Work Item → gated action → Decision Record*, and the *"needs zero vendor connectors"* boast is replaced by the stronger *"needs no vendor cooperation at all."* **§7** — decisions **24 (reworded) + 25–27**. Companion: `design.md` **§1.2** (where the LLM is and is not implicated) and **§1.3** (UI/UX reuse, binding) |
 | **2026-10-01** | Owner feedback round 2. §3 — the ***disposition*** finding (it was **never retired**; *typed outcome* is the ⚠️ term, and CM-4's recommended resolution is to adopt *disposition*, **pending owner confirmation**). §6 — Console **name** changes now, web-resource **identifier** `sprk_spaarkeai` does not (blast radius measured). §6.1 — the one-archetype claim **tested by the Console prototype**: held for the archetype and the narrative wrapper, **false** for *"zero new UI code"* (finding 9), stat tiles replaced by count filters (finding 17), plus three new rule-declaration requirements (findings 14–16). §6.2 — the Briefing **dissolves** into the worklist (Decide / Do / Know). §7 — decisions **20–24** (intelligence-forward · no LEDES · no per-entity fact or signal tables · rows are matters · the Briefing dissolves). §11.1 — the open hosting question **answered**, with the caveat that the query path is free and the row component is not. ⚠️ Decision **5**'s LEDES-parser clause is superseded by decision 21 |
 | 2026-09-24 (c) | **Scope-reduction pass.** §4.15.1 **materialize the fact** — rollup + calculated column, zero C#, which makes a worklist a Dataverse view and **closes CM-3**. §6.1 renamed to **worklist** with prior art (Palantir Workshop, ServiceNow, Dynamics) and §6.1.1 how a row is produced (evaluate-on-write + flag entity, not evaluate-on-read). §6.2 charts/reports are supporting surfaces via Power BI — "not BI" ≠ "no charts". **§11 MVP scope** — LEDES → threshold → worklist → inquiry → Decision Record. §11.1 workspace assessment reduced to one question. **Authority moved post-MVP** (human confirmation *is* the authority while every action is gated) |

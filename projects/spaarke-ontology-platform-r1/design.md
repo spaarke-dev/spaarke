@@ -1,6 +1,6 @@
 # Spaarke Legal Operations Intelligence — Ontology Platform R1 · Design
 
-> **Status**: **DRAFT for review — rev 4**, 2026-10-01. Not yet through `/design-to-spec`.
+> **Status**: **DRAFT for review — rev 5**, 2026-10-02. Not yet through `/design-to-spec`.
 > **Evidence base**: [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) (~800 lines — field-level
 > detail, live-verified schema, defect forensics). **This document holds the decisions; the spec holds the
 > evidence.** Where they disagree, this document is newer.
@@ -29,7 +29,7 @@ reference in the document that claims to hold the decisions.
 | Single-source computation — budget variance, rate compliance, accruals, invoice-line review | ❌ **No** | Legal Tracker, Onit and Brightflag already do this, often with AI. Budget **and** spend both live in e-billing |
 | **Requires data the incumbent does not hold** — email, documents, requests, obligations | ✅ Yes | Structurally impossible for them |
 | **A rule about an object they do not model** | ✅ Yes | You cannot write a rule about a thing their schema lacks |
-| **The record of what was decided and what resulted** | ✅ Yes | They *alert*; they do not capture the intervention or its typed outcome — and it **compounds** |
+| **The record of what was decided and what resulted** | ✅ Yes | They *alert*; they do not capture the intervention or its **disposition** — and it **compounds** |
 
 ### 0.1 Budget variance is the plumbing proof, NOT the pitch
 
@@ -102,6 +102,55 @@ failure, committed on the headline claim.
 Everything else in the MVP exists to make that one sentence computable, recordable, and re-tunable without a
 deployment.
 
+### 1.2 Where the LLM is — and is not — implicated `[rev 5, owner item 7]`
+
+Decision 15 states the rule in six words: **the LLM classifies, deterministic code decides, a human acts.**
+This section says exactly where each of those happens, because "AI-directed platform" is the kind of phrase
+that hides an architecture rather than describing one.
+
+#### The LLM has exactly one job that the machinery depends on: **classification**
+
+A communication (later a memo) arrives. The model reads it and returns a **category chosen from a bounded set**
+— `sprk_triagecategory` rows, resolved **per run** into both the prompt *and* a JSON-Schema `enum` used for
+constrained decoding. The model cannot invent a category; it can only pick an existing row, which is what makes
+a new taxonomy row live with **zero deployment**.
+
+**That category is the only model output any predicate reads.** Everything downstream treats it as data.
+
+| # | LLM touchpoint | What it produces | Bound by |
+|---|---|---|---|
+| 1 | **Communication classification** (`triage-email` Action) | `sprk_triagecategory` + priority + obligations + summary | Registry `$choices` → prompt **and** constrained-decoding `enum`; evidence-before-conclusions field order |
+| 2 | **`sprk_memo` classification** (signal source #2) | the same bounded category | Same contract — one new Action row, no new mechanism |
+| 3 | **Classifier guidance** | nothing at runtime; it *shapes* #1 and #2 | `sprk_classifierguidance` text authored per category row and injected into the prompt (the planned `LookupChoicesResolver` extension). Ten rows are authored and currently inert |
+| 4 | **Narrative prose** — the row's sentence and the Briefing-style wrapper | words only | **§0.3**: the sentence may not assert anything the predicate did not read. An Observation is hedged, carries a confidence and cites its passage; a Fact is stated flatly |
+| 5 | **Drafting an Inquiry** | a proposed email body the human edits and sends | The gate. Nothing is sent without human confirmation |
+| 6 | **The association ladder's AI rung** (`AiClassificationRung`, shipped) | a *candidate*, never a filing | **Structurally barred** from emitting a record GUID or auto-filing |
+
+#### Where the LLM is deliberately absent
+
+| Function | Who does it | Why not the model |
+|---|---|---|
+| **Membership** — which signals exist at all | A deterministic predicate over Dataverse (FetchXML) | There must be an answer to *"why didn't this surface on Tuesday?"* A model's answer is unverifiable |
+| **Rank / order** | A deterministic rank function | Row-contract requirement 2. Rank chosen by a model cannot be explained or reproduced |
+| **Whether the predicate is true** | FetchXML + `sprk_policyversion` | **A predicate evaluated by a model makes the Decision Record an anecdote.** This is the single most important line in this section |
+| **The authorize/deny decision** | `ConfirmationPolicyEngine` → `GateDecisionV2` | The gate is the audit boundary |
+| **The Decision Record** | Code, at the gate | It must say what *was* decided, not what a model recounts |
+| **Priority selection** | The first row, because rank is deterministic | The Briefing's LLM-chosen *"Top action"* is being **removed** for exactly this reason (BR-3 / §5 In) |
+| **Filing a communication to a matter** | The deterministic rungs; AI only proposes | Auto-file stays at 0.85 and is barred to the AI rung — filing writes data, where a false positive is worse than a miss (decision 13) |
+
+#### The two consequences that fall out of this split
+
+1. **The conjunction inherits its weakest input, and that input is the classifier.** Path B is
+   *communication-classified-as-fee-or-scope* **AND** *no-budget-revision*. The second conjunct is exact. The
+   first is a model output. So at 70% classifier recall the differentiated claim silently misses 30% of real
+   cases **while every other success criterion passes green** — which is why criterion 11 makes a measured
+   recall floor a gate rather than an observation.
+2. **The zero-deployment taxonomy property is architectural, not prompt engineering.** It comes from binding the
+   prompt and the schema `enum` to the same Dataverse rows at run time. ⚠️ And it degrades **silently** if that
+   Dataverse read fails ([ISS-002](https://github.com/spaarke-dev/spaarke/issues/1049)): `$choices` resolution
+   is best-effort (NFR-04), and the pre-2026-09-04 behaviour was category null on 100% of captures. The failure
+   is invisible by construction, which is why it is filed rather than noted.
+
 ### 1.1 What this project is NOT
 
 - **Not budget variance.** Legal Tracker, Onit and Brightflag already ship it. It is the plumbing proof, never
@@ -124,6 +173,57 @@ deployment.
 - **Not a migration.** The line between overlay and system-of-record is **authority, not storage**.
 - **Not an agent.** The LLM classifies, bounded by data; deterministic code evaluates; a human acts
   (decision 15). A predicate evaluated by a model makes the Decision Record an anecdote.
+
+---
+
+### 1.3 UI/UX: reuse first, and anything new must be reusable `[rev 5, owner item 3 — BINDING]`
+
+**Owner directive 2026-10-02**: *"it is critical that we reuse existing components and follow existing patterns;
+we may create new components and patterns but ensure they are consistent with our UI and UX standards and are
+reusable."*
+
+This is the universal rule of CLAUDE.md §11 (component justification) applied to the Console surface, and it
+has teeth here because §7 criterion 7 now concedes that **the worklist row is new UI**. That concession is a
+licence to build *one* component well, not a licence to build a surface.
+
+**Reuse these — they are shipped and they are the default:**
+
+| Need | Reuse | Not |
+|---|---|---|
+| Modals of any kind | **`SprkModal` + its six presets** (`ConfirmModal` / `ChoiceModal` / `FormModal` / `PreviewModal` / `BrowseModal` / `WizardModal`) from `@spaarke/ui-components`, governed by [ADR-050](../../.claude/adr/ADR-050-canonical-modal-shell.md) | A bespoke dialog. [`MODAL-DECISION-CRITERIA.md`](../../docs/standards/MODAL-DECISION-CRITERIA.md) decides OOB `navigateTo` vs proprietary first |
+| Tabular membership | **`<DataGrid configId=… />`** + a `sprk_gridconfiguration` row | A hand-rolled table |
+| Widget hosting / layout | **`WorkspaceWidgetRegistry`** · `WorkspaceLayoutWidget` · the six system layouts · `PaneEventBus` | New hosting machinery |
+| The row's own ancestry | **`Spaarke.DailyBriefing.Components`** — `HighPrioritySection` is already a worklist in structure (type badge, status chip, per-row menu) | Starting the row from nothing |
+| Context-pane push | **`PaneEventBus` `context` channel** + `ContextPaneController` + `useContextEventBridge` | A new channel |
+| Calendar-style dual use | **`CalendarSection`** — the proven *shared-lib widget + thin shim* pattern (componentization audit §2A) | A Console-only copy |
+
+**Standards that bind, not advise**: [`UI-DESIGN-STANDARDS.md`](../../docs/standards/UI-DESIGN-STANDARDS.md) ·
+[`MODAL-DESIGN-SYSTEM.md`](../../docs/standards/MODAL-DESIGN-SYSTEM.md) (the 7-size scale, Cancel always left,
+`--sprk-ui-scale` via a scaled Fluent theme — never CSS `zoom`) ·
+[`ASSISTANT-UI-ELEMENT-CRITERIA.md`](../../docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md) (bubble vs chip vs
+card vs tab — the worklist row is a **card**: a persistent act-on item) ·
+[`UI-SCROLLBARS.md`](../../docs/standards/UI-SCROLLBARS.md) ·
+[`COMPONENT-COMPLEXITY.md`](../../docs/standards/COMPONENT-COMPLEXITY.md) (complexity and cohesion, never line
+count). Build guide: [`BUILD-A-NEW-WORKSPACE-WIDGET.md`](../../docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md);
+host contract: [`LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`](../../docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md).
+
+**Four rules for anything genuinely new** (the row component, the evidence block, the outcome cards):
+
+1. **It lands in a shared library, not in the Console app.** `@spaarke/ui-components` if it is generic,
+   `@spaarke/ai-widgets` if it is widget-shaped. A component that lives in `src/solutions/SpaarkeAi/` is not
+   reusable, and the componentization audit already lists that coupling as remediation debt.
+2. **It answers CLAUDE.md §11's three questions** — what it overlaps (verified by `Grep`, not asserted), why
+   extension does not work, and the concrete behaviour that fails without it.
+3. **It is Fluent v9 with tokens only**, light and dark both correct, no hardcoded colors — the same bar the
+   prototype met.
+4. **It is one component with data-driven variants, not a family.** Prototype finding 10 is the evidence that
+   this is achievable: one row component carried all three signal shapes once five things were present in the
+   data. A second row component is a design failure, not a feature.
+
+⚠️ **The prototype is the design contract, not the implementation.** It is a standalone Vite app with mocked
+data; it deliberately reuses nothing. Carrying it forward means carrying **the kit's shapes and behaviours** —
+one shape per verb, progressive disclosure, count filters as lenses — and re-expressing them in production
+components. Do not port prototype source.
 
 ---
 
@@ -243,7 +343,16 @@ pointing at stale indices, so numbers are no longer load-bearing anywhere in thi
 | **`sprk_memo` as signal source #2** | one Action row + taxonomy decision | Needs D-4 |
 | **Guidance injection** | small change to `LookupChoicesResolver` | No decision needed. The ten authored `sprk_classifierguidance` rows are inert today |
 
-**Already-built signals — the Daily Briefing dissolves into the worklist** `[rev 4, owner items 2 + 3]`.
+**Already-built signals — the Daily Briefing's items are enhanced into Work Items** `[rev 4; wording aligned
+rev 5 per owner item 4]`.
+
+> **The alignment, stated precisely.** The Briefing's content is **not deleted and not merged** — its
+> one-dimensional lines (tasks, To Dos, matters, documents) are **enhanced until they become actionable**, and
+> then rendered through the **same row component, the same row contract and the same UI/UX as every other Work
+> Item**. Three things change per line and nothing else: **where membership comes from** (a declared rule, not
+> the collector's own query), **that the line states a reason**, and **that the line carries an action that
+> changes something**. A line that cannot be given an action is not a Work Item — it becomes Know (narrative +
+> Context pane), which is the only part of today's Briefing that leaves the list.
 Full analysis: [`notes/daily-briefing-ontology-fit.md`](notes/daily-briefing-ontology-fit.md). Four of the six
 rows below are **configuration or deletion**, which is why this broadens the MVP without lengthening it:
 
@@ -335,13 +444,8 @@ overdue tasks would push 5 decisions off the screen.
 9. **The §0 differentiation test passes** (§0): for every shipped capability, we can name the data it
    requires that the incumbent does not hold — **and the predicate reads that data**, per §0.3.
 10. **Something happens in the world.** A confirmed signal produces an Inquiry through the existing gate; the
-    Inquiry carries an SLA; the reply resolves it with a **typed outcome**<sup>†</sup> queryable per matter and
-    per outside firm.
-
-    > <sup>†</sup> ⚠️ **Term provisional — pending CM-4** (§8.0a). Component model §3 marks *disposition*
-    > ✅ Keep and flags *typed outcome* with "consider reusing disposition". If CM-4 resolves as recommended,
-    > **"typed outcome" is swept from this criterion and from all four project documents** (15 occurrences) in
-    > favour of **disposition**. Do not harden either phrasing into a schema name until then. *(Restored rev 3 from `mvp-synopsis.md` §6 criterion 5 — see review §1.3. Criteria 1–9
+    Inquiry carries an SLA; the reply resolves it with a **disposition** queryable per matter and per outside
+    firm. *(Restored rev 3 from `mvp-synopsis.md` §6 criterion 5 — see review §1.3. Criteria 1–9
     cover detect, record, surface, suppress, tune and render; **not one of them required an effect**, which
     leaves the §0 table's fourth row unexercised and is also how an incumbent alerting product behaves.)*
 11. **Classifier recall meets a stated floor.** Recall on `Scope / budget change` and `Fee / rate change` is
@@ -366,6 +470,8 @@ re-thresholding (review §4.4).
 | **D-3** | Worklist surface · rows = matters or communications? | **RESOLVED by the Console prototype** (its README §"D-3 recommendation"). **Rows are matters; the worklist reads signals and groups them by matter.** One-row-per-communication strands two of the three shapes (threshold and SLA have no communication subject); one-row-per-flag hides that a single inquiry can answer two flags. **Both surfaces, split by verb**: Console acts, the MDA authors/administers/audits. **Consequence for `sprk_signal`**: a polymorphic **subject** (the SLA flag is *about* an Inquiry) **plus an always-populated matter lookup** as the grouping key, derived from the subject. `spaarke-ai` stays **Y** (§2) |
 | **D-4** | `sprk_memo` taxonomy | **RESOLVED — reuse `sprk_triagecategory`.** One bounded set keeps cross-source rules simple and the zero-deployment taxonomy property intact |
 | **D-5** | MM connector in MVP? | **RESOLVED — out of scope** (§1.0 / §5 Out). Not deferred-as-undecided; decided |
+| **D-2** | Decision Record field list | **APPROVED (owner 2026-10-02)** with its four constraints intact: `sprk_factsnapshot` **mandatory** (§8.2) · a **nullable action reference** (deny paths have no action) · a **nullable decision reference on the flag** (BR-1 — a Do item resolved as one's own work writes no Decision Record) · **Decision Record → signal is 1:N** (prototype finding 4; the gate records which signals a decision closed) |
+| **CM-4** | Terminology — *disposition* vs *typed outcome* | **RESOLVED (owner 2026-10-02) — adopt `disposition`.** *typed outcome* is retired as a term and swept from all four project documents. `disposition` was already ✅ Keep in component model §3 and is ADR-039's own vocabulary (8 action dispositions + File / File+Act / Route / Hold / Dismiss for communications), so this is reuse, not a new word |
 
 ### 8.0a Still open
 
@@ -375,7 +481,7 @@ re-thresholding (review §4.4).
 | **D-7** | **Is `sprk_signal` an `InsightArtifact` subtype or a sibling table?** `[new rev 4 — owner item 7]` *(Recommend **sibling**: `InsightArtifact` is a response/evidence contract returned from a query, whereas a signal is a durable queue row with a lifecycle — `Open` → `Acted`/`Dismissed`/`ConditionCleared`/`Superseded`/`PolicyRetired` — plus dedupe and suppression. Forcing one shape to serve both repeats the `sprk_spendsignal` mistake in the other direction. A signal **cites** `InsightArtifact`s as evidence)* | `sprk_signal` shape |
 | **D-8** | **Do we need entity-specific fact tables at all?** `[new rev 4 — owner item 5]` *(Recommend **no**. Verified 2026-10-01: `ILiveFactResolver` is already generic — keyed `(subject-scheme, predicate)` with Matter / Invoice / Project implementations — and **CM-3** already says materialize facts as rollup + calculated columns, zero C#. So `sprk_spendsnapshot` is **one materialization, not a pattern**: keep it, read it as evidence, and add no `sprk_*snapshot` sibling per entity. The same logic retires `sprk_spendsignal` in favour of generic `sprk_signal`, with `SignalEvaluationService` becoming one producer among several.)* ⚠️ **One thing to settle inside this**: §8.1's exit condition and the synopsis §2 *compute facts* row both still name `sprk_spendsnapshot` as **the** fact mechanism. If D-8 lands as recommended, those read as the exception, not the rule | `sprk_signal` shape · the evaluator's fact reads |
 | **CM-2** | **Object-definition registry.** *What it is*: a machine-readable description of the ontology's own objects — which entities exist, how they link, which attributes are owned where — so an external consumer can **discover** the model instead of having it hardcoded. *Implication for R1*: **none, and it stays post-MVP**, because its only consumer is the MCP server (out of scope, §5 Out). Worth recording that a seed already exists — `SubjectParser` + `SubjectSchemeCatalogOptions` are a subject-scheme registry — so if a second consumer appears, we extend rather than start | Post-MVP |
-| **CM-4** | **Terminology — "disposition".** ⚠️ **Needs owner confirmation, because the premise differs from recollection.** Component model §3 (authoritative) marks **"Action · gate · disposition" ✅ Keep** and flags only *typed outcome* with ⚠️ *"consider reusing disposition"*. **"Disposition" was never retired**; what §3 retired was *ledger* → **Decision Record**, plus *binding registry*, *connector manifest*, *originate* and *field classes*. **Recommendation: resolve CM-4 by adopting §3's own suggestion** — use **disposition** for an Inquiry's outcome and drop *typed outcome* as a separate term, then sweep *typed outcome* out of criterion 10, the synopsis and the review. That gives the single vocabulary owner item 9 asks for. If you would rather retire *disposition*, say so and it becomes an amendment to component model §3 — the one place a terminology change is allowed to originate | **Decision Record** naming · **Inquiry action** · criterion 10 wording |
+
 
 ### 8.0b From the Daily Briefing analysis `[rev 4]`
 
@@ -545,6 +651,15 @@ Carried from `current-task.md`; full rationale in the notes.
     has no sole owner, so AI-side work this project needs is **done in this project** (owner 2026-10-01,
     answering synopsis §7 item 5). `/conflict-check` still applies for in-flight neighbours
 22. **The Console prototype is the UI/UX contract** — not a sketch to admire and re-derive (§11, §12)
+23. **D-2 approved** (owner 2026-10-02) with its four constraints — mandatory `sprk_factsnapshot`, nullable
+    action reference, nullable decision reference on the Signal, Decision Record → Signal is 1:N
+24. **`disposition`, not "typed outcome"** (CM-4 resolved, owner 2026-10-02). Reuses ADR-039's shipped vocabulary
+25. **A line in the worklist is a Work Item** (user-facing); the row behind it is a **Signal** (`sprk_signal`,
+    engineering). **"Flag" is retired** as a synonym — `sprk_highpriority` / `sprk_monitor` already own that
+    word. Decide and Do are the two lanes; **Know is not a Work Item**. Vocabulary lives in component model §3
+26. **Reuse first on UI** (§1.3, binding) — shipped components and standards are the default; anything new lands
+    in a shared library, justifies itself per CLAUDE.md §11, and is **one component with data-driven variants,
+    not a family**
 
 ---
 
@@ -563,8 +678,9 @@ Carried from `current-task.md`; full rationale in the notes.
 
 ## 12. Next steps
 
-1. **Review + iterate this document.** Rev 4 answers owner feedback of 2026-10-01; **CM-4 needs an explicit
-   confirmation** because its premise differs from recollection (§8.0a).
+1. **Review + iterate this document.** Rev 5 answers owner feedback of 2026-10-02 — D-2 approved, CM-4
+   resolved to `disposition`, the **Work Item** vocabulary set, UI/UX reuse made binding (§1.3), and the LLM's
+   role stated explicitly (§1.2). **No open terminology questions remain.**
 2. **Seed the dev data** (§8.1 checklist) — no longer a spike, no longer the critical path.
 3. Settle **D-2**, **D-7**, **D-8** and the `sprk_signal` shape (§5 deferred-in-project, incl. CM-9 resolution
    semantics and D-3's polymorphic-subject + matter-lookup consequence) **before the evaluator writes its first

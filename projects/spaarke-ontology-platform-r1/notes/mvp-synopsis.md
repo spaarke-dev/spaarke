@@ -171,7 +171,7 @@ subtype — is **D-7**.
 
 | Item | Why it's not a build |
 |---|---|
-| **Inquiry action** | One Action + one Binding. Dispatch already exists: ADR-039 Binding catalog · `ConfirmationPolicyEngine` · `GateDecisionV2` · `SideEffectGateAIFunction` · `OutputRouter` (8 dispositions). Uses `sprk_servicerequest` with an outbound direction + typed outcome (CM-5) |
+| **Inquiry action** | One Action + one Binding. Dispatch already exists: ADR-039 Binding catalog · `ConfirmationPolicyEngine` · `GateDecisionV2` · `SideEffectGateAIFunction` · `OutputRouter` (8 dispositions). Uses `sprk_servicerequest` with an outbound direction + **disposition** (CM-5) |
 | **Policy authoring UI** | Model-driven form over `sprk_policy` / `sprk_policyversion`. Dataverse gives the form, version list, row security and audit for free |
 
 ### 4.5 Console hosting — RESOLVED 2026-09-24
@@ -250,7 +250,7 @@ here that is the cheap, reversible option. Revisit the identifier when solution 
    read-only and derived fields writable **in the same row**, demonstrable on seeded data without a connector.
 3. A legal-ops admin can change a budget-variance threshold **in a form, without a deploy**, and the change produces a new policy version that the old signals still reference.
 4. A matter breaching the threshold appears in the Console worklist, showing **why** (policy code + version + the triggering values).
-5. One click sends a budget inquiry through the gate; the inquiry is tracked with an SLA; the reply resolves it with a **typed outcome**.
+5. One click sends a budget inquiry through the gate; the inquiry is tracked with an SLA; the reply resolves it with a **disposition**.
 6. The matter's Decision Record shows the full entry: what was proposed, the fact that triggered it, the policy version, who confirmed, and the outcome.
 7. Nothing was written back to the e-billing system.
 8. **The differentiation criterion** — *strengthened 2026-09-30*: at least one signal type fires on a predicate that **reads** both a communication field and a budget field. **A demo that only shows budget variance has not met the bar — and neither has a rule that merely *mentions* the budget in its message.**
@@ -261,7 +261,7 @@ here that is the cheap, reversible option. Revisit the identifier when solution 
    > criterion that the failure satisfies is not a criterion. The test is now about what the predicate
    > **reads**, not what the signal is *about* (spec §0.3).
 
-9. **Something happens in the world.** A confirmed signal produces an Inquiry through the existing gate; the Inquiry carries an SLA; the reply resolves it with a **typed outcome** queryable per matter and per outside firm. *(This was always criterion 5 here; recorded again because `design.md` rev 1 dropped it and had to restore it — criteria that only cover detect/record/surface describe an alerting product.)*
+9. **Something happens in the world.** A confirmed signal produces an Inquiry through the existing gate; the Inquiry carries an SLA; the reply resolves it with a **disposition** queryable per matter and per outside firm. *(This was always criterion 5 here; recorded again because `design.md` rev 1 dropped it and had to restore it — criteria that only cover detect/record/surface describe an alerting product.)*
 10. **Classifier recall meets a stated floor.** Recall on `Scope / budget change` and `Fee / rate change` is measured against a labelled set, with the floor recorded. *(New 2026-09-30. The predicate is a **conjunction**, so it inherits its weakest input — the LLM classifier. At 70% recall the differentiated claim silently misses 30% of real cases while every other criterion above still passes green.)*
 
 ## 7. Open items before this becomes a spec

@@ -21,7 +21,9 @@
 > [`ontology-architecture-feedback.md`](ontology-architecture-feedback.md) §1.5, §2.1, §4 · [`design.md`](../design.md)
 > §0, §3.1, §5 · the Console prototype in `c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\`
 > (its README, findings 1–17).
-> **Vocabulary**: component model §3 is authoritative.
+> **Vocabulary**: component model §3 is authoritative. ⓘ *Written before the 2026-10-02 vocabulary decision:
+> read **"flag"** below as **Signal** (`sprk_signal`) wherever it means the stored row, and **"row" / "item"** as
+> **Work Item**. §3 retired "flag" as a synonym precisely because this document uses it both ways.*
 > **Audience**: owner · `/design-to-spec` · future sessions.
 
 ---

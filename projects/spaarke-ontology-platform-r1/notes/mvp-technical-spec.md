@@ -52,7 +52,7 @@
 | Single-source computation — budget variance, rate compliance, accruals, invoice line review | ❌ **No** | Legal Tracker, Onit, Brightflag already do this, often with AI. Budget **and** spend both live in e-billing |
 | **Requires data the incumbent doesn't hold** — email, documents, requests, obligations | ✅ Yes | structurally impossible for them |
 | **A rule about an object they don't model** | ✅ Yes | you cannot write a rule about a thing their schema lacks |
-| **The record of what was decided and what resulted** | ✅ Yes | they *alert*; they do not capture the intervention or its typed outcome — and it **compounds** |
+| **The record of what was decided and what resulted** | ✅ Yes | they *alert*; they do not capture the intervention or its **disposition** — and it **compounds** |
 
 ### 0.1 Consequence: budget variance is the plumbing proof, NOT the pitch
 
@@ -141,7 +141,7 @@ This is the whole MVP. Everything in §§2–7 exists to make this run.
 
 ⑨ Decision Record written at the gate                       [PROPOSED — new entity]
 
-⑩ Reply arrives → classified → typed outcome → signal closed
+⑩ Reply arrives → classified → disposition → signal closed
 ```
 
 **Four of ten steps already work.** Steps ③④⑤ and ⑦ are shipped.
@@ -506,7 +506,7 @@ public sealed record SourceRecord(
 | **7a** | **Landing contract only** — pointer columns (`sourcesystem` · `sourceid` · `sourceetag` · `sourceasof`) + attribute ownership on any entity a later ingest touches, and `sourceasof` **surfaced in the UI as a gap when stale** | schema + a render rule. In R1 because it is free now and a migration later |
 | 8 | Worklist: **one row component** over `sprk_signal` where unresolved, **grouped by matter** (D-3). ⚠️ Not `sprk_spendsignal`, and ⚠️ **not "zero new UI code"** — prototype finding 9 disproved that; finding 10 is the recovered half (one component carried all three signal shapes, so the cost is build-once) | new |
 | 9 | `sprk_decisionrecord` entity + gate write + subgrid + view. ⚠️ **1:N to flags** (prototype finding 4) and the flag's decision reference is **nullable** (BR-1) | new |
-| 10 | `sprk_servicerequest`: outbound direction + outcome vocabulary. ⚠️ **Term pending CM-4** — component model §3 marks *disposition* ✅ Keep and flags *typed outcome* with "consider reusing disposition"; do not harden either phrasing until CM-4 is confirmed | extend |
+| 10 | `sprk_servicerequest`: outbound direction + **disposition** (CM-4 resolved 2026-10-02 — reuses ADR-039's existing vocabulary rather than adding a term) | extend |
 | **11** | **Do-lane `Temporal` policy rows** — overdue task · due within 3 days · work assignment past `sprk_responseduedate` (BR-2). Membership moves off `DailyBriefingCollector`'s own queries onto declared rules | 3 data rows, **no new evaluator** |
 | **12** | **Retire *Critical Today* as a list** — `sprk_highpriority` → rank input, `sprk_monitor` → subscription (BR-3); **remove the LLM-chosen "Top action"** (it breaks row-contract requirement 2 and decision 15) | configuration + deletion |
 | **13** | **First Know-promotion rule** — *new matter with no budget after 5 days* (`Absence`, Spaarke-held data) (BR-6). ⚠️ Document-based Absence rules wait until documents are mirrored — impossible over reference-mode data | one data row |
