@@ -49,7 +49,7 @@ Because the record is then a secure root, every existing secure rule applies to 
     <constraint source="owner">Fail closed (ADR-003). If the parent's flag cannot be read, refuse the create or re-file, or leave it to the job, rather than treat the record as not secure. The S5 invariant holds: a secured record always has at least one user who can see it (the creator share, via provisioning).</constraint>
     <constraint source="owner">No Dataverse plugins (ADR-002 / D-1). Securing happens in the BFF write paths, the transition path (task 148) and a BFF `IScheduledJob` registered via `AddScheduledJob&lt;&gt;` (ADR-036 / ADR-052). There is no hand-rolled timer.</constraint>
     <constraint source="project">Reuse the existing provisioning path (tasks 133 and 144). Do not write a second "make secure" implementation. `sprk_issecure` is locked by FLS (task 150) and changed only by the BFF secure/unsecure endpoints. Go through them.</constraint>
-    <constraint source="project">Never auto-unsecure. Unsecuring the parent does not unsecure its filed work assignments or projects (escalation trigger below).</constraint>
+    <constraint source="owner">Never auto-unsecure (owner round 6, 2026-10-02: "yes"). When the parent is unsecured, its secured work assignments and projects STAY secure. Unsecuring them is an explicit act by the people F3 allows (Full Access holders plus the creator). Report them in the unsecure response so the user can see what stayed secure.</constraint>
     <constraint source="project">ADR-038 test bans. Prove each new guard bites by seeding. Drive at least one real route end to end.</constraint>
     <constraint source="project">Live Dataverse is read-only during development. The live gate below is run by the main session.</constraint>
   </constraints>
@@ -74,7 +74,6 @@ Because the record is then a secure root, every existing secure rule applies to 
   </acceptance-criteria>
 
   <escalation>
-    <trigger>The owner has not decided what happens to a secured work assignment or project when its PARENT is unsecured. STOP before implementing any unsecure cascade. Recommendation: leave it secure and report it. Unsecuring is an explicit act by the people F3 allows.</trigger>
     <trigger>A path creates or re-files work assignments or projects outside the BFF in a way the job cannot see within 5 minutes. STOP and report the path.</trigger>
   </escalation>
 

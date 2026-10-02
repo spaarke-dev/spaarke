@@ -137,6 +137,7 @@ These answer the seven questions raised after batch 2 (tasks 141, 144, 145, 155,
 
 1. **A work assignment (or project) filed under a SECURE matter or project is itself secure: "yes".** This is task 158. Such a record becomes a real secure root: `sprk_issecure`, the named-team owner, its own container and the creator share. The parent's sharees can see it. This supersedes task 155's interpretation (iii) for these records.
 2. **Record-first ownership:** explained to the owner. The new record's owner is the parent's business-unit team; the creator's (or BFF app user's) unit team is used only when there is no parent; a secure parent's records go to the named team. With one customer BU per environment, it gives the same result as creator-first. It is kept as implemented, and the owner had no objection.
+4. **Parent unsecured → its secured work assignments and projects STAY secure: "yes"** (asked 2026-10-02 with the recommendation "stay secure"). There is no unsecure cascade. Unsecuring a child is an explicit act by the people F3 allows. This is now a task 158 constraint.
 3. **Customer BU seeding:** the owner believes customer-provisioning-orchestration-r1 seeds the customer's business unit as a prerequisite. Verified in that project's design: §9.3 places both Dataverse application users in the **Root** BU, and no step creates a customer BU. #1094 stands as a design change for that project; its 2026-10-02 comment cites §9.3. The dev root-BU placement is a dev artifact (round 5).
 
 ## Live facts verified this session
