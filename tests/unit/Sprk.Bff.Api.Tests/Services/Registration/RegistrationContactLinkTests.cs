@@ -37,17 +37,18 @@ public class RegistrationContactLinkTests
     public RegistrationContactLinkTests()
     {
         _factory = new RecordingBinderFactory(_demoStore);
-        _sut = NewService(_factory, _log, bffEnvironment: DefaultEnvironment);
+        _sut = NewService(_factory, _log);
     }
 
-    // The BFF's own environment (Dataverse:ServiceUrl) is the ONLY one its identity-link reconciliation job scans.
+    // DATAVERSE_URL is registration's default target. The identity-link reconciliation job reconciles it, the BFF's
+    // own Dataverse:ServiceUrl and every active registry environment (third fix round), so the service itself no
+    // longer reads Dataverse:ServiceUrl.
     private static RegistrationDataverseService NewService(
-        ContactIdentityBinderFactory factory, ILogger<RegistrationDataverseService> logger, string? bffEnvironment)
+        ContactIdentityBinderFactory factory, ILogger<RegistrationDataverseService> logger)
         => new(
             new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["DATAVERSE_URL"] = DefaultEnvironment,
-                ["Dataverse:ServiceUrl"] = bffEnvironment,
             }).Build(),
             new TrackingIdGenerator(),
             Mock.Of<TokenCredential>(),
@@ -103,60 +104,34 @@ public class RegistrationContactLinkTests
         _demoStore.Writes.Should().NotContain(w => w.Op == "link");
     }
 
-    // ── Verifier finding 4: a link that does not land is never logged as "the reconciliation job retries it"
-    //    unless this BFF's job actually scans that environment ─────────────────────────────────────────────
+    // ── Third fix round (the verifier's open gap, notes §12.1): a link that does not land in a provisioning
+    //    target IS re-decided — the identity-link reconciliation job reconciles every environment this BFF
+    //    provisions into. The operator signal says so; IdentityLinkReconciliationTests proves the job does it. ──
 
-    [Fact]
-    public void OnlyThisBffsOwnEnvironment_IsReconciledByItsJob()
-    {
-        _sut.IsReconciledByThisBff(DefaultEnvironment).Should().BeTrue();
-        _sut.IsReconciledByThisBff(DefaultEnvironment.ToUpperInvariant() + "/").Should().BeTrue(
-            "the same environment, whatever the case or trailing slash");
-        _sut.IsReconciledByThisBff(DemoEnvironment).Should().BeFalse(
-            "the job reads only Dataverse:ServiceUrl, never a demo/customer provisioning target");
-
-        NewService(_factory, NullLogger<RegistrationDataverseService>.Instance, bffEnvironment: null)
-            .IsReconciledByThisBff(DefaultEnvironment).Should().BeFalse(
-                "with no Dataverse:ServiceUrl nothing can be claimed to retry anything");
-    }
-
-    [Fact]
-    public async Task ALinkThatDoesNotLand_InATargetEnvironment_IsReportedAsNotRetried()
+    [Theory]
+    [InlineData(DemoEnvironment)]
+    [InlineData(null)]
+    public async Task ALinkThatDoesNotLand_InAnyRegistrationEnvironment_IsReportedAsReDecidedByTheJob(string? target)
     {
         var (userId, oid) = GivenAUserLinkedMeanwhile();
 
         var result = await _sut.LinkContactForNewSystemUserAsync(
             userId, oid.ToString(), "Raced", "User", "raced.user@demo.spaarke.com",
-            _sut.ContactLinkEnvironment(DemoEnvironment), CancellationToken.None);
+            _sut.ContactLinkEnvironment(target), CancellationToken.None);
 
         result!.Outcome.Should().Be(SystemUserLinkOutcome.Failed);
         var warning = _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning).Subject;
-        warning.Message.Should().Contain("NOT retried by this BFF").And.Contain(DemoEnvironment)
-            .And.Contain(DefaultEnvironment, "the operator is told which environment the job DOES scan");
-        _log.Entries.Should().NotContain(e => e.Message.Contains("re-decides the user"),
-            "no retry is promised for an environment the job never scans");
+        warning.Message.Should().Contain("re-decides the user on its next run")
+            .And.Contain("every environment it provisions users into")
+            .And.Contain("IdentityLink:Reconciliation:WritesEnabled")
+            .And.Contain(_sut.ContactLinkEnvironment(target));
+        warning.Message.Should().NotContain("NOT retried", "the gap the second round logged is closed");
     }
 
     [Fact]
-    public async Task ALinkThatDoesNotLand_InThisBffsOwnEnvironment_IsReportedAsReDecidedByTheJob()
+    public async Task ALinkThatFaults_InATargetEnvironment_IsReportedAsReDecidedByTheJob()
     {
-        var (userId, oid) = GivenAUserLinkedMeanwhile();
-
-        var result = await _sut.LinkContactForNewSystemUserAsync(
-            userId, oid.ToString(), "Raced", "User", "raced.user@demo.spaarke.com",
-            _sut.ContactLinkEnvironment(null), CancellationToken.None);
-
-        result!.Outcome.Should().Be(SystemUserLinkOutcome.Failed);
-        _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning)
-            .Which.Message.Should().Contain("re-decides the user on its next run")
-            .And.Contain("IdentityLink:Reconciliation:WritesEnabled");
-        _log.Entries.Should().NotContain(e => e.Message.Contains("NOT retried"));
-    }
-
-    [Fact]
-    public async Task ALinkThatFaults_InATargetEnvironment_IsReportedAsNotRetried()
-    {
-        var sut = NewService(new ThrowingBinderFactory(), _log, bffEnvironment: DefaultEnvironment);
+        var sut = NewService(new ThrowingBinderFactory(), _log);
 
         var result = await sut.LinkContactForNewSystemUserAsync(
             Guid.NewGuid(), Guid.NewGuid().ToString(), "A", "B", "a@demo.spaarke.com", DemoEnvironment,
@@ -164,7 +139,14 @@ public class RegistrationContactLinkTests
 
         result.Should().BeNull();
         _log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning)
-            .Which.Message.Should().Contain("NOT retried by this BFF");
+            .Which.Message.Should().Contain("re-decides the user on its next run").And.Contain(DemoEnvironment);
+    }
+
+    [Fact]
+    public void TheBinderForAnEnvironment_IsBuiltForExactlyThatEnvironment()
+    {
+        _sut.ContactBinderFor(DemoEnvironment + "/").Store.Should().BeSameAs(_demoStore);
+        _factory.Environments.Should().Equal(DemoEnvironment);
     }
 
     // The just-created user was linked by something else between its creation and this link (the

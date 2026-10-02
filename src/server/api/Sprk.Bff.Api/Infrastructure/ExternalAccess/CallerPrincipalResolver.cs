@@ -516,6 +516,9 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
         ContactBindingDecision.DenyContactBindingUnreadable =>
             "The contact for this sign-in carries an identity binding that cannot be read. An administrator has "
             + "been alerted through an identity-collision flag.",
+        ContactBindingDecision.DenyContactKeyConflict =>
+            "Another contact holds the identity key for this sign-in, so it cannot be bound. An administrator has been "
+            + "alerted through an identity-collision flag.",
         _ => "Access could not be resolved for this sign-in. Please try again.",
     };
 }

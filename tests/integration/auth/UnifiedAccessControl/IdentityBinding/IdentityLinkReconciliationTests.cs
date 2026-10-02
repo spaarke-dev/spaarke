@@ -1,13 +1,17 @@
 using System.Text.Json;
+using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Moq;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Services.Registration;
 using Xunit;
 using static Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.IdentityBindingTestKit;
 
@@ -158,8 +162,10 @@ public class IdentityLinkReconciliationTests
     {
         await RunAsync(writes: true);
 
-        // The documented operator resolution for Eyal: the CIAM identity loses this contact (both columns cleared).
+        // The documented operator resolution for Eyal: the CIAM identity loses this contact (binding, mirror and
+        // plane cleared — guide §6.5.3).
         _store.Contacts[EyalContact].Oid = null;
+        _store.Contacts[EyalContact].KeyMirror = null;
         _store.Contacts[EyalContact].Plane = null;
 
         var next = await RunAsync(writes: true);
@@ -169,6 +175,63 @@ public class IdentityLinkReconciliationTests
         _store.SystemUsers[EyalUser].PrimaryContactId.Should().Be(EyalContact);
         _store.Contacts[RalphContact].Flag.Should().NotBeNull("Ralph's collision still holds");
         next.Success.Should().BeTrue(next.ErrorMessage);
+    }
+
+    /// <summary>
+    /// B2 (owner round 4 item 4): a licensed user whose oid another contact holds in the unsecured uniqueness mirror.
+    /// The index refuses the create; the job never creates around it — it flags the holder, keeps that flag while
+    /// the slot is held (even if the holder is deactivated, which does not free the index), and links the user on
+    /// the run after an operator clears the mirror.
+    /// </summary>
+    [Fact]
+    public async Task ASquattedMirror_IsFlaggedNotCreatedAround_AndTheUserIsLinkedOnceTheOperatorClearsIt()
+    {
+        var victimOid = Guid.Parse("5a5a5a5a-0000-4000-8000-0000000000a1");
+        var victim = Guid.NewGuid();
+        var holder = Guid.NewGuid();
+        _store.AddSystemUser(victim, victimOid, "squat.victim@demo.spaarke.com");
+        _store.AddContact(holder, "holder@elsewhere.example", keyMirror: victimOid.ToString("D"));
+
+        var first = await RunAsync(writes: true);
+
+        _store.ContactsBoundTo(victimOid).Should().BeEmpty("nothing is created past the unique index");
+        _store.SystemUsers[victim].PrimaryContactId.Should().BeNull();
+        _store.Contacts[holder].Flag!.Reason.Should().Be(IdentityCollisionReason.KeyMirrorConflict);
+        _store.Contacts[holder].Flag!.CollidingOid.Should().Be(victimOid);
+        Outcome(first, "Flagged").Should().Be(4, "the three dev collisions plus the squat");
+
+        // Deactivating the holder does not free the index slot: the flag stays and nothing is created.
+        _store.Contacts[holder].StateCode = 1;
+        var second = await RunAsync(writes: true);
+        _store.Contacts[holder].Flag.Should().NotBeNull("an inactive holder still holds the slot");
+        Outcome(second, "FlagAlreadyPresent").Should().Be(4);
+
+        // The documented resolution: clear the holder's mirror.
+        _store.Contacts[holder].KeyMirror = null;
+        var third = await RunAsync(writes: true);
+
+        var created = _store.ContactsBoundTo(victimOid).Should().ContainSingle().Subject;
+        _store.SystemUsers[victim].PrimaryContactId.Should().Be(created.Id);
+        _store.Contacts[holder].Flag.Should().BeNull("the conflict no longer holds, so the job clears the flag");
+        third.Success.Should().BeTrue(third.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task AReportOnlyRun_NeverReportsAHeldKeyMirrorFlagAsClearable()
+    {
+        // A report-only pass 1 attempts no write, so it cannot SEE the key conflict: it "would create" the user.
+        // The holder's flag must still be judged from the holder row — or the review run would promise to clear it.
+        var victimOid = Guid.Parse("5a5a5a5a-0000-4000-8000-0000000000b2");
+        var holder = Guid.NewGuid();
+        _store.AddSystemUser(Guid.NewGuid(), victimOid, "squat.victim2@demo.spaarke.com");
+        _store.AddContact(holder, "holder2@elsewhere.example", keyMirror: victimOid.ToString("D"),
+            flag: ContactBindingDecision.FlagWith(null, new CollisionParty(victimOid, IdentityPlaneMarker.Workforce,
+                IdentityCollisionReason.KeyMirrorConflict, Now.AddDays(-1))));
+
+        var result = await RunAsync(writes: null);
+
+        FlagCount(result, "cleared").Should().Be(0, "the slot is still held");
+        _log.Messages.Should().NotContain(m => m.Contains("before-state") && m.Contains(holder.ToString()) && m.Contains("flag=(none)"));
     }
 
     [Fact]
@@ -447,6 +510,147 @@ public class IdentityLinkReconciliationTests
         result.Success.Should().BeTrue(result.ErrorMessage);
     }
 
+    // ── Provisioning targets (third fix round): every environment this BFF provisions users into is
+    //    reconciled like its own — the registration-link gap of notes §12.1 is closed, not recorded ─────────
+
+    private const string OwnEnvironment = "https://spaarkedev1.crm.dynamics.com";
+    private const string DemoEnvironment = "https://spaarke-demo.crm.dynamics.com";
+    private const string OtherDemoEnvironment = "https://spaarke-demo2.crm.dynamics.com";
+
+    [Fact]
+    public async Task ARegistrationLinkThatDidNotLand_InAProvisioningTarget_IsMadeByTheNextRun()
+    {
+        // The registration created this systemuser in the demo environment and its inline link did not land.
+        var demo = new InMemoryContactIdentityStore();
+        var oid = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        demo.AddSystemUser(user, oid, "new.user@demo.spaarke.com");
+
+        var result = await RunAsync(writes: true, targets: new() { [DemoEnvironment] = demo },
+            registry: new[] { DemoEnvironment });
+
+        var created = demo.ContactsBoundTo(oid).Should().ContainSingle().Subject;
+        demo.SystemUsers[user].PrimaryContactId.Should().Be(created.Id);
+        TargetOutcome(result, DemoEnvironment, "CreatedAndLinked").Should().Be(1);
+        _store.SystemUsers[TestUser1].PrimaryContactId.Should().Be(TestUser1Contact, "the own environment is reconciled too");
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ReportOnly_WritesNothingInAProvisioningTarget_AndLogsItsBeforeState()
+    {
+        var demo = new InMemoryContactIdentityStore();
+        demo.AddSystemUser(Guid.NewGuid(), Guid.NewGuid(), "new.user@demo.spaarke.com");
+
+        var result = await RunAsync(writes: null, targets: new() { [DemoEnvironment] = demo }, registry: new[] { DemoEnvironment });
+
+        demo.Writes.Should().BeEmpty("the owner's switch gates every environment");
+        _log.Messages.Should().Contain(m => m.Contains("before-state") && m.Contains($"environment={DemoEnvironment}")
+            && m.Contains("create contact"));
+        TargetOutcome(result, DemoEnvironment, "CreatedAndLinked").Should().Be(1, "reported as what it WOULD do");
+    }
+
+    [Fact]
+    public async Task AFlagWrittenInAProvisioningTarget_IsReEvaluated_AndClearedOnceResolved()
+    {
+        // A registration link raised a collision in the demo environment (an internal address once invited as an
+        // external). This BFF must re-evaluate that flag too, or it outlives its collision forever.
+        var demo = new InMemoryContactIdentityStore();
+        var oid = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        demo.AddContact(contact, "invited.employee@demo.spaarke.com", Guid.NewGuid().ToString("D"), IdentityPlaneMarker.External);
+        demo.AddSystemUser(user, oid, "invited.employee@demo.spaarke.com");
+        var targets = new Dictionary<string, InMemoryContactIdentityStore> { [DemoEnvironment] = demo };
+
+        await RunAsync(writes: true, targets: targets, registry: new[] { DemoEnvironment });
+        demo.Contacts[contact].Flag!.Reason.Should().Be(IdentityCollisionReason.BoundToDifferentOid);
+
+        // The documented resolution: the external identity loses the contact (binding, mirror and plane cleared).
+        demo.Contacts[contact].Oid = null;
+        demo.Contacts[contact].KeyMirror = null;
+        demo.Contacts[contact].Plane = null;
+        var next = await RunAsync(writes: true, targets: targets, registry: new[] { DemoEnvironment });
+
+        demo.Contacts[contact].Flag.Should().BeNull("pass 2 runs in the provisioning target as well");
+        demo.SystemUsers[user].PrimaryContactId.Should().Be(contact);
+        next.Success.Should().BeTrue(next.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task TheRegistrationDefaultEnvironment_IsATargetEvenWhenTheRegistryCannotBeRead_AndTheRunFails()
+    {
+        var registrationDefault = new InMemoryContactIdentityStore();
+        var oid = Guid.NewGuid();
+        var user = Guid.NewGuid();
+        registrationDefault.AddSystemUser(user, oid, "a@demo.spaarke.com");
+
+        var result = await RunAsync(writes: true,
+            targets: new() { [OtherDemoEnvironment] = registrationDefault },
+            registrationEnvironment: OtherDemoEnvironment, registryFails: true);
+
+        registrationDefault.SystemUsers[user].PrimaryContactId.Should().NotBeNull("DATAVERSE_URL needs no registry read");
+        result.Success.Should().BeFalse("an unreadable registry means some targets were not reconciled");
+        result.ErrorMessage.Should().Contain("environment registry");
+        _store.SystemUsers[TestUser1].PrimaryContactId.Should().Be(TestUser1Contact);
+    }
+
+    [Fact]
+    public async Task OneUnreachableTarget_FailsTheRun_ButNeverStopsTheOthers()
+    {
+        var demo2 = new InMemoryContactIdentityStore();
+        var user = Guid.NewGuid();
+        demo2.AddSystemUser(user, Guid.NewGuid(), "b@demo.spaarke.com");
+
+        // DemoEnvironment has no store: building its binder throws, as an unreachable environment would.
+        var result = await RunAsync(writes: true, targets: new() { [OtherDemoEnvironment] = demo2 },
+            registry: new[] { DemoEnvironment, OtherDemoEnvironment });
+
+        demo2.SystemUsers[user].PrimaryContactId.Should().NotBeNull();
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain($"[{DemoEnvironment}]");
+        TargetStatus(result, DemoEnvironment).Should().Be("error");
+        TargetStatus(result, OtherDemoEnvironment).Should().Be("ok", "the other target is reported on its own merits");
+    }
+
+    [Fact]
+    public async Task AFailedScanInATarget_IsAFailedRun_NotNothingToReconcile()
+    {
+        var demo = new InMemoryContactIdentityStore { FailSystemUserScan = true };
+
+        var result = await RunAsync(writes: true, targets: new() { [DemoEnvironment] = demo }, registry: new[] { DemoEnvironment });
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain($"[{DemoEnvironment}]").And.Contain("scan failed");
+    }
+
+    [Fact]
+    public async Task TheOwnEnvironmentInTheRegistry_IsReconciledOnce()
+    {
+        var result = await RunAsync(writes: true, targets: new(), registry: new[] { OwnEnvironment + "/", OwnEnvironment.ToUpperInvariant() });
+
+        TargetEnvironments(result).Should().BeEmpty("the own environment is reconciled through the DI binder only");
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task WithoutDATAVERSE_URL_ThereAreNoProvisioningTargets_AndTheRunIsClean()
+    {
+        var result = await RunAsync(writes: true);
+
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        doc.RootElement.GetProperty("provisioningTargets").GetProperty("configured").GetBoolean().Should().BeFalse();
+        result.Success.Should().BeTrue(result.ErrorMessage);
+    }
+
+    [Fact]
+    public void ProvisioningTargetUrls_AreTheRegistrationDefaultAndTheRegistry_NormalisedDeduplicated_NeverTheOwn()
+        => IdentityLinkReconciliationJob.ProvisioningTargetUrls(
+                OwnEnvironment + "/",
+                DemoEnvironment + "/",
+                new[] { DemoEnvironment.ToUpperInvariant(), null, "  ", OwnEnvironment, OtherDemoEnvironment })
+            .Should().Equal(DemoEnvironment, OtherDemoEnvironment);
+
     // ── Shipping state ───────────────────────────────────────────────────────────────────────────────
 
     /// <remarks>
@@ -472,20 +676,46 @@ public class IdentityLinkReconciliationTests
 
     // ── Helpers ──────────────────────────────────────────────────────────────────────────────────────
 
-    private async Task<JobRunResult> RunAsync(bool? writes, string? rawSwitch = null)
+    /// <param name="targets">
+    /// When set, registration is configured (DATAVERSE_URL = <paramref name="registrationEnvironment"/>, default the
+    /// own environment) and each provisioning-target URL is served by its store; a URL with no store throws when its
+    /// binder is built, as an unreachable environment would.
+    /// </param>
+    private async Task<JobRunResult> RunAsync(
+        bool? writes,
+        string? rawSwitch = null,
+        Dictionary<string, InMemoryContactIdentityStore>? targets = null,
+        string[]? registry = null,
+        string? registrationEnvironment = null,
+        bool registryFails = false)
     {
-        var settings = new Dictionary<string, string?>();
+        var settings = new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = OwnEnvironment };
         if (writes is { } w) settings["IdentityLink:Reconciliation:WritesEnabled"] = w ? "true" : "false";
         if (rawSwitch is not null) settings["IdentityLink:Reconciliation:WritesEnabled"] = rawSwitch;
+        if (targets is not null) settings["DATAVERSE_URL"] = registrationEnvironment ?? OwnEnvironment;
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
 
         var services = new ServiceCollection();
         services.AddSingleton(Binder(_store));
+        if (targets is not null)
+        {
+            services.AddSingleton(new RegistrationDataverseService(
+                configuration,
+                new TrackingIdGenerator(),
+                Mock.Of<TokenCredential>(),
+                Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
+                NullLogger<RegistrationDataverseService>.Instance,
+                new PerEnvironmentBinderFactory(targets)));
+            services.AddSingleton<DataverseEnvironmentService>(
+                new RegistryDouble(configuration, registry ?? Array.Empty<string>(), registryFails));
+        }
+
         using var provider = services.BuildServiceProvider();
 
         var job = new IdentityLinkReconciliationJob(
             provider.GetRequiredService<IServiceScopeFactory>(),
             new FakeTimeProvider(Now),
-            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
+            configuration,
             _log);
 
         return await job.ExecuteAsync(
@@ -517,5 +747,54 @@ public class IdentityLinkReconciliationTests
     {
         using var doc = JsonDocument.Parse(result.ResultJson!);
         return doc.RootElement.GetProperty("mode").GetString()!;
+    }
+
+    private static int TargetOutcome(JobRunResult result, string environment, string outcome)
+    {
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        var env = doc.RootElement.GetProperty("provisioningTargets").GetProperty("environments").EnumerateArray()
+            .Single(e => e.GetProperty("environment").GetString() == environment);
+        return env.GetProperty("systemUsers").GetProperty("outcomes").TryGetProperty(outcome, out var o)
+            ? o.GetProperty("count").GetInt32()
+            : 0;
+    }
+
+    private static string TargetStatus(JobRunResult result, string environment)
+    {
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.GetProperty("provisioningTargets").GetProperty("environments").EnumerateArray()
+            .Single(e => e.GetProperty("environment").GetString() == environment)
+            .GetProperty("status").GetString()!;
+    }
+
+    private static List<string> TargetEnvironments(JobRunResult result)
+    {
+        using var doc = JsonDocument.Parse(result.ResultJson!);
+        return doc.RootElement.GetProperty("provisioningTargets").GetProperty("environments").EnumerateArray()
+            .Select(e => e.GetProperty("environment").GetString()!).ToList();
+    }
+
+    /// <summary>
+    /// The binder factory's virtual store seam (the registration path's own test convention): each environment URL
+    /// gets its in-memory store, so "this environment was reconciled" is asserted on its own rows — no HTTP double.
+    /// </summary>
+    private sealed class PerEnvironmentBinderFactory(Dictionary<string, InMemoryContactIdentityStore> stores)
+        : ContactIdentityBinderFactory(Mock.Of<IHttpClientFactory>(), NullLoggerFactory.Instance, Tenants(CustomerTenant),
+            new FakeTimeProvider(Now))
+    {
+        public override IContactIdentityStore CreateStore(string dataverseBaseUrl, Func<CancellationToken, Task<string>> getToken)
+            => stores.TryGetValue(dataverseBaseUrl, out var store)
+                ? store
+                : throw new InvalidOperationException($"{dataverseBaseUrl} could not be reached");
+    }
+
+    /// <summary>The environment registry at its virtual read (no HTTP double).</summary>
+    private sealed class RegistryDouble(IConfiguration configuration, string[] activeUrls, bool fails)
+        : DataverseEnvironmentService(configuration, Mock.Of<TokenCredential>(), NullLogger<DataverseEnvironmentService>.Instance)
+    {
+        public override Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
+            => fails
+                ? Task.FromException<List<DataverseEnvironmentRecord>>(new HttpRequestException("registry unavailable"))
+                : Task.FromResult(activeUrls.Select(u => new DataverseEnvironmentRecord { DataverseUrl = u, IsActive = true }).ToList());
     }
 }

@@ -191,10 +191,12 @@ public static class InviteExternalUserEndpoint
                 logger.LogWarning(
                     "[EXT-INVITE] Contact lookup for {Email} could not be read ({ReasonCode}) — nothing created",
                     request.Email, code);
+                // The last fallback is deliberately NOT the decision's wording, so a test can tell which one reached
+                // the client (third fix round, verifier INFO finding).
                 return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "LookupFailed",
                     Failure: new InviteLookupFailure(code,
                         resolution.Message ?? ContactIdentityBinder.InviteMessage(code)
-                        ?? "The contact for this email could not be looked up. Nothing was created; try again."));
+                        ?? "The invite could not be completed. Nothing was created; try again."));
 
             default:
                 // NeedReferenceLookup (or an action this code does not know) cannot reach here: the binder

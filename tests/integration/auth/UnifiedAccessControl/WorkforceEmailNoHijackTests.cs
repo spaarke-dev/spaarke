@@ -39,8 +39,10 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///
 /// <para><b>The double.</b> <see cref="InMemoryContactIdentityStore"/> is the module boundary (ADR-038: no HTTP
 /// doubles). It matches oid and email case-insensitively as Dataverse does, honours <c>$top=2</c>, versions
-/// every row for <c>If-Match</c>, and enforces the <c>sprk_externalobjectid</c> alternate key. Every test reads
-/// what the code DID (<see cref="InMemoryContactIdentityStore.Writes"/>), not only what it returned.</para>
+/// every row for <c>If-Match</c>, and enforces the alternate key where owner round 4 item 4 (B2) put it: on the
+/// UNSECURED uniqueness mirror <c>sprk_externalobjectidkey</c>, while field-level security stays on the binding
+/// <c>sprk_externalobjectid</c> — a combination Dataverse allows. Every test reads what the code DID
+/// (<see cref="InMemoryContactIdentityStore.Writes"/>), not only what it returned.</para>
 /// </remarks>
 public class WorkforceEmailNoHijackTests
 {
@@ -106,6 +108,7 @@ public class WorkforceEmailNoHijackTests
         var created = _store.ContactsBoundTo(Caller).Should().ContainSingle().Subject;
         result.Principal!.ContactId.Should().Be(created.Id);
         created.Plane.Should().Be((int)IdentityPlaneMarker.Workforce);
+        created.KeyMirror.Should().Be(Caller.ToString("D"), "the binding and its uniqueness mirror land in the same request");
         created.Email.Should().Be(Email);
         (created.FirstName, created.LastName).Should().Be(("Ada", "Lovelace"));
         _store.Writes.Should().ContainSingle(w => w.Op == "create",
@@ -115,12 +118,9 @@ public class WorkforceEmailNoHijackTests
     [Fact]
     public async Task TwoConcurrentFirstSignIns_StillLeaveExactlyOneContactForTheOid()
     {
-        // Both sign-ins pass the "no contact yet" read, then race to create. The alternate key's unique index
-        // admits one; the loser's create-only write gets 412 and it re-reads by oid.
-        // ⚠️ This proves the BINDER given a platform uniqueness guarantee. Which column carries that guarantee is
-        // an open owner decision: Dataverse refuses an alternate key on a field-secured column, and the schema
-        // also field-secures sprk_externalobjectid (notes/task-141-identity-binding.md §9). Until it is decided,
-        // the deployed behaviour is the next test's: creation DENIES rather than risk two contacts.
+        // Both sign-ins pass the "no contact yet" read, then race to create. The alternate key's unique index —
+        // on the unsecured uniqueness mirror, owner round 4 item 4 (B2) — admits one; the loser's create-only write
+        // gets 412 and it re-reads by the (field-secured) binding, which the winner wrote in the same request.
         var gate = new TaskCompletionSource();
         var arrived = 0;
         _store.BeforeCreate = async _ =>
@@ -134,8 +134,76 @@ public class WorkforceEmailNoHijackTests
             Resolve(WorkforceUser(Caller, CustomerTenant, email: Email)));
 
         _store.ContactsBoundTo(Caller).Should().ContainSingle();
+        _store.Contacts.Values.Count(c => c.KeyMirror == Caller.ToString("D")).Should().Be(1);
+        _store.Writes.Count(w => w.Op == "create").Should().Be(1, "the loser's create was refused by the index");
         results.Select(r => r.Principal!.ContactId).Distinct().Should().ContainSingle(
             "both sign-ins resolve to the one contact");
+    }
+
+    // ── B2 (owner round 4 item 4): a squatted uniqueness mirror DENIES — it never binds or creates ──────
+    //
+    // The mirror is unsecured, so any user with contact Write can put an oid into it. The index then refuses that
+    // oid everywhere else. These pin what that buys the squatter: a visible denial of service, never a binding.
+
+    [Fact]
+    public async Task ASquattedMirror_DeniesTheCreate_CreatesNothing_AndFlagsTheHolder()
+    {
+        // ContactB holds the caller's oid in its mirror only — its binding (the secured column) is empty.
+        _store.AddContact(ContactB, email: "squatter@customer.example", keyMirror: Caller.ToString("D"));
+
+        var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
+
+        result.IsResolved.Should().BeFalse();
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactKeyConflict);
+        _store.Contacts.Should().ContainSingle("no contact is created past the index");
+        _store.Contacts[ContactB].Oid.Should().BeNull("the holder is never bound by the conflict");
+        var flag = _store.Contacts[ContactB].Flag!;
+        flag.Reason.Should().Be(IdentityCollisionReason.KeyMirrorConflict);
+        (flag.CollidingOid, flag.CollidingPlane).Should().Be((Caller, IdentityPlaneMarker.Workforce));
+        _log.Entries.Should().Contain(e => e.Level == LogLevel.Error
+            && e.Message.Contains(ContactBindingDecision.DenyContactKeyConflict) && e.Message.Contains(ContactB.ToString()),
+            "the operator is told which contact holds the oid");
+    }
+
+    [Fact]
+    public async Task ASquattedMirror_DeniesTheEmailBind_TheMatchedContactStaysUnbound()
+    {
+        _store.AddContact(ContactA, email: Email);                                     // the bind target
+        _store.AddContact(ContactB, email: "squatter@customer.example", keyMirror: Caller.ToString("D"));
+
+        var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
+
+        result.IsResolved.Should().BeFalse("a refused bind is never 'resolved anyway'");
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactKeyConflict);
+        (_store.Contacts[ContactA].Oid, _store.Contacts[ContactA].KeyMirror).Should().Be(((string?)null, (string?)null),
+            "the index refused the whole write: neither the binding nor the mirror landed");
+        _store.Writes.Should().NotContain(w => w.Op == "bind" || w.Op == "create");
+        _store.Contacts[ContactB].Flag!.Reason.Should().Be(IdentityCollisionReason.KeyMirrorConflict);
+    }
+
+    [Fact]
+    public async Task ASquattedMirror_RetriedSignIn_WritesNoSecondFlag()
+    {
+        _store.AddContact(ContactB, email: "squatter@customer.example", keyMirror: Caller.ToString().ToUpperInvariant());
+
+        await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
+        var again = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
+
+        again.DenyCode.Should().Be(ContactBindingDecision.DenyContactKeyConflict,
+            "the index compares case-insensitively, as the stored mirror does");
+        _store.Writes.Should().ContainSingle(w => w.Op == "flag", "the same identity's conflict is recorded once");
+    }
+
+    [Fact]
+    public async Task AMirrorThatMatchesItsOwnBinding_IsNotASquat_TheCallerResolvesByOid()
+    {
+        // Schema step (a) copies every existing binding into the mirror; that contact IS the caller's.
+        _store.AddContact(ContactA, email: "x@customer.example", oid: Caller.ToString("D"), plane: IdentityPlaneMarker.Workforce);
+
+        var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
+
+        result.Principal!.ContactId.Should().Be(ContactA);
+        _store.Writes.Should().BeEmpty();
     }
 
     [Fact]
@@ -221,9 +289,11 @@ public class WorkforceEmailNoHijackTests
     [Fact]
     public async Task TwoContactsCarryingTheOid_Deny_AndBothAreFlagged()
     {
-        _store.KeyDefined = false; // only possible without the key — the case the key exists to prevent
+        // Only possible when a binding has no mirror (one written by hand by a holder of the writer profile, or
+        // before the key existed) — the index guards the mirror, so the second binding slipped past it.
         _store.AddContact(ContactA, oid: Caller.ToString("D"), plane: IdentityPlaneMarker.Workforce);
-        _store.AddContact(ContactB, oid: Caller.ToString().ToUpperInvariant(), plane: IdentityPlaneMarker.Workforce);
+        _store.AddContact(ContactB, oid: Caller.ToString().ToUpperInvariant(), plane: IdentityPlaneMarker.Workforce,
+            deriveKeyMirror: false);
 
         var result = await Resolve(WorkforceUser(Caller, CustomerTenant, email: Email));
 

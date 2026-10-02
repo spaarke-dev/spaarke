@@ -59,19 +59,83 @@ public class DataverseContactIdentityStoreTests
         path.Should().Contain("$expand=sprk_PrimaryContact(");
     }
 
-    [Fact]
-    public void TheCreate_IsAddressedByTheAlternateKey()
-        => DataverseContactIdentityStore.BuildCreateByKeyPath(Oid)
-            .Should().Be("contacts(sprk_externalobjectid='aaaaaaaa-0000-4000-8000-000000000001')");
+    // ── Owner round 4 item 4 (B2): field-level security stays on the binding; the alternate key moves to an
+    //    unsecured mirror written with the same oid in the same request as every bind and create ─────────────
 
     [Fact]
-    public void TheBindPayload_WritesTheOidInDFormat_AndThePlane_Together()
+    public void TheCreate_IsAddressedByTheMirrorKey_NeverTheFieldSecuredBinding()
+        => DataverseContactIdentityStore.BuildCreateByKeyPath(Oid)
+            .Should().Be("contacts(sprk_externalobjectidkey='aaaaaaaa-0000-4000-8000-000000000001')",
+                "Dataverse refuses an alternate key on a field-secured column, so the key lives on the unsecured mirror");
+
+    [Fact]
+    public void TheBindPayload_WritesTheOidInDFormat_IntoTheBindingAndTheMirror_WithThePlane_InOneRequest()
     {
         var payload = DataverseContactIdentityStore.BindPayload(Oid, IdentityPlaneMarker.Workforce);
 
         payload["sprk_externalobjectid"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001");
+        payload["sprk_externalobjectidkey"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001",
+            "a bind that skipped the mirror would let a second contact take the same oid past the unique index");
         payload["sprk_identityplane"].Should().Be(100000001);
     }
+
+    [Fact]
+    public void TheCreatePayload_CarriesTheBindingAndThePlane_TheMirrorComesFromTheKeyInTheUrl()
+    {
+        var payload = DataverseContactIdentityStore.CreatePayload(
+            Oid, IdentityPlaneMarker.Workforce, new NewContactDetails("Pat", "Example", "pat@customer.example"));
+
+        payload["sprk_externalobjectid"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001",
+            "the binding is what every reader resolves by; a created contact without it would be unbound");
+        payload["sprk_identityplane"].Should().Be(100000001);
+        payload.Should().NotContainKey("sprk_externalobjectidkey", "the key column's value is the URL's");
+        (payload["lastname"], payload["firstname"], payload["emailaddress1"])
+            .Should().Be(("Example", "Pat", "pat@customer.example"));
+    }
+
+    [Fact]
+    public void TheKeyMirrorLookup_IsDiagnostic_ReadingTwoRowsOfAnyState_ByTheMirror()
+    {
+        var path = DataverseContactIdentityStore.BuildKeyMirrorLookupPath(Oid);
+
+        path.Should().Contain("$filter=sprk_externalobjectidkey eq 'aaaaaaaa-0000-4000-8000-000000000001'");
+        path.Should().Contain("$top=2").And.NotContain("statecode eq",
+            "the unique index counts inactive rows too, so an inactive holder must be found");
+        path.Should().Contain("sprk_externalobjectid,", "the holder's binding decides whether it is a squat");
+    }
+
+    /// <summary>
+    /// Owner round 4 item 4: "every read keeps using the secured column". The only query that filters on the mirror
+    /// is the diagnostic one above, which names a key conflict's holder; every read that decides who a contact IS
+    /// filters on the field-secured binding.
+    /// </summary>
+    [Fact]
+    public void EveryIdentityRead_FiltersOnTheSecuredBinding_NeverOnTheMirror()
+    {
+        DataverseContactIdentityStore.BuildOidLookupPath(Oid)
+            .Should().Contain("$filter=sprk_externalobjectid eq").And.NotContain("sprk_externalobjectidkey eq");
+        DataverseContactIdentityStore.BuildEmailLookupPath("a@b.example").Should().NotContain("sprk_externalobjectidkey eq");
+        DataverseContactIdentityStore.BuildProbePath().Should().NotContain("sprk_externalobjectidkey");
+
+        var sdk = ContactBindingDecision.ContactsBoundToQuery(Oid);
+        sdk.Criteria.Conditions.Should().ContainSingle().Which.AttributeName.Should().Be("sprk_externalobjectid");
+    }
+
+    [Fact]
+    public void EveryContactRead_SelectsTheBindingAndTheMirror_SoASquatCanBeToldApart()
+        => DataverseContactIdentityStore.ContactSelect.Split(',')
+            .Should().Contain(new[] { "sprk_externalobjectid", "sprk_externalobjectidkey", "sprk_identityplane" },
+                "without the mirror a key conflict's holder cannot be told apart from the contact that owns the oid");
+
+    [Theory]
+    [InlineData("{\"error\":{\"code\":\"0x80060892\",\"message\":\"Entity Key External Object ID Unique violated. A record with the same value for External Object ID Key already exists.\"}}", true)]
+    [InlineData("{\"error\":{\"code\":\"0x80060882\",\"message\":\"The version of the existing record doesn't match the RowVersion property provided.\"}}", false)]
+    [InlineData("{\"error\":{\"code\":\"0x80060888\",\"message\":\"The key in the request URI is not valid for resource 'Microsoft.Dynamics.CRM.contact'.\"}}", false)]
+    [InlineData("{\"error\":{\"code\":\"0x80060891\",\"message\":\"adjacent code\"}}", false)]
+    [InlineData(null, false)]
+    public void IsDuplicateKey_RecognisesTheUniqueIndexFault_AndNothingElse(string? body, bool expected)
+        => DataverseContactIdentityStore.IsDuplicateKey(body).Should().Be(expected,
+            "a stale-version 412 is retried after a re-read; a duplicate-key 412 never succeeds on retry");
 
     [Fact]
     public void TheFlagPayloads_SetAndClearAllFiveColumns_IncludingEveryParty()
@@ -157,6 +221,7 @@ public class DataverseContactIdentityStoreTests
         using var doc = JsonDocument.Parse("""
             {"@odata.etag":"W/\"42\"","contactid":"cccccccc-0000-4000-8000-00000000000a","statecode":0,
              "emailaddress1":"a@b.example","sprk_externalobjectid":"AAAAAAAA-0000-4000-8000-000000000001",
+             "sprk_externalobjectidkey":"aaaaaaaa-0000-4000-8000-000000000001",
              "sprk_identityplane":100000001,"sprk_identitycollisionon":"2026-10-01T09:00:00Z",
              "sprk_identitycollisionoid":"aaaaaaaa-0000-4000-8000-000000000001","sprk_identitycollisionplane":100000000,
              "sprk_identitycollisionreason":100000000}
@@ -167,6 +232,8 @@ public class DataverseContactIdentityStoreTests
         row.ETag.Should().Be("W/\"42\"");
         row.Binding.Kind.Should().Be(BindingKind.Bound);
         row.Binding.Oid.Should().Be(Oid);
+        row.RawKeyMirror.Should().Be("aaaaaaaa-0000-4000-8000-000000000001");
+        ContactBindingDecision.MirrorHeldWithoutBinding(row, Oid).Should().BeFalse("the mirror matches its own binding");
         row.Flag!.Reason.Should().Be(IdentityCollisionReason.BoundToDifferentOid);
         row.Flag.CollidingPlane.Should().Be(IdentityPlaneMarker.External);
     }
@@ -226,6 +293,7 @@ public class DataverseContactIdentityStoreTests
             DataverseContactIdentityStore.BuildEmailLookupPath("a@b.example"),
             DataverseContactIdentityStore.BuildProbePath(),
             DataverseContactIdentityStore.BuildFlaggedContactScanPath(),
+            DataverseContactIdentityStore.BuildKeyMirrorLookupPath(Oid),
         }.Should().AllSatisfy(p => p.Should().NotContain("azureactivedirectoryobjectid"));
     }
 

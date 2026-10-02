@@ -5,16 +5,15 @@
 > tasks 152 (briefing "assigned to" matching) and 013 (A-18 closure), and the C9 Assigned-To auto-grant work.
 > Changes to this contract are made HERE and announced to those consumers — do not fork a second rule.
 >
-> **State of the world when this was written**: the code is on branch `task/uac-r2-141` (not merged; fix rounds
-> `task/uac-r2-141-f1` and `task/uac-r2-141-f2`, 2026-10-01). The Dataverse schema, the `acct` claim, the tenant setting and the job's
-> writes are **pending manual gates** (see `task-141-identity-binding.md` §8). Until those land, dev behaves as
+> **State of the world when this was written**: the code is on branch `task/uac-r2-141-f3` (not merged; earlier
+> rounds `task/uac-r2-141`, `-f1`, `-f2`; third fix round 2026-10-02). The Dataverse schema, the `acct` claim, the
+> tenant setting and the job's writes are **pending manual gates the owner has approved** (see
+> `task-141-identity-binding.md` §8; the main session runs them after deploy). Until those land, dev behaves as
 > today: 1 of 11 interactive systemusers has `sprk_primarycontact`.
 >
-> ⛔ **One part of this contract is PENDING AN OWNER DECISION** (`task-141-identity-binding.md` §9, CLAUDE.md
-> §6.5): the schema asked for BOTH an alternate key AND field-level security on `contact.sprk_externalobjectid`,
-> and Dataverse allows only one of them on a column. Until the owner decides, the schema script refuses `-Apply`,
-> so neither is in place. What a consumer may rely on regardless of the outcome is marked ✅ below; what depends on
-> it is marked ⛔.
+> ✅ **The uniqueness-vs-field-lock question is DECIDED** (owner round 4 item 4, 2026-10-01 — "B2"): field-level
+> security stays on the binding `contact.sprk_externalobjectid`; the platform's "one contact per oid" moves to an
+> unsecured mirror column `contact.sprk_externalobjectidkey` (§1.1). Nothing a consumer reads changes.
 
 ---
 
@@ -22,34 +21,41 @@
 
 | Table.column | Type | Meaning | Who may write |
 |---|---|---|---|
-| `contact.sprk_externalobjectid` | Text(100) | **The binding.** The Entra object id (`oid`) of the ONE identity this contact signs in as — a CIAM oid OR a workforce oid (one field, both planes; oids are globally unique). Always lowercase "D" GUID (`xxxxxxxx-xxxx-…`). | BFF only — ⛔ the FLS lock on THIS column is part of the pending decision (§1.1) |
+| `contact.sprk_externalobjectid` | Text(100) | **The binding.** The Entra object id (`oid`) of the ONE identity this contact signs in as — a CIAM oid OR a workforce oid (one field, both planes; oids are globally unique). Always lowercase "D" GUID (`xxxxxxxx-xxxx-…`). **The only column anyone resolves a contact by.** | BFF only (field-secured) |
+| `contact.sprk_externalobjectidkey` | Text(100), **not** field-secured | **The uniqueness mirror.** The same oid as the binding, written by the BFF in the SAME request as every bind and create; carries the alternate key `sprk_ExternalObjectIdUniqueKey`. Carries NO identity — **never read it to resolve anyone**. | BFF (any user with contact Write *can* set it; §1.1 says what that buys them) |
 | `contact.sprk_identityplane` | Choice (global `sprk_identityplane`) | Which plane wrote the binding: `100000000` External (CIAM), `100000001` Workforce. Written together with the oid, never alone. | BFF only |
 | `systemuser.sprk_primarycontact` | Lookup → contact (nav. property `sprk_PrimaryContact`) | **The link.** The contact that represents this licensed user. | BFF only (field-secured) |
 | `contact.sprk_identitycollisionon` | Date/time | When a collision was flagged. **Empty = no open collision.** | BFF only |
 | `contact.sprk_identitycollisionoid` | Text(100) | The oid of the identity that collided with this contact. | BFF only |
 | `contact.sprk_identitycollisionplane` | Choice (`sprk_identityplane`) | The plane of the colliding identity. | BFF only |
-| `contact.sprk_identitycollisionreason` | Choice (global `sprk_identitycollisionreason`) | Why — `100000000` bound to a different oid · `…01` email on >1 contact · `…02` oid on >1 contact · `…03` linked to another user · `…04` binding unreadable · `…05` guest email matches a contact · `…06` linked contact bound to a different oid · `…07` link and binding name different contacts · `…08` linked contact inactive · `…09` guest linked to an unbound contact · `…10` invite matches a workforce contact | BFF only |
+| `contact.sprk_identitycollisionreason` | Choice (global `sprk_identitycollisionreason`) | Why — `100000000` bound to a different oid · `…01` email on >1 contact · `…02` oid on >1 contact · `…03` linked to another user · `…04` binding unreadable · `…05` guest email matches a contact · `…06` linked contact bound to a different oid · `…07` link and binding name different contacts · `…08` linked contact inactive · `…09` guest linked to an unbound contact · `…10` invite matches a workforce contact · `…11` key mirror held by another contact (B2) | BFF only |
 | `contact.sprk_identitycollisionparties` | Multi-line text (4000), JSON | **Every** identity that collided with this contact: `[{"oid","plane","reason","on"}]`, the first one being the four summary columns above (which is what the operator view lists). Added by the verifier fix round (finding 3) so a second identity's collision is recorded rather than swallowed. | BFF only — do not edit by hand (an unreadable value keeps the flag until an operator clears it) |
 
-### 1.1 Uniqueness and the field lock — ⛔ pending owner decision
+### 1.1 Uniqueness and the field lock — owner decision B2 (round 4 item 4, 2026-10-01)
 
-The design asked for an alternate key `sprk_ExternalObjectIdKey` on `contact(sprk_externalobjectid)` (**exactly one
-contact per oid**, including when two first sign-ins race) AND for field-level security on that same column (only
-the BFF may write it). Microsoft documents that a field-secured column cannot be an alternate key ("Attributes must
-not have field-level security applied" — *Work with alternate keys*). So:
+Microsoft documents that a field-secured column cannot be an alternate key ("Attributes must not have field-level
+security applied" — *Work with alternate keys*), so the two properties live on two columns:
 
-- ✅ Regardless of the outcome: **two contacts carrying one oid always DENY** (`contact_oid_ambiguous`), on every
-  plane and in every reader below. No path ever picks one of two.
-- ✅ Without the key, contact **creation denies** (`contact_create_unavailable`) rather than risk two contacts; email
-  binds and resolution by oid are unaffected.
-- ⛔ Which mechanism provides uniqueness, and which provides the write lock, is the owner's §6.5 decision. The
-  options and the recommendation are in `task-141-identity-binding.md` §9. This section is rewritten when it is made.
+- **The write lock** — field-level security on `contact.sprk_externalobjectid` and `systemuser.sprk_primarycontact`.
+  Profile **"Spaarke Identity Link Readers"** (Read) is associated with every business unit's default team, so every
+  user keeps READING both secured fields; profile **"Spaarke Identity Link Writers"** (Read + Create + Update) holds
+  only the BFF application user(s), associated explicitly. A client write fails.
+- **Exactly one contact per oid** — the alternate key `sprk_ExternalObjectIdUniqueKey` on the unsecured mirror
+  `contact.sprk_externalobjectidkey`. The BFF writes binding and mirror together, in one request, on every bind and
+  every create (the create is a create-only `PATCH contacts(sprk_externalobjectidkey='<oid>')` with
+  `If-None-Match: *`). The platform's unique index — which counts rows of every state — therefore admits one contact
+  per oid, **including when two first sign-ins race** (the loser's create is refused and it resolves the winner's
+  contact by the binding). The schema step copies the existing bindings into the mirror before creating the key.
+- **What the unsecured mirror allows** — a user with contact Write can put someone's oid into a mirror. That can
+  only DENY SERVICE to that identity: its bind or create is refused by the index, the BFF denies
+  `sdap.access.deny.contact_key_conflict` and flags the holder (reason `…11` "key mirror held by another
+  contact"). It can never make a contact resolve as someone else — nothing resolves by the mirror.
+- ✅ Unchanged: **two contacts carrying one oid in the binding always DENY** (`contact_oid_ambiguous`), on every
+  plane and in every reader below — no path picks one of two. (Possible only for a binding written by hand without
+  its mirror.) Where the key is not yet defined, contact **creation denies** (`contact_create_unavailable`) rather
+  than risk two contacts.
 
-Field-level security on `systemuser.sprk_primarycontact` is **not** affected by the conflict: profile **"Spaarke
-Identity Link Readers"** (Read) is associated with every business unit's default team, so every user keeps READING
-the secured field; profile **"Spaarke Identity Link Writers"** (Read + Create + Update) holds only the BFF
-application user(s), associated explicitly. A client write fails. (It is applied by the same script, so it too waits
-on the decision — the script stops before any write rather than leave a partial schema.)
+All of it is applied by `scripts/Set-ContactIdentityBindingSchema.ps1` (gate G-1 in the notes).
 
 `contact.azureactivedirectoryobjectid` is **not** part of this contract. It does not exist in dev, nothing writes
 it, and a source guard (`ContactAadObjectIdColumnGuardTests`) fails the build if any query against `contact` names
@@ -80,8 +86,8 @@ plugin, no client, no `Xrm.WebApi` (DATAVERSE-WRITE-PATH-ARCHITECTURE WP-1/WP-3;
 | Writer | When | Writes |
 |---|---|---|
 | **Inline, workforce sign-in** — `WorkforcePrincipalResolver` | A licensed user resolves (Teams/SPA) with no contact: `EnsureSystemUserLinkAsync(systemUserId, applyWrites: true)` — **only when `IdentityLink:Reconciliation:WritesEnabled = true`** (the job's rollout switch; verifier finding 4). A Type-2 (unlicensed) member's first sign-in: `ResolveWorkforceCallerAsync` (not gated). | Bind / create / link, or a flag. The new link takes effect **on the same request** (`IIdentityNormalizationService.InvalidateAsync`). A user whose link cannot be made is not re-attempted for 10 minutes. With the switch off a licensed user is simply not linked inline (no read, no write) — the report-only job shows what would happen. |
-| **Registration** — `RegistrationDataverseService.CreateSystemUserAsync` → `LinkContactForNewSystemUserAsync` | When the BFF creates a systemuser (demo provisioning) | Bind / create / link, in the **same** `targetDataverseUrl` environment as the systemuser. ⚠️ A link that does not land in a target environment other than the BFF's own `Dataverse:ServiceUrl` is **not retried by this BFF** (its job scans only its own environment); the warning says so. Such a user is linked only by a BFF deployed against that environment (second fix round, verifier finding 4). |
-| **Reconciliation job** — `identity-link-reconciliation` (ADR-036 `IScheduledJob`, every 5 min) | Every enabled interactive systemuser (`isdisabled = false`, `applicationid` null, `accessmode` 0/1/2) | Pass 1: verify / link / bind / create, or flag. Pass 2 (only after a complete, untruncated pass 1 with a readable masking probe): re-evaluate every recorded party; drop the ones whose collision no longer holds, and clear the flag only when none holds AND no systemuser collided with the contact this run. **Report-only until `IdentityLink:Reconciliation:WritesEnabled = true`.** |
+| **Registration** — `RegistrationDataverseService.CreateSystemUserAsync` → `LinkContactForNewSystemUserAsync` | When the BFF creates a systemuser (demo provisioning) | Bind / create / link, in the **same** `targetDataverseUrl` environment as the systemuser. A link that does not land there (fault, deny, lost race, collision) is **re-decided by the reconciliation job's next run**, which reconciles every environment this BFF provisions into (third fix round — the second round's "not retried" gap is closed). |
+| **Reconciliation job** — `identity-link-reconciliation` (ADR-036 `IScheduledJob`, every 5 min) | Every enabled interactive systemuser (`isdisabled = false`, `applicationid` null, `accessmode` 0/1/2) in the BFF's own `Dataverse:ServiceUrl` AND in every provisioning target (`DATAVERSE_URL` and every active `sprk_dataverseenvironment` row) | Per environment — pass 1: verify / link / bind / create, or flag. Pass 2 (only after a complete, untruncated pass 1 with a readable masking probe): re-evaluate every recorded party; drop the ones whose collision no longer holds, and clear the flag only when none holds AND no systemuser collided with the contact this run. One environment's failure fails the run, never the others. **Report-only until `IdentityLink:Reconciliation:WritesEnabled = true`, in every environment.** |
 | **Invite** — `/invite`, `/invite-and-grant` | An external user is invited | Binds the new CIAM oid (plane External) onto the contact. Refuses (409) and flags an email that matches a workforce-bound contact or a contact a systemuser links to. |
 | **CIAM first login** — `CiamContactPrincipalStrategy` | The invite's oid write had failed | Repair bind only (never creates a contact). |
 
@@ -110,7 +116,8 @@ Order of a systemuser link decision (the full table is `task-141-identity-bindin
   treated as "unbound". It denies.
 - Sign-in denials carry their own reason codes (`sdap.access.deny.contact_bound_to_different_oid`,
   `…contact_email_ambiguous`, `…contact_oid_ambiguous`, `…contact_inactive`, `…contact_binding_unreadable`,
-  `…binding_column_missing`, `…binding_column_masked`, `…workforce_acct_claim_missing`, …). Invites return HTTP 409
+  `…binding_column_missing`, `…binding_column_masked`, `…contact_key_conflict` (B2: another contact holds the oid's
+  unique-index slot), `…workforce_acct_claim_missing`, …). Invites return HTTP 409
   with `reasonCode` `sdap.access.invite.workforce_bound_contact` / `…contact_linked_to_internal_user` /
   `…email_ambiguous` / `…contact_binding_unreadable`. An invite whose contact lookup (email, or the systemuser
   reference check) could not be read is NOT a refusal: HTTP **503** with `reasonCode`
@@ -125,13 +132,14 @@ every consumer must handle.
 
 | You have | Use | You get |
 |---|---|---|
-| A **systemuser id** (server) | `IIdentityNormalizationService.ResolveAsync(systemUserId, ct)` → `PersonIdentity.ContactId` | `sprk_primarycontact` (honoured as-is, including a flagged kept link); when absent, the ONE contact bound to the user's oid if it is active — read over EVERY statecode, so two contacts on the oid (even one active plus one inactive) give `null`, exactly as the binder denies them (second fix round, verifier finding 6); otherwise `null`. Cached 10 min; writers invalidate. **This is the value membership (`MembershipResolverService`) and the Assigned-To / briefing matching see.** ⚠️ Stated explicitly (verifier finding 5, owner decision I2 = (1)): a flagged kept link is honoured EVERYWHERE this value is used — including `AccessibleRecordSetService`, whose contact-grant term then loads that contact's external grants into the licensed user's accessible set. In dev that is ralph.schroeder@spaarke.com → 8e9918a9, a contact bound to a CIAM oid: his set includes that CIAM identity's grants. This is the mixing the POML's rejection of option (b) warned about; it is pre-existing behaviour (the link predates task 141) that the owner chose to keep rather than clear the link, and it ends when an operator resolves the collision. |
+| A **systemuser id** (server) | `IIdentityNormalizationService.ResolveAsync(systemUserId, ct)` → `PersonIdentity.ContactId` | `sprk_primarycontact` (honoured as-is, including a flagged kept link); when absent, the ONE contact BOUND (`sprk_externalobjectid`, never the mirror) to the user's oid if it is active — read over EVERY statecode, so two contacts on the oid (even one active plus one inactive) give `null`, exactly as the binder denies them (second fix round, verifier finding 6); otherwise `null`. Cached 10 min; writers invalidate. **This is the value membership (`MembershipResolverService`) and the Assigned-To / briefing matching see.** ⚠️ Stated explicitly (verifier finding 5, owner decision I2 = (1)): a flagged kept link is honoured EVERYWHERE this value is used — including `AccessibleRecordSetService`, whose contact-grant term then loads that contact's external grants into the licensed user's accessible set. In dev that is ralph.schroeder@spaarke.com → 8e9918a9, a contact bound to a CIAM oid: his set includes that CIAM identity's grants. This is the mixing the POML's rejection of option (b) warned about; it is pre-existing behaviour (the link predates task 141) that the owner chose to keep rather than clear the link, and it ends when an operator resolves the collision. |
 | The **caller's claims**, and you need proof the contact IS this identity ("assign it to me") | `ICallerContactResolver.ResolveAsync(principal, ct)` | Only the ONE contact whose `sprk_externalobjectid` = the caller's oid, when it is active (read over every statecode — the binder's own question). Unresolved (`no-matching-contact`, `ambiguous-binding` — two contacts in any state —, `inactive-contact`, `lookup-failed`) otherwise — it does **not** follow a flagged kept link. |
 | A **workforce request principal** (Teams/SPA) | `WorkforcePrincipalResolution.ContactId` | The contact the resolver derived/bound for this request. |
 | **Client code** running as the signed-in user | `systemuser._sprk_primarycontact_value` (Web API) | Read only. Writing it fails (FLS). |
 
-Do **not**: query `contact.azureactivedirectoryobjectid`; resolve a person's contact by email; write either
-secured field from a client; treat two contacts on one oid as a choice.
+Do **not**: query `contact.azureactivedirectoryobjectid`; resolve a person's contact by email OR by the
+`sprk_externalobjectidkey` mirror; write either secured field from a client; treat two contacts on one oid as a
+choice.
 
 ## 6. For `spaarkeai-word-add-in-r1` task 083 specifically
 
@@ -149,3 +157,15 @@ secured field from a client; treat two contacts on one oid as a choice.
   report-only job run reviewed → writes enabled), the step-0 data predicts **9 of 11** with a contact: 1 bind +
   7 creates linked fresh, Ralph's kept (flagged) link, and 2 flagged without a contact (eyal.iffergan, the
   hotmail guest) until an operator resolves them. Re-measure after the gate rather than relying on this forecast.
+
+## 7. What changed in the third fix round (2026-10-02) — for consumers
+
+- **Nothing you read changed.** The link (`systemuser.sprk_primarycontact`), the binding
+  (`contact.sprk_externalobjectid`) and every reader in §5 are as before. Do not read the new
+  `sprk_externalobjectidkey` column — it is the platform's uniqueness mirror and carries no identity (§1.1).
+- **Uniqueness is decided** (owner B2) and becomes live with the schema gate; criterion "exactly one contact per oid,
+  including two racing first sign-ins" holds once `Set-ContactIdentityBindingSchema.ps1 -Apply` has run.
+- **One new deny code**, `sdap.access.deny.contact_key_conflict`, and one new collision reason (`…11`). A consumer that
+  only reads the link sees it as an ordinary "no contact" (`null`).
+- **More users get linked**: the reconciliation job now also covers every environment this BFF provisions users into,
+  so a demo-registered user whose link did not land at creation is linked by the next run (§3).

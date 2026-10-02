@@ -94,9 +94,9 @@ public class CiamContactBindingTests
     [Fact]
     public async Task AnAmbiguousOid_IsDenied_NotAFirstRowPick()
     {
-        _store.KeyDefined = false;
+        // The second binding carries no mirror (written by hand), so the unique index never saw it.
         _store.AddContact(ContactA, oid: CiamOid.ToString("D"), plane: IdentityPlaneMarker.External);
-        _store.AddContact(ContactB, oid: CiamOid.ToString("D"), plane: IdentityPlaneMarker.External);
+        _store.AddContact(ContactB, oid: CiamOid.ToString("D"), plane: IdentityPlaneMarker.External, deriveKeyMirror: false);
 
         var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
 
@@ -158,6 +158,22 @@ public class CiamContactBindingTests
         result.DenyCode.Should().Be(ContactBindingDecision.DenyContactBoundToDifferentOid,
             "re-decided: the contact is now someone else's");
         _store.Contacts[ContactA].Oid.Should().Be(winner.ToString("D"), "the winning binding is never overwritten");
+    }
+
+    [Fact]
+    public async Task TheRepairBind_AgainstASquattedMirror_Denies_AndFlagsTheHolder_NeverBinds()
+    {
+        // B2 (owner round 4 item 4): another contact holds this CIAM oid in the unsecured uniqueness mirror.
+        _store.AddContact(ContactA, email: Email);
+        _store.AddContact(ContactB, email: "elsewhere@firm.example", keyMirror: CiamOid.ToString("D"));
+
+        var result = await Binder(_store).ResolveCiamCallerAsync(CiamOid.ToString(), Email, CancellationToken.None);
+
+        result.DenyCode.Should().Be(ContactBindingDecision.DenyContactKeyConflict);
+        _store.Contacts[ContactA].Oid.Should().BeNull("the repair bind is never made past the index");
+        var flag = _store.Contacts[ContactB].Flag!;
+        (flag.Reason, flag.CollidingOid, flag.CollidingPlane)
+            .Should().Be((IdentityCollisionReason.KeyMirrorConflict, CiamOid, IdentityPlaneMarker.External));
     }
 
     [Fact]

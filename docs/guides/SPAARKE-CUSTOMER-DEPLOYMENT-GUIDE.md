@@ -580,52 +580,65 @@ The same switch gates the **inline link** a licensed user would otherwise get at
 so between the BFF deploy and the switch nothing links a licensed user to a contact and the report-only run is a
 true preview. Two writes are **not** gated, by design: a Type-2 (unlicensed) member's own first sign-in (bind or
 create, behind the member test) and the link written when the BFF itself creates a systemuser during demo
-provisioning (in that target environment, which the job does not scan). Do not run demo registrations into the
-BFF's own environment while the report-only run is under review, or its counts will drift.
+provisioning. Do not run demo registrations while the report-only run is under review, or its counts will drift.
 
-**A registration link that does not land in a target environment is NOT retried by this BFF.** The job scans
-only the BFF's own `Dataverse:ServiceUrl`. When a demo/customer provisioning target is a different environment
-and the link there faults, is refused or loses a race (or raises a collision flag), nothing in this BFF re-decides
-that user or re-evaluates that flag. App Insights shows it as a warning:
-`[ID-BIND] New systemuser … contact link NOT made … and NOT retried by this BFF`. The user is linked only by a
-BFF deployed against that environment (its own job, with `IdentityLink__Reconciliation__WritesEnabled=true`); if
-none runs there, the user stays unlinked (Assigned-To / No Access List / briefing matching skip them) until one
-does. A link that does not land in the BFF's own environment logs `… re-decides the user on its next run` instead.
+**Which environments the job reconciles.** The BFF's own `Dataverse:ServiceUrl` AND every environment it
+provisions users into: `DATAVERSE_URL` (registration's default) and every **active** `sprk_dataverseenvironment`
+row — the only environments the approve endpoint provisions into. Each is reconciled the same way (pass 1 links or
+flags every enabled interactive systemuser; pass 2 re-evaluates and clears resolved flags), through the
+registration service's existing per-environment token path (the BFF's own managed identity — it must be an
+application user in each, which demo provisioning already requires). So **a registration link that does not land
+is retried**: whether it faulted, was refused, lost a race or raised a collision flag, the next run re-decides that
+user and re-evaluates that flag (App Insights: `[ID-BIND] New systemuser … contact link NOT made … re-decides the
+user on its next run`). One environment's failure fails the run (`[ID-LINK-RECON] {environment}: …`, and the
+ResultJson's `provisioningTargets.environments[]`) but never stops the others. Deactivating a registry row stops
+the BFF reconciling that environment — deliberately. (Before 2026-10-01's third fix round the job scanned only its
+own environment and this was a recorded gap.)
+
+**Every one of those environments needs the Dataverse prerequisite below** — an environment without it is
+reported by every run as a failed environment, and registration links there deny `binding_column_missing`.
 
 **Cost of leaving a stamp report-only.** Each run reads every enabled interactive systemuser; a user with no
 verified link costs roughly 2–4 further Dataverse reads per run (every 5 minutes) for as long as writes stay off.
 Fine at dev scale; on a large stamp, enable writes after the review rather than leaving the job report-only.
 
-**Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141.** The BFF selects the new
-columns, so without them every binding read fails closed (`sdap.access.deny.binding_column_missing`) and
-CIAM and Type-2 sign-ins are denied.
-
-> ⛔ **BLOCKED pending an owner decision (2026-10-01).** As designed, the script puts BOTH an alternate key and
-> field-level security on `contact.sprk_externalobjectid`, and Dataverse refuses an alternate key on a
-> field-secured column ([Work with alternate keys](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity)).
-> `-Apply` therefore stops at its platform-rule preflight, before any write; the dry run and `-Verify` report
-> `BLOCKED`. The decision (which mechanism moves) is recorded in
-> `projects/unified-access-control-r2/notes/task-141-identity-binding.md` §9. Do not work around the stop by
-> editing the script.
+**Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141**, in the BFF's own environment and
+in every provisioning target above. The BFF selects the new columns, so without them every binding read fails
+closed (`sdap.access.deny.binding_column_missing`) and CIAM and Type-2 sign-ins are denied.
 
 ```powershell
 .\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
   -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
 .\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
-  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0 (re-run until the key is Active)
 ```
 
-Once unblocked, it adds the uniqueness guarantee (exactly one contact per oid), the plane and collision
+**Uniqueness lives on a mirror column (owner decision, 2026-10-01).** Dataverse refuses an alternate key on a
+field-secured column ([Work with alternate keys](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity)),
+and the binding `contact.sprk_externalobjectid` must stay field-secured (only the BFF may write it — it decides
+whose grants a caller inherits). So the script creates an UNSECURED mirror, `contact.sprk_externalobjectidkey`,
+copies every existing binding into it, and puts the alternate key `sprk_ExternalObjectIdUniqueKey` on the mirror.
+The BFF writes the mirror with the same oid, in the same request, as every bind and create; the platform's unique
+index then guarantees **exactly one contact per oid**, including when two first sign-ins race. Every read that
+decides who a contact IS uses the secured binding; nothing resolves by the mirror. A user with Write on contact
+can therefore only **deny service** through the mirror (put someone's oid into it): that person's bind or create is
+refused, the BFF denies `sdap.access.deny.contact_key_conflict`, and the holder is flagged with reason **"Key mirror
+held by another contact"** (§6.5.3) — visible, never a takeover. The script also adds the plane and collision
 columns (backfilling existing bindings as External), the "Contacts with Identity Collisions" view, and the
 field-level security that lets ONLY the BFF write `contact.sprk_externalobjectid` and
-`systemuser.sprk_primarycontact` while every user keeps reading them. **A business unit created later needs
-`-Apply` re-run**, so its default team joins the reader profile.
+`systemuser.sprk_primarycontact` while every user keeps reading them. It refuses `-Apply` (before any write) if
+an edit ever puts the key and field security on one column again, and reports a mirror value its own binding does
+not carry as `FAIL` without touching it. **A business unit created later needs `-Apply` re-run**, so its default
+team joins the reader profile.
 
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
-contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; or an invite
-whose email matches a workforce-bound contact or a contact a systemuser links to. Every collision is refused
+contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; an invite
+whose email matches a workforce-bound contact or a contact a systemuser links to; or an oid whose unique-index slot
+another contact holds in its `sprk_externalobjectidkey` mirror without the binding. Every collision is refused
 (403 at sign-in, 409 at invite) **and flagged on the contact** — `sprk_identitycollisionon` (when),
 `sprk_identitycollisionoid` + `sprk_identitycollisionplane` (who collided), `sprk_identitycollisionreason` (why),
 for the FIRST identity; `sprk_identitycollisionparties` lists EVERY identity that collided with the contact.
@@ -636,20 +649,31 @@ A repeated collision by the same identity does not write again; a different iden
 **Resolve** (System Administrator — the fields are field-secured):
 
 1. Decide which identity owns the contact. One contact carries one sign-in; it is never shared or merged.
-2. **The colliding identity should own it** — clear BOTH `sprk_externalobjectid` and `sprk_identityplane` on the
-   contact (clearing only one leaves it UNREADABLE, which also denies). The other identity's next sign-in or the
-   next reconciliation run binds it correctly.
+2. **The colliding identity should own it** — clear ALL THREE of `sprk_externalobjectid`,
+   `sprk_externalobjectidkey` and `sprk_identityplane` on the contact (clearing the binding without its marker
+   leaves it UNREADABLE, which denies; clearing it without the mirror leaves the oid's unique-index slot held, which
+   also denies — reason "Key mirror held by another contact"). The other identity's next sign-in or the next
+   reconciliation run binds it correctly.
    **The existing binding is right** — leave the binding. For an invite, invite a different email; for a
    licensed user whose `sprk_primarycontact` points at someone else's contact, point it at the user's own contact
    (or clear it and let the job create one). ⚠️ Changing a licensed user's link changes their Assigned-To access —
    it is deliberately never done automatically.
    **Duplicate email** (reason "Email carried by more than one contact") — deactivate or correct the duplicate
    contact(s); only ACTIVE contacts take part in an email match.
-   **Duplicate oid** (reason "Oid carried by more than one contact") — clear BOTH `sprk_externalobjectid` and
-   `sprk_identityplane` on every contact that is not that person's. Deactivating is NOT enough here: the oid
-   lookup reads contacts of every state, so an oid left on an inactive duplicate keeps the oid ambiguous. (Once
-   the `sprk_ExternalObjectIdKey` alternate key exists this cannot recur; the schema script refuses to create the
-   key while duplicates exist.)
+   **Duplicate oid** (reason "Oid carried by more than one contact") — clear all three binding columns
+   (`sprk_externalobjectid`, `sprk_externalobjectidkey`, `sprk_identityplane`) on every contact that is not that
+   person's. Deactivating is NOT enough here: the oid lookup reads contacts of every state, so an oid left on an
+   inactive duplicate keeps the oid ambiguous. (Once the `sprk_ExternalObjectIdUniqueKey` alternate key exists it
+   can only recur through a binding someone wrote by hand without its mirror; the schema script refuses to create
+   the key while two contacts would share a mirror value.)
+   **Key mirror held** (reason "Key mirror held by another contact") — the flagged contact carries an oid in
+   `sprk_externalobjectidkey` that its binding `sprk_externalobjectid` does not: someone with Write on contact put
+   it there, or a binding was cleared without its mirror. The identity named in the flag cannot be bound or get a
+   contact until the slot is freed. If the flagged contact is NOT that person's, clear its `sprk_externalobjectidkey`;
+   if it IS, ask an administrator holding the identity-link writer profile to restore the binding (or clear the
+   mirror and let that person's next sign-in, or the next reconciliation run, bind them again). Deactivating the
+   contact does NOT free the slot — the unique index counts inactive rows — so the flag stays until the mirror is
+   cleared.
    Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
    created.
    **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
@@ -1173,6 +1197,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
 | 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
 | 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
+| 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
 
 ---
 

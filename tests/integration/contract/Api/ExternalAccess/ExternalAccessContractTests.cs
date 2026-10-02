@@ -771,8 +771,10 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         (await ReasonCode(response)).Should().Be("sdap.access.invite.contact_lookup_failed");
         using (var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
         {
+            // Pinned to the DECISION's message (ContactIdentityBinder.InviteMessage), which the endpoint's last-resort
+            // fallback deliberately does not share — so this cannot pass on the fallback (third fix round).
             doc.RootElement.GetProperty("detail").GetString().Should().Be(
-                "The contact for this email could not be looked up. Nothing was created; try again.",
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed),
                 "the decision's own message reaches the client");
             doc.RootElement.TryGetProperty("onboardStatus", out _).Should().BeFalse();
         }
@@ -1552,6 +1554,7 @@ internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
             new ContactBindingRow(id, 0, oid.ToString("D"), (int)IdentityPlaneMarker.External)));
     }
 
+    public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct) => _inner.FindContactsByKeyMirrorAsync(oid, ct);
     public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindActiveContactsByEmailAsync(email, ct);
     public Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct) => _inner.GetContactAsync(contactId, ct);
     public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);

@@ -487,7 +487,11 @@ public static class ExternalAccessModule
         // places it in the BFF). ENABLED but REPORT-ONLY: writes need IdentityLink:Reconciliation:WritesEnabled
         // = true — absent, empty or unparseable writes nothing. The switch is a rollout guard, not a deferral:
         // the dev live gate runs report-only, the report is reviewed, then writes are enabled.
-        // UNCONDITIONAL (ADR-032): every dependency is registered unconditionally above.
+        // It reconciles this BFF's own environment AND every environment it provisions users into (DATAVERSE_URL
+        // and the active sprk_dataverseenvironment rows, through RegistrationDataverseService's per-environment
+        // token path), so a registration link that did not land in a target is retried (task 141, third fix round).
+        // UNCONDITIONAL (ADR-032): every dependency is registered unconditionally above; the registration services
+        // (RegistrationModule) are resolved per run and only when DATAVERSE_URL is configured.
         services.AddScheduledJob<IdentityLinkReconciliationJob>(IdentityLinkReconciliationJob.DefaultCronSchedule);
 
         // unified-access-control-r2 task 144 (C10 part 1, #967; owner decision F2 = a) — the read-only Secure Record

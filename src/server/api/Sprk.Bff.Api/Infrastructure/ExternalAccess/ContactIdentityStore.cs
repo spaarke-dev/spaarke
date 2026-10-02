@@ -54,11 +54,21 @@ public enum StoreWriteStatus
     /// <summary>The target row does not exist.</summary>
     NotFound,
 
-    /// <summary>The create needs the <c>sprk_externalobjectid</c> alternate key and it is not defined.</summary>
+    /// <summary>
+    /// The create needs the alternate key on the uniqueness mirror (<c>sprk_externalobjectidkey</c>) and it is not
+    /// defined in this environment.
+    /// </summary>
     KeyMissing,
 
     /// <summary>Any other failure.</summary>
     Failed,
+
+    /// <summary>
+    /// The write would put the oid into the uniqueness mirror while ANOTHER contact already holds it — Dataverse's
+    /// duplicate-key fault on the alternate key's unique index (<c>0x80060892</c>, HTTP 412). Not a version race:
+    /// re-reading and retrying changes nothing, so the binder denies and flags the holder (owner round 4 item 4, B2).
+    /// </summary>
+    KeyConflict,
 }
 
 /// <summary>A store write's result; <see cref="ContactId"/> is set by a successful create.</summary>
@@ -93,6 +103,13 @@ public interface IContactIdentityStore
     /// <summary>Contacts carrying <paramref name="oid"/> — ANY statecode, two rows.</summary>
     Task<ContactLookup> FindContactsByOidAsync(Guid oid, CancellationToken ct);
 
+    /// <summary>
+    /// Contacts whose uniqueness MIRROR (<c>sprk_externalobjectidkey</c>) carries <paramref name="oid"/> — any
+    /// statecode, two rows. DIAGNOSTIC ONLY: it names the holder of a key conflict so the holder can be flagged.
+    /// Nothing resolves or binds by it; who a contact IS is read from the binding column alone.
+    /// </summary>
+    Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct);
+
     /// <summary>ACTIVE contacts whose <c>emailaddress1</c> is <paramref name="email"/>, two rows.</summary>
     Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct);
 
@@ -108,10 +125,17 @@ public interface IContactIdentityStore
     /// <summary>The field-level-security masking probe.</summary>
     Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct);
 
-    /// <summary>Writes the oid (D format) and plane onto a contact, conditional on <paramref name="etag"/>.</summary>
+    /// <summary>
+    /// Writes the oid (D format) into the binding AND the uniqueness mirror, with the plane, in ONE request,
+    /// conditional on <paramref name="etag"/>. Another contact holding the oid in its mirror makes the platform
+    /// refuse the write (<see cref="StoreWriteStatus.KeyConflict"/>).
+    /// </summary>
     Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
 
-    /// <summary>Creates a contact keyed by <paramref name="oid"/> — create-only through the alternate key.</summary>
+    /// <summary>
+    /// Creates a contact keyed by <paramref name="oid"/> — create-only through the alternate key on the uniqueness
+    /// mirror, with the binding and the plane written in the same request.
+    /// </summary>
     Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct);
 
     /// <summary>Sets <c>systemuser.sprk_primarycontact</c>, conditional on <paramref name="etag"/>.</summary>
@@ -156,10 +180,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     /// <summary>Every recorded party of the flag, as JSON (multi-line text). The four columns above are the first.</summary>
     public const string FlagPartiesColumn = "sprk_identitycollisionparties";
 
-    /// <summary>The contact columns every binding read selects.</summary>
+    /// <summary>
+    /// The contact columns every binding read selects. The uniqueness mirror is selected so a squatted or
+    /// half-cleared mirror can be told apart (<see cref="ContactBindingDecision.MirrorHeldWithoutBinding"/>); it is
+    /// never what a contact resolves by.
+    /// </summary>
     public static readonly string ContactSelect = string.Join(",",
         "contactid", "statecode", "emailaddress1",
         ContactBindingDecision.ExternalObjectIdColumn, ContactBindingDecision.IdentityPlaneColumn,
+        ContactBindingDecision.KeyMirrorColumn,
         FlagOnColumn, FlagOidColumn, FlagPlaneColumn, FlagReasonColumn, FlagPartiesColumn);
 
     /// <summary>The systemuser columns the link decision selects.</summary>
@@ -212,6 +241,14 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         => $"contacts?$select={ContactSelect}"
            + $"&$filter={ContactBindingDecision.ExternalObjectIdColumn} eq '{oid:D}'&$top=2";
 
+    /// <summary>
+    /// Contacts whose uniqueness mirror carries the oid — any state, two rows. Diagnostic: names a key conflict's
+    /// holder (<see cref="IContactIdentityStore.FindContactsByKeyMirrorAsync"/>).
+    /// </summary>
+    public static string BuildKeyMirrorLookupPath(Guid oid)
+        => $"contacts?$select={ContactSelect}"
+           + $"&$filter={ContactBindingDecision.KeyMirrorColumn} eq '{oid:D}'&$top=2";
+
     /// <summary>ACTIVE contacts by email, two rows (TopCount 1 made ambiguity invisible — task 013).</summary>
     public static string BuildEmailLookupPath(string email)
         => $"contacts?$select={ContactSelect}"
@@ -243,23 +280,36 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static string BuildFlaggedContactScanPath()
         => $"contacts?$select={ContactSelect}&$filter={FlagOnColumn} ne null&$orderby=contactid";
 
-    /// <summary>The create-only path: the alternate key in the URL.</summary>
+    /// <summary>
+    /// The create-only path: the alternate key in the URL — on the UNSECURED uniqueness mirror, because Dataverse
+    /// refuses an alternate key on the field-secured binding column (owner round 4 item 4, B2).
+    /// </summary>
     public static string BuildCreateByKeyPath(Guid oid)
-        => $"contacts({ContactBindingDecision.ExternalObjectIdColumn}='{oid:D}')";
+        => $"contacts({ContactBindingDecision.KeyMirrorColumn}='{oid:D}')";
 
-    /// <summary>The bind payload: the oid in "D" format and the plane marker, always together.</summary>
+    /// <summary>
+    /// The bind payload: the oid in "D" format into the binding AND the uniqueness mirror, and the plane marker —
+    /// always together, in one request, so the unique index guards every bind as well as every create.
+    /// </summary>
     public static Dictionary<string, object?> BindPayload(Guid oid, IdentityPlaneMarker plane) => new()
     {
         [ContactBindingDecision.ExternalObjectIdColumn] = oid.ToString("D"),
+        [ContactBindingDecision.KeyMirrorColumn] = oid.ToString("D"),
         [ContactBindingDecision.IdentityPlaneColumn] = (int)plane,
     };
 
-    /// <summary>The create payload. The key column itself comes from the URL.</summary>
-    public static Dictionary<string, object?> CreatePayload(IdentityPlaneMarker plane, NewContactDetails details)
+    /// <summary>
+    /// The create payload: the binding (the field-secured column the BFF's writer profile may create) and the plane.
+    /// The mirror — the key column — comes from the URL (<see cref="BuildCreateByKeyPath"/>), so the created row
+    /// carries the same oid in both.
+    /// </summary>
+    public static Dictionary<string, object?> CreatePayload(Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
     {
+        ArgumentNullException.ThrowIfNull(details);
         var payload = new Dictionary<string, object?>
         {
             ["lastname"] = details.LastName,
+            [ContactBindingDecision.ExternalObjectIdColumn] = oid.ToString("D"),
             [ContactBindingDecision.IdentityPlaneColumn] = (int)plane,
         };
         if (!string.IsNullOrWhiteSpace(details.FirstName)) payload["firstname"] = details.FirstName;
@@ -379,7 +429,8 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             IntOf(row, ContactBindingDecision.IdentityPlaneColumn),
             StringOf(row, "@odata.etag"),
             StringOf(row, "emailaddress1"),
-            flag);
+            flag,
+            StringOf(row, ContactBindingDecision.KeyMirrorColumn));
     }
 
     /// <summary>Parses one systemuser row (with an optional expanded linked contact) from Web API JSON.</summary>
@@ -421,6 +472,15 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public static bool IsKeyMissing(string? body)
         => body is not null && body.Contains("key in the request URI is not valid", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// True when a Dataverse error body is the alternate key's DUPLICATE fault — <c>0x80060892</c>, "Entity Key …
+    /// violated", returned as HTTP 412 (captured live 2026-08-06 on <c>sprk_communication</c>,
+    /// email-communication-intelligence-r2 task 020). Exact code, never a range. Distinct from the 412 a stale
+    /// <c>If-Match</c> version produces, which a re-read can fix.
+    /// </summary>
+    public static bool IsDuplicateKey(string? body)
+        => body is not null && body.Contains("0x80060892", StringComparison.OrdinalIgnoreCase);
+
     // ── Reads ──────────────────────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc />
@@ -433,6 +493,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
         return ReadContactsAsync(BuildEmailLookupPath(email.Trim()), "email lookup", ct);
     }
+
+    /// <inheritdoc />
+    public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct)
+        => ReadContactsAsync(BuildKeyMirrorLookupPath(oid), "key-mirror lookup", ct);
 
     /// <inheritdoc />
     public async Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct)
@@ -545,9 +609,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct)
     {
         // PATCH on the alternate key + If-None-Match: * is CREATE-ONLY: Dataverse answers 412 when a contact
-        // with that oid already exists. With the key's unique index this is exactly one contact per oid even
-        // when two first sign-ins race — the loser gets 412 and re-reads.
-        var result = await WriteAsync(HttpMethod.Patch, BuildCreateByKeyPath(oid), CreatePayload(plane, details),
+        // already holds that oid in the uniqueness mirror. With the key's unique index this is exactly one contact
+        // per oid even when two first sign-ins race — the loser gets 412 and re-reads by the binding. A 412 the
+        // re-read cannot explain (no contact BOUND to the oid) is a squatted mirror: the binder denies and flags.
+        var result = await WriteAsync(HttpMethod.Patch, BuildCreateByKeyPath(oid), CreatePayload(oid, plane, details),
             ("If-None-Match", "*"), ct).ConfigureAwait(false);
         return result;
     }
@@ -683,6 +748,13 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             }
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+
+            // Checked BEFORE the generic 412: the duplicate-key fault is also a 412, but a re-read cannot fix it.
+            if (IsDuplicateKey(body))
+            {
+                return new StoreWriteResult(StoreWriteStatus.KeyConflict, Error: Trim(body));
+            }
+
             if (response.StatusCode == HttpStatusCode.PreconditionFailed)
             {
                 return new StoreWriteResult(StoreWriteStatus.PreconditionFailed, Error: Trim(body));

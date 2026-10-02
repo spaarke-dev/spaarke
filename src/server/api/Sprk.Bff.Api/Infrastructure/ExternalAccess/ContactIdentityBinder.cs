@@ -71,8 +71,9 @@ public enum SystemUserLinkOutcome
     Denied,
 
     /// <summary>
-    /// A write failed. In this BFF's own environment the reconciliation job re-decides the user on its next run;
-    /// a registration link in another environment has no retry in this BFF (see RegistrationDataverseService).
+    /// A write failed. The reconciliation job re-decides the user on its next run once its writes are enabled — in
+    /// this BFF's own environment and in every environment it provisions users into (third fix round; see
+    /// IdentityLinkReconciliationJob).
     /// </summary>
     Failed,
 }
@@ -136,12 +137,12 @@ public sealed class ContactIdentityBinder
     /// Linking a systemuser to an existing contact hands that user the contact's grants (the class of write
     /// ExternalAccessReconciliationJob's R1 is). The switch exists so the dev live gate can review a report-only
     /// run before any such write lands; an ungated inline link would make those writes as soon as a licensed user
-    /// signed in after the deploy, ahead of the review (verifier finding 4). Not gated, deliberately: the Type-2
-    /// token plane (a member's own first sign-in, behind the member test — gating it would deny every Type-2
-    /// caller) and registration (an operator-initiated link of a systemuser the BFF itself just created, normally
-    /// in a demo/customer target environment this BFF's job does not scan — it scans only Dataverse:ServiceUrl —
-    /// so a gate would leave that user unlinked with no safety net; a registration link that does not land there
-    /// is not retried by this BFF either, and RegistrationDataverseService logs it as such).
+    /// signed in after the deploy, ahead of the review (verifier finding 4). The job's writes in the environments
+    /// this BFF provisions users into (its provisioning-target pass) are gated by the same switch. Not gated,
+    /// deliberately: the Type-2 token plane (a member's own first sign-in, behind the member test — gating it would
+    /// deny every Type-2 caller) and registration (an operator-initiated link of a systemuser the BFF itself just
+    /// created; a link that does not land there is re-decided by the job's provisioning-target pass on its next run
+    /// once this switch is on).
     /// </remarks>
     public const string LinkWritesEnabledConfigKey = "IdentityLink:Reconciliation:WritesEnabled";
 
@@ -293,7 +294,8 @@ public sealed class ContactIdentityBinder
                 (decision, emailLookup) = await DecideUnlinkedAsync(request, oidLookup, known, ct).ConfigureAwait(false);
             }
 
-            var outcome = await ApplySystemUserDecisionAsync(user, request, decision, known, applyWrites, ct)
+            var outcome = await ApplySystemUserDecisionAsync(user, request, decision, known, applyWrites,
+                    lastAttempt: attempt == 1, ct)
                 .ConfigureAwait(false);
             if (outcome is not null)
             {
@@ -447,6 +449,12 @@ public sealed class ContactIdentityBinder
                         return ContactBindingResult.Resolved(target.ContactId, BindingAction.BindByEmail, wrote: true);
                     }
 
+                    if (write.Status == StoreWriteStatus.KeyConflict)
+                    {
+                        // Another contact holds this oid in its uniqueness mirror. Never bound around.
+                        return await KeyConflictDeniedAsync(request, ct).ConfigureAwait(false);
+                    }
+
                     if (write.Status == StoreWriteStatus.PreconditionFailed && attempt == 0)
                     {
                         continue; // the row changed under us — re-decide against fresh rows
@@ -480,16 +488,20 @@ public sealed class ContactIdentityBinder
                                 created, request.CallerOid, request.CallerPlane);
                             return ContactBindingResult.Resolved(created, BindingAction.CreateByOid, wrote: true);
                         case StoreWriteStatus.Written:
-                        case StoreWriteStatus.PreconditionFailed when attempt == 0:
+                        case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict when attempt == 0:
                             // Created without an id in the response, or a concurrent first sign-in won the race
                             // (412 on If-None-Match). Either way the oid lookup now finds exactly one contact.
                             continue;
+                        case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict:
+                            // Refused by the key AGAIN although the binding read found no contact for this oid: no
+                            // racer explains it. Another contact holds the oid in its uniqueness mirror.
+                            return await KeyConflictDeniedAsync(request, ct).ConfigureAwait(false);
                         case StoreWriteStatus.KeyMissing:
                             _logger.LogError(
-                                "[ID-BIND] {DenyCode}: the sprk_externalobjectid alternate key is not defined, so "
-                                + "exactly-one-contact-per-oid cannot be guaranteed. Apply "
+                                "[ID-BIND] {DenyCode}: the alternate key on the uniqueness mirror ({Mirror}) is not "
+                                + "defined, so exactly-one-contact-per-oid cannot be guaranteed. Apply "
                                 + "scripts/Set-ContactIdentityBindingSchema.ps1.",
-                                ContactBindingDecision.DenyContactCreateUnavailable);
+                                ContactBindingDecision.DenyContactCreateUnavailable, ContactBindingDecision.KeyMirrorColumn);
                             return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateUnavailable);
                         default:
                             return ContactBindingResult.Denied(ContactBindingDecision.DenyContactCreateFailed);
@@ -528,7 +540,8 @@ public sealed class ContactIdentityBinder
 
     /// <summary>
     /// Plans — and with <paramref name="applyWrites"/>, performs — a systemuser decision. Returns null when a
-    /// conditional write lost a race and the caller should re-decide.
+    /// conditional write lost a race and the caller should re-decide (never on <paramref name="lastAttempt"/> for a
+    /// create the key refused: that is a key-mirror conflict, not a race).
     /// </summary>
     private async Task<SystemUserLinkResult?> ApplySystemUserDecisionAsync(
         SystemUserIdentityRow user,
@@ -536,6 +549,7 @@ public sealed class ContactIdentityBinder
         BindingDecision decision,
         Dictionary<Guid, ContactBindingRow> known,
         bool applyWrites,
+        bool lastAttempt,
         CancellationToken ct)
     {
         var suid = user.SystemUserId;
@@ -605,6 +619,11 @@ public sealed class ContactIdentityBinder
                 var etag = known.TryGetValue(target, out var row) ? row.ETag : null;
                 var write = await _store.BindOidAsync(target, etag, request.CallerOid, IdentityPlaneMarker.Workforce, ct)
                     .ConfigureAwait(false);
+                if (write.Status == StoreWriteStatus.KeyConflict)
+                {
+                    return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
+                }
+
                 return write.Status switch
                 {
                     StoreWriteStatus.Written => Result(suid, SystemUserLinkOutcome.BoundLinkedContact, target, null, null,
@@ -648,6 +667,11 @@ public sealed class ContactIdentityBinder
                 var write = await _store.BindOidAsync(target, known[target].ETag, request.CallerOid,
                     IdentityPlaneMarker.Workforce, ct).ConfigureAwait(false);
                 if (write.Status == StoreWriteStatus.PreconditionFailed) return null;
+                if (write.Status == StoreWriteStatus.KeyConflict)
+                {
+                    return await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false);
+                }
+
                 if (write.Status != StoreWriteStatus.Written)
                 {
                     return Result(suid, SystemUserLinkOutcome.Failed, null, ContactBindingDecision.DenyContactBindFailed,
@@ -686,10 +710,18 @@ public sealed class ContactIdentityBinder
                         null, none, Array.Empty<IdentityChange>(), false);
                 }
 
-                if (create.Status == StoreWriteStatus.PreconditionFailed
-                    || (create.Status == StoreWriteStatus.Written && create.ContactId is null))
+                if (create.Status is StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict)
                 {
-                    return null; // created elsewhere or id not returned: re-decide; the oid lookup now finds it
+                    // First refusal: a concurrent writer may have created it — re-decide; the oid lookup finds it.
+                    // Refused AGAIN after a fresh read found no contact bound to the oid: a key-mirror conflict.
+                    return lastAttempt
+                        ? await KeyConflictLinkResultAsync(user, request, changes, ct).ConfigureAwait(false)
+                        : null;
+                }
+
+                if (create.Status == StoreWriteStatus.Written && create.ContactId is null)
+                {
+                    return null; // created but the id was not returned: re-decide; the oid lookup now finds it
                 }
 
                 if (create.Status != StoreWriteStatus.Written)
@@ -841,6 +873,65 @@ public sealed class ContactIdentityBinder
     private CollisionParty Party(Guid? collidingOid, IdentityPlaneMarker plane, IdentityCollisionReason reason)
         => new(collidingOid == Guid.Empty ? null : collidingOid, plane, reason, _time.GetUtcNow());
 
+    /// <summary>A token-plane bind or create the unique index refused: flag the holder(s), deny.</summary>
+    private async Task<ContactBindingResult> KeyConflictDeniedAsync(BindingRequest request, CancellationToken ct)
+    {
+        var (_, _, wrote) = await FlagKeyMirrorHoldersAsync(request.CallerOid, request.CallerPlane, ct).ConfigureAwait(false);
+        return ContactBindingResult.Denied(ContactBindingDecision.DenyContactKeyConflict, BindingAction.Collision,
+            IdentityCollisionReason.KeyMirrorConflict, wrote);
+    }
+
+    /// <summary>A systemuser link the unique index refused: flag the holder(s), report the user as flagged.</summary>
+    private async Task<SystemUserLinkResult> KeyConflictLinkResultAsync(
+        SystemUserIdentityRow user, BindingRequest request, List<IdentityChange> changes, CancellationToken ct)
+    {
+        var (holders, pending, wrote) = await FlagKeyMirrorHoldersAsync(request.CallerOid, request.CallerPlane, ct)
+            .ConfigureAwait(false);
+        var outcome = holders.Count == 0
+            ? SystemUserLinkOutcome.Failed          // the holder could not be named: nothing to flag; retried next run
+            : pending == 0
+                ? SystemUserLinkOutcome.FlagAlreadyPresent
+                : wrote ? SystemUserLinkOutcome.Flagged : SystemUserLinkOutcome.Failed;
+        return Result(user.SystemUserId, outcome, null, ContactBindingDecision.DenyContactKeyConflict,
+            IdentityCollisionReason.KeyMirrorConflict, holders, changes, true);
+    }
+
+    /// <summary>
+    /// A bind or create the platform's unique index refused although no contact is BOUND to the oid: another contact
+    /// holds the oid in its uniqueness mirror (<c>sprk_externalobjectidkey</c>) without the binding to match —
+    /// squatted (the mirror is unsecured, so any user with contact Write can set it) or half-cleared by an operator.
+    /// It is never bound around. The holder is flagged (<see cref="IdentityCollisionReason.KeyMirrorConflict"/>) so an
+    /// operator can see it, and the caller is denied <see cref="ContactBindingDecision.DenyContactKeyConflict"/>.
+    /// That is the most a user with contact Write can do through the mirror — deny one identity service, visibly —
+    /// because nothing resolves or binds by it (owner round 4 item 4, B2).
+    /// </summary>
+    /// <returns>The holders, how many of them still needed this party recorded, and whether any flag was written.</returns>
+    private async Task<(IReadOnlyList<Guid> Holders, int Pending, bool Wrote)> FlagKeyMirrorHoldersAsync(
+        Guid oid, IdentityPlaneMarker plane, CancellationToken ct)
+    {
+        var lookup = await _store.FindContactsByKeyMirrorAsync(oid, ct).ConfigureAwait(false);
+        var holders = lookup.Status == LookupStatus.Read
+            ? lookup.Rows.Where(r => ContactBindingDecision.MirrorHeldWithoutBinding(r, oid)).ToList()
+            : new List<ContactBindingRow>();
+
+        _logger.LogError(
+            "[ID-BIND] {DenyCode}: the unique index refused oid {Oid} ({Plane}) although no contact is bound to it. "
+            + "The uniqueness mirror {Mirror} carries it on contact(s) [{Holders}] (lookup {LookupStatus}) — squatted or "
+            + "half-cleared. Nothing was bound or created; the holder is flagged for an operator (deployment guide §6.5.3).",
+            ContactBindingDecision.DenyContactKeyConflict, oid, plane, ContactBindingDecision.KeyMirrorColumn,
+            string.Join(",", holders.Select(h => h.ContactId)), lookup.Status);
+
+        var party = Party(oid, plane, IdentityCollisionReason.KeyMirrorConflict);
+        var pending = holders.Where(h => ContactBindingDecision.ShouldWriteFlag(h.Flag, party)).ToList();
+        var wrote = false;
+        foreach (var holder in pending)
+        {
+            wrote |= await RecordPartyAsync(holder, party, ct).ConfigureAwait(false);
+        }
+
+        return (holders.Select(h => h.ContactId).ToList(), pending.Count, wrote);
+    }
+
     private async Task<bool> MaskedAsync(CancellationToken ct)
     {
         var readability = await _store.ProbeBindingReadabilityAsync(ct).ConfigureAwait(false);
@@ -872,6 +963,7 @@ public sealed class ContactIdentityBinder
             var level = result.DenyCode is ContactBindingDecision.DenyBindingColumnMissing
                 or ContactBindingDecision.DenyBindingColumnMasked
                 or ContactBindingDecision.DenyContactCreateUnavailable
+                or ContactBindingDecision.DenyContactKeyConflict
                 ? LogLevel.Error
                 : LogLevel.Warning;
             _logger.Log(level,

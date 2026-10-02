@@ -76,6 +76,14 @@ public enum IdentityCollisionReason
 
     /// <summary>An invite whose email matches a workforce-bound contact or one a systemuser links to.</summary>
     InviteMatchesWorkforceContact = 100000010,
+
+    /// <summary>
+    /// The uniqueness mirror (<c>sprk_externalobjectidkey</c>) carries the colliding oid on THIS contact, but its
+    /// binding (<c>sprk_externalobjectid</c>) does not — a squatted or half-cleared mirror. The platform's unique
+    /// index then refuses to bind or create that oid anywhere else (owner round 4 item 4, B2). Flagged on the
+    /// holder so an operator can see it; the caller is denied <c>contact_key_conflict</c>.
+    /// </summary>
+    KeyMirrorConflict = 100000011,
 }
 
 /// <summary>Which caller plane a binding decision is being made for.</summary>
@@ -222,6 +230,11 @@ public sealed record FlagReconciliation(FlagReconciliationAction Action, Collisi
 /// <param name="ETag">The row version, used as the <c>If-Match</c> precondition for a bind.</param>
 /// <param name="Email"><c>emailaddress1</c>, used by the reconciliation job's flag re-evaluation.</param>
 /// <param name="Flag">The open collision flag, or null.</param>
+/// <param name="RawKeyMirror">
+/// <c>sprk_externalobjectidkey</c> exactly as stored, or null — the UNSECURED uniqueness mirror (owner round 4
+/// item 4, B2). It carries no identity: nothing resolves or binds by it. It is read only to tell a squatted or
+/// half-cleared mirror apart (<see cref="ContactBindingDecision.MirrorHeldWithoutBinding"/>).
+/// </param>
 public sealed record ContactBindingRow(
     Guid ContactId,
     int? StateCode,
@@ -229,7 +242,8 @@ public sealed record ContactBindingRow(
     int? RawPlane,
     string? ETag = null,
     string? Email = null,
-    CollisionFlag? Flag = null)
+    CollisionFlag? Flag = null,
+    string? RawKeyMirror = null)
 {
     /// <summary>Only <c>statecode = 0</c> resolves or binds (ADR-003).</summary>
     public bool IsActive => StateCode == 0;
@@ -432,7 +446,10 @@ public static class ContactBindingDecision
     /// <summary>The bind write failed and a re-read did not show the caller bound.</summary>
     public const string DenyContactBindFailed = "sdap.access.deny.contact_bind_failed";
 
-    /// <summary>Creation needs the <c>sprk_externalobjectid</c> alternate key, which is not defined here.</summary>
+    /// <summary>
+    /// Creation needs the alternate key on the uniqueness mirror (<c>sprk_externalobjectidkey</c>), which is not
+    /// defined here — so exactly-one-contact-per-oid cannot be guaranteed and nothing is created.
+    /// </summary>
     public const string DenyContactCreateUnavailable = "sdap.access.deny.contact_create_unavailable";
 
     /// <summary>The create write failed.</summary>
@@ -440,6 +457,13 @@ public static class ContactBindingDecision
 
     /// <summary>The binding column reads as masked (field-level security without Read): no write is safe.</summary>
     public const string DenyBindingColumnMasked = "sdap.access.deny.binding_column_masked";
+
+    /// <summary>
+    /// The uniqueness mirror carries the caller's oid on a contact whose binding does not: the platform's unique
+    /// index refuses the bind or the create. A squatted or half-cleared mirror — flagged on the holder, never bound
+    /// around (owner round 4 item 4, B2).
+    /// </summary>
+    public const string DenyContactKeyConflict = "sdap.access.deny.contact_key_conflict";
 
     // ── Invite reason codes ─────────────────────────────────────────────────────────────────────────
 
@@ -914,6 +938,14 @@ public static class ContactBindingDecision
         ArgumentNullException.ThrowIfNull(oidCarriers);
         ArgumentNullException.ThrowIfNull(references);
 
+        // A key-mirror conflict is a fact about the UNIQUE INDEX, which counts inactive rows too: deactivating the
+        // holder does not free the oid. So it is decided from the holder row alone, before the inactive shortcut —
+        // it holds while the holder's mirror still carries the party's oid without the binding to match.
+        if (party.Reason == IdentityCollisionReason.KeyMirrorConflict)
+        {
+            return party.Oid is { } mirrored && MirrorHeldWithoutBinding(flagged, mirrored);
+        }
+
         // Anything we could not read keeps the party: dropping it on a failed read is the fail-open direction.
         if (emailCarriers.Status != LookupStatus.Read || oidCarriers.Status != LookupStatus.Read
             || references.Status != LookupStatus.Read)
@@ -972,8 +1004,37 @@ public static class ContactBindingDecision
         IdentityCollisionReason.LinkedContactInactive => DenyLinkedContactInactive,
         IdentityCollisionReason.GuestLinkUnverified => DenyGuestLinkUnverified,
         IdentityCollisionReason.InviteMatchesWorkforceContact => InviteWorkforceBoundContact,
+        IdentityCollisionReason.KeyMirrorConflict => DenyContactKeyConflict,
         _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Every collision reason needs its own code."),
     };
+
+    /// <summary>
+    /// True when <paramref name="row"/>'s uniqueness mirror carries <paramref name="oid"/> while its binding does
+    /// not (unbound, unreadable, or bound to another oid) — the contact holds the oid's unique-index slot without
+    /// owning the oid. Every BFF write sets binding and mirror together, so this is a squatted mirror (any user
+    /// with contact Write can set the unsecured column) or one an operator half-cleared. Pure.
+    /// </summary>
+    /// <remarks>
+    /// Owner round 4 item 4 (B2): field-level security stays on <c>sprk_externalobjectid</c>, and the platform's
+    /// "exactly one contact per oid" moves to the unsecured mirror. What a user with contact Write can do to the
+    /// mirror is therefore limited to DENYING SERVICE to one identity: the bind or create that needs the slot is
+    /// refused by the index, and the BFF denies (<see cref="DenyContactKeyConflict"/>) and flags the holder. It can
+    /// never make a contact resolve as someone else — nothing resolves or binds by the mirror.
+    /// </remarks>
+    public static bool MirrorHeldWithoutBinding(ContactBindingRow row, Guid oid)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        if (oid == Guid.Empty
+            || string.IsNullOrWhiteSpace(row.RawKeyMirror)
+            || !Guid.TryParse(row.RawKeyMirror.Trim(), out var mirrored)
+            || mirrored != oid)
+        {
+            return false;
+        }
+
+        var binding = row.Binding;
+        return !(binding.Kind == BindingKind.Bound && binding.Oid == oid);
+    }
 
     /// <summary>
     /// The read-only SDK query for the contacts bound to <paramref name="oid"/>: EVERY statecode, two rows, with
@@ -1031,8 +1092,19 @@ public static class ContactBindingDecision
         return DecideOnOid(oidLookup);
     }
 
-    /// <summary><c>contact.sprk_externalobjectid</c> — the binding key, both planes.</summary>
+    /// <summary>
+    /// <c>contact.sprk_externalobjectid</c> — the binding, both planes. FIELD-SECURED (only the BFF writes it).
+    /// Every read that decides who a contact IS uses this column, and only this column.
+    /// </summary>
     public const string ExternalObjectIdColumn = "sprk_externalobjectid";
+
+    /// <summary>
+    /// <c>contact.sprk_externalobjectidkey</c> — the UNSECURED uniqueness mirror that carries the platform's
+    /// alternate key (owner round 4 item 4, B2: Dataverse refuses an alternate key on a field-secured column). The
+    /// BFF writes it with the same oid, in the same request, as every bind and create; nothing reads an identity
+    /// from it (<see cref="MirrorHeldWithoutBinding"/>).
+    /// </summary>
+    public const string KeyMirrorColumn = "sprk_externalobjectidkey";
 
     /// <summary><c>contact.sprk_identityplane</c> — which plane wrote the binding.</summary>
     public const string IdentityPlaneColumn = "sprk_identityplane";

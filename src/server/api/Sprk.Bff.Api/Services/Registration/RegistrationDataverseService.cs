@@ -46,11 +46,6 @@ public class RegistrationDataverseService : IDisposable
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
     private readonly ContactIdentityBinderFactory _binderFactory;
-
-    // The ONE environment this BFF's identity-link reconciliation job scans: its own Dataverse:ServiceUrl (the
-    // job reads through the DI-registered IContactIdentityStore). Null when unset. Used only to tell an operator
-    // truthfully whether a registration link that did not land has a retry path (task 141, verifier finding 4).
-    private readonly string? _reconciledEnvironmentUrl;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -89,9 +84,6 @@ public class RegistrationDataverseService : IDisposable
 
         DataverseBaseUrl = dataverseUrl.TrimEnd('/');
         _apiUrl = $"{DataverseBaseUrl}/api/data/v9.2";
-        _reconciledEnvironmentUrl = string.IsNullOrWhiteSpace(configuration["Dataverse:ServiceUrl"])
-            ? null
-            : configuration["Dataverse:ServiceUrl"]!.TrimEnd('/');
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         // Factory-created client (pooled handler per ADR-010). BaseAddress + default Prefer
@@ -450,15 +442,17 @@ public class RegistrationDataverseService : IDisposable
         => (string.IsNullOrWhiteSpace(targetDataverseUrl) ? DataverseBaseUrl : targetDataverseUrl).TrimEnd('/');
 
     /// <summary>
-    /// True when this BFF's identity-link reconciliation job scans <paramref name="dataverseBaseUrl"/>, i.e. it
-    /// is this BFF's own <c>Dataverse:ServiceUrl</c> (compared case-insensitively, trailing slash ignored). The
-    /// job reads ONLY that environment, so a registration link that does not land in any other environment has
-    /// no retry path in this BFF.
+    /// The identity binder for <paramref name="dataverseBaseUrl"/>, authenticated through this service's existing
+    /// per-environment token path (the BFF's own credential; ADR-028 — no new secret, no caller token). Used for a
+    /// new systemuser's contact link at creation, and by the identity-link reconciliation job for every environment
+    /// this BFF provisions users into (task 141, third fix round).
     /// </summary>
-    public bool IsReconciledByThisBff(string dataverseBaseUrl)
-        => _reconciledEnvironmentUrl is not null
-           && !string.IsNullOrWhiteSpace(dataverseBaseUrl)
-           && string.Equals(dataverseBaseUrl.TrimEnd('/'), _reconciledEnvironmentUrl, StringComparison.OrdinalIgnoreCase);
+    public ContactIdentityBinder ContactBinderFor(string dataverseBaseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
+        var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        return _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
+    }
 
     /// <summary>
     /// Runs the identity-binding decision for a just-created systemuser against <paramref name="dataverseBaseUrl"/>
@@ -466,18 +460,16 @@ public class RegistrationDataverseService : IDisposable
     /// or flag a collision. NON-FATAL by design: the systemuser exists either way.
     /// </summary>
     /// <remarks>
-    /// <para><b>What happens to a link that does not land</b> (a fault, a deny, a lost race, or a collision flag)
-    /// depends on the environment, and the log line says which (verifier finding 4):</para>
-    /// <list type="bullet">
-    /// <item><b>This BFF's own environment</b> (<see cref="IsReconciledByThisBff"/>): the identity-link
-    /// reconciliation job re-decides the user on its next run — once <c>IdentityLink:Reconciliation:WritesEnabled</c>
-    /// is true; until then it only reports.</item>
-    /// <item><b>Any other target environment</b> (every demo/customer provisioning target): <b>nothing in this BFF
-    /// retries it</b>, and a collision flag written there is never re-evaluated or cleared by this BFF's job. The
-    /// user is linked only by a BFF deployed against that environment (its own job, writes enabled), if one runs
-    /// there. This is a recorded gap (notes/task-141-identity-binding.md §12), surfaced as a warning that names it,
-    /// never as a promise of a retry.</item>
-    /// </list>
+    /// <para><b>A link that does not land is retried</b> (a fault, a deny, a lost race — or a collision flag, which
+    /// is re-evaluated). The environment a registration links in is always one the identity-link reconciliation job
+    /// reconciles: the approve endpoint provisions only into an ACTIVE <c>sprk_dataverseenvironment</c> row, and
+    /// with no target the user is created in this service's own <c>DATAVERSE_URL</c> environment. The job
+    /// reconciles this BFF's <c>Dataverse:ServiceUrl</c> AND both of those (its provisioning-target pass), so it
+    /// re-decides the user on its next run once <c>IdentityLink:Reconciliation:WritesEnabled</c> is true; until then
+    /// it reports what it would do. (Second fix round: the job scanned only its own environment and this path
+    /// logged "NOT retried" for every other one — verifier finding 4, closed in the third fix round.)</para>
+    /// <para>The one way out of that coverage is an operator deactivating the environment's registry row after
+    /// provisioning into it: the BFF then stops serving that environment, deliberately.</para>
     /// </remarks>
     /// <returns>The link result, or null when nothing could be attempted (unusable oid, or a fault).</returns>
     public async Task<SystemUserLinkResult?> LinkContactForNewSystemUserAsync(
@@ -493,10 +485,9 @@ public class RegistrationDataverseService : IDisposable
         }
 
         var baseUrl = dataverseBaseUrl.TrimEnd('/');
-        var reconciledHere = IsReconciledByThisBff(baseUrl);
         try
         {
-            var binder = _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
+            var binder = ContactBinderFor(baseUrl);
 
             // email is the UPN this service created the user with (directory data, not a client value), so it
             // is both the directory-synced email and the domainname the guest test reads.
@@ -513,7 +504,7 @@ public class RegistrationDataverseService : IDisposable
             }
             else
             {
-                LogLinkNotMade(systemUserId, baseUrl, reconciledHere, result.Outcome.ToString(), result.DenyCode, null);
+                LogLinkNotMade(systemUserId, baseUrl, result.Outcome.ToString(), result.DenyCode, null);
             }
 
             return result;
@@ -524,32 +515,19 @@ public class RegistrationDataverseService : IDisposable
         }
         catch (Exception ex)
         {
-            LogLinkNotMade(systemUserId, baseUrl, reconciledHere, "Fault", null, ex);
+            LogLinkNotMade(systemUserId, baseUrl, "Fault", null, ex);
             return null;
         }
     }
 
-    // Two templates, so App Insights can tell "will be retried" from "will NOT be retried" without parsing text.
-    private void LogLinkNotMade(
-        Guid systemUserId, string environment, bool reconciledHere, string outcome, string? denyCode, Exception? ex)
-    {
-        if (reconciledHere)
-        {
-            _logger.LogWarning(ex,
-                "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link NOT made ({Outcome}, code {Code}). "
-                + "This BFF's identity-link reconciliation job scans this environment and re-decides the user on its "
-                + "next run once IdentityLink:Reconciliation:WritesEnabled is true (report-only until then)",
-                systemUserId, environment, outcome, denyCode);
-            return;
-        }
-
-        _logger.LogWarning(ex,
-            "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link NOT made ({Outcome}, code {Code}) "
-            + "and NOT retried by this BFF: its identity-link reconciliation job scans only its own Dataverse:ServiceUrl "
-            + "({ReconciledEnvironment}). The user stays unlinked until a BFF deployed against that environment "
-            + "reconciles it (deployment guide §6.5.2)",
-            systemUserId, environment, outcome, denyCode, _reconciledEnvironmentUrl ?? "(not configured)");
-    }
+    private void LogLinkNotMade(Guid systemUserId, string environment, string outcome, string? denyCode, Exception? ex)
+        => _logger.LogWarning(ex,
+            "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link NOT made ({Outcome}, code {Code}). "
+            + "The identity-link reconciliation job re-decides the user on its next run — it reconciles this BFF's own "
+            + "environment and every environment it provisions users into (DATAVERSE_URL and every ACTIVE "
+            + "sprk_dataverseenvironment row) — once IdentityLink:Reconciliation:WritesEnabled is true (report-only "
+            + "until then; deployment guide §6.5.2)",
+            systemUserId, environment, outcome, denyCode);
 
     #endregion
 

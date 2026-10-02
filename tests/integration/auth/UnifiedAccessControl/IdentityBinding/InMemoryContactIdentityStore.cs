@@ -11,15 +11,19 @@ namespace Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 ///     the stored TEXT, so an upper-case stored oid still matches;</item>
 ///   <item>both lookups honour <c>$top=2</c>; the email lookup returns ACTIVE rows only, the oid lookup any state;</item>
 ///   <item>every row has a version; <c>If-Match</c> writes fail with 412 when it moved;</item>
-///   <item>the <c>sprk_externalobjectid</c> alternate key is unique among non-null values (when
-///     <see cref="KeyDefined"/>), so a create or bind that would duplicate an oid fails. ⚠️ <see cref="KeyDefined"/>
-///     = true together with <see cref="MaskBindingColumn"/>-style field security models a combination Dataverse
-///     does NOT allow: an alternate key cannot include a field-secured column (Microsoft Learn, "Work with
-///     alternate keys"). Which of the two the platform keeps is an owner decision pending under CLAUDE.md §6.5
-///     (notes/task-141-identity-binding.md §9); until it is made, a test that relies on the key proves the
-///     binder's behaviour GIVEN a uniqueness guarantee, not that the deployed schema provides one;</item>
-///   <item><see cref="MaskBindingColumn"/> reproduces field-level-security masking: the oid comes back null in
-///     rows AND is treated as null in filters (Dataverse substitutes null — documented).</item>
+///   <item>the schema is owner round 4 item 4's B2: the BINDING (<see cref="Contact.Oid"/>,
+///     <c>sprk_externalobjectid</c>) is field-secured, and the platform's uniqueness lives on a separate UNSECURED
+///     mirror (<see cref="Contact.KeyMirror"/>, <c>sprk_externalobjectidkey</c>), whose alternate key (when
+///     <see cref="KeyDefined"/>) is unique among non-null values. A create is create-only on the MIRROR (412 when
+///     any contact — of any state — holds the oid there), and a bind writes binding and mirror together and fails
+///     with the duplicate-key fault (<see cref="StoreWriteStatus.KeyConflict"/>) when ANOTHER contact holds the
+///     oid in its mirror. Seeding a binding seeds the matching mirror (schema step (a) copies every existing
+///     binding into it); <c>keyMirror</c> seeds a squatted or half-cleared one. This is a combination Dataverse
+///     allows — the key column is not field-secured — unlike the pre-B2 double, which modelled a key on the
+///     secured column;</item>
+///   <item><see cref="MaskBindingColumn"/> reproduces field-level-security masking of the BINDING only: the oid
+///     comes back null in rows AND is treated as null in filters (Dataverse substitutes null — documented). The
+///     mirror is not secured, so it is never masked and the unique index still applies.</item>
 /// </list>
 /// Failures are injected per operation. Every write is recorded in <see cref="Writes"/>, every read in
 /// <see cref="Reads"/>, so a test asserts what the code DID, not only what it returned.
@@ -34,6 +38,10 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         public Guid Id { get; init; }
         public int StateCode { get; set; }
         public string? Oid { get; set; }
+
+        /// <summary><c>sprk_externalobjectidkey</c> — the unsecured uniqueness mirror (B2).</summary>
+        public string? KeyMirror { get; set; }
+
         public int? Plane { get; set; }
         public string? Email { get; set; }
         public string? FirstName { get; set; }
@@ -134,13 +142,23 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
     // ── Seeding ────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Seeds a contact. A well-formed binding seeds the matching uniqueness mirror (lowercase "D"), as schema step
+    /// (a) copies every existing binding into it and every BFF write sets both. <paramref name="keyMirror"/> seeds
+    /// the mirror explicitly instead — a squatted or half-cleared one; <paramref name="deriveKeyMirror"/> = false
+    /// seeds a binding with NO mirror (a binding an operator wrote by hand).
+    /// </summary>
     public Contact AddContact(Guid id, string? email = null, string? oid = null, IdentityPlaneMarker? plane = null,
-        int stateCode = 0, CollisionFlag? flag = null)
+        int stateCode = 0, CollisionFlag? flag = null, string? keyMirror = null, bool deriveKeyMirror = true)
     {
+        var mirror = keyMirror
+            ?? (deriveKeyMirror && oid is not null && Guid.TryParse(oid.Trim(), out var g) && g != Guid.Empty
+                ? g.ToString("D")
+                : null);
         var c = new Contact
         {
-            Id = id, Email = email, Oid = oid, Plane = plane is { } p ? (int)p : null, StateCode = stateCode,
-            Flag = flag, Version = NextVersion(),
+            Id = id, Email = email, Oid = oid, KeyMirror = mirror, Plane = plane is { } p ? (int)p : null,
+            StateCode = stateCode, Flag = flag, Version = NextVersion(),
         };
         Contacts[id] = c;
         return c;
@@ -180,6 +198,17 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             var rows = Contacts.Values
                 .Where(c => !MaskBindingColumn && OidEquals(c.Oid, oid))
                 .Take(2).Select(Row).ToArray();
+            return Task.FromResult(ContactLookup.Of(rows));
+        }
+    }
+
+    public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct)
+    {
+        lock (_gate)
+        {
+            Reads.Add("key-mirror");
+            AfterRead?.Invoke("key-mirror");
+            var rows = Contacts.Values.Where(c => OidEquals(c.KeyMirror, oid)).Take(2).Select(Row).ToArray();
             return Task.FromResult(ContactLookup.Of(rows));
         }
     }
@@ -267,12 +296,17 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
             BeforeBind = null; // one-shot
             hook?.Invoke(c);
             if (!VersionMatches(etag, c.Version)) return Task.FromResult(new StoreWriteResult(StoreWriteStatus.PreconditionFailed));
-            if (KeyDefined && Contacts.Values.Any(o => o.Id != contactId && OidEquals(o.Oid, oid)))
+
+            // The unique index is on the MIRROR (B2), and it counts rows of every state: another contact holding the
+            // oid there makes the platform refuse the whole write with the duplicate-key fault.
+            if (KeyDefined && Contacts.Values.Any(o => o.Id != contactId && OidEquals(o.KeyMirror, oid)))
             {
-                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.Failed, Error: "duplicate key"));
+                Writes.Add(("refused-duplicate-key-bind", contactId, oid.ToString("D")));
+                return Task.FromResult(new StoreWriteResult(StoreWriteStatus.KeyConflict, Error: "0x80060892 duplicate key"));
             }
 
             c.Oid = oid.ToString("D");
+            c.KeyMirror = oid.ToString("D");
             c.Plane = (int)plane;
             c.Version = NextVersion();
             Writes.Add(("bind", contactId, $"{c.Oid}|{plane}"));
@@ -286,7 +320,7 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         {
             if (FailCreate) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
             if (!KeyDefined) return new StoreWriteResult(StoreWriteStatus.KeyMissing);
-            if (Contacts.Values.Any(c => OidEquals(c.Oid, oid))) return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
+            if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
         }
 
         if (BeforeCreate is not null)
@@ -296,12 +330,13 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
 
         lock (_gate)
         {
-            // The unique index decides, atomically, at insert time — exactly one contact per oid.
-            if (Contacts.Values.Any(c => OidEquals(c.Oid, oid))) return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
+            // The unique index on the MIRROR decides, atomically, at insert time — exactly one contact per oid. The
+            // create-only PATCH is addressed by the mirror key and carries the binding in its body: both land together.
+            if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
             var id = Guid.NewGuid();
             Contacts[id] = new Contact
             {
-                Id = id, Oid = oid.ToString("D"), Plane = (int)plane, Email = details.Email,
+                Id = id, Oid = oid.ToString("D"), KeyMirror = oid.ToString("D"), Plane = (int)plane, Email = details.Email,
                 FirstName = details.FirstName, LastName = details.LastName, StateCode = 0, Version = NextVersion(),
             };
             Writes.Add(("create", id, $"{oid:D}|{plane}|{details.Email}|{details.LastName}"));
@@ -414,7 +449,8 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
     }
 
     private ContactBindingRow Row(Contact c)
-        => new(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid, c.Plane, $"W/\"{c.Version}\"", c.Email, c.Flag);
+        => new(c.Id, c.StateCode, MaskBindingColumn ? null : c.Oid, c.Plane, $"W/\"{c.Version}\"", c.Email, c.Flag,
+            c.KeyMirror);
 
     private SystemUserIdentityRow UserRow(SystemUser u)
         => new(u.Id, u.Oid, u.Email, u.DomainName, u.PrimaryContactId, $"W/\"{u.Version}\"",

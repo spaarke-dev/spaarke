@@ -306,6 +306,7 @@ public class CallerPrincipalResolverTests
     [InlineData("collision", "sdap.access.deny.contact_bound_to_different_oid")]
     [InlineData("unreadable", "sdap.access.deny.contact_lookup_failed")]
     [InlineData("inactive", "sdap.access.deny.contact_inactive")]
+    [InlineData("key-conflict", "sdap.access.deny.contact_key_conflict")]
     public async Task CiamStrategy_EachDeny_CarriesItsOwnReasonCode(string scenario, string expectedCode)
     {
         var oid = Guid.NewGuid();
@@ -324,6 +325,11 @@ public class CallerPrincipalResolverTests
                 break;
             case "inactive":
                 store.AddContact(Guid.NewGuid(), oid: oid.ToString("D"), plane: IdentityPlaneMarker.External, stateCode: 1);
+                break;
+            case "key-conflict":
+                // B2: the repair bind's target is free, but another contact holds the oid in the uniqueness mirror.
+                store.AddContact(Guid.NewGuid(), email: "x@firm.example");
+                store.AddContact(Guid.NewGuid(), email: "y@firm.example", keyMirror: oid.ToString("D"));
                 break;
         }
 

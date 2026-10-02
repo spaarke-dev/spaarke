@@ -2,7 +2,10 @@
 
 > **Status**: implemented on branch `task/uac-r2-141` (2026-10-01). Live steps are **pending manual gates** —
 > this run was read-only against Dataverse/Entra by instruction (§8 lists every gate with its exact command).
-> ⛔ Since the verifier fix round the task is **blocked on an owner decision** (§9): G-1 cannot run as designed.
+> ✅ **Third fix round** (`task/uac-r2-141-f3`, 2026-10-02): the §9 owner decision is made — owner round 4 item 4
+> = **B2** — and implemented; the registration-link gap of §12.1 is CLOSED (the job reconciles every provisioning
+> target); the remaining INFO finding is fixed. See **§13**. G-1..G-8 are owner-approved and pending (the main
+> session runs them after deploy).
 > **Owner answers in force**: round 2 item 4, Q3; round 3 I1 = (b), I2 = (1), T2; trigger (a) for licensed
 > collision rows. Source: `session27-owner-decisions-and-research.md`.
 > **Peer contract**: [`141-link-contract.md`](141-link-contract.md) (word-add-in-r1 task 083 waits on it).
@@ -163,8 +166,8 @@ The plane marker is not secured, so "marker present, oid absent" is detectable a
 
 | Write | Mechanism | Race / failure |
 |---|---|---|
-| Bind | `PATCH contacts(id)` with `If-Match: <etag read with the row>` | 412 → re-decide once; otherwise Deny `contact_bind_failed` (**not** "resolved anyway") |
-| Create | `PATCH contacts(sprk_externalobjectid='<oid>')` + `If-None-Match: *` — create-only via the alternate key | 412 → re-read by oid and resolve; key not defined → Deny `contact_create_unavailable` |
+| Bind | `PATCH contacts(id)` with `If-Match: <etag read with the row>`, writing the binding `sprk_externalobjectid` AND the uniqueness mirror `sprk_externalobjectidkey` (same oid, one request — B2, §13) | 412 → re-decide once; otherwise Deny `contact_bind_failed` (**not** "resolved anyway"). Duplicate-key fault (`0x80060892`, another contact holds the oid in its mirror) → **K1**: flag the holder (reason `KeyMirrorConflict`), Deny `contact_key_conflict` |
+| Create | `PATCH contacts(sprk_externalobjectidkey='<oid>')` + `If-None-Match: *` — create-only via the alternate key on the MIRROR, the binding in the body (B2) | 412 → re-read by the binding and resolve (a racing first sign-in won); 412 AGAIN with no contact bound → **K2**: flag the holder, Deny `contact_key_conflict`; key not defined → Deny `contact_create_unavailable` |
 | Link | `PATCH systemusers(id)` `sprk_PrimaryContact@odata.bind`, `If-Match: <etag>` | 412 → not re-pointed |
 | Flag | `PATCH contacts(id)` the four summary columns + `sprk_identitycollisionparties` (every party), `If-Match: <etag>` | a party is recorded once per contact (idempotent per identity+reason); a DIFFERENT identity is appended (fix round, finding 3); 412 → re-read once and append again |
 | Flag prune / clear (job pass 2) | `PATCH contacts(id)`, `If-Match: <etag the verdict was made on>`; a clear without a version is refused | 412 → kept; the next run re-evaluates |
@@ -333,22 +336,26 @@ fail closed with `binding_column_missing`).
 
 | Gate | Action | Exact command |
 |---|---|---|
-| **G-1** Schema (dev) | ⛔ **BLOCKED on the §9 owner decision** — `-Apply` now stops at its platform-rule preflight before any write (as designed it asks for an alternate key on a field-secured column, which Dataverse refuses). Everything below that depends on G-1 (G-4 onward) waits with it. Once decided and the script amended: apply, then verify (exit 0). Dry run 2026-10-01: 6 oids OK (lowercase D), key + 2 choices + 5 columns + view + 2 FLS profiles + 2 writer members (`# mi-bff-api-dev`, `SDAP-BFF-SPE-API`) + 6 BU default teams + 2 secured fields + 1 solution component WOULD be written; backfill 6 as External | `.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then the same with `-Verify` |
+| **G-1** Schema (dev) | **Unblocked (§9 decided: B2; script amended — §13.1).** Dry run first (read-only), then apply, then verify (exit 0; re-run `-Verify` until the key is Active). Dry run 2026-10-02 (B2 script, read-only): platform rules OK (key on `sprk_externalobjectidkey`, FLS on `sprk_externalobjectid`); WOULD create the mirror column, copy the 6 bindings into it, create key `sprk_ExternalObjectIdUniqueKey` on the mirror, 2 choices (reason choice now 12 options) + 6 columns + view + 2 FLS profiles + 2 writer members (`# mi-bff-api-dev`, `SDAP-BFF-SPE-API`) + 6 BU default teams + 2 secured fields; backfill 6 as External | `.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c` (dry run), then with `-Apply`, then with `-Verify` |
+| **G-1b** Provisioning target (dev) — NEW, third fix round | The job now reconciles every environment the dev BFF provisions into (§13.2). Read-only 2026-10-02: the dev BFF's `DATAVERSE_URL` = `Dataverse__ServiceUrl` = spaarkedev1; active registry rows in spaarkedev1: **Dev** (spaarkedev1 — the own environment, skipped), **Demo 1** (`https://spaarke-demo.crm.dynamics.com` — a target), `trial-2026-08-18` (no URL — skipped). In spaarke-demo the dev BFF's identities (`5967251e…` MI, `1e40baad…`) are **NOT application users** (only the demo stamp's own `BFF mi-bff-api-demo` / `Spaarke BFF API - Demo`), and the binding columns do not exist there. So every job run will report spaarke-demo as a FAILED environment (`Success=false`; the own environment is still reconciled) — accurately: the dev BFF cannot register into Demo 1 either (its `CreateSystemUserAsync` would get 403). **Owner/main-session choice, NOT approved by round 4 (a different environment):** (a) if dev is meant to provision into Demo 1, add the dev BFF MI as an application user there with the role demo provisioning needs, then run G-1 against spaarke-demo; (b) if not, deactivate the stale "Demo 1" row in spaarkedev1's `sprk_dataverseenvironment` (a data write); (c) accept the reported failure during the G-5/G-6 review. Recommendation: (b) — the row cannot work for this BFF today. | (a) `.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://spaarke-demo.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d` (after the app user exists); (b) set `sprk_isactive = false` on the "Demo 1" `sprk_dataverseenvironment` row in spaarkedev1 |
 | **G-2** `acct` claim (dev BFF registration) | Add the access-token optional claim | `.\scripts\Register-EntraAppRegistrations.ps1 -TenantId a221a95e-6abc-4434-aecc-e48338a1b2f2 -AcctClaimOnly -AcctClaimAppId 1e40baad-e065-4aea-a8d4-4b7ab273458c`; verify `az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c --query optionalClaims.accessToken` lists `acct` |
 | **G-3** Tenant setting (dev) | Dev's workforce tenant is the registration's tenant (Model-2 shape) | `az webapp config appsettings set -g <dev-rg> -n <dev-bff-app> --settings WorkforceIdentity__CustomerTenantIds__0=a221a95e-6abc-4434-aecc-e48338a1b2f2` (both slots) |
 | **G-4** Deploy BFF (dev) | After merge to the project branch | `bff-deploy` skill / `scripts/Deploy-BffApi.ps1` |
-| **G-5** Job report-only run | Leave `IdentityLink__Reconciliation__WritesEnabled` unset; trigger a run (admin jobs endpoint, `ManualAdmin`) or wait 5 min; review `[ID-LINK-RECON] before-state` lines + ResultJson against §0 (expect: 1 bind, 7 creates, Ralph's link Verified-or-flagged-kept, 3 collisions flagged, nothing written). These counts no longer drift between G-4 and G-6: the inline link is gated on the same switch (fix round, finding 4). Do not run a demo registration into spaarkedev1 during the review (registration is not gated — §10, finding 4) | App Insights: `traces | where message startswith "[ID-LINK-RECON]"` |
+| **G-5** Job report-only run | Leave `IdentityLink__Reconciliation__WritesEnabled` unset; trigger a run (admin jobs endpoint, `ManualAdmin`) or wait 5 min; review `[ID-LINK-RECON] before-state` lines + ResultJson against §0 (expect: 1 bind, 7 creates, Ralph's link Verified-or-flagged-kept, 3 collisions flagged, nothing written). These counts no longer drift between G-4 and G-6: the inline link is gated on the same switch (fix round, finding 4). Do not run a demo registration during the review (registration is not gated — §10, finding 4). The ResultJson's root is the own environment; `provisioningTargets.environments[]` carries each target (G-1b) | App Insights: `traces | where message startswith "[ID-LINK-RECON]"` |
 | **G-6** Enable writes, run again, run a third time | Then confirm the third run changes nothing | `az webapp config appsettings set … --settings IdentityLink__Reconciliation__WritesEnabled=true` |
 | **G-7** FLS authorization | As a non-admin dev user: edit both fields in MDA → refused; Daily Briefing inline to-do still defaults Assigned To; TrackingFieldTrio still shows an internal user as internal | manual |
 | **G-8** Live gate items (POML criterion "MANUAL LIVE GATE") | (1) `test.user@demo.spaarke.com` signs in to Teams/SPA → resolves; one contact created, plane Workforce; second sign-in resolves by oid. (2) a guest / no-`acct` token is not bound. (3) the 3 collision emails refused + visible in "Contacts with Identity Collisions". (4) G-5/G-6 counts recorded. (5) a linked user named in `sprk_assignedattorney1` no longer logs `member_skipped`. (6) = G-7. (7) first link visible on the same request. (8) invite to a workforce-bound contact's email → 409, no CIAM account | manual; record results here |
 | **G-9** Publish size | Skipped by instruction this run. Fresh short-path worktrees, both sides, `Compress-Archive`, equal file counts | CLAUDE.md §10 procedure |
 
-## 9. ⛔ OWNER DECISION REQUIRED — alternate key vs field-level security on `contact.sprk_externalobjectid`
+## 9. ✅ DECIDED (owner round 4 item 4, 2026-10-01: **B2**) — alternate key vs field-level security on `contact.sprk_externalobjectid`
 
+> **Decision** (`session27-owner-decisions-and-research.md` round 4 item 4): FLS stays on `sprk_externalobjectid`;
+> the alternate key moves to a new unsecured mirror column `sprk_externalobjectidkey`, written with the same oid in
+> the same request as every bind and create; every read keeps using the secured column. **Implemented in the third
+> fix round — §13.1.** The text below is the escalation as raised, kept for the record.
+>
 > Raised by the adversarial verifier (finding 1, CRITICAL), 2026-10-01. Confirmed against Microsoft Learn the same
-> day. **No option below was implemented**: the binding rules say an escalation that is not answered in the owner
-> decisions is a first-class stop — stop that part, record it, report it. What WAS done is the stop itself (the
-> schema script refuses `-Apply`) and the paper trail. G-1 should not be run as originally written.
+> day.
 
 🔔 **Human Input Required — conflicting requirements (CLAUDE.md §6 / §6.5 format)**
 
@@ -503,6 +510,9 @@ endpoint, option, job or package. `WorkforcePrincipalResolver` gains an `IConfig
 
 ### 12.1 Recorded gap — a registration link outside the BFF's own environment has no retry in this BFF
 
+> ✅ **CLOSED in the third fix round (§13.2)**: the identity-link job now reconciles every environment this BFF
+> provisions users into. The text below is the gap as it stood after the second round.
+
 - **What**: `RegistrationDataverseService.CreateSystemUserAsync` links a just-created systemuser in the TARGET
   environment (`targetDataverseUrl`; for demo provisioning, `DemoEnvironmentConfig.DataverseUrl`). If that link
   does not land, nothing in this BFF re-decides it, and a collision flag written there is never re-evaluated or
@@ -576,3 +586,174 @@ No new service, DI registration, endpoint, option, job or package. All changes a
 - NetArchTest (`dotnet test tests/Spaarke.ArchTests`): **337 / 0 / 0**.
 - No package or csproj change (no new CVE surface). Publish size not measured (G-9; the main session measures
   after merging).
+
+## 13. Third fix round (`task/uac-r2-141-f3`, 2026-10-02) — B2 built, the registration-link gap closed
+
+> Branch `task/uac-r2-141-f3` from `task/uac-r2-141-f2`, then a merge of `integ/uac-r2-batch2` (origin/master,
+> tasks 130/131/134/151, 109/135/136/144/145). Owner answers in force: round 4 item 4 = **B2**; live steps approved
+> (run by the main session after deploy). READ-ONLY for live systems in this round: the only live calls were the
+> read-only schema dry run against spaarkedev1, a read-only registry/app-user check in spaarkedev1 and spaarke-demo,
+> and an App Service settings read filtered to two non-secret keys. Nothing was written to Dataverse, Entra or Azure.
+
+### 13.0 Merge of `integ/uac-r2-batch2` (five conflicts, both sides kept)
+
+| File | Resolution |
+|---|---|
+| `CallerPrincipalResolver.cs` | `CiamContactPrincipalStrategy` takes identity from the binder (141: distinct deny codes) AND record scope from the unified evaluator (135/136: read-bearing entries only). `ExternalParticipationService` is no longer a dependency of the strategy (neither half uses it); 141's `RightsFromGrants` left with the grants-only path |
+| `ExternalAccessModule.cs` | both scheduled jobs (141 identity-link reconciliation, 144 Secure Record isolation census) |
+| `RegistrationDataverseService.cs` | both `using`s |
+| `ExternalAccessContractTests.cs` | 136's `DataReads` stub + 141's header-driven identity store + 135/136's veto/plane wiring |
+| `CallerPrincipalResolverTests.cs` | 135's evaluator-scope tests over 141's binder (contact named by an in-memory identity store) |
+
+Non-conflicting compile breaks fixed in the same merge commit: `UnifiedEvaluatorSeamTests` and
+`OrganizationMembershipReadTests` (135) resolved the CIAM contact through `ExternalParticipationService`, whose contact
+resolution 141 removed — they now name the contact in an in-memory identity store through the binder;
+`RegistrationSecureRecordPlacementTests` (144) passes the binder factory 141 added. Identity/access subset after the
+merge: 519 / 0.
+
+### 13.1 Owner round 4 item 4 = B2 — implemented (the §9 "Impact if accepted" list, item by item)
+
+| §9 impact item | Done |
+|---|---|
+| Schema step (b) on the mirror | `Set-ContactIdentityBindingSchema.ps1`: `$KeyAttributes = @($MirrorColumn)`; key `sprk_ExternalObjectIdUniqueKey` on `contact(sprk_externalobjectidkey)` (renamed from the never-applied `sprk_ExternalObjectIdKey`, which would have shared its logical name with the new column). FAIL for any key on the secured binding |
+| Step (a) copies the 6 existing bindings into the mirror before the key | (a) creates `sprk_externalobjectidkey` (Text 100, never secured — FAIL if someone secures it), normalises each binding to "D" and copies it into the mirror in one PATCH; a mirror its own binding does not carry is reported FAIL and never written; a copy that would collide with another contact's mirror stops the run before the key |
+| `BindPayload` / `CreatePayload` / `BuildCreateByKeyPath` write and address the mirror | `BindPayload` writes binding + mirror + plane; `CreatePayload(oid, plane, details)` carries the binding (the key column's value is the URL's); `BuildCreateByKeyPath` = `contacts(sprk_externalobjectidkey='<oid>')`. New: `IsDuplicateKey` (exact `0x80060892`, captured live by email-communication-intelligence-r2 task 020) → `StoreWriteStatus.KeyConflict`, checked before the generic 412 |
+| `InMemoryContactIdentityStore` models the key on the mirror, no longer a key+FLS combination the platform refuses | `Contact.KeyMirror`; create is create-only on the mirror; bind fails with `KeyConflict` when another contact holds the oid in its mirror; masking hides only the binding; seeding a binding seeds its mirror (step (a)'s copy); `keyMirror:` seeds a squat. Its doc no longer carries the ⚠️ |
+| A test pins that a squatted mirror DENIES (never binds) | `WorkforceEmailNoHijackTests.ASquattedMirror_DeniesTheCreate_…`, `…_DeniesTheEmailBind_TheMatchedContactStaysUnbound`, `…_RetriedSignIn_WritesNoSecondFlag`; `CiamContactBindingTests.TheRepairBind_AgainstASquattedMirror_…`; `CallerPrincipalResolverTests` (key-conflict deny code); `IdentityLinkReconciliationTests.ASquattedMirror_IsFlaggedNotCreatedAround_…` and `AReportOnlyRun_NeverReportsAHeldKeyMirrorFlagAsClearable` |
+| The schema script's platform-rule preflight passes | Shown 2026-10-02: the real script with `-Apply` against an unreachable URL passes the preflight and stops at authentication (`No Dataverse token`); a seeded copy with the key back on the binding throws `BLOCKED … Nothing was written` before auth. Read-only dry run against spaarkedev1: `OK no alternate-key column is field-secured`, 6 copies WOULD, key WOULD. Plus a source guard, `ContactIdentitySchemaAgreementTests`: the script keys exactly `ContactBindingDecision.KeyMirrorColumn`, secures `ExternalObjectIdColumn`, never both on one column, and its choices cover every `IdentityCollisionReason` / `IdentityPlaneMarker` value |
+| Rewrite link contract §1.1 and guide §6.5.2 | Done (contract §1, §1.1, §3, §4, §5, new §7; guide §6.5.2, §6.5.3, change log). Also SPA-r2 023 closure + note, the provisioning handoff, DATAVERSE-WRITE-PATH-ARCHITECTURE I-10 |
+
+**What a squat does (decision table addition).** K1 — a bind the index refuses (another contact holds the oid in
+its mirror): never retried as a race; the holder(s) are read by the mirror (diagnostic read only —
+`FindContactsByKeyMirrorAsync`; nothing resolves by it), flagged with reason `KeyMirrorConflict` (`…011`), and the
+caller is denied `sdap.access.deny.contact_key_conflict` (error-level log naming the holder). K2 — a create refused
+by the key, re-read by the binding with no contact found, refused AGAIN: same outcome. A first 412 on a create is
+still a race (a concurrent first sign-in won) and resolves the winner. A key-conflict flag holds while the holder's
+mirror carries the oid without a matching binding — **even if the holder is deactivated** (the unique index counts
+inactive rows), so it is evaluated before the inactive shortcut, from the holder row alone (also in a report-only
+run, which attempts no write and so cannot see the conflict). Operator procedure: guide §6.5.3 "Key mirror held".
+
+**Criterion 3 ("exactly one contact per oid, two concurrent first sign-ins") — MET in code**, platform-enforced
+once G-1 creates the key: the create is create-only on the mirror's unique index, the binding lands in the same
+request, the race test passes over a store that now models a combination Dataverse accepts, and a squat or an
+undefined key DENIES instead of creating a second contact. It is live after G-1.
+
+### 13.2 The registration-link gap (§12.1) — CLOSED, not recorded
+
+The second round recorded that a registration link which did not land in a target environment other than the BFF's
+`Dataverse:ServiceUrl` was never retried, and a flag written there never re-evaluated. Now:
+
+- **`IdentityLinkReconciliationJob` reconciles every environment this BFF provisions users into** — its own
+  environment, then `DATAVERSE_URL` (registration's default target) and every ACTIVE `sprk_dataverseenvironment` row
+  (`ProvisioningTargetUrls`: normalised, de-duplicated, never the own environment). Each target gets the full
+  probe → pass 1 → pass 2 through `RegistrationDataverseService.ContactBinderFor(url)` — the registration service's
+  existing per-environment token path (the BFF's managed identity; ADR-028: no new secret, no caller token). The same
+  report-only switch gates every environment. One environment's failure (unreachable, scan failed, probe failed)
+  fails the run (`[env]`-prefixed problems; `provisioningTargets.environments[]` in the ResultJson) but never stops
+  the others; an unreadable registry fails the run while `DATAVERSE_URL` is still reconciled.
+- **Why that covers every registration-created user**: the approve endpoint provisions only into an ACTIVE registry
+  row (`RegistrationEndpoints` refuses an inactive one), and with no target a user is created in `DATAVERSE_URL`. So
+  every environment a registration links in is one the job reconciles; the only way out is an operator deactivating
+  the row afterwards — which stops this BFF serving that environment, deliberately.
+- **`RegistrationDataverseService`**: `IsReconciledByThisBff` and the two-template "NOT retried" warning are gone;
+  a link that does not land logs one warning — "re-decides the user on its next run … every environment it
+  provisions users into". `ContactBinderFor(url)` is the one place a binder for another environment is built.
+- `DataverseEnvironmentService.GetActiveEnvironmentsAsync` became `virtual` — the test seam (ADR-038 B1: no HTTP
+  double), the `ExternalParticipationService` convention.
+
+**Live finding (read-only, 2026-10-02) — a G-1b decision for the main session/owner.** In dev the only provisioning
+target is "Demo 1" (`https://spaarke-demo.crm.dynamics.com`), and there the dev BFF's identities are NOT application
+users and the binding schema does not exist. Every run will therefore report spaarke-demo as a failed environment —
+accurately (the dev BFF cannot register into Demo 1 either). Options and recommendation are in §8 G-1b. This is not
+one of the round-4 approved live steps (a different environment), so nothing was done.
+
+### 13.3 Other findings of the second-round verdict
+
+| Finding | Disposition |
+|---|---|
+| INFO — the 503 contract test could not tell the decision's message from the endpoint's hard-coded fallback (identical text) | Fixed: the fallback is now distinct ("The invite could not be completed. …") and the test asserts equality with `ContactIdentityBinder.InviteMessage(InviteContactLookupFailed)`. Seed B18 |
+| Registration tests assert on log substrings (brittle, accepted by the verifier) | Unchanged; the operator signal IS the log line (guide §6.5.2) |
+| Criterion 3 not met | Met in code (§13.1); live after G-1 |
+| Goal clause "every active licensed systemuser is linked or flagged" not guaranteed for registration-created users in other environments | Closed (§13.2) |
+| FLS criterion, manual live gate, `acct`/tenant setting, publish size | Live gates G-1..G-9 (owner-approved; main session) — not executed here. Publish size: the main session measures |
+
+### 13.4 Placement and justification (CLAUDE.md §10 / §11)
+
+No new service, DI registration, endpoint, option, scheduled job or package; all in the BFF (bff-extensions.md §A),
+inside existing components. The existing job gains a pass; the existing store/binder/decision gain members.
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `contact.sprk_externalobjectidkey` + key `sprk_ExternalObjectIdUniqueKey`; choice option `100000011` | `sprk_externalobjectid` (field-secured binding); the 11 reasons | Owner-decided (B2). The binding column cannot carry the key (platform rule) | Criterion 3 has no enforcing mechanism; every create denies `contact_create_unavailable` |
+| `ContactBindingDecision.KeyMirrorColumn` / `MirrorHeldWithoutBinding` / `DenyContactKeyConflict` / `IdentityCollisionReason.KeyMirrorConflict`; `ContactBindingRow.RawKeyMirror` | `ExternalObjectIdColumn`, `ReadBinding`, the deny-code set, the reason enum | Extends each (one constant, one pure predicate, one code, one value, one optional row field) | A squat is indistinguishable from a race or a plain failure: no flag, wrong code, a report-only run promises to clear a live conflict |
+| `StoreWriteStatus.KeyConflict`, `IsDuplicateKey`, `FindContactsByKeyMirrorAsync` / `BuildKeyMirrorLookupPath`; `CreatePayload(oid, …)` | `PreconditionFailed`, `IsKeyMissing`, the oid lookup | Extends the store's status set, classifier set and read set | A duplicate-key 412 is retried as a version race, and the holder cannot be named or flagged |
+| `RegistrationDataverseService.ContactBinderFor` (replaces `IsReconciledByThisBff`) | `_binderFactory.CreateBinder` + `GetAccessTokenForUrlAsync`, inline in the link method | Extracts the existing expression so the job reuses the same token path | The job would need a second per-environment token path (ADR-028 says reuse) |
+| `IdentityLinkReconciliationJob` provisioning-target pass + `ProvisioningTargetUrls` | the job's own-environment passes; `DemoExpirationService`'s use of the same registry | Extends the existing job (same reason to change: identity links), same safety convention | Registration-created users in other environments are never retried or flagged (the verifier's open gap) |
+| `DataverseEnvironmentService.GetActiveEnvironmentsAsync` → `virtual` | — | Modification (test seam) | The target pass could only be tested through an HTTP double (banned) |
+
+### 13.5 Seeded violations (third fix round) — each alone, built, the identity subset run, source restored byte-identical and touched
+
+Harness `f3_seed.py` (scratchpad). Every seed went RED:
+
+| # | Seeded violation (production code or script) | Failing test(s) |
+|---|---|---|
+| B1 | bind payload omits the mirror | `TheBindPayload_WritesTheOidInDFormat_IntoTheBindingAndTheMirror_…` |
+| B2 | create addressed by the secured binding again | `TheCreate_IsAddressedByTheMirrorKey_NeverTheFieldSecuredBinding` |
+| B3 | create payload omits the binding | `TheCreatePayload_CarriesTheBindingAndThePlane_…` |
+| B4 | contact reads stop selecting the mirror | `EveryContactRead_SelectsTheBindingAndTheMirror_…` |
+| B5 | duplicate-key fault not recognised | `IsDuplicateKey_RecognisesTheUniqueIndexFault_AndNothingElse` |
+| B6 | token-plane email bind treats a key conflict as bound | `ASquattedMirror_DeniesTheEmailBind_…`, `TheRepairBind_AgainstASquattedMirror_…`, `CiamStrategy_EachDeny_…(key-conflict)` |
+| B7 | a create the key refuses twice is a plain create failure (no flag) | `ASquattedMirror_DeniesTheCreate_…`, `ASquattedMirror_RetriedSignIn_…` |
+| B8 | the holder is never flagged | 5 squat tests (token, CIAM, job) |
+| B9 | a systemuser create refused twice is re-decided forever | `ASquattedMirror_IsFlaggedNotCreatedAround_…` |
+| B10 | a mirror matching its own binding counts as a squat | `MirrorHeldWithoutBinding_…`, `CollisionStillHolds_AKeyMirrorConflict_…`, `ParseContactRow_ReadsTheBindingTheFlagAndTheETag` |
+| B11 | an inactive holder frees the key-conflict flag | `CollisionStillHolds_AKeyMirrorConflict_HoldsWhileTheHolderKeepsTheSlot_EvenWhenInactive` |
+| B12 | the job judges a key-conflict party by pass-1 decisions | `AReportOnlyRun_NeverReportsAHeldKeyMirrorFlagAsClearable` |
+| B13 | the job skips every provisioning target | 6 target tests |
+| B14 | the own environment is not excluded from the targets | `ProvisioningTargetUrls_…`, `TheOwnEnvironmentInTheRegistry_IsReconciledOnce`, 2 more |
+| B15 | one unreachable target stops the others | `OneUnreachableTarget_FailsTheRun_ButNeverStopsTheOthers` |
+| B16 | an unreadable registry also drops `DATAVERSE_URL` | `TheRegistrationDefaultEnvironment_IsATargetEvenWhenTheRegistryCannotBeRead_…` |
+| B17 | registration logs the old "NOT retried" again | `ALinkThatDoesNotLand_InAnyRegistrationEnvironment_…` (×2) |
+| B18 | invite lookup failure answers with the endpoint fallback | the two 503 contract theories (×2 routes each) |
+| B19 | schema script keys the field-secured binding again | `TheScript_KeysTheMirror_SecuresTheBinding_AndNeverBothOnOneColumn` |
+| B20 | schema script lacks the key-conflict reason option | `TheScriptsChoices_CoverEveryValueTheBffWrites` |
+
+Harness notes: the first run's B16 seed did not compile (an inserted `return;` made code unreachable under
+warnings-as-errors) and its B19/B20 ran against binaries a preceding `.cs` seed had left stale; both were re-run with
+a corrected harness that rebuilds before every test run (B12–B16, B19, B20 re-run; all RED on their own tests). The
+schema preflight was also shown to bite directly (§13.1).
+
+### 13.6 Step 9.5 (code-review + adr-check) on this round's diff
+
+ADR-002 (no plugin; every write in the BFF), ADR-003 (a squat, an unreadable registry, an unreachable target all
+deny or fail the run — never resolve, never clear a flag), ADR-010 (no new DI registration; the only interface is the
+existing `IContactIdentityStore` seam; `GetActiveEnvironmentsAsync` virtual as the test seam), ADR-028 (the target
+pass reuses the registration service's per-environment token path — the BFF's managed identity, no new secret, no
+caller token, no Graph), ADR-036 A1 (no throw from `ExecuteAsync`; one target's fault fails the run, not the others),
+ADR-052 (placement unchanged: in-process scheduler), ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or
+ctor null-check test; the schema guard reads the script as text) — no violation, no tension. Greps over the changed
+`src` files for `Microsoft.Graph`, `WithClientSecret`, `IMemoryCache`, `BackgroundService`, `IPlugin`, new
+`interface I…`, timers: none.
+
+Review findings — fixed: the per-environment status was missing from the heartbeat and ResultJson (every
+environment logged the RUN's status) → `environmentStatus` / `provisioningTargets.environments[].status`; the
+probe-blocked message called an unreachable environment "masked" → it now distinguishes masking from "could not be
+read (no access, no schema, unreachable)"; the registration test helper still set `Dataverse:ServiceUrl`, which the
+service no longer reads → removed. Accepted with reasons: a repeated sign-in by a squatted identity costs two refused
+create PATCHes, five reads and one error log each time (the flag write is idempotent; this is the same profile as
+the other denies the first round accepted, and the log is the operator signal); `IdentityLinkReconciliationJob.cs`
+grew to ~700 lines with the target pass (one reason to change — identity links — and the per-environment code is a
+loop over the existing passes, not a second responsibility; CLAUDE.md §11.5); in dev every run reports spaarke-demo
+as a failed environment until G-1b is decided (an accurate signal, not noise to suppress).
+
+### 13.7 Suites (third fix round, final code)
+
+- Identity/access subset (IdentityBinding, IdentityLink, CallerPrincipalResolver, UnifiedEvaluatorSeam,
+  OrganizationMembershipRead, Registration, ExternalAccessContract, ContactIdentity, WorkforceEmailNoHijack,
+  WorkforcePrincipal, AccessibleRecordSet, CallerContactResolver, IdentityNormalization, ContactAadObjectId,
+  MembershipPaging, DataverseContactIdentityStore): **637 passed / 0 failed**.
+- Full BFF suite (`dotnet test tests/unit/Sprk.Bff.Api.Tests`, which also compiles the `tests/integration/**` KEEP
+  paths): **13,791 passed / 0 failed / 54 skipped (13,845)** — on top of the merged batch-2 base.
+- NetArchTest (`dotnet test tests/Spaarke.ArchTests`): **341 / 0 / 0**.
+- No package or csproj change in this task's diff (no new CVE surface). Publish size: not measured (G-9; the main
+  session measures after merging).

@@ -527,6 +527,44 @@ public class ContactBindingDecisionTests
         Holds(flag, Unbound(ContactA)).Should().BeFalse();
     }
 
+    // ── B2 (owner round 4 item 4): the uniqueness mirror ─────────────────────────────────────────────────
+
+    [Fact]
+    public void MirrorHeldWithoutBinding_IsTrueOnlyWhenTheMirrorCarriesTheOid_AndTheBindingDoesNot()
+    {
+        var mirrorOnly = Unbound(ContactA) with { RawKeyMirror = Caller.ToString().ToUpperInvariant() };
+        var mirrorOverOtherBinding = Bound(ContactA, Other) with { RawKeyMirror = Caller.ToString("D") };
+        var mirrorOverUnreadable = new ContactBindingRow(ContactA, 0, null, (int)IdentityPlaneMarker.Workforce,
+            RawKeyMirror: Caller.ToString("D"));
+        var own = Bound(ContactA, Caller) with { RawKeyMirror = Caller.ToString("D") };
+
+        ContactBindingDecision.MirrorHeldWithoutBinding(mirrorOnly, Caller).Should().BeTrue("a squatted mirror");
+        ContactBindingDecision.MirrorHeldWithoutBinding(mirrorOverOtherBinding, Caller).Should().BeTrue();
+        ContactBindingDecision.MirrorHeldWithoutBinding(mirrorOverUnreadable, Caller).Should().BeTrue();
+        ContactBindingDecision.MirrorHeldWithoutBinding(own, Caller).Should().BeFalse("the mirror matches its own binding");
+        ContactBindingDecision.MirrorHeldWithoutBinding(Unbound(ContactA), Caller).Should().BeFalse("no mirror");
+        ContactBindingDecision.MirrorHeldWithoutBinding(mirrorOnly, Other).Should().BeFalse("another oid's slot");
+        ContactBindingDecision.MirrorHeldWithoutBinding(mirrorOnly with { RawKeyMirror = "not-a-guid" }, Caller)
+            .Should().BeFalse();
+    }
+
+    [Fact]
+    public void CollisionStillHolds_AKeyMirrorConflict_HoldsWhileTheHolderKeepsTheSlot_EvenWhenInactive()
+    {
+        // The unique index counts inactive rows: deactivating the holder does NOT free the oid, so — unlike every
+        // other reason — an inactive holder keeps the flag.
+        var party = Party(IdentityCollisionReason.KeyMirrorConflict, Caller);
+        var squat = Unbound(ContactA) with { RawKeyMirror = Caller.ToString("D") };
+
+        Holds(party, squat).Should().BeTrue();
+        Holds(party, squat with { StateCode = 1 }).Should().BeTrue("an inactive holder still holds the index slot");
+        Holds(party, Unbound(ContactA)).Should().BeFalse("resolved: an operator cleared the mirror");
+        Holds(party, Bound(ContactA, Caller) with { RawKeyMirror = Caller.ToString("D") })
+            .Should().BeFalse("resolved: the holder is now that identity's contact");
+        ContactBindingDecision.CollisionStillHolds(party, squat, ContactLookup.Failed, NoRows, ReferenceLookup.Failed)
+            .Should().BeTrue("decided from the holder row alone");
+    }
+
     // ── Codes ────────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
