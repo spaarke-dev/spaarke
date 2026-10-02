@@ -11,7 +11,7 @@
 | The one Spaarke `<DataGrid>` mount in the external SPA passes `showViewSelector={false}`. Header comment says why it is a security setting. | `src/client/external-spa/src/widgets/GridWidgetBody.tsx` |
 | Four module allow-lists shrink. Three are unchanged. The derivation comment drops rule (b) and warns that re-enabling a selector needs rule (b) back first. | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs` |
 | Section 6: each list pinned to its live derivation; shrink-only proven against the task-134 lists; every dropped column refused by `/fetch` and `/record $select` and stripped from a `/record` read | `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs` |
-| Arch guard: every Spaarke `DataGrid` mount under `src/client/external-spa/src` passes `showViewSelector={false}`. It also refuses `DataGridPageShell` and namespace imports of a DataGrid module. Negative and positive controls are included. | `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` (new) |
+| Arch guard: every Spaarke `DataGrid` mount under `src/client/external-spa/src` passes `showViewSelector={false}` as its last top-level attribute, with no spread after it. It fails closed (review round 1): any import of `DataGrid`/`DataGridDefault` (named, aliased, `default as`, default, mixed) is a mount source; the grid may appear only as a JSX tag; `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, dynamic `import()`/`require()` of the shared lib, and unparseable import clauses are refused. Negative and positive controls are included. | `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` (new) |
 
 The shared `DataGrid`'s default (`showViewSelector = true`) is **unchanged**. Internal surfaces keep the picker.
 
@@ -49,7 +49,8 @@ Primary id / name (live, unchanged from task 134 §8): project → sprk_projectn
 ## 4. Decisions
 
 - **G1: where the "no selector" assertion lives.** The SPA has no test runner, so the assertion is a source-scan arch guard in `tests/Spaarke.ArchTests`. That is the established home for client↔server agreement guards (`ClientUploadRouteAgreementTests`, `SpeAdminClientRouteAgreementTests`). It is a test file, not new product surface, so no §11 justification is needed.
-- **G2: the guard strips comments before scanning.** Its first run flagged `GridWidgetBody.tsx`'s own JSDoc (`<DataGrid configId=… />`). Block comments keep their newlines so line numbers stay true. A `//` is stripped only at line start or after whitespace, so `'https://…'` in a string does not hide code after it. A control covers both cases.
+- **G2: the guard strips comments before scanning.** Its first run flagged `GridWidgetBody.tsx`'s own JSDoc (`<DataGrid configId=… />`). Block comments keep their newlines so line numbers stay true. **Revised in review round 1:** only comments that START their line are stripped (a `//` line, a `/* … */` or JSX `{/* … */}` block opening the line). The first version also stripped a `/*` or a whitespace-preceded `//` mid-line, so a string such as `'src/**/*.ts'` or `'a // b'` could blank real code (fail open). Now a mid-line marker is left alone; the cost is fail-closed (a mount quoted in a trailing comment is reported). Controls cover both string cases and the URL case.
+- **G4: the guard fails closed (review round 1).** The verifier seeded nine files, covering eight evasion shapes, that the first version passed: (A) default import, (B) the barrel's `DataGridDefault`, (C) mixed default+named import, (D) `showViewSelector={false}` followed by `{...rest}`, (E) `DataGridPageShellDefault`, (F) a local re-export file, (G) `React.createElement(DataGrid, …)`, (H) `React.lazy(() => import(…DataGrid))`. The rewritten detector treats every import of `DataGrid`/`DataGridDefault` from the shared lib (package alias or a path into `Spaarke.UI.Components`) as a mount source, requires the LAST top-level `showViewSelector` to be `{false}` with no spread after it, refuses any non-JSX reference to the grid binding (createElement, aliasing, `export { X }`, `export default X`, HOCs), and refuses `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, any dynamic `import()`/`require()` of the shared lib and any import clause it cannot parse. Each shape has a Theory control row. The same nine files were re-seeded under `src/client/external-spa/src/zzseed`. The production fact went red with eight violations, one per shape; F was caught through `F_reexport.ts`. They were then deleted. P1 was re-run against the new detector: red at `GridWidgetBody.tsx:71`, then restored and touched.
 - **G3: the `/record` tests use a caller granted the id as project, matter and work assignment at once.** Row scope then passes for every module, including invoices, whose record gate checks the scope dimensions. Any refusal or strip in those tests can only come from the column scope.
 - **No new service, DI registration, endpoint, option, job or package.** This change edits data in existing registrations, one prop on an existing mount, and tests. Placement: the column scope stays in the BFF's existing external read seam (task 134 §5). NuGet: no change.
 
@@ -84,7 +85,14 @@ On dev, after deploying the SPA and then the BFF, sign in as an outside-counsel 
 | P2: `ownerid` put back on the production project list | 4: the equality pin, plus the fetch-refusal, record-`$select`-refusal and record-strip rows for (`sprk_project`, `ownerid`) |
 | P3: grid column `modifiedon` removed from the production project list (a grid would blank) | 7: the equality pin, the live-grid-FetchXML-admitted test, and the 5 project fetch-refusal rows, whose positive control (the grid's own FetchXML must still run) fails first |
 
-**Runs:** see the POML `<execution>` block for exact counts.
+**Runs (review round 1, `task/uac-r2-157-r1`, 2026-10-02):**
+
+| Suite | Result |
+|---|---|
+| `ExternalSpaGridViewSelectorGuardTests` | 29 / 29 passed (8 facts + 19 evasion Theory rows + 2 new controls) |
+| NetArchTest `dotnet test tests/Spaarke.ArchTests` | Passed 370, Failed 0, Total 370 (349 at `3d858490b` + 21 new control rows) |
+| BFF unit `dotnet test tests/unit/Sprk.Bff.Api.Tests` | Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 20m24s); the verifier's Release run at `3d858490b` gave the same counts |
+| SPA `npm run build` (vite) | exit 0 at `3d858490b` (verifier); no client file changed in round 1 |
 
 ## 8. Read-only findings (not acted on; out of scope)
 

@@ -4,7 +4,7 @@
     <title>External SPA grids stop offering the internal MDA views (showViewSelector=false), and each external module's column allow-list shrinks to what its grid actually shows (owner round 4 item 7, task 134 open item D1)</title>
     <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
     <gate>startable now (134 merged)</gate>
-    <status>completed</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Narrows the columns an external (CIAM/contact) caller may read through /fetch and /record. That is an authorization surface (defect C6), plus a client change to the external SPA.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -90,6 +90,44 @@
       registrations, so the section 11 justification is n/a.
       Deploy order: SPA first, or together with the BFF. Full record:
       notes/task-157-external-grid-columns.md.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-r1" round="review-1">
+      Status corrected from "completed" to "completed-with-escalation". Code is complete and tested. Two items stay
+      open: the MANUAL live gate (criterion 6, pending by design, deploy order in note section 5), and an owner
+      decision on finding F1.
+      Item 8/15 (guard failed open, criterion 1): ExternalSpaGridViewSelectorGuardTests was rewritten to fail closed.
+      Every import of DataGrid or DataGridDefault from the shared lib is now a mount source. That covers named,
+      aliased, "default as", default and mixed default+named imports, from the package alias or from a path into
+      Spaarke.UI.Components. Each mount must end with showViewSelector={false} as its last top-level attribute, with
+      no spread after it. Any non-JSX reference to the grid binding is refused (createElement, aliasing,
+      export { X }, export default X, HOCs). Also refused: DataGridPageShell(Default), namespace imports,
+      re-exports that could carry the grid, dynamic import()/require() of the shared lib, and unparseable import
+      clauses. Each of the verifier's shapes A-H, plus D2/D3/E2/F2-F4/G2/H2, a relative path and an unparseable
+      clause, has a Theory control row. A positive control covers spread-before, closing tag, typeof, type-only
+      re-export and the JSX comment. The verifier's nine seed files were re-created under
+      external-spa/src/zzseed. The production fact went red with 8 violations, one per shape (F was caught via
+      F_reexport.ts). The seeds were then deleted. P1 was re-run against the new detector: red at
+      GridWidgetBody.tsx:71, then restored (no diff) and touched.
+      Item 10 (comment stripper failed open): only comments that START their line are stripped now, so a "/*" or
+      "//" inside a string can no longer blank code. The new control covers 'src/**/*.ts' and 'a // b'.
+      Item 9 (no run counts): counts are recorded below and in note section 7.
+      Runs (this branch): ExternalSpaGridViewSelectorGuardTests 29/29. NetArchTest (dotnet test
+      tests/Spaarke.ArchTests): Passed 370, Failed 0, Total 370. That is 349 at 3d858490b plus 21 new control rows.
+      BFF unit (dotnet test tests/unit/Sprk.Bff.Api.Tests): Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 20m24s). The verifier's own run at 3d858490b
+      (Release) was Passed 13627, Failed 0, Skipped 54, Total 13681.
+      SPA: no client file changed in this round (GridWidgetBody.tsx is byte-identical to 3d858490b). The
+      verifier's npm run build (vite) at 3d858490b exited 0, so no rebuild was needed.
+      Item 11 (INFO): the task-134 comparison test is tautological on its own. It reaches production only through
+      the equality pin, which the verifier confirmed against live data. Left as is.
+      Item 12 / F1 (OPEN, owner decision): with the selector off, DataGrid still calls the external savedqueries
+      route on every load, so internal MDA view definitions still reach external callers. Proposed follow-up:
+      skip the sibling fetch when showViewSelector is false, and/or restrict the external savedquer* routes. This
+      is out of scope here.
+      Item 16 (OPEN, live gate): deploy the SPA first (gh workflow run deploy-external-spa.yml --ref
+      &lt;branch&gt;), then the BFF (pwsh scripts/Deploy-BffApi.ps1), then run note section 6. Not run here: no
+      live write was made.
+      Justification: no new service, DI registration, endpoint, option, job or package. Only a test file and
+      documentation changed.
     </outcome>
   </execution>
 </task>

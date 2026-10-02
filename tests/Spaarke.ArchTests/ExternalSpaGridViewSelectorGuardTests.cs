@@ -25,13 +25,36 @@ namespace Spaarke.ArchTests;
 /// <c>sprk_visibilitystate</c> …) to outside counsel. This guard stops the first step.
 /// </para>
 /// <para>
-/// <b>What it scans.</b> Every <c>.ts</c>/<c>.tsx</c> file under <c>src/client/external-spa/src</c>. A file
-/// that imports <c>DataGrid</c> from <c>@spaarke/ui-components</c> (under any local alias) must pass
-/// <c>showViewSelector={false}</c> on every JSX mount of it. Fluent's own <c>DataGrid</c> (from
-/// <c>@fluentui/react-components</c>) has no view picker and is ignored. Two shapes the per-mount check
-/// cannot see are refused outright: importing <c>DataGridPageShell</c> (it mounts the shared grid itself and
-/// has no way to switch the picker off), and any namespace import from the shared library (a
-/// <c>&lt;UI.DataGrid&gt;</c> mount could not be attributed).
+/// <b>What it scans.</b> Every script file under <c>src/client/external-spa/src</c>. The shared library is
+/// any module specifier starting <c>@spaarke/ui-components</c> or reaching into a <c>Spaarke.UI.Components</c>
+/// folder by path. Fluent's own <c>DataGrid</c> (from <c>@fluentui/react-components</c>) has no view picker
+/// and is ignored.
+/// </para>
+/// <para><b>Fail closed.</b> The rules are written so that a shape the scan cannot attribute is REFUSED, not
+/// passed (task 157 review round 1 seeded nine shapes that the first version let through):</para>
+/// <list type="number">
+/// <item>A grid binding is ANY import of <c>DataGrid</c> / <c>DataGridDefault</c> from the shared library —
+/// named, aliased, <c>{ default as X }</c>, default import, or mixed default + named — where a default import
+/// counts when the module's last path segment is <c>DataGrid</c>. Every JSX mount of a binding must pass
+/// <c>showViewSelector={false}</c> as its LAST top-level <c>showViewSelector</c> attribute, with no attribute
+/// spread after it (a later <c>{...rest}</c> could switch it back on).</item>
+/// <item>A binding may appear only as a JSX tag (<c>&lt;X</c>, <c>&lt;/X</c>), after <c>typeof</c>, or as a
+/// member name (<c>.X</c>). Any other reference — <c>React.createElement(X, …)</c>, <c>const G = X</c>,
+/// <c>export { X }</c>, <c>export default X</c>, <c>memo(X)</c> — lets the grid leave this file unchecked and
+/// is refused.</item>
+/// <item><c>DataGridPageShell</c> / <c>DataGridPageShellDefault</c> (by name, by <c>default as</c>, or by
+/// default import of a <c>…/DataGridPageShell</c> module) is refused: it mounts the shared grid itself and
+/// cannot switch the picker off.</item>
+/// <item>Namespace imports, re-exports that could carry the grid (<c>export *</c>, a grid name, <c>default</c>,
+/// or a module path naming <c>DataGrid</c>), any dynamic <c>import()</c> / <c>require()</c> of the shared
+/// library (<c>React.lazy</c>), and any import clause the scan cannot parse are refused.</item>
+/// </list>
+/// <para>
+/// <b>Comments.</b> Only comments that START their line are stripped (a <c>//</c> line, a <c>/* … */</c> or
+/// JSX <c>{/* … */}</c> block opening the line), so a JSDoc example such as GridWidgetBody's own
+/// <c>&lt;DataGrid configId=… /&gt;</c> is not read as a mount. A <c>/*</c> or <c>//</c> later in a line —
+/// including inside a string such as <c>'src/**/*.ts'</c> or <c>'a // b'</c> — is left in place, so it can
+/// never hide code. The cost is fail-closed: a mount quoted in a TRAILING comment is reported.
 /// </para>
 /// <para>
 /// <b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each rule
@@ -47,19 +70,46 @@ public class ExternalSpaGridViewSelectorGuardTests
     private static string ExternalSpaSource =>
         Path.Combine(SourceScan.RepoRoot, "src", "client", "external-spa", "src");
 
-    private static readonly Regex NamedImport = new(
-        @"import\s+(?:type\s+)?\{(?<names>[^}]*)\}\s*from\s*['""](?<module>@spaarke/ui-components[^'""]*)['""]",
+    private static readonly string[] ScriptExtensions = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"];
+
+    /// <summary>The shared grid itself: a binding whose JSX mounts are checked.</summary>
+    private static readonly HashSet<string> GridNames = new(StringComparer.Ordinal) { "DataGrid", "DataGridDefault" };
+
+    /// <summary>The shared shell that mounts the grid with the picker on and no way to switch it off.</summary>
+    private static readonly HashSet<string> ShellNames = new(StringComparer.Ordinal) { "DataGridPageShell", "DataGridPageShellDefault" };
+
+    // A module specifier that resolves into the shared UI library: the package alias, or a path into its source.
+    private const string SharedModule =
+        @"(?<module>(?i:@spaarke/ui-components|[^'""`\n]*Spaarke\.UI\.Components)[^'""`\n]*)";
+
+    // `import <clause> from '<shared>'`. The clause starts at a name, `{` or `*` (so `import.meta` and
+    // `import(` never match) and cannot cross a quote or `;`, so it cannot swallow a neighbouring statement.
+    private static readonly Regex StaticImport = new(
+        @"\bimport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""]" + SharedModule + @"['""]",
         RegexOptions.Compiled);
 
-    private static readonly Regex NamespaceImport = new(
-        @"import\s+\*\s+as\s+\w+\s+from\s*['""](?<module>@spaarke/ui-components[^'""]*)['""]",
+    private static readonly Regex ReExport = new(
+        @"\bexport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""]" + SharedModule + @"['""]",
         RegexOptions.Compiled);
 
-    // One import specifier: `DataGrid`, `type DataGridProps`, `DataGrid as Grid` — any whitespace, newlines included.
+    private static readonly Regex DynamicLoad = new(
+        @"\b(?:import|require)\s*\(\s*['""`]" + SharedModule + @"['""`]", RegexOptions.Compiled);
+
+    // `[type] [Default] [, ] [{ names } | * as NS]`
+    private static readonly Regex ImportClause = new(
+        @"^(?:type\s+)?(?:(?<default>[\w$]+)\s*(?:,\s*|$))?(?:\{(?<names>[^}]*)\}|\*\s*as\s+(?<ns>[\w$]+))?$",
+        RegexOptions.Compiled | RegexOptions.Singleline);
+
+    // One import specifier: `DataGrid`, `type DataGridProps`, `DataGrid as Grid`, `default as Grid`.
     private static readonly Regex ImportSpecifier = new(
-        @"^\s*(?:type\s+)?(?<imported>\w+)(?:\s+as\s+(?<local>\w+))?\s*$", RegexOptions.Compiled);
+        @"^\s*(?:type\s+)?(?<imported>[\w$]+)(?:\s+as\s+(?<local>[\w$]+))?\s*$", RegexOptions.Compiled);
 
-    private static readonly Regex SelectorOff = new(@"\bshowViewSelector\s*=\s*\{\s*false\s*\}", RegexOptions.Compiled);
+    private static readonly Regex GridNameInClause = new(@"(?<![\w$])(?:DataGrid|DataGridDefault|DataGridPageShell|DataGridPageShellDefault|default)(?![\w$])", RegexOptions.Compiled);
+
+    // Anchored (\G) probes used while walking an opening tag at brace depth 0.
+    private static readonly Regex SelectorProp = new(@"\G(?<![\w$.-])showViewSelector\s*=", RegexOptions.Compiled);
+    private static readonly Regex SelectorOffAt = new(@"\GshowViewSelector\s*=\s*\{\s*false\s*\}", RegexOptions.Compiled);
+    private static readonly Regex SpreadAt = new(@"\G\{\s*\.\.\.", RegexOptions.Compiled);
 
     /// <summary>The result of scanning one file: every violation, and how many sanctioned mounts it holds.</summary>
     internal sealed record ScanResult(IReadOnlyList<string> Violations, int CompliantMounts);
@@ -70,78 +120,211 @@ public class ExternalSpaGridViewSelectorGuardTests
         var text = StripComments(source);
         var violations = new List<string>();
         var localNames = new List<string>();
+        // Import / re-export / dynamic-load statements: their module paths name `DataGrid` and are not references.
+        var importSpans = new List<(int Start, int End)>();
 
-        foreach (Match import in NamedImport.Matches(text))
+        string Where(int index) => $"{fileName}:{LineOf(text, index)}";
+
+        foreach (Match import in StaticImport.Matches(text))
         {
-            foreach (var raw in import.Groups["names"].Value.Split(','))
+            importSpans.Add((import.Index, import.Index + import.Length));
+            var module = import.Groups["module"].Value;
+            var clause = ImportClause.Match(import.Groups["clause"].Value.Trim());
+            if (!clause.Success)
             {
-                var specifier = ImportSpecifier.Match(raw);
-                if (!specifier.Success)
-                {
-                    continue;
-                }
-                var imported = specifier.Groups["imported"].Value;
-                var local = specifier.Groups["local"].Success ? specifier.Groups["local"].Value : imported;
+                violations.Add($"{Where(import.Index)}: import clause from '{module}' could not be parsed. Import "
+                               + "from the shared library with a plain named import so DataGrid mounts can be checked.");
+                continue;
+            }
 
-                if (imported == "DataGrid")
+            if (clause.Groups["ns"].Success)
+            {
+                // `import * as UI from '@spaarke/ui-components'` then `<UI.DataGrid>` would mount the grid under a
+                // name this scan cannot attribute.
+                violations.Add($"{Where(import.Index)}: namespace import of '{module}'. Import from the shared "
+                               + "library by name so every DataGrid mount can be checked for showViewSelector={false}.");
+            }
+
+            if (clause.Groups["default"].Success)
+            {
+                Classify(DefaultExportOf(module), clause.Groups["default"].Value, import.Index);
+            }
+
+            if (clause.Groups["names"].Success)
+            {
+                foreach (var raw in clause.Groups["names"].Value.Split(','))
                 {
-                    localNames.Add(local);
-                }
-                else if (imported == "DataGridPageShell")
-                {
-                    violations.Add($"{fileName}: imports DataGridPageShell, which mounts the shared DataGrid with "
-                                   + "its default view selector and cannot switch it off. Mount DataGrid directly "
-                                   + "with showViewSelector={false}.");
+                    if (string.IsNullOrWhiteSpace(raw))
+                    {
+                        continue; // trailing comma
+                    }
+                    var specifier = ImportSpecifier.Match(raw);
+                    if (!specifier.Success)
+                    {
+                        violations.Add($"{Where(import.Index)}: import specifier '{raw.Trim()}' from '{module}' could "
+                                       + "not be parsed.");
+                        continue;
+                    }
+                    var imported = specifier.Groups["imported"].Value;
+                    var local = specifier.Groups["local"].Success ? specifier.Groups["local"].Value : imported;
+                    Classify(imported == "default" ? DefaultExportOf(module) : imported, local, import.Index);
                 }
             }
         }
 
-        foreach (Match ns in NamespaceImport.Matches(text))
+        foreach (Match reExport in ReExport.Matches(text))
         {
-            // Any module of the shared lib: `import * as UI from '@spaarke/ui-components'` then `<UI.DataGrid>`
-            // would mount the grid under a name this scan cannot attribute. None exists today.
-            violations.Add($"{fileName}: namespace import of '{ns.Groups["module"].Value}'. Import from the shared "
-                           + "library by name so every DataGrid mount can be checked for showViewSelector={false}.");
+            importSpans.Add((reExport.Index, reExport.Index + reExport.Length));
+            var clause = reExport.Groups["clause"].Value.Trim();
+            var module = reExport.Groups["module"].Value;
+            if (clause.StartsWith("type ", StringComparison.Ordinal) || clause.StartsWith("type{", StringComparison.Ordinal))
+            {
+                continue; // a type-only re-export cannot carry a mountable component
+            }
+            if (clause.StartsWith('*') || GridNameInClause.IsMatch(clause)
+                || module.Contains("DataGrid", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{Where(reExport.Index)}: re-exports '{clause}' from '{module}'. A local re-export "
+                               + "lets another file mount the shared DataGrid under a name this scan cannot attribute.");
+            }
+        }
+
+        foreach (Match load in DynamicLoad.Matches(text))
+        {
+            importSpans.Add((load.Index, load.Index + load.Length));
+            violations.Add($"{Where(load.Index)}: dynamic import/require of '{load.Groups["module"].Value}' "
+                           + "(e.g. React.lazy). Import the shared library statically by name so every DataGrid mount "
+                           + "can be checked.");
         }
 
         var compliant = 0;
-        foreach (var local in localNames.Distinct())
+        foreach (var local in localNames.Distinct(StringComparer.Ordinal))
         {
-            var open = new Regex($@"<{Regex.Escape(local)}(?=[\s/>])");
-            foreach (Match mount in open.Matches(text))
+            var name = Regex.Escape(local);
+
+            var mountPattern = new Regex($@"<\s*{name}(?=[\s/>])");
+            foreach (Match mount in mountPattern.Matches(text))
             {
-                var tag = OpeningTag(text, mount.Index);
-                if (SelectorOff.IsMatch(tag))
+                if (TurnsSelectorOff(OpeningTag(text, mount.Index)))
                 {
                     compliant++;
                 }
                 else
                 {
-                    var line = text[..mount.Index].Count(c => c == '\n') + 1;
-                    violations.Add($"{fileName}:{line}: <{local}> mounted without showViewSelector={{false}}. The "
-                                   + "shared DataGrid would offer the entity's internal MDA views, and the server "
-                                   + "column allow-list (task 157) does not admit their columns.");
+                    violations.Add($"{Where(mount.Index)}: <{local}> mounted without a final top-level "
+                                   + "showViewSelector={false} (missing, not false, nested, or overridden by a later "
+                                   + "{...spread}). The shared DataGrid would offer the entity's internal MDA views, and "
+                                   + "the server column allow-list (task 157) does not admit their columns.");
                 }
+            }
+
+            // Any reference that is not a JSX tag, a `typeof`, or a member name lets the binding escape this file.
+            var escapePattern = new Regex(
+                $@"(?<![\w$])(?<!<\s*)(?<!</\s*)(?<!\btypeof\s+)(?<!(?<!\.)\.){name}(?![\w$])");
+            foreach (Match reference in escapePattern.Matches(text))
+            {
+                if (importSpans.Any(span => reference.Index >= span.Start && reference.Index < span.End))
+                {
+                    continue;
+                }
+                violations.Add($"{Where(reference.Index)}: '{local}' (the shared DataGrid) is referenced outside a JSX "
+                               + "tag (createElement, aliasing, re-export, HOC …). Mount it only as JSX in this file, "
+                               + "with showViewSelector={false}.");
             }
         }
 
         return new ScanResult(violations, compliant);
+
+        void Classify(string exported, string local, int index)
+        {
+            if (GridNames.Contains(exported))
+            {
+                localNames.Add(local);
+            }
+            else if (ShellNames.Contains(exported))
+            {
+                violations.Add($"{Where(index)}: imports DataGridPageShell (as '{local}'), which mounts the shared "
+                               + "DataGrid with its default view selector and cannot switch it off. Mount DataGrid "
+                               + "directly with showViewSelector={false}.");
+            }
+        }
     }
 
-    private static readonly Regex BlockComment = new(@"/\*.*?\*/", RegexOptions.Compiled | RegexOptions.Singleline);
+    /// <summary>
+    /// What a default import of <paramref name="module"/> binds, by the module's last path segment
+    /// (<c>…/DataGrid/DataGrid</c> → <c>DataGrid</c>, <c>…/DataGrid/DataGridPageShell.tsx</c> →
+    /// <c>DataGridPageShell</c>, <c>…/DataGrid/index</c> → <c>DataGrid</c>).
+    /// </summary>
+    private static string DefaultExportOf(string module)
+    {
+        var segments = module.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        var last = Path.GetFileNameWithoutExtension(segments[^1]);
+        if (last.Equals("index", StringComparison.OrdinalIgnoreCase) && segments.Length > 1)
+        {
+            last = segments[^2];
+        }
+        if (last.Equals("DataGrid", StringComparison.OrdinalIgnoreCase))
+        {
+            return "DataGrid";
+        }
+        return last.Equals("DataGridPageShell", StringComparison.OrdinalIgnoreCase) ? "DataGridPageShell" : last;
+    }
 
-    // A `//` that starts a line or follows whitespace. A URL inside a string ('https://…') has ':' before the
-    // slashes, so it is left alone and the code after it on that line is still scanned.
-    private static readonly Regex LineComment = new(@"(?<=^|\s)//[^\n]*", RegexOptions.Compiled | RegexOptions.Multiline);
+    private static int LineOf(string text, int index) => text[..index].Count(c => c == '\n') + 1;
+
+    // A comment that OPENS its line: `/* … */`, a JSX `{/* … */}`, or a `//` line. Mid-line comment starts are
+    // left alone, so a `/*` or `//` inside a string can never blank real code.
+    private static readonly Regex BlockComment = new(
+        @"^[ \t]*(?:\{[ \t]*/\*.*?\*/[ \t]*\}|/\*.*?\*/)", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.Multiline);
+
+    private static readonly Regex LineComment = new(@"^[ \t]*//[^\n]*", RegexOptions.Compiled | RegexOptions.Multiline);
 
     /// <summary>
-    /// Removes comments so a documentation example (GridWidgetBody's JSDoc names <c>&lt;DataGrid configId=… /&gt;</c>)
-    /// is not read as a mount. Block comments keep their newlines, so reported line numbers stay true.
+    /// Removes comments that start their line, so a documentation example (GridWidgetBody's JSDoc names
+    /// <c>&lt;DataGrid configId=… /&gt;</c>) is not read as a mount. Block comments keep their newlines, so
+    /// reported line numbers stay true.
     /// </summary>
     private static string StripComments(string source)
     {
         var withoutBlocks = BlockComment.Replace(source, m => new string('\n', m.Value.Count(c => c == '\n')));
         return LineComment.Replace(withoutBlocks, string.Empty);
+    }
+
+    /// <summary>
+    /// True when the tag's LAST top-level <c>showViewSelector</c> attribute is <c>{false}</c> and no attribute
+    /// spread follows it. A <c>showViewSelector</c> inside a prop expression (brace depth &gt; 0) belongs to some
+    /// other element and does not count.
+    /// </summary>
+    private static bool TurnsSelectorOff(string tag)
+    {
+        var depth = 0;
+        var lastProp = -1;
+        var spreadAfterLastProp = false;
+        for (var i = 0; i < tag.Length; i++)
+        {
+            if (depth == 0)
+            {
+                if (SelectorProp.IsMatch(tag, i))
+                {
+                    lastProp = i;
+                    spreadAfterLastProp = false;
+                }
+                else if (lastProp >= 0 && SpreadAt.IsMatch(tag, i))
+                {
+                    spreadAfterLastProp = true;
+                }
+            }
+            switch (tag[i])
+            {
+                case '{':
+                    depth++;
+                    break;
+                case '}':
+                    depth--;
+                    break;
+            }
+        }
+        return lastProp >= 0 && !spreadAfterLastProp && SelectorOffAt.IsMatch(tag, lastProp);
     }
 
     /// <summary>
@@ -170,7 +353,7 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     private static IEnumerable<string> ExternalSpaFiles() =>
         Directory.EnumerateFiles(ExternalSpaSource, "*.*", SearchOption.AllDirectories)
-            .Where(f => f.EndsWith(".ts", StringComparison.Ordinal) || f.EndsWith(".tsx", StringComparison.Ordinal))
+            .Where(f => ScriptExtensions.Any(ext => f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
             .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}node_modules{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
 
     [Fact(DisplayName = "Every Spaarke DataGrid mounted by the external SPA passes showViewSelector={false}")]
@@ -269,5 +452,82 @@ public class ExternalSpaGridViewSelectorGuardTests
 
         Assert.Empty(result.Violations);
         Assert.Equal(0, result.CompliantMounts);
+    }
+
+    // ── Review round 1 (2026-10-02): the shapes the first version let through. Each one MUST be reported. ──
+
+    private const string GridModule = "'@spaarke/ui-components/components/DataGrid/DataGrid'";
+    private const string Bad = " configId={id} />";
+
+    [Theory(DisplayName = "Control: every evasion shape seeded in review round 1 is reported")]
+    // A: default import (DataGrid.tsx has `export default DataGrid`)
+    [InlineData("A-default", "import DataGrid from " + GridModule + ";\n<DataGrid" + Bad, "<DataGrid>")]
+    // B: the barrel's DataGridDefault alias
+    [InlineData("B-barrel-default-alias", "import { DataGridDefault } from '@spaarke/ui-components/components/DataGrid';\n<DataGridDefault" + Bad, "<DataGridDefault>")]
+    // C: mixed default + named import
+    [InlineData("C-mixed", "import Grid, { type DataGridProps } from " + GridModule + ";\n<Grid" + Bad, "<Grid>")]
+    // C2: `{ default as X }`
+    [InlineData("C2-default-as", "import { default as Grid } from " + GridModule + ";\n<Grid" + Bad, "<Grid>")]
+    // D: a later spread could switch the picker back on
+    [InlineData("D-spread-after", SpaarkeImport + "<DataGrid configId={id} showViewSelector={false} {...rest} />", "<DataGrid>")]
+    // D2: a later showViewSelector wins in JSX
+    [InlineData("D2-later-prop-wins", SpaarkeImport + "<DataGrid showViewSelector={false} showViewSelector={true} />", "<DataGrid>")]
+    // D3: the prop on a NESTED element does not count for this mount
+    [InlineData("D3-nested-only", SpaarkeImport + "<DataGrid configId={id} empty={<X showViewSelector={false} />} />", "<DataGrid>")]
+    // E: the barrel's DataGridPageShellDefault alias, and a default import of the shell module
+    [InlineData("E-shell-default-alias", "import { DataGridPageShellDefault } from '@spaarke/ui-components/components/DataGrid';", "DataGridPageShell")]
+    [InlineData("E2-shell-default-import", "import Shell from '@spaarke/ui-components/components/DataGrid/DataGridPageShell';", "DataGridPageShell")]
+    // F: a re-export from the shared library, and a two-step local re-export
+    [InlineData("F-reexport", "export { DataGrid } from '@spaarke/ui-components/components/DataGrid';", "re-exports")]
+    [InlineData("F2-reexport-star", "export * from '@spaarke/ui-components';", "re-exports")]
+    [InlineData("F3-local-reexport", SpaarkeImport + "export { DataGrid };", "outside a JSX tag")]
+    [InlineData("F4-export-default", SpaarkeImport + "export default DataGrid;", "outside a JSX tag")]
+    // G: createElement / aliasing
+    [InlineData("G-createElement", SpaarkeImport + "React.createElement(DataGrid, { configId: id });", "outside a JSX tag")]
+    [InlineData("G2-alias-variable", SpaarkeImport + "const G = DataGrid;\n<G configId={id} />", "outside a JSX tag")]
+    // H: React.lazy over a dynamic import
+    [InlineData("H-lazy", "const G = React.lazy(() => import(" + GridModule + "));", "dynamic import")]
+    [InlineData("H2-require", "const { DataGrid } = require(" + GridModule + ");", "dynamic import")]
+    // A path into the shared library's source instead of the package alias
+    [InlineData("I-relative-path", "import { DataGrid } from '../../../shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid';\n<DataGrid" + Bad, "<DataGrid>")]
+    // An import clause the scan cannot parse fails closed
+    [InlineData("J-unparsed", "import DataGrid, Other from " + GridModule + ";", "could not be parsed")]
+    public void Scan_WhenAnEvasionShapeIsSeeded_ReportsIt(string shape, string source, string expected)
+    {
+        var result = Scan(source, shape + ".tsx");
+
+        Assert.Contains(result.Violations, v => v.Contains(expected, StringComparison.Ordinal));
+        Assert.Equal(0, result.CompliantMounts);
+    }
+
+    [Fact(DisplayName = "Control: a /* or // inside a string does not hide the code after it (fail closed)")]
+    public void Scan_WhenAStringHoldsCommentMarkers_StillChecksTheCodeAfterIt()
+    {
+        var text = SpaarkeImport +
+                   "const glob = 'src/**/*.ts';\n" +
+                   "const A = () => <DataGrid configId={id} />;\n" +
+                   "const z = 'end */';\n" +
+                   "const s = 'a // b'; const B = () => <DataGrid configId={id} />;";
+
+        var result = Scan(text, "strings.tsx");
+
+        Assert.Equal(2, result.Violations.Count);
+        Assert.Contains(result.Violations, v => v.StartsWith("strings.tsx:3", StringComparison.Ordinal));
+        Assert.Contains(result.Violations, v => v.StartsWith("strings.tsx:5", StringComparison.Ordinal));
+    }
+
+    [Fact(DisplayName = "Control: sanctioned neighbours pass — spread BEFORE the prop, closing tag, typeof, type-only re-export, JSX comment")]
+    public void Scan_WhenOnlySanctionedShapesArePresent_Passes()
+    {
+        var text = "import DataGrid, { type DataGridProps } from " + GridModule + ";\n" +
+                   "export type { DataGridProps } from '@spaarke/ui-components/components/DataGrid';\n" +
+                   "type P = React.ComponentProps<typeof DataGrid>;\n" +
+                   "const A = () => (\n  <div>\n    {/* <DataGrid configId={id} /> */}\n" +
+                   "    <DataGrid {...base} configId={id} showViewSelector={false}></DataGrid>\n  </div>\n);";
+
+        var result = Scan(text, "sanctioned.tsx");
+
+        Assert.Empty(result.Violations);
+        Assert.Equal(1, result.CompliantMounts);
     }
 }
