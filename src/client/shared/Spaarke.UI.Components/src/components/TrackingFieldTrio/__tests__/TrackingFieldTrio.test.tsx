@@ -144,6 +144,107 @@ describe('TrackingFieldTrio', () => {
     });
   });
 
+  // unified-access-control-r2 task 138 — read-only honoured, unbound pill, secure display (owner O1 FINAL).
+  describe('Read-only honoured (task 138)', () => {
+    it.each([
+      ['disabled', { disabled: true }],
+      ['accessPermissionDisabled', { accessPermissionDisabled: true }],
+    ] as [string, Partial<ITrackingFieldTrioProps>][])(
+      'with %s the pill renders disabled, its menu never opens, and onAccessPermissionChange is never called',
+      async (_name, flags) => {
+        const onAccessPermissionChange = jest.fn();
+        renderWithTheme(<TrackingFieldTrio {...makeProps({ ...flags, onAccessPermissionChange })} />);
+
+        const pill = screen.getByRole('button', { name: 'Access Permission' });
+        expect(pill).toBeDisabled();
+        fireEvent.click(pill);
+
+        // Give an (incorrectly) opening menu the chance to render before asserting it did not.
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+        expect(onAccessPermissionChange).not.toHaveBeenCalled();
+      }
+    );
+
+    it('disabled=true also disables the Monitor and High Priority switches (the same read-only defect)', () => {
+      const onMonitorChange = jest.fn();
+      const onHighPriorityChange = jest.fn();
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ disabled: true, onMonitorChange, onHighPriorityChange })} />);
+
+      const switches = screen.getAllByRole('switch');
+      switches.forEach(s => expect(s).toBeDisabled());
+      switches.forEach(s => fireEvent.click(s));
+      expect(onMonitorChange).not.toHaveBeenCalled();
+      expect(onHighPriorityChange).not.toHaveBeenCalled();
+    });
+
+    it('accessPermissionDisabled alone leaves the switches enabled', () => {
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ accessPermissionDisabled: true })} />);
+      screen.getAllByRole('switch').forEach(s => expect(s).not.toBeDisabled());
+    });
+
+    it('with disabled=false (explicit) the pill and switches behave exactly as before', async () => {
+      const onAccessPermissionChange = jest.fn();
+      renderWithTheme(
+        <TrackingFieldTrio
+          {...makeProps({ disabled: false, accessPermissionDisabled: false, onAccessPermissionChange })}
+        />
+      );
+
+      screen.getAllByRole('switch').forEach(s => expect(s).not.toBeDisabled());
+      fireEvent.click(screen.getByRole('button', { name: 'Access Permission' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Limited' }));
+      expect(onAccessPermissionChange).toHaveBeenCalledWith(100000001);
+    });
+  });
+
+  describe('Unbound access permission (task 138, owner Q6)', () => {
+    it('renders the two switches and NO pill or pill caption when showAccessPermission is false', () => {
+      renderWithTheme(<TrackingFieldTrio {...makeProps({ showAccessPermission: false, showTitle: true })} />);
+
+      expect(screen.getAllByRole('switch')).toHaveLength(2);
+      expect(screen.queryByRole('button', { name: 'Access Permission' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Access Permission')).not.toBeInTheDocument();
+      expect(screen.queryByText('Standard')).not.toBeInTheDocument();
+      // Captions for the bound fields still render.
+      expect(screen.getByText('Monitor')).toBeInTheDocument();
+    });
+  });
+
+  describe('Secure record display (task 138, owner O1 FINAL)', () => {
+    const SECURE = {
+      label: 'Secure',
+      options: [
+        { value: 100000001, label: 'Secure' },
+        { value: 100000002, label: 'Secure – Restricted' },
+      ],
+    };
+
+    it.each([100000000, 100000001, 100000002])(
+      'the closed pill reads "Secure" for underlying value %s (both secure and secure + Restricted)',
+      value => {
+        renderWithTheme(
+          <TrackingFieldTrio {...makeProps({ accessPermission: value, secureAccessPermission: SECURE })} />
+        );
+        expect(screen.getByRole('button', { name: 'Access Permission' })).toHaveTextContent(/^Secure$/);
+      }
+    );
+
+    it('the open menu offers "Secure" and "Secure – Restricted" and writes the chosen value', async () => {
+      const onAccessPermissionChange = jest.fn();
+      renderWithTheme(
+        <TrackingFieldTrio {...makeProps({ secureAccessPermission: SECURE, onAccessPermissionChange })} />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Access Permission' }));
+      expect(await screen.findByRole('menuitem', { name: 'Secure' })).toBeInTheDocument();
+      expect(screen.getAllByRole('menuitem')).toHaveLength(2);
+      expect(screen.queryByRole('menuitem', { name: 'Standard' })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Secure – Restricted' }));
+      expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
+    });
+  });
+
   describe('Dark mode (ADR-021)', () => {
     it('renders all three flags under a dark FluentProvider theme without crashing', () => {
       renderWithTheme(<TrackingFieldTrio {...makeProps({ monitor: true, highPriority: false })} />, webDarkTheme);

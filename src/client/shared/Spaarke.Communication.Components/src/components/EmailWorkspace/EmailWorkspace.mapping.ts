@@ -14,7 +14,6 @@
  */
 import type { IDataService } from '@spaarke/ui-components';
 import { sanitizeEmailHtml } from '@spaarke/ui-components';
-import type { IAccessPermissionOption } from '@spaarke/ui-components';
 import {
   COMMUNICATION_REGARDING_FIELDS,
   derivePrimaryReview,
@@ -30,29 +29,23 @@ export const COMMUNICATION_ENTITY = 'sprk_communication';
 /**
  * ⚠️ PLACEHOLDER pending Dataverse schema creation. `docs/data-model/
  * sprk_communication.md` (reviewed 2026-07-21) does NOT yet document a
- * Monitor / High Priority / Access Permission field on `sprk_communication` —
- * design.md (Lens 2/4) flags the `TrackingFieldTrio` placement on this form as
- * "net-new to the form." These three logical names are the best-available
- * placeholders (matching the `TrackingFieldTrio` PCF's own Standard(100000000)/
- * Limited(100000001)/Restricted(100000002) fallback for Access Permission);
- * update this ONE constant once the columns exist and are confirmed via live
+ * Monitor / High Priority field on `sprk_communication` — design.md (Lens 2/4)
+ * flags the `TrackingFieldTrio` placement on this form as "net-new to the
+ * form." These two logical names are the best-available placeholders; update
+ * this ONE constant once the columns exist and are confirmed via live
  * Dataverse metadata — no other file in this component needs to change.
  * Filed as a defer/issue (see `projects/email-communication-solution-r5/
- * notes/defer-issues.md`) rather than invented as new schema in this task
- * (out of scope — this task's outputs are code-only, no `dataverse` tag).
+ * notes/defer-issues.md`) rather than invented as new schema in this task.
+ *
+ * There is deliberately NO access-permission field here (unified-access-control-r2
+ * task 138, owner Q6): a communication INHERITS its parent record's Access
+ * Permission, its own `sprk_accesspermission` copy is retired, and no client or
+ * server code may read or write it. The parent's pill is the one place to change it.
  */
 export const EMAIL_TRACKING_FIELDS = {
   monitor: 'sprk_ismonitored',
   highPriority: 'sprk_ishighpriority',
-  accessPermission: 'sprk_accesspermission',
 } as const;
-
-/** Same fallback triple the `TrackingFieldTrio` PCF caller uses when live OptionSet metadata isn't available (task 023 `index.ts`). */
-export const DEFAULT_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
-  { value: 100000000, label: 'Standard' },
-  { value: 100000001, label: 'Limited' },
-  { value: 100000002, label: 'Restricted' },
-];
 
 /** Envelope + tracking + association columns this workspace reads per selection (no `$select` — mirrors `CommunicationConnectionsApp`'s "an unknown regarding field name makes the whole $select throw" note; the regarding lookups vary by deployment). */
 export interface RawCommunicationRecord {
@@ -217,7 +210,6 @@ export interface EmailWorkspaceRecordState {
   filedAssociations: FiledAssociation[];
   monitor: boolean;
   highPriority: boolean;
-  accessPermission: number | null;
 }
 
 /** Derive the full workspace record state from one raw `retrieveRecord` payload. */
@@ -244,7 +236,6 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
     filedAssociations: readFiledAssociations(raw),
     monitor: asBoolean(raw[EMAIL_TRACKING_FIELDS.monitor]),
     highPriority: asBoolean(raw[EMAIL_TRACKING_FIELDS.highPriority]),
-    accessPermission: asNullableNumber(raw[EMAIL_TRACKING_FIELDS.accessPermission]),
   };
 }
 

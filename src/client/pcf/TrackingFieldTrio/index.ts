@@ -12,7 +12,7 @@
  * v1.0.6 (task 023, FR-14/FR-18) — the rendered component now lives in
  * `@spaarke/ui-components` (entity-agnostic `TrackingFieldTrio`; options
  * injected via props). This `index.ts` is the ONLY place in the tree that
- * knows about `sprk_communication`'s Access Permission choice values —
+ * knows the bound record's Access Permission choice values —
  * `getAccessPermissionOptions()` supplies the real Dataverse OptionSet
  * metadata (value + label + color) when available, falling back to the
  * hardcoded Standard/Limited/Restricted triple (no color — the shared
@@ -100,6 +100,25 @@
  * it resolves into control state and re-renders (the `authInit` pattern this
  * file already uses) rather than blocking a render on a network call.
  *
+ * v1.0.32 (task 138, unified-access-control-r2 — the Access Permission levels
+ * made real; owner round 2 item 3 + Q6 + O1 FINAL):
+ * - The modal's state now folds in the record's SECURE flag through the shared
+ *   pure `resolveAccessPermissionState`: Restricted → 'restricted'; Limited, or
+ *   Standard on a secure record, or Standard while `sprk_issecure` is unreadable
+ *   → 'limited' (fail CLOSED); Standard on a record read as not secure →
+ *   'standard'. The secure read used for this GATING is `ensureSecureFlag()`;
+ *   the owner/BU DISPLAY read (`fetchSecureOwnerInfo`) stays fail-soft.
+ * - The pill honours a read-only form: `context.mode.isControlDisabled`
+ *   disables all three controls, and the bound column's `security.editable ===
+ *   false` disables the pill alone (re-read in init and in every updateView).
+ * - On a secure record the closed pill reads "Secure" in red (owner O1 FINAL),
+ *   and its menu offers "Secure" / "Secure – Restricted".
+ * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
+ *   on a form whose table has no such column (the retired
+ *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
+ * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
+ *   standing-grant control since task 073 UAT v1.0.24 #5).
+ *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
  * - Uses Fluent UI v9 per ADR-021 (via platform libraries)
@@ -139,6 +158,7 @@ import {
   type ISecureOwnerInfo,
   type ExternalGrantRootType,
   type AccessPermissionState,
+  resolveAccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
 // Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
 // host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
@@ -167,12 +187,26 @@ import { initializeAuth } from './authInit';
 // client id / BFF app id / BFF base url come from sprk_MsalClientId / sprk_BffApiAppId / sprk_BffApiBaseUrl.
 import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environmentVariables';
 
-// sprk_communication Access Permission choice values — MUST match the
-// Dataverse OptionSet values. Entity-specific: lives ONLY here (the PCF
-// caller), never in the shared `TrackingFieldTrio` core (FR-14).
+// Access Permission choice values of the three grant ROOTS — sprk_project,
+// sprk_matter and sprk_workassignment carry the identical option set (verified
+// live 2026-09-04 and 2026-09-30; the BFF's ExternalParticipationService uses the
+// same integers). Entity-specific: lives ONLY here (the PCF caller), never in the
+// shared `TrackingFieldTrio` core (FR-14). The `sprk_communication` copy of the
+// column is retired (task 138, owner Q6): a communication inherits its parent's
+// permission and has no value of its own.
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
+
+// Owner O1 FINAL (2026-10-01): on a SECURE record the closed pill reads "Secure"
+// (red) for both secure and secure + Restricted; the menu may name both. "Secure"
+// writes Limited — Secure already limits contacts to named grants, and Limited is
+// the conservative value the record keeps if it is later unsecured (task 150).
+const SECURE_PILL_LABEL = 'Secure';
+const SECURE_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
+  { value: ACCESS_PERMISSION_LIMITED, label: 'Secure' },
+  { value: ACCESS_PERMISSION_RESTRICTED, label: 'Secure – Restricted' },
+];
 
 // Fallback segments (no per-option color) used when the bound OptionSet's
 // field metadata isn't available (e.g., harness/test environments). The
@@ -304,6 +338,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * refresh while an answer is already in flight. */
   private grantGateRequestedFor: string | null | undefined = undefined;
 
+  /** The bound record's `sprk_issecure`, read for GATING (task 138): `true` / `false` from a successful
+   * read, `null` while unread or when the read fails or the value is hidden (field-level security). The
+   * modal state treats `null` as Limited — an unknown Secure flag must never widen what the dialog offers. */
+  private isSecureValue: boolean | null = null;
+
+  /** The record id the secure read was ASKED about — the same three-state discipline as
+   * {@link grantGateRequestedFor}, so `updateView` does not re-read on every refresh. */
+  private secureFlagRequestedFor: string | null | undefined = undefined;
+
   private authInitPromise: Promise<void> = Promise.resolve();
 
   // Email-members state (task 042). `apiBaseUrl` mirrors the value passed to
@@ -359,6 +402,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // rather than delaying first paint on a network call. Nothing is swallowed — every failure path
     // inside `evaluateGrantGate` resolves the gate to `false` and logs.
     this.ensureGrantGate();
+    // Read the record's Secure flag for the Access Permission gate (task 138) — also not awaited; until it
+    // answers, the modal state is the fail-closed Limited.
+    this.ensureSecureFlag();
 
     this.renderControl();
   }
@@ -374,8 +420,70 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
     // Re-ask the server if — and only if — this control is now bound to a different record (task 118).
     this.ensureGrantGate();
+    // Same for the record's Secure flag (task 138).
+    this.ensureSecureFlag();
 
     this.renderControl();
+  }
+
+  /**
+   * Reads the bound record's `sprk_issecure` for the Access Permission GATE (task 138), unless that read is
+   * already asked or answered for this record. FAIL CLOSED: a failed read, a missing record id or a hidden
+   * value leaves {@link isSecureValue} `null`, which `resolveAccessPermissionState` maps to Limited. Distinct
+   * from the fail-soft owner/BU DISPLAY read in `fetchSecureOwnerInfo`, which is unchanged.
+   */
+  private ensureSecureFlag(): void {
+    const recordId = this.getRecordId();
+    if (recordId === this.secureFlagRequestedFor) {
+      return;
+    }
+
+    this.secureFlagRequestedFor = recordId;
+    this.isSecureValue = null;
+    if (!recordId) {
+      return;
+    }
+
+    void (async () => {
+      let value: boolean | null = null;
+      try {
+        const record = (await this.context.webAPI.retrieveRecord(
+          this.getHostEntity(),
+          recordId,
+          '?$select=sprk_issecure'
+        )) as unknown as Record<string, unknown>;
+        const raw = record['sprk_issecure'];
+        value = raw === true ? true : raw === false ? false : null;
+      } catch (err) {
+        console.warn(
+          '[TrackingFieldTrio] Could not read whether this record is secure; Manage Access offers only named grants.',
+          err
+        );
+      }
+      // Drop a late answer for a record the form has since left.
+      if (this.secureFlagRequestedFor !== recordId) {
+        return;
+      }
+      this.isSecureValue = value;
+      this.renderControl();
+    })();
+  }
+
+  /** Whether the `accessPermission` property is bound to a column on this form (task 138 — the property
+   * is optional so the control can sit on a table without the column). A bound OptionSet parameter
+   * carries its attribute metadata (`attributes.LogicalName`); an unbound optional one does not. */
+  private isAccessPermissionBound(): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attrs = (this.context.parameters.accessPermission as any)?.attributes;
+    return typeof attrs?.LogicalName === 'string' && attrs.LogicalName.length > 0;
+  }
+
+  /** Whether the bound access-permission column is editable for this user — `false` only when the
+   * platform says so explicitly (`security.editable === false`, e.g. field-level security). */
+  private isAccessPermissionEditable(): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const security = (this.context.parameters.accessPermission as any)?.security;
+    return security?.editable !== false;
   }
 
   /**
@@ -684,25 +792,18 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   /**
-   * Maps the bound `sprk_project.sprk_accesspermission` raw OptionSet value
-   * (task 043, spec FR-14 Option A) to `AccessGrantModal`'s entity-agnostic
-   * `AccessPermissionState`. This is the ONLY place that knows the real
-   * `ACCESS_PERMISSION_*` integers — the shared modal receives only the
-   * semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012).
-   * Defaults to `'standard'` (all grant types available — task 041's
-   * baseline) when the value is unset or unrecognized, matching the modal's
-   * own default and preserving zero regression for records without the
-   * field populated.
+   * Maps the bound root's raw `sprk_accesspermission` value AND its `sprk_issecure` flag (task 043, spec
+   * FR-14 Option A; task 138) to `AccessGrantModal`'s entity-agnostic `AccessPermissionState`. This is the
+   * ONLY place that knows the real `ACCESS_PERMISSION_*` integers and the secure column — the shared modal
+   * receives only the semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012). The rules
+   * themselves (Restricted wins; Secure implies Limited; an unreadable Secure flag is Limited) live in the
+   * shared pure `resolveAccessPermissionState`, where tests pin them.
    */
   private mapAccessPermissionToState(value: number | null): AccessPermissionState {
-    switch (value) {
-      case ACCESS_PERMISSION_RESTRICTED:
-        return 'restricted';
-      case ACCESS_PERMISSION_LIMITED:
-        return 'limited';
-      default:
-        return 'standard';
-    }
+    return resolveAccessPermissionState(value, this.isSecureValue, {
+      limited: ACCESS_PERMISSION_LIMITED,
+      restricted: ACCESS_PERMISSION_RESTRICTED,
+    });
   }
 
   /** Reads the current `sprk_project` record's `sprk_assigned*` contact
@@ -971,14 +1072,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return result.entities.length > 0;
   };
 
-  /** Sets/clears the contact's standing-grant flag — a single-field Contact
-   * write via `context.webAPI` (host-context, NOT a `sprk_externalrecordaccess`
-   * write, so it is intentionally outside the BFF grant-endpoint reuse
-   * constraint). */
-  private onSetStandingGrant = async (contactId: string, standingGrant: boolean): Promise<void> => {
-    await this.context.webAPI.updateRecord('contact', contactId, { sprk_standinggrant: standingGrant });
-  };
-
   /** Reads the record's STANDING-grant members (task 073 UAT #2): the record's
    * role-member candidates (`fetchCandidates()`) whose global
    * `contact.sprk_standinggrant` flag is set. The intersection with THIS
@@ -1067,6 +1160,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // VisualHost's showToolbar/showVersion reads.
     const showTitle = this.context.parameters.showTitle?.raw !== false;
     const showVersion = this.context.parameters.showVersion?.raw === true;
+    // Task 138: honour a read-only form. Re-read on every render (init and every updateView), so a form
+    // that becomes read-only — or a column that becomes non-editable — takes effect immediately.
+    const controlDisabled = this.context.mode?.isControlDisabled === true;
+    const accessPermissionBound = this.isAccessPermissionBound();
 
     const props: ITrackingFieldTrioProps = {
       monitor: this.monitorValue,
@@ -1077,7 +1174,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.31 • Built 2026-09-21',
+      versionText: 'v1.0.32 • Built 2026-10-02',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -1124,6 +1221,14 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       // evaluateGrantGate(). `false` until the server says otherwise, including while the answer is in
       // flight and on every failure to obtain one.
       canGrantAccess: this.canGrantAccessValue,
+      // Task 138 — read-only form / non-editable column / unbound column / secure display (O1 FINAL).
+      disabled: controlDisabled,
+      accessPermissionDisabled: !this.isAccessPermissionEditable(),
+      showAccessPermission: accessPermissionBound,
+      secureAccessPermission:
+        this.isSecureValue === true
+          ? { label: SECURE_PILL_LABEL, options: SECURE_ACCESS_PERMISSION_OPTIONS }
+          : undefined,
     };
 
     const recordId = this.getRecordId();
@@ -1197,11 +1302,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
                     onOpenContact: this.openContactRecord,
                     isInternalContact: this.isInternalContact,
-                    onSetStandingGrant: this.onSetStandingGrant,
-                    // Access-Permission sharing gate (task 043, FR-14 Option A) —
-                    // mapped from the bound field's raw OptionSet value; see
-                    // mapAccessPermissionToState()'s doc comment.
+                    // Access-Permission sharing gate (task 043, FR-14 Option A; task 138) —
+                    // the bound field's raw value folded with the record's Secure flag,
+                    // failing closed; see mapAccessPermissionToState()'s doc comment.
                     accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
+                    // Banner copy only ("Secure" / "Secure – Restricted", owner O1 FINAL).
+                    isSecureRecord: this.isSecureValue === true,
                     // Secure-record owner/BU read-only display (task 065, design.md §6).
                     fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
                   })
@@ -1297,7 +1403,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return {
       monitor: this.monitorValue,
       highPriority: this.highPriorityValue,
-      accessPermission: this.accessPermissionValue ?? undefined,
+      // Task 138: an unbound (optional) property is never written back.
+      accessPermission: this.isAccessPermissionBound() ? (this.accessPermissionValue ?? undefined) : undefined,
     };
   }
 
