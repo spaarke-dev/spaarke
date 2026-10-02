@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-02 — root `CLAUDE.md` §1.1: product names vs engineering identifiers (spaarke-ontology-platform-r1)
+
+**SpaarkeAi is now called the Spaarke Console.** Added a §1.1 naming table so the rename does **not** require
+sweeping ~705 "SpaarkeAi" occurrences across 256 files: product name and engineering identifier are allowed to
+differ, and the table is what makes the old name readable. `sprk_spaarkeai`, `src/solutions/SpaarkeAi/` and the
+deploy script/workflow names are **explicitly unchanged** — renaming them is tracked at
+[#1095](https://github.com/spaarke-dev/spaarke/issues/1095) and deferred because **37 of 62 active projects
+declare `SpaarkeAi = Y`** and would inherit the merge conflicts. Same split already set for
+~~ledger~~ → Decision Record. Naming authority stays
+`projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.
+
 ###### 2026-09-30 — `office-addins-deploy`: two manifest eras (spaarkeai-word-add-in-r1 task 078)
 
 The skill's "Manifest Upload After Deploy" told operators to download `outlook/manifest.xml` — a path that

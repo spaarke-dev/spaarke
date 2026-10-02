@@ -1,6 +1,6 @@
 # Spaarke Legal Operations Intelligence — Ontology Platform R1 · Design
 
-> **Status**: **DRAFT for review — rev 6**, 2026-10-02. Not yet through `/design-to-spec`.
+> **Status**: **DRAFT for review — rev 7**, 2026-10-02. Not yet through `/design-to-spec`.
 > **Evidence base**: [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) (~800 lines — field-level
 > detail, live-verified schema, defect forensics). **This document holds the decisions; the spec holds the
 > evidence.** Where they disagree, this document is newer.
@@ -279,7 +279,7 @@ components. Do not port prototype source.
   <spaarke-ai>Y</spaarke-ai>                <!-- SETTLED rev 4: D-3 resolved by the Console prototype — the worklist needs a new row component (prototype findings 9, 10), so this is Y permanently, not provisionally. The "sprk_gridconfiguration row alone" branch that would have made this N is dead -->
   <ci-workflows>N</ci-workflows>
   <skill-directives>Y</skill-directives>    <!-- .claude/FAILURE-MODES.md (AP-14 + an AP-12 instance) and .claude/CHANGELOG.md. NOT .claude/skills/** -->
-  <root-claude-md>N</root-claude-md>
+  <root-claude-md>Y</root-claude-md>   <!-- FLIPPED 2026-10-02: added §1.1 product-names table (SpaarkeAi = the Console; identifiers unchanged). One additive section, no rule changed. .claude/CHANGELOG.md entry added per CLAUDE.md §18 -->
 </hot-path-declaration>
 ```
 
@@ -407,7 +407,7 @@ rows below are **configuration or deletion**, which is why this broadens the MVP
 | **First Know-promotion rule** | one policy row | *New matter with no budget after 5 days* — `Absence` shape over Spaarke-held data. *"A new matter was opened"* is news; *"a new matter has no budget"* is work. **That difference is the ontology**: membership by rule evaluation, not by recency |
 | **Retire *Critical Today* as a list** | configuration | `sprk_highpriority` becomes a **rank input**; `sprk_monitor` becomes a **subscription** to Know. Neither is a reason in the ontology sense — a flag says *someone cares*, not *what is wrong*. Nothing it meant is lost |
 | **Remove the LLM-chosen "Top action"** | deletion | The first row *is* the top action, because rank is deterministic. A model choosing priority breaks row-contract requirement 2 and decision 15 |
-| **Email awaiting a matter match** | 1 policy row + a scope check | The association ladder already produces this; it surfaces as a Do row where resolution came back Ambiguous. ⚠️ Carries prototype finding 7 — **misresolution dismissals must not count toward suppression**, or fixing our own bad match teaches the system to stop asking |
+| **Email awaiting a matter match** | ⚠️ **REVERSED rev 7 — NOT a Work Item.** One widget registration instead | **It is a separate surface, and the surface already exists** — see §5.1. Earlier revisions put this in the Do lane; that was wrong on three counts (§5.1). R1's work here is **one `SectionRegistration`** so the shipped reconciliation code page can mount as a Console tab, plus **one aggregate Work Item** that links to it |
 
 ⚠️ **§0 still applies to all six.** Overdue tasks and new matters are **not differentiated** — every
 matter-management system shows them. They join for completeness and adoption (*"this is where I start my day"*),
@@ -436,6 +436,48 @@ overdue tasks would push 5 decisions off the screen.
 | Item | Why it is not settled yet |
 |---|---|
 | **Generic `sprk_signal`** | Replacing `sprk_spendsignal` is free **now** (zero client references, no production data) and a migration later. ⚠️ **Two of its three dependencies are now closed (rev 4)**: **D-3** is settled — the worklist **reads signals and groups by matter**, so the shape needs a **polymorphic subject plus an always-populated matter lookup** derived from it — and **D-4** is settled (reuse `sprk_triagecategory`). What remains is **D-2**, plus **BR-1**'s nullable decision reference and **D-7** (sibling of `InsightArtifact`, not subtype). ⚠️ `sprk_signaltype` / `sprk_signalvalue` are **already taken** on `sprk_affinity` — **collision confirmed live 2026-10-02** (choice + text columns on that table). ⚠️ **And the resolution model should be copied, not designed**: live `sprk_spendsignal` already has `sprk_spendsignalstatus` (Active / Acknowledged / Resolved / **Auto Resolved**) + `sprk_resolutionnotes`, which the spec's §2.2 inventory omits. **Per review §1.4 the shape question now also covers resolution semantics, not only columns** (CM-9): a `sprk_dedupekey` alternate key, an `sprk_resolutiontype` option set (`ConditionCleared`/`Acted`/`Dismissed`/`Superseded`/`PolicyRetired`), `sprk_lastevaluated`, and a resolution **sweep** so a flag whose predicate stops holding is closed rather than left to rot. `sprk_spendsignal`'s idempotent upsert works today only because its key is implicitly (matter, signaltype) — that does not survive a polymorphic subject. **Decide before the evaluator writes its first signal** |
+
+### 5.1 Email→record reconciliation is a separate surface, not a worklist lane `[rev 7, owner question]`
+
+**Owner, 2026-10-02**: *"are we surfacing email to record matching as part of this ontology / worklist surface?
+I think 'no' — we should make the email reconciliation a separate surface/tab that can be added to the Console."*
+
+**Agreed, and the evidence is stronger than the intuition: it is already built.** Verified 2026-10-02 in
+`src/client/shared/Spaarke.Communication.Components/src/components/`:
+
+| Already shipped | What it is |
+|---|---|
+| `ReconciliationGrid/` + **four** `*.gridconfiguration.json` | `needs-review` · `email-review-all` · `email-review-completed` · `per-team` — membership already in FetchXML, and all four exist as live `sprk_gridconfiguration` rows (spec §10.7) |
+| `ReconciliationBrowseShell/` | the browse shell |
+| `ReconcileTabs/` — `FieldUpdateReconcileTab`, `TaskReconcileTab` | **the tab pattern already exists** |
+| `EmailAssociationsAndTracking/EmailConnectionsReview*` | the review grid, rows, helpers, styles |
+| `src/solutions/CommunicationReconciliation/` | it runs today as its **own code page** |
+
+**What is missing is only the mount.** There is no `SectionRegistration` for it and nothing in
+`WorkspaceWidgetRegistry` references it — so making it a Console tab is **one registration file**, following
+`dailyBriefing.registration.ts` as the template. That is the whole deliverable.
+
+**Three reasons it must not be a worklist lane** — the second is the one that matters:
+
+1. **Different interaction shape.** Reconciliation is **bulk triage**: work through N items fast, same action
+   each time. A Work Item is a **single decision** with evidence, a gate and a record. Merging them forces one
+   component to be both, which breaks §1.3 rule 4.
+2. 🔴 **The semantics actually conflict.** Prototype finding 7: *misresolution dismissals must not count toward
+   suppression.* Dismissing *"this email was matched to the wrong matter"* is a judgement about **our
+   resolution**, not about the customer's rule — yet in the worklist every dismissal feeds suppression
+   (criterion 4). So fixing our own bad match would teach the system **to stop asking**. Separating the surface
+   removes the conflict by construction rather than by a special case.
+3. **It is not a Signal.** *"This email's match is uncertain"* is a **confidence state of a resolution**, not a
+   rule evaluation over a declared policy. Forcing it into `sprk_signal` would make the association engine a
+   policy producer, which it is not — and would be the `sprk_spendsignal` mistake again, in a third costume.
+4. **Volume.** Email volume dwarfs decisions. The 11-overdue-tasks-vs-5-decisions problem, an order of magnitude
+   worse.
+
+**The one thing separation must not cost** is decision 9 (*"one 'needs attention' widget, not four queues — four
+places to look means nobody looks"*). Mitigation: the worklist carries **one aggregate Work Item** —
+*"14 emails await a match confirmation →"* — that links to the reconciliation tab. One place to start the day;
+the bulk task lives where bulk tasks belong. Decision 9's concern is **competing** "what needs you today"
+surfaces, and a deliberate task you navigate to is not that.
 
 ### Out (with rationale)
 
@@ -714,7 +756,13 @@ Carried from `current-task.md`; full rationale in the notes.
     matter grouping Work Items** (owner clarification 2026-10-03). The Signal's **subject** — `sprk_event`,
     `sprk_todo`, `sprk_workassignment`, `sprk_matter`, `sprk_communication`, `sprk_servicerequest` — is the
     target of a Work Item and **never a Work Item itself**. Full chain: component model §3.1
-29. **The LLM reads and writes; deterministic code decides** (§1.2). Read side = classification **and** proposing
+29. **Email→record reconciliation is a separate Console tab, not a worklist lane** (§5.1, owner 2026-10-02).
+    The surface is **already built** (`ReconciliationGrid` + 4 grid configs + `ReconcileTabs` +
+    `EmailConnectionsReview` + its own code page); R1 adds **one widget registration** plus **one aggregate Work
+    Item** that links to it. Decisive reason: a misresolution dismissal is a judgement about *our* resolution,
+    and in the worklist every dismissal feeds suppression — so fixing our own bad match would teach the system
+    to stop asking
+30. **The LLM reads and writes; deterministic code decides** (§1.2). Read side = classification **and** proposing
     which record an inbound communication belongs to; write side = the prose, over facts it did not compute.
     Only the read side feeds the machinery
 

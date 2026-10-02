@@ -121,27 +121,34 @@ Raised in owner feedback: *"isn't Signal sort of a trigger or condition that res
 and that is the correct model.** The earlier wording ("a Work Item is one line in the worklist") conflated two
 layers and, worse, contradicted D-3, which makes the worklist's **line a matter**. The chain is five steps:
 
-| # | Step | Name | Layer |
-|---|---|---|---|
-| 1 | A rule declares a condition over data | **Policy** + immutable **policy version** | declaration |
-| 2 | Evaluation finds the condition **holds** for some subject | a **Signal** is written (`sprk_signal`) | data — *the trigger* |
-| 3 | An unresolved Signal presents as something to act on | a **Work Item** | presentation / work |
-| 4 | Work Items are **grouped by matter** onto one line | a worklist **row** (= a matter) | layout — D-3 |
-| 5 | Acting **dispositions** the Work Item → closes the Signal → writes a **Decision Record** | | record |
+**There are exactly two defined terms. Everything else is description.** *(Simplified 2026-10-02: an earlier
+version also defined "row", which added a third term, confused more than it fixed, and was rightly challenged.
+The visual container does not need a name of its own.)*
 
-Three consequences worth stating, because each one has already caused a wording error:
+| Term | Definition |
+|---|---|
+| **Signal** (`sprk_signal`) | **A condition that held.** The stored result of evaluating a rule against data: subject · rule + version · evidence · lifecycle. It is the **trigger** |
+| **Work Item** | **The actionable unit a Signal produces** — what a person is asked to do something about, with its evidence, its available actions and its disposition. **One per unresolved Signal** |
 
-- **A Signal is a condition, not a task.** *"Spend reached 118% of budget"* is a Signal. *"Decide what to do
-  about the overrun on Acme v. Northwind"* is the Work Item. Keeping these apart is what lets a Signal
-  auto-close as `ConditionCleared` without anyone having worked it.
-- **A row is not a Work Item.** One row (a matter) can carry several. That is exactly why *"does one decision
-  resolve both?"* is a real question, and why a Decision Record is **1:N** to Signals (D-2).
+The chain: a **Policy** declares a condition → evaluation writes a **Signal** when it holds → the Signal
+presents as a **Work Item** → acting **dispositions** it, closing the Signal and writing a **Decision Record**.
+
+Two things that follow, and matter for what we build:
+
+- **A Signal is a condition, not a task.** *"Spend reached 118% of budget"* is the Signal. *"Decide what to do
+  about the overrun on Acme v. Northwind"* is the Work Item. Keeping them apart is what lets a Signal auto-close
+  as `ConditionCleared` without anyone having worked it — and what makes a **Decision Record 1:N to Signals**,
+  since one decision can close several Work Items on the same matter (D-2).
 - **A Work Item's *subject* is an existing object, and that object is never itself a Work Item** (owner
-  clarification, 2026-10-03). `sprk_event` (task), `sprk_todo`, `sprk_workassignment`, `sprk_matter`,
+  clarification 2026-10-02). `sprk_event` (task), `sprk_todo`, `sprk_workassignment`, `sprk_matter`,
   `sprk_communication` and `sprk_servicerequest` (inquiry) are the **subjects or targets** a Signal points at.
-  A To Do is not a Work Item; *"this To Do is 7 days past due and still open"* is. This is the whole reason
+  A To Do is not a Work Item; *"this To Do is 7 days past due and still open"* is. This is precisely why
   **Work Item must never become an entity name** — the superordinate term would collide with its own members,
-  and `sprk_workassignment` (141 files), `sprk_todo` (208) and `sprk_event` (284) are all already taken.
+  and `sprk_workassignment` (141 files), `sprk_todo` (208) and `sprk_event` (284) are all taken.
+
+**How it looks on screen is a layout question, not a vocabulary one**: the Console groups a matter's Work Items
+together so a user sees one card per matter with its issues listed beneath (D-3). That grouping is worth
+building and not worth naming.
 
 ---
 
