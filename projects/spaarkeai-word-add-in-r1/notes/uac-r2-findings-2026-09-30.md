@@ -208,7 +208,9 @@ coordinates its edits to both.
 | The trusted-tenant list (their I1) | *"yes proceed"* | Their owner had already accepted option (b) directly (a new explicit per-deployment list; empty = deny). 141 proceeds on it. **141 is not in their current batch** (130/131/134/151); they will send its link contract when it is authored as code, so **083 stays blocked** |
 | #1037, disabled with the reason | *"yes write the task"* | Authored as **task 084** |
 
-## 11. Owner decision 2026-10-02 on #1081 — relay NOT YET DELIVERED
+## 11. Owner decision 2026-10-02 on #1081 — ✅ DELIVERED by the owner to UAC-r2 (2026-10-02)
+
+> Two cross-session sends expired unapproved; the owner posted it to the UAC-r2 project conversation directly.
 
 A cross-session message to the UAC-r2 session (2026-10-02) was **held for its user's approval and expired
 unapproved**, so UAC-r2 has not received it. The content is public on

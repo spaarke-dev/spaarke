@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-02 (079 ✅ closed; next: task 076 — MAT-/PRJ- sequential numbering; then 086)
+> **Last Updated**: 2026-10-02 17:15 UTC (by context-handoff, before /compact). 079 ✅; 080 backfill APPLIED; next: task 076
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -22,10 +22,23 @@ All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §
 
 | Field | Value |
 |---|---|
-| **Task** | 076, `tasks/076-record-numbering-no-blank-primary-name.poml`. Start via `task-execute`. **Owner answers 2026-10-02 (in the POML)**: Matter `MAT-######`, Project `PRJ-######`, both **sequential**; owner checks production uniqueness manually; interim until a numbering-schema component — **not a spike** |
-| **Branch** | `work/spaarkeai-word-add-in-r1`, ahead of master by the 079 + restart-check records (not yet PR'd). Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` and `Build & Test (Debug)` pass and nothing is pending |
-| **Queue after 076** | **086** (Word Send Email choice A+B, focused record open — client-only); 042 UAT (owner, live Word/Outlook); 090 wrap-up (`/test-diet`). 083 waits on UAC-r2 141 |
-| **For the owner** | (1) 080 backfill `-Apply` (sample first). (2) Upload `C:\tmp\spaarke-addin-package\spaarke-addin-1.1.0-TEST.zip` (078 §6). (3) Post the #1081 relay to UAC-r2 (uac-r2-findings §11). (4) 042 UAT list (`defer-issues.md` register) |
+| **Task** | 076, `tasks/076-record-numbering-no-blank-primary-name.poml`. **Start via `task-execute`** (FULL, opus/xhigh). **Owner answers 2026-10-02 are in the POML**: Matter `MAT-######`, Project `PRJ-######`, both **sequential**; owner checks production uniqueness manually; interim until a numbering-schema component — **not a spike**. Fixes SC-8 (now FAIL) and the blank primary name. Design question to settle first in the task: where the sequence lives (Dataverse autonumber on the column vs a server-side sequence with an alternate key) — both columns are their table's primary name; wizards still supply their own numbers and must not be modified |
+| **Next Action** | `task-execute` task 076. Then **086** (Word Send Email choice A+B + focused record open `navbar=off`; client-only, parallel-safe with 076). Then open the PR for everything since `5e39f2bea` |
+| **Branch** | `work/spaarkeai-word-add-in-r1`, clean, pushed. Ahead of master by the 060/068 live-check records, 079, and these handoffs — **not yet PR'd**. Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` **and** `Build & Test (Debug)` pass (both required) and nothing is pending |
+| **Queue** | 076 → 086 → PR. 042 UAT (owner, live Word/Outlook — list in `defer-issues.md` register). 090 wrap-up (`/test-diet`) after 042. 083 waits on UAC-r2 141 |
+| **Owner, in flight** | **078 add-in install**: the owner is uploading `C:\tmp\spaarke-addin-package\spaarke-addin-1.1.0-TEST.zip` (from run `37046260279`) to *Just me*; how to tell it worked was given 2026-10-02 (a "Spaarke (TEST)" ribbon group in Word/Outlook, desktop + web — 078 §6). Record the outcome in 078 when reported |
+| **Done 2026-10-02** | 080 backfill **applied** (31 docs + 10 To Dos, 0 failed; Test User 1 verified; manifests in `notes/080-backfill-2026-10-02/`). #1081 relayed to UAC-r2 **by the owner**. Redis `JobStatusSequence` approved. Hard-kill live checks for 060/068 pass. Probe data deleted |
+
+### Files modified this session (all committed)
+`spec.md` · `tasks/TASK-INDEX.md` · 24 POMLs (079 repairs/syncs, 076 answers, new 086) · `notes/079-record-integrity.md` ·
+`notes/defer-issues.md` (register) · `notes/042-uat-results.md` · `notes/parity-checklist.md` · `notes/060-…` §11 ·
+`notes/068-…` §9 · `notes/080-record-ownership.md` §6.9 · `notes/uac-r2-findings-2026-09-30.md` §11 ·
+`src/…/Infrastructure/Cache/SystemCacheKeys.cs` (approval comment) · `src/…/Api/Filters/TodoSourceAccessFilter.cs` (comment)
+
+### Critical context
+Master `5e39f2bea` is deployed to `spaarke-bff-dev`. The drift checker on master cannot read this index layout —
+`customer-provisioning-orchestration-r1` commit `233ff9341` fixes it (unmerged; it reads this index 87/87, no drift), so
+push-to-github Step 1.65 is red for a parser reason. Board #945: 87 tasks, 82 closed.
 
 ### ✅ Closed 2026-10-02: task 079 (record integrity) — `notes/079-record-integrity.md`
 
