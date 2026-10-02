@@ -423,7 +423,7 @@ _TODO: How does the Word add-in handle the case where the user creates a documen
 
 **Flow (via Outlook add-in)**:
 1. User receives an email, invokes the Spaarke Outlook add-in taskpane.
-2. Taskpane reads the current email via `OutlookHostAdapter` (`src/client/office-addins/outlook/OutlookHostAdapter.ts`):
+2. Taskpane reads the current email via `OutlookAdapter` (`src/client/office-addins/shared/adapters/OutlookAdapter.ts`):
    - Email body + headers
    - Attachments (file blobs)
 3. User selects target matter/project (and any categorization) in the taskpane UI.
@@ -440,7 +440,7 @@ Spaarke has **no catch-all email ingestion path** — no Exchange Online connect
 **🚨 Critical**: if a server-side email ingestion path is added later, it MUST route through the same custom save component — never call SPE directly, never create `sprk_communication` directly, never resurrect the OOB `email` entity or server-side sync.
 
 **Code paths**:
-- `src/client/office-addins/outlook/OutlookHostAdapter.ts` — Outlook-specific host adapter (reads email/attachments via Office.js)
+- `src/client/office-addins/shared/adapters/OutlookAdapter.ts` — Outlook-specific host adapter (reads email/attachments via Office.js)
 - `src/client/office-addins/outlook/taskpane/` — taskpane UI
 - `src/client/office-addins/outlook/commands/` — ribbon commands
 - Custom email save component (BFF-side): _TODO: confirm exact path. Likely under `src/server/api/Sprk.Bff.Api/` — search for `sprk_communication` or `EmailToSpe` to locate._
@@ -453,7 +453,7 @@ Spaarke has **no catch-all email ingestion path** — no Exchange Online connect
 
 _TODO: Confirm — do attachments become `sprk_document` records linked to the parent `sprk_communication`, or do they also become `sprk_communication` records (e.g., type=Attachment)? Document the convention so the agent doesn't create the wrong shape._
 
-_TODO: Document the Outlook 1.8+ Mailbox API requirement set dependency and any tenant-side configuration needed (per `OutlookHostAdapter.ts` header)._
+_TODO: Document the Outlook 1.8+ Mailbox API requirement set dependency and any tenant-side configuration needed (per `shared/adapters/OutlookAdapter.ts` header)._
 
 _TODO: Attachment dedup policy — if the same attachment was already saved (different email, same file), does Spaarke detect and link to the existing record, or create a new one?_
 

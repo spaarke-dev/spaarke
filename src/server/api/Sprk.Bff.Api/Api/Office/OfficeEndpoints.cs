@@ -634,10 +634,13 @@ public static class OfficeEndpoints
             // Task 080 — OFFICE_022 (no owner could be determined) joins the two version refusals: a refusal that
             // wrote nothing, rendered with its own status and title from OfficeErrorCodes. Task 060 — OFFICE_014 (the
             // save's job row could not be created) too: a retryable 502, not the default 400, which would blame the request.
+            // Task 075 — OFFICE_INTERNAL (an unexpected server exception) too: a 500 with a generic message, not the
+            // default 400 below, which blamed the request and carried the exception's message.
             OfficeErrorCodes.VersionTargetHasNoFile
                 or OfficeErrorCodes.VersionTargetLocked
                 or OfficeErrorCodes.RecordOwnerUnresolved
-                or OfficeErrorCodes.DataverseError => Results.Problem(
+                or OfficeErrorCodes.DataverseError
+                or OfficeErrorCodes.InternalError => Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(error.Code),
                 title: OfficeErrorCodes.GetTitle(error.Code),
                 detail: error.Message,

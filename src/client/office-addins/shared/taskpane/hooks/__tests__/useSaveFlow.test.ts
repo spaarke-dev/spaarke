@@ -406,6 +406,39 @@ describe('useSaveFlow', () => {
     });
   });
 
+  describe('Unexpected server error (task 075)', () => {
+    it('a 500 OFFICE_INTERNAL problem ends in the error state with the server message, offering a retry', async () => {
+      // Task 075: an unexpected server exception is now a 500 (it was a 400 carrying ex.Message).
+      const problem = {
+        type: 'https://spaarke.com/errors/office/internal-error',
+        title: 'Save Failed',
+        status: 500,
+        detail:
+          'The save could not be completed. Try again; if it keeps failing, contact support with the correlation id.',
+        errorCode: 'OFFICE_INTERNAL',
+        retryable: true,
+        correlationId: 'corr-075',
+      };
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 500, text: async () => JSON.stringify(problem) });
+
+      const onError = jest.fn();
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken, onError }));
+
+      act(() => {
+        result.current.setSelectedEntity(mockEntity);
+      });
+
+      await act(async () => {
+        await result.current.startSave(mockContext);
+      });
+
+      expect(result.current.flowState).toBe('error');
+      expect(result.current.error?.message).toBe(problem.detail);
+      expect(result.current.error?.recoverable).toBe(true);
+      expect(onError).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe('Duplicate Detection', () => {
     it('handles duplicate response', async () => {
       const duplicateResponse = {
