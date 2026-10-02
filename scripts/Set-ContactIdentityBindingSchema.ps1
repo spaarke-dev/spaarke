@@ -172,6 +172,18 @@ function Invoke-DvWrite([string]$Method, [string]$Path, $Body, [hashtable]$Extra
     Invoke-RestMethod -Uri "$Api/$Path" -Headers $h -Method $Method -Body $json
 }
 function Try-DvGet([string]$Path) { try { Invoke-DvGet $Path } catch { $null } }
+# Dataverse metadata writes propagate asynchronously: a column or global choice created a moment ago can still 404
+# on the next read (live run 2026-10-02: the mirror column was invisible right after its create, so the copy and the
+# key were skipped). Poll a read until it answers, or give up loudly — never treat "not visible yet" as "absent".
+function Wait-DvRead([string]$Path, [string]$What, [int]$Attempts = 12, [int]$DelaySeconds = 10) {
+    for ($i = 1; $i -le $Attempts; $i++) {
+        $r = Try-DvGet $Path
+        if ($r) { return $r }
+        Write-Host "    waiting for $What to become readable ($i/$Attempts)..."
+        Start-Sleep -Seconds $DelaySeconds
+    }
+    throw "$What was created but is still not readable after $($Attempts * $DelaySeconds)s; re-run the script (it is idempotent)."
+}
 function New-Label([string]$Text) {
     @{ '@odata.type' = 'Microsoft.Dynamics.CRM.Label'; LocalizedLabels = @(@{ '@odata.type' = 'Microsoft.Dynamics.CRM.LocalizedLabel'; Label = $Text; LanguageCode = 1033 }) }
 }
@@ -220,7 +232,9 @@ else {
         FormatName    = @{ Value = 'Text' }
     } | Out-Null
     Report 'DONE' "created contact.$MirrorColumn"
-    $mirrorAttr = Try-DvGet "EntityDefinitions(LogicalName='contact')/Attributes(LogicalName='$MirrorColumn')?`$select=LogicalName,IsSecured,MetadataId"
+    $mirrorAttr = Wait-DvRead "EntityDefinitions(LogicalName='contact')/Attributes(LogicalName='$MirrorColumn')?`$select=LogicalName,IsSecured,MetadataId" "contact.$MirrorColumn metadata"
+    # The data endpoint can lag the metadata endpoint: the copy below selects the column, so wait for that too.
+    Wait-DvRead "contacts?`$select=contactid,$MirrorColumn&`$top=1" "contact.$MirrorColumn in data queries" | Out-Null
 }
 $mirrorReadable = [bool]$mirrorAttr
 $select = if ($mirrorReadable) { "contactid,$BindingColumn,$MirrorColumn" } else { "contactid,$BindingColumn" }
@@ -327,7 +341,7 @@ Ensure-GlobalOptionSet $ReasonOptionSet 'Identity Collision Reason' $ReasonOptio
 $columns = @(
     @{ Logical = 'sprk_identityplane'; Schema = 'sprk_IdentityPlane'; Display = 'Identity Plane'
        Description = 'Which sign-in plane wrote sprk_externalobjectid: External (CIAM) or Workforce. Written by the BFF only, always together with the oid (task 141).'
-       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; 'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions(Name='$PlaneOptionSet')" } },
+       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; }; OptionSet = $PlaneOptionSet },
     @{ Logical = 'sprk_identitycollisionon'; Schema = 'sprk_IdentityCollisionOn'; Display = 'Identity Collision On'
        Description = 'When an identity collision was flagged on this contact. Empty = no open collision. Cleared by the identity-link reconciliation job once an operator resolves it.'
        Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'; Format = 'DateAndTime'; DateTimeBehavior = @{ Value = 'UserLocal' } } },
@@ -336,10 +350,10 @@ $columns = @(
        Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'; MaxLength = 100; FormatName = @{ Value = 'Text' } } },
     @{ Logical = 'sprk_identitycollisionplane'; Schema = 'sprk_IdentityCollisionPlane'; Display = 'Identity Collision Plane'
        Description = 'The sign-in plane of the colliding identity.'
-       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; 'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions(Name='$PlaneOptionSet')" } },
+       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; }; OptionSet = $PlaneOptionSet },
     @{ Logical = 'sprk_identitycollisionreason'; Schema = 'sprk_IdentityCollisionReason'; Display = 'Identity Collision Reason'
        Description = 'Why the binding was refused. See SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, identity collisions.'
-       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; 'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions(Name='$ReasonOptionSet')" } },
+       Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'; }; OptionSet = $ReasonOptionSet },
     @{ Logical = 'sprk_identitycollisionparties'; Schema = 'sprk_IdentityCollisionParties'; Display = 'Identity Collision Parties'
        Description = 'EVERY identity that collided with this contact (JSON: oid, plane, reason, time), the first one being the four Identity Collision columns. Written by the BFF; the reconciliation job drops a party once its collision no longer holds and clears the flag when none does. Do not edit by hand: an unreadable value keeps the flag until an operator clears it.'
        Body = @{ '@odata.type' = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'; Format = 'TextArea'; MaxLength = 4000 } }
@@ -350,6 +364,13 @@ foreach ($col in $columns) {
     if ($Verify) { Report 'MISSING' "contact.$($col.Logical)"; continue }
     if ($IsDryRun) { Report 'WOULD' "create contact.$($col.Logical)"; continue }
     $body = $col.Body.Clone()
+    if ($col.OptionSet) {
+        # The metadata API binds a global choice by its MetadataId GUID only; Name='...' is refused with
+        # "Guid should contain 32 digits with 4 dashes" (live run 2026-10-02). Resolve it (with the propagation wait,
+        # since the choice may have been created moments ago in step (c)).
+        $os = Wait-DvRead "GlobalOptionSetDefinitions(Name='$($col.OptionSet)')?`$select=MetadataId" "global choice $($col.OptionSet)"
+        $body['GlobalOptionSet@odata.bind'] = "/GlobalOptionSetDefinitions($($os.MetadataId))"
+    }
     $body.SchemaName = $col.Schema
     $body.DisplayName = New-Label $col.Display
     $body.Description = New-Label $col.Description
@@ -441,11 +462,24 @@ foreach ($f in $SecuredFields) {
         }
         if ($Verify) { Report 'MISSING' "$($spec.Name) on $($f.Entity).$($f.Attribute)"; continue }
         if ($IsDryRun) { Report 'WOULD' "grant $($spec.Name) on $($f.Entity).$($f.Attribute) (read=4 create=$($spec.Create) update=$($spec.Update))"; continue }
-        Invoke-DvWrite POST 'fieldpermissions' @{
-            entityname = $f.Entity; attributelogicalname = $f.Attribute
-            canread = 4; cancreate = $spec.Create; canupdate = $spec.Update
-            'fieldsecurityprofileid@odata.bind' = "/fieldsecurityprofiles($($spec.Id))"
-        } | Out-Null
+        # Securing a column propagates asynchronously: the FIRST grant after securing may succeed while the second is
+        # refused 0x8004f508 "... is NOT secured for entity fieldpermission" (live run 2026-10-02, on both columns).
+        # Retry that one error; anything else propagates.
+        for ($attempt = 1; ; $attempt++) {
+            try {
+                Invoke-DvWrite POST 'fieldpermissions' @{
+                    entityname = $f.Entity; attributelogicalname = $f.Attribute
+                    canread = 4; cancreate = $spec.Create; canupdate = $spec.Update
+                    'fieldsecurityprofileid@odata.bind' = "/fieldsecurityprofiles($($spec.Id))"
+                } | Out-Null
+                break
+            } catch {
+                $notYetSecured = "$($_.ErrorDetails.Message) $($_.Exception.Message)" -match '0x8004f508'
+                if (-not $notYetSecured -or $attempt -ge 12) { throw }
+                Write-Host "    $($f.Entity).$($f.Attribute) not yet seen as secured by the field-permission service; retrying ($attempt/12)..."
+                Start-Sleep -Seconds 10
+            }
+        }
         Report 'DONE' "granted $($spec.Name) on $($f.Entity).$($f.Attribute)"
     }
 

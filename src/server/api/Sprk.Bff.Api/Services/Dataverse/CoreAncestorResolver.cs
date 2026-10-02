@@ -87,9 +87,12 @@ public sealed class CoreAncestorResolver
     /// access edge.
     /// </summary>
     /// <remarks>
-    /// ⚠️ Not every child entity carries all four: <c>sprk_todo</c> has no <c>sprk_regardingservicerequest</c>
-    /// while <c>sprk_communication</c> does. Presence is therefore always resolved against live metadata, never
-    /// assumed — reading a non-existent column would fault and turn a schema gap into a blocked write.
+    /// ⚠️ Not every child entity carries all four: <c>sprk_invoice</c> carries none of them (it links through
+    /// typed <c>sprk_matter</c> / <c>sprk_project</c> lookups), while <c>sprk_todo</c> and <c>sprk_event</c>
+    /// carry all four (live spaarkedev1, read-only, 2026-10-01 — an earlier note here
+    /// that <c>sprk_todo</c> lacks <c>sprk_regardingservicerequest</c> was stale). Presence is therefore always
+    /// resolved against live metadata, never assumed — reading a non-existent column would fault and turn a
+    /// schema gap into a blocked write.
     /// </remarks>
     public static readonly IReadOnlyList<(string EntityType, string LookupAttribute)> CoreAncestorLookups =
     [
@@ -283,8 +286,10 @@ public sealed class CoreAncestorResolver
     /// Apply derived ancestor stamps to a child entity being written, skipping any the host cannot store.
     /// </summary>
     /// <remarks>
-    /// A derived ancestor the host has no column for (a <c>sprk_todo</c> whose ancestor is a Service Request —
-    /// <c>sprk_todo</c> has no <c>sprk_regardingservicerequest</c>) is a genuine hole in child inheritance. It is
+    /// A derived ancestor the host has no column for (a child entity lacking the matching
+    /// <c>sprk_regarding{core}</c> column — e.g. <c>sprk_invoice</c>, which carries none of them; the earlier
+    /// example, <c>sprk_todo</c> lacking <c>sprk_regardingservicerequest</c>, was stale as of live metadata on
+    /// 2026-10-01) is a genuine hole in child inheritance. It is
     /// RETURNED as <c>unstampable</c> and logged, never silently dropped: it is a schema finding for the owner,
     /// not a runtime condition to paper over.
     /// </remarks>

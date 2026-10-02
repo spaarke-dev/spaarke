@@ -102,6 +102,8 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
     {
         _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("a refused request writes no row and creates no Contact");
         _fixture.Dataverse.ContactUpdates.Should().BeEmpty("a refused request binds no CIAM oid");
+        _fixture.IdentityStore.Writes.Should().BeEmpty(
+            "nor through the identity store (task 141: the oid bind and any collision flag are written there)");
         _fixture.Dataverse.QueriedEntitySets.Should().NotContain(GrantTable,
             "the policy runs before the upsert's own pre-existence query");
     }
@@ -151,8 +153,9 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await ProblemOf(response)).ReasonCode.Should().Be(RecordRestricted);
-        _fixture.Dataverse.QueriedEntitySets.Should().NotContain("contacts",
-            "the onboarding seam's first step — the Contact lookup — is never reached, so no CIAM account is provisioned");
+        _fixture.IdentityStore.Reads.Should().BeEmpty(
+            "the onboarding seam's first step — the Contact lookup, through the identity binder since task 141 — is " +
+            "never reached, so no CIAM account is provisioned");
         AssertNothingWritten();
     }
 
@@ -165,7 +168,7 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
         (await ProblemOf(response)).ReasonCode.Should().Be(RecordRestricted);
-        _fixture.Dataverse.QueriedEntitySets.Should().NotContain("contacts");
+        _fixture.IdentityStore.Reads.Should().BeEmpty("the Contact lookup (the identity binder, task 141) is never reached");
         AssertNothingWritten();
     }
 
@@ -263,7 +266,7 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         (await ProblemOf(response)).ReasonCode.Should().Be(PolicyUnreadable);
-        _fixture.Dataverse.QueriedEntitySets.Should().NotContain("contacts");
+        _fixture.IdentityStore.Reads.Should().BeEmpty("the Contact lookup (the identity binder, task 141) is never reached");
         AssertNothingWritten();
     }
 

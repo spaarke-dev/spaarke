@@ -1190,8 +1190,6 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
     private string? Header(string name) =>
         _accessor.HttpContext?.Request.Headers.TryGetValue(name, out var v) == true ? v.ToString() : null;
 
-    // Task 141 removed ResolveExternalContactAsync from the base (identity binding moved to ContactIdentityBinder),
-    // so this double no longer overrides it.
     // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
     // and fails CLOSED — every record would read as secure AND restricted and this double would
     // compose to nothing. Unflagged is the right default for a test that predates the vetoes.

@@ -320,7 +320,14 @@ public sealed class ContactIdentityBinder
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
 
-        var (decision, emailLookup) = await DecideInviteAsync(email, ct).ConfigureAwait(false);
+        var emailLookup = await _store.FindActiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
+        var decision = ContactBindingDecision.DecideInvite(emailLookup);
+        if (decision.Action == InviteContactAction.NeedReferenceLookup && decision.ContactId is { } candidate)
+        {
+            var refs = await _store.FindSystemUsersLinkingAsync(new[] { candidate }, ct).ConfigureAwait(false);
+            decision = ContactBindingDecision.DecideInvite(emailLookup, refs);
+        }
+
         var row = decision.ContactId is { } id ? emailLookup.Rows.FirstOrDefault(r => r.ContactId == id) : null;
 
         if (decision.Action == InviteContactAction.Refuse)
@@ -338,36 +345,6 @@ public sealed class ContactIdentityBinder
 
         return new InviteContactResolution(decision.Action, decision.ContactId, row?.ETag, decision.ReasonCode,
             InviteMessage(decision.ReasonCode));
-    }
-
-    /// <summary>
-    /// The SAME invite decision <see cref="ResolveInviteContactAsync"/> makes — the same ACTIVE-contact lookup and
-    /// reference lookup — but READ-ONLY: a refusal raises no collision flag. <c>/invite-and-grant</c> calls it before
-    /// onboarding so its grant pre-check judges the contact onboarding would use, without writing anything; the
-    /// refusal (and its flag) stays owned by the onboarding call that follows.
-    /// </summary>
-    public async Task<InviteContactResolution> PeekInviteContactAsync(string email, CancellationToken ct)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(email);
-
-        var (decision, emailLookup) = await DecideInviteAsync(email, ct).ConfigureAwait(false);
-        var row = decision.ContactId is { } id ? emailLookup.Rows.FirstOrDefault(r => r.ContactId == id) : null;
-        return new InviteContactResolution(decision.Action, decision.ContactId, row?.ETag, decision.ReasonCode,
-            InviteMessage(decision.ReasonCode));
-    }
-
-    /// <summary>The invite decision over the email and (when the decision asks for it) the linking systemusers.</summary>
-    private async Task<(InviteDecision Decision, ContactLookup EmailLookup)> DecideInviteAsync(string email, CancellationToken ct)
-    {
-        var emailLookup = await _store.FindActiveContactsByEmailAsync(email, ct).ConfigureAwait(false);
-        var decision = ContactBindingDecision.DecideInvite(emailLookup);
-        if (decision.Action == InviteContactAction.NeedReferenceLookup && decision.ContactId is { } candidate)
-        {
-            var refs = await _store.FindSystemUsersLinkingAsync(new[] { candidate }, ct).ConfigureAwait(false);
-            decision = ContactBindingDecision.DecideInvite(emailLookup, refs);
-        }
-
-        return (decision, emailLookup);
     }
 
     /// <summary>

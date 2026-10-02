@@ -10,6 +10,20 @@
 
 Spaarke is an **enterprise AI-directed legal operations intelligence platform** built on Power Apps/Dataverse, SharePoint Embedded, and Azure AI services; backend in **.NET 10 Minimal API**; frontend in **custom React Code Pages and PCF components**; the AI layer combines an internal **JPS (JSON Prompt Schema)** playbook system with Azure OpenAI deployments and a retrieval layer over SharePoint Embedded documents.
 
+### 1.1 Product names — read this before "fixing" a name (added 2026-10-02)
+
+| Product name | What it is | Engineering identifiers — **unchanged, do not rename** |
+|---|---|---|
+| **Spaarke Console** | The three-pane user app. **This is the current name for what the codebase calls "SpaarkeAi."** | `sprk_spaarkeai` (Dataverse web resource) · `src/solutions/SpaarkeAi/` · `scripts/Deploy-SpaarkeAi.ps1` · `deploy-spaarke-ai.yml` |
+| **Spaarke Matter Management** | The model-driven app | — |
+| **Spaarke External Access** | The external SPA | — |
+| **Spaarke Connect** (SKU) / **Connection Engine** (component) | Third-party data binding | `Sprk.Connect.*` |
+| **Decision Record** | The append-only record of what was decided | *ledger* remains correct in engineering docs |
+
+**The rule**: **product name and engineering identifier are allowed to differ, and here they deliberately do.** Read "SpaarkeAi" in code, paths, web-resource names and historical docs as **the Console**. Do **not** sweep ~705 "SpaarkeAi" occurrences across 256 files to "correct" them — this table is what makes them readable, and a rename is tracked separately at **[#1095](https://github.com/spaarke-dev/spaarke/issues/1095)**, deferred because **37 of 62 active projects declare `SpaarkeAi = Y`** and would inherit the merge conflicts.
+
+Naming authority: `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3. A terminology change originates there and nowhere else.
+
 ---
 
 ## 2. Source of Truth: Code, then `.claude/`, then `docs/`

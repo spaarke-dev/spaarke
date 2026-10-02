@@ -52,13 +52,14 @@ public static class InviteExternalUserEndpoint
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            // 409: the email is an identity collision (task 141).
+            // 409 (task 141): the email's contact belongs to another sign-in (a work identity, an internal user's
+            // contact), is ambiguous, or carries an unreadable binding — refused and flagged; no CIAM account.
             .ProducesProblem(StatusCodes.Status409Conflict)
             // 422: the named record is Restricted, so no contact may be invited to it (task 138).
-            // 503: the record's access settings (138) or the contact lookup (141) could not be read. Before any
-            // Contact or CIAM write.
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
+            // 503: the record's access settings could not be read (task 138, before any Contact or CIAM work), or
+            // the contact lookup could not be read (task 141, sdap.access.invite.contact_lookup_failed).
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
@@ -117,7 +118,8 @@ public static class InviteExternalUserEndpoint
         try
         {
             var outcome = await ProvisionAsync(
-                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger, ct);
+                request, dataverseClient, ciamProvisioner, emailService, binder, portalUrl, logger,
+                resolution: null, ct);
             if (outcome.Failure is { } failure)
             {
                 return LookupFailureResult(failure, httpContext);
@@ -170,6 +172,12 @@ public static class InviteExternalUserEndpoint
     /// lookup could not be read. Throws on any other hard failure (Contact create, CIAM create, oid bind). Shared
     /// by <c>/invite</c> and <c>/invite-and-grant</c> (task 029).
     /// </summary>
+    /// <param name="resolution">
+    /// The invite resolution the caller ALREADY made with <see cref="ContactIdentityBinder.ResolveInviteContactAsync"/>,
+    /// or <c>null</c> to resolve here. <c>/invite-and-grant</c> resolves once, BEFORE onboarding, judges that contact
+    /// with the grant checks (task 139), and passes the same resolution in — so the contact the checks judged IS the
+    /// contact onboarding provisions: one email→contact answer, never a second, possibly different, lookup.
+    /// </param>
     internal static async Task<ProvisionOutcome> ProvisionAsync(
         InviteExternalUserRequest request,
         DataverseWebApiClient dataverseClient,
@@ -178,21 +186,20 @@ public static class InviteExternalUserEndpoint
         ContactIdentityBinder binder,
         string portalUrl,
         ILogger logger,
+        InviteContactResolution? resolution,
         CancellationToken ct)
     {
-        var resolution = await binder.ResolveInviteContactAsync(request.Email, ct);
+        resolution ??= await binder.ResolveInviteContactAsync(request.Email, ct);
+
+        if (NotProvisionable(resolution, request.Email, logger) is { } stopped)
+        {
+            return stopped;
+        }
 
         Guid contactId;
         string? etag = null;
         switch (resolution.Action)
         {
-            case InviteContactAction.Refuse:
-                logger.LogWarning(
-                    "[EXT-INVITE] Refused invite for {Email} ({ReasonCode}) — no CIAM account created",
-                    request.Email, resolution.ReasonCode);
-                return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "Refused",
-                    new InviteRefusal(resolution.ReasonCode!, resolution.Message ?? "The invite was refused."));
-
             case InviteContactAction.AlreadyProvisioned:
                 // Idempotency gate: an oid bound on the CIAM plane means the CIAM account already exists — do NOT
                 // create a second account (and do not re-send the onboarding email).
@@ -209,21 +216,6 @@ public static class InviteExternalUserEndpoint
             case InviteContactAction.CreateContact:
                 contactId = await CreateContactAsync(dataverseClient, request, logger, ct);
                 break;
-
-            case InviteContactAction.Fail:
-                // The email or reference lookup could not be read. Nothing was decided, created or flagged. The
-                // decision's own reason code and message reach the client (503) — never folded into the generic
-                // "Failed to onboard" 500.
-                var code = resolution.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed;
-                logger.LogWarning(
-                    "[EXT-INVITE] Contact lookup for {Email} could not be read ({ReasonCode}) — nothing created",
-                    request.Email, code);
-                // The last fallback is deliberately NOT the decision's wording, so a test can tell which one reached
-                // the client (third fix round, verifier INFO finding).
-                return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "LookupFailed",
-                    Failure: new InviteLookupFailure(code,
-                        resolution.Message ?? ContactIdentityBinder.InviteMessage(code)
-                        ?? "The invite could not be completed. Nothing was created; try again."));
 
             default:
                 // NeedReferenceLookup (or an action this code does not know) cannot reach here: the binder
@@ -265,6 +257,43 @@ public static class InviteExternalUserEndpoint
             ciamOid, request.Email, contactId);
 
         return new ProvisionOutcome(contactId, "Provisioned");
+    }
+
+    /// <summary>
+    /// The outcome of an invite resolution that must provision NOTHING — a refusal (409; the binder has already
+    /// flagged the contact) or an unreadable lookup (503) — or <c>null</c> when the resolution names a contact to
+    /// provision (or to create). The ONE mapping, used by <see cref="ProvisionAsync"/> and by <c>/invite-and-grant</c>'s
+    /// pre-onboarding check, so both answer a refusal and a lookup failure with the same code and message.
+    /// </summary>
+    internal static ProvisionOutcome? NotProvisionable(InviteContactResolution resolution, string email, ILogger logger)
+    {
+        switch (resolution.Action)
+        {
+            case InviteContactAction.Refuse:
+                logger.LogWarning(
+                    "[EXT-INVITE] Refused invite for {Email} ({ReasonCode}) — no CIAM account created",
+                    email, resolution.ReasonCode);
+                return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "Refused",
+                    new InviteRefusal(resolution.ReasonCode!, resolution.Message ?? "The invite was refused."));
+
+            case InviteContactAction.Fail:
+                // The email or reference lookup could not be read. Nothing was decided, created or flagged. The
+                // decision's own reason code and message reach the client (503) — never folded into the generic
+                // "Failed to onboard" 500, and never read as "no such contact".
+                var code = resolution.ReasonCode ?? ContactBindingDecision.InviteContactLookupFailed;
+                logger.LogWarning(
+                    "[EXT-INVITE] Contact lookup for {Email} could not be read ({ReasonCode}) — nothing created",
+                    email, code);
+                // The last fallback is deliberately NOT the decision's wording, so a test can tell which one reached
+                // the client (third fix round, verifier INFO finding).
+                return new ProvisionOutcome(resolution.ContactId ?? Guid.Empty, "LookupFailed",
+                    Failure: new InviteLookupFailure(code,
+                        resolution.Message ?? ContactIdentityBinder.InviteMessage(code)
+                        ?? "The invite could not be completed. Nothing was created; try again."));
+
+            default:
+                return null;
+        }
     }
 
     /// <summary>The 409 ProblemDetails for a refused invite (both <c>/invite</c> and <c>/invite-and-grant</c>).</summary>

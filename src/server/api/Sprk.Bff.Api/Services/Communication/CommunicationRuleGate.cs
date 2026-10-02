@@ -30,7 +30,13 @@ public sealed record CommunicationRuleDecision(
     double Confidence,
     double Threshold,
     bool PrivilegeFlagged,
-    string Reason);
+    string Reason,
+    /// <summary>Days from now for the RI task's <c>sprk_duedate</c> — the matched rule's
+    /// <c>sprk_taskduedays</c>, else <see cref="CommsPolicyOptions.DefaultTaskDueDays"/>.</summary>
+    int TaskDueDays = 1,
+    /// <summary>Days from now for the RI task's <c>sprk_finalduedate</c> — the matched rule's
+    /// <c>sprk_taskfinalduedays</c>, else <see cref="CommsPolicyOptions.DefaultTaskFinalDueDays"/>.</summary>
+    int TaskFinalDueDays = 3);
 
 /// <summary>
 /// The comms Responsive-Intelligence policy gate (spec FR-12). Decides WHETHER to act on an assessed
@@ -70,10 +76,15 @@ public sealed class CommunicationRuleGate
     private const string FlagPrivilegeColumn = "sprk_flagprivilege";
     private const string EnabledColumn = "sprk_enabled";
     private const string PriorityColumn = "sprk_priority";
+    // Added 2026-09-29: the RI task's due dates are DECLARED on the rule, not compiled in -- same
+    // rule-wins-over-options pattern as sprk_confidencethreshold. Purpose of the rule table.
+    private const string TaskDueDaysColumn = "sprk_taskduedays";
+    private const string TaskFinalDueDaysColumn = "sprk_taskfinalduedays";
 
     private static readonly string[] RuleColumns =
     {
         IdColumn, TenantColumn, MatterColumn, ThresholdColumn, FlagPrivilegeColumn, PriorityColumn,
+        TaskDueDaysColumn, TaskFinalDueDaysColumn,
     };
 
     private readonly IGenericEntityService _entityService;
@@ -138,7 +149,10 @@ public sealed class CommunicationRuleGate
             Confidence: request.Confidence,
             Threshold: threshold,
             PrivilegeFlagged: privilege,
-            Reason: authorize ? "rule-matched-confidence-met" : "rule-matched-confidence-below-threshold");
+            Reason: authorize ? "rule-matched-confidence-met" : "rule-matched-confidence-below-threshold",
+            TaskDueDays: matched.GetAttributeValue<int?>(TaskDueDaysColumn) ?? _options.DefaultTaskDueDays,
+            TaskFinalDueDays: matched.GetAttributeValue<int?>(TaskFinalDueDaysColumn)
+                              ?? _options.DefaultTaskFinalDueDays);
 
         LogDecision(result, request);
         return result;
@@ -179,10 +193,12 @@ public sealed class CommunicationRuleGate
         return value.HasValue ? (double)value.Value : null;
     }
 
-    private static CommunicationRuleDecision Deny(
+    private CommunicationRuleDecision Deny(
         CommunicationRuleDecisionRequest request, double threshold, bool privilege, string reason)
         => new(Authorize: false, MatchedRuleId: null, Confidence: request.Confidence,
-               Threshold: threshold, PrivilegeFlagged: privilege, Reason: reason);
+               Threshold: threshold, PrivilegeFlagged: privilege, Reason: reason,
+               TaskDueDays: _options.DefaultTaskDueDays,
+               TaskFinalDueDays: _options.DefaultTaskFinalDueDays);
 
     private void LogDecision(CommunicationRuleDecision d, CommunicationRuleDecisionRequest request)
         => _logger.LogInformation(

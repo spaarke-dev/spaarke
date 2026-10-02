@@ -294,18 +294,13 @@ public class CallerPrincipalResolverTests
         var both = Guid.NewGuid();
         var limited = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsLimited: true);
 
-        // Task 141: the CIAM contact resolves through the oid binding (the binder's store), not the participation service.
+        // Task 141: the CIAM caller's contact is named by the oid binding (the identity store, through the binder),
+        // no longer by the participation service — which now supplies only the grant data.
         var oid = Guid.NewGuid();
-        var store = new InMemoryContactIdentityStore();
-        store.AddContact(contactId, oid: oid.ToString("D"), plane: IdentityPlaneMarker.External);
+        var identities = new InMemoryContactIdentityStore();
+        identities.AddContact(contactId, oid: oid.ToString("D"), plane: IdentityPlaneMarker.External);
 
-        var participations = new Mock<ExternalParticipationService>(
-            new HttpClient(),
-            Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
-            new ConfigurationBuilder().Build(),
-            Mock.Of<Azure.Core.TokenCredential>(),
-            Mock.Of<IHttpContextAccessor>(),
-            Mock.Of<ILogger<ExternalParticipationService>>());
+        var participations = CreateParticipationServiceMock();
         participations.Setup(s => s.GetGrantSetAsync(contactId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ExternalGrantSet
             {
@@ -342,7 +337,7 @@ public class CallerPrincipalResolverTests
             Mock.Of<ILogger<AccessibleRecordSetService>>());
 
         var strategy = new CiamContactPrincipalStrategy(
-            IdentityBindingTestKit.Binder(store), evaluator, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
+            IdentityBindingTestKit.Binder(identities), evaluator, Mock.Of<ILogger<CiamContactPrincipalStrategy>>());
         var result = await strategy.ResolveAsync(
             new DefaultHttpContext { User = Principal(("oid", oid.ToString())) }, CancellationToken.None);
 
@@ -526,6 +521,16 @@ public class CallerPrincipalResolverTests
                 Rights = rights,
                 Sources = new AccessibleRecordSetSources(false, true, false),
             });
+
+    /// <summary>The participation service at its module boundary — grant data only since task 141.</summary>
+    private static Mock<ExternalParticipationService> CreateParticipationServiceMock() =>
+        new(
+            new HttpClient(),
+            Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
+            new ConfigurationBuilder().Build(),
+            Mock.Of<Azure.Core.TokenCredential>(),
+            Mock.Of<IHttpContextAccessor>(),
+            Mock.Of<ILogger<ExternalParticipationService>>());
 
     /// <summary>A strategy stub that records whether it was invoked (for plane-routing tests).</summary>
     private sealed class StubStrategy : ICallerPrincipalStrategy

@@ -310,3 +310,170 @@ item, and what happened to it:
 
 - `AddUserToTeam_WhenTheSecureRecordLookupFails_IsRefused_FailClosed`: the team-membership guard shares the status check F1 found unpinned.
 - The three ambiguity tests: verifier finding F2.
+
+---
+
+## 13. Live gate run 2026-10-02 (spaarkedev1)
+
+> Section 12 was already taken by verifier round 2, so this is section 13. The instruction named it "12. Live gate run 2026-10-02".
+
+- **Authority:** owner round 4 (2026-10-01), items 1–3 and 6, `session27-owner-decisions-and-research.md`.
+- **Operator:** the `az` login `ralph.schroeder@spaarke.com`, systemuser `1d02f31c-1872-f011-b4cb-7c1e52671ad0`. Dataverse tokens were minted for the explicit URL.
+- **Scripts:** from worktree `C:\wt28b` at `bca0941f6`.
+- **BFF:** `https://spaarke-bff-dev.azurewebsites.net`. The 144 build is confirmed deployed: `GET /api/admin/jobs` lists `secure-record-isolation-census`.
+- **Times:** all UTC, 03:46–04:00Z.
+
+**Outcome:** the cutover is done and `-Verify` passes.
+
+🔴 **The run STOPPED at step 8 (NFR-05).** Clause 1 now names six principals beyond the three accepted root-BU users. The cause is a change outside this run: the **root BU's default team `Spaarke` holds `Spaarke Basic User` (Deep Read on project, matter and work assignment)**. So every human in the root BU reaches the Secure BU by depth. Steps 9 and 10 were **not run**.
+
+### 13.1 Step 1: pre-checks (read-only)
+
+| Check | Result |
+|---|---|
+| `organization.sharetopreviousowneronassign` | **False** |
+| systemusers in Secure BU `d9ec0b6f-80a0-f111-aaac-000d3a99d1d7` | **0** |
+| default team `Secure Record` (`daec0b6f-80a0-f111-aaac-000d3a99d1d7`) members | **0** |
+| teams named `Secure Record Owners` (anywhere) | **0** |
+| `Secure Record Owner` (`e4ebabd9-b4a0-f111-aaac-000d3a99d1d7`) holders | the default team only; 0 users; 8 privileges |
+| `65a3fab2-77a5-f111-aaad-70a8a590c51c` | secure; owned by team `cf15f587` (default team of `Spaarke Business Unit 1`); BU `cb15f587`; container `b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm`; 0 shares; created by `ralph.schroeder@spaarke.com` (the operator) |
+
+### 13.2 Step 2: the named team, the role, and the assignment probe
+
+- **Guide §4.2:** `POST teams` → 204. Team `Secure Record Owners` = **`6eabc7f9-13be-f111-a05b-0022482913fc`**: `teamtype` 0, `isdefault` false, BU `d9ec0b6f`, administrator = the operator. **0 members** read back.
+- **Guide §5.5a:** `POST teams(6eabc7f9…)/teamroles_association/$ref` → `roles(e4ebabd9…)` → 204. Read back: the team holds exactly `Secure Record Owner`.
+- **§7 item 6, 3 polls ~20 s apart.** Each poll:
+  - created a probe `sprk_project` (`sprk_issecure=true`, owned by the operator in root BU `06fbf21c`);
+  - ran `PATCH ownerid@odata.bind → /teams(6eabc7f9…)`;
+  - read it back;
+  - deleted it.
+
+| Poll | Probe id | PATCH | Owning team | Owning BU flipped to Secure BU | Delete / read-back |
+|---|---|---|---|---|---|
+| 1 03:48:10Z | `2fe1b215-14be-f111-a05b-0022482913fc` | 204 | `6eabc7f9` ✅ | ✅ | 204 / 404 |
+| 2 03:48:33Z | `868f7223-14be-f111-a05b-0022482913fc` | 204 | `6eabc7f9` ✅ | ✅ | 204 / 404 |
+| 3 03:48:55Z | `23b06e2f-14be-f111-a05b-3833c5e9614d` | 204 | `6eabc7f9` ✅ | ✅ | 204 / 404 |
+
+### 13.3 Step 3: migration
+
+- **Dry run.** Exit **2**. Plan **0 rows**. Census shows 1 row: `[NOT-ISOLATED] project 65a3fab2 'Test New Matter via Workspace' owningTeam=cf15f587 owningBu=cb15f587 shares=0 createdBy=Ralph Schroeder (app=False) container=own content=none`. The only STOP: `Assign cascades from a root to: sharepointdocument, sharepointdocumentlocation, team`. Role holders: the default team plus `Secure Record Owners`. Named team: 0 members. BU: 0 users.
+- **`-Apply -AcceptedAssignCascade team,sharepointdocumentlocation,sharepointdocument`:** exit **0**. All 6 cascades `ACCEPTED`. `Nothing to migrate: every secure row in the Secure Record BU is already owned by the named team.` **No row was written.**
+- **Second dry run** (cascade list passed): exit **0**. **`PLAN: 0 row(s)`**, no STOP. `DRY RUN: nothing was written.`
+
+### 13.4 Step 4: provision `65a3fab2` through the endpoint
+
+`POST /api/v1/external-access/provision-project`, called with a **delegated** token: `az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`, which gives `scp SDAP.Access user_impersonation`, upn `ralph.schroeder@spaarke.com`. Body: `{"recordType":"project","recordId":"65a3fab2-77a5-f111-aaad-70a8a590c51c","projectRef":"Test New Matter via Workspace"}`. Result **200**:
+
+```json
+{ "businessUnitId": "d9ec0b6f-80a0-f111-aaac-000d3a99d1d7", "businessUnitName": "Secure Record",
+  "ownerTeamId": "6eabc7f9-13be-f111-a05b-0022482913fc", "ownerTeamName": "Secure Record Owners",
+  "speContainerId": "b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN",
+  "sharedToCreatorSystemUserId": "1d02f31c-1872-f011-b4cb-7c1e52671ad0", "additionalPrincipalsShared": 0,
+  "recordType": "project", "recordId": "65a3fab2-77a5-f111-aaad-70a8a590c51c" }
+```
+
+Read back from Dataverse:
+- **Owner:** owning team `6eabc7f9` (the named team), owning BU `d9ec0b6f` (Secure Record). `sprk_issecure` is true.
+- **Shares:** exactly one POA row, to systemuser `1d02f31c` (the operator, who is the record's creator, per F8), `accessrightsmask` **262167**. That is Read+Write+Append+AppendTo+Share, which equals `CreatorAccessRights` (Collaborate + ShareAccess).
+- **Container:** `sprk_containerid` is now a **new** container of its own, `b!MVasATu…`, referenced by 1 root.
+  - ⚠️ This was **not** "its own container intact". The endpoint creates a container on every provisioning and overwrites `sprk_containerid` (`RecordContainerAsync`; the §3 option (a) wording, "a new container", says so).
+  - The previous container `b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm` is now referenced by **0** roots. The migration census had recorded "content=none" for it.
+  - It is an orphaned, empty SPE container. **Not deleted** (outside this run's allowed writes). Its removal is an owner or operator decision.
+
+### 13.5 Step 5: the role leaves the default team (guide §4.3 step 4)
+
+`DELETE teams(daec0b6f…)/teamroles_association(e4ebabd9…)/$ref` → **204**. Read back:
+- the default team holds **no roles**;
+- `Secure Record Owner` is held by **`Secure Record Owners` alone** (`isdefault=False`), with 0 users.
+
+### 13.6 Step 6: `Migrate-SecureRecordsToNamedOwnerTeam.ps1 -Verify` → **exit 0**
+
+```
+Named owner team     : Secure Record Owners (6eabc7f9-13be-f111-a05b-0022482913fc)
+Named team members   : 0
+Default team members : 0
+Users in Secure BU   : 0
+Owner role holders   : team 'Secure Record Owners'
+   [DONE                           ] project        65a3fab2 'Test New Matter via Workspace' owningTeam=6eabc7f9 owningUser=- owningBu=d9ec0b6f defaultTeam=False shares=1
+PLAN: 0 row(s) to move to 'Secure Record Owners'.
+VERIFY: PASS
+```
+
+### 13.7 Step 7: task 145 G1
+
+Recorded in `task-145-secure-owner-role-privileges.md` §11. Summary:
+- **Negative control:** refused 3/3, naming only `prvReadsprk_Invoice`, with privilegeCount=8.
+- **Script:** dry run → `-Apply` → §5.4 strip (removed exactly the re-injected SharePoint four) → `-Verify` exit 0 (9/9).
+- **Positive probes:** 3/3 succeeded. The sprk_analysis control was refused 3/3 with privilegeCount=9.
+
+### 13.8 Step 8: NFR-05 live test. 🔴 STOP
+
+Command: `SPAARKE_NFR05_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com`, `AZURE_TOKEN_CREDENTIALS=AzureCliCredential`, then `dotnet test C:\wt28b\tests\unit\Sprk.Bff.Api.Tests --filter FullyQualifiedName~SecureBusinessUnitRoleDepth_InTheTargetEnvironment`. Result: **Failed (1 of 1)**.
+
+> NFR-05 role-depth census for https://spaarkedev1.crm.dynamics.com: 6 business unit(s), 795 effective grant(s) of
+> prvReadsprk_Project / prvReadsprk_Matter / prvReadsprk_WorkAssignment (60 held by humans), 1 holder(s) of 'Secure
+> Record Owner', 1 team(s) named 'Secure Record Owners' with 0 member(s) of any kind, 0 systemuser(s) in 'Secure
+> Record', 1 owner role(s) in it covering 9 of 9 codified table(s) at Basic. Verdict: HumanPrincipalReachesSecureBusinessUnit.
+
+**Clauses 2, 2b, 3, 4 and 5 PASS.** No finding of those verdicts appears. This is the first live run in which they all pass:
+- the named team resolves;
+- it has 0 members;
+- it is the sole holder;
+- the BU has 0 users;
+- the role covers 9 of 9 codified tables.
+
+**Clause 1: 42 findings, all `HumanPrincipalReachesSecureBusinessUnit`, all Deep, all anchored at root BU `06fbf21c`.** The 2026-10-01 census had 17 findings and 282 grants (33 human).
+
+| Findings | Principal | How |
+|---|---|---|
+| 1–12 | Chelsea Friez, Lori Witkin | Spaarke Core User + Spaarke Office Add In User, direct. **Accepted** (owner round 4, item 1) |
+| 13–15 | `ralph.schroeder_hotmail.com#EXT#` | Spaarke Basic User, direct. **Accepted** |
+| 16–21 | Chelsea Friez, Lori Witkin | **Spaarke Basic User via team `Spaarke`**. NEW mechanism (accepted users) |
+| 22–24 | Ralph Schroeder `ralph.schroeder@spaarke.onmicrosoft.com` | Spaarke Basic User via team `Spaarke`. **NEW, not accepted** |
+| 25–27 | Final Test `final.test@demo.spaarke.com` | the same. **NEW** |
+| 28–30 | Ralph Schroeder `ralph.schroeder@spaarke.com` (the operator; the census calls him non-administrator) | the same. **NEW** |
+| 31–33 | Eyal Iffergan `eyal.iffergan@spaarke.com` | the same. **NEW** |
+| 34–36 | `ralph.schroeder_hotmail.com#EXT#` | the same (a second path for an accepted user) |
+| 37–39 | Jake Schroeder `jake.schroeder@demo.spaarke.com` | the same. **NEW** |
+| 40–42 | E2E Test `e2e.test2@demo.spaarke.com` | the same. **NEW** |
+
+**Read-only diagnosis.**
+- `Spaarke Basic User` has root copy `11f93c04-ddf6-f011-8406-7c1e520aa4df`, in root BU `06fbf21c`, modified 2026-09-30 02:43Z. It holds `prvReadsprk_Project`, `prvReadsprk_Matter` and `prvReadsprk_WorkAssignment` at **Deep**.
+- Its holders now:
+  - the hotmail guest (direct);
+  - the **root BU's default team `Spaarke` (`09fbf21c-1872-f011-b4cb-7c1e52671ad0`, 171 members; 9 enabled interactive users in the root BU)**;
+  - `Spaarke Business Unit 1`'s default team `cf15f587` (a sibling BU, which does not reach the Secure BU).
+- The 2026-10-01 censuses (§6, §12; 145 note §5) saw `Spaarke Basic User` only on the hotmail account. So the root default team's association happened after them, and outside this run.
+- The `audits` query on team `09fbf21c` returns no rows, so who made the change and when is unknown.
+- **This run wrote nothing to `Spaarke Basic User`, to team `Spaarke`, or to any user.**
+
+**Consequence:** every human in the root BU reads every secure project, matter and work assignment by depth, including the freshly provisioned `65a3fab2`. This is outside the owner's round-4 acceptance, which named exactly three users. Owner decision needed:
+- (a) remove `Spaarke Basic User` from the root default team `Spaarke`; or
+- (b) narrow the role's three Reads from Deep to Local; or
+- (c) accept it for dev.
+
+Recommendation: (a), and find who associated it. This run changed nothing, by instruction.
+
+### 13.9 Steps 9 and 10: NOT RUN (stopped at step 8)
+
+- **Step 9** (§7 item 7, the impersonated probe on `65a3fab2` plus the (g) matter and work assignment): not run.
+  - **No (g) test records were created.**
+  - With step 8's finding standing, a root-BU non-admin would read them. The probe user must sit in a NON-root BU (for example `Spaarke Business Unit 1`) once the run resumes.
+- **Step 10** (census job). Observed once **before** the stop, read-only, via `GET /api/admin/jobs` (the delegated token carries role `Admin`): `secure-record-isolation-census` is enabled, cron `*/15 * * * *`, last run 2026-10-02T03:45:00Z → 03:45:01Z, **`lastRunStatus: Failed`**.
+  - That run came BEFORE this run's first write (03:47Z), so it graded the pre-cutover state.
+  - `/api/admin/jobs/secure-record-isolation-census/status` was not queried after the stop.
+
+### 13.10 Every live write in this run
+
+| # | Entity | Id | What |
+|---|---|---|---|
+| 1 | team | `6eabc7f9-13be-f111-a05b-0022482913fc` | created `Secure Record Owners` (Owner, Secure BU, no members) |
+| 2 | teamroles_association | team `6eabc7f9…` ↔ role `e4ebabd9…` | associated `Secure Record Owner` |
+| 3–5 | sprk_project | `2fe1b215-14be-f111-a05b-0022482913fc`, `868f7223-14be-f111-a05b-0022482913fc`, `23b06e2f-14be-f111-a05b-3833c5e9614d` | §7 item 6 probes: created, assigned to the named team, deleted (404 on read-back) |
+| 6 | (none) | — | migration `-Apply`: 0 rows to move, nothing written |
+| 7 | sprk_project | `65a3fab2-77a5-f111-aaad-70a8a590c51c` | provisioned via the endpoint: owner → named team; POA share to `1d02f31c` (262167); new SPE container `b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN` recorded; old container `b!HBRbo…` orphaned (empty, not deleted) |
+| 8 | teamroles_association | team `daec0b6f…` ↔ role `e4ebabd9…` | **removed** (default team no longer holds the role) |
+| 9–13 | role `e4ebabd9…` privileges | — | task 145 G1: `AddPrivilegesRole` +`prvReadsprk_Invoice` (Basic), which re-injected the SharePoint four; then `RemovePrivilegeRole` ×4 removed exactly those four. Net change: +1 privilege |
+| 14–16 | sprk_invoice | `db6ecf10-15be-f111-a05b-0022482913fc`, `5959bb20-15be-f111-a05b-0022482913fc`, `76e58e2f-15be-f111-a05b-3833c5e9614d` | G1 positive probes: created team-owned, deleted (404 on read-back) |
+
+Refused creates (nothing written): 3 negative-control invoices and 3 sprk_analysis controls.
