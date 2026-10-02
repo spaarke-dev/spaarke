@@ -4,7 +4,7 @@
     <title>Make the Access Permission levels real — Standard / Limited / Restricted enforced at read AND write time on every plane; Limited implemented; communications inherit the parent's permission</title>
     <phase>Register-driven (authored 2026-09-30, session 27 — owner decisions round 2, grant-model group)</phase>
     <gate>after-135 (CIAM plane routed through the shared veto pipeline)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path change in the unified evaluator (pre-max suppression), new write-time refusals on the grant endpoints, an ADR-003 contract amendment, a shared UI component, a PCF, and a Dataverse column retirement. Tags bff-api/auth/pcf.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -336,7 +336,46 @@ Anchors verified 2026-09-30 against the working tree:
 - The EmailWorkspace/EmailTrackingPanel lines listed in background item 7.
   </notes>
 
-  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; code-review and adr-check at Step 9.5.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-138" base="integ/uac-r2-batch2 @ 2a9b4b26c" status="code-complete; BFF + PCF deploy, the retirement script -Apply and the criterion-16 live gate are PENDING MANUAL GATES; owner approval of the ADR-003 path-B amendment is required in the PR; publish size measured by the main session">
+      Full record: projects/unified-access-control-r2/notes/task-138-access-permission-levels.md.
+      - Preconditions: 135 (CIAM through the shared contact plane) and 131 (C3) merged — escalations 1 and 2 do not fire.
+      - Read time: RootRecordFlags gains IsLimited + an explicit IsUnreadable marker; IsDirectOnly = IsSecure || IsLimited is
+        the ONE pre-max predicate (AccessibleRecordSetService.DirectOnlyPredicate), consulted by the grant term, the standing
+        term and org expansion on the workforce contact plane, the systemuser contact-grants term and CIAM (no CIAM code).
+        Membership never consults it; Restricted stays the post-max veto and wins.
+      - Write time: ONE decision, ExternalGrantLifecycle.DecideGrantPolicy (absent key = unreadable), run first by the shared
+        core CreateGrantAsync (typed GrantUpsertOutcome.Refusal, never an exception) and before any side effect by
+        /invite-and-grant and /invite. 422 sdap.access.grant.record_restricted / sdap.access.grant.org_grant_direct_only_record;
+        503 sdap.access.grant.policy_unreadable. Runs after DelegationRuleFilter (non-Write caller: 403, policy never read).
+        RecordAccessGateEndpoint remarks record why the gate ignores the flags.
+      - Client: AccessGrantModal hides per state (Restricted: contact/org/candidates hidden, + User enabled; Limited/Secure:
+        + Organization hidden), one bar per state incl. owner O1 FINAL "Secure – Restricted", server refusal detail shown,
+        dead onSetStandingGrant removed; pure resolveAccessPermissionState (fail closed). TrackingFieldTrio: disabled /
+        accessPermissionDisabled / showAccessPermission / secureAccessPermission ("Secure" red pill). PCF v1.0.32 (five
+        version locations, rebuilt bundle): isControlDisabled + security.editable, fail-closed sprk_issecure gating read,
+        accessPermission optional. Communication components: every reader/writer of the column removed.
+      - Communications (owner Q6): live READ-ONLY scan — no form/view/workflow/plugin reference; one unmanaged aiskillconfig
+        (FormFillFieldOptOut) dependency; 99 rows at Standard. scripts/Retire-CommunicationAccessPermission.ps1 written (dry run
+        default, idempotent, refuses managed/workflow/filtering references) and run WITHOUT -Apply (output in the notes).
+        Escalations 4 and 5 do not fire.
+      - Escalation 3 SURFACED (not fired): the core admits named contact auto-grants on Limited/Secure (the recommendation);
+        refused on Restricted — task 142 must treat that refusal as skip-and-log.
+      - ADR-003 item 8 amended in docs/adr (path B); concise .claude/adr replacement text handed to the main session (notes §5).
+      - Placement (CLAUDE.md §10): in the BFF; no new service, endpoint, DI registration, option, job or package. §11:
+        methods on the existing ExternalGrantLifecycle / ExternalParticipationService (no write-time policy existed; extends the
+        lifecycle home and the one flag reader; without it a Write-holder mints contact/org grants on Restricted records and org
+        grants on Secure ones, and /invite-and-grant provisions an account that can never get access). New script: no existing
+        column-retirement script (nearest pattern Deploy-AccessEventEntity.ps1); without it the dead column and its Copilot
+        dependency stay. New shared pure function: the PCF has no jest harness; the host keeps its integers (ADR-012).
+      - Tests: perturbation-checked (Limited predicate off: 16 red; policy off: 32 red; core check off: 17 red; modal gating
+        off: 3 red). Counts for the full suites are in the notes.
+      - Deviations: "Secure" in the pill menu writes Limited; a NULL sprk_issecure reads as Limited in the dialog until task
+        153's Q1 cleanup; criterion 12's pure test lives in the shared lib's jest.
+    </outcome>
+  </execution>
   <ui-tests>
     <test name="Restricted keeps + User and blocks contact grants">
       <steps>

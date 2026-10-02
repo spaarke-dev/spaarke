@@ -449,6 +449,46 @@ The BFF grants one of three access levels on `sprk_externalrecordaccess.sprk_acc
 
 ---
 
+## Section 9: Access Permission × Secure — which grant types a record admits
+
+Unified-access-control-r2 task 138 made the record-level **Access Permission** choice
+(`sprk_accesspermission` on `sprk_project`, `sprk_matter` and `sprk_workassignment`: Standard
+100000000 / Limited 100000001 / Restricted 100000002) real at read AND write time, on every plane. The
+**Secure** flag (`sprk_issecure`) is separate; for contacts, Secure implies Limited.
+
+| Record | Named contact grant | Organization-wide grant | Org-inherited grant, standing grant, org expansion | Internal users (systemuser) |
+|---|---|---|---|---|
+| **Standard** | ✅ admitted | ✅ admitted | ✅ count | ✅ unaffected |
+| **Limited** | ✅ admitted — its OWN level only | ❌ refused (422 `sdap.access.grant.org_grant_direct_only_record`) | ❌ contribute nothing | ✅ unaffected |
+| **Secure** (not Restricted) | ✅ admitted — its OWN level only | ❌ refused (422 `…org_grant_direct_only_record`) | ❌ contribute nothing | governed by Dataverse (the Secure BU) |
+| **Restricted** (with or without Secure/Limited) | ❌ refused (422 `sdap.access.grant.record_restricted`) | ❌ refused (422 `…record_restricted`) | ❌ removed — no contact access at all | ✅ unaffected ("+ User" still shares) |
+
+**Where each rule is enforced**
+
+- **Read time (authoritative)** — `AccessibleRecordSetService`. Limited and Secure use ONE pre-max
+  suppression predicate (ADR-003 item 8 as amended); Restricted is a post-max veto. It applies on the
+  workforce contact plane (Teams), the systemuser plane's linked-contact term, and the CIAM plane
+  (external SPA). Rows written directly in Dataverse (MDA grid, import) bypass the write-time check, so the
+  read path stays the backstop.
+- **Write time** — `ExternalGrantLifecycle.DecideGrantPolicy`, called by `/grant`, `/invite-and-grant`,
+  `/invite` and the shared grant core, BEFORE any row, Contact, CIAM account or email. A refusal is a
+  ProblemDetails with a readable `detail`, the `reasonCode` above and the `traceId`. If the record's
+  settings cannot be read, the answer is **503 `sdap.access.grant.policy_unreadable`** ("nothing was
+  granted"), never a false "Restricted". A caller without Write still gets the delegation 403 first, so
+  the record's policy is never disclosed to them.
+- **Manage Access dialog** — hides what the record does not admit: on Restricted, "+ Contact",
+  "+ Organization" and the role candidates (keeping "+ User" and Revoke); on Limited/Secure,
+  "+ Organization". One message bar explains the state (Restricted Access / Secure – Restricted / Secure /
+  Limited Access). The Manage Access *gate* (`can-manage-access`) deliberately ignores the flags: it
+  answers "may you change who has access" (Write), not "which grant types apply".
+- **Communications** have no Access Permission of their own — they inherit the parent's (owner Q6). The
+  retired `sprk_communication.sprk_accesspermission` column is removed by
+  `scripts/Retire-CommunicationAccessPermission.ps1` (dry run by default).
+
+**Operator checks.** A record that is Standard but has `sprk_issecure` NULL is treated as Standard by the
+server, but the Manage Access dialog fails closed and offers it as Limited until the NULL is cleaned up
+(task 153 Q1 decision: set NULL to No).
+
 ## Related Resources
 
 - **Architecture Reference**: [external-access-spa-architecture.md](../architecture/external-access-spa-architecture.md)
