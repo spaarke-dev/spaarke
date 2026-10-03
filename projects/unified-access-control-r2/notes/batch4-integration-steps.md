@@ -4,6 +4,8 @@ This is the running list of obligations the main session takes on while integrat
 
 ## Code reconciliation (on the integration branch)
 
+- [ ] **146-c1 hygiene.** The branch contains WIP commit `6cd0c3f28`, which the main session wrote while two agents had collided in the 146 worktree. The coordination files `NOTE-FROM-MAIN.md` and `COORDINATION-FROM-MAIN.md` must NOT be in the merged tree: check with `git show --stat`.
+- [ ] **Schema-script verify defect.** The solution-membership check must count a component as included when its parent table is in the solution with `rootcomponentbehavior = 0`. Fix it in every schema script that does the check (`Set-RecordCreatorPersonSchema.ps1`, `Set-NoAccessSystemUserSubjectSchema.ps1`, 150's FLS script, the others: use the Grep tool for `solutioncomponents?`), then re-run 133's and 143's `-Verify` until both PASS (`notes/batch4-live-gates-2026-10-03.md`).
 - [ ] **One F3 check.** Task 146-c1 adds a shared F3 helper. Apply 146's recorded replacement so that 150's `UnsecureProjectEndpoint.RefuseUnlessPermittedToRemoveAsync` calls it. After integration, exactly one F3 check exists.
 - [ ] **The creator column constant.** 146's helper reads `sprk_createdbyperson` by its logical name. Switch it to 133's constant.
 - [ ] **133's interim stamp** in `DataverseCreateRecordHandler` is replaced by 146's create-as-the-app, which puts the stamp in the create payload (133 note §13.8, owner round 7 item 3).
