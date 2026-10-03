@@ -192,6 +192,28 @@ Also from task 156's verifier, filed as work rather than decisions (the owner's 
 - **Lists:** trimmed to what the caller can read.
 - **Failure:** fail closed (ADR-003). An unknown id and a denied id get the same answer.
 
+## Owner answers, round 10 (2026-10-03). BINDING. Each "(Recommended)" option chosen.
+
+**From the route-sweep task authoring (tasks 159-169):**
+1. **Routes with no caller: remove them if truly unused.** Delete a route when it has no caller in the repo AND is not in any published API description (e.g. the Copilot OpenAPI / plugin manifest); otherwise fix it. Candidates named: the internal Dataverse proxy (`/api/dataverse/fetch`, `/api/dataverse/record/...`), the AI prompt library (`/api/ai/prompts`), document `associate-record`, and the reporting module. Each removal is listed in its PR. Precedent: tasks 073/083.
+2. **Task 168, analysis form: add the RegardingResolver picker, then lock** its root columns, the same as the to-do, event and communication forms.
+
+**From batch 4 (all nine recommendations accepted):**
+3. **132:** during a RetrievePrincipalAccess outage, the degraded probe-derived answer stays UNCACHED (as built). Correctness first; the load stays at the no-cache baseline.
+4. **133, compensation's reverse Assign cascade:** coordinate with task 148's child-ownership logic, then snapshot and restore each re-owned child's own owner (options (c) then (a)).
+5. **133, a kept-container record failing after its move:** as shipped. No automatic resume; the response names the Manage Access recovery.
+6. **143:** reusing `IScheduledJobLease` as the No Access enforcer's per-record mutex is ACCEPTED as a documented §6.5 path A exception to ADR-036 A1-7 / ADR-052 §5 (design.md §9 row). The PR cites it.
+7. **146:** moving a CHILD out of a secure root is an un-secure, so F3's limit applies: Full Access holders plus the creator.
+8. **146 E1:** unfiled communications (inbound, chat, outbound naming no record) keep their creator as owner. Filed ones are routed secure-if-any. MessagingIngestor's Pending waiver resolves on this.
+9. **150 F6 copy:** option A for rows 1, 3, 4, 5 and 6; the resume-neutral option D for row 2. Remove the DRAFT markers.
+10. **150 §11.6:** `/provision-project` may secure an UNFLAGGED record only for its creator (`createdby` / `sprk_createdbyperson`); already-flagged rows stay on the Write gate. "Secure an existing record" belongs to task 148's surface.
+11. **150 item 4:** invoices follow their matter. `sprk_invoice.sprk_issecure` is no longer a security input (remove it from the securable registry; the ancestor walk decides), and the column is locked like the roots.
+
+**Decided by the main session under existing decisions (reversible; recorded for the owner):**
+- **156:** the narrow write-only re-stamp helper ships as a sealed concrete class with one public member (`CoreAncestorAfterWriteRestamp`), which is ADR-010 compliant. It meets round 8 item 1's "narrow, write-only re-stamp helper".
+- **157 residual 4:** the shared DataGrid's external-host jest test becomes a blocking CI check (`sdap-ci.yml`); this project's hot-path declaration becomes ci-workflows = Y.
+- **133's interim app-only `sprk_createdbyperson` stamp** in `DataverseCreateRecordHandler`: superseded at integration by task 146's create-as-the-app (round 7 item 3), which writes the stamp in the create payload (133 note §13.8).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
