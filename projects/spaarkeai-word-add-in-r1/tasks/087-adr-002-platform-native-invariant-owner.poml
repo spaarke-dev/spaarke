@@ -3,7 +3,7 @@
   <metadata>
     <title>ADR-002 amendment (path B): a platform-native declarative mechanism such as Dataverse autonumber may own a write-path invariant</title>
     <phase>5 Remediation — governance follow-through</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Governance documents only: ADR-002 (full + concise), the write-path architecture doc, `.claude/constraints/plugins.md`, root `CLAUDE.md` and the changelog. No `.cs`/`.ts` change.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -102,4 +102,16 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Main session only (touches .claude/).</protocol>
   </execution>
+
+  <notes>
+    COMPLETED 2026-10-03. Record: notes/087-adr-002-amendment.md. Owner sign-off on the full wording, 2026-10-03:
+    "approved--but let's not add business rules in this revision" - business rules stay Permitted for defaults/UX and
+    are explicitly never an invariant owner. WP-1 now: one owner = BFF code, or a platform-native declarative mechanism
+    meeting (a) Dataverse metadata / no Spaarke code, (b) applied on every create/update whoever writes, (c) a scripted
+    per-environment -Verify named in the registry row. Autonumber columns added to Permitted; formula/rollup vs business
+    rules split (removes the plugins.md contradiction). Applied to: full + concise ADR-002, plugins.md, root CLAUDE.md
+    pointer row, .claude/CHANGELOG.md, the write-path doc (L2, section 5 intro, I-11 row), spec ADR Tensions (path B
+    done), projects/INDEX.md (Skill Directives Y). Escalation trigger 2 did not fire (no other open PR on these files).
+    ArchTests 345/345 (doc-drift guards included).
+  </notes>
 </task>
