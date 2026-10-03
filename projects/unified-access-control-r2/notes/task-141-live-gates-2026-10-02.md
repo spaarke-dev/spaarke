@@ -188,3 +188,65 @@ The completion was run by the main session; no subagent was available (weekly us
 - The deployed BFF (`bca0941f6`) does not read the new columns yet. The schema is in place ahead of the deploy, as G-1-before-G-4 requires.
 
 **G-1b DONE (2026-10-02, owner-approved: "yes can deactivate stale registry row if not needed").** The "Demo 1" `sprk_dataverseenvironment` row (`5762061b-ef31-f111-88b5-7ced8d1dc988`, `https://spaarke-demo.crm.dynamics.com`) is set to `sprk_isactive = false` (PATCH 204, read back). It was not needed: the dev BFF's identities are not application users in spaarke-demo, so neither registration nor reconciliation could work there. Reversible: set `sprk_isactive = true` after adding the dev BFF MI as an application user in spaarke-demo.
+
+## G-4 — deploy (2026-10-02 23:4xZ)
+
+PR #1096 merged as `5e1fdcc0b` (merge commit; branch kept). Published from a FRESH worktree at the merge commit
+(`C:\wt3d`, 212 files) and deployed with `scripts/Deploy-BffApi.ps1 -SkipBuild`: package 45.66 MB, 4 critical files
+SHA-256 verified, `/healthz` 200, CORS OK. The dev BFF now runs batches 1-3 (it contains master `93634db58`).
+
+## G-5 — report-only run: PASS (2026-10-02 23:42Z)
+
+`IdentityLink__Reconciliation__WritesEnabled` unset. `POST /api/admin/jobs/identity-link-reconciliation/trigger`
+with a delegated token (ralph.schroeder@spaarke.com) → 202, run `c3e9d04d-fe76-4227-9091-51f05126ff06`, Succeeded in
+3.2 s, `processedItems = 0`. The scheduled 23:45 run repeated it identically. App Insights heartbeat:
+
+`mode=report-only environment=https://spaarkedev1.crm.dynamics.com readability=Readable usersScanned=11 verified=0
+linked=0 boundAndLinked=1 createdAndLinked=7 boundLinkedContact=0 flagged=3 flagAlreadyPresent=0 denied=0 failed=0
+truncated=False`
+
+| Against notes/task-141-identity-binding.md §0 | Expected | Observed |
+|---|---|---|
+| Users in scope (accessmode 0/1/2, enabled, not application users) | 11 | 11 |
+| Bind | 1 (testuser1 → unbound contact ac6d7b68) | 1: testuser1, contact `ac6d7b68…`, oid bcde7809 |
+| Create | 7 (final.test, demo, jake.schroeder, e2e.test2, chelsea.friez, lori.witkin, ralph@spaarke.onmicrosoft.com) | the same 7 |
+| Ralph's existing link | kept, flagged | `Flagged` `LinkedContactBoundToDifferentOid`; before-state shows only a flag added; `sprk_primarycontact` untouched |
+| Collisions | 3 (incl. Ralph's link) | 3: ralph.schroeder@spaarke.com, eyal.iffergan@spaarke.com (`BoundToDifferentOid`), ralph.schroeder@hotmail.com guest (`BoundToDifferentOid`) |
+| Writes | 0 | 0 (report-only; every line carries `mode=report-only`) |
+| Provisioning targets | Demo 1 deactivated (G-1b) | no failed environment reported (`environmentStatus=ok`) |
+
+## G-6 — writes enabled: first write run PARTIAL, a live defect found and fixed (2026-10-02 23:45Z)
+
+`IdentityLink__Reconciliation__WritesEnabled=true` set on spaarke-bff-dev (no staging slot exists); the app
+restarted at 23:46:20. A trigger at 23:46:19 was still served by the old process (report-only, identical to G-5).
+The first run in write mode (23:47:11, correlation `a1621aa3cad941dab0e7dc73eef1fb39`):
+
+`status=partial mode=write usersScanned=11 boundAndLinked=1 createdAndLinked=0 flagged=3 failed=7 flagsKept=3`
+
+- **Written correctly:** testuser1's bind and link (contact `ac6d7b68…` now bound to oid bcde7809, plane Workforce;
+  `sprk_primarycontact` set); the three collision flags (contacts `8e9918a9…`, `8cb95c16…`, `2e419a4f…`). Ralph's
+  existing link was not touched.
+- **All seven creates FAILED** with `sdap.access.deny.contact_create_failed`. App Insights dependencies: each was
+  `PATCH /api/data/v9.2/contacts(sprk_externalobjectidkey='<oid>')` → **404**.
+- **Root cause (reproduced by hand, read-mostly):** Dataverse answers a create-only upsert on an alternate key
+  (`PATCH` on the key URL + `If-None-Match: *`) with **404 `0x80060891`** "A record with the specified key values does
+  not exist in contact entity", and creates nothing. Same answer as the operator (System Administrator), so it is the
+  platform, not the BFF's identity or FLS. The alternate key itself is fine: `sprk_ExternalObjectIdUniqueKey` on
+  `sprk_externalobjectidkey`, `EntityKeyIndexStatus = Active`; a GET by the key answers a normal 404.
+- **What works (probe, then deleted):** `POST contacts` with the mirror in the body → 204 + `OData-EntityId`
+  (`aa875ce9-bbbe-f111-aaaf-0022482913fc`); a second `POST` with the same mirror value → **412 `0x80060892`** "Entity
+  Key External Object ID (unique) violated". The probe contact was deleted (204); 0 probe rows remain. This was one
+  temporary dev row, created only to diagnose this approved gate.
+- **Why the suites missed it:** `InMemoryContactIdentityStore` modelled the keyed PATCH as a working create-only
+  write, and the HTTP shape was pinned only as a path string. The platform's real answer was never exercised; there
+  is no Dataverse in CI (owner directive).
+- **Impact while deployed:** every contact CREATE by oid fails: the job's creates, and a first sign-in of an
+  unlinked workforce user who needs a new contact (refused, fail-closed). Binds, links and flags are unaffected.
+- **Fix:** `DataverseContactIdentityStore.BuildCreateRequest` = `POST contacts` with the binding, the mirror and the
+  plane in the body; no precondition header. The duplicate comes back as 412 `0x80060892` → `IsDuplicateKey` →
+  `KeyConflict`, which the binder already handles as "a racer won, re-read". The in-memory store now answers a
+  duplicate mirror with that `KeyConflict`, as the platform does. New tests pin the method, the path, the mirror in
+  the body and the live duplicate-fault body; dropping the mirror from the body was seeded and fails two of them.
+- **Next:** ship the fix, deploy, then re-run G-6 (run, run again, a third run changes nothing). Writes stay enabled
+  meanwhile: each 5-minute run re-fails the same seven creates harmlessly and writes nothing else.
+
