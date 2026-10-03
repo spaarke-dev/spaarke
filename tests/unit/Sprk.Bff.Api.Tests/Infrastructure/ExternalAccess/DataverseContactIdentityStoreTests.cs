@@ -62,11 +62,36 @@ public class DataverseContactIdentityStoreTests
     // ── Owner round 4 item 4 (B2): field-level security stays on the binding; the alternate key moves to an
     //    unsecured mirror written with the same oid in the same request as every bind and create ─────────────
 
+    /// <summary>
+    /// The create is a plain POST to the collection. Dataverse answers a create-only upsert on an alternate key
+    /// (<c>PATCH contacts(sprk_externalobjectidkey='…')</c> + <c>If-None-Match: *</c>) with 404 0x80060891 and creates
+    /// nothing — every create of 141 gate G-6's first write run failed that way (2026-10-02). The uniqueness comes from
+    /// the mirror key's unique index refusing the POST (412 0x80060892).
+    /// </summary>
     [Fact]
-    public void TheCreate_IsAddressedByTheMirrorKey_NeverTheFieldSecuredBinding()
-        => DataverseContactIdentityStore.BuildCreateByKeyPath(Oid)
-            .Should().Be("contacts(sprk_externalobjectidkey='aaaaaaaa-0000-4000-8000-000000000001')",
-                "Dataverse refuses an alternate key on a field-secured column, so the key lives on the unsecured mirror");
+    public void TheCreate_IsAPlainPostToTheCollection_NeverAKeyAddressedUpsert()
+    {
+        var (method, path, payload) = DataverseContactIdentityStore.BuildCreateRequest(
+            Oid, IdentityPlaneMarker.Workforce, new NewContactDetails(null, "Example", null));
+
+        method.Should().Be(HttpMethod.Post);
+        path.Should().Be("contacts", "a key-addressed PATCH with If-None-Match: * is answered 404 and creates nothing");
+        payload["sprk_externalobjectidkey"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001",
+            "without the mirror in the body the unique index has nothing to refuse, and two racing creates both land");
+    }
+
+    [Fact]
+    public void TheMirrorKeysDuplicateFault_IsRecognised_SoACreateThatLostTheRaceReReads()
+    {
+        // Verbatim body of the second POST with the same mirror value, captured live on spaarkedev1 2026-10-02.
+        const string body = "{\"error\":{\"code\":\"0x80060892\",\"message\":\"Entity Key External Object ID (unique) " +
+            "violated. A record with the same value for External Object ID (uniqueness key) already exists.\"}}";
+
+        DataverseContactIdentityStore.IsDuplicateKey(body).Should().BeTrue();
+        DataverseContactIdentityStore.IsDuplicateKey(
+            "{\"error\":{\"code\":\"0x80060891\",\"message\":\"A record with the specified key values does not exist\"}}")
+            .Should().BeFalse("the keyed-PATCH 404 is not a duplicate; reading it as one would hide a create that never happened");
+    }
 
     [Fact]
     public void TheBindPayload_WritesTheOidInDFormat_IntoTheBindingAndTheMirror_WithThePlane_InOneRequest()
@@ -80,7 +105,7 @@ public class DataverseContactIdentityStoreTests
     }
 
     [Fact]
-    public void TheCreatePayload_CarriesTheBindingAndThePlane_TheMirrorComesFromTheKeyInTheUrl()
+    public void TheCreatePayload_CarriesTheBindingTheMirrorAndThePlane_InOneBody()
     {
         var payload = DataverseContactIdentityStore.CreatePayload(
             Oid, IdentityPlaneMarker.Workforce, new NewContactDetails("Pat", "Example", "pat@customer.example"));
@@ -88,7 +113,8 @@ public class DataverseContactIdentityStoreTests
         payload["sprk_externalobjectid"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001",
             "the binding is what every reader resolves by; a created contact without it would be unbound");
         payload["sprk_identityplane"].Should().Be(100000001);
-        payload.Should().NotContainKey("sprk_externalobjectidkey", "the key column's value is the URL's");
+        payload["sprk_externalobjectidkey"].Should().Be("aaaaaaaa-0000-4000-8000-000000000001",
+            "the binding and the mirror carry the same oid, written together in the create");
         (payload["lastname"], payload["firstname"], payload["emailaddress1"])
             .Should().Be(("Example", "Pat", "pat@customer.example"));
     }

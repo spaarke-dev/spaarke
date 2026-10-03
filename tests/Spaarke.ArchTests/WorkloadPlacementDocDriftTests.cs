@@ -43,6 +43,10 @@ public class WorkloadPlacementDocDriftTests
     //      active project (a row in projects/INDEX.md), its CLAUDE.md and its tasks/*.poml files that are still
     //      to run.
     //
+    //      A NESTED CHECKOUT is not this repository at all, so the walk never enters one: a directory holding its
+    //      own .git (a linked worktree such as an agent's under .claude/worktrees/, or a clone) carries another
+    //      revision's files. That is not an exclude of directives; it keeps the guard judging this checkout only.
+    //
     //      A task POML is history — not scanned — only when its first <status> says the task is done or will
     //      never run: it starts with complete / completed / done (so completed-partial, complete-merged and
     //      done-with-exception count), is ✅, or starts with cancelled / superseded / skipped / closed
@@ -384,6 +388,35 @@ public class WorkloadPlacementDocDriftTests
         Assert.Empty(Scan("x.yml", $"# adr052-drift:allow-begin reason=\"history\"\n- {sample}\n# adr052-drift:allow-end\n"));
     }
 
+    [Fact(DisplayName = "ADR-052 drift guard: the walk never enters a nested checkout (linked worktree or clone)")]
+    public void TheWalk_SkipsANestedCheckout_ButNotThisRepositorysOwnFolders()
+    {
+        var root = Directory.CreateTempSubdirectory("adr052-walk-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "own.md"), "x");
+            var own = Directory.CreateDirectory(Path.Combine(root, "docs")).FullName;
+            File.WriteAllText(Path.Combine(own, "own-doc.md"), "x");
+            var worktree = Directory.CreateDirectory(Path.Combine(root, "worktrees", "agent")).FullName;
+            File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: C:/elsewhere/.git/worktrees/agent");
+            File.WriteAllText(Path.Combine(worktree, "foreign.md"), "x");
+            var clone = Directory.CreateDirectory(Path.Combine(root, "vendor", "clone")).FullName;
+            Directory.CreateDirectory(Path.Combine(clone, ".git"));
+            File.WriteAllText(Path.Combine(clone, "cloned.md"), "x");
+
+            var names = PlacementRepoFiles.Walk(root).Select(Path.GetFileName).ToList();
+
+            Assert.Contains("own.md", names);
+            Assert.Contains("own-doc.md", names);
+            Assert.DoesNotContain("foreign.md", names);
+            Assert.DoesNotContain("cloned.md", names);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact(DisplayName = "ADR-052 drift guard: positive control — the aligned wording is not reported")]
     public void PositiveControl_TheAlignedWordingIsNotReported()
     {
@@ -582,13 +615,24 @@ internal static class PlacementRepoFiles
             foreach (var child in Directory.EnumerateDirectories(dir))
             {
                 var info = new DirectoryInfo(child);
-                if (!SkippedDirectories.Contains(info.Name) && !info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                if (!SkippedDirectories.Contains(info.Name)
+                    && !info.Attributes.HasFlag(FileAttributes.ReparsePoint)
+                    && !IsNestedCheckout(child))
                 {
                     pending.Push(child);
                 }
             }
         }
     }
+
+    /// <summary>
+    /// A directory holding its own <c>.git</c> — a FILE for a linked worktree, a folder for a clone — is another
+    /// checkout (for example an agent's worktree under <c>.claude/worktrees/</c>), not this repository's content.
+    /// Walking into it judges a different revision's files: on 2026-10-02 an agent's in-progress copy of this guard,
+    /// nested in the project worktree, failed the guard there while the same commit passed in a fresh checkout.
+    /// </summary>
+    internal static bool IsNestedCheckout(string directory)
+        => File.Exists(Path.Combine(directory, ".git")) || Directory.Exists(Path.Combine(directory, ".git"));
 
     /// <summary>
     /// The drift guard's scope: directives and documentation, plus each active project's CLAUDE.md and the task
