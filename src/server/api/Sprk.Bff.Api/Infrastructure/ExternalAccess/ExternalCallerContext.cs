@@ -386,12 +386,42 @@ public sealed class ExternalGrantSet
     public IReadOnlySet<Guid> WorkAssignments =>
         _workAssignmentIds ??= WorkAssignmentGrants.Select(g => g.RecordId).ToHashSet();
 
+    /// <summary>
+    /// <c>true</c> when this set was built over a read that could not be completed — the grant query itself (a
+    /// non-2xx, a 429, a timeout, a parse failure, any exception), the organization-grant read, or the membership
+    /// junction read (task 109's <see cref="ActiveOrgMemberships.Unreadable"/>). Unified-access-control-r2 task 132
+    /// (defect C12).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The set itself is still the fail-closed answer for THIS request</b>: whatever was read successfully
+    /// (e.g. the direct grants when only the organization term faulted), and nothing a failed read would have added.
+    /// What the flag changes is only whether the set may be STORED — <c>GetGrantSetAsync</c> never caches a faulted
+    /// set, so a 429 costs one request its grants instead of 60 seconds of requests.</para>
+    /// <para><b>Never cached, so always false on a cache hit.</b> It is deliberately absent from the cached shape
+    /// (<c>CachedGrantSet</c>) and from <c>GrantCacheRoundTripSeamTests</c>' carried set (named in its
+    /// <c>NotCarriedByDesign</c>). Internal init: only the grant read sets it. Not serialized.</para>
+    /// </remarks>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool Faulted { get; internal init; }
+
     /// <summary>The empty grant set (no grants of any root type).</summary>
     public static ExternalGrantSet Empty { get; } = new()
     {
         Projects = Array.Empty<ExternalParticipation>(),
         MatterGrants = Array.Empty<ExternalRootGrant>(),
         WorkAssignmentGrants = Array.Empty<ExternalRootGrant>(),
+    };
+
+    /// <summary>
+    /// The empty, FAULTED grant set: the read failed, so nothing is granted for this request and nothing is cached
+    /// (task 132). Never use <see cref="Empty"/> for a failed read — that is an answer ("no grants") and IS cached.
+    /// </summary>
+    internal static ExternalGrantSet Unreadable { get; } = new()
+    {
+        Projects = Array.Empty<ExternalParticipation>(),
+        MatterGrants = Array.Empty<ExternalRootGrant>(),
+        WorkAssignmentGrants = Array.Empty<ExternalRootGrant>(),
+        Faulted = true,
     };
 }
 
@@ -455,6 +485,20 @@ public sealed class WorkforcePrincipal
     /// when the systemuser has neither.</summary>
     public Guid? ContactId { get; init; }
 
+    /// <summary>
+    /// <c>true</c> when, on a <see cref="WorkforcePrincipalKind.SystemUser"/> principal, <see cref="ContactId"/> is
+    /// <c>null</c> because the reads that decide it FAILED (the systemuser row or the oid-binding lookup) — not because
+    /// the user genuinely has no linked contact. Unified-access-control-r2 task 132 (defect C12).
+    /// </summary>
+    /// <remarks>
+    /// The deny veto (FR-23) uses the linked contact as its subject on the systemuser plane. With the contact
+    /// UNKNOWN the veto has no subject and checks nothing, so a No Access entry naming that person stops applying to
+    /// their membership-term access — the same "unreadable looks like absent" shape as ISS-019. The evaluator
+    /// therefore denies every candidate when this is set, mirroring <see cref="ActiveOrgMemberships.Failed"/>. A
+    /// successfully read user with no linked contact leaves this false and composes exactly as before.
+    /// </remarks>
+    public bool ContactUnreadable { get; init; }
+
     /// <summary>The workforce AAD object id (<c>oid</c> claim) the caller was resolved by.</summary>
     public required string Oid { get; init; }
 
@@ -514,14 +558,18 @@ public sealed class WorkforcePrincipalResolution
         => new() { Principal = principal ?? throw new ArgumentNullException(nameof(principal)) };
 
     /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + token email).
-    /// <paramref name="email"/> is display/audit only (see <see cref="WorkforcePrincipal.Email"/>).</summary>
+    /// <paramref name="email"/> is display/audit only (see <see cref="WorkforcePrincipal.Email"/>).
+    /// <paramref name="contactUnreadable"/>: the derived contact could not be read (task 132 — see
+    /// <see cref="WorkforcePrincipal.ContactUnreadable"/>); ignored when a contact was derived.</summary>
     public static WorkforcePrincipalResolution ForSystemUser(
-        Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null)
+        Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null,
+        bool contactUnreadable = false)
         => Resolved(new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
             SystemUserId = systemUserId,
             ContactId = derivedContactId,
+            ContactUnreadable = derivedContactId is null && contactUnreadable,
             Oid = oid,
             TenantId = tenantId,
             Email = email ?? string.Empty

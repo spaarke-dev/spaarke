@@ -423,7 +423,7 @@ All three default to `false`. Each independently gates one Phase 2 component. Un
 ```
 
 | When to flip to `true` | When `Redis:Enabled=true` in this environment AND a Redis connection string is configured. Without Redis, leave this `false`. |
-| When to leave `false` | No Redis (local dev, CI, environments without Redis). The per-user membership cache still works via its 5-minute TTL — pub/sub invalidation is a latency optimization, NOT a correctness requirement. |
+| When to leave `false` | No junction writer publishing (the default). The per-user membership cache still expires on its 2-minute TTL (task 132), and the BFF's own team / BU / owner writes evict it directly whether or not this switch is on — pub/sub invalidation is a latency optimization for junction writes, NOT a correctness requirement. |
 
 > **Correctness backstop**: even if all three Phase 2 flags are `false` AND no recon job ever runs, the user endpoint still returns correct results because the per-request FetchXML always reads source-of-truth Lookups directly.
 
@@ -489,7 +489,7 @@ Phase 2 lights up incrementally. You can run any subset of the three components:
 |---|---|---|---|---|
 | **Default ship state** | `false` | `false` | `false` | Phase 1A only. Per-request FetchXML. Recon job populates junction directly (independent of topic). Correct results, no Azure dependencies beyond Dataverse. |
 | **Cache-only** | `false` | `false` | `true` (when Redis enabled) | Phase 1A + Redis pub/sub for any cache invalidations that DO happen (e.g., recon-triggered ones via the shared handler). |
-| **Topic deployed, no Redis** | `true` | `true` | `false` | Phase 2 sync via Service Bus. Cache invalidation falls back to 5-min TTL. |
+| **Topic deployed, no Redis** | `true` | `true` | `false` | Phase 2 sync via Service Bus. Cache invalidation falls back to the 2-min TTL. |
 | **Full Phase 2** | `true` | `true` | `true` | Real-time event sync + sub-second cache invalidation across instances. |
 
 ---
@@ -588,12 +588,12 @@ Authorization: Bearer <SystemAdmin token>
 
 **Symptom**: User changes `sprk_assignedattorney1` on a matter. The new assignee still sees the OLD matter list for several minutes.
 
-**Cause (Phase 1A)**: The per-user membership cache has a 5-minute TTL. Without Phase 2 pub/sub invalidation, the cache simply expires.
+**Cause (Phase 1A)**: The per-user membership cache has a 2-minute TTL (5 before task 132). A change made outside the BFF waits for it; the BFF's own team / BU / owner writes evict it at once.
 
-**Cause (Phase 2 partial)**: If `EventPublisher` is enabled but `CacheInvalidator` is not, the junction table updates in seconds but the user-facing cache still waits for its 5-min TTL.
+**Cause (Phase 2 partial)**: If `EventPublisher` is enabled but `CacheInvalidator` is not, the junction table updates in seconds but the user-facing cache still waits for its 2-min TTL.
 
 **Fixes (pick one)**:
-- Wait up to 5 minutes (correctness backstop).
+- Wait up to 2 minutes (correctness backstop; identity + membership stacked: 4 minutes).
 - Enable `Membership:CacheInvalidator:Enabled = true` (requires Redis) for sub-second invalidation.
 - Restart the BFF to flush all caches immediately (drastic — only for testing).
 

@@ -87,7 +87,7 @@ namespace Sprk.Bff.Api.Services.Ai.Membership.Models;
 /// </param>
 /// <param name="CacheExpiresAt">
 /// The UTC timestamp at which the cached membership result for this user +
-/// entityType combination will expire (per the 5-min per-user TTL in
+/// entityType combination will expire (per the 2-min per-user TTL — task 132; was 5 under
 /// FR-1A.8). Clients MAY use this to schedule revalidation. ISO 8601 with
 /// timezone offset.
 /// </param>

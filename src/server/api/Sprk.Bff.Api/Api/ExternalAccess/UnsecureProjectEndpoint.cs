@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -103,6 +104,7 @@ public static class UnsecureProjectEndpoint
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
         IConfiguration configuration,
+        IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -241,14 +243,29 @@ public static class UnsecureProjectEndpoint
                 "[UNSECURE] Could not verify the ownership reassignment of {RecordType} {RecordId}. " +
                 "Treating it as failed. TraceId={TraceId}", root.WireToken, recordId, traceId);
 
+            // Task 132 (C12): the PATCH was accepted and may have applied — evict (always safe) before reporting.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The ownership reassignment could not be verified, so the secure designation was left " +
                 "in place.", traceId, (ReasonKey, ReasonOwnerAssignmentNotApplied));
         }
 
         // ── Step 4: Revoke the explicit shares ───────────────────────────────
-        var sweep = await RevokeAllSharesAsync(
-            recordShare, root, recordId, logger, traceId, ct);
+        ShareSweep sweep;
+        try
+        {
+            sweep = await RevokeAllSharesAsync(
+                recordShare, root, recordId, logger, traceId, ct);
+        }
+        finally
+        {
+            // ── Step 4.5 (task 132 · C12): the owner changed and the shares went — evict, before any return ──
+            // The record now sits with a user in a normal business unit, so that unit's colleagues gain it by
+            // ownership, and every former sharee loses it. Their cached membership, impersonated root sets and access
+            // snapshots would otherwise keep the old answer for the TTLs.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+        }
 
         // ── Step 5: Clear the flag ───────────────────────────────────────────
         try
@@ -303,6 +320,17 @@ public static class UnsecureProjectEndpoint
             RecordType: root.WireToken,
             RecordId: recordId));
     }
+
+    /// <summary>
+    /// Evicts the caches an owner change makes stale, through the ONE hook every owner-changing writer must call
+    /// (<see cref="IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync"/>, task 132). Never fails the request:
+    /// the hook does not throw, and it is not bound to the request's token — a client that disconnects must not leave
+    /// the clean-up half done.
+    /// </summary>
+    private static Task EvictAfterOwnerChangeAsync(
+        IMembershipCacheInvalidator accessCacheInvalidator, SecureRecordRoot root, Guid recordId, string traceId)
+        => accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+            root.LogicalName, root.EntitySet, recordId, traceId, CancellationToken.None);
 
     /// <summary>
     /// The owner an un-secured record lands on: the request's nomination, else configuration, else

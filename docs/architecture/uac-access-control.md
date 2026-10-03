@@ -54,17 +54,22 @@ Direct query pattern: query the document directly → 200 = grant `AccessRights.
 
 ## Redis Caching TTLs (ADR-009)
 
-Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs:17-19, 65, 153, 180` (corrected 2026-08-20 — plain `IDistributedCache`, NOT `ITenantCache`; no tenant segment, no version suffix):
+Actual keys per `Infrastructure/Caching/CachedAccessDataSource.cs` — since unified-access-control-r2 task 132 (defect C12, ADR-009 path C) through `ITenantCache` under the caller's `tid` (the on-wire key carries the configured `InstanceName` in front):
 
 | Data | Cache Key Pattern | TTL |
 |------|-------------------|-----|
-| User Roles | `sdap:auth:roles:{userOid}` | 2 min |
-| Team Memberships | `sdap:auth:teams:{userOid}` | 2 min |
-| Resource Access | `sdap:auth:access:{userOid}:{resourceId}` | 60 sec |
+| Document access | `tenant:{tid}:auth-access:{authMode}:{userOid}:{documentId}:v1` | 60 sec |
+| Record access | `tenant:{tid}:auth-record-access:{entitySet}:{userOid}:{recordId}:v1` | 60 sec |
+
+The user-level role and team keys that used to be written here (2 min) were read by nothing and are deleted. A request with no `tid` is not cached at all.
+
+**A fault is never cached (task 132).** `DataverseAccessDataSource` marks a snapshot `AccessSnapshot.Faulted` when it is not a complete Dataverse answer — an OBO failure, a user lookup that could not be completed, a RetrievePrincipalAccess or probe status other than an answer, a timeout, a failed team / role sub-read, or the DEGRADED probe-derived Read after RetrievePrincipalAccess gave no answer. The request receives exactly the rights it always did; the snapshot is not stored. An answer — RPA with no rights, a probe 403 / 404, a lookup that found no systemuser — is cached. Re-owns evict every user's snapshot of the record (`IMembershipCacheInvalidator.InvalidateRecordOwnerChangeAsync`).
 
 Fail-open on Redis errors: falls through to Dataverse. Cache stores permission **data**, not decisions (allows rule changes without cache invalidation).
 
-The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
+The membership-side caches (identity, membership resolution, impersonated root sets) are 2 minutes since task 132 (were 10 / 5 / 5) and are evicted by the BFF's own team, business-unit and owner writes; the residual staleness table is in [`caching-architecture.md`](caching-architecture.md#access-cache-residual-staleness-unified-access-control-r2-task-132--defect-c12).
+
+The EXTERNAL participation cache is separate and DOES use `ITenantCache`: tenant-scoped, resource `external-access-grant`, contact-id component, version 5 (`ExternalParticipationService.CacheVersion` in `Infrastructure/ExternalAccess/ExternalParticipationService.cs`, whose comment carries the version history), 60s TTL — invalidated by the grant/revoke/closure/expiry endpoints, which all reference that one constant. A set built over a failed read (the grant query, the organization-grant read, or the membership junction) is returned to its request and never cached (task 132). Each cached grant carries BOTH the effective level and the direct level (`DirectAccessLevel`, read by Secure suppression); v5 (unified-access-control-r2 task 131) added the direct level after its absence made a direct grant on a secure root resolve to no rights on every cache hit.
 
 ---
 

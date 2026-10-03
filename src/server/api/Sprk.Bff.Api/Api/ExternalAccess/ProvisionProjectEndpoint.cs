@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -221,6 +222,7 @@ public static class ProvisionProjectEndpoint
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
         IConfiguration configuration,
+        IMembershipCacheInvalidator accessCacheInvalidator,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -408,8 +410,25 @@ public static class ProvisionProjectEndpoint
         // is created. Ownership must land first or the share would be issued on a record still in the
         // caller's own business unit; and running before container creation means a share failure
         // leaves NOTHING orphaned to reconcile.
-        var shareOutcome = await ShareToCreatorAndPrincipalsAsync(
-            recordShare, callerAccessProbe, httpContext, request, root, recordId, logger, traceId, ct);
+        ShareOutcome shareOutcome;
+        try
+        {
+            shareOutcome = await ShareToCreatorAndPrincipalsAsync(
+                recordShare, callerAccessProbe, httpContext, request, root, recordId, logger, traceId, ct);
+        }
+        finally
+        {
+            // ── Step 5.6 (task 132 · C12): the owner changed — evict, before any return ──────────────────
+            // Steps 5 and 5.5 changed who can read this record: it left its business-unit owner for the memberless
+            // secure team, and the creator (and colleagues) got explicit shares. Without this, a BU colleague whose
+            // cached membership contained the record through ownership keeps it on Teams/SPA for the identity +
+            // membership TTLs, and every user's cached impersonated root set and access snapshot for it stay stale —
+            // securing a record would not take effect for minutes. Runs once the re-own is verified, on success or
+            // failure of the share step (the re-own stands either way), and never fails provisioning: the hook does
+            // not throw, and it is not bound to the request's token.
+            await accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+                root.LogicalName, root.EntitySet, recordId, traceId, CancellationToken.None);
+        }
 
         if (shareOutcome.Error != null)
             return shareOutcome.Error;

@@ -1,10 +1,12 @@
-using System.Text.Json;
+using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Caching;
 using Xunit;
 
@@ -25,26 +27,28 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// <c>userId</c> is already the caller's stable 'oid' claim).
 ///
 /// Tests seed the cache directly rather than racing the production write, which is deliberately
-/// fire-and-forget (<c>_ = CacheSnapshotAsync(...)</c>, line 105). Seeding keeps the assertion
+/// fire-and-forget (<c>_ = CacheSnapshotAsync(...)</c>). Seeding keeps the assertion
 /// deterministic with no Stopwatch/Task.Delay (tests/CLAUDE.md TimeProvider rule).
+///
+/// <para><b>Re-keyed by task 132 (defect C12, ADR-009 path C).</b> The decorator now reads and writes through the
+/// production <see cref="TenantCache"/> under the caller's <c>tid</c>, so the seeds go through the same wrapper with
+/// the decorator's own id builder (<see cref="CachedAccessDataSource.DocumentAccessCacheId"/>) instead of hand-typed
+/// <c>sdap:auth:access:*</c> strings. Every property below is unchanged: the mode flag still separates sp from obo, the
+/// raw token is still never part of the key, and user and resource still discriminate. The fault gate this task adds is
+/// pinned in <c>AccessCacheFaultCachingTests</c>.</para>
 /// </summary>
 public class AccessCacheCharacterizationTests
 {
     private const string UserId = "caller-oid-1";
     private const string ResourceId = "document-1";
+    private const string Tenant = "11111111-2222-3333-4444-555555555555";
 
-    /// <summary>The exact key production computes for SP (app-only) mode — CachedAccessDataSource.cs
-    /// resourceCacheKey when userAccessToken is null/empty.</summary>
-    private const string ProductionCacheKey = "sdap:auth:access:sp:caller-oid-1:document-1";
+    /// <summary>The id production computes for SP (app-only) mode — userAccessToken null/empty.</summary>
+    private static readonly string ProductionCacheKey = CachedAccessDataSource.DocumentAccessCacheId("sp", UserId, ResourceId);
 
-    /// <summary>The exact key production computes for OBO mode, same (user, resource) — resourceCacheKey
-    /// when userAccessToken is non-empty. Added by task 014 alongside the authMode key segment.</summary>
-    private const string OboProductionCacheKey = "sdap:auth:access:obo:caller-oid-1:document-1";
-
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    /// <summary>The id production computes for OBO mode, same (user, resource) — userAccessToken non-empty. Added by
+    /// task 014 alongside the authMode key segment.</summary>
+    private static readonly string OboProductionCacheKey = CachedAccessDataSource.DocumentAccessCacheId("obo", UserId, ResourceId);
 
     private sealed class RecordingInnerSource : IAccessDataSource
     {
@@ -97,30 +101,41 @@ public class AccessCacheCharacterizationTests
         }
     }
 
-    private static IDistributedCache NewCache() =>
-        new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+    /// <summary>The production tenant-scoped wrapper over an in-memory distributed cache.</summary>
+    private static ITenantCache NewCache() =>
+        new TenantCache(
+            new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())),
+            NullLogger<TenantCache>.Instance);
 
     /// <summary>
-    /// Writes an entry in the exact shape <c>CachedAccessDataSource</c> reads back (camelCase,
-    /// <c>accessRightsValue</c> as the int flags value).
+    /// Writes an entry through the production wrapper, under the request's tenant and the document-access resource,
+    /// in the shape <c>CachedAccessDataSource</c> reads back.
     /// </summary>
-    private static async Task SeedCacheAsync(IDistributedCache cache, string key, AccessRights rights)
-    {
-        var payload = new
-        {
-            userId = UserId,
-            resourceId = ResourceId,
-            accessRightsValue = (int)rights,
-            teamMemberships = Array.Empty<string>(),
-            roles = Array.Empty<string>(),
-            cachedAt = DateTimeOffset.UtcNow
-        };
+    private static Task SeedCacheAsync(ITenantCache cache, string cacheId, AccessRights rights)
+        => cache.SetAsync(
+            Tenant, CachedAccessDataSource.DocumentAccessResource, cacheId, CachedAccessDataSource.CacheVersion,
+            new CachedAccessDataSource.CachedAccessSnapshot
+            {
+                UserId = UserId,
+                ResourceId = ResourceId,
+                AccessRightsValue = (int)rights,
+                CachedAt = DateTimeOffset.UtcNow,
+            },
+            TimeSpan.FromMinutes(1));
 
-        await cache.SetStringAsync(key, JsonSerializer.Serialize(payload, JsonOptions));
-    }
-
-    private static CachedAccessDataSource Decorator(IAccessDataSource inner, IDistributedCache cache) =>
-        new(inner, cache, NullLogger<CachedAccessDataSource>.Instance);
+    /// <summary>The decorator inside a request carrying the caller's <c>tid</c> — the cache is skipped without one.</summary>
+    private static CachedAccessDataSource Decorator(IAccessDataSource inner, ITenantCache cache) =>
+        new(
+            inner,
+            cache,
+            new HttpContextAccessor
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tid", Tenant) }, "test")),
+                },
+            },
+            NullLogger<CachedAccessDataSource>.Instance);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // A-19 — Flipped by task 014 (FR-13).
@@ -234,7 +249,7 @@ public class AccessCacheCharacterizationTests
         // Arrange — a key that WOULD be correct if the implementation embedded the raw token (instead
         // of the "sp"/"obo" mode flag) at the auth-mode position.
         const string token = "obo-bearer-token";
-        var tokenShapedKey = $"sdap:auth:access:{token}:{UserId}:{ResourceId}";
+        var tokenShapedKey = CachedAccessDataSource.DocumentAccessCacheId(token, UserId, ResourceId);
 
         var cache = NewCache();
         await SeedCacheAsync(cache, tokenShapedKey, AccessRights.Write);
@@ -245,7 +260,7 @@ public class AccessCacheCharacterizationTests
         var snapshot = await Decorator(inner, cache)
             .GetUserAccessAsync(UserId, ResourceId, userAccessToken: token);
 
-        // Assert — the real key is "sdap:auth:access:obo:...", not the token-shaped one, so this MUST
+        // Assert — the real id is "obo:{user}:{resource}", not the token-shaped one, so this MUST
         // miss the seeded Write entry and reach the inner source instead.
         snapshot.AccessRights.Should().Be(AccessRights.None,
             "the cache key uses a mode flag, never the raw token — a token-shaped key must not be readable");

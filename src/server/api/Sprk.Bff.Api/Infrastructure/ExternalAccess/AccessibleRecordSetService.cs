@@ -1337,12 +1337,34 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         //
         // Skipping to `None` rather than `Failed` is correct here and is not a fail-open: the veto
         // itself returns EmptyDeniedSet for an empty candidate list, so the value is never consulted.
-        var activeOrgs = candidates.Count == 0
-            ? ActiveOrgMemberships.None
-            : await ReadActiveOrgMembershipsAsync(grantContactId, ct).ConfigureAwait(false);
+        //
+        // ── Task 132 (defect C12): an UNKNOWN veto subject denies; an ABSENT one checks nothing ─────────────────
+        // The subject here is the systemuser's linked contact. When the reads that decide it FAILED
+        // (principal.ContactUnreadable — the systemuser row or the oid-binding lookup), the contact is unknown,
+        // not absent: ResolveDenyVetoAsync would see no subject and check nothing, so a No Access entry naming
+        // this person would stop applying to their membership-term access (traced, task 132 notes §4). That is
+        // the ISS-019 shape on the contact axis, so it gets ISS-019's answer: deny every candidate, exactly as
+        // ActiveOrgMemberships.Failed does. A user READ as having no linked contact keeps today's path (no
+        // subject, nothing to check) — 7 of 8 dev systemusers are in that state and lose nothing.
+        IReadOnlySet<Guid> deniedIds;
+        if (principal.ContactUnreadable && candidates.Count > 0)
+        {
+            _logger.LogError(
+                "[WF-AUTHZ] Deny-veto subject for systemuser {SystemUserId} on {EntityType} is UNREADABLE (the linked-" +
+                "contact read failed). Failing CLOSED — denying every queried candidate ({Count}); the veto is never " +
+                "skipped (NFR-01, task 132).",
+                systemUserId, entityType, candidates.Count);
+            deniedIds = candidates.ToHashSet();
+        }
+        else
+        {
+            var activeOrgs = candidates.Count == 0
+                ? ActiveOrgMemberships.None
+                : await ReadActiveOrgMembershipsAsync(grantContactId, ct).ConfigureAwait(false);
 
-        var deniedIds = await ResolveDenyVetoAsync(entityType, candidates, grantContactId, activeOrgs, ct)
-            .ConfigureAwait(false);
+            deniedIds = await ResolveDenyVetoAsync(entityType, candidates, grantContactId, activeOrgs, ct)
+                .ConfigureAwait(false);
+        }
 
         ApplyVetoPipeline(
             composed,
@@ -1405,7 +1427,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // ── Task 137 · defect C5: an INACTIVE contact confers nothing — read LIVE, first ───────────
         // Every term on this plane is contact-sourced (grants, standing membership, organization expansion), so a
         // contact that is not Active composes to the EMPTY set, on both sign-ins. The state is read live on every
-        // composition — not from the 60-second grant cache nor the 10-minute identity cache — so a contact
+        // composition — not from the 60-second grant cache nor the identity cache (2 min, task 132) — so a contact
         // deactivated after sign-in loses access on its next request. Unreadable or missing is not Active (fail
         // closed, ADR-003). Read before anything else so a deactivated contact costs no grant read, no membership
         // walk and no flag read.

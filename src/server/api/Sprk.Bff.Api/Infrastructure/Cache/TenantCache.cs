@@ -254,8 +254,27 @@ internal sealed class TenantCache : ITenantCache
         await _cache.SetAsync(key, bytes, options, ct).ConfigureAwait(false);
     }
 
-    private static string BuildKey(string tenantId, string resource, string id, int version)
+    /// <summary>
+    /// The ONE tenant-scoped key format (before <c>StackExchangeRedisCache</c> prepends the configured
+    /// <c>InstanceName</c>). <c>internal</c> so an eviction pattern is built by this same method — with
+    /// <see cref="AnyTenant"/> for the tenant and the reader's own id builder for the id — rather than by a
+    /// hand-typed string that could drift from what readers write (unified-access-control-r2 task 132).
+    /// </summary>
+    internal static string BuildKey(string tenantId, string resource, string id, int version)
         => $"tenant:{tenantId}:{resource}:{id}:v{version}";
+
+    /// <summary>
+    /// The tenant segment of an eviction pattern: the Redis glob that matches every tenant (task 132). Eviction is
+    /// tenant-agnostic because the writer that evicts (a background job, or a request in another tenant) does not
+    /// share the tenant the affected user's own requests cached under.
+    /// </summary>
+    internal const string AnyTenant = "*";
+
+    /// <summary>
+    /// The on-wire form of a <see cref="BuildKey"/> key or pattern: the configured <c>InstanceName</c> prepended
+    /// exactly as <c>StackExchangeRedisCache</c> prepends it (a raw prefix; null or empty adds nothing).
+    /// </summary>
+    internal static string OnWire(string? instanceName, string key) => (instanceName ?? string.Empty) + key;
 
     private static void ValidateArguments(string tenantId, string resource, string id, string cacheInstance)
     {

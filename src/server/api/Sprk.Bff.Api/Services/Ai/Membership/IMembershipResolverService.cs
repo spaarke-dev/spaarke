@@ -2,7 +2,7 @@
 // Task 033 (2026-06-21): Public contract for the top-level membership resolver.
 // Combines IMembershipFieldDiscoveryService (task 030), IIdentityNormalizationService
 // (task 031), IOrganizationMembershipResolver (task 032 — consumed transitively via
-// task 031), and a per-user Redis cache (5-min TTL Phase 1A per FR-1A.8) to build
+// task 031), and a per-user Redis cache (2-min TTL since unified-access-control-r2 task 132; was 5) to build
 // + execute a single OR-joined FetchXML query against the target entity and group
 // matching rows by role.
 //

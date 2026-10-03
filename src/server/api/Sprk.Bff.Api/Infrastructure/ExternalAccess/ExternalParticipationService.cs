@@ -374,6 +374,11 @@ public class ExternalParticipationService
                     return cached.ToGrantSet();
                 }
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Task 132: the caller cancelled — propagate; a cancelled read is not a cache fault.
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "[EXT-ACCESS] Cache read error for Contact {ContactId}. Falling through to Dataverse.", contactId);
@@ -383,8 +388,18 @@ public class ExternalParticipationService
         // Cache miss — query Dataverse
         var grantSet = await QueryGrantSetAsync(contactId, ct);
 
-        // Cache result (fire-and-forget — don't block response). Skip when no tenant claim.
-        if (!string.IsNullOrEmpty(tenantId))
+        // THE ONE cache write for grant sets (task 137 left this the single write path; task 132 · C12 gates it).
+        // A FAULTED set — built over a failed grant, organization-grant or junction read — is returned to this request
+        // (fail closed: it holds only what was read successfully) and NEVER stored: storing it is what turned one 429
+        // into 60 seconds of "no grants". A successful read that found nothing is an answer and IS stored.
+        // Fire-and-forget (don't block the response). Skip when no tenant claim.
+        if (grantSet.Faulted)
+        {
+            _logger.LogWarning(
+                "[EXT-ACCESS] Grant set for Contact {ContactId} was built over a FAULTED read; returned to this request " +
+                "only and NOT cached (task 132). The next request re-reads.", contactId);
+        }
+        else if (!string.IsNullOrEmpty(tenantId))
         {
             _ = CacheGrantSetAsync(tenantId, idComponent, grantSet);
         }
@@ -1241,13 +1256,23 @@ public class ExternalParticipationService
             var response = await _httpClient.SendAsync(request, ct);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning("[EXT-ACCESS] Dataverse query failed for Contact {ContactId}: {Status}",
+                // Task 132 (C12): a non-2xx — a 429 throttle and a 5xx included — is a FAULT, not "no grants". The
+                // request still composes no grant-derived access; the set is marked so it is never cached.
+                _logger.LogWarning("[EXT-ACCESS] Dataverse query failed for Contact {ContactId}: {Status} (faulted, not cached)",
                     contactId, response.StatusCode);
-                return ExternalGrantSet.Empty;
+                return ExternalGrantSet.Unreadable;
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
-            var rows = WithoutInactiveOrganizations(result?.Value ?? new List<ExternalAccessRow>(), contactId);
+            if (result?.Value is null)
+            {
+                // A 2xx without a value array is not a Dataverse answer.
+                _logger.LogWarning("[EXT-ACCESS] Grant query for Contact {ContactId} returned no value array (faulted, not cached)",
+                    contactId);
+                return ExternalGrantSet.Unreadable;
+            }
+
+            var rows = WithoutInactiveOrganizations(result.Value, contactId);
 
             // Partition each grant into its root bucket by which typed lookup is populated. A project
             // grant keeps its access level; matter/WA grants contribute an id only.
@@ -1304,7 +1329,11 @@ public class ExternalParticipationService
             // union: no per-contact rows exist, membership is resolved live, and staleness is bounded by
             // the 60s cache TTL. Fail-closed by construction — a junction or org-grant read fault
             // contributes nothing, never 500s the authz path.
-            var orgRows = await QueryOrganizationGrantRowsAsync(contactId, token, apiUrl, ct);
+            //
+            // Task 132 (C12): ...and marks the set FAULTED, so the direct grants read above are returned for THIS
+            // request but nothing is cached — a set missing every organization grant is not stored for 60 s. The
+            // junction fault comes from task 109's outcome (ActiveOrgMemberships.Unreadable), not a second read.
+            var (orgRows, orgTermFaulted) = await QueryOrganizationGrantRowsAsync(contactId, token, apiUrl, ct);
             if (orgRows.Count > 0)
             {
                 // Task 037 (FR-22): ORG-INHERITED rows leave DirectAccessLevel NULL. That null is the
@@ -1369,20 +1398,28 @@ public class ExternalParticipationService
             workAssignments = DedupeByHighestLevel(workAssignments);
 
             _logger.LogInformation(
-                "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment (incl. {OrgRows} org-grant rows)",
-                contactId, projects.Count, matters.Count, workAssignments.Count, orgRows.Count);
+                "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment (incl. {OrgRows} org-grant rows; org term faulted: {OrgTermFaulted})",
+                contactId, projects.Count, matters.Count, workAssignments.Count, orgRows.Count, orgTermFaulted);
 
             return new ExternalGrantSet
             {
                 Projects = projects,
                 MatterGrants = matters,
                 WorkAssignmentGrants = workAssignments,
+                Faulted = orgTermFaulted,
             };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Task 132 (C12): the CALLER cancelled (a client abort). Propagate — swallowing it here returned an empty
+            // set that was then cached for 60 s. An HttpClient TIMEOUT also arrives as OperationCanceledException,
+            // with the caller's token NOT cancelled: it falls through to the fault arm below.
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[EXT-ACCESS] Error querying Dataverse for Contact {ContactId}", contactId);
-            return ExternalGrantSet.Empty;
+            _logger.LogError(ex, "[EXT-ACCESS] Error querying Dataverse for Contact {ContactId} (faulted, not cached)", contactId);
+            return ExternalGrantSet.Unreadable;
         }
     }
 
@@ -1416,12 +1453,12 @@ public class ExternalParticipationService
     /// nothing else: a date-ended or not-yet-started membership, or one under an inactive organization,
     /// contributes no org grant (owner D-2 part 1, D-10, ISS-026). On an unreadable junction that set is
     /// empty, so the fault grants nothing — the additive half of the outcome's two fail directions.
-    /// <para>⚠️ The <see cref="ActiveOrgMemberships.Unreadable"/> signal is logged here but not yet carried
-    /// on the returned grant set, so a grant set built over a faulted junction read is cached for one TTL
-    /// like any other. Classifying that set as faulted (and not caching it) is task 132's, which consumes
-    /// this outcome by design rather than re-reading the junction.</para>
+    /// <para><b>Faulted is carried, not just logged</b> (task 132 · C12). The second value is true when the
+    /// junction read reported <see cref="ActiveOrgMemberships.Unreadable"/> (task 109's outcome, consumed as is —
+    /// no second read) or the organization-grant read failed. <see cref="QueryGrantSetAsync"/> marks the whole set
+    /// faulted, so it is returned for this request and never cached.</para>
     /// </remarks>
-    private async Task<List<ExternalAccessRow>> QueryOrganizationGrantRowsAsync(
+    private async Task<(List<ExternalAccessRow> Rows, bool Faulted)> QueryOrganizationGrantRowsAsync(
         Guid contactId, string token, string apiUrl, CancellationToken ct)
     {
         var memberships = await QueryOrganizationMembershipsAsync(contactId, token, apiUrl, ct);
@@ -1432,10 +1469,11 @@ public class ExternalParticipationService
             {
                 _logger.LogWarning(
                     "[EXT-ACCESS] Org-grant term for Contact {ContactId} contributes NOTHING: the membership " +
-                    "junction was unreadable. A fault must not grant (ADR-003).", contactId);
+                    "junction was unreadable. A fault must not grant (ADR-003), and the grant set is not cached " +
+                    "(task 132).", contactId);
             }
 
-            return new List<ExternalAccessRow>();
+            return (new List<ExternalAccessRow>(), memberships.Unreadable);
         }
 
         try
@@ -1459,22 +1497,35 @@ public class ExternalParticipationService
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning(
-                    "[EXT-ACCESS] Org-grant query failed for Contact {ContactId} ({OrgCount} orgs): {Status}",
+                    "[EXT-ACCESS] Org-grant query failed for Contact {ContactId} ({OrgCount} orgs): {Status} (faulted, not cached)",
                     contactId, orgIds.Count, response.StatusCode);
-                return new List<ExternalAccessRow>();
+                return (new List<ExternalAccessRow>(), true);
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
+            if (result?.Value is null)
+            {
+                _logger.LogWarning(
+                    "[EXT-ACCESS] Org-grant query for Contact {ContactId} returned no value array (faulted, not cached)",
+                    contactId);
+                return (new List<ExternalAccessRow>(), true);
+            }
 
             // Belt-and-braces for ISS-026: the conferring set already excluded inactive organizations,
             // so a row here under an inactive one means its organization changed state between the two
             // reads. The guard is the same one the contact-grant read applies.
-            return WithoutInactiveOrganizations(result?.Value ?? new List<ExternalAccessRow>(), contactId);
+            return (WithoutInactiveOrganizations(result.Value, contactId), false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Task 132: the caller cancelled — propagate (QueryGrantSetAsync rethrows it and caches nothing). A
+            // timeout (the caller's token NOT cancelled) is a fault, below.
+            throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[EXT-ACCESS] Error querying org grants for Contact {ContactId}", contactId);
-            return new List<ExternalAccessRow>();
+            _logger.LogError(ex, "[EXT-ACCESS] Error querying org grants for Contact {ContactId} (faulted, not cached)", contactId);
+            return (new List<ExternalAccessRow>(), true);
         }
     }
 
@@ -1612,7 +1663,8 @@ public class ExternalParticipationService
             // QueryGrantSetAsync, whose catch-all would turn a propagated cancellation into an EMPTY grant set
             // (direct grants included) and cache it — a wider loss than the org-grant term alone. The
             // evaluator's entry (ReadOrganizationMembershipsAsync) rethrows the cancellation itself.
-            // Not caching fault-derived grant sets at all is task 132's.
+            // Since task 132 the Failed outcome also marks that grant set FAULTED, so it is returned (direct grants
+            // kept) and never cached.
             return ActiveOrgMemberships.Failed;
         }
         catch (Exception ex)
