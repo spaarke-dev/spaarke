@@ -566,4 +566,35 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
         result.Success.Should().BeTrue();
         AssertTelemetryRespectsAdr015(sensitiveValue);
     }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // unified-access-control-r2 task 133 b2 — the creator stamp (owner round 7 item 2). Since owner round 10 the stamp
+    // rides the APPLICATION's create payload on the owned path (SecureChildOwnershipAiToolTests); this class keeps the
+    // refusal of an item that names the column.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The column is server-stamped: an item naming it — in any casing, its Web API read form, or a bind — is refused
+    /// pre-suspend AND on the execute path, before any Dataverse call. A caller never chooses who created a record.
+    /// </summary>
+    [Theory]
+    [InlineData("sprk_createdbyperson")]
+    [InlineData("SPRK_CreatedByPerson")]
+    [InlineData("_sprk_createdbyperson_value")]
+    [InlineData("sprk_createdbyperson@odata.bind")]
+    public async Task AnItemNamingTheCreatorColumn_IsRefusedBeforeAnyDataverseCall(string key)
+    {
+        var args = $$$"""{"tablename":"sprk_matter","item":{"sprk_mattername":"New","{{{key}}}":"x"}}""";
+
+        var validation = CreateHandler().ValidateChat(BuildChatInvocationContext(toolArgumentsJson: args), BuildCreateTool());
+        var result = await CreateHandler().ExecuteChatAsync(
+            BuildChatInvocationContext(toolArgumentsJson: args), BuildCreateTool(), CancellationToken.None);
+
+        validation.IsValid.Should().BeFalse();
+        validation.Errors.Should().ContainMatch("*sprk_createdbyperson*");
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        _dataverse.VerifyNoOtherCalls();
+        _appOnly.VerifyNoOtherCalls();
+    }
 }

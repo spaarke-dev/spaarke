@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.AccessControl;
 
@@ -153,6 +154,17 @@ internal sealed class SecureChildShareWorld
     public static SecureChildShareSynchronizer SynchronizerOver(
         Func<SecureChildShareWorld> current, IDataverseRecordShareService shares)
         => new(EntitiesOver(current).Object, shares, Configuration(), NullLogger<SecureChildShareSynchronizer>.Instance);
+
+    /// <summary>
+    /// Task 143's REAL guard over flags that call every record NOT secure — so it answers
+    /// <see cref="SecureShareWallOutcome.NotSecure"/> and walls nobody. The default for tests that are not about the No
+    /// Access list; the walled cases build the guard over secure flags and a deny-list entry.
+    /// </summary>
+    public static SecureShareNoAccessGuard NobodyWalled() =>
+        new(new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None),
+            new GrantPolicyTestDoubles.SeamNoAccessListReader(),
+            new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
 
     /// <summary>A strict <see cref="IGenericEntityService"/> whose queries this world answers; callers add other setups.</summary>
     public static Mock<IGenericEntityService> EntitiesOver(Func<SecureChildShareWorld> current)

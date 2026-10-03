@@ -125,6 +125,132 @@ describe('provisionSecureProject — failure classification', () => {
     expect(result.success).toBe(false);
     expect(result.failureKind).toBe('environment-not-configured');
     expect(result.reasonCode).toBe('sdap.provision.secure_bu_not_found');
+    expect(result.retryable).toBe(false);
+  });
+
+  it('carries `retryable` through for a state the same caller can finish (task 133)', async () => {
+    const authFetch = jest
+      .fn()
+      .mockResolvedValue(
+        problemResponse(500, { detail: 'operator text', reasonCode: 'sdap.provision.container_creation_failed' })
+      );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.failureKind).toBe('storage-incomplete');
+    expect(result.retryable).toBe(true);
+  });
+
+  // Task 133 verifier round 2: an unverified owner move's copy follows the server's `creatorShareConfirmed`. Only a
+  // share read back on the record may be asserted; an unconfirmed (or unreported) one names the administrator, because
+  // if the move landed and the share did not take, the caller's own retry is refused at the Write gate.
+  it.each([
+    [true, /read back, so you can open it/i, /administrator/i],
+    [false, /administrator needs to finish/i, /can open it either way/i],
+    [undefined, /administrator needs to finish/i, /can open it either way/i],
+  ])(
+    'reads creatorShareConfirmed=%s from the problem body for owner_assignment_unverified',
+    async (confirmed, says, neverSays) => {
+      const authFetch = jest.fn().mockResolvedValue(
+        problemResponse(500, {
+          detail: 'operator text',
+          reasonCode: 'sdap.provision.owner_assignment_unverified',
+          ...(confirmed === undefined ? {} : { creatorShareConfirmed: confirmed }),
+        })
+      );
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe('interrupted');
+      expect(result.retryable).toBe(true);
+      expect(result.errorMessage).toMatch(says);
+      expect(result.errorMessage).not.toMatch(neverSays);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+    }
+  );
+
+  // Task 133 b2 (verifier finding): `resume_creator_unavailable` follows the server's `creatorState`. `unreadable` is a
+  // failed READ — the server's detail and guide §7a tell the same caller they may call again — so it is retryable with
+  // copy that says only that the creator could not be looked up. Every other state is the administrator's.
+  //
+  // Task 133 r1 (verifier finding 10): `column-missing` — the creator column is not in this environment (a deterministic
+  // 400) — is NOT the retryable `unreadable`: a "Try securing again" would fail until an administrator applies the schema.
+  it.each([
+    ['unreadable', 'not-started', true, /could not be looked up/i],
+    ['column-missing', 'needs-administrator', false, /not yet set up to record who created/i],
+    ['disabled', 'needs-administrator', false, /administrator needs to finish/i],
+    ['application-user', 'needs-administrator', false, /administrator needs to finish/i],
+    ['absent', 'needs-administrator', false, /administrator needs to finish/i],
+    [undefined, 'needs-administrator', false, /administrator needs to finish/i],
+  ])(
+    'reads creatorState=%s from the problem body for resume_creator_unavailable',
+    async (creatorState, kind, retryable, says) => {
+      const authFetch = jest.fn().mockResolvedValue(
+        problemResponse(creatorState === 'unreadable' || creatorState === 'column-missing' ? 500 : 409, {
+          detail: 'operator text',
+          reasonCode: 'sdap.provision.resume_creator_unavailable',
+          ...(creatorState === undefined ? {} : { creatorState }),
+        })
+      );
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe(kind);
+      expect(result.retryable).toBe(retryable);
+      expect(result.errorMessage).toMatch(says);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+      if (retryable) {
+        expect(result.errorMessage).not.toMatch(/administrator/i);
+      }
+    }
+  );
+
+  // Task 133 r2 (verifier round 5 finding 8): the server's `containerKept`. A project that kept its own document container
+  // reads as provisioned to every later call once the secure owner holds it, so "an administrator needs to finish securing
+  // it" names a recovery that does not exist; the copy names the one that does — a Manage Access share. Without the flag
+  // (or with it false) the copy is unchanged, and a confirmed share keeps its "you can open it either way" copy.
+  it.each([
+    ['sdap.provision.creator_share_failed_resumable', { containerKept: true }, 'needs-administrator', false, true],
+    ['sdap.provision.creator_share_failed_resumable', { containerKept: false }, 'needs-administrator', false, false],
+    ['sdap.provision.creator_share_failed_resumable', {}, 'needs-administrator', false, false],
+    ['sdap.provision.owner_assignment_unverified', { containerKept: true }, 'interrupted', true, true],
+    [
+      'sdap.provision.owner_assignment_unverified',
+      { containerKept: true, creatorShareConfirmed: false },
+      'interrupted',
+      true,
+      true,
+    ],
+    ['sdap.provision.owner_assignment_unverified', { containerKept: false }, 'interrupted', true, false],
+  ])(
+    'reads containerKept from the problem body: %s %o',
+    async (reasonCode, extensions, kind, retryable, namesManageAccess) => {
+      const authFetch = jest
+        .fn()
+        .mockResolvedValue(problemResponse(500, { detail: 'operator text', reasonCode, ...extensions }));
+
+      const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+      expect(result.failureKind).toBe(kind);
+      expect(result.retryable).toBe(retryable);
+      expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+      if (namesManageAccess) {
+        expect(result.errorMessage).toMatch(/share it with you through Manage Access/i);
+        expect(result.errorMessage).not.toMatch(/finish securing/i);
+      } else {
+        expect(result.errorMessage).toMatch(/administrator needs to finish securing/i);
+        expect(result.errorMessage).not.toMatch(/Manage Access/i);
+      }
+    }
+  );
+
+  it('keeps the confirmed-share copy for a kept container whose share was read back', () => {
+    const result = classifyProvisioningFailure('sdap.provision.owner_assignment_unverified', {
+      containerKept: true,
+      creatorShareConfirmed: true,
+    });
+    expect(result.errorMessage).toMatch(/read back, so you can open it/i);
+    expect(result.errorMessage).not.toMatch(/Manage Access/i);
   });
 
   it('does not leak the server ProblemDetails detail or status into what the user is shown', async () => {
@@ -147,72 +273,95 @@ describe('provisionSecureProject — failure classification', () => {
     expect(consoleError).toHaveBeenCalled();
   });
 
-  it.each([
-    ['sdap.provision.secure_bu_not_found', 'environment-not-configured'],
-    ['sdap.provision.secure_bu_ambiguous', 'environment-not-configured'],
-    ['sdap.provision.secure_owner_team_not_found', 'environment-not-configured'],
-    ['sdap.provision.secure_owner_team_ambiguous', 'environment-not-configured'],
+  // Task 133 (C11): every code the endpoint can emit, the state it maps to, and whether the SAME caller can finish
+  // securing by calling again. `retryable` must match what the endpoint's detail tells that caller — a state the
+  // server calls retryable that the client does not offer to retry strands the user; the reverse promises an action
+  // that fails.
+  const EMITTED: ReadonlyArray<[string, string, boolean]> = [
+    ['sdap.provision.secure_bu_not_found', 'environment-not-configured', false],
+    ['sdap.provision.secure_bu_ambiguous', 'environment-not-configured', false],
+    ['sdap.provision.secure_owner_team_not_found', 'environment-not-configured', false],
+    ['sdap.provision.secure_owner_team_ambiguous', 'environment-not-configured', false],
     // Task 144: the named owner team's members and the business unit's users are checked BEFORE any
     // mutation, so each of these is a not-safe environment with nothing moved — never 'error'.
-    ['sdap.provision.secure_owner_team_has_members', 'environment-not-configured'],
-    ['sdap.provision.secure_owner_team_membership_unreadable', 'environment-not-configured'],
-    ['sdap.provision.secure_bu_has_users', 'environment-not-configured'],
-    ['sdap.provision.secure_bu_users_unreadable', 'environment-not-configured'],
-    ['sdap.provision.already_provisioned', 'already-provisioned'],
+    ['sdap.provision.secure_owner_team_has_members', 'environment-not-configured', false],
+    ['sdap.provision.secure_owner_team_membership_unreadable', 'environment-not-configured', false],
+    ['sdap.provision.secure_bu_has_users', 'environment-not-configured', false],
+    ['sdap.provision.secure_bu_users_unreadable', 'environment-not-configured', false],
+    // Task 133: checked before any mutation too.
+    ['sdap.provision.container_type_not_configured', 'environment-not-configured', false],
+    // Since task 133 a 409 here means genuinely provisioned: owned by the team WITH a container.
+    ['sdap.provision.already_provisioned', 'already-provisioned', false],
     // Task 144: secured before the named team existed, under the retired default team — already claimed.
-    ['sdap.provision.owned_by_other_secure_team', 'already-provisioned'],
-    ['sdap.provision.legacy_per_project_bu', 'legacy-provisioning'],
-    ['sdap.provision.creator_unresolved', 'share-failed'],
-    ['sdap.provision.creator_share_failed', 'share-failed'],
-    ['sdap.provision.container_not_recorded', 'container-not-recorded'],
-    // "Nothing has been provisioned" per the endpoint — the generic copy is already accurate.
-    ['sdap.provision.owner_assignment_failed', 'error'],
-    ['sdap.provision.owner_assignment_not_applied', 'error'],
-  ])('maps reason code %s to %s', (reasonCode, expected) => {
-    expect(classifyProvisioningFailure(reasonCode).failureKind).toBe(expected);
+    ['sdap.provision.owned_by_other_secure_team', 'already-provisioned', false],
+    ['sdap.provision.legacy_per_project_bu', 'legacy-provisioning', false],
+    // Task 133: refused before any change — nothing moved, the caller still passes the Write gate.
+    ['sdap.provision.creator_unresolved', 'not-started', true],
+    // Task 133 verifier round 1: refused before any change, but DETERMINISTIC — the same call is refused again (an
+    // ownerless row; a resume naming colleagues from someone other than the creator), so no retry is offered.
+    ['sdap.provision.record_owner_unreadable', 'not-started', false],
+    ['sdap.provision.resume_colleagues_not_permitted', 'not-started', false],
+    // Task 133 b2: a container already on the project. Recorded on ANOTHER record too — deterministic, an administrator
+    // decides; could not be checked — a read failed, the same caller may call again. Both refused before any change.
+    ['sdap.provision.container_shared_with_another_record', 'not-started', false],
+    ['sdap.provision.container_ownership_unreadable', 'not-started', true],
+    // Task 133 r1: a SHARED container is unlinked before the move; that failed, so nothing moved and the same caller may
+    // call again.
+    ['sdap.provision.shared_container_not_cleared', 'not-started', true],
+    // Task 133: the share failed and the move was undone (or never made), read back.
+    ['sdap.provision.creator_share_failed', 'share-failed', true],
+    // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
+    ['sdap.provision.owner_assignment_failed', 'not-secured', false],
+    ['sdap.provision.owner_assignment_not_applied', 'not-secured', false],
+    // Task 133: a share to the creator was issued (confirmed or not — copy pinned above), so the next call resumes or
+    // restarts by the observed state.
+    ['sdap.provision.owner_assignment_unverified', 'interrupted', true],
+    // Task 133: secured and shared, no container recorded — the next call resumes.
+    ['sdap.provision.container_creation_failed', 'storage-incomplete', true],
+    ['sdap.provision.container_not_recorded', 'storage-incomplete', true],
+    // Task 133: only an administrator can finish these — the creator may no longer pass the Write gate.
+    ['sdap.provision.creator_share_failed_resumable', 'needs-administrator', false],
+    ['sdap.provision.resume_creator_unavailable', 'needs-administrator', false],
+  ];
+
+  it.each(EMITTED)('maps reason code %s to %s (retryable: %s)', (reasonCode, expected, retryable) => {
+    const result = classifyProvisioningFailure(reasonCode);
+    expect(result.failureKind).toBe(expected);
+    expect(result.retryable).toBe(retryable);
+    expect(result.errorMessage.trim().length).toBeGreaterThan(0);
+  });
+
+  it("never advises trying again in the message — the retry is the host's action, keyed on `retryable`", () => {
+    // A message that says "try again" renders in hosts that may have nothing to click (FR-31). The advice lives
+    // next to the "Try securing again" button in SecureProvisioningOutcome, which renders it only when retryable.
+    for (const code of [...EMITTED.map(([c]) => c), undefined, 'sdap.provision.something_invented_later']) {
+      expect(classifyProvisioningFailure(code).errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+    }
+  });
+
+  it('never calls a secure-requested project a normal project', () => {
+    // `sprk_issecure` is set before provisioning and never cleared on a refusal (task 133 never writes it).
+    for (const code of [...EMITTED.map(([c]) => c), undefined]) {
+      expect(classifyProvisioningFailure(code).errorMessage).not.toMatch(/normal project/i);
+    }
   });
 
   it('classifies every reason code ProvisionProjectEndpoint can emit', () => {
-    // This list is the endpoint's `internal const string Reason*` set, transcribed. It is the guard
-    // against the drift this task found: the client originally classified 8 of the 11, and one of
-    // the 3 it missed (container_not_recorded) fell through to copy that told the user the project
-    // had been left as a NORMAL project — when in fact it had been secured AND had left an orphaned
-    // container behind. Wrong in both halves. Adding a Reason* constant server-side means adding it
-    // here, and deciding deliberately whether the generic message is honest for it.
-    const emittedByEndpoint = [
-      'sdap.provision.secure_bu_not_found',
-      'sdap.provision.secure_bu_ambiguous',
-      'sdap.provision.secure_owner_team_not_found',
-      'sdap.provision.secure_owner_team_ambiguous',
-      'sdap.provision.owner_assignment_failed',
-      'sdap.provision.owner_assignment_not_applied',
-      'sdap.provision.container_not_recorded',
-      'sdap.provision.already_provisioned',
-      'sdap.provision.legacy_per_project_bu',
-      'sdap.provision.creator_unresolved',
-      'sdap.provision.creator_share_failed',
-      // Task 144.
-      'sdap.provision.secure_owner_team_has_members',
-      'sdap.provision.secure_owner_team_membership_unreadable',
-      'sdap.provision.secure_bu_has_users',
-      'sdap.provision.secure_bu_users_unreadable',
-      'sdap.provision.owned_by_other_secure_team',
-    ];
-
-    for (const code of emittedByEndpoint) {
-      const { failureKind, errorMessage } = classifyProvisioningFailure(code);
-      expect(errorMessage.trim().length).toBeGreaterThan(0);
-      // A code that lands on 'error' must be one we decided reads correctly there, not one nobody
-      // has looked at.
-      if (failureKind === 'error') {
-        expect(code).toMatch(/owner_assignment_(failed|not_applied)/);
-      }
+    // EMITTED is the endpoint's `internal const string Reason*` set, transcribed — the guard against the drift task
+    // 068 found (container_not_recorded once fell through to copy that was wrong in both halves). Adding a Reason*
+    // constant server-side means adding it to EMITTED and deciding deliberately what state and retryability it has.
+    // Nothing the endpoint emits lands on the generic 'error' copy.
+    for (const [code] of EMITTED) {
+      expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
+    expect(EMITTED).toHaveLength(26);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {
     expect(classifyProvisioningFailure(undefined).failureKind).toBe('error');
     expect(classifyProvisioningFailure('sdap.provision.something_invented_later').failureKind).toBe('error');
+    // An unknown state is never offered as retryable: the client cannot tell the caller still passes the Write gate.
+    expect(classifyProvisioningFailure(undefined).retryable).toBe(false);
   });
 
   it('produces a non-empty authored message for every failure kind', () => {

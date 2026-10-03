@@ -237,8 +237,8 @@ public class SecureNamedOwnerTeamProvisioningTests : IClassFixture<ProvisionProj
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A record provisioned before task 144 is owned by the default team. Re-provisioning it would create a second
-    /// container, so it is refused like any already-provisioned record and pointed at the migration script.
+    /// A record provisioned before task 144 is owned by the default team. Moving it onto the named team is the migration
+    /// script's job, not a side effect of provisioning, so it is refused before any write and pointed at the script.
     /// </summary>
     [Fact]
     public async Task Provision_WhenTheRecordIsStillOwnedByTheRetiredDefaultTeam_RefusesAndWritesNothing()

@@ -147,6 +147,10 @@ public static class ExternalAccessEndpoints
         // they inherit the same Write-on-the-record delegation gate as every route above.
         adminGroup.MapInternalShareEndpoints();
 
+        // POST /api/v1/external-access/no-access/enforce — enforce one No Access entry now (task 143, owner Q4 + R3:
+        // "immediate on save"). On this group so the delegation filter gates it on Write on the ENTRY; it only removes.
+        adminGroup.MapNoAccessEnforceEndpoint();
+
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();
 

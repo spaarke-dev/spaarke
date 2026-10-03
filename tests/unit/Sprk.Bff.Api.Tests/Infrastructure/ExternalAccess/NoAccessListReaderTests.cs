@@ -289,6 +289,92 @@ public class NoAccessListReaderTests
         filter.Should().Be($"(sprk_subjectcontact eq {Contact} or (sprk_subjectorganization eq {SubjectOrg}))");
     }
 
+    // ── Task 143: the systemuser subject, exactly-one-of-THREE, and subject-kind provenance ──────
+
+    private static readonly Guid SystemUser = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+    [Fact]
+    public void RowSelect_NamesTheSystemUserSubjectColumn()
+    {
+        // The deploy-order hazard: this column must exist live before this select ships (schema doc + PR order).
+        NoAccessListReader.RowSelect.Split(',').Should().Contain("_sprk_subjectsystemuser_value");
+    }
+
+    [Fact]
+    public void BuildSubjectFilter_AllThreeSubjects_OrJoinsEveryDimension()
+    {
+        var filter = NoAccessListReader.BuildSubjectFilter(
+            new NoAccessSubjects(new[] { Contact }, new[] { SubjectOrg }, SystemUser));
+
+        filter.Should().Be(
+            $"(sprk_subjectcontact eq {Contact} or (sprk_subjectorganization eq {SubjectOrg}) or sprk_subjectsystemuser eq {SystemUser})");
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_ASystemUserSubjectRow_DeniesTheRecord_AndSaysASystemUserDeniedIt()
+    {
+        var row = RecordObjectRow(EntryId, objectRecordId: RecordA);
+        row._sprk_subjectsystemuser_value = SystemUser;
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new(), recordLoop: new() { row });
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(Array.Empty<Guid>(), Array.Empty<Guid>(), SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.DeniedRecordIds.Should().Equal(RecordA);
+        result.DenyingSubjectKinds[RecordA].Should().Be(NoAccessSubjectKinds.SystemUser);
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_AContactAndAnOrganizationEntryOnOneRecord_ReportBothSubjectKinds()
+    {
+        var direct = OrganizationObjectRow(EntryId, subjectContact: Contact, objectOrg: DeniedOrg);
+        var viaFirm = OrganizationObjectRow(EntryId2, subjectOrg: SubjectOrg, objectOrg: DeniedOrg);
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new() { direct, viaFirm }, recordLoop: new());
+
+        var result = await sut.GetDeniedRecordsAsync(Contact, new[] { SubjectOrg },
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { DeniedOrg }) }, CancellationToken.None);
+
+        result.DenyingSubjectKinds[RecordA].Should().Be(NoAccessSubjectKinds.Contact | NoAccessSubjectKinds.Organization);
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]   // contact + systemuser
+    [InlineData(false, true, true)]   // organization + systemuser
+    [InlineData(true, true, false)]   // contact + organization
+    [InlineData(false, false, false)] // no subject at all
+    public async Task GetDeniedRecordsAsync_ARowWithNoneOrMoreThanOneSubject_IsMalformed_AndDeniesNothing(
+        bool contact, bool organization, bool systemUser)
+    {
+        var row = RecordObjectRow(EntryId, objectRecordId: RecordA);
+        row._sprk_subjectcontact_value = contact ? Contact : null;
+        row._sprk_subjectorganization_value = organization ? SubjectOrg : null;
+        row._sprk_subjectsystemuser_value = systemUser ? SystemUser : null;
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new(), recordLoop: new() { row });
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(new[] { Contact }, new[] { SubjectOrg }, SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.DeniedRecordIds.Should().BeEmpty("exactly one of the three subjects is required (schema Business Rule 1)");
+        result.FailedClosed.Should().BeFalse("a malformed row is a data-quality guard, not a read fault");
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_ASystemUserSubjectAlone_IsSomethingToCheck_NotAnEmptyAnswer()
+    {
+        var sut = FakeNoAccessListReader.Throwing(new InvalidOperationException("the query ran"));
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(Array.Empty<Guid>(), Array.Empty<Guid>(), SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.FailedClosed.Should().BeTrue("a systemuser subject must reach the query — and a fault there denies");
+    }
+
     // ── Test double ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>

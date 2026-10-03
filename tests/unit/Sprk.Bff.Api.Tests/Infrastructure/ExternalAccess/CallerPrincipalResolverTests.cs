@@ -331,6 +331,7 @@ public class CallerPrincipalResolverTests
             participations.Object,
             new Mock<ISubjectStandingGrantReader>(MockBehavior.Strict).Object,
             NeverDeniesReader(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             Mock.Of<ILogger<AccessibleRecordSetService>>());
 
         var strategy = new CiamContactPrincipalStrategy(

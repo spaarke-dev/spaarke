@@ -533,7 +533,8 @@ public class SecureChildShareMirrorTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("project", ProjectR, user, level),
             _shares, _users.Client, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
-            world.Synchronizer(_shares), Context(), NullLogger<Program>.Instance, CancellationToken.None);
+            world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(), Context(), NullLogger<Program>.Instance,
+            CancellationToken.None);
 
     private Task<IResult> Unshare(SecureChildShareWorld world, Guid user) =>
         InternalShareEndpoints.UnshareAsync(

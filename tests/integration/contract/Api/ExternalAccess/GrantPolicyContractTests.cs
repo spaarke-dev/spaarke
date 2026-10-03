@@ -287,6 +287,9 @@ public sealed class GrantPolicyContractTests : IClassFixture<ExternalAccessContr
     {
         _fixture.Dataverse.ContactQueryResult =
             $$"""[{"systemuserid":"{{InternalUserId}}","fullname":"Ada Lovelace","isdisabled":false,"accessmode":0,"applicationid":null,"sprk_isexternal":false}]""";
+        // Task 143: on a SECURE record /share-user asks the No Access list about the user, whose link must be readable
+        // (an unreadable link refuses). The user exists and is linked to no contact; the list names nobody.
+        _fixture.IdentityStore.AddSystemUser(InternalUserId, oid: null, email: "ada@customer.example");
         using var client = ClientFor(restricted: restricted, limited: limited, secure: secure);
 
         var response = await client.PostAsJsonAsync(ShareUserPath, new

@@ -900,7 +900,20 @@ public class RouteAuthorizationGuardTests
     //            RecordAccessGateQuery case in the same change; without it the route would default-deny and the
     //            affordance would vanish for every user. Both directions are pinned by
     //            tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs.
-    private const int ExpectedEndpointFileCount = 120;
+    //
+    // 120 -> 121 (2026-10-02, unified-access-control-r2 task 143):
+    //
+    //   143  +1  Api/ExternalAccess/NoAccessEnforceEndpoint.cs ADDED — POST /no-access/enforce, which enforces one
+    //            No Access entry now: it removes the direct POA shares the entry walls off on secure records (owner
+    //            Q4). Classified per the maintenance procedure: it serves NEITHER document metadata nor file bytes —
+    //            it removes POA shares on root records and returns a report — so there is no GovernedFiles entry to
+    //            add; the count alone moves. Same shape as 061, 098, 063 and 118: the route sits in the
+    //            external-access admin group and inherits AddDelegationRuleFilter(). DelegationRuleFilter's target map
+    //            gained the matching NoAccessEnforceRequest case in the same change — its target is the
+    //            sprk_noaccessentries row, so the caller needs Write on the ENTRY; an absent entry and an unwritable one
+    //            are the same 403. Pinned through the real pipeline by
+    //            tests/integration/auth/UnifiedAccessControl/NoAccessEnforceEndpointTests.cs.
+    private const int ExpectedEndpointFileCount = 121;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

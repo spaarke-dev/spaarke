@@ -629,6 +629,7 @@ public class MembershipPagingCharacterizationTests
             new NoGrantsParticipationService(),
             standing.Object,
             NeverDeniesReader(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 

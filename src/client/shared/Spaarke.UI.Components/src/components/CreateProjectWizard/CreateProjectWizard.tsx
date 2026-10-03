@@ -42,7 +42,8 @@ import type { IDataService, INavigationService, IUploadService } from '../../typ
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
-import { provisionSecureProject } from './provisioningService';
+import { provisionSecureProject, type IProvisionProjectResult } from './provisioningService';
+import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
@@ -681,12 +682,15 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 1d. Provision Secure Project infrastructure when the Secure Project toggle is enabled:
-        //     assign the project to the canonical Secure Record business unit's owner team, share
-        //     it back to the creator (task 061 — the owner team is memberless, so without this the
-        //     record is unreachable), then provision its own SPE container and record it. No
-        //     business unit or account is created (BFF task 021, 2026-08-25).
+        //     share the project to the creator (task 061 — the owner team is memberless, so without
+        //     this the record is unreachable; task 133 issues it BEFORE the move and proves it after),
+        //     assign it to the canonical Secure Record business unit's owner team, then provision its
+        //     own SPE container and record it. No business unit or account is created (BFF task 021).
         let provisioningWarning: string | undefined;
         let provisioningSucceeded = false;
+        // Task 133: a failure the SAME caller can finish is rendered with its "Try securing again" action instead of
+        // as a warning, because the success screen is static and the action needs state.
+        let retryableProvisioning: IProvisionProjectResult | undefined;
         if (mergedFormValues.isSecure && authFetch && bffBaseUrl) {
           const provisionResult = await provisionSecureProject(
             {
@@ -705,11 +709,16 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           provisioningSucceeded = provisionResult.success;
 
           if (!provisionResult.success) {
-            // Non-fatal for the WIZARD — the project record exists either way, and the endpoint
-            // fails closed, so a refusal means nothing was moved and no container was orphaned.
-            // `errorMessage` is authored copy classified from the endpoint's `reasonCode`
-            // (task 068); the server's raw ProblemDetails detail never reaches this string.
-            provisioningWarning = provisionResult.errorMessage;
+            // Non-fatal for the WIZARD — the project record exists either way. What the failure left
+            // behind depends on where it stopped (task 133): before any change, undone, secured without
+            // storage, or — only on a double failure — needing an administrator. `errorMessage` is
+            // authored copy classified from the endpoint's `reasonCode` (task 068) and describes that
+            // state; the server's raw ProblemDetails detail never reaches it.
+            if (provisionResult.retryable) {
+              retryableProvisioning = provisionResult;
+            } else {
+              provisioningWarning = provisionResult.errorMessage;
+            }
           }
         } else if (mergedFormValues.isSecure) {
           // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
@@ -839,15 +848,30 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               ? 'Secure Project created!'
               : 'Project created!',
           body: (
-            <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{projectName}&rdquo;</span>{' '}
-              has been created
-              {hasWarnings
-                ? ', though some operations could not complete. See details below.'
-                : provisioningSucceeded
-                  ? ' with its own document container, and is shared with you. Anyone else who needs it has to be added explicitly.'
-                  : ' and is ready to use.'}
-            </Text>
+            <>
+              <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
+                  &ldquo;{projectName}&rdquo;
+                </span>{' '}
+                has been created
+                {hasWarnings
+                  ? ', though some operations could not complete. See details below.'
+                  : provisioningSucceeded
+                    ? ' with its own document container, and is shared with you. Anyone else who needs it has to be added explicitly.'
+                    : retryableProvisioning
+                      ? '.'
+                      : ' and is ready to use.'}
+              </Text>
+              {retryableProvisioning && authFetch && bffBaseUrl && (
+                <SecureProvisioningOutcome
+                  projectId={projectId}
+                  projectRef={projectName}
+                  initialResult={retryableProvisioning}
+                  authenticatedFetch={authFetch}
+                  bffBaseUrl={bffBaseUrl}
+                />
+              )}
+            </>
           ),
           actions: (
             <>

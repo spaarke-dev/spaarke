@@ -284,6 +284,17 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // code-before-config ordering exists to prevent.
                 case RecordAccessGateQuery gate:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(gate.RecordType, gate.RecordId));
+
+                // ── /no-access/enforce (task 143) ────────────────────────────────
+                // The target is the No Access ENTRY itself, so the caller must hold Write on the entry (owner O2: the
+                // access-administrator role). An absent entry and one the caller cannot write both answer the probe
+                // with no Write, so both are this filter's 403 — indistinguishable, never a 404. The removals the
+                // handler then makes on each covered record are bounded by the entry AUTHOR's Write on that record
+                // (owner N5), decided inside the enforcer. Without this case every caller would be denied.
+                case NoAccessEnforceRequest enforce:
+                    return enforce.EntryId is { } entryId && entryId != Guid.Empty
+                        ? new DelegationTarget(NoAccessEnforceEndpoint.EntrySet, entryId)
+                        : null;
             }
         }
 

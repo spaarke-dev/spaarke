@@ -123,6 +123,9 @@ public sealed record RecordCreationResult
 ///   <see cref="CreateTimeFieldMapping"/>; a missing profile is a silent no-op.</description></item>
 ///   <item><description>Owner — <c>ownerid</c> = the caller's business-unit DEFAULT OWNER TEAM (task 080, invariant
 ///   I-6); refused when the caller or the team is unresolved.</description></item>
+///   <item><description>Creator — <c>sprk_createdbyperson</c> = the caller (unified-access-control-r2 task 133, owner
+///   round 7 item 2): this create is app-only, so <c>createdby</c> is the BFF application user and this column is what
+///   records the person. Protected from field mapping like the owner.</description></item>
 /// </list>
 /// <para><b><c>sprk_matternumber</c> is never written here</b> (owner decision 2026-09-11) — not directly, and not
 /// through a field-mapping rule of any type (the protected-attribute check is case-insensitive). Numbering is left to
@@ -172,8 +175,16 @@ public sealed class RecordCreationService
     /// numbering component — notes/030-numbering-handoff.md), the load-bearing owner, and the storage container
     /// (server-derived only — task 076 W1). Case-insensitive, so a mis-cased or padded target is caught too.
     /// </summary>
+    /// <remarks>
+    /// Task 133 (unified-access-control-r2, owner round 7 item 2) adds <c>sprk_createdbyperson</c>: the
+    /// person who created the record is the caller, stamped by this service — a Copy rule from a source record would
+    /// otherwise name that record's creator as this one's.
+    /// </remarks>
     private static readonly IReadOnlySet<string> MatterProtectedAttributes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MatterNumberAttribute, OwnerAttribute, ContainerAttribute };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            MatterNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column
+        };
 
     /// <summary>
     /// The same three protections for a PROJECT, with <see cref="ProjectNumberAttribute"/> in place of the matter
@@ -186,7 +197,10 @@ public sealed class RecordCreationService
     /// which task 031's acceptance criteria forbid.
     /// </remarks>
     private static readonly IReadOnlySet<string> ProjectProtectedAttributes =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ProjectNumberAttribute, OwnerAttribute, ContainerAttribute };
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ProjectNumberAttribute, OwnerAttribute, ContainerAttribute, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column
+        };
 
     internal const string TeamEntity = "team";
 
@@ -393,6 +407,10 @@ public sealed class RecordCreationService
 
         entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
 
+        // Task 133 (owner round 7 item 2): this create is APP-ONLY, so createdby is the BFF application user. The
+        // person who asked for the matter is recorded here — set last, like the owner, so no mapping rule replaces it.
+        Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(entity, ownerId);
+
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
@@ -482,6 +500,9 @@ public sealed class RecordCreationService
         }
 
         entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
+
+        // Task 133 (owner round 7 item 2): the app-only create's person, as for Matter.
+        Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Stamp(entity, ownerId);
 
         var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
 

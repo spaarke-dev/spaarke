@@ -317,8 +317,12 @@ internal static class OwnedChildWrite
         if (missing is not null)
             return new Outcome { Denied = $"You do not have permission to create records in '{table}' ({missing})." };
 
-        // (3) No column under field-level security: an app-only write would pass the caller's column security.
-        var columnFilter = string.Join(" or ", item.Columns.Select(c => $"LogicalName eq '{c}'"));
+        // (3) No column under field-level security: an app-only write would pass the caller's column security. The one
+        // exception is the SERVER-set creator column (task 133): it is field-secured precisely so that only the BFF writes
+        // it, it names the caller, and an item that names it is refused before this point (DataverseCreateRecordHandler).
+        var columnFilter = string.Join(" or ", item.Columns
+            .Where(c => !IsServerSetCreatorColumn(c, serverSetLookupColumns))
+            .Select(c => $"LogicalName eq '{c}'"));
         var attributes = await user.GetAsync(
             $"EntityDefinitions(LogicalName='{table}')/Attributes?$select=LogicalName,IsSecured&$filter={Uri.EscapeDataString(columnFilter)}", ct)
             .ConfigureAwait(false);
@@ -338,6 +342,12 @@ internal static class OwnedChildWrite
                 user, me, item.Lookups.Where(l => serverSetLookupColumns?.Contains(l.Column) != true), ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>Whether <paramref name="column"/> is the creator column (<see cref="RecordCreatorPerson.Column"/>) AND the
+    /// server added it — never a column the request named.</summary>
+    private static bool IsServerSetCreatorColumn(string column, IReadOnlySet<string>? serverSetLookupColumns) =>
+        string.Equals(column, RecordCreatorPerson.Column, StringComparison.OrdinalIgnoreCase)
+        && serverSetLookupColumns?.Contains(column) == true;
 
     /// <summary>
     /// AS THE CALLER, AppendTo on each record in <paramref name="lookups"/> (<c>RetrievePrincipalAccess</c>) — the right a

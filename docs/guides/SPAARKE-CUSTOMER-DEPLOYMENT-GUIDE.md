@@ -633,6 +633,15 @@ an edit ever puts the key and field security on one column again, and reports a 
 not carry as `FAIL` without touching it. **A business unit created later needs `-Apply` re-run**, so its default
 team joins the reader profile.
 
+**Dataverse prerequisite — apply BEFORE deploying a BFF that carries `unified-access-control-r2` task 133.** That BFF
+records the PERSON who created every project, matter and work assignment it creates in `sprk_createdbyperson` (a
+BFF-only, field-secured lookup to `systemuser`; owner decision 2026-10-02) — the person secure provisioning's resume
+shares to when `createdby` is the BFF application user. Without the column, every Office quick-create and every
+`POST /api/v1/work-assignments` fails (Dataverse refuses a create naming a column it does not have). Run
+`scripts/Set-RecordCreatorPersonSchema.ps1` with the same `-BffApplicationIds` as above — dry run, then `-Apply`, then
+`-Verify` (must exit 0); re-run `-Apply` when a business unit is added. Details:
+`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §7b.
+
 #### 6.5.3 Identity collisions — the operator procedure
 
 A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
@@ -1198,6 +1207,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
 | 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
 | 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
+| 2026-10-02 | §6.5.2: second Dataverse prerequisite — `scripts/Set-RecordCreatorPersonSchema.ps1` (`sprk_createdbyperson`, BFF-only, field-secured) must run BEFORE a BFF carrying task 133 is deployed, or Office quick-create and work-assignment creates fail | `unified-access-control-r2` task 133 round b2 (owner round 7 item 2) |
 
 ---
 

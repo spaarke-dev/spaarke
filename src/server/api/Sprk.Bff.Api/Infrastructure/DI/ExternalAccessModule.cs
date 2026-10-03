@@ -197,6 +197,23 @@ public static class ExternalAccessModule
         });
         services.AddTransient<INoAccessListReader>(sp => sp.GetRequiredService<NoAccessListReader>());
 
+        // unified-access-control-r2 task 143 (owner Q4) — the No Access list for INTERNAL users on secure records.
+        // Three components, all UNCONDITIONAL (ADR-032 — every dependency is unconditional, so no Null-Object):
+        //   • SecureShareNoAccessGuard — the ONE write-time "is this systemuser walled off this secure record?" check,
+        //     asked by /share-user and secure provisioning before any share write. Scoped: it composes the scoped
+        //     typed-HttpClient readers above.
+        //   • NoAccessEnforcementStore — the app-only Dataverse reads the enforcer needs that no reader answers (the
+        //     entry, systemusers by oid, team membership, RetrievePrincipalAccess for ANOTHER principal). Its own
+        //     typed HttpClient, the NoAccessListReader shape; the internal-virtual reads are the test seam.
+        //   • NoAccessShareEnforcer — removes the direct shares an entry walls off (never a team or role share; never
+        //     the last person; only where the entry's author holds Write). Used by the enforce route and the job.
+        services.AddScoped<SecureShareNoAccessGuard>();
+        services.AddHttpClient<NoAccessEnforcementStore>((sp, client) =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddScoped<NoAccessShareEnforcer>();
+
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
         // CIAM external contact AND the workforce (Teams-host) user through ONE endpoint set. The two
@@ -520,6 +537,14 @@ public static class ExternalAccessModule
         // UNCONDITIONAL registration (ADR-032): IServiceScopeFactory, TimeProvider and the synchronizer are unconditional.
         services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob>(
             Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob.DefaultCronSchedule);
+
+        // unified-access-control-r2 task 143 (owner Q4; round 3 R3/R4) — the No Access safety net: every 5 minutes,
+        // every active entry is enforced through NoAccessShareEnforcer (out-of-band MDA shares after an entry, records
+        // that became secure, links that appeared). ENABLED with writes ON, per the owner's R4 answer — it only ever
+        // REMOVES, inside the enforcer's rules. ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1
+        // rule 6). UNCONDITIONAL (ADR-032): IServiceScopeFactory, TimeProvider and IConfiguration are unconditional,
+        // and the store/enforcer it resolves per run are registered unconditionally above.
+        services.AddScheduledJob<NoAccessShareReconciliationJob>(NoAccessShareReconciliationJob.DefaultCronSchedule);
 
         return services;
     }

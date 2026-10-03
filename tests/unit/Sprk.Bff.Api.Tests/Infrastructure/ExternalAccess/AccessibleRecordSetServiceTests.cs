@@ -1224,20 +1224,18 @@ public class AccessibleRecordSetServiceTests
     }
 
     [Fact]
-    public async Task ComposeAsync_SystemUserRecordThatWouldSurviveRestricted_IsStillRemovedWhenAlsoDenyListed()
+    public async Task ComposeAsync_SystemUser_OnASecureRecord_ALinkedContactEntryRemovesTheWholeRecord_MembershipIncluded()
     {
-        // Ordering: deny is evaluated as an UNCONDITIONAL removal, independent of what Restricted would
-        // otherwise have preserved. A record that would normally SURVIVE Restricted (the systemuser's
-        // own ADR-034 membership) must still end up ABSENT when it is also on the deny list — proving
-        // the deny veto's removal is not something Restricted's survival logic can protect a record
-        // from, regardless of which slot's loop runs first.
+        // Task 143 (owner Q4 + N2): on a SECURE record the wall binds the internal user — the deny removal is
+        // UNCONDITIONAL there, so even the systemuser's own ADR-034 membership (what Restricted would preserve) goes.
+        // Before task 143 this held on every record; owner N3 narrowed it to secure records (next test).
         var membership = new Mock<IMembershipResolverService>();
         membership
             .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity, GrantedProject));
 
         var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
-        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
 
         var reader = DenyingReader(deniedRecordIds: new[] { GrantedProject });
         var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
@@ -1245,8 +1243,266 @@ public class AccessibleRecordSetServiceTests
         var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
 
         set.Contains(GrantedProject).Should().BeFalse(
-            "a record that would otherwise survive Restricted (systemuser's own membership) must still " +
-            "be removed once it is also deny-listed");
+            "on a secure record a linked-contact entry removes the record whole, membership included (Q4, N2)");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_OnANonSecureRecord_ALinkedContactEntryRemovesOnlyTheContactsContribution()
+    {
+        // Task 143 (owner N3, both halves): on a NON-secure record the systemuser keeps its own term at that term's
+        // rights — MDA admits it, and C9 says Teams/SPA agrees — while the linked contact's Full Access grant is vetoed.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject));
+
+        var participations = new FakeParticipationService(new[]
+        {
+            new ExternalParticipation
+            {
+                ProjectId = GrantedProject,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+            new ExternalParticipation
+            {
+                ProjectId = StandingMatter,
+                AccessLevel = ExternalAccessLevel.FullAccess,
+                DirectAccessLevel = ExternalAccessLevel.FullAccess,
+            },
+        });
+        participations.Flags[GrantedProject] = RootRecordFlags.None;
+        participations.Flags[StandingMatter] = RootRecordFlags.None;
+
+        var reader = DenyingReader(deniedRecordIds: new[] { GrantedProject, StandingMatter });
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.RightsFor(GrantedProject).Should().Be(MembershipOnlyRights(),
+            "the systemuser keeps its own (membership) term on a non-secure record — the contact's Full Access is vetoed");
+        set.Rights.Should().NotContainKey(StandingMatter,
+            "a record reached ONLY through the linked contact's grant has nothing left once that grant is vetoed");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_ASystemUserSubjectEntry_RemovesASecureRecordButNeverANonSecureOne()
+    {
+        // Task 143 (owner Q4): a sprk_subjectsystemuser entry binds the internal user on SECURE records only. Driven
+        // through the REAL reader (wire seam only), so the subject filter and the subject-kind provenance are real.
+        var secure = GrantedProject;
+        var open = MemberRecordA;
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, secure, open));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[secure] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[open] = RootRecordFlags.None;
+
+        var reader = new SubjectRowReader();
+        reader.Add(new NoAccessEntryRow
+        {
+            sprk_noaccessentryid = Guid.NewGuid(), _sprk_subjectsystemuser_value = SystemUserId,
+            _sprk_objectrecordtype_value = Guid.NewGuid(), sprk_objectrecordid = secure.ToString(),
+        });
+        reader.Add(new NoAccessEntryRow
+        {
+            sprk_noaccessentryid = Guid.NewGuid(), _sprk_subjectsystemuser_value = SystemUserId,
+            _sprk_objectrecordtype_value = Guid.NewGuid(), sprk_objectrecordid = open.ToString(),
+        });
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(secure).Should().BeFalse("a systemuser-subject entry removes the secure record, membership term included");
+        set.RightsFor(open).Should().Be(MembershipOnlyRights(),
+            "a systemuser-subject entry never removes a non-secure record (Q4 scope)");
+        reader.SubjectFilters.Should().Contain(f => f.Contains($"sprk_subjectsystemuser eq {SystemUserId}"),
+            "the systemuser was checked as a subject in its own right");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_WhenTheDenyReadFaults_RemovesEveryCandidate_SecureOrNot()
+    {
+        // Task 143 criterion 11: a veto-read fault removes the candidate — never "not walled", on any record.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject, MemberRecordA));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[MemberRecordA] = RootRecordFlags.None;
+
+        var reader = new SubjectRowReader { Faults = true };
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().BeEmpty("a faulted deny read removes every queried candidate (fail closed)");
+    }
+
+    // ── Task 143 r1: the systemuser-plane veto's fault branches and its subjects on a SECURE record ──────────
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_WhenTheLinkReadFaults_RemovesEverySecureCandidate_AndLeavesNonSecureOnes()
+    {
+        // Verifier finding 2 (ADR-003: "link unreadable → removed"). The normalizer that derives principal.ContactId
+        // swallows a link-read fault into "no contact", so the principal arrives with NO contact. The veto must not
+        // read that as "nothing to check" on a secure record: it reads the link itself, status-first, and a fault
+        // removes the secure record whole — membership included. A non-secure record keeps its membership term: there
+        // the wall removes only the derived contact's grants, and no contact was derived, so nothing was granted by one.
+        var secure = GrantedProject;
+        var open = MemberRecordA;
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, secure, open));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[secure] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        participations.Flags[open] = RootRecordFlags.None;
+
+        var links = new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore(); // user unreadable
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), NeverDeniesReader(), links);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipalWithoutContact(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(secure).Should().BeFalse("a secure record whose wall subjects could not be read is removed (fail closed)");
+        set.RightsFor(open).Should().Be(MembershipOnlyRights(), "a non-secure record keeps the systemuser's own term");
+        links.Reads.Should().Contain("systemuser", "the veto read the link itself rather than trusting 'no contact'");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_OnASecureRecord_AnEntryNamingAContactBoundToTheUsersOid_RemovesIt()
+    {
+        // Verifier finding 3: the veto now asks the write-time guard's question — every contact that represents the
+        // user (the primary link AND every contact bound to its oid), not only the one contact the normalizer derived.
+        var secure = GrantedProject;
+        var userOid = Guid.NewGuid();
+        var bound = Guid.NewGuid();
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, secure));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[secure] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+
+        var links = new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore();
+        links.AddSystemUser(SystemUserId, userOid, "user@firm.example"); // no primary contact
+        links.AddContact(bound, oid: userOid.ToString());
+
+        var reader = new SubjectRowReader();
+        reader.Add(new NoAccessEntryRow
+        {
+            sprk_noaccessentryid = Guid.NewGuid(), _sprk_subjectcontact_value = bound,
+            _sprk_objectrecordtype_value = Guid.NewGuid(), sprk_objectrecordid = secure.ToString(),
+        });
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), reader, links);
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(secure).Should().BeFalse(
+            "a contact bound to the user's oid represents them; its entry walls them off the secure record, as at write time");
+        reader.SubjectFilters.Should().Contain(f => f.Contains($"sprk_subjectcontact eq {bound}"));
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_ARecordWhoseFlagsAreUnreadable_IsTreatedAsSecure_AndRemovedWhole()
+    {
+        // Seed S2: "unreadable flags count as secure" — pinned on the veto's OWN rule, with the unreadable marker set
+        // and the secure bit NOT set, so the test does not lean on the factory value (RootRecordFlags.Unreadable sets
+        // IsSecure too). Read as non-secure, a linked-contact entry would remove only the contact's contribution and
+        // the membership term would survive.
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, GrantedProject, MemberRecordA));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>());
+        participations.Flags[GrantedProject] = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsUnreadable: true);
+        participations.Flags[MemberRecordA] = RootRecordFlags.Unreadable; // the production fault value
+
+        var reader = DenyingReader(deniedRecordIds: new[] { GrantedProject, MemberRecordA });
+        var sut = CreateSut(membership.Object, participations, NeverStanding(), reader);
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Contains(GrantedProject).Should().BeFalse("unreadable flags are secure to the veto: the record goes whole");
+        set.Contains(MemberRecordA).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUser_WhenTheLinkedContactsOrganizationsAreUnreadable_RemovesEveryCandidate()
+    {
+        // Seed S9: an unreadable membership read removes every candidate — a NON-secure one included, so the test bites
+        // on this branch alone (the secure path's own subject read would also catch a secure one).
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        var participations = new FakeParticipationService(Array.Empty<ExternalParticipation>()) { ThrowOnActiveOrgIds = true };
+        participations.Flags[MemberRecordA] = RootRecordFlags.None;
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.Rights.Should().BeEmpty("the wall's organization axis could not be read: every candidate is removed (fail closed)");
+    }
+
+    private static WorkforcePrincipal SystemUserPrincipalWithoutContact() => new()
+    {
+        Kind = WorkforcePrincipalKind.SystemUser,
+        SystemUserId = SystemUserId,
+        ContactId = null, // the normalizer swallowed a link-read fault into "no contact"
+        Oid = Oid.ToString("D"),
+        TenantId = Tenant,
+    };
+
+    /// <summary>The membership term's rights, named for what the assertions mean.</summary>
+    private static AccessRights MembershipOnlyRights() => AccessibleRecordSetService.MembershipTermRights;
+
+    /// <summary>
+    /// The PRODUCTION <see cref="NoAccessListReader"/> with only its wire seam overridden (task 143): returns every
+    /// added row whose populated subject appears in the query's subject filter, on the loop matching its object shape.
+    /// </summary>
+    private sealed class SubjectRowReader : NoAccessListReader
+    {
+        private readonly List<NoAccessEntryRow> _rows = new();
+
+        public SubjectRowReader()
+            : base(new HttpClient(), configuration: null!, credential: null!, logger: NullLogger<NoAccessListReader>.Instance)
+        {
+        }
+
+        public bool Faults { get; set; }
+
+        public List<string> SubjectFilters { get; } = new();
+
+        public void Add(NoAccessEntryRow row) => _rows.Add(row);
+
+        internal override Task<List<NoAccessEntryRow>?> QueryChunkAsync(string subjectFilter, string objectFilter, CancellationToken ct)
+        {
+            SubjectFilters.Add(subjectFilter);
+            if (Faults)
+            {
+                return Task.FromResult<List<NoAccessEntryRow>?>(null);
+            }
+
+            var orgLoop = objectFilter.Contains("sprk_objectorganization", StringComparison.Ordinal);
+            var matching = _rows
+                .Where(r => (r._sprk_subjectsystemuser_value is { } u && subjectFilter.Contains($"sprk_subjectsystemuser eq {u}"))
+                            || (r._sprk_subjectcontact_value is { } c && subjectFilter.Contains($"sprk_subjectcontact eq {c}"))
+                            || (r._sprk_subjectorganization_value is { } o && subjectFilter.Contains($"sprk_subjectorganization eq {o}")))
+                .Where(r => orgLoop ? r._sprk_objectorganization_value.HasValue : !r._sprk_objectorganization_value.HasValue)
+                .ToList();
+            return Task.FromResult<List<NoAccessEntryRow>?>(matching);
+        }
     }
 
     [Fact]
@@ -1424,6 +1680,28 @@ public class AccessibleRecordSetServiceTests
                     FailedClosed = false,
                 };
             });
+        // Task 143: the systemuser plane's three-subject overload. These canned entries are contact-subject entries,
+        // so a denial is reported as CONTACT-sourced — what the systemuser plane splits on (owner N3).
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<NoAccessSubjects>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((NoAccessSubjects subjects, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken _) =>
+            {
+                var denied = subjects.ContactIds.Count == 0 && subjects.OrganizationIds.Count == 0
+                    ? new HashSet<Guid>()
+                    : candidates
+                        .Where(c => recordIds.Contains(c.RecordId) || c.ReferencedOrganizationIds.Any(orgIds.Contains))
+                        .Select(c => c.RecordId)
+                        .ToHashSet();
+                return new NoAccessListResult
+                {
+                    DeniedRecordIds = denied,
+                    DenyingEntryIds = denied.ToDictionary(id => id, _ => (IReadOnlyList<Guid>)Array.Empty<Guid>()),
+                    DenyingSubjectKinds = denied.ToDictionary(id => id, _ => NoAccessSubjectKinds.Contact),
+                    FailedClosed = false,
+                };
+            });
         return reader.Object;
     }
 
@@ -1439,8 +1717,10 @@ public class AccessibleRecordSetServiceTests
         IMembershipResolverService membership,
         ExternalParticipationService participations,
         ISubjectStandingGrantReader standing,
-        INoAccessListReader? noAccessList = null)
+        INoAccessListReader? noAccessList = null,
+        IContactIdentityStore? identityStore = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
+               identityStore ?? UnlinkedIdentityStore(),
                NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>
