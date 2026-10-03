@@ -117,7 +117,7 @@ public static class SetRecordShareExpiryEndpoint
         SetRecordShareExpiryRequest request,
         DataverseWebApiClient dataverseClient,
         IDataverseService dataverseService,
-        ITenantCache cache,
+        ExternalParticipationService participations,
         TimeProvider timeProvider,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -243,7 +243,7 @@ public static class SetRecordShareExpiryEndpoint
             // appears. Routed through the shared mirror.
             shares.Count(s => !ExternalParticipationService.ConfersAccessOn(s.ExpiresDate, today)));
 
-        await InvalidateAffectedCachesAsync(shares, dataverseClient, cache, httpContext.User, logger);
+        await InvalidateAffectedCachesAsync(shares, participations);
 
         return TypedResults.Ok(new SetRecordShareExpiryResponse(UpdatedCount: shares.Count, ExpiresDate: expiry));
     }
@@ -265,10 +265,11 @@ public static class SetRecordShareExpiryEndpoint
         => (row.ProjectId.HasValue ? 1 : 0) + (row.MatterId.HasValue ? 1 : 0) + (row.WorkAssignmentId.HasValue ? 1 : 0);
 
     /// <summary>
-    /// Clears the participation cache of every contact whose access came through one of the updated shares:
-    /// the contact on a contact share, and every ACTIVE member of the organization on an organization share.
-    /// Non-fatal throughout, and deliberately NOT bound to the request's cancellation token: the write has
-    /// already committed, so a client that disconnects now must not stop the clean-up half-way.
+    /// Clears the grant cache of every contact whose access came through one of the updated shares — the contact on
+    /// a contact share, every ACTIVE member of the organization on an organization share — through the ONE
+    /// invalidation routine (task 137), under every tenant a grant set can be cached under. Non-fatal, and
+    /// deliberately NOT bound to the request's cancellation token: the write has already committed, so a client
+    /// that disconnects now must not stop the clean-up half-way.
     /// </summary>
     /// <remarks>
     /// <para><b>Freshness, not a security boundary.</b> The cache holds WHICH grants a contact has, not their
@@ -279,82 +280,26 @@ public static class SetRecordShareExpiryEndpoint
     /// this request revives is normally visible on the next evaluation — at worst after the 60-second TTL,
     /// because a read already in flight can re-populate the entry after the removal (the participation service
     /// caches fire-and-forget).</para>
-    ///
-    /// <para><b>Why organization members are expanded here when /grant, /revoke and /close-project do not.</b>
-    /// Those endpoints skipped it because it needed a members-of-organization read that did not exist on the
-    /// write path. It does now — <see cref="ExternalOrganizationMembership"/> (task 020) — and this task's
-    /// constraint asks for it, so the reader is reused rather than the gap copied. An organization over its
-    /// bound, or one whose members cannot be read, is logged and left to the TTL.</para>
+    /// <para><b>Task 137.</b> This method used to expand organizations itself, through the revoke path's
+    /// 200-member reader, and SKIP an organization over that bound. The routine pages every organization to
+    /// completion instead, and the other grant-write paths now share it rather than each keeping a copy.</para>
     /// </remarks>
-    private static async Task InvalidateAffectedCachesAsync(
+    private static Task InvalidateAffectedCachesAsync(
         IReadOnlyList<ExternalGrantRow> shares,
-        DataverseWebApiClient dataverseClient,
-        ITenantCache cache,
-        ClaimsPrincipal caller,
-        ILogger logger)
+        ExternalParticipationService participations)
     {
-        var tenantId = TenantResolution.ResolveTenantId(caller);
-        if (tenantId is null)
-        {
-            logger.LogWarning(
-                "[SHARE-EXPIRY] No tenant claim — skipping cache invalidation; affected contacts refresh within the participation TTL.");
-            return;
-        }
-
-        var contactIds = new HashSet<Guid>(shares.Where(s => s.ContactId.HasValue).Select(s => s.ContactId!.Value));
+        var contactIds = shares.Where(s => s.ContactId.HasValue).Select(s => s.ContactId!.Value).Distinct().ToList();
 
         // A row with BOTH a contact and an organization is a person share whose firm is metadata — only a row
         // with NO contact is the organization's own share (ExternalGrantKey's rule).
         var organizationIds = shares
             .Where(s => s.ContactId is null && s.OrganizationId.HasValue)
             .Select(s => s.OrganizationId!.Value)
-            .Distinct();
+            .Distinct()
+            .ToList();
 
-        foreach (var organizationId in organizationIds)
-        {
-            try
-            {
-                var members = await ExternalOrganizationMembership.QueryActiveMembersAsync(
-                    dataverseClient, organizationId, CancellationToken.None);
-
-                if (members.ExceededBound)
-                {
-                    logger.LogWarning(
-                        "[SHARE-EXPIRY] Organization {OrganizationId} has more than {Bound} active members; " +
-                        "their caches refresh within the participation TTL.",
-                        organizationId, ExternalOrganizationMembership.MaxMembersPerSweep);
-                    continue;
-                }
-
-                contactIds.UnionWith(members.ContactIds);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "[SHARE-EXPIRY] Could not read the members of Organization {OrganizationId}; their caches " +
-                    "refresh within the participation TTL.", organizationId);
-            }
-        }
-
-        foreach (var contactId in contactIds)
-        {
-            try
-            {
-                await cache.RemoveAsync(
-                    tenantId, ExternalParticipationService.ExternalAccessResource, contactId.ToString(),
-                    ExternalParticipationService.CacheVersion, ct: CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "[SHARE-EXPIRY] Failed to invalidate the participation cache for Contact {ContactId}. Non-critical.",
-                    contactId);
-            }
-        }
-
-        logger.LogDebug("[SHARE-EXPIRY] Invalidated the participation cache for {Count} contact(s).", contactIds.Count);
+        return participations.InvalidateGrantSetsAsync(contactIds, organizationIds, CancellationToken.None);
     }
-
     /// <summary>The single refusal shape: ProblemDetails with a reason code (ADR-003) and the trace id (ADR-019).</summary>
     private static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)
         => Results.Problem(

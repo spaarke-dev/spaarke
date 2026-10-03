@@ -25,20 +25,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Endpoint filter for internal caller check (RequireAuthorization).
-/// ADR-009: Redis cache invalidation after grant (key: sdap:external:access:{contactId}).
+/// ADR-009: Redis cache invalidation after grant — ExternalParticipationService.InvalidateGrantSetsAsync (task 137).
 /// ADR-010: Concrete DI injections.
 /// </summary>
 public static class GrantExternalAccessEndpoint
 {
     private const string EntitySet = "sprk_externalrecordaccesses";
-    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
-    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
-    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so grant
-    // invalidation never actually cleared the cache (it relied on the 60s TTL). Tenant scope is derived
-    // from the caller's 'tid' claim; the cached value is per-Contact participation data, not an authz
-    // decision (ADR-009).
-    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
-    private const int CacheVersion = ExternalParticipationService.CacheVersion;
+    // Cache invalidation (task 137): through ExternalParticipationService.InvalidateGrantSetsAsync — the ONE
+    // routine every grant-write path calls. It owns the key (resource + version), removes under every tenant a
+    // grant set can be cached under (the CIAM one included), and expands an organization grant to its members.
+    // This file used to carry its own cache.RemoveAsync copy keyed on the caller's tid alone.
 
     /// <summary>
     /// Registers the grant endpoint on the external-access group.
@@ -81,7 +77,6 @@ public static class GrantExternalAccessEndpoint
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
         CallerRecordAccessProbe callerAccessProbe,
-        ITenantCache cache,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -144,7 +139,7 @@ public static class GrantExternalAccessEndpoint
         {
             outcome = await CreateGrantAsync(
                 request, root.Type, root.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, cache, httpContext, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct);
         }
         catch (Exception ex)
         {
@@ -285,8 +280,6 @@ public static class GrantExternalAccessEndpoint
         DataverseWebApiClient dataverseClient,
         ExternalParticipationService participations,
         IAccessibleRecordSetService accessibleRecords,
-        ITenantCache cache,
-        HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
     {
@@ -434,7 +427,7 @@ public static class GrantExternalAccessEndpoint
             }
 
             await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, logger, ct);
-            await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
+            await InvalidateGranteeCacheAsync(key, participations);
 
             return new GrantUpsertOutcome(survivor.Id, null)
             {
@@ -496,7 +489,7 @@ public static class GrantExternalAccessEndpoint
                 "duplicate will be collapsed by the next grant or revoke on this key.", key);
         }
 
-        await InvalidateGranteeCacheAsync(request, cache, httpContext, logger, ct);
+        await InvalidateGranteeCacheAsync(key, participations);
 
         return new GrantUpsertOutcome(accessRecordId, null)
         {
@@ -765,48 +758,20 @@ public static class GrantExternalAccessEndpoint
     }
 
     /// <summary>
-    /// Invalidates the grantee Contact's Redis participation cache. Non-fatal.
+    /// Invalidates the grant cache of everyone the written grant reaches, through the ONE routine (task 137):
+    /// the contact on a person grant, every ACTIVE member on an organization grant — under every tenant id a grant
+    /// set can be cached under, so a CIAM grantee's entry is cleared too. Non-fatal by construction.
     /// </summary>
-    private static async Task InvalidateGranteeCacheAsync(
-        GrantAccessRequest request,
-        ITenantCache cache,
-        HttpContext httpContext,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        try
-        {
-            var tenantId = ExtractTenantId(httpContext);
-            if (request.ContactId == Guid.Empty)
-            {
-                // Organization grant (task 073 #7): there is no single grantee contact to invalidate —
-                // every active member's participation set is affected. We deliberately DO NOT fan out an
-                // invalidation per member here (that would need a members-of-org read on the write path);
-                // members pick up the new org grant within the 60s participation-cache TTL. (An org-scoped
-                // cache key is a possible future optimization — see the org-grant design note.)
-                logger.LogDebug(
-                    "[EXT-GRANT] Organization grant — no per-contact cache to invalidate; members refresh within the participation TTL.");
-            }
-            else if (!string.IsNullOrEmpty(tenantId))
-            {
-                await cache.RemoveAsync(
-                    tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion, ct: ct);
-                logger.LogDebug("[EXT-GRANT] Invalidated cache for Contact {ContactId}", request.ContactId);
-            }
-            else
-            {
-                logger.LogWarning(
-                    "[EXT-GRANT] No tenant claim found — skipping cache invalidation for Contact {ContactId}",
-                    request.ContactId);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex,
-                "[EXT-GRANT] Failed to invalidate Redis cache for Contact {ContactId}. Non-critical.",
-                request.ContactId);
-        }
-    }
+    /// <remarks>
+    /// Keyed on the grant KEY the upsert wrote, not on the request: an OrganizationId beside a ContactId is the
+    /// contact's firm (metadata), so only a key with no contact is an organization grant. The write has committed,
+    /// so the clean-up runs to completion even if the caller disconnects.
+    /// </remarks>
+    private static Task InvalidateGranteeCacheAsync(ExternalGrantKey key, ExternalParticipationService participations)
+        => participations.InvalidateGrantSetsAsync(
+            key.ContactId is { } contactId ? new[] { contactId } : Array.Empty<Guid>(),
+            key.IsOrganizationGrant && key.OrganizationId is { } organizationId ? new[] { organizationId } : Array.Empty<Guid>(),
+            CancellationToken.None);
 
     /// <summary>
     /// Resolves the caller's Azure AD object id (<c>oid</c>) — the input to
@@ -985,12 +950,4 @@ public static class GrantExternalAccessEndpoint
 
         return payload;
     }
-
-    /// <summary>
-    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
-    /// Returns null when no claim is present (in which case cache invalidation is skipped).
-    /// </summary>
-    private static string? ExtractTenantId(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 }

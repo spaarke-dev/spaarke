@@ -424,43 +424,384 @@ public class ExternalParticipationService
     /// belt-and-suspenders that also drops any co-cached per-contact grant data for the same subject.
     /// <para>
     /// <paramref name="tenantId"/> is explicit so an out-of-request caller (e.g. a future Dataverse
-    /// change webhook on the standing-grant field) can invalidate without an ambient HttpContext; when
-    /// null it falls back to the current request's <c>tid</c> claim. A no-tenant call is a logged
-    /// no-op (the cache key is mandatorily tenant-scoped, so there is nothing to remove without one).
+    /// change webhook on the standing-grant field) can invalidate without an ambient HttpContext. Since task 137
+    /// it is ADDED to the tenants <see cref="InvalidateGrantSetsAsync"/> removes under (the request's, the CIAM
+    /// tenant and every configured workforce tenant); with none of those available the call is a logged no-op.
     /// </para>
     /// </remarks>
-    public virtual async Task InvalidateAsync(
+    public virtual Task InvalidateAsync(
         Guid contactId,
         string? tenantId = null,
         CancellationToken ct = default)
+        => InvalidateGrantSetsAsync(new[] { contactId }, Array.Empty<Guid>(), ct, tenantId);
+
+    // ── THE ONE grant-cache invalidation routine (task 137 · defect C5) ───────────────────────────
+    //
+    // Every grant-write path calls this — /grant, /invite-and-grant (through the grant core), /revoke,
+    // /close-project, /set-record-share-expiry — instead of carrying its own cache.RemoveAsync copy. Two holes
+    // it closes:
+    //   1. THE TENANT. The cache key is tenant:{tid}:…, where tid is the READING request's tenant: a CIAM
+    //      caller's entry lives under the CIAM tenant, a workforce caller's under theirs. Every writer runs on the
+    //      workforce admin group and removed only its own tid, so a revoked CIAM contact kept its cached grants for
+    //      the 60-second TTL. The routine removes under EVERY tenant a grant set can be cached under (path C — no
+    //      ITenantCache contract change, ADR-009 tenant scoping intact).
+    //   2. ORGANIZATION GRANTS. A grant to an organization names no contact, so /grant, /revoke and
+    //      /close-project invalidated nobody. The routine expands every organization to its ACTIVE members, paged
+    //      to completion — no silent cap.
+
+    /// <summary>Junction rows per page when expanding an organization to its members (Dataverse's own maximum is 5000).</summary>
+    internal const int OrganizationMemberPageSize = 500;
+
+    /// <summary>
+    /// Page backstop for one organization's member walk: 200 pages × 500 = 100,000 members. Past it the walk stops
+    /// and says so at warning — the remaining members' entries expire on the 60-second TTL.
+    /// </summary>
+    internal const int MaxOrganizationMemberPages = 200;
+
+    /// <summary>Concurrent cache removals per invalidation (each is one independent Redis DEL).</summary>
+    private const int MaxConcurrentRemovals = 16;
+
+    /// <summary>
+    /// Removes every cached grant set that can hold the affected contacts' grants: the given contacts, plus every
+    /// ACTIVE member of the given organizations, under every tenant id a grant set can be cached under
+    /// (<see cref="GrantCacheTenantIds"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never throws and never fails the write</b> (owner 2026-09-10). Each removal is independent; a
+    /// failure is counted and logged, and the entry it missed expires on the 60-second TTL. The caller has
+    /// already committed its write, so it may pass <see cref="CancellationToken.None"/> to finish the clean-up
+    /// even if its client disconnects.</para>
+    /// <para><b>Data, not decisions.</b> The grant set is participation DATA (ADR-009); the authorization
+    /// decision is recomputed live per request and never cached (auth.md). A read already in flight can still
+    /// re-populate an entry after its removal (the cache write is fire-and-forget), so the bound on staleness
+    /// remains the TTL — what this routine removes is the TTL as the NORMAL case.</para>
+    /// </remarks>
+    /// <param name="contactIds">Contacts whose own grants changed (a person grant, or a contact-keyed share).</param>
+    /// <param name="organizationIds">Organizations whose organization-wide grants changed.</param>
+    /// <param name="explicitTenantId">An extra tenant id (an out-of-request caller's), added to the set.</param>
+    public virtual async Task<GrantCacheInvalidation> InvalidateGrantSetsAsync(
+        IEnumerable<Guid> contactIds,
+        IEnumerable<Guid> organizationIds,
+        CancellationToken ct = default,
+        string? explicitTenantId = null)
     {
-        var tenant = tenantId ?? ExtractTenantId();
-        if (string.IsNullOrEmpty(tenant))
+        try
+        {
+            return await InvalidateGrantSetsCoreAsync(contactIds, organizationIds, ct, explicitTenantId)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Belt-and-braces for the "never throws" contract: every step inside already catches its own faults.
+            _logger.LogWarning(ex,
+                "[EXT-ACCESS] Grant-cache invalidation failed unexpectedly. Affected entries expire on the " +
+                "{Ttl}-second TTL; the write that called it is unaffected.", CacheTtl.TotalSeconds);
+            return new GrantCacheInvalidation(0, 0, 0, Array.Empty<Guid>());
+        }
+    }
+
+    private async Task<GrantCacheInvalidation> InvalidateGrantSetsCoreAsync(
+        IEnumerable<Guid> contactIds,
+        IEnumerable<Guid> organizationIds,
+        CancellationToken ct,
+        string? explicitTenantId)
+    {
+        var contacts = new HashSet<Guid>((contactIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty));
+        var unexpanded = new List<Guid>();
+
+        foreach (var organizationId in (organizationIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct())
+        {
+            var members = await EnumerateActiveOrganizationMembersAsync(organizationId, ct).ConfigureAwait(false);
+            contacts.UnionWith(members.ContactIds);
+            if (!members.Complete)
+            {
+                unexpanded.Add(organizationId);
+            }
+        }
+
+        var tenants = GrantCacheTenantIds(explicitTenantId);
+        if (tenants.Count == 0)
         {
             _logger.LogWarning(
-                "[EXT-ACCESS] InvalidateAsync for Contact {ContactId} skipped: no tenant id available " +
-                "(no explicit tenantId argument and no 'tid' claim on the current request). The cache " +
-                "key is tenant-scoped, so there is nothing to remove.", contactId);
-            return;
+                "[EXT-ACCESS] Grant-cache invalidation for {Count} contact(s) skipped: no tenant id is available (no " +
+                "'tid' claim, no explicit tenant, no Ciam:TenantId / AzureAd:TenantId / WorkforceIdentity:CustomerTenantIds " +
+                "configured). Their entries expire on the {Ttl}-second TTL.", contacts.Count, CacheTtl.TotalSeconds);
+            return new GrantCacheInvalidation(contacts.Count, 0, 0, unexpanded);
         }
+
+        // Bounded parallelism: a large organization × several tenants is thousands of independent key removals,
+        // and run one at a time they would hold the write's response for seconds. Each removal stands alone.
+        var removed = 0;
+        var failed = 0;
+        var removals = contacts.SelectMany(contactId => tenants.Select(tenant => (contactId, tenant)));
+        await Parallel.ForEachAsync(
+                removals,
+                new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrentRemovals, CancellationToken = ct },
+                async (removal, token) =>
+                {
+                    try
+                    {
+                        await _cache.RemoveAsync(removal.tenant, ExternalAccessResource, removal.contactId.ToString(),
+                            CacheVersion, ct: token).ConfigureAwait(false);
+                        Interlocked.Increment(ref removed);
+                    }
+                    catch (Exception ex) when (!token.IsCancellationRequested)
+                    {
+                        // Non-fatal: the entry expires on its own TTL. Never turns a committed write into an error.
+                        Interlocked.Increment(ref failed);
+                        _logger.LogWarning(ex,
+                            "[EXT-ACCESS] Failed to invalidate the grant cache for Contact {ContactId} under tenant " +
+                            "{TenantId}. It expires on the {Ttl}-second TTL.",
+                            removal.contactId, removal.tenant, CacheTtl.TotalSeconds);
+                    }
+                })
+            .ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "[EXT-ACCESS] Invalidated the grant cache of {Contacts} contact(s) under {Tenants} tenant id(s): {Removed} " +
+            "removal(s), {Failed} failed; {Unexpanded} organization(s) not fully expanded.",
+            contacts.Count, tenants.Count, removed, failed, unexpanded.Count);
+
+        return new GrantCacheInvalidation(contacts.Count, removed, failed, unexpanded);
+    }
+
+    /// <summary>
+    /// Every tenant id a contact's grant set can be cached under: the current request's <c>tid</c>, an explicit
+    /// one, the CIAM tenant (<c>Ciam:TenantId</c>), the workforce app's own tenant (<c>AzureAd:TenantId</c>) and
+    /// every configured customer workforce tenant (<c>WorkforceIdentity:CustomerTenantIds</c>, task 141 — under
+    /// Model 1 it differs from <c>AzureAd:TenantId</c>).
+    /// </summary>
+    /// <remarks>
+    /// The cache key is built from the raw <c>tid</c> claim, which Entra issues as a lower-case "D" GUID. A
+    /// configured value may differ in case, so each GUID is added in BOTH its configured spelling and its canonical
+    /// lower-case form; an extra removal of a key that does not exist costs one cache round trip and nothing else.
+    /// </remarks>
+    internal IReadOnlyList<string> GrantCacheTenantIds(string? explicitTenantId = null)
+    {
+        var raw = new List<string?> { ExtractTenantId(), explicitTenantId };
+        if (_configuration is not null)
+        {
+            raw.Add(_configuration["Ciam:TenantId"]);
+            raw.Add(_configuration["AzureAd:TenantId"]);
+            raw.AddRange(_configuration.GetSection("WorkforceIdentity:CustomerTenantIds").GetChildren().Select(c => c.Value));
+        }
+
+        var tenants = new List<string>();
+        foreach (var value in raw)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                continue;
+            }
+
+            var trimmed = value.Trim();
+            if (!tenants.Contains(trimmed, StringComparer.Ordinal))
+            {
+                tenants.Add(trimmed);
+            }
+
+            if (Guid.TryParse(trimmed, out var guid))
+            {
+                var canonical = guid.ToString("D");
+                if (!tenants.Contains(canonical, StringComparer.Ordinal))
+                {
+                    tenants.Add(canonical);
+                }
+            }
+        }
+
+        return tenants;
+    }
+
+    /// <summary>
+    /// The ACTIVE member contacts of one organization, following the server's paging to the end (no silent cap).
+    /// A failed page, or the page backstop, stops the walk: the members already read are returned and the result
+    /// says it is incomplete, with a warning naming the count and the TTL bound.
+    /// </summary>
+    internal async Task<OrganizationMemberWalk> EnumerateActiveOrganizationMembersAsync(Guid organizationId, CancellationToken ct)
+    {
+        var members = new HashSet<Guid>();
+        string? next = null;
+        var pages = 0;
 
         try
         {
-            await _cache.RemoveAsync(
-                tenant, ExternalAccessResource, contactId.ToString(), CacheVersion, ct: ct);
-            _logger.LogInformation(
-                "[EXT-ACCESS] Invalidated cached participation data for Contact {ContactId} (tenant {TenantId}) " +
-                "— standing-grant change reflects on next evaluation.", contactId, tenant);
+            do
+            {
+                var page = await ReadOrganizationMemberPageAsync(organizationId, next, ct).ConfigureAwait(false);
+                pages++;
+                members.UnionWith(page.ContactIds.Where(id => id != Guid.Empty));
+                next = page.NextLink;
+
+                if (next is not null && pages >= MaxOrganizationMemberPages)
+                {
+                    _logger.LogWarning(
+                        "[EXT-ACCESS] Organization {OrganizationId} has more active members than {Pages} page(s) of " +
+                        "{PageSize}: {Read} member(s) invalidated, the rest are NOT — their cached grant sets expire on " +
+                        "the {Ttl}-second TTL.",
+                        organizationId, pages, OrganizationMemberPageSize, members.Count, CacheTtl.TotalSeconds);
+                    return new OrganizationMemberWalk(members.ToList(), Complete: false);
+                }
+            }
+            while (next is not null);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[EXT-ACCESS] Could not read all active members of Organization {OrganizationId} (stopped after {Pages} " +
+                "page(s), {Read} member(s) read). Members not read are NOT invalidated — their cached grant sets expire " +
+                "on the {Ttl}-second TTL.", organizationId, pages, members.Count, CacheTtl.TotalSeconds);
+            return new OrganizationMemberWalk(members.ToList(), Complete: false);
+        }
+
+        return new OrganizationMemberWalk(members.ToList(), Complete: true);
+    }
+
+    /// <summary>
+    /// One page of an organization's ACTIVE junction rows — the same <c>$filter</c> the revoke path's SPE sweep
+    /// uses (<see cref="ExternalOrganizationMembership.ActiveMembersFilter"/>) — and the server's
+    /// <c>@odata.nextLink</c> for the next one. Throws on any failure (a fault is never an empty page).
+    /// </summary>
+    /// <remarks><c>internal virtual</c>: the test seam this class uses for every read (subclass + override; no
+    /// HTTP double, ADR-038 B1). <c>DataverseWebApiClient.QueryAsync</c> is not used because it discards
+    /// <c>@odata.nextLink</c> — the silent truncation the 200-member bound on the revoke path exists to detect.</remarks>
+    internal virtual async Task<OrganizationMemberPage> ReadOrganizationMemberPageAsync(
+        Guid organizationId, string? nextLink, CancellationToken ct)
+    {
+        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
+        var url = nextLink
+                  ?? $"{GetDataverseApiUrl()}/{ExternalOrganizationMembership.EntitySet}" +
+                     $"?$filter={ExternalOrganizationMembership.ActiveMembersFilter(organizationId)}" +
+                     $"&$select={ExternalOrganizationMembership.MemberSelect}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+        request.Headers.Add("Prefer", $"odata.maxpagesize={OrganizationMemberPageSize}");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+
+        var page = await response.Content.ReadFromJsonAsync<MemberPageResult>(ct).ConfigureAwait(false);
+        var ids = (page?.Value ?? new List<ExternalOrganizationMembership.ContactOrganizationRow>())
+            .Where(r => r.ContactId is { } id && id != Guid.Empty)
+            .Select(r => r.ContactId!.Value)
+            .ToList();
+        return new OrganizationMemberPage(ids, page?.NextLink);
+    }
+
+    private sealed class MemberPageResult
+    {
+        [JsonPropertyName("value")]
+        public List<ExternalOrganizationMembership.ContactOrganizationRow>? Value { get; set; }
+
+        [JsonPropertyName("@odata.nextLink")]
+        public string? NextLink { get; set; }
+    }
+
+    // ── The LIVE contact-state read (task 137 · defect C5) ─────────────────────────────────────────
+
+    /// <summary>
+    /// Whether <paramref name="contactId"/> is an ACTIVE contact, read LIVE — never from the 60-second grant cache
+    /// or the 10-minute identity cache. The evaluator consults it on every composition that could contribute
+    /// contact-sourced access, so a contact deactivated after sign-in loses that access on its next request.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail closed.</b> Anything but a successfully read <c>statecode</c> of 0 is not Active: a missing
+    /// row is <see cref="ContactRecordState.Inactive"/>, a fault is <see cref="ContactRecordState.Unreadable"/>,
+    /// and the evaluator treats both as "confers nothing" (ADR-003, NFR-01).</para>
+    /// <para><b>Once per request.</b> A request that composes several entity types (the CIAM principal composes
+    /// three) reads the row once: an Active or Inactive answer is remembered in <c>HttpContext.Items</c> for the
+    /// rest of that request only — the next request reads again. A fault is not remembered.</para>
+    /// <para><b>Why its own read.</b> No existing live read covers every plane: the standing-grant reader reads
+    /// the contact row only on the workforce contact plane (and task 142 escalation (d) may retire that term), the
+    /// junction read returns nothing for a contact with no membership, and the grant read is cached.</para>
+    /// </remarks>
+    internal async Task<ContactRecordState> ReadContactStateAsync(Guid contactId, CancellationToken ct)
+    {
+        var items = _httpContextAccessor?.HttpContext?.Items;
+        var key = ContactStateItemKey + contactId.ToString("N");
+        if (items is not null && items.TryGetValue(key, out var remembered) && remembered is ContactRecordState known)
+        {
+            return known;
+        }
+
+        ContactRecordState state;
+        try
+        {
+            state = await QueryContactStateAsync(contactId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            // Non-fatal: a failed invalidation degrades to the 60s TTL expiring on its own. The
-            // authorization decision is never cached, so the worst case is a bounded staleness window,
-            // not an incorrect grant/deny beyond that window.
-            _logger.LogWarning(ex,
-                "[EXT-ACCESS] Failed to invalidate participation cache for Contact {ContactId} (tenant {TenantId}). " +
-                "Falling back to TTL expiry.", contactId, tenant);
+            _logger.LogError(ex,
+                "[EXT-ACCESS] The state of Contact {ContactId} could not be read. Failing CLOSED — its grants confer " +
+                "nothing on this request (ADR-003).", contactId);
+            return ContactRecordState.Unreadable;
         }
+
+        if (items is not null && state != ContactRecordState.Unreadable)
+        {
+            items[key] = state;
+        }
+
+        return state;
+    }
+
+    private const string ContactStateItemKey = "uac:contact-state:";
+
+    /// <summary>
+    /// The live read behind <see cref="ReadContactStateAsync"/>: <c>contacts({id})?$select=statecode</c>, app-only.
+    /// 404 is <see cref="ContactRecordState.Inactive"/> (no row confers nothing); any other non-success status, or a
+    /// row without a <c>statecode</c>, is <see cref="ContactRecordState.Unreadable"/>.
+    /// </summary>
+    /// <remarks><c>internal virtual</c> — the test seam every grant-data double overrides (subclass + override).</remarks>
+    internal virtual async Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+    {
+        var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
+        var url = $"{GetDataverseApiUrl()}/contacts({contactId:D})?$select=statecode";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return ContactRecordState.Inactive;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "[EXT-ACCESS] Contact-state read FAILED for Contact {ContactId}: {Status}. Failing CLOSED.",
+                contactId, response.StatusCode);
+            return ContactRecordState.Unreadable;
+        }
+
+        var row = await response.Content.ReadFromJsonAsync<ContactStateRow>(ct).ConfigureAwait(false);
+        return ContactStateFrom(row?.StateCode);
+    }
+
+    /// <summary>The state one successfully read row carries: 0 is Active, any other value Inactive, null Unreadable.</summary>
+    internal static ContactRecordState ContactStateFrom(int? stateCode) => stateCode switch
+    {
+        0 => ContactRecordState.Active,
+        null => ContactRecordState.Unreadable,
+        _ => ContactRecordState.Inactive,
+    };
+
+    private sealed class ContactStateRow
+    {
+        [JsonPropertyName("statecode")]
+        public int? StateCode { get; set; }
     }
 
     /// <summary>
@@ -469,7 +810,7 @@ public class ExternalParticipationService
     /// </summary>
     private string? ExtractTenantId()
     {
-        var user = _httpContextAccessor.HttpContext?.User;
+        var user = _httpContextAccessor?.HttpContext?.User;
         if (user is null) return null;
         return user.FindFirst("tid")?.Value
             ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
@@ -575,7 +916,7 @@ public class ExternalParticipationService
                 var idFilter = string.Join(" or ", chunk.Select(id => $"{source.IdAttribute} eq {id}"));
                 var query = $"{apiUrl}/{source.Collection}" +
                             $"?$filter=({idFilter})" +
-                            $"&$select={source.IdAttribute},sprk_issecure,sprk_accesspermission";
+                            $"&$select={source.IdAttribute},{RootFlagColumns}";
 
                 using var request = new HttpRequestMessage(HttpMethod.Get, query);
                 request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -605,7 +946,7 @@ public class ExternalParticipationService
                 foreach (var id in chunk)
                 {
                     flags[id] = byId.TryGetValue(id, out var row)
-                        ? FlagsFrom(row.sprk_issecure, row.sprk_accesspermission)
+                        ? FlagsFrom(row.sprk_issecure, row.sprk_accesspermission, row.statecode)
                         // Asked about, not returned. Cannot be distinguished from an unreadable row.
                         : RootRecordFlags.Unreadable;
                 }
@@ -634,11 +975,22 @@ public class ExternalParticipationService
     /// today's behaviour, unchanged (task 138 constraint; the NULL-<c>sprk_issecure</c> cleanup is task 153's
     /// Q1 decision). <see cref="RootRecordFlags.IsUnreadable"/> is never set here — this row WAS read.
     /// </remarks>
-    internal static RootRecordFlags FlagsFrom(bool? isSecure, int? accessPermission)
+    /// <para><b>Task 137 · defect C5 — the root's own state.</b> Only <c>statecode</c> 0 is active. A non-zero OR
+    /// NULL state is INACTIVE (fail closed, NFR-01): Dataverse never writes a null <c>statecode</c>, so a row
+    /// without one is a row whose state was not read. No default for the parameter — every caller says what it
+    /// read.</para>
+    internal static RootRecordFlags FlagsFrom(bool? isSecure, int? accessPermission, int? stateCode)
         => new(
             IsSecure: isSecure == true,
             IsRestricted: accessPermission == AccessPermissionRestricted,
-            IsLimited: accessPermission == AccessPermissionLimited);
+            IsLimited: accessPermission == AccessPermissionLimited,
+            IsInactive: stateCode != 0);
+
+    /// <summary>
+    /// The flag read's columns besides the id: the two policy flags (tasks 037, 138) and the row's own
+    /// <c>statecode</c> (task 137 · C5) — in the SAME batched read, so the inactive-root rule costs no round trip.
+    /// </summary>
+    internal const string RootFlagColumns = "sprk_issecure,sprk_accesspermission,statecode";
 
     /// <summary>
     /// Whether <paramref name="entityType"/> (a LOGICAL name, e.g. <c>sprk_project</c>) is a key of the flag
@@ -661,6 +1013,9 @@ public class ExternalParticipationService
         public string? sprk_workassignmentid { get; set; }
         public bool? sprk_issecure { get; set; }
         public int? sprk_accesspermission { get; set; }
+
+        /// <summary>The root's own state (task 137 · C5): Active(0) / Inactive(1). Null reads as inactive.</summary>
+        public int? statecode { get; set; }
 
         public Guid GetId(string idAttribute)
         {
@@ -1613,4 +1968,37 @@ public class ExternalParticipationService
             WorkAssignmentGrants = WorkAssignmentGrants.Select(g => g.ToGrant()).ToList(),
         };
     }
+}
+
+/// <summary>
+/// What one call of <see cref="ExternalParticipationService.InvalidateGrantSetsAsync"/> did (task 137): how many
+/// contacts were affected, how many key removals landed or failed, and which organizations could not be expanded to
+/// every member. Informational — a write endpoint never changes its answer because of it.
+/// </summary>
+public sealed record GrantCacheInvalidation(
+    int ContactCount,
+    int RemovalsSucceeded,
+    int RemovalsFailed,
+    IReadOnlyList<Guid> OrganizationsNotFullyExpanded);
+
+/// <summary>An organization's active members, and whether the walk read them all (task 137).</summary>
+internal sealed record OrganizationMemberWalk(IReadOnlyList<Guid> ContactIds, bool Complete);
+
+/// <summary>One page of an organization's active members and the server's next-page link (task 137).</summary>
+internal sealed record OrganizationMemberPage(IReadOnlyList<Guid> ContactIds, string? NextLink);
+
+/// <summary>
+/// A contact's own state as the evaluator sees it (task 137 · defect C5). The DEFAULT value is
+/// <see cref="Unreadable"/> on purpose: an uninitialized or defaulted answer fails closed.
+/// </summary>
+internal enum ContactRecordState
+{
+    /// <summary>The state could not be read. Confers nothing (fail closed).</summary>
+    Unreadable = 0,
+
+    /// <summary><c>statecode</c> 0 — the only state whose grants confer access.</summary>
+    Active = 1,
+
+    /// <summary>Deactivated, or no such row. Confers nothing.</summary>
+    Inactive = 2,
 }

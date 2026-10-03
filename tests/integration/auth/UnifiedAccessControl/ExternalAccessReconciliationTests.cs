@@ -260,16 +260,20 @@ public class ExternalAccessReconciliationTests
             .Which.Should().Contain("before=[statecode=0 expiresDate=(null)]").And.Contain("mode=write");
     }
 
-    // ── S2: the job ships DISABLED ──────────────────────────────────────────────────────────────────
+    // ── S2: the job ships SCHEDULED and REPORT-ONLY (owner round 7 item 1, task 137) ─────────────────
 
     /// <remarks>
     /// Not an ADR-038 B3 wiring test. It asserts no <c>GetRequiredService(...) is not null</c> and no "the
-    /// right type came back" — <c>Single(r =&gt; r.Job.JobId == …)</c> already fails if it did not. The one
-    /// assertion is the SHIPPING STATE the owner's D-2 part 3 decision turns on: this job, which removes live
-    /// access, must arrive switched off. Perturbing the registration to <c>enabled: true</c> reddens it.
+    /// right type came back" — <c>Single(r =&gt; r.Job.JobId == …)</c> already fails if it did not. The
+    /// assertions are the SHIPPING POSTURE the owner decided (task 137, owner round 7 item 1, 2026-10-02:
+    /// "enable the schedule in report-only mode now; enable writes only after the owner has reviewed one
+    /// report"): the schedule ticks daily, and with the shipping configuration — no
+    /// <c>ExternalAccess:Reconciliation:WritesEnabled</c> key — a tick writes nothing. Perturbing the
+    /// registration back to <c>enabled: false</c>, or changing the schedule, reddens it; the write side of the
+    /// same posture is pinned by S1 (every value but <c>true</c> is report-only).
     /// </remarks>
     [Fact]
-    public void S2_TheJobShipsDisabled_SoEnablingItIsAnOwnerAction()
+    public void S2_TheJobShipsScheduled_AndItsShippingConfigurationIsReportOnly()
     {
         var services = new ServiceCollection();
         services.AddLogging();
@@ -280,8 +284,11 @@ public class ExternalAccessReconciliationTests
         var registration = provider.GetServices<ScheduledJobRegistration>()
             .Single(r => r.Job.JobId == ExternalAccessReconciliationJob.JobIdConstant);
 
-        registration.Enabled.Should().BeFalse(
-            "R2 and R3 remove access that exists today; enabling the job is an owner action (D-2 part 3)");
+        registration.Enabled.Should().BeTrue(
+            "the owner enabled the schedule in report-only mode so a report exists to review (round 7 item 1)");
+        registration.CronSchedule.Should().Be("0 5 * * *", "daily at 05:00 UTC, an hour before the reminder sweep");
+        ((ExternalAccessReconciliationJob)registration.Job).WritesEnabled.Should().BeFalse(
+            "with no WritesEnabled key the scheduled tick is report-only — writes wait for the owner's review");
     }
 
     // ── S3: every write is taken under a per-chunk atomic claim ─────────────────────────────────────

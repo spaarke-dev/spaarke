@@ -154,14 +154,28 @@ public sealed class ExternalRootGrant
 /// combination — but the WRITE-time grant policy does: it must tell an operator "the record's settings could
 /// not be read" rather than "the record is Restricted", which would be false (task 138).
 /// </param>
+/// <param name="IsInactive">
+/// The root record's own <c>statecode</c> is not Active (task 137 · defect C5). An inactive project, matter or
+/// work assignment confers NOTHING contact-sourced — removed after the max exactly as Restricted removes it, with
+/// the same survivor rule (a systemuser's own membership term stays). A read-time rule, not a grant write, so
+/// reactivating the record restores access with no data change.
+/// </param>
 /// <remarks>
 /// The flags are independent, so a record can carry any combination. They are carried together because they
-/// come from the same row and the same read. <see cref="IsLimited"/> and <see cref="IsUnreadable"/> are
-/// optional so a value built with only the first two (every pre-138 call site) means what it always meant.
+/// come from the same row and the same read. <see cref="IsLimited"/>, <see cref="IsUnreadable"/> and
+/// <see cref="IsInactive"/> are optional so a value built with only the first two (every pre-138 call site)
+/// means what it always meant.
 /// </remarks>
 public readonly record struct RootRecordFlags(
-    bool IsSecure, bool IsRestricted, bool IsLimited = false, bool IsUnreadable = false)
+    bool IsSecure, bool IsRestricted, bool IsLimited = false, bool IsUnreadable = false, bool IsInactive = false)
 {
+    /// <summary>
+    /// Whether the post-max veto removes every CONTACT-SOURCED contribution on this record: Restricted (task 037 ·
+    /// FR-21) or an inactive record (task 137 · C5). Both keep a non-contact-sourced survivor — the systemuser
+    /// plane's ADR-034 membership term (<c>AccessibleRecordSetService.ApplyVetoPipeline</c>).
+    /// </summary>
+    public bool RemovesContactSourcedAccess => IsRestricted || IsInactive;
+
     /// <summary>
     /// The ONE pre-max suppression predicate (ADR-003 item 8 as amended by task 138 · FR-22): on a
     /// direct-only record a contact's access comes ONLY from its own named grant rows. Organization-inherited
@@ -187,7 +201,8 @@ public readonly record struct RootRecordFlags(
     /// org-expansion term contribute access to a record nobody could confirm is safe to share.
     /// </para>
     /// </summary>
-    public static RootRecordFlags Unreadable => new(IsSecure: true, IsRestricted: true, IsLimited: true, IsUnreadable: true);
+    public static RootRecordFlags Unreadable =>
+        new(IsSecure: true, IsRestricted: true, IsLimited: true, IsUnreadable: true, IsInactive: true);
 
     /// <summary>No restriction applies. Only ever produced by a SUCCESSFUL read of a Standard, non-secure row.</summary>
     public static RootRecordFlags None => new(IsSecure: false, IsRestricted: false);
