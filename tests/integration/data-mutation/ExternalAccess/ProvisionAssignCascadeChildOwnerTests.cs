@@ -167,6 +167,78 @@ public class ProvisionAssignCascadeChildOwnerTests : IClassFixture<ProvisionProj
     }
 
     /// <summary>
+    /// The two restore outcomes that end in "unknown", not "refused" (owner round 10 item 4: "a child whose restore fails is
+    /// named"). <c>Unreadable</c>: the child's owner cannot be read before the restore, so nothing is written to it.
+    /// <c>Unverified</c>: its PATCH is sent but it cannot be read back. Each is a failure — never "already owned" or
+    /// "restored" — named with its own owner, its outcome and the call that puts it back, in the response and in a CRITICAL
+    /// line, with no "retry". The other child is still put back.
+    /// </summary>
+    [Theory]
+    [InlineData("Unreadable")]
+    [InlineData("Unverified")]
+    public async Task Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored(string outcome)
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        var unknownLocation = Guid.NewGuid();
+        var otherLocation = Guid.NewGuid();
+        var unknownOwner = DataversePrincipalRef.User(Guid.NewGuid());
+        var otherOwner = DataversePrincipalRef.Team(Guid.NewGuid());
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam);
+        _fixture.SeedCascadeChild(projectId, Location, unknownLocation, unknownOwner);
+        _fixture.SeedCascadeChild(projectId, Location, otherLocation, otherOwner);
+        _fixture.SharePointDocumentReadRefused = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = true; // the post-move proof fails → compensate
+        if (outcome == "Unreadable")
+            _fixture.FailChildOwnerReadFor = unknownLocation;              // its read BEFORE the restore throws
+        else
+            _fixture.FailChildOwnerReadBackAfterBindFor = unknownLocation; // its read-back AFTER the PATCH throws
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCascadeChildrenNotRestored);
+        problem.GetProperty("ownershipRestored").GetBoolean().Should().BeTrue();
+        problem.GetProperty("childOwnersRestored").GetBoolean().Should().BeFalse();
+
+        var expectedCall =
+            $"PATCH /api/data/v9.2/sharepointdocumentlocations({unknownLocation}) {{\"ownerid@odata.bind\":\"/systemusers({unknownOwner.Id})\"}}";
+        var named = problem.GetProperty("childOwnersNotRestored").EnumerateArray().Should().ContainSingle().Subject;
+        named.GetProperty("table").GetString().Should().Be(Location);
+        named.GetProperty("id").GetGuid().Should().Be(unknownLocation);
+        named.GetProperty("ownerType").GetString().Should().Be("systemuser");
+        named.GetProperty("ownerId").GetGuid().Should().Be(unknownOwner.Id);
+        named.GetProperty("outcome").GetString().Should().Be(outcome);
+        named.GetProperty("nextCall").GetString().Should().Be(expectedCall);
+
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain(unknownLocation.ToString()).And.Contain("before provisioning is called again");
+        detail.Should().NotContainEquivalentOf("retry");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Critical
+            && e.Message.Contains($"{Location} {unknownLocation} ({outcome})")
+            && e.Message.Contains(expectedCall));
+
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+        _fixture.OwnerOfCascadeChild(otherLocation).Should().Be(otherOwner, "the other child is still put back");
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+
+        var writesToUnknown = ChildOwnerWrites().Where(u => u.RecordId == unknownLocation).ToList();
+        if (outcome == "Unreadable")
+        {
+            writesToUnknown.Should().BeEmpty("its owner could not be read, so nothing was written to it");
+            _fixture.OwnerOfCascadeChild(unknownLocation).Should().Be(DataversePrincipalRef.Team(businessUnitTeam),
+                "what the move back's cascade left");
+        }
+        else
+        {
+            writesToUnknown.Should().ContainSingle("the PATCH was sent; only its read-back failed")
+                .Which.Payload["ownerid@odata.bind"].Should().Be($"/systemusers({unknownOwner.Id})");
+        }
+    }
+
+    /// <summary>
     /// The snapshot cannot be read completely: refused BEFORE any write (a move whose cascade could not be undone child by
     /// child is not attempted). A transient failure is the same caller's retry; a 400 is Dataverse refusing the read —
     /// deterministic, so the detail says calling again repeats it.

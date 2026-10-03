@@ -43,8 +43,13 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// <para><b>Restore is keyed on observed state.</b> <see cref="RestoreAsync"/> reads each snapshotted child: one that
 /// reads as its snapshotted owner is left alone; one that does not is assigned back — its own operation, never folded
 /// into another PATCH — and read back, exactly as the root's own owner moves are (<c>ProvisionProjectEndpoint</c>'s
-/// bind-then-read-back). A child that no longer exists is <see cref="CascadeChildRestoreOutcome.Gone"/>. Every other
-/// outcome that does not end on the snapshotted owner is a failure the caller reports, child by child, with the call
+/// bind-then-read-back). A child that no longer exists when it is read BEFORE the restore is
+/// <see cref="CascadeChildRestoreOutcome.Gone"/>: nothing is left to put back. Only that read decides <c>Gone</c> — a child
+/// that disappears after its PATCH is reported <see cref="CascadeChildRestoreOutcome.Refused"/> or
+/// <see cref="CascadeChildRestoreOutcome.NotApplied"/>, a failure (fail closed). Every outcome other than
+/// <c>AlreadyOwned</c>, <c>Restored</c> and <c>Gone</c> — including a child that could not be read before the restore
+/// (<see cref="CascadeChildRestoreOutcome.Unreadable"/>) or read back after it
+/// (<see cref="CascadeChildRestoreOutcome.Unverified"/>) — is a failure the caller reports, child by child, with the call
 /// that puts it back (<see cref="CascadeChild.RestoreCall"/>).</para>
 ///
 /// <para><b>For task 148 (secure child backfill and transitions)</b> — reuse, do not fork. Around ANY owner move of a
@@ -364,13 +369,20 @@ public enum CascadeChildRestoreOutcome
     /// <summary>Assigned back and read back as its snapshotted owner.</summary>
     Restored,
 
-    /// <summary>The row no longer exists: there is nothing to put back.</summary>
+    /// <summary>
+    /// The row did not exist when read before the restore: there is nothing to put back. Decided only by that read — a
+    /// row that disappears after its PATCH is <see cref="Refused"/> or <see cref="NotApplied"/>.
+    /// </summary>
     Gone,
 
-    /// <summary>Dataverse refused the assignment, and the row does not read as its snapshotted owner.</summary>
+    /// <summary>
+    /// Dataverse refused the assignment, and the row does not read back as its snapshotted owner (or no longer reads).
+    /// </summary>
     Refused,
 
-    /// <summary>The assignment was accepted, and the row still does not read as its snapshotted owner.</summary>
+    /// <summary>
+    /// The assignment was accepted, and the row still does not read back as its snapshotted owner (or no longer reads).
+    /// </summary>
     NotApplied,
 
     /// <summary>The assignment was sent and the row could not be read back: unknown.</summary>
@@ -383,7 +395,10 @@ public enum CascadeChildRestoreOutcome
 /// <summary>One child's restore: the child, what happened, and the owner it was found with (when read).</summary>
 public sealed record CascadeChildRestore(CascadeChild Child, CascadeChildRestoreOutcome Outcome, DataversePrincipalRef? FoundOwner)
 {
-    /// <summary>True when the child ends on its snapshotted owner, or no longer exists.</summary>
+    /// <summary>
+    /// True when the child ends on its snapshotted owner (read), or did not exist when read before the restore. An
+    /// <c>Unreadable</c> or <c>Unverified</c> child is NOT back: whether it is on its owner is unknown.
+    /// </summary>
     public bool IsBack => Outcome is CascadeChildRestoreOutcome.AlreadyOwned
         or CascadeChildRestoreOutcome.Restored
         or CascadeChildRestoreOutcome.Gone;

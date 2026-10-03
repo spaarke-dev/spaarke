@@ -1026,6 +1026,14 @@ edit another task's POML):**
 - 🔔 **Open design point for 148, not decided here:** where unsecure's cascade sends these rows (the new root owner, as
   the cascade does, or the owner the task-146 rule gives a non-secure child). The owners they had before PROVISIONING are
   not stored anywhere once the forward move succeeds — the snapshot here lives for one provisioning call only.
+- ⚠️ **Unproven assumption — `sharepointdocument` in an org WITH SharePoint integration** (verifier c1 item 12; round
+  c1-r1, §17.3). There its rows are listed from SharePoint, not stored. Whether they carry an owner, whether the Assign
+  cascade actually re-owns them, and whether an `ownerid` PATCH on them is accepted are all UNPROVEN — dev has the
+  integration off, so none of the three can be observed there. Both ways it can be wrong fail closed: rows read without an
+  owner refuse every move of a root that has documents, deterministically (here `cascade_children_unreadable`,
+  `refused`); a PATCH Dataverse does not support ends every undo of such a root `cascade_children_not_restored`, naming a
+  `nextCall` that fails the same way. 148 does not treat a document's restore as proven until it is checked live in an
+  integration-on org.
 - `sprk_*` child tables (documents, events, to-dos, communications …) are NOT cascade tables: 148's reconciler re-owns those
   through `IRecordOwnershipResolver`; this primitive covers only what Dataverse's own Assign cascade moves.
 
@@ -1050,7 +1058,8 @@ ownership and shares only" now says whose ownership), `MoveWithCreatorShareAsync
 Decided: **(C)** of §14.3 — no automatic resume for a record that keeps its own container; the response names the Manage
 Access recovery. **No code change.** Recorded in §14.3, the POML and the guide §7a, whose sentence "is an open owner
 question" was the one statement the decision made false. The code comments ("an owner question recorded in the task 133
-note §14", "an owner decision (task 133 note §14)") stay true and are unchanged.
+note §14", "an owner decision (task 133 note §14)") stay true and are unchanged. *(Round c1-r1, verifier c1 item 11: both
+still read as open, so both now say "decided as shipped by owner round 10 item 5 (task 133 note §14.3)" — §17.2.)*
 
 ### 16.5 Item 3 — the interim `sprk_createdbyperson` stamp (round 7 item 3; round 10 main-session record)
 
@@ -1123,6 +1132,11 @@ original bytes + touch (`Environment.TickCount64` where a constant would be unre
 **20/20 bite.** Scripts: scratchpad `task133/perturb_c1.py`, `perturb_c1_js.py`; sources verified restored (`git status`, no
 `TickCount64` left).
 
+*Round c1-r1 (verifier c1 item 1):* the sweep above missed two fail-open seeds on the primitive — S19 (the read BEFORE a
+child's restore fails → `AlreadyOwned`) and S20 (the read-back AFTER its PATCH fails → `Restored`) — which survived every
+test. Pinned by a new theory (2 cases) and two fixture switches; S19–S22 now bite (§17.1). The class is 9 methods / 14
+cases.
+
 ### 16.8 Pending manual gates (main session; nothing here was written live)
 
 Unchanged from §15.5 (schema before master; live gate (a)–(i) after a deploy; the (e) replay acceptance; publish size).
@@ -1146,6 +1160,16 @@ move of a project or matter that has a document location is refused. That is the
 `owner_assignment_failed` (owner read back unchanged, nothing moved), not a new hole; dev has 0 such roots, so it cannot
 be observed there without a probe like (j) extended past the snapshot (which (j) never reaches).
 
+**Unproven assumption, next to the observation above (verifier c1 item 12; round c1-r1, §17.3):** in an org WITH
+SharePoint integration, `sharepointdocument` rows are listed from SharePoint, not stored. Whether they carry an owner,
+whether the Assign cascade re-owns them, and whether an `ownerid` PATCH on them is accepted are all unproven, and none can
+be shown in dev (integration off; 0 document locations, re-confirmed read-only by the verifier). Both ways it can be wrong
+fail closed: rows read without an owner → every provisioning of a record with documents is refused before any write
+(`cascade_children_unreadable`, `refused`); a PATCH Dataverse does not support → every compensation of such a record ends
+`cascade_children_not_restored`, naming a `nextCall` that fails the same way. Gate (e) proves only the no-children path in
+dev; a real child restore — a location's or a document's — cannot be shown live there. The first integration-on
+environment should run (j) past the snapshot and (e) with a document location before relying on the document path.
+
 ### 16.9 Quality gates (round c1 — FULL rigor, and TEST-MODIFYING, so code-review + adr-check run)
 
 **code-review** (all severities):
@@ -1161,7 +1185,8 @@ be observed there without a probe like (j) extended past the snapshot (which (j)
 | AI-smell scan: no new interface, no catch-log-rethrow, no null-check on a non-nullable, no swallowed failure (each child outcome is reported), exhaustive table switch with a throwing default | — | Clean |
 
 **adr-check**: ADR-001 (no new endpoint), ADR-002 (no plugin; the restore is server-side in the BFF), ADR-003 (an
-unreadable or incomplete snapshot refuses before any write; an unverifiable child restore is a failure, never "restored";
+unreadable or incomplete snapshot refuses before any write; an unverifiable child restore is a failure, never "restored"
+— *unpinned in round c1 (verifier c1 items 1/14: seeds S19/S20 survived); pinned in round c1-r1, §17.1*;
 `Gone` is not a failure because nothing is left to restore), ADR-008 (the delegation filter unchanged), ADR-010 (no
 interface, no registration), ADR-019 (ProblemDetails + stable `reasonCode`; extensions follow the existing convention),
 ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; the fixture models Dataverse's cascade and
@@ -1196,3 +1221,143 @@ Fresh-worktree note for whoever re-runs the client tests: `@spaarke/sdap-client`
 whose `dist/` is not committed; build each (`npm install --legacy-peer-deps --no-audit --no-fund` + `npm run build` in
 `src/client/shared/Spaarke.SdapClient` and `Spaarke.Auth`) before the component package's jest or `tsc`, or four suites
 fail to resolve them.
+
+## 17. Round c1-r1 (2026-10-03, branch `task/uac-r2-133-c1-r1`) — the verifier's findings on round c1
+
+Base: `task/uac-r2-133-c1` @ **`27d14cbcf`** (baseSha), branched as `task/uac-r2-133-c1-r1`. Binding sources re-read from
+`work/unified-access-control-r2` (owner rounds 10–11). No escalation trigger fired: every item is answered by round 10
+item 4 or 5, or is a test, a comment or a note.
+
+| Item | Verifier finding | Disposition |
+|---|---|---|
+| 1 | MEDIUM — seeds S19 / S20 (a child's read before / after its restore fails → `AlreadyOwned` / `Restored`) survive every test | **Closed** (§17.1): two fixture switches, one theory (2 cases); S19–S22 bite |
+| 2–10 | VERIFIED (seed sweep, runs, merge, POML, snapshot order, restore-after-verified-undo only, `QueryAsync` 400 shape, 0 live locations, restore order) | No change; nothing to close |
+| 11 | LOW — `ProvisionProjectEndpoint.cs:61` still reads as an open owner question | **Closed** (§17.2) — and the same wording at `:2573` |
+| 12 | LOW / OBSERVATION — `sharepointdocument` in an integration-on org is unproven | **Recorded** (§17.3): §16.8 live-gate notes + §16.2 task 148 handoff; no code (both failure shapes fail closed) |
+| 13 | LOW — "a child that no longer exists is Gone" overstates: a row deleted after its PATCH is `NotApplied`/`Refused` | **Closed** (§17.4): wording only; behaviour unchanged (fails closed) |
+| 14 | Criterion not met: round 10 item 4 "a child whose restore fails is named" — `Unreadable` / `Unverified` untested | **Closed** by item 1 |
+| 15 | Publish size not measured | **Not closed — main session** (by instruction; no package changed, no CVE delta) |
+| 16 | Manual live gate (a)–(j), schema dry run / -Apply / -Verify | **Not closed — main session** (approved by owner round 11); §17.3 adds the dev limit on (e) |
+| 17 | Step 9, TASK-INDEX status cell | **Not closed — main session** (by instruction this executor does not edit TASK-INDEX.md / current-task.md) |
+
+### 17.1 Items 1 and 14 — the two unpinned fail-closed outcomes
+
+The c1 primitive was correct; nothing pinned two of its four failure outcomes. The fixture had no way to fail a child's
+**by-id** read (`CascadeChildSnapshotReadFailsWith` fires only on the snapshot's by-regarding read).
+
+**Fixture** (`ProvisionProjectTestFixture`), two switches in the real client's exception shape
+(`HttpRequestException`, 503):
+
+- `FailChildOwnerReadFor` — a by-id read of the named child throws: the restore's read of its current owner, BEFORE any
+  PATCH. The snapshot's by-regarding read is unaffected.
+- `FailChildOwnerReadBackAfterBindFor` — once an `ownerid` PATCH on the named child has been APPLIED, its by-id read
+  throws: the read-back after the PATCH. The read before it still answers. (Applied binds are tracked per child;
+  `Reset` clears both switches and the set.)
+
+**Test** — `ProvisionAssignCascadeChildOwnerTests.Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored`,
+a theory over `Unreadable` / `Unverified`. Two document locations with owners of their own (a user and a team); the
+post-move share proof fails, so the move is undone (read back). Asserted: `sdap.provision.cascade_children_not_restored`;
+`ownershipRestored: true`, `childOwnersRestored: false`; exactly one named child with `table`, `id`, `ownerType`,
+`ownerId`, **`outcome` = the case** and the exact **`nextCall`**; the detail names the child and says "before
+provisioning is called again", never "retry"; a **CRITICAL** line naming `sharepointdocumentlocation {id} ({outcome})`
+and the call; the record's owner restored; the other child put back; no container. `Unreadable` → no write to the child
+(it stays on the owner the undo's cascade left); `Unverified` → exactly one bind to it, with its own owner (the PATCH was
+sent; only its read-back failed — and the response still does not claim it).
+
+**Seeds** (scratchpad `task133/perturb_c1r1.py`; each seed applied to `AssignCascadeChildOwners.cs`, the test project
+built, two filters run, the original bytes restored and the file touched; `git status` verified after):
+
+| # | Seeded violation | `DataMutation.ExternalAccess` WITHOUT the new test (202) | The new theory (2) |
+|---|---|---|---|
+| **S19** | the read before a child's restore fails → `AlreadyOwned` | SURVIVES (0 failed) — the verifier's finding, reproduced on a wider set | **BITES** — `Unreadable` case |
+| **S20** | the read-back after its PATCH fails → `Restored` | SURVIVES (0 failed) | **BITES** — `Unverified` case |
+| S21 | `Unreadable` counted `IsBack` | SURVIVES (0 failed) | **BITES** — `Unreadable` case |
+| S22 | `Unverified` counted `IsBack` | SURVIVES (0 failed) | **BITES** — `Unverified` case |
+
+Each seed fails exactly the case it should and no other. With c1's 20 seeds, the sweep is **24/24 bite**.
+
+### 17.2 Item 11 — the kept-container comment
+
+`ProvisionProjectEndpoint.cs` class remarks (`:61`): "… — an owner question recorded in the task 133 note §14" →
+"… — decided as shipped by owner round 10 item 5 (task 133 note §14.3)". The `RootRow.IsProvisioned` remarks (`:2573`)
+said "an owner decision (task 133 note §14)", which also reads as pending; it now carries the same words. Comments only.
+
+### 17.3 Item 12 — the unproven `sharepointdocument` assumption
+
+Recorded where the verifier asked: the live-gate notes (§16.8, beside the forward-move privilege observation) and task
+148's handoff (§16.2). In an org WITH SharePoint integration, `sharepointdocument` rows are listed from SharePoint; whether
+they carry an owner, whether the Assign cascade re-owns them and whether an `ownerid` PATCH on them is accepted are all
+unproven, and none is observable in dev. Both ways it can be wrong fail closed (ownerless → `cascade_children_unreadable`
+`refused`, before any write; PATCH unsupported → `cascade_children_not_restored` with a `nextCall` that fails the same
+way). No code changed for it. Gate (e) in dev proves only the no-children path. **For the main session:** if 148's POML
+is amended from §16.2, copy this bullet with it.
+
+### 17.4 Item 13 — what `Gone` means
+
+`AssignCascadeChildOwners` remarks, the `Gone` / `Refused` / `NotApplied` member docs and `IsBack`'s summary now say what
+the code does: only the read BEFORE the restore decides `Gone`; a child that disappears after its PATCH is reported
+`Refused` or `NotApplied` — a failure, fail closed; `Unreadable` and `Unverified` are never "back". Behaviour unchanged.
+`Gone` itself stays untested, deliberately: no seed on it is fail-open (counting it as a failure refuses more; patching a
+missing row fails closed as `Refused`), and the item asked for wording.
+
+The guide §7a `cascade_children_not_restored` row said the named rows "are NOT back on their own owners" — true for
+`Refused`/`NotApplied`, not known for `Unreadable`/`Unverified`, which item 1 now pins. It now says "NOT confirmed back"
+and gives each `outcome`'s meaning.
+
+### 17.5 Placement and component justification (CLAUDE.md §10 / §11)
+
+**No new production surface**: no endpoint, service, registration, interface, option, job, package, column or reason
+code; the BFF change is comments only. New test surface only:
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| Fixture switches `FailChildOwnerReadFor`, `FailChildOwnerReadBackAfterBindFor` (+ the applied-bind set) | `CascadeChildSnapshotReadFailsWith` (by-regarding read only), `FailChildOwnerBindFor` (the PATCH only), `FailOwnerReadBackAfterBindTo` (the ROOT's read-back) | Extends the fixture's switch set, in the existing switches' shape | S19 and S20 stay unseen: an unreadable or unverifiable child restore could be reported "restored" with every test green |
+| Theory `Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored` | `Compensation_WhenAChildCannotBePutBack_…` pins only `Refused` | A separate theory: the setup and the per-outcome write assertions differ | Owner round 10 item 4 is unpinned for two of the four failure outcomes |
+
+Publish size: not measured (main session, by instruction). No package changed → no CVE delta.
+
+### 17.6 Quality gates (TEST-MODIFYING → code-review + adr-check unconditionally)
+
+**code-review** (all severities, on the diff): no production behaviour change (two comment blocks, five doc members).
+Fixture: the by-id switch keys on the child id in the filter and only when the read is NOT by regarding, so the snapshot
+is untouched; the read-back switch keys on an APPLIED bind, so it cannot fire before the PATCH (S20's case is reached
+only through the PATCH — asserted by the one recorded bind). Theory: each case asserts its distinguishing effect (no write
+vs one write), so a fixture that failed the wrong read would go red. AI-smell scan: no interface, no swallowed failure, no
+assertion on a mock's call count standing in for state. **No findings.**
+
+**adr-check**: ADR-003 (an unreadable or unverifiable child restore is a failure, never "restored" — now pinned, as
+§16.9 claimed); ADR-038 (KEEP path `tests/integration/data-mutation/**`; no `Mock<HttpMessageHandler>`, no
+DI-registration or ctor-null tests; the fixture fails in `DataverseWebApiClient`'s real exception shape); ADR-002 / 010 /
+019 / 052 untouched. **Compliant, 0 violations.** §6.5: none.
+
+### 17.7 Runs (round c1-r1)
+
+Affected first: `ProvisionAssignCascadeChildOwnerTests` **14/14** (c1's 12 + 2); the verifier's provisioning class set
+(as §16.11) **265/265** (263 + 2); `DataMutation.ExternalAccess` **204/204**. `dotnet build` of the test project 0
+warnings / 0 errors; `dotnet format whitespace --verify-no-changes` and the pre-commit hook's own `dotnet format
+--include` leave the four changed C# files byte-identical.
+
+Then once, on the final code:
+
+- **Full BFF unit suite: 14,205 passed / 136 failed / 54 skipped (14,395)**, 1 h 9 m — run while **ten** full BFF unit
+  suites from other agents' worktrees ran at once (CPU 83–99 %, free memory 1–42 MB of 63 GB, measured during the run).
+  135 of the 136 are `TaskCanceledException` (HttpClient's 100 s timeout, 2–6 min per test); the 136th,
+  `OrganizationMembershipReadTests.GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants`, is a
+  cancellation-timing test. None is in a class this round touches (two `Api.ExternalAccess` classes — the external
+  project-event and internal-user-share contracts — timed out like the rest; no provisioning class failed). **Every one of
+  the 53 classes with a failure, re-run in isolation: 499 passed / 0 failed / 10 skipped (509)** — contention; both
+  results reported.
+- NetArchTest **346/346**.
+- **Hard gate**, both in full on this branch: `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests`
+  **403 passed / 0 failed / 25 skipped (428)**.
+
+No client file changed (no jest / prod build needed). No package changed (no CVE delta). Publish size: not measured
+(main session).
+
+### 17.8 PR description — addition to §16.10
+
+> **Round c1-r1 (verifier on c1).** Pinned the two child-restore outcomes c1 left untested — a child whose owner cannot
+> be read before its restore (`Unreadable`) or read back after it (`Unverified`) — as `cascade_children_not_restored`,
+> named with its `nextCall` and a CRITICAL line (owner round 10 item 4). Seeds S19–S22 bite (24/24 with c1's). Comments:
+> the kept-container decision (round 10 item 5) and what `Gone` means. Recorded: the `sharepointdocument` behaviour in an
+> integration-on org is unproven (fails closed either way).

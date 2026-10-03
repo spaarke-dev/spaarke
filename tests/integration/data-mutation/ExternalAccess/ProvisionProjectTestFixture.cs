@@ -365,6 +365,23 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>An <c>ownerid</c> PATCH on THIS cascade child throws (recorded first) — a child that cannot be put back.</summary>
     public Guid? FailChildOwnerBindFor { get; set; }
 
+    /// <summary>
+    /// A by-id read of THIS cascade child throws 503, in the real client's shape (task 133 c1-r1): the restore's read of
+    /// its current owner, BEFORE any PATCH — a child whose owner cannot be read, so nothing is written to it. The
+    /// snapshot's by-regarding read is unaffected.
+    /// </summary>
+    public Guid? FailChildOwnerReadFor { get; set; }
+
+    /// <summary>
+    /// Once an <c>ownerid</c> PATCH on THIS cascade child has been applied, its by-id read throws 503 (task 133 c1-r1):
+    /// the restore's read-back AFTER the PATCH — a child put back whose owner cannot be confirmed. The read before the
+    /// PATCH still answers.
+    /// </summary>
+    public Guid? FailChildOwnerReadBackAfterBindFor { get; set; }
+
+    /// <summary>The cascade children an <c>ownerid</c> PATCH has been applied to (for <see cref="FailChildOwnerReadBackAfterBindFor"/>).</summary>
+    private readonly ConcurrentDictionary<Guid, byte> _cascadeChildBindsApplied = new();
+
     /// <summary>Every query the endpoints issued (entity set, filter) — so a test can prove a table was never read.</summary>
     public ConcurrentBag<(string EntitySet, string? Filter)> Queries { get; } = new();
 
@@ -488,6 +505,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SharePointDocumentReadRefused = true;
         CascadeChildSnapshotReadFailsWith = null;
         FailChildOwnerBindFor = null;
+        FailChildOwnerReadFor = null;
+        FailChildOwnerReadBackAfterBindFor = null;
+        _cascadeChildBindsApplied.Clear();
         Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
@@ -643,6 +663,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                         ? DataversePrincipalRef.User(childOwnerId)
                         : DataversePrincipalRef.Team(childOwnerId)
                 };
+                _cascadeChildBindsApplied[id] = 0;
             }
 
             return Task.CompletedTask;
@@ -944,6 +965,20 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                         $"Dataverse {(int)snapshotStatus}: simulated failure reading the document locations.",
                         inner: null,
                         statusCode: snapshotStatus);
+                }
+
+                // Task 133 c1-r1: a restore's by-id read of one child — before its PATCH, or its read-back after it.
+                if (regardingRoot is null && filter is not null
+                    && ((FailChildOwnerReadFor is { } unreadableChild
+                         && filter.Contains(unreadableChild.ToString(), StringComparison.OrdinalIgnoreCase))
+                        || (FailChildOwnerReadBackAfterBindFor is { } unverifiableChild
+                            && _cascadeChildBindsApplied.ContainsKey(unverifiableChild)
+                            && filter.Contains(unverifiableChild.ToString(), StringComparison.OrdinalIgnoreCase))))
+                {
+                    throw new HttpRequestException(
+                        "Dataverse 503: simulated failure reading a related row's owner by id.",
+                        inner: null,
+                        statusCode: System.Net.HttpStatusCode.ServiceUnavailable);
                 }
 
                 payload.AddRange(_cascadeChildren.Values

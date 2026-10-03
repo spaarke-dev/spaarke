@@ -58,7 +58,8 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// first (an unreadable share set refuses before any write, rather than moving it with no share), and every failure
 /// after its move says the next call answers <c>already_provisioned</c> and names the recovery that works: an
 /// administrator shares it through Manage Access. The extension <c>containerKept</c> marks those responses. Making such
-/// a record resumable would change what the marker means — an owner question recorded in the task 133 note §14.</para>
+/// a record resumable would change what the marker means — decided as shipped by owner round 10 item 5 (task 133 note
+/// §14.3).</para>
 ///
 /// <para><b>RESUME.</b> A record owned by the team with no container recorded did not finish: steps 5.5/6/7 did not
 /// all complete. A call on it ensures the share for the record's creator — <c>createdby</c> when that is a usable
@@ -2570,9 +2571,9 @@ public static class ProvisionProjectEndpoint
         /// nothing on the row tells it from a finished one, so the run that failed says so and names the recovery that
         /// works without this call — an administrator's Manage Access share (task 133 r1). It is also moved only once its
         /// creator's share can be set up first, which removes the commonest such failure. Resuming it instead would make
-        /// this marker read more than ownership and the container — an owner decision (task 133 note §14). (3) A SHARED
-        /// container never reaches the team: it is unlinked before the move, so every failure after the move leaves
-        /// "owned, no container", which is resumed.</para>
+        /// this marker read more than ownership and the container — decided as shipped by owner round 10 item 5 (task 133
+        /// note §14.3). (3) A SHARED container never reaches the team: it is unlinked before the move, so every failure
+        /// after the move leaves "owned, no container", which is resumed.</para>
         /// </remarks>
         public bool IsProvisioned(Guid ownerTeamId) =>
             IsOwnedBy(ownerTeamId) && !string.IsNullOrWhiteSpace(sprk_containerid);

@@ -5,7 +5,7 @@
     <phase>Register-driven (authored 2026-09-30, session 27; defect C11)</phase>
     <gate>after-144 (task 144 rewrites Step 3 of the same endpoint to a named non-default owner team and generalizes provisioning to sprk_matter and sprk_workassignment; this task's fix must cover every root type provisioning handles once 144 lands)</gate>
     <status>completed</status>
-    <status-note>**Round c1, 2026-10-03.** Escalation trigger 4 (Assign cascade under compensation) is ANSWERED by owner round 10 item 4 ((c) then (a)) and implemented: ONE reusable primitive, AssignCascadeChildOwners, snapshots each cascaded child's own owner before any write and restores it after a verified undo (task 148 reuses it). Owner round 10 item 5 decided the kept-container question (note 14.3): as shipped. No escalation trigger is open. NOT closed by this executor (main session): the manual live gate (a)-(j) and the sprk_createdbyperson schema apply before master (both approved by owner round 11 for the main session at integration); publish size; and whether round 11's blanket approval of the batch-4 live steps covers REPLAY as the (e) method (raised verifier round 1 item 9) - if the main session reads it as not covered, it asks the owner before running (e). Full record: notes/task-133-provision-creator-lockout.md section 16.</status-note>
+    <status-note>**Round c1, 2026-10-03.** Escalation trigger 4 (Assign cascade under compensation) is ANSWERED by owner round 10 item 4 ((c) then (a)) and implemented: ONE reusable primitive, AssignCascadeChildOwners, snapshots each cascaded child's own owner before any write and restores it after a verified undo (task 148 reuses it). Owner round 10 item 5 decided the kept-container question (note 14.3): as shipped. No escalation trigger is open. NOT closed by this executor (main session): the manual live gate (a)-(j) and the sprk_createdbyperson schema apply before master (both approved by owner round 11 for the main session at integration); publish size; and whether round 11's blanket approval of the batch-4 live steps covers REPLAY as the (e) method (raised verifier round 1 item 9) - if the main session reads it as not covered, it asks the owner before running (e). Full record: notes/task-133-provision-creator-lockout.md section 16. **Round c1-r1, 2026-10-03 (verifier on c1).** The two child-restore outcomes c1 left untested - a child whose owner cannot be read before its restore (Unreadable) or read back after it (Unverified) - are pinned as cascade_children_not_restored with the outcome, nextCall and CRITICAL line (owner round 10 item 4); seeds S19-S22 bite. Comment wording: the kept-container decision (round 10 item 5) and what Gone means. Recorded for the live gate and task 148: the sharepointdocument behaviour in an integration-on org is unproven (fails closed either way). The NOT-closed list above is unchanged. Note section 17.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-boundary .cs change (tags bff-api, auth, security) that reorders mutations on the secure-record isolation path and changes the idempotency contract of a live endpoint.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -587,6 +587,52 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       publish size. Observation routed to 145/146/148 (note 16.8): the secure owner role holds no sharepointdocumentlocation
       privilege, so a forward move of a root that HAS a document location may be refused (existing fail-closed
       owner_assignment_failed; 0 such roots in dev; unproven).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1-r1" round="c1-r1 (verifier on round c1)" baseSha="27d14cbcf">
+      COMPLETED: every verifier item closed or routed. Full record: notes/task-133-provision-creator-lockout.md section 17.
+
+      (1/14) MEDIUM / criterion "a child whose restore fails is named" (owner round 10 item 4, amendment R10): Unreadable
+          and Unverified were untested - seeds S19 (the read before a child's restore fails -> AlreadyOwned) and S20 (the
+          read-back after its PATCH fails -> Restored) survived every test. Fixture: FailChildOwnerReadFor (a by-id read of
+          the named child throws 503 - before its PATCH; the snapshot's by-regarding read unaffected) and
+          FailChildOwnerReadBackAfterBindFor (its by-id read throws once its owner bind is applied - the read-back), both in
+          the real client's HttpRequestException shape. New theory
+          Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored (Unreadable, Unverified):
+          cascade_children_not_restored, ownershipRestored true, childOwnersRestored false, the named child with table, id,
+          ownerType, ownerId, outcome and nextCall, the detail ("before provisioning is called again", no retry), the
+          CRITICAL line naming the child, its outcome and the call; the other child put back; no write to an Unreadable
+          child, one bind (its own owner) to an Unverified one. Seeds S19-S22 (S21/S22: Unreadable / Unverified counted
+          IsBack): each SURVIVES the 202-test DataMutation.ExternalAccess set without the new theory and BITES exactly its
+          case with it. Sweep 24/24 with round c1's 20.
+      (2-10) VERIFIED by the verifier; nothing to change.
+      (11) Comment: the kept-container remarks (class remarks and RootRow.IsProvisioned) now say "decided as shipped by
+          owner round 10 item 5 (task 133 note 14.3)".
+      (12) Recorded, no code: sharepointdocument in an integration-on org (owner? cascade? PATCH accepted?) is unproven -
+          note 16.8 (live-gate notes, beside the forward-move privilege observation) and 16.2 (task 148 handoff). Both
+          failure shapes fail closed. Gate (e) proves only the no-children path in dev.
+      (13) Wording: only the read BEFORE a restore decides Gone; a row that disappears after its PATCH is Refused or
+          NotApplied (fail closed) - primitive remarks, member docs, IsBack. Behaviour unchanged; Gone stays untested (no
+          fail-open seed exists on it). Guide 7a's not-restored row now explains each outcome.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 17.5). No new production surface (the BFF change is comments). New
+      test surface only: the two fixture switches (no existing switch fails a child's by-id read; without them S19/S20
+      stay unseen) and the theory (the existing child test pins only Refused).
+
+      QUALITY GATES (TEST-MODIFYING): code-review no findings; adr-check compliant, 0 violations (ADR-003 now pinned;
+      ADR-038 KEEP path, no banned test shapes). Note 17.6.
+
+      TESTS. Affected: the cascade class 14/14; the provisioning class set 265/265; DataMutation.ExternalAccess 204/204.
+      Once on the final code: full BFF unit suite 14,205 passed / 136 failed / 54 skipped (14,395) under ten concurrent
+      full suites from other worktrees (CPU 83-99 percent, free memory 1-42 MB) - 135 TaskCanceledException timeouts plus
+      one cancellation-timing test, none in a class this round touches; the 53 classes with a failure re-run in
+      isolation: 499 passed / 0 failed / 10 skipped (509) - contention, both reported. NetArchTest 346/346. HARD GATE,
+      both in full: Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 0 failed / 25 skipped
+      (428). Build 0 warnings / 0 errors; dotnet format leaves the changed C# byte-identical. No client or package change.
+
+      NOT CLOSED (main session): publish size (by instruction); manual live gate (a)-(j) and the sprk_createdbyperson
+      schema dry run / -Apply / -Verify before master (approved by owner round 11); whether round 11 covers REPLAY as the
+      (e) method (verifier round 1 item 9); Step 9 (TASK-INDEX.md status cell). If 148's POML is amended from note 16.2,
+      the new sharepointdocument bullet goes with it.
     </outcome>
   </execution>
   <amendments>
