@@ -1506,6 +1506,9 @@ public sealed class UnifiedEvaluatorSeamTests
             participations,
             new Mock<ISubjectStandingGrantReader>(MockBehavior.Strict).Object,
             new SeamNoAccessListReader(),
+            // Merge of 137-b2 with 143-r2 (task 142 base): 143 r1 added the identity store to the evaluator; the inert
+            // unlinked default every other construction site uses.
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
 
         var ciam = await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None);
