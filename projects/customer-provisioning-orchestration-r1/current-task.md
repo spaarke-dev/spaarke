@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-02 SESSION 31 — T249 ✅ (`33365edd2`, + owner D20/D21) and T243 ✅ (+ G29, owner D22). Next: **T242** (POML to file); T248 still owner-blocked. 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)**.
+> **Last Updated**: 2026-10-03 SESSION 31 END (context-handoff before /compact) — T249 ✅ `33365edd2`, T243 ✅ `25107decf`, container type recorded `f4250fc0f`, D23 + T250 + `sprk_credentialmode` `13cf0f2e8`. Working tree clean, all pushed. **Next: T248** (unblocked). 🔴 **READ FIRST: [`notes/model1-dedicated-remediation-plan.md`](notes/model1-dedicated-remediation-plan.md)** (§2 decisions D16–D23, §7 task rows).
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,26 +36,34 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 31, 2026-10-02)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 31 END, 2026-10-03)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **242 — Per-customer Redis → Azure Managed Redis B0 HA, Entra-only (D12)** — no POML yet (file from plan §7 T242 via task-create conventions, as T243 was) · FULL (BFF `CacheModule` + Bicep) |
-| **Step** | Not started. |
-| **Status** | pending. **T248 UNBLOCKED + pre-checks passed 2026-10-03**: container type `Spaarke Model 1` = `fb3817a8-5a55-42ba-8cc9-12cf055168b8`, standard billing attached (`Microsoft.Syntex/accounts` `dc4749c2-…` in `rg-spaarke-shared-prod`), owning app = `bfac7f6e-…` (owner confirmed in the admin center), owning app still 0 secrets / 0 certs. `sprk_credentialmode` created on spaarkedev1 (owner-approved). Owner D23: `rg-spaarke-shared-prod` = home for shared prod resources; subscription renamed "Spaarke Shared Production"; T241 also removes the partial trial01 stamp. New plan row **T250** (SpeAdminGraphService MI-FIC). T248's live probe needs a dev Worker deploy — ASK the owner before deploying. Order: **T248** → T242 → … |
-| **Next Action** | File `tasks/242-*.poml` from plan §7 T242 (replace `modules/redis.bicep` with `Microsoft.Cache/redisEnterprise` B0 + database `accessKeysAuthentication: Disabled` + access-policy assignment for the stamp UAMI; BFF `CacheModule` → `Microsoft.Azure.StackExchangeRedis` MI + `Protocol=Resp3`; remove `Redis-ConnectionString` from catalog/customer.bicep; BFF §10 incl. NEW package → CVE + publish size). Add TASK-INDEX row, then `task-execute`. Memory: Redis default unchanged outside stamps (T242 owns it). |
-| **Order** | ~~T225b~~ → ~~T249~~ → **T248** (owner) → T243 → T242 → T244 → T246 → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → 213.7/207/208/209 → T186 |
+| **Task** | **248 — L2 signs in as the SPE owning app with MI-FIC (G28, owner D16)** — `tasks/248-spe-owning-app-mi-fic.poml` · **pending** (TASK-INDEX `🔲`) · FULL · **opus @ high** · read the POML `<escalation>` triggers |
+| **Step** | Not started. All owner pre-checks PASSED 2026-10-03 (recorded in the T248 POML `<notes>`): container type `Spaarke Model 1` = **`fb3817a8-5a55-42ba-8cc9-12cf055168b8`** is standard + billed (`Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b`, `rg-spaarke-shared-prod`, eastus) + owned by `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e` (owner confirmed in the admin center); the owning app still has 0 secrets / 0 certificates. |
+| **Status** | Ready. **Owner approval needed before the dev deploy** that T248's live probe requires (asked 2026-10-03, not yet answered). |
+| **Next Action** | `task-execute` on T248. Its first step is the LIVE probe from the dev Worker (FIC token for the owning app → decode `azpacr`/`appidacr`, never print token values → Graph calls on the container type). That needs a dev deploy — ASK the owner first. Deploy ORDER: (1) dev `platform-controlplane` Bicep (sets `ControlPlaneIdentity__PrincipalObjectId`; drops `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId` + `BicepInfraDeployOptions__ControlPlaneUamiPrincipalId` — T249/D20), then (2) the Worker code straight away (`scripts/Deploy-ControlPlane.ps1`; each Worker version refuses to start without the setting name it reads). Registration = Graph v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{id}` (legacy SharePoint REST returns apiNotFound). If SPE rejects FIC tokens → STOP (trigger #1): the fallback is a Key Vault certificate (ADR-028 A4), never a secret — re-ask the owner. |
+| **Order** | ~~T225b~~ → ~~T249~~ → **T248** → ~~T243~~ → T242 → T244 → T246 (**T244 + T246 = hard prerequisites of T186**, D22) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 (SpeAdminGraphService MI-FIC, after T248) → 213.7/207/208/209 → T186. T241 (decommission) runs on owner go-ahead. |
 
-### Completed this session (SESSION 30)
+### Completed (SESSIONS 30–31)
 | Item | Commit | Outcome |
 |---|---|---|
 | T245b | `5e15c128a` | L2-owned values are config/computed (artifact versions, SPE owner-credential options, L2 KV principal, vendor-key vault, H9 → BffApiUrl/BffBuildId). |
 | T245c | `81c16bd07` | Operator intake required + validated at `POST /api/runs` (H11, H14, mailbox). Owner D14 + D15. G25 CLOSED. |
 | T225a | `b9fd48bbe` | Model 1 shared-tier Bicep deleted; Model 1 fails closed at H2a until T225b + T228. ci-cd-unit-test-remediation-r1 CLOSED (owner). |
-| O1–O5 | `6240f41d8` / `c8bbc027b` | **D16** L2 signs in as the SPE owning app via MI-FIC — no certificate, no ADR-028 amendment. **D17** registry version columns = deployed build ids (ADR-020 complied with; matrix doc v2). **D18** Bing + LlamaParse keys removed from customer stamps (dead features) → T225b. **D19** `customer.bicep` the only stamp template; delete `model2-full` → T249. |
-| T225b | `a95212260` | Model 1 on the dedicated code path: H2b, H13 I2 probe, H12c use the stamp's own services (shared options, template store, AzureOpenAI-Endpoint seed entry deleted); intake pairing `Model1`↔`spaarke-hosted-model2` / `Model2`↔`customer-owned-model2` (G6); secret-free H4 default, both credential secrets omitted (G21); Bing/LlamaParse + `from-platform-vault` removed (D18); `TenancyModelDagParityTests` (G13). Skill hard-stops Model 1 until T228. New PRQ-E-14 (registry `sprk_credentialmode`, missing live). |
-| T249 | `33365edd2` | `customer.bicep` is the only stamp template (D19): `model2-full` + 5 param files deleted; `deploy-infrastructure.yml` validate-only (also compiles `parameters/*.bicepparam`); SignalR → stamp UAMI; KV diagnostics → workspace resource id (gate caught a GUID that would fail every deploy); `platformKeyVaultName` + `createdDate` tag removed. **D20** one shared `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`, ValidateOnStart) for H2a + H4 — rollout: platform-controlplane Bicep first, then Worker code. **D21** L2 Website Contributor grant on Model 1 stamps only. |
-| T243 | *(this commit)* | BFF Document Intelligence via the stamp UAMI ("key if configured, else MI"; credential rejection reported plainly); `DocumentIntelligence-ApiKey` gone from catalog + customer.bicep (+ `listKeys` output). **G29**: no stamp ever set `DocumentIntelligence__Enabled` → stamps ran AI-off; catalog literal added. **D22** T244 + T246 hard prerequisites of T186. Publish +0.00 MB (45.54 MB, 212 files); no CVE; BFF suite 13,575/0 fail. |
+| O1–O5 | `6240f41d8` / `c8bbc027b` | **D16** MI-FIC for the SPE owning app (no certificate, no ADR-028 amendment). **D17** registry version columns = deployed build ids. **D18** Bing + LlamaParse keys removed. **D19** `customer.bicep` the only stamp template. |
+| T225b | `a95212260` | Model 1 on the dedicated code path; intake pairing (G6); secret-free H4 default (G21); D18; `TenancyModelDagParityTests` (G13). New PRQ-E-14. |
+| **T249** (S31) | `33365edd2` | `customer.bicep` the only stamp template; `deploy-infrastructure.yml` validate-only (+ `parameters/*.bicepparam` compile); SignalR → stamp UAMI; KV diagnostics → workspace RESOURCE id (gate caught a GUID that would fail every deploy); `platformKeyVaultName` + `createdDate` tag removed; Provision-Customer.ps1 fixed. **D20** one shared `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`, ValidateOnStart) for H2a + H4. **D21** L2 Website Contributor grant on Model 1 stamps only. |
+| **T243** (S31) | `25107decf` | BFF Document Intelligence: key if configured, else the stamp UAMI; credential rejection reported plainly; `DocumentIntelligence-ApiKey` gone from catalog + customer.bicep (+ `listKeys` output). **G29**: no stamp had ever set `DocumentIntelligence__Enabled` (AI platform off on stamps) → catalog literal. **D22** T244 + T246 hard prerequisites of T186 (T186 deps updated). Publish 45.54 MB / +0.00 MB; no CVE; BFF suite 13,575 pass / 0 fail. |
+| Container type (S31) | `f4250fc0f` | `Spaarke Model 1` = `fb3817a8-…` recorded; T241 must NOT delete `rg-spaarke-shared-prod` or the Syntex billing account (billing binding permanent). |
+| D23 / T250 / PRQ-E-14 (S31) | `13cf0f2e8` | **D23** `rg-spaarke-shared-prod` = single home for shared PROD resources (Model 1 SPE billing now; prod L2 control plane from its first deploy — change `platform-controlplane.bicep`'s RG name then; group is westus2); subscription renamed "Spaarke Shared Production"; T241 also deletes the partial `rg-spaarke-trial01-prod-model1` stamp. **T250** (plan row): `SpeAdminGraphService` still signs in as each owning app with a KV client SECRET (ADR-028 E-1) → add a MI-FIC credential mode; until then NO secret-based `sprk_specontainertypeconfig` for Model 1. `sprk_credentialmode` created on spaarkedev1 (owner-approved); schema script's case-sensitive existence check fixed. |
+
+### Live changes made 2026-10-03 (operator identity `ralph.schroeder@spaarke.com`; owner-performed or owner-approved)
+- **Owner** created the SPE container type `Spaarke Model 1` (`fb3817a8-5a55-42ba-8cc9-12cf055168b8`) in the SharePoint admin center with standard billing → `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b` in `rg-spaarke-shared-prod`. The admin-center flow asked for a client secret on the owning app; none was added (MI-FIC is the path; see T248 notes).
+- Registry column `sprk_credentialmode` added to `sprk_dataverseenvironment` on `spaarkedev1` (`Extend-DataverseEnvironmentSchema-v3.3.ps1`; idempotent rerun clean).
+- Subscription `cd95fcec-6b89-49ea-8339-c2b579b12587` display name → **"Spaarke Shared Production"** (was "Spaarke Model 1 Production").
+- Owner chose NO lock and NO tags on `rg-spaarke-shared-prod` / the billing account for now.
 
 ### Live changes made 2026-10-02 (operator identity `ralph.schroeder@spaarke.com`, Global Admin — owner-approved D16)
 - Entra app **`Spaarke SPE Model 1 Owner`** — appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, object `b0f01a91-7836-4949-be96-4fcab69419c2`, SP `6c1165e2-2193-4f82-ba30-e0f64d5e767e`, single-tenant, no secret, no certificate.
@@ -64,14 +72,28 @@
 - Read-only checks: no vault holds a Bing / LlamaParse / SPE-owner-cert secret; dev/demo BFFs use `BingGrounding__*` (Foundry connection), no LlamaParse settings.
 
 ### Critical Context
-Model 1 is on the dedicated code path (T225b) but cannot run: H2a fails closed and the skill hard-stops Model 1 until
-**T228** (one subscription per customer); every run also stops at H0 until **T248** (SPE owning app via MI-FIC — owning
-app + FIC created live 2026-10-02; container type is an owner action). New stamps are secret-free by default (H4 omits
-`BFF-API-ClientSecret` and `Dataverse-ClientSecret`). Rollout order recorded in the T225b POML: deploy a Worker built
-from `a95212260`+ before the next `customer` ARM artifact publish. Remaining manifest pins: T246 (ContentSafety), T227
-(SPE container ids).
+Every provisioning run stops at H0 until **T248** lands (SPE owning app via MI-FIC; owning app + FIC + container type
+now exist). Model 1 also fails closed at H2a and the skill hard-stops it until **T228** (one subscription per customer).
+New stamps: secret-free BFF (H4 omits `BFF-API-ClientSecret` + `Dataverse-ClientSecret`), Document Intelligence via
+UAMI (T243), AI platform switched ON (G29) — so AI Search MI 403 (until T244) and the BFF's hard-coded dev Content
+Safety fallback (until T246) are live risks → no customer run (T186) before T244 + T246 (D22). The deployed dev Worker
+predates T249: its next deploy needs the dev control-plane Bicep FIRST (setting rename), then the code. Never delete
+`rg-spaarke-shared-prod` or its Syntex billing account. Remaining manifest pins: T246 (ContentSafety), T227 (SPE
+container ids). BFF follow-up: reconcile `DocumentIntelligence:Enabled` defaults (options class true vs DI gates false).
 
 ## 📁 Files Modified This Session
+
+### SESSION 31 (2026-10-02 → 03) — T249, T243, container type, D23 — ALL COMMITTED + PUSHED (tree clean)
+
+See the T249 and T243 POML `<notes>` (completion, gates, deviations, follow-ups). Highlights: new
+`Handlers/ControlPlaneIdentityOptions.cs` (D20); runner/detector/H4/Worker Program.cs/Worker Bicep/tests for D20+D21;
+customer.bicep + customer.json + platform(-controlplane).json + key-vault/doc-intelligence/customer-l2-bff-rbac modules;
+`deploy-infrastructure.yml` + WORKFLOWS.md; BFF `TextExtractorService.cs` + `DocumentIntelligenceOptions.cs` +
+`appsettings.template.json` + `TextExtractorServiceTests.cs`; catalog manifest + generated/; ControlPlane manifest tests;
+`scripts/Provision-Customer.ps1`, `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`; parameter JSONs; docs (deployment
+guide, inventory, prereqs guide, CONFIGURATION-MATRIX, naming convention, packaging strategy, ci-cd docs, AI guides);
+`.claude` CHANGELOG + patterns (manifest-driven-secret-catalog, provisioning INDEX) + skills (azure-deploy, ci-cd,
+context-handoff example); plan §2 D20–D23 + G29 + T241/T244/T250 rows; spec ADR-028 tension row; T186 deps; T243 POML new.
 
 ### SESSION 30 (2026-10-02) — T225a (retire Model 1 shared Bicep) — committed
 
@@ -3350,7 +3372,7 @@ Wired `modules/uami.bicep` (task 028) + `modules/app-service-plan.bicep` + `modu
 
 **Remaining customer.bicep gaps** (per task 123/126 discovery, Path 1 plan): task 128 (OpenAI + AI Search modules — task 123's Gap 1 part 2/2) and task 129 (`kv-secrets.generated.bicep` wiring — task 126's Gap 2) are NOT done yet. Task 128 dispatches next (serial after 127 to avoid customer.bicep merge race). Wave G-3 (130/131/132) stays blocked on 127+128+129 landing per the owner's Path 1 sequencing decision.
 
-## Quick Recovery (READ THIS FIRST)
+## HISTORICAL snapshot 2026-08-19 — SUPERSEDED (current state: the Quick Recovery at the top of this file)
 
 | Field | Value |
 |-------|-------|
