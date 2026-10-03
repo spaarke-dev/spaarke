@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-03 (task-execute Step 11). 076 ✅ + 086 ✅; next: commit/push → PR for everything since `5e39f2bea` → task 087
+> **Last Updated**: 2026-10-03 (by context-handoff, before /compact). 076 ✅ · 086 ✅ · 087 ✅ — all pushed (`773cc57a9`); PR #1110 open, CI running
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,16 +18,38 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### ▶️ NEXT: open the PR, then task 087
+### ▶️ NEXT: merge PR #1110 when CI is green
 
 | Field | Value |
 |---|---|
-| **PR** | **#1110 OPEN** (2026-10-03) — https://github.com/spaarke-dev/spaarke/pull/1110. Merge `gh pr merge 1110 --merge` (**NEVER `--delete-branch`**) when `Router` AND `Build & Test (Debug)` pass and nothing is pending; then fast-forward both checkouts and record the merge here + portfolio |
-| **Next Action** | (1) ✅ committed `d886d5e24` + pushed. (2) ✅ PR opened (#1110) `work/spaarkeai-word-add-in-r1` → master for everything since `5e39f2bea`: 060/068 live-check records, 079, 080 backfill records, **086**, **076** (+ the `141ad4c4b` master merge). PR body: §10 Placement (076: no new BFF component; platform owner, notes/076 §2), publish **+981 B**, CVE none, ADR-002 WP-1 **path A** (spec ADR Tensions) + task 087, test-diet n/a until 090. Merge `--merge` (**NEVER `--delete-branch`**) once `Router` **and** `Build & Test (Debug)` pass. (3) Then `task-execute` **087** (ADR-002 amendment, path B; opus; MAIN SESSION — `.claude/`; owner signs the wording) |
-| **Branch** | `work/spaarkeai-word-add-in-r1`; master merged in as `141ad4c4b` (2026-10-02) |
-| **Queue** | PR → 087. 042 UAT (owner, live Word/Outlook; `defer-issues.md` register). 090 wrap-up (`/test-diet`) after 042. 083 waits on UAC-r2 141 |
-| **Owner, open** | (a) **Production numbering**: check matter numbers are unique, then `scripts/Set-RecordNumberingSchema.ps1 -Apply` in each environment after its SpaarkeCore import (guide §7.4). (b) **078 add-in**: the owner saw THREE Spaarke groups in Word ("Spaarke (TEST)" + 2 × "Spaarke") — expected if BOTH zips were uploaded (office-js #6938: Word cannot hide the XML add-in); hover *Save to Spaarke*: XML says "…Spaarke DMS", the unified package "…Spaarke Document Management System". Tidy-up: remove the TEST app; unassign the Word XML add-in for Word ≥ 2501 users. Record the outcome in 078 when the owner confirms which zips were uploaded |
-| **Live checks pending a deploy** | 086 AC8 (Word Send Email both choices; Word-web popup-blocker risk; the `data=` URL form has no shipped precedent) and 076's BFF retry/warning (the platform half is verified live) |
+| **Task** | none in progress — 076, 086, 087 all ✅ (88 tasks: 85 closed; 042 🔄 owner UAT; 083 🔲 blocked on UAC-r2 141; 090 🔲 wrap-up after 042) |
+| **PR** | **#1110 OPEN** — https://github.com/spaarke-dev/spaarke/pull/1110 — title/body updated for 087. Carries everything since `5e39f2bea`: 060/068 records, 079, 080 backfill records, 086, 076, **087 (root CLAUDE.md + ADR-002 + plugins.md + CHANGELOG)**, master merge `141ad4c4b`. CI restarted on the `773cc57a9` push (2026-10-03) |
+| **Next Action** | `gh pr checks 1110` → wait until `grep -c pending` = 0. Merge only when **`Router` AND `Build & Test (Debug)`** pass: `gh pr merge 1110 --merge` (**NEVER `--delete-branch`**). Tier 2 "Full Unit Tests" cancelled at its 30-min cap is advisory, not a failure. Known pre-existing flake: `PinnedMemoryEndpointsContractTests.*Pin*EmitsCounter` (metrics tag cross-talk; passes alone). After merge: fast-forward the main checkout (`C:\code_files\spaarke`, `git pull origin master`) and this worktree; record the merge SHA here; portfolio #945 stays 88/85 |
+| **Then** | Nothing executable without the owner: **042** UAT (live Word/Outlook — list in `notes/defer-issues.md` register) → **090** wrap-up with `/test-diet` (binding gate). **083** waits on UAC-r2 141's contract |
+| **Owner, open** | (a) **Production numbering**: check matter numbers are unique, then `scripts/Set-RecordNumberingSchema.ps1 -Apply` (then `-Verify`) in each environment AFTER its SpaarkeCore import (deployment guide §7.4); where tables are managed the script only seeds + backfills. (b) **078 add-in**: owner sees THREE Spaarke groups in Word ("Spaarke (TEST)" + 2 × "Spaarke") — expected if BOTH zips were uploaded (office-js #6938: Word cannot hide the XML add-in); hover *Save to Spaarke*: XML = "…Spaarke DMS", unified = "…Spaarke Document Management System". Tidy-up: remove the TEST app; unassign the Word XML add-in for Word ≥ 2501 users. Record the outcome in `notes/078-manifest-decision.md` once the owner confirms which zips were uploaded |
+| **Live checks pending the next deploy from master** | 086 AC8 (both Word Send Email choices; `main.aspx`+`data=` URL has no shipped precedent; Word-web popup-blocker risk after a slow share-link mint) · 076's BFF retry/warning (platform half verified live) |
+| **Drift checker** | `scripts/check-task-status-drift.ps1` on master is red for a PARSER reason (cannot read this index layout; fix `233ff9341` on customer-provisioning, unmerged). Verified by hand 2026-10-03: **88/88 POML↔index pairs agree** (scratchpad `status_audit.py`) |
+
+### Files modified this session (all committed and pushed)
+`scripts/Set-RecordNumberingSchema.ps1` (new) · `Services/Office/RecordCreationService.cs` · `OfficeService.cs` · `OfficeEndpoints.cs` ·
+`tests/integration/contract/Api/Office/OfficeQuickCreate{,Project}ContractTests.cs` · `tests/unit/.../Services/Office/RecordCreationNumberReadBackTests.cs` (new) ·
+`office-addins` 086 files + `SaveFlow.tsx` comment · `docs/adr/ADR-002-no-heavy-plugins.md` · `.claude/adr/ADR-002-thin-plugins.md` ·
+`.claude/constraints/plugins.md` · root `CLAUDE.md` · `.claude/CHANGELOG.md` · `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (I-11) ·
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.4 · `scripts/README.md` · `projects/INDEX.md` · project `spec.md`, `CLAUDE.md`,
+TASK-INDEX, POMLs 076/086/087, notes 030/031/042/076/086/087/defer-issues · researcher memory (autonumber findings)
+
+### Critical context
+Dev `spaarkedev1` now has the interim numbering live (`MAT-`/`PRJ-{SEQNUM:6}`, keys `sprk_MatterNumber` + `sprk_ProjectNumber`;
+next numbers `MAT-000011`, `PRJ-000010`); `-Verify` PASS. The deployed BFF is still master `5e39f2bea` (numbering works there
+because the PLATFORM assigns it). ADR-002 WP-1 now allows a platform-native declarative owner under (a) metadata/no code,
+(b) every create/update, (c) per-environment `-Verify` — business rules excluded by the owner.
+
+### ✅ Closed 2026-10-03: task 087 (ADR-002 WP-1 amendment, path B) — `notes/087-adr-002-amendment.md`
+
+- Owner approved the wording 2026-10-03: *"approved--but let's not add business rules in this revision"*.
+- Applied to full + concise ADR-002, `plugins.md` (contradiction fixed), root CLAUDE.md row (+ CHANGELOG), write-path doc
+  (L2 box, §5 intro, I-11 row — 076's path-A exception closed), spec ADR Tensions, `projects/INDEX.md` (Skill Directives Y).
+  ArchTests 345/345. Commit `773cc57a9`.
 
 ### ✅ Closed 2026-10-03: task 076 (numbering) — `notes/076-record-numbering.md`
 
