@@ -1,6 +1,6 @@
 # Task 157 — external grids lose the view selector; column allow-lists shrink
 
-> **Status**: code complete on `task/uac-r2-157` (review rounds 1–4 on `-r1`, `-r1-r2`, `-b1`/`-b2`, `-b2-r1`). **Live steps PENDING** (deploy order in §5, manual gate in §6).
+> **Status**: code complete on `task/uac-r2-157` (review rounds 1–6 on `-r1`, `-r1-r2`, `-b1`/`-b2`, `-b2-r1`, `-b2-r2`). **Live steps PENDING** (deploy order in §5, manual gate in §6).
 > **Closes**: task 134 open item D1. **Owner decision**: round 4 item 7 (2026-10-01): "Yes: set
 > `showViewSelector=false` on the external SPA grids, so the column allow-lists can shrink to what the grids show."
 
@@ -12,7 +12,7 @@
 | **Review round 3 (new):** `ExternalDataGrid`, the only external-SPA import path to the shared grid. It renders the grid with `showViewSelector={false}` AFTER the caller's props, so for every JSX mount no prop or spread, and no `cloneElement` / `createElement` of an `<ExternalDataGrid>` ELEMENT, can turn the picker on. Its props type omits `showViewSelector`. **Fix round b2-r1:** it does NOT protect the element it returns when called as a plain function (Q1/Q2, §7), so the guard now refuses any non-JSX use of it; the JSDoc says so. | `src/client/external-spa/src/widgets/ExternalDataGrid.tsx` (new) |
 | Four module allow-lists shrink. Three are unchanged. The derivation comment drops rule (b) and warns that re-enabling a selector needs rule (b) back first. | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs` |
 | Section 6: each list pinned to its live derivation; shrink-only proven against the task-134 lists; every dropped column refused by `/fetch` and `/record $select` and stripped from a `/record` read | `tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs` |
-| Arch guard: every Spaarke `DataGrid` mount under `src/client/external-spa/src` passes `showViewSelector={false}` as its last top-level attribute, with no spread after it. It fails closed (review round 1): any import of `DataGrid`/`DataGridDefault` (named, aliased, `default as`, default, mixed) is a mount source; the grid may appear only as a JSX tag; `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, dynamic `import()`/`require()` of the shared lib, and unparseable import clauses are refused. Review round 2 adds: generic mounts are refused; comments are scanned as code; the tag walk is string-aware and refuses what it cannot follow; and the shared-library path is matched anywhere in the specifier (§7). Review round 3 adds: only `ExternalDataGrid.tsx` may import the grid, and its text is pinned; module-specifier and dynamic-load rules; `import.meta.glob`, `cloneElement`/`createElement` and `\u` escapes are refused; a shared-library fan-in pin (§7). Fix round b2 adds: side-effect imports get the specifier rules, a bare specifier must be a declared package, `eval`/`Function` are refused, and `index.html` may only load scripts from `src/` (§7). Fix round b2-r1 adds: the wrapper may be used only as a JSX tag outside its own file; a library-naming specifier (the alias resolved, not trusted) must land in the library's shipped `src`, not beside it and not in a test / `__*` path; shipped library files may not load such modules either; `?query` / `#fragment` and bare `..` segments are refused (§7, round 5). Negative and positive controls are included. | `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` (new) |
+| Arch guard: every Spaarke `DataGrid` mount under `src/client/external-spa/src` passes `showViewSelector={false}` as its last top-level attribute, with no spread after it. It fails closed (review round 1): any import of `DataGrid`/`DataGridDefault` (named, aliased, `default as`, default, mixed) is a mount source; the grid may appear only as a JSX tag; `DataGridPageShell(Default)`, namespace imports, re-exports that could carry the grid, dynamic `import()`/`require()` of the shared lib, and unparseable import clauses are refused. Review round 2 adds: generic mounts are refused; comments are scanned as code; the tag walk is string-aware and refuses what it cannot follow; and the shared-library path is matched anywhere in the specifier (§7). Review round 3 adds: only `ExternalDataGrid.tsx` may import the grid, and its text is pinned; module-specifier and dynamic-load rules; `import.meta.glob`, `cloneElement`/`createElement` and `\u` escapes are refused; a shared-library fan-in pin (§7). Fix round b2 adds: side-effect imports get the specifier rules, a bare specifier must be a declared package, `eval`/`Function` are refused, and `index.html` may only load scripts from `src/` (§7). Fix round b2-r1 adds: the wrapper may be used only as a JSX tag outside its own file; a library-naming specifier (the alias resolved, not trusted) must land in the library's shipped `src`, not beside it and not in a test / `__*` path; shipped library files may not load such modules either; `?query` / `#fragment` and bare `..` segments are refused (§7, round 5). Fix round b2-r2 adds: a comment between `from` / `import` / `require` and the specifier or `(` is refused (one such comment hid an import from every rule); JSX pragmas are refused; `\u` escapes and a literal U+FEFF are refused in every SPA file; `import.meta.glob` is matched across comments; no `node_modules` folder may exist under, or be imported from, a scanned `src`; shipped library files get the comment, pragma and `node_modules` rules too (§7, round 6). Negative and positive controls are included. | `tests/Spaarke.ArchTests/ExternalSpaGridViewSelectorGuardTests.cs` (new) |
 
 The shared `DataGrid`'s default (`showViewSelector = true`) is **unchanged**. Internal surfaces keep the picker.
 
@@ -55,12 +55,13 @@ Primary id / name (live, unchanged from task 134 §8): project → sprk_projectn
 - **G5: a runtime guard, because a source scan is not a proof (review round 3).** The round-2 scan passed three shapes the verifier compiled with `vite build` into a live mount with the picker on: `import.meta.glob` of `DataGrid.tsx` (V1), a unicode-escaped identifier `DataGrid` (V2), and `React.cloneElement(<compliant mount>, { showViewSelector: true })` (V3). V3 cannot be caught by a regex in general: `(React as any)['clone' + 'Element']` spells nothing. So the guarantee moved to runtime:
   - `ExternalDataGrid.tsx` renders `<DataGrid {...props} showViewSelector={false} />`. The bundle shows `e=>u.jsx(ole,{...e,showViewSelector:!1})`, and `showViewSelector:!0` occurs nowhere in `dist/assets/app.js`. A clone or `createElement` of an `<ExternalDataGrid>` element sets the WRAPPER's props, and the forced `false` wins. **Corrected in fix round b2-r1:** the wrapper has no hooks, so `ExternalDataGrid(props)` called as a plain function returns the INNER grid element; cloning it (Q1) or mounting its `.type` (Q2) turns the picker on. The runtime guard covers JSX mounts only; the scan now refuses every non-JSX use of the wrapper (§7, round 5).
   - The scan's job is now narrow: only the wrapper may import a grid binding (a fully compliant mount anywhere else is refused), and the wrapper's text is pinned, whitespace-insensitive. A computed clone inside the wrapper (P5 below) passes every regex rule but fails the pin.
-  - The scan's cheap rules stay as defence in depth. Every `from '…'` must be escape-free, attributed to a parsed import when it names the library, and resolve inside the SPA source or into the library. Every `import()` / `require()` takes one plain local literal. `import.meta.glob` is refused in any form. In a grid-binding file, `cloneElement`, `createElement` and `\u` are refused.
+  - The scan's cheap rules stay as defence in depth. Every `from '…'` it reads (keyword, whitespace, quote; since b2-r2 a comment there is refused) must be escape-free, attributed to a parsed import when it names the library, and resolve inside the SPA source or into the library. Every `import()` / `require()` takes one plain local literal. `import.meta.glob` is refused in any form. In a grid-binding file, `cloneElement`, `createElement` and `\u` are refused.
   - **Shared-library fan-in pin.** The scan refuses `DataGridPageShell` by name, and that only works while it is the one shared component that mounts the grid. `SharedLibrary_OnlyKnownModulesCarryTheGrid` pins the four modules that import or re-export it (`DataGrid/index.ts`, `DataGridPageShell.tsx`, `components/index.ts`, `src/index.ts`).
   - §11 justification for the new file: see the POML round-3 outcome.
   - **Fix round b2** found and closed a fourth compiled shape (V4): a side-effect `import` of a module outside `src/` that parks the grid on `window`. Side-effect imports now get the specifier rules. Also new: a bare specifier must be a package declared in `package.json`; `eval` / `Function` are refused; `index.html` may only load scripts from `src/` (§7).
-  - **Fix round b2-r1** closed five more compiled shapes from the verifier (Q1–Q5) and two found while fixing them (Q6 `?query`, Q7 bare `..`); see §7, round 5.
-  - **Residuals** (the scan is not a proof; full list in §7 and in the guard's remarks): a new npm dependency that re-exports the grid; a `vite.config.ts` alias or plugin that re-points a declared name; a shared-library `import()` built from a variable; edits to the shared `DataGrid.tsx`; element-tree peeling by hand (`.props.children` / `.type`, or a React-internals fiber walk), widened in b2-r1 with a compiled example (Q8).
+  - **Fix round b2-r1** closed five more compiled shapes from the verifier (Q1–Q5) and two found while fixing them (Q6 `?query`, Q7 bare `..`) **as spelled**; see §7, round 5. Review round 6 reopened Q1/Q2 and the dynamic-load rule with one comment after `from` / `import`.
+  - **Fix round b2-r2** closed the five round-6 shapes (R1–R5) and three more of the same class found while fixing them (U+FEFF, an escaped letter in `glob`, a comment before `.glob`); see §7, round 6. The scan refuses the routes to the grid it knows of, in the spellings it recognises. It does not guarantee that every route goes through a JSX mount of the wrapper.
+  - **Residuals** (the scan is not a proof; full list in §7 and in the guard's remarks): a new npm dependency that re-exports the grid; a `vite.config.ts` alias or plugin, or a `tsconfig.json` / React-plugin JSX option, that re-points a declared name or the JSX runtime; a shared-library `import()` built from a variable; edits to the shared `DataGrid.tsx`; element-tree peeling by hand (`.props.children` / `.type`, or a React-internals fiber walk), widened in b2-r1 with a compiled example (Q8).
 
     The first four are reviewed changes outside `external-spa/src`. In every case the BFF allow-list still refuses the internal views' columns with a 400.
 - **G3: the `/record` tests use a caller granted the id as project, matter and work assignment at once.** Row scope then passes for every module, including invoices, whose record gate checks the scope dimensions. Any refusal or strip in those tests can only come from the column scope.
@@ -173,7 +174,7 @@ the whitespace-insensitive pin, which P4 shows.
 
 **Residuals (documented in the guard's remarks). The scan is not a proof:**
 1. a NEW npm dependency that bundles and re-exports the grid;
-2. build configuration (a `vite.config.ts` alias or plugin) that re-points a DECLARED name at another file;
+2. build configuration (a `vite.config.ts` alias or plugin, or, named since b2-r2, a `tsconfig.json` / React-plugin JSX option such as `jsxImportSource`) that re-points a DECLARED name or the JSX runtime at another file;
 3. a shared-library `import()` whose path is built in a variable elsewhere;
 4. edits to the shared `DataGrid.tsx` itself;
 5. runtime reflection over React internals (a fiber walk from a rendered `ExternalDataGrid` to the inner component type, then `createElement` of it). This is deliberate obfuscation, and no fixed spelling identifies it. **Widened in fix round b2-r1** to element-tree peeling in general (Q8 below).
@@ -219,6 +220,60 @@ tag (`<ExternalDataGrid>`), because comments are scanned as code and its three p
 | NetArchTest `dotnet test tests/Spaarke.ArchTests` | Passed 454, Failed 0, Total 454 (426 + 28) |
 | BFF unit `dotnet test tests/unit/Sprk.Bff.Api.Tests` | Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 19m56s) |
 | SPA `npm install --legacy-peer-deps --no-audit --no-fund` + `npx vite build` (clean, seeds removed) | exit 0. The bundle holds `nle=e=>u.jsx(ole,{...e,showViewSelector:!1})`; `showViewSelector:!0` occurs 0 times. `npx tsc --noEmit`: 6 errors, all pre-existing, none in a changed file |
+
+**Review round 6 → fix round b2-r2 (`task/uac-r2-157-b2-r2`, 2026-10-02): the guard failed open a sixth time.** The
+verifier seeded five shapes (R1–R5) in a throwaway worktree; `vite build` compiled all five into live picker-on mounts and
+the b2-r1 guard stayed 109/109 green. Q1–Q7 had been closed only as spelled: one comment reopened Q1/Q2 and the dynamic-load
+rule.
+
+| Shape | Why it passed | Fix |
+|---|---|---|
+| R1 `import { DataGrid as G } from /* c */ '@spaarke/…/DataGrid'` | every specifier rule needs `from\s*['"]`, so the import was invisible | a comment after `from` / `import` / `require` that is followed by a quote or `(` is refused |
+| R2 the same comment on the wrapper import, then `(E as any)({…}).type` mounted | the wrapper binding was never recognised, so the round-5 reference rule never ran | same rule |
+| R3 `React.lazy(() => import /* c */ ('@spaarke/…/DataGrid'))` | `DynamicCall` is `\b(?:import\|require)\s*\(` | same rule (a comment INSIDE the parentheses already failed the plain-literal rule) |
+| R4 `/** @jsxImportSource ../../zzoutside/rt */` | esbuild imports `…/rt/jsx-runtime` with no import statement | `@jsx` in any form is refused anywhere in an SPA file |
+| R5 a carrier at `src/node_modules/zzc`, imported as `'../node_modules/zzc'` | the scan skips `node_modules`, but the specifier rule accepted it as "inside the SPA source" | such a specifier is refused, and the production facts fail if any `node_modules` folder exists under the SPA's or the library's `src` (Vite resolves even a declared bare name through the nearest one) |
+| **(found in b2-r2)** `from` + U+FEFF + `'…'` | U+FEFF is JavaScript whitespace, not .NET `\s` | a literal U+FEFF is refused in every SPA file; the token gap treats it as whitespace |
+| **(found in b2-r2)** `import.meta.glob` with one letter of `glob` written as a `\u` escape, in a file with no binding | `\u` was refused only in binding files | `\u` is refused in every SPA file (none today) |
+| **(found in b2-r2)** `import.meta /* c */ .glob(…)` | `ImportMetaGlob` read only whitespace between tokens | it reads comments and U+FEFF between tokens, accepts `?.`, and refuses any computed `import.meta[…]` |
+
+The three found here were each compile-proven first: wired into `main.tsx`, `vite build` produced
+`u.jsx(vp,{configId:"zzr6"})` (vp is the shared grid: the wrapper renders `u.jsx(vp,{...e,showViewSelector:!1})`) and two
+`Object.assign({"…/DataGrid.tsx":dE})` globs (dE is the grid module, `DataGrid:vp`).
+
+**Why a refusal and not "treat comments as whitespace".** Inside JSX children `/*` is text. A specifier regex that skips a
+"comment" can then run to the next `*/` and swallow a real import in between (regex matches do not overlap), and in the
+rules whose matches are attributed or excluded that hides code. A refusal has no such failure: every match is a violation.
+(Reasoned, not compiled.) The comment bounds are JavaScript's: a block ends at the first `*/`, a line at `\n`, `\r`,
+U+2028 or U+2029.
+
+**The library rule is narrower.** In shipped library files the same comment rule fires only when what follows could load a
+library module (a relative, root-relative or alias path, or text naming the library or `DataGrid`). The SPA form flagged
+library prose: `surfaceLaunchRegistry.ts:161` ends a comment line with "from", then a comment line, then the object key
+`'nda-review'`. A literal U+FEFF is not refused there either: `csvExport.ts:32` holds the UTF-8 BOM in a string on purpose.
+The library rule is a lookahead from each keyword, so a misread "comment" cannot swallow a later keyword.
+
+Proof it bites (seeds written by a script so U+FEFF and `\u` stayed literal; all deleted, `main.tsx` restored with
+`git checkout` and touched, `package-lock.json` reverted, `external-spa/zzoutside` removed):
+
+| Seeded | Result |
+|---|---|
+| `zzseed/R1`–`R5` (+ `src/node_modules/zzc/index.ts` carrying the grid), `R6feff`, `R7glob`, `R8metacomment` | production fact red on all 8 files and on the `src/node_modules` folder |
+| library `components/ZzSeed/ZzSeed.ts` (comment after `from`; `import // c` then `(…)`; U+FEFF after `from`; an `@jsxImportSource` pragma) + `src/node_modules/zzc` | fan-in fact red with 5 entries, one per seed |
+
+**Not changed:** Q8 (element-tree peeling) stays residual 5. Item 13 (process): the project's integration hard gate
+(`tests/integration/Sprk.Bff.Api.IntegrationTests` and `tests/integration/Spe.Integration.Tests` in full) was not run in
+this fix round; the main session runs both before the PR.
+
+**Runs (fix round b2-r2):**
+
+| Suite | Result |
+|---|---|
+| `ExternalSpaGridViewSelectorGuardTests` | 134 / 134 passed: 109 + 24 round-6 Theory rows + 1 neighbours control (the `SharedEscapes` control gained 7 asserts) |
+| NetArchTest `dotnet test tests/Spaarke.ArchTests` | Passed 479, Failed 0, Total 479 (454 + 25) |
+| BFF unit `dotnet test tests/unit/Sprk.Bff.Api.Tests` | Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 18m31s) |
+| SPA `npm install --legacy-peer-deps --no-audit --no-fund` + `npm run build` (vite), seeds removed | exit 0. The bundle holds `ole,{...e,showViewSelector:!1}`; `showViewSelector:!0` occurs 0 times. No client file changed |
+| Integration suites (project hard gate) | not run here; the main session runs both before the PR |
 
 **Runs (review round 3, fix round b2, on `task/uac-r2-157-b2` after merging `work/unified-access-control-r2` at `1f3e7bd76`):**
 

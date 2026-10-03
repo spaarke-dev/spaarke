@@ -291,7 +291,9 @@
       Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
       design; deploy order unchanged, note section 5) and the owner decision on F1 (note section 8).
       BLOCKING item 1 (criterion 1; Q1-Q5 compiled into live picker-on mounts and the guard passed them): CLOSED,
-      with one documented residual. Before any change, the 5 verifier shapes plus 3 of mine were re-seeded and wired
+      with one documented residual. [Corrected in fix round b2-r2: Q1-Q7 were closed AS SPELLED. Review round 6
+      reopened Q1/Q2 (R2) and the round-1/3 dynamic-load rule H/X (R3) with one comment after 'from' / 'import', and
+      found three more compiled bypasses (R1, R4, R5); see the b2-r2 outcome.] Before any change, the 5 verifier shapes plus 3 of mine were re-seeded and wired
       into main.tsx. vite build compiled all 8 into a live mount (Q1-Q5 and Q7 onto the shared grid; Q6 onto a SECOND
       instance of the grid module; Q8 onto the shared grid). The guard stayed 81/81 green.
       - Q1/Q2 (the wrapper called as a plain function): outside the wrapper, every import of the wrapper module, by any
@@ -354,6 +356,89 @@
       454; BFF unit Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 19m56s); SPA npm install
       --legacy-peer-deps --no-audit --no-fund + npx vite build exit 0 (bundle: nle=e=&gt;u.jsx(ole,{...e,showViewSelector:!1}),
       showViewSelector:!0 occurs 0 times); npx tsc --noEmit 6 errors, all pre-existing, none in a changed file.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b2-r2" round="review-6-fix-b2-r2" base="e205c1b7e">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, below) and the owner decision on F1 (note section 8).
+      BLOCKING item 1 / criterion 1 (R1-R5 compiled into live picker-on mounts; the guard stayed 109/109 green):
+      the five shapes are now refused, each with a Theory row and a seeded production run. The scan is still not a
+      proof; residuals 1-5 stand, and residual 2 now names the tsconfig / React-plugin JSX options.
+      - R1-R3 (item 2-4, a comment between a module keyword and its specifier or "("): a comment after 'from',
+        'import' or 'require' that is followed by a quote or "(" is refused (CommentAfterModuleKeyword). The verifier
+        offered two fixes; I took the refusal, not "treat comments as whitespace in every specifier regex". Reason:
+        inside JSX children "/*" is TEXT, so a specifier regex that skips a "comment" can be made to skip live code,
+        and in the regexes whose matches are attributed (parsed import spans) or excluded (importSpans for the
+        reference rule) a skipped span would hide what it covers. Worked through by hand, not compiled: a 'from'
+        in JSX text followed by "/*" would let a comment-skipping AnyFrom match run to the next "*/" and swallow a real
+        import in between (regex matches do not overlap). A refusal rule has no such failure, because every match is
+        already a violation. The comment bounds are JavaScript's (a block ends at the first */, a line at \n, \r,
+        U+2028 or U+2029; the R3i row covers U+2028). A comment INSIDE import( ... ) already failed the plain-literal
+        rule (R3c row).
+      - R4 (item 5, a JSX pragma): @jsx in any form (@jsx, @jsxImportSource, @jsxRuntime, @jsxFrag; case-insensitive)
+        is refused anywhere in an external-SPA file, comment or not.
+      - R5 (item 6, src/node_modules): a specifier that resolves into a node_modules folder inside the SPA source,
+        or inside the library's src, is refused. The production facts also fail if any node_modules folder exists
+        under external-spa/src or Spaarke.UI.Components/src, because the scans skip node_modules AND Vite resolves
+        even a DECLARED bare name (react) through the nearest node_modules walking up from the importer. The
+        verifier's "scan src/**/node_modules" alternative would not cover that bare-name route.
+      - Item 7, the shared library: SharedEscapes (always reported, carriers included) now refuses a comment or
+        U+FEFF between a module keyword and a specifier or argument that could load a library module (relative,
+        root-relative or alias path, or text naming the library or DataGrid), and any JSX pragma. The library rule is
+        narrower than the SPA's on purpose: a first form (keyword, then any comment) had at least 24 false positives in the
+        library (prose ending a comment line with "from" or "import" above another comment line); the final SPA form
+        (comment, then a quote or "(") still had one (surfaceLaunchRegistry.ts:161: prose ending in "from", a comment
+        line, then the quoted object key 'nda-review'). A bare package there is residual 1 already. The library is
+        not refused a literal U+FEFF globally either: csvExport.ts:32 holds the UTF-8 BOM as a string on purpose. The regex is a lookahead
+        from each keyword, so a misread "comment" cannot swallow a later keyword. SharedEscapes reads AnyFrom /
+        SideEffectImport / DynamicCall (whitespace-only) for its path rules, so the new rule is what covers the gap.
+      - Found while fixing, same class, each compile-proven with vite build in this worktree and then refused:
+        (a) U+FEFF between 'from' and the specifier: JavaScript whitespace, not .NET \s. Seed compiled to
+        u.jsx(vp,{configId:"zzr6"}), vp being the shared grid (the wrapper renders u.jsx(vp,{...e,
+        showViewSelector:!1})). A literal U+FEFF is now refused in every SPA file (none today), and the token gap
+        treats it as whitespace. (b) import.meta.glob(...) with an escaped letter, in a file with no binding:
+        the round-3 \u refusal applied only in binding files. Compiled to Object.assign({".../DataGrid.tsx":dE}),
+        dE being the grid module namespace (DataGrid:vp). \u is now refused in every SPA file (none today). (c)
+        import.meta /* c */ .glob(...): ImportMetaGlob read only whitespace between tokens. Compiled the same way.
+        ImportMetaGlob now reads comments and U+FEFF between tokens, accepts ?. and refuses any computed
+        import.meta[...] access (none in the SPA).
+      - Q8 (element-tree peeling) stays residual 5, as before; the owner directive (runtime guard + documented
+        residual when a scan cannot catch a shape with zero false positives) applies.
+      MINOR item 8 (overclaims): reworded.
+      - Guard remarks: the scan item no longer says the scan keeps every path to the grid going through a JSX mount
+        of the pinned wrapper; it says the scan refuses the routes it knows of, in the spellings it recognises. The
+        specifier and dynamic-load items say which form they read (keyword, whitespace, quote or "("), and a new item
+        lists what the rules above do not read and how each is refused (R1-R5, U+FEFF, \u, import.meta). The fan-in
+        paragraph and the "comments are not stripped" paragraph say the same for the library and for comments.
+      - POML: the b2-r1 "CLOSED" is annotated in place. Note: section 1 row, G5 and section 7 were updated.
+      CONFIRMED / CLEAN items 9-12, 14: no change needed. Item 13 (process): the integration hard gate
+      (tests/integration/Sprk.Bff.Api.IntegrationTests AND tests/integration/Spe.Integration.Tests in full before
+      the PR) was NOT run here; the main session must run both before the PR.
+      Proof the guard bites (this worktree; seeds written by a script so U+FEFF and \u stayed literal):
+      - SPA: zzseed/R1.tsx, R2.tsx, R3.tsx, R4.tsx, R5.tsx (+ src/node_modules/zzc/index.ts carrying the grid),
+        R6feff.tsx, R7glob.tsx, R8metacomment.tsx. The production fact went red on all 8 files plus the
+        src/node_modules folder: R1/R2/R3 comment rule, R4 pragma, R5 node_modules specifier, R6 U+FEFF, R7 \u, R8
+        import.meta.glob.
+      - Library: components/ZzSeed/ZzSeed.ts (from /* c */ '../DataGrid'; import // c then ('../DataGrid/DataGrid');
+        from U+FEFF '../DataGrid'; an @jsxImportSource pragma) + src/node_modules/zzc. The fan-in fact went red with
+        5 entries, one per seed.
+      - Every seed was deleted; main.tsx (wired for the build) was restored with git checkout and touched; the
+        npm-touched package-lock.json was reverted; external-spa/zzoutside was removed.
+      Client: no client file changed in b2-r2. Clean build (seeds removed): npm install --legacy-peer-deps
+      --no-audit --no-fund + npm run build (vite) exit 0; the bundle holds ole,{...e,showViewSelector:!1};
+      showViewSelector:!0 occurs 0 times.
+      Live: none performed (no deploy, no Dataverse access). Deploy order is unchanged:
+      1. SPA first: gh workflow run deploy-external-spa.yml --ref &lt;branch-or-master-containing-157&gt;. The
+         workflow runs npm install --legacy-peer-deps --no-audit --no-fund and then npm run build.
+      2. Then the BFF: pwsh scripts/Deploy-BffApi.ps1.
+      3. Then the note section 6 gate.
+      b2-r2 changes no BFF file. Publish size was not measured; the main session measures.
+      Section 10/11: no new service, DI registration, endpoint, option, job, column or package. Changes: one test
+      file and documentation.
+      Runs: guard class 134/134 (109 + 24 round-6 Theory rows + 1 round-6 neighbours control; the SharedEscapes
+      control gained 7 asserts); NetArchTest Passed 479, Failed 0, Total 479 (454 + 25); BFF unit Passed 14274,
+      Failed 0, Skipped 54, Total 14328 (Debug, 18m31s); SPA npm install --legacy-peer-deps --no-audit --no-fund +
+      npm run build (vite) exit 0, clean tree (bundle: ole,{...e,showViewSelector:!1}; showViewSelector:!0 occurs 0
+      times). Integration suites: NOT run (item 13; main session).
     </outcome>
   </execution>
 </task>

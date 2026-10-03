@@ -42,9 +42,10 @@ namespace Spaarke.ArchTests;
 /// (whitespace-insensitive) by <see cref="ExternalSpa_GridWrapper_IsPinnedAndForcesThePickerOff"/>.</item>
 /// <item><b>Scan:</b> no OTHER file under <c>src/client/external-spa/src</c> may reach the shared grid, and
 /// (round 5) no other file may use the wrapper except as a JSX tag. The rules are written to refuse what they
-/// cannot attribute, but a regex scan is not a proof — each review round so far has found a compiled bypass of the
-/// previous version. So the scan's job is narrow (keep every path to the grid going through a JSX mount of the
-/// pinned wrapper), and the known residuals are listed below.</item>
+/// cannot attribute, but a regex scan is not a proof: each of the six review rounds so far found a compiled bypass
+/// of the previous version (round 6: a single comment after <c>from</c> hid an import from every rule). So the
+/// scan refuses the routes to the grid that it knows of, each spelling it recognises; it does not guarantee that
+/// every route goes through a JSX mount of the pinned wrapper. The known residuals are listed below.</item>
 /// </list>
 /// <para><b>Scan rules</b> (every script file under <c>src/client/external-spa/src</c>):</para>
 /// <list type="number">
@@ -59,8 +60,10 @@ namespace Spaarke.ArchTests;
 /// V2/V3).</item>
 /// <item><c>DataGridPageShell(Default)</c>, namespace imports and re-exports that could carry the grid are
 /// refused.</item>
-/// <item><b>Module specifiers (round 3).</b> Every <c>from '…'</c> must be a plain string (no <c>\</c>
-/// escape, which would spell the library without naming it). One that names the shared library must belong
+/// <item><b>Module specifiers (round 3).</b> The rules read a specifier where only whitespace separates it from
+/// <c>from</c> or a side-effect <c>import</c>; a comment there is refused (round 6, below), so these are the
+/// specifiers of the file. Each must be a plain string (no <c>\</c> escape, which would spell the library without
+/// naming it). One that names the shared library must belong
 /// to an import or re-export the scan parsed (so <c>import { "DataGrid" as G }</c> cannot hide). A relative,
 /// <c>/</c> or <c>@/</c> specifier must resolve inside the external SPA source or into the shared library;
 /// a bare <c>@spaarke/…</c> specifier must be the shared library. A module elsewhere could re-export the grid
@@ -69,8 +72,9 @@ namespace Spaarke.ArchTests;
 /// seed in fix round b2 compiled into a live mount with the picker on). Any other bare specifier must name a
 /// package declared in <c>external-spa/package.json</c>, so a resolve alias, a <c>#…</c> subpath import or a
 /// <c>node:</c> builtin is refused.</item>
-/// <item><b>Dynamic loads (round 3).</b> Every <c>import(…)</c> / <c>require(…)</c> must take one plain string
-/// literal that resolves inside the external SPA source or names a declared package. <c>import.meta.glob</c> is
+/// <item><b>Dynamic loads (round 3).</b> Every <c>import(…)</c> / <c>require(…)</c> (the keyword, whitespace,
+/// then <c>(</c>; a comment after the keyword is refused, round 6) must take one plain string literal, with nothing
+/// else inside the parentheses, that resolves inside the external SPA source or names a declared package. <c>import.meta.glob</c> is
 /// refused in any form: its pattern can match the grid's file without naming it (V1). <b>Round 4:</b>
 /// <c>eval(…)</c> and the <c>Function</c> constructor are refused, because code built from a string can import
 /// anything.</item>
@@ -89,6 +93,19 @@ namespace Spaarke.ArchTests;
 /// <c>..</c> segment (<c>react-window/../../x</c> compiled into a live mount: the package has no
 /// <c>exports</c> map). A <c>?query</c> or <c>#fragment</c> in a specifier is refused (<c>…/DataGrid?v=1</c>
 /// compiled into a second instance of the grid module, whose default import no name rule could attribute).</item>
+/// <item><b>What the rules above do not read (round 6, R1–R5; each compiled into a live picker-on mount).</b> A
+/// comment directly after <c>from</c>, <c>import</c> or <c>require</c> is refused: <c>from /* c */ '…'</c> hid a
+/// grid import (R1) and a wrapper import (R2, reopening Q1/Q2), and <c>import /* c */ (…)</c> a dynamic load (R3).
+/// The specifier regexes do not skip comments instead, because inside JSX children <c>/*</c> is text, so a skipped
+/// "comment" could span live code. <c>import.meta.glob</c> is matched across comments and <c>?.</c>, and any
+/// computed <c>import.meta[…]</c> is refused. A JSX pragma (<c>@jsx</c>, <c>@jsxImportSource</c>,
+/// <c>@jsxRuntime</c>, <c>@jsxFrag</c>) is refused anywhere: <c>@jsxImportSource</c> imports a runtime from any
+/// path with no import statement (R4). A <c>\u</c> escape is refused in every file, not only in a binding file
+/// (<c>import.meta.glob</c> with one letter of <c>glob</c> escaped). A literal U+FEFF is refused: JavaScript reads it
+/// as whitespace and .NET's <c>\s</c> does not, so <c>from</c>, U+FEFF, <c>'…'</c> would slip past every
+/// <c>from\s*</c>. A specifier into a <c>node_modules</c> folder inside <c>src</c> is refused, and no such folder may
+/// exist under the SPA's or the library's <c>src</c>: the scans skip <c>node_modules</c>, and a bare specifier
+/// resolves through the nearest one (R5).</item>
 /// </list>
 /// <para><b>Shared-library fan-in (round 3).</b> The scan refuses <c>DataGridPageShell</c> by name, which is
 /// only enough while it is the one shared component that mounts the grid.
@@ -98,17 +115,25 @@ namespace Spaarke.ArchTests;
 /// fact until it is reviewed (refuse it here by name, like the shell, or prove it switches the picker off).
 /// <b>Round 5:</b> the test exclusion is sound only while nothing ships a test path, so every shipped library file
 /// (the allowed carriers included) is refused if it loads a module outside <c>src/</c> or from a test /
-/// <c>__*</c> path, and the external SPA may not import one either (rule above).</para>
+/// <c>__*</c> / <c>node_modules</c> path, and the external SPA may not import one either (rule above). <b>Round 6:</b>
+/// the fan-in regexes read only whitespace after the keyword too, so a library file is also refused for a comment or
+/// U+FEFF between <c>from</c> / <c>import</c> / <c>require</c> and a specifier or argument that could load a library
+/// module (relative, root-relative or alias path, or text naming the library or <c>DataGrid</c>), and for a JSX
+/// pragma. The library rule is narrower than the SPA's because library prose often ends a comment line with "from"
+/// above another comment line and a quoted object key; a bare package there is residual 1.</para>
 /// <para><b>Comments are NOT stripped.</b> Inside JSX children a line reading <c>// &lt;X /&gt;</c> is TEXT
 /// followed by a live element (round 2, S2/S3), so every comment is scanned as code. In a file that holds a
-/// grid binding, a comment must not quote a mount, name the binding, or spell an element-cloning API.</para>
+/// grid binding, a comment must not quote a mount, name the binding, or spell an element-cloning API. In every
+/// file, a comment may not sit directly after a module keyword (round 6).</para>
 /// <para><b>Residual (documented, not scanned).</b> The scan is NOT a proof that no code path can mount the grid
 /// with the picker on. What it does not cover:</para>
 /// <list type="number">
 /// <item>A NEW npm dependency (a <c>package.json</c> change) that itself bundles and re-exports the shared grid
 /// under another name.</item>
 /// <item>Build configuration: a <c>vite.config.ts</c> resolve alias or plugin that re-points a DECLARED name
-/// (e.g. <c>react</c> or <c>@spaarke/ui-components</c> itself) at another file.</item>
+/// (e.g. <c>react</c> or <c>@spaarke/ui-components</c> itself) at another file, or a JSX option in
+/// <c>tsconfig.json</c> / the React plugin (<c>jsxImportSource</c>, <c>jsxFactory</c>) that re-points the JSX
+/// runtime the way the pragma refused above would.</item>
 /// <item>Inside the shared library, a dynamic <c>import()</c> whose path is built in a variable elsewhere (the
 /// fan-in fact reads the call's own argument text only, because the library's prose says "import (" in many
 /// comments).</item>
@@ -216,7 +241,9 @@ public class ExternalSpaGridViewSelectorGuardTests
         @"\bexport\b\s*(?<clause>[\w{*][^;'""`]*?)\s*\bfrom\s*['""](?<module>[^'""\n]*)['""]", RegexOptions.Compiled);
 
     // Every `from '<specifier>'` in the file, whatever precedes it (round 3: the specifier rules), and every
-    // side-effect `import '<specifier>'` (round 4: such a module can hand the grid over through a global).
+    // side-effect `import '<specifier>'` (round 4: such a module can hand the grid over through a global). Only
+    // whitespace may separate the keyword and the quote: a comment there is refused by CommentAfterModuleKeyword
+    // (round 6), so these two find every specifier the file has.
     private static readonly Regex AnyFrom = new(@"\bfrom\s*(?<q>['""])(?<spec>[^'""\n]*)\k<q>", RegexOptions.Compiled);
     private static readonly Regex SideEffectImport = new(@"\bimport\s*(?<q>['""])(?<spec>[^'""\n]*)\k<q>", RegexOptions.Compiled);
 
@@ -235,9 +262,38 @@ public class ExternalSpaGridViewSelectorGuardTests
     private static readonly Regex DynamicLiteralArgAt = new(
         @"\G\s*(?<q>['""])(?<spec>[^'""`\n\\]*)\k<q>\s*[),]", RegexOptions.Compiled);
 
-    // `import.meta.glob(…)`, `import.meta.globEager(…)`, `import . meta['glob']` … (round 3, V1).
+    // Whitespace or comments between tokens. Used ONLY in rules whose every match is a violation: a regex that
+    // skips a "comment" can be made to skip live code (inside JSX children `/*` is text), and in a rule whose
+    // matches are attributed or excluded that would hide what the "comment" spans. Here it can only add matches.
+    private const string Comment = @"(?>/\*[\s\S]*?\*/)|(?>//[^\n\r\u2028\u2029]*)";
+
+    // U+FEFF is JavaScript whitespace (not .NET `\s`), so it belongs in the gap too.
+    private const string TokenGap = @"(?:[\s\uFEFF]|" + Comment + ")*";
+
+    // `import.meta.glob(…)`, `import.meta.globEager(…)`, `import . meta /* c */ .glob`, `import.meta?.glob`, and any
+    // computed `import.meta[…]` / `import.meta?.[…]` access (round 3, V1; round 6: comments and `?.` between tokens).
     private static readonly Regex ImportMetaGlob = new(
-        @"\bimport\s*\.\s*meta\s*(?:\.\s*|\[\s*['""`])glob", RegexOptions.Compiled);
+        @"\bimport" + TokenGap + @"\." + TokenGap + "meta" + TokenGap + @"(?:\??\." + TokenGap + @"glob|(?:\?\.)?" + TokenGap + @"\[)",
+        RegexOptions.Compiled);
+
+    // Round 6 (fix round b2-r2, R1–R3): a comment between a module keyword and its specifier or `(`. Every specifier
+    // rule reads `from '…'`, `import '…'` and `import(` / `require(` with only whitespace between; `from /* c */ '…'`
+    // and `import /* c */ (…)` hid the module from all of them. Refused, not skipped: see TokenGap for why a
+    // specifier regex must not skip comments. Only a keyword whose comment(s) are followed by a quote or `(` is
+    // refused, because library prose often ends a comment line with "from" or "import" above another comment line.
+    // The comment bounds are JavaScript's (a block ends at the first `*/`, a line at any line terminator). A comment
+    // INSIDE the parentheses already fails the plain-literal rule.
+    private static readonly Regex CommentAfterModuleKeyword = new(
+        @"(?<![\w$.])(?:from|import|require)\s*(?:" + Comment + ")" + TokenGap + @"['""(]", RegexOptions.Compiled);
+
+    // Round 6: U+FEFF is JavaScript whitespace but not .NET `\s`, so `from\uFEFF'…'` would slip past every
+    // `from\s*['"]`. The literal character is refused (File.ReadAllText already drops a leading byte-order mark).
+    private static readonly Regex ZeroWidthNoBreakSpace = new("\uFEFF", RegexOptions.Compiled);
+
+    // Round 6 (R4): a JSX pragma. `/** @jsxImportSource ../../x */` makes esbuild import `../../x/jsx-runtime` with
+    // no import statement in the file, so a module outside src/ runs every jsx() call of that file. `@jsx`,
+    // `@jsxFrag` and `@jsxRuntime` re-point the factory the same way. Refused anywhere, comment or not.
+    private static readonly Regex JsxPragma = new(@"@jsx", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     // Element-cloning APIs and identifier escapes, refused in a file that holds a grid binding (round 3, V2/V3).
     private static readonly Regex CloneOrCreate = new(@"(?<![\w$])(?:cloneElement|createElement)(?![\w$])", RegexOptions.Compiled);
@@ -509,14 +565,36 @@ public class ExternalSpaGridViewSelectorGuardTests
 
         foreach (Match glob in ImportMetaGlob.Matches(text))
         {
-            violations.Add($"{Where(glob.Index)}: import.meta.glob is refused. Its pattern can match the shared "
-                           + "DataGrid's file without naming it, so the grid it loads cannot be checked.");
+            violations.Add($"{Where(glob.Index)}: import.meta.glob (or a computed import.meta[…] access) is refused. Its "
+                           + "pattern can match the shared DataGrid's file without naming it, so the grid it loads cannot "
+                           + "be checked.");
         }
 
         foreach (Match code in DynamicCode.Matches(text))
         {
             violations.Add($"{Where(code.Index)}: eval / Function constructor is refused. Code built from a string can "
                            + "import a module this scan cannot read.");
+        }
+
+        // ── Round 6 (fix round b2-r2): R1–R3 hid a module behind a comment; R4 loaded one through a JSX pragma. ──
+        foreach (Match comment in CommentAfterModuleKeyword.Matches(text))
+        {
+            violations.Add($"{Where(comment.Index)}: a comment directly after 'from' / 'import' / 'require'. The module "
+                           + "specifier rules read only whitespace there, so the import behind the comment could not be "
+                           + "checked; move the comment off the import.");
+        }
+
+        foreach (Match space in ZeroWidthNoBreakSpace.Matches(text))
+        {
+            violations.Add($"{Where(space.Index)}: a U+FEFF character. JavaScript reads it as whitespace and this scan "
+                           + "does not, so it could separate a module keyword from its specifier unseen.");
+        }
+
+        foreach (Match pragma in JsxPragma.Matches(text))
+        {
+            violations.Add($"{Where(pragma.Index)}: a JSX pragma (@jsx, @jsxImportSource, @jsxRuntime, @jsxFrag) is "
+                           + "refused. It makes the compiler import a JSX runtime or factory from a module this scan "
+                           + "cannot read, with no import statement.");
         }
 
         var compliant = 0;
@@ -602,6 +680,18 @@ public class ExternalSpaGridViewSelectorGuardTests
             {
                 violations.Add($"{Where(escape.Index)}: unicode escape in a file that holds ExternalDataGrid. An escaped "
                                + "identifier can reference the wrapper under a spelling this scan cannot see.");
+            }
+        }
+        else if (distinctLocals.Count == 0)
+        {
+            // Round 6: in every OTHER file too. An escaped property name spells what a rule looks for without
+            // naming it (`import.meta.glob(…)` with one letter of `glob` escaped); the SPA source holds no `\u` today,
+            // so this costs nothing.
+            foreach (Match escape in UnicodeEscape.Matches(text))
+            {
+                violations.Add($"{Where(escape.Index)}: unicode escape. An escaped identifier or property name can spell "
+                               + "what this scan looks for (e.g. import.meta.gl\\u006fb) without naming it; write the "
+                               + "character itself.");
             }
         }
         foreach (var local in distinctWrapperLocals)
@@ -730,11 +820,31 @@ public class ExternalSpaGridViewSelectorGuardTests
             if (IsUnder(full, root))
             {
                 var relative = Path.GetRelativePath(root, full).Replace('\\', '/');
+                if (HasNodeModulesSegment(relative))
+                {
+                    return $"a node_modules path in the shared library's src ({relative}), which the fan-in fact skips";
+                }
                 return IsTestPath(relative) ? $"a test or __* path in the shared library ({relative})" : null;
             }
         }
         return $"{Path.GetRelativePath(SourceScan.RepoRoot, full).Replace('\\', '/')} (outside the shared library's src)";
     }
+
+    /// <summary>Whether a relative path passes through a <c>node_modules</c> folder (round 6, R5).</summary>
+    private static bool HasNodeModulesSegment(string relative) =>
+        relative.Split('/', '\\').Any(segment => segment.Equals("node_modules", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Every <c>node_modules</c> folder under <paramref name="root"/>, as a violation (round 6, R5). The scans skip
+    /// <c>node_modules</c>, and a bare specifier resolves through the nearest one walking up from the importer, so a
+    /// folder inside a scanned <c>src</c> would supply unscanned modules even to a declared package name.
+    /// </summary>
+    private static IEnumerable<string> NodeModulesFoldersUnder(string root) =>
+        Directory.EnumerateDirectories(root, "*", SearchOption.AllDirectories)
+            .Where(directory => Path.GetFileName(directory).Equals("node_modules", StringComparison.OrdinalIgnoreCase))
+            .Select(directory => $"{RepoRelative(directory)}: a node_modules folder inside a scanned src. The scan skips "
+                                 + "node_modules, and Vite resolves bare specifiers through it; keep packages in the "
+                                 + "project's own node_modules.");
 
     /// <summary>
     /// Where a module specifier resolves, when that is OUTSIDE the external SPA source (and, when
@@ -773,7 +883,10 @@ public class ExternalSpaGridViewSelectorGuardTests
         }
         if (IsUnder(full, ExternalSpaSource))
         {
-            return null;
+            // Round 6 (R5): ScriptFilesUnder skips node_modules, so a node_modules folder inside src is not scanned.
+            return HasNodeModulesSegment(Path.GetRelativePath(ExternalSpaSource, full))
+                ? $"{Path.GetRelativePath(SourceScan.RepoRoot, full).Replace('\\', '/')}: a node_modules folder, which the scan skips"
+                : null;
         }
         if (allowSharedLibrary)
         {
@@ -1030,6 +1143,9 @@ public class ExternalSpaGridViewSelectorGuardTests
         // bundled unscanned.
         violations.AddRange(ScanEntryHtml(File.ReadAllText(Path.Combine(ExternalSpaRoot, "index.html"))));
 
+        // Round 6 (R5): the loop above skips node_modules, so none may exist inside the scanned source.
+        violations.AddRange(NodeModulesFoldersUnder(ExternalSpaSource));
+
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
         // Not vacuous: the wrapper was found, scanned, and holds exactly the one sanctioned mount.
         var only = Assert.Single(compliantByFile);
@@ -1162,8 +1278,48 @@ public class ExternalSpaGridViewSelectorGuardTests
                 found.Add($"{Where(index)}: loads '{spec}' ({where}), a module this fact does not read");
             }
         }
+
+        // Round 6: the same comment gap (LibStatement, AnyFrom and DynamicCall read only whitespace after the
+        // keyword, so `from /* c */ '../DataGrid'` was invisible to the fan-in too). Library prose often ends a
+        // comment line with "from" above another comment line and then a quoted object key, so here a keyword
+        // followed by a comment or U+FEFF is refused only when what follows could load a library module.
+        foreach (Match keyword in LibKeywordGap.Matches(source))
+        {
+            if (keyword.Groups["gap"].Value.All(char.IsWhiteSpace))
+            {
+                continue; // plain whitespace: the rules above read this one
+            }
+            var loads = keyword.Groups["spec"].Success
+                ? CouldLoadALibraryModule(keyword.Groups["spec"].Value)
+                : CouldLoadALibraryModule(keyword.Groups["arg"].Value) || keyword.Groups["arg"].Value.Contains('`');
+            if (loads)
+            {
+                found.Add($"{Where(keyword.Index)}: a comment (or U+FEFF) between '{keyword.Value}' and the module hides it "
+                          + "from this fact");
+            }
+        }
+        foreach (Match pragma in JsxPragma.Matches(source))
+        {
+            found.Add($"{Where(pragma.Index)}: a JSX pragma loads a runtime or factory module this fact does not read");
+        }
         return found;
     }
+
+    // Round 6, library only: a module keyword, the gap after it (whitespace, comments, U+FEFF), then a quoted
+    // specifier or a parenthesised argument. A lookahead, so a "comment" the regex misreads (inside a string) cannot
+    // swallow a later keyword: each keyword is matched on its own.
+    private static readonly Regex LibKeywordGap = new(
+        @"(?<![\w$.])(?:from|import|require)(?=(?<gap>" + TokenGap + @")(?:(?<q>['""])(?<spec>[^'""\n]*)\k<q>|\((?<arg>[^)]*)))",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// Whether a specifier (or the text of a call's argument) could load a module of the shared library: a relative,
+    /// root-relative or alias path, or any text naming the library or <c>DataGrid</c>. A bare package is residual 1.
+    /// </summary>
+    private static bool CouldLoadALibraryModule(string text) =>
+        Regex.IsMatch(text, @"(?:^|['""`]\s*)(?:\.|/|@spaarke/)")
+        || NamesSharedLibrary.IsMatch(text)
+        || text.Contains("DataGrid", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsGridCarryingModule(string module, string fileName)
     {
@@ -1185,7 +1341,7 @@ public class ExternalSpaGridViewSelectorGuardTests
     {
         Assert.True(Directory.Exists(SharedLibrarySource), $"the shared library must exist at {SharedLibrarySource}");
 
-        var unexpected = new List<string>();
+        var unexpected = new List<string>(NodeModulesFoldersUnder(SharedLibrarySource)); // round 6 (R5)
         var carriersSeen = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in ScriptFilesUnder(SharedLibrarySource))
         {
@@ -1527,6 +1683,70 @@ public class ExternalSpaGridViewSelectorGuardTests
             $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, result.Violations)}");
     }
 
+    // ── Review round 6 (task 157 fix round b2-r2): five shapes compiled (vite build) into a live mount with the picker
+    // on past the round-5 scan (R1–R5), and their neighbours. Each one MUST be reported. Scanned as OtherSpaFile. ──
+
+    private const string CommentAfterKeyword = "a comment directly after 'from' / 'import' / 'require'";
+
+    [Theory(DisplayName = "Control: every evasion shape seeded in review round 6 is reported")]
+    // R1: a comment between `from` and the specifier hid the import from every specifier rule
+    [InlineData("R1-block-comment-after-from", "import { DataGrid as G } from /* c */ '@spaarke/ui-components/components/DataGrid/DataGrid';\n<G configId=\"zzr1\" showViewSelector />", CommentAfterKeyword)]
+    [InlineData("R1b-line-comment-after-from", "import { DataGrid as G } from // c\n  '@spaarke/ui-components/components/DataGrid/DataGrid';", CommentAfterKeyword)]
+    [InlineData("R1c-reexport", "export { DataGrid as G } from /* c */ '@spaarke/ui-components/components/DataGrid/DataGrid';", CommentAfterKeyword)]
+    [InlineData("R1d-side-effect", "import /* c */ '../../zzoutside/gridGlobal';", CommentAfterKeyword)]
+    [InlineData("R1e-outside-module", "import { Grid } from /* c */ '../../../../solutions/Other/src/grid';", CommentAfterKeyword)]
+    // R2: the same trick on the wrapper reopened Q1/Q2 (its binding was never recognised)
+    [InlineData("R2-wrapper-behind-comment", "import { ExternalDataGrid as E } from /* c */ '../widgets/ExternalDataGrid';\nconst Inner = (E as any)({ configId: 'zzr2' }).type;\nconst A = () => <Inner showViewSelector />;", CommentAfterKeyword)]
+    // R3: a comment between `import` / `require` and `(` hid the dynamic load
+    [InlineData("R3-dynamic-import", "const G = React.lazy(() => import /* c */ ('@spaarke/ui-components/components/DataGrid/DataGrid'));", CommentAfterKeyword)]
+    [InlineData("R3b-require-line-comment", "const m = require // c\n  ('../../zzoutside/grid');", CommentAfterKeyword)]
+    [InlineData("R3c-comment-inside-parens", "const m = import(/* @vite-ignore */ './Other');", "dynamic import")]
+    [InlineData("R3d-comment-before-meta", "const m = import /* c */ .meta.glob('./x/*.tsx');", "import.meta.glob")]
+    [InlineData("R3i-line-separator-ends-the-comment", "import { Grid } from // c\u2028'../../zzoutside/grid';", CommentAfterKeyword)]
+    [InlineData("R3j-feff-whitespace", "import { Grid } from\uFEFF'../../zzoutside/grid';", "a U+FEFF character")]
+    [InlineData("R3e-comment-before-glob", "const m = import.meta /* c */ .glob('./x/*.tsx');", "import.meta.glob")]
+    [InlineData("R3f-optional-chain-glob", "const m = import.meta?.glob('./x/*.tsx');", "import.meta.glob")]
+    [InlineData("R3g-computed-meta", "const k = 'gl' + 'ob';\nconst m = import.meta[k]('./x/*.tsx');", "import.meta.glob")]
+    [InlineData("R3h-escaped-glob", "const m = import.meta.gl\\u006fb('./x/*.tsx');", "unicode escape")]
+    // R4: a JSX pragma loads a runtime outside src/ with no import statement
+    [InlineData("R4-jsx-import-source", "/** @jsxImportSource ../../zzoutside/rt */\nconst A = () => <div data-zz=\"grid\" />;", "a JSX pragma")]
+    [InlineData("R4b-jsx-factory", "/** @jsx h */\nconst A = () => <div />;", "a JSX pragma")]
+    [InlineData("R4c-jsx-runtime", "// @jsxRuntime classic\nconst A = () => <div />;", "a JSX pragma")]
+    [InlineData("R4d-jsx-frag", "/* @jsxFrag F */\nconst A = () => <></>;", "a JSX pragma")]
+    // R5: a carrier in a node_modules folder inside src (the scan skips node_modules)
+    [InlineData("R5-src-node-modules", "import { T } from '../node_modules/zzc';\n<T configId=\"zzr5\" />", "a node_modules folder, which the scan skips")]
+    [InlineData("R5b-at-alias-node-modules", "import '@/node_modules/zzc';", "a node_modules folder, which the scan skips")]
+    [InlineData("R5c-dynamic-node-modules", "const m = import('../node_modules/zzc');", "dynamic import")]
+    [InlineData("R5d-library-node-modules", "import { T } from '@spaarke/ui-components/node_modules/zzc';", "a node_modules path in the shared library's src")]
+    public void Scan_WhenARound6EvasionShapeIsSeeded_ReportsIt(string shape, string source, string expected)
+    {
+        var result = Scan(source, OtherSpaFile);
+
+        Assert.True(
+            result.Violations.Any(v => v.Contains(expected, StringComparison.Ordinal)),
+            $"{shape}: expected a violation containing '{expected}', got:{Environment.NewLine}{string.Join(Environment.NewLine, result.Violations)}");
+    }
+
+    [Fact(DisplayName = "Control: round-6 neighbours pass — comments that do not follow a module keyword, Array.from, import.meta.env")]
+    public void Scan_WhenCommentsAndImportMetaAreUsedOrdinarily_Passes()
+    {
+        var text = "import { makeStyles } from '@fluentui/react-components'; // from the docs\n" +
+                   "// imported from the shared library, see import.meta.env\n" +
+                   "/* the jsx runtime is the default one */\n" +
+                   "const rows = Array.from(items); // copy\n" +
+                   "const env = import.meta.env.VITE_BFF_URL; /* import.meta is fine */\n" +
+                   "const word = 'require'; const label = 'from';\n" +
+                   "// Re-export the public types so callers can import them directly from\n" +
+                   "// this barrel (prose that ends a comment line with a module keyword)\n" +
+                   "export { tokens } from './tokens';\n" +
+                   "/* the server takes it from */ const n = 1;\n" +
+                   "const L = () => import('../widgets/ProjectsWidget');";
+
+        var result = Scan(text, OtherSpaFile);
+
+        Assert.Empty(result.Violations);
+    }
+
     [Fact(DisplayName = "Control: sanctioned uses of the wrapper pass — JSX tags, typeof, type-only imports and re-exports, a comment quoting the tag")]
     public void Scan_WhenTheWrapperIsUsedOnlyAsJsx_Passes()
     {
@@ -1618,6 +1838,18 @@ public class ExternalSpaGridViewSelectorGuardTests
         Assert.Single(SharedEscapes("import { x } from '../Foo/Foo.test';", NewWidget));
         Assert.Single(SharedEscapes("import '@spaarke/ui-components/../zzoutside/x';", NewWidget));
         Assert.Single(SharedEscapes("const m = import('../../../zzoutside/x');", NewWidget));
+        // Round 6: a comment after the keyword, a JSX pragma, a node_modules folder inside src
+        Assert.Single(SharedEscapes("export { DataGrid as T } from /* c */ '../DataGrid';", NewWidget));
+        Assert.Single(SharedEscapes("const G = React.lazy(() => import /* c */ ('../DataGrid/DataGrid'));", NewWidget));
+        Assert.Single(SharedEscapes("/** @jsxImportSource ../../../zzoutside/rt */", NewWidget));
+        Assert.Single(SharedEscapes("import { T } from '../node_modules/zzc';", NewWidget));
+        Assert.Single(SharedEscapes("export { DataGrid as T } from // c\n  '@spaarke/ui-components/components/DataGrid';", NewWidget));
+        Assert.Single(SharedEscapes("export { DataGrid as T } from\uFEFF'../DataGrid';", NewWidget));
+        // Library prose that ends a comment line with a module keyword, a quoted key after it, a literal BOM
+        Assert.Empty(SharedEscapes(
+            "const registry = {\n  // resolves the SAME surface identity from\n  // this ONE place (ADR-039)\n  'nda-review': { kind: 'tab' },\n" +
+            "  // the jsx runtime is imported from\n  // React itself\n  (x as any)\n};\n" +
+            "export const UTF8_BOM = '\uFEFF';", NewWidget));
 
         Assert.Empty(SharedEscapes(
             "import { tokens } from '../DataGrid/tokens';\n" +
