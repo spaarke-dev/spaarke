@@ -4084,9 +4084,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           ) : null}
           {/* UAT round-6 #3b — the floating "Comments" (TipTap OOB session-comments) toggle FAB was
               REMOVED per reviewer request (those comments aren't used in the NDA advisory flow; the
-              advisory Review Notes gutter is the comment surface). The ComposeCommentThread panel +
-              useComposeCommentThreads instance remain in the codebase (now unreachable from the UI) so
-              the capability can be re-exposed later without re-plumbing. */}
+              advisory Review Notes gutter is the comment surface). CORRECTION (spaarke-ontology-
+              platform-r1 task 085 / C-16, 2026-10-03): the ComposeCommentThread panel + its
+              useComposeCommentThreads instance are LIVE, not unreachable — FR-10 / R6 D7 (task 072)
+              re-exposed the capability via the top toolbar's "Add Comment" toggle
+              (`commentsOpen` / `onToggleComments={handleToggleComments}` on <ComposeFormatToolbar>
+              above, rendering <ComposeCommentThread> below with `open={commentsOpen}`; see that
+              toolbar prop's own comment). Only the floating FAB is gone; the panel it used to open
+              now opens from the toolbar instead. */}
           {/* UAT round-4: the "Show styles" toggle was REMOVED per user request — the apply-existing-
               styles pane added little value over the Body/Paragraph/Font toolbar dropdowns. The
               ComposeStylesPane component + hook remain in the codebase (unmounted) in case it returns. */}
