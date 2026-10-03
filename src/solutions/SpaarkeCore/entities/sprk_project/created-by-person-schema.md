@@ -57,7 +57,8 @@ the person, which the resume reads first.
 | Spaarke BFF-Managed Field Writers | the BFF application user(s), explicitly | read, create, update |
 
 Any other profile (besides the platform's System Administrator profile) that can create or update the column is reported
-`FAIL` by `-Verify`. The two profiles are named for the CLASS of column — task 150 locks `sprk_issecure` the same way and
+`FAIL` by `-Verify` — and so is any member of the WRITER profile other than the `-BffApplicationIds` users (a human, another
+application user, or any team): that membership IS the lock (task 133 r1). Both are reported in every mode, never removed. The two profiles are named for the CLASS of column — task 150 locks `sprk_issecure` the same way and
 adds it to them. **A business unit created later** needs `-Apply` re-run, so its default team joins the reader profile.
 
 ## Who reads it
@@ -66,13 +67,16 @@ adds it to them. **A business unit created later** needs `-Apply` re-run, so its
 application user), in a query of its own — never in the Step 1 select. Order (owner round 7 item 2): `createdby` when it is
 a usable person → else this column when it names a usable person → else refused (`sdap.provision.resume_creator_unavailable`,
 nothing written; never the caller as a substitute — owner decision F8). An unreadable `createdby` stops the decision (500,
-the same caller may retry) rather than falling through to the column.
+the same caller may retry) rather than falling through to the column. A read of this column that Dataverse answers 400 (the
+column does not exist in the environment) is `creatorState: column-missing` — deterministic, no retry offered, an
+administrator applies the schema; any other failed read is the transient `unreadable` (task 133 r1).
 
 ## Deployment
 
 ⚠️ **Order: schema BEFORE the BFF.** A BFF carrying task 133 writes this column on every Office quick-create and every
 `POST /api/v1/work-assignments`; Dataverse refuses a create naming a column that does not exist, so those creates fail until
-the schema is applied. Provisioning itself tolerates the column's absence (only a resume that needs it reports `unreadable`).
+the schema is applied. Provisioning itself tolerates the column's absence (only a resume that needs it reports
+`column-missing`).
 
 ```powershell
 .\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `

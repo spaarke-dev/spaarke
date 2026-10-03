@@ -166,12 +166,17 @@ public class ProvisionResumeCreatorPersonTests : IClassFixture<ProvisionProjectT
     }
 
     /// <summary>
-    /// The column cannot be read — an environment where <c>Set-RecordCreatorPersonSchema.ps1</c> has not run answers its
-    /// projection with a 400. A 500 <c>unreadable</c> naming the column (the client offers the same caller a retry), zero
-    /// writes — never a substitute share.
+    /// The column does not exist — an environment where <c>Set-RecordCreatorPersonSchema.ps1</c> has not run answers its
+    /// projection with a 400. That is deterministic, so it is NOT the transient <c>unreadable</c> (which the client offers
+    /// the same caller as a retry that would fail every time): <c>creatorState: column-missing</c>, naming the column and
+    /// the schema script, zero writes — never a substitute share.
     /// </summary>
+    /// <remarks>
+    /// <b>Rewritten by task 133 r1</b> (verifier round 4, finding 10). This test pinned <c>unreadable</c> for the absent
+    /// column, which the wizard classified as retryable: its "Try securing again" would fail until the schema was applied.
+    /// </remarks>
     [Fact]
-    public async Task Resume_WhenTheColumnCannotBeRead_Refuses500_NamingTheColumn()
+    public async Task Resume_WhenTheColumnDoesNotExist_RefusesAsColumnMissing_NotAsARetry()
     {
         var projectId = Guid.NewGuid();
         _fixture.CreatorPersonColumnExists = false;
@@ -182,10 +187,39 @@ public class ProvisionResumeCreatorPersonTests : IClassFixture<ProvisionProjectT
         response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
         var problem = await BodyOf(response);
         problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonResumeCreatorUnavailable);
+        problem.GetProperty("creatorState").GetString().Should().Be("column-missing");
+        problem.GetProperty("creatorColumn").GetString().Should().Be(RecordCreatorPerson.Column);
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("Set-RecordCreatorPersonSchema.ps1").And.Contain("-Verify")
+            .And.Contain("repeats this refusal");
+        detail.Should().NotContain("the same caller may)", "calling again cannot succeed until the schema is applied");
+        AssertNothingWritten();
+    }
+
+    /// <summary>
+    /// The column exists but its read fails TRANSIENTLY: 500 <c>unreadable</c> naming the column (the same caller may call
+    /// again), zero writes; once the read works the same caller's call shares to the recorded person.
+    /// </summary>
+    [Fact]
+    public async Task Resume_WhenTheColumnReadFailsTransiently_Refuses500Unreadable_AndTheSameCallerCanRetry()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.CreatorPersonReadFails = true;
+        _fixture.SeedProject(projectId, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId,
+            createdBy: AppUser, createdByPerson: Maker);
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await BodyOf(response);
         problem.GetProperty("creatorState").GetString().Should().Be("unreadable");
         problem.GetProperty("creatorColumn").GetString().Should().Be(RecordCreatorPerson.Column);
-        problem.GetProperty("detail").GetString().Should().Contain("Set-RecordCreatorPersonSchema.ps1 -Verify");
         AssertNothingWritten();
+
+        _fixture.CreatorPersonReadFails = false;
+        var retry = await ProvisionAsync(new { projectId });
+        retry.StatusCode.Should().Be(HttpStatusCode.OK, await retry.Content.ReadAsStringAsync());
+        _fixture.Grants.Select(g => g.Principal.Id).Should().Equal(Maker);
     }
 
     /// <summary>

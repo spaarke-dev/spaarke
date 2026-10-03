@@ -411,6 +411,73 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       its recorded person; (h) a record's own container kept. (3) Owner acceptance of the (e) replay method.
       (4) Publish size (main session).
     </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-b2-r1" round="r1 (verifier round 4)" baseSha="d10db4252">
+      COMPLETED-WITH-ESCALATION (unchanged): the BLOCKING kept-container finding and every other code/doc item closed WITHOUT
+      changing the idempotency marker; one new owner question (14.3) and the earlier open items remain. Full record:
+      notes/task-133-provision-creator-lockout.md section 14.
+
+      BASE. task/uac-r2-133-b2 + work/unified-access-control-r2 merged (8531711d6 integration fixtures, ea6484102 hard
+      gate); baseSha d10db4252, clean.
+
+      (1) BLOCKING, kept container. Proven first: 10 new/rewritten tests failed on the b2 logic (both probes reproduced).
+          Root cause is wider: ANY record entering the owner move with sprk_containerid set (a KEPT own container, and
+          also a REPLACED shared container, recorded from the move until Step 7) is 409'd forever by the marker if a step
+          after the move fails - for the shared case while its uploads go to the business unit's shared container. The
+          marker was NOT changed: the AC pins ProvisionProject_WhenAlreadyOwnedBySecureTeam_IsRefusedAndWritesNothing
+          unmodified, and its seed (team-owned, container, no share) is identical to a stranded kept record; a
+          provisioning-complete signal is a new column. Either is the owner's call (POML trigger 3: no widening on a
+          guess). Done instead (verifier option c and its shared-container counterpart):
+          (a) Step 4.2: a shared container is UNLINKED before the move (first write, after every read); every failure
+              after the move leaves "owned, no container" = resumed (tested). A failed unlink: new code
+              sdap.provision.shared_container_not_cleared (500, retryable, nothing moved). Later details say "unlinked".
+          (b) A kept record moves only when share-first is possible: an unreadable pre-call share set refuses before any
+              write (creator_share_failed, containerKept true) - closes probe 2. The live-gate-(a) post-move-grant
+              fallback for a creator who owns the record is kept (refusing would refuse every re-securing if (a) fails).
+          (c) Every failure after a kept record's move tells the truth: extension containerKept; the detail says the next
+              call answers already_provisioned and does not resume, and names the recovery that works - an administrator's
+              Manage Access share (or Share in the model-driven app); CRITICAL logs say it; the double failure says when
+              the creator's share was confirmed before the move and still stands. Tested for every failure after the move
+              (probe 1: someone can open it and the next 409 is TRUE - creator share exact).
+          Residual (stated, 14.1): nobody can open a kept record only if live gate (b) or (a) is disproved AND two more
+          writes/reads fail after the move; CRITICAL, recovery named.
+      (2) Trigger 3 surfaced (14.4): fired by code, resolved by prevention, resume condition unchanged.
+      (4) Hard gate: both integration suites run in full on this branch (counts below); PR text prepared (14.7).
+      (7) Schema script: writer-profile members other than the BFF application users (humans, other app users, any
+          team) are FAIL in every mode (-Verify exits 1), never removed; the informational count pages past 5,000.
+      (9) Chat handler remarks: the interim app-only stamp stated as a section 6.5 path-B exception (owner round 7 items
+          2+3; neither names this shape explicitly); PR citation text in 14.7.
+      (10) A 400 on the sprk_createdbyperson read = creatorState column-missing (500, deterministic; the detail names the
+           schema script and says calling again repeats the refusal); client maps it to needs-administrator, not
+           retryable. Other failed reads stay the transient unreadable (new test).
+      (11-14) Closed by (1): no detail promises an unreachable resume; every stale comment/detail rewritten, incl.
+           already_provisioned's and owned_by_other_secure_team's "second container" reasons, guide 4.3/7a, schema doc.
+      (3,5,6,8) Confirmations - no action. (15) publish size and (16) live gate: NOT closed (main session / no live writes).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; 14.6): all in ProvisionProjectEndpoint. New: reason code
+      shared_container_not_cleared (no code means "a pre-move write failed, nothing moved, retry"); ProblemDetails extension
+      containerKept (same convention as sharesRestored; without it a client cannot tell a provisioning-call recovery from
+      a Manage Access one); creatorState value column-missing (without it the wizard offers a retry that always fails);
+      Step 4.2 (one clear of the column provisioning already owns); private helpers. Removed: RecordContainerAsync's
+      previousContainerId and its overwrite warning (dead after the unlink). No new endpoint, service, interface, DI
+      registration, option, job, package or column.
+
+      TESTS: full BFF unit suite 14,319 passed / 0 failed / 54 skipped (14,373); NetArchTest 345/345;
+      HARD GATE (ea6484102), both run in full on this branch: Sprk.Bff.Api.IntegrationTests 104/104, Spe.Integration.Tests
+      403 passed / 0 failed / 25 skipped (428); affected classes (the verifier's set) 452 passed / 0 failed / 3 skipped;
+      Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 96/96 (8 suites), package build (tsc) clean,
+      prettier + eslint clean on the changed TS; dotnet build 0 warnings; dotnet format whitespace clean on the changed C#.
+      Perturbation sweep 14/14 bite (R1-R12 server, C1-C2 client). New: 9 kept/shared-container tests (each makes the
+      next call), 1 transient column-read test; rewritten: the absent-column test (now column-missing, not a retry);
+      strengthened: the S19 test (+2 assertions). No package changed (no CVE delta). Publish size: not measured (main
+      session).
+
+      NOT CLOSED. (1) OWNER QUESTION 14.3 - should a kept-container record be resumable (A: marker reads "nobody holds a
+      share" + AC test amendment; B: provisioning-state column; C: as shipped). Recommendation: C now, A for one recovery
+      path. (2) STOP still open: Assign cascade under COMPENSATION (13.6). (3) PENDING MANUAL GATES: schema dry run /
+      -Apply / -Verify in dev BEFORE master; live gate (a)-(h) after a deploy; NEW (i) a record recording a business
+      unit's container is provisioned with its own container and the business unit's left unchanged. (4) Owner acceptance
+      of the (e) replay method. (5) Publish size (main session).
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>

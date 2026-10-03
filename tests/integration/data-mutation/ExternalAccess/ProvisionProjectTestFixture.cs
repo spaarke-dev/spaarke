@@ -297,8 +297,20 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>When false, SPE container creation returns null (Graph failure). Default true.</summary>
     public bool SpeContainerCreationSucceeds { get; set; } = true;
 
-    /// <summary>When false, an UPDATE whose payload carries <c>sprk_containerid</c> throws. Default true.</summary>
+    /// <summary>When false, an UPDATE that RECORDS a container (a non-null <c>sprk_containerid</c>) throws. Default true.</summary>
     public bool ContainerStampSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When false, an UPDATE that CLEARS <c>sprk_containerid</c> (a null value) throws — the unlinking of a shared
+    /// container before the owner move (task 133 r1). Default true.
+    /// </summary>
+    public bool ContainerClearSucceeds { get; set; } = true;
+
+    /// <summary>
+    /// When true, a read naming <c>sprk_createdbyperson</c> fails TRANSIENTLY (a 503), in an environment that has the
+    /// column (task 133 r1: told apart from the 400 an environment without it answers).
+    /// </summary>
+    public bool CreatorPersonReadFails { get; set; }
 
     /// <summary>
     /// When false, the ownership PATCH is accepted but NOT applied to the in-memory row — Dataverse's
@@ -394,6 +406,8 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         BusinessUnitUserReadSucceeds = true;
         SpeContainerCreationSucceeds = true;
         ContainerStampSucceeds = true;
+        ContainerClearSucceeds = true;
+        CreatorPersonReadFails = false;
         OwnershipPatchIsApplied = true;
         _updateSequence = 0;
         Grants.Clear();
@@ -541,10 +555,19 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             _failNextOwnerReadBack = true;
         }
 
-        if (flat.ContainsKey("sprk_containerid") && !ContainerStampSucceeds)
+        if (flat.TryGetValue("sprk_containerid", out var containerWrite))
         {
-            throw new InvalidOperationException(
-                "Dataverse 400: simulated failure recording sprk_containerid.");
+            if (containerWrite is not null && !ContainerStampSucceeds)
+            {
+                throw new InvalidOperationException(
+                    "Dataverse 400: simulated failure recording sprk_containerid.");
+            }
+
+            if (containerWrite is null && !ContainerClearSucceeds)
+            {
+                throw new InvalidOperationException(
+                    "Dataverse 503: simulated failure clearing sprk_containerid.");
+            }
         }
 
         if (_records.TryGetValue(id, out var record) && record.EntitySet == entitySet)
@@ -675,12 +698,20 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         foreach (var column in select.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (CreatorPersonColumnExists && string.Equals(column, CreatorPersonReadColumn, StringComparison.OrdinalIgnoreCase))
+            {
+                if (CreatorPersonReadFails)
+                    throw new InvalidOperationException("Dataverse 503: simulated transient failure reading the creator person.");
                 continue;
+            }
 
             if (!live.Contains(column))
             {
-                throw new InvalidOperationException(
-                    $"Dataverse 400: Could not find a property named '{column}' on entity set '{entitySet}'.");
+                // The shape the real DataverseWebApiClient raises: EnsureSuccessStatusCode → HttpRequestException carrying
+                // the status (task 133 r1 tells a 400 — a column this environment lacks — from a transient failure).
+                throw new HttpRequestException(
+                    $"Dataverse 400: Could not find a property named '{column}' on entity set '{entitySet}'.",
+                    inner: null,
+                    statusCode: System.Net.HttpStatusCode.BadRequest);
             }
         }
     }

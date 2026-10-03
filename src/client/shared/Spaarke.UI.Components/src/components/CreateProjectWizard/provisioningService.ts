@@ -117,7 +117,9 @@ export type ProvisioningFailureKind =
   /** The project carries a legacy per-project security BU; migrating it is a manual operation. */
   | 'legacy-provisioning'
   /**
-   * Refused before any change. Retryable where a READ failed and the same call can succeed once it works:
+   * Refused before any change. Retryable where a READ failed and the same call can succeed once it works — and
+   * `shared_container_not_cleared` (task 133 r1: a shared container's link could not be removed before the move; the
+   * same caller calls again):
    * `creator_unresolved` (the caller's identity could not be confirmed), `container_ownership_unreadable` (whether the
    * container already on the record is shared could not be checked — task 133 b2) and `resume_creator_unavailable` with
    * `creatorState: unreadable` (the record's creator could not be looked up). Deterministic refusals are not retryable —
@@ -275,6 +277,15 @@ const REASON_STATES: Readonly<
       'Securing the project did not start, because the document container already linked to it could not be checked. Nothing about the project changed.',
     retryable: true,
   },
+  // Task 133 r1: the project recorded a SHARED document container, which is unlinked before the project is moved to the
+  // secure owner — and that failed. Its ownership did not change; the link may or may not be gone. The server tells the
+  // same caller they may call again.
+  'sdap.provision.shared_container_not_cleared': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Securing the project stopped before it was moved: the shared document container linked to it could not be unlinked first. Its ownership did not change.',
+    retryable: true,
+  },
   'sdap.provision.creator_share_failed': {
     failureKind: 'share-failed',
     errorMessage:
@@ -343,6 +354,19 @@ const RESUME_CREATOR_UNREADABLE = {
 };
 
 /**
+ * `resume_creator_unavailable` with `creatorState: column-missing` (task 133 r1, verifier finding 10). The column that
+ * records the person who created the project does not exist in this environment yet — the server's 400 is
+ * deterministic, so calling again repeats the refusal until an administrator applies the schema. Not retryable: a
+ * "Try securing again" here would fail every time.
+ */
+const RESUME_CREATOR_COLUMN_MISSING = {
+  failureKind: 'needs-administrator' as const,
+  errorMessage:
+    'Securing the project could not be finished, because this environment is not yet set up to record who created a project. Nothing about the project changed; an administrator needs to finish setting it up.',
+  retryable: false,
+};
+
+/**
  * `owner_assignment_unverified` with `creatorShareConfirmed: true` (task 133 verifier round 2). Only a share the server
  * read back on the record lets the copy say the project can be opened. Unconfirmed, the copy names the administrator:
  * if the move DID land and the unconfirmed share did not take, the caller no longer passes the Write gate and their
@@ -357,7 +381,8 @@ export interface IProvisioningFailureExtensions {
   creatorShareConfirmed?: boolean;
   /**
    * `resume_creator_unavailable` only (task 133 b2): why no creator could be shared to — `absent`, `disabled`,
-   * `application-user` (deterministic: an administrator acts) or `unreadable` (a read failed: the same caller may retry).
+   * `application-user`, `column-missing` (task 133 r1: the creator column is not in this environment) — all
+   * deterministic: an administrator acts — or `unreadable` (a read failed: the same caller may retry).
    */
   creatorState?: string;
 }
@@ -392,6 +417,10 @@ export function classifyProvisioningFailure(
 
   if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'unreadable') {
     return { ...RESUME_CREATOR_UNREADABLE };
+  }
+
+  if (reasonCode === 'sdap.provision.resume_creator_unavailable' && extensions?.creatorState === 'column-missing') {
+    return { ...RESUME_CREATOR_COLUMN_MISSING };
   }
 
   if (reasonCode != null && Object.prototype.hasOwnProperty.call(REASON_STATES, reasonCode)) {

@@ -30,7 +30,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      SPE container type is configured; a container ALREADY recorded on the record is classified (a business unit's
 ///      or this BFF's configured shared container is replaced, one another root records is refused, the record's own
 ///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI), the record's current owner, and the creator's
-///      current share (complete read or nothing)
+///      current share (complete read or nothing — a record that keeps its own container is refused when it cannot be
+///      read, task 133 r1)
+///   4.2 A replaced SHARED container is unlinked from the record (task 133 r1), so the team never owns a record that
+///      records shared storage
 ///   4.5 SHARE-FIRST: give the creator their share while the record is still where it was created
 ///   5. Assign the record's owner to that team, and verify the assignment by reading it back
 ///   5.5 Prove the creator holds exactly <see cref="CreatorAccessRights"/> now that the team owns it (re-issue if the
@@ -44,7 +47,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// way in. Every single failure therefore ends either with the record back in its pre-call ownership (the creator
 /// keeps the access they had, and can retry through the normal Write gate) or with the creator's share in place.
 /// Only a DOUBLE failure — the share and then the compensating move — can leave a record nobody opens; that state has
-/// its own reason code, a CRITICAL log line, and a resume path an administrator (who holds Write) can run.</para>
+/// its own reason code, a CRITICAL log line, and a recovery an administrator (who holds Write) can run: a provisioning
+/// call that resumes it — or, for a record that keeps its own container, a Manage Access share (next paragraph).</para>
+///
+/// <para><b>A record that KEEPS its own container cannot be resumed</b> (task 133 r1, verifier round 4). Once the team
+/// owns it, "owned by the team AND a container recorded" is the 409 marker whether or not the run finished — nothing a
+/// later call can observe tells the two apart. So such a record is moved only once the creator's share can be set up
+/// first (an unreadable share set refuses before any write, rather than moving it with no share), and every failure
+/// after its move says the next call answers <c>already_provisioned</c> and names the recovery that works: an
+/// administrator shares it through Manage Access. The extension <c>containerKept</c> marks those responses. Making such
+/// a record resumable would change what the marker means — an owner question recorded in the task 133 note §14.</para>
 ///
 /// <para><b>RESUME.</b> A record owned by the team with no container recorded did not finish: steps 5.5/6/7 did not
 /// all complete. A call on it ensures the share for the record's creator — <c>createdby</c> when that is a usable
@@ -60,7 +72,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// owner-decided contract without the owner).</para>
 ///
 /// <para><b>Rollback is for ownership and shares only.</b> Steps 4.5–5.5 are undone on failure, because the undo
-/// restores the access state every earlier refusal already leaves (the creator's own). Steps 6 and 7 are NOT undone:
+/// restores the access state every earlier refusal already leaves (the creator's own). Step 4.2 is not: a shared
+/// container stays unlinked from a secure-flagged record, which refuses uploads until it has its own (fail closed —
+/// before it, the record's uploads went to shared storage). Steps 6 and 7 are NOT undone:
 /// moving a record OUT of the Secure Record business unit because storage failed would turn a storage failure into a
 /// disclosure. A container failure leaves a secured, shared record that the next call resumes; the only artifact a
 /// failed run can strand is an empty SPE container, which its error body names (ADR-003). <c>sprk_issecure</c> is
@@ -160,8 +174,10 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonSecureBuUsersUnreadable = "sdap.provision.secure_bu_users_unreadable";
 
     // Task 144 — a record already owned INSIDE the Secure Record BU by a team other than the named one: in practice a
-    // record provisioned under the retired default team, before the migration script ran. Re-provisioning it would
-    // create a second container, so it is refused like any other already-provisioned record.
+    // record provisioned under the retired default team, before the migration script ran. Moving it onto the named team
+    // is that script's job — a deliberate, reported operation over every such record — not a side effect of provisioning
+    // one, so it is refused before any write. (Until task 133 b2 the stated reason was "a second container"; a recorded
+    // container of the record's own is now kept, so that is no longer the reason.)
     internal const string ReasonOwnedByOtherSecureTeam = "sdap.provision.owned_by_other_secure_team";
 
     // Task 133 (C11) — the creator lock-out. Each names a state the client must tell apart from the others, because
@@ -170,9 +186,12 @@ public static class ProvisionProjectEndpoint
     /// <summary>
     /// The creator's share failed AND the record could not be shown to be back with its pre-call owner — or the owner
     /// move could not be verified and no creator share could be issued. The record may be owned by the memberless
-    /// team with nobody shared: the creator cannot call again (they no longer pass the Write gate); an administrator, who
-    /// holds Write, calls provisioning again to resume, which shares it to the person who created the record
-    /// (<c>createdby</c>, or <c>sprk_createdbyperson</c> for an app-created row).
+    /// team with nobody shared: the creator cannot call again (they no longer pass the Write gate). An administrator,
+    /// who holds Write, recovers it: for a record with no container recorded, by calling provisioning again — it resumes
+    /// and shares it to the person who created the record (<c>createdby</c>, or <c>sprk_createdbyperson</c> for an
+    /// app-created row); for a record that KEEPS its own container (<c>containerKept: true</c>), that call answers
+    /// <c>already_provisioned</c> instead, so the administrator shares it through Manage Access (task 133 r1). The name
+    /// says "resumable" for the first case; it is a contract, so it was not renamed.
     /// </summary>
     internal const string ReasonCreatorShareFailedResumable = "sdap.provision.creator_share_failed_resumable";
 
@@ -180,9 +199,12 @@ public static class ProvisionProjectEndpoint
     /// A resume found no usable person to share to: neither <c>createdby</c> nor the server-stamped
     /// <c>sprk_createdbyperson</c> (owner round 7 item 2) is an enabled, non-application user — HTTP 409 with
     /// <c>creatorState</c> <c>absent</c> / <c>disabled</c> / <c>application-user</c> — or one of them could not be read
-    /// (HTTP 500, <c>creatorState: unreadable</c>). The <c>creatorColumn</c> extension names which column the state
-    /// describes. Resume never shares to the caller instead (owner decision F8), and nothing is written. Recovery, each
-    /// of which works against this code: <c>unreadable</c> — the same caller calls again once the read works;
+    /// (HTTP 500, <c>creatorState: unreadable</c>), or <c>sprk_createdbyperson</c> does not exist in the environment
+    /// (HTTP 500, <c>creatorState: column-missing</c>, task 133 r1). The <c>creatorColumn</c> extension names which
+    /// column the state describes. Resume never shares to the caller instead (owner decision F8), and nothing is written.
+    /// Recovery, each of which works against this code: <c>unreadable</c> — the same caller calls again once the read
+    /// works; <c>column-missing</c> — an administrator applies the schema
+    /// (<c>scripts/Set-RecordCreatorPersonSchema.ps1</c>), then calls again;
     /// <c>disabled</c> — an administrator re-enables that user, then calls again (the resume shares to them); any state
     /// — an administrator ASSIGNS the record to the person who should hold it, which takes it out of the owner team, and
     /// that person then calls provisioning, which runs from the start and shares it to them.
@@ -198,7 +220,9 @@ public static class ProvisionProjectEndpoint
 
     /// <summary>
     /// The owner PATCH was sent but its outcome could not be read back. A share to the creator was issued — read back
-    /// when the read works (<c>creatorShareConfirmed: true</c>), otherwise issued without confirmation.
+    /// when the read works (<c>creatorShareConfirmed: true</c>), otherwise issued without confirmation. The next call
+    /// resumes a record the team now owns — unless it keeps its own container (<c>containerKept: true</c>), which the
+    /// next call answers <c>already_provisioned</c> (task 133 r1).
     /// </summary>
     internal const string ReasonOwnerAssignmentUnverified = "sdap.provision.owner_assignment_unverified";
 
@@ -228,6 +252,16 @@ public static class ProvisionProjectEndpoint
     /// (a read failed). Refused before any mutation (500); the same caller may call again once Dataverse is reachable.
     /// </summary>
     internal const string ReasonContainerOwnershipUnreadable = "sdap.provision.container_ownership_unreadable";
+
+    /// <summary>
+    /// The record recorded a SHARED container (a business unit's, or one this BFF uses for many records), which
+    /// provisioning replaces with the record's own — and that link could not be removed before the owner move (task 133
+    /// r1). Provisioning stops there: the owner was not moved and no share was issued; the link may or may not have been
+    /// removed. The same caller may call again. Why the link goes BEFORE the move: a record owned by the secure owner
+    /// team with a container recorded is the 409 marker, so a failure after the move would otherwise leave a record that
+    /// can never be finished — whose uploads meanwhile go to shared storage.
+    /// </summary>
+    internal const string ReasonSharedContainerNotCleared = "sdap.provision.shared_container_not_cleared";
 
     /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
@@ -314,7 +348,8 @@ public static class ProvisionProjectEndpoint
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            // 409: already provisioned — re-running would orphan the existing container.
+            // 409: already provisioned (owned by the secure owner team with a container recorded) — nothing is
+            // written; or a refusal before any write (another record's container, a legacy BU, a retired owner team).
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
@@ -439,8 +474,12 @@ public static class ProvisionProjectEndpoint
         {
             if (row.IsProvisioned(ownerTeamId))
             {
-                // Genuinely provisioned: Step 7 is the only writer of sprk_containerid (see RootRow), so a recorded
-                // container on a team-owned record means every step completed. Nothing is written.
+                // Provisioned, and nothing is written. The recorded container is one of two things (see RootRow): one
+                // Step 7 recorded after Step 5.5 proved the creator's share, or the record's OWN container, kept (task
+                // 133 b2). A record that keeps its container is indistinguishable here from a finished one even when a
+                // step after its move failed — which is why it moves only once the creator's share can be set up first,
+                // and why each failure after its move names a recovery that does not need this call (task 133 r1). A
+                // SHARED container never reaches here: it is unlinked before the move (Step 4.2).
                 logger.LogWarning(
                     "[PROVISION] {RecordType} {RecordId} is already provisioned: owned by the Secure Record owner " +
                     "team {TeamId} with container {ContainerId} recorded. Refusing. TraceId={TraceId}",
@@ -448,9 +487,9 @@ public static class ProvisionProjectEndpoint
 
                 return Problem(StatusCodes.Status409Conflict, "Conflict",
                     $"{root.DisplayLabel} {recordId} has already been provisioned: it is owned by the Secure Record " +
-                    "owner team and its own SPE container is recorded on it. Nothing was changed. Re-provisioning " +
-                    "would create a second container and repoint the record at it, orphaning the documents " +
-                    "already stored.",
+                    "owner team and its own SPE container is recorded on it. Nothing was changed. Calling provisioning " +
+                    "again does not change who can open it: that is managed through Manage Access, where an " +
+                    "administrator shares it to anyone who should hold it but cannot open it.",
                     traceId,
                     (ReasonKey, ReasonAlreadyProvisioned),
                     ("businessUnitId", secureBuId),
@@ -473,8 +512,9 @@ public static class ProvisionProjectEndpoint
             return Problem(StatusCodes.Status409Conflict, "Conflict",
                 $"{root.DisplayLabel} {recordId} is already owned inside the Secure Record business unit, by a " +
                 "team other than the named secure owner team — most likely the business unit's default team, " +
-                "which owned secure records before task 144. Re-provisioning would create a second SPE " +
-                "container; move it with scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 instead.",
+                "which owned secure records before task 144. Nothing was changed: moving it onto the named team is a " +
+                "deliberate migration, not a side effect of provisioning — move it with " +
+                "scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 instead.",
                 traceId,
                 (ReasonKey, ReasonOwnedByOtherSecureTeam),
                 ("businessUnitId", secureBuId),
@@ -506,10 +546,12 @@ public static class ProvisionProjectEndpoint
         // above). Provisioning used to create a new container and overwrite the value — on the 2026-10-02 live gate
         // that orphaned the record's OWN container (65a3fab2), and would have orphaned anything stored there. Now the
         // value is classified first, read-only: a business unit's or this BFF's configured shared container is replaced
-        // by the record's own (the business unit / configuration keeps pointing at it, so nothing is orphaned); one
-        // recorded on ANOTHER root is refused; anything else is this record's own and is KEPT. A failed read refuses,
-        // never guesses.
+        // by the record's own (the business unit / configuration keeps pointing at it, so nothing is orphaned) — and is
+        // unlinked BEFORE the owner move (task 133 r1), because a team-owned record with any container recorded is the
+        // 409 marker; one recorded on ANOTHER root is refused; anything else is this record's own and is KEPT. A failed
+        // read refuses, never guesses.
         string? keptContainerId = null;
+        string? sharedContainerToUnlink = null;
         if (!resume && !string.IsNullOrWhiteSpace(row.sprk_containerid))
         {
             var recorded = row.sprk_containerid.Trim();
@@ -547,16 +589,20 @@ public static class ProvisionProjectEndpoint
                         ("otherRecordType", holder.OtherRoot.WireToken));
 
                 case RecordedContainerKind.BusinessUnit:
+                    sharedContainerToUnlink = recorded;
                     logger.LogInformation(
                         "[PROVISION] {RecordType} {RecordId} records business unit {BusinessUnitId}'s shared container " +
-                        "{ContainerId}; it will get its own container. The business unit keeps the shared one.",
+                        "{ContainerId}; it is unlinked before the owner move and the record gets its own container. The " +
+                        "business unit keeps the shared one.",
                         root.WireToken, recordId, holder.BusinessUnitId, recorded);
                     break;
 
                 case RecordedContainerKind.Configured:
+                    sharedContainerToUnlink = recorded;
                     logger.LogInformation(
                         "[PROVISION] {RecordType} {RecordId} records the shared container {ContainerId} configured as " +
-                        "{ConfigKey}; it will get its own container. The configuration keeps the shared one.",
+                        "{ConfigKey}; it is unlinked before the owner move and the record gets its own container. The " +
+                        "configuration keeps the shared one.",
                         root.WireToken, recordId, recorded, holder.ConfigKey);
                     break;
 
@@ -605,7 +651,7 @@ public static class ProvisionProjectEndpoint
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
                 dataverseClient, recordShare, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId,
-                logger, traceId, ct);
+                keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, logger, traceId, ct);
 
             if (forward.Error != null)
                 return forward.Error;
@@ -650,8 +696,7 @@ public static class ProvisionProjectEndpoint
         // ── Step 7: Record the container on the record — FAIL if it cannot be written ──
         try
         {
-            await RecordContainerAsync(
-                dataverseClient, root, recordId, speContainerId, row.sprk_containerid, logger, ct);
+            await RecordContainerAsync(dataverseClient, root, recordId, speContainerId, logger, ct);
         }
         catch (Exception ex)
         {
@@ -843,10 +888,11 @@ public static class ProvisionProjectEndpoint
     /// (<c>businessunit.sprk_containerid</c>, the pre-task-076 create-time cascade) or one this BFF is configured to use
     /// for many records (<see cref="SharedContainerConfigKeys"/>). Many records legitimately carry such a value — three
     /// live projects share the root business unit's — so it is replaced by the record's own and the shared container
-    /// stays where the business unit or configuration points (nothing is orphaned). Only then is "another project,
-    /// matter or work assignment records the same container" a REFUSAL: a container two records claim, which is not
-    /// shared storage, belongs to one of them, and provisioning cannot tell which. Anything else is this record's own and
-    /// is KEPT.</para>
+    /// stays where the business unit or configuration points (nothing is orphaned) — unlinked from the record before the
+    /// owner move (task 133 r1). Only then is "another project, matter or work assignment records the same container" a
+    /// REFUSAL: a container two records claim, which is not shared storage, belongs to one of them, and provisioning
+    /// cannot tell which. Anything else is this record's own and is KEPT (and moved only once its creator's share can be
+    /// set up first — see <see cref="MoveWithCreatorShareAsync"/>).</para>
     ///
     /// <para><b>Fail closed.</b> Any failed read is <see cref="RecordedContainerKind.Unreadable"/> — never "its own"
     /// (which would keep a container another record may hold) and never "shared" (which would orphan the record's own).
@@ -930,6 +976,22 @@ public static class ProvisionProjectEndpoint
     /// If the PATCH had in fact not landed and the pre-call owner was a team, the creator now holds an explicit share
     /// they did not hold before, on a record they already had Write on. Stated in the task 133 note §4 and accepted in
     /// its code review; nothing else on this path widens.</para>
+    ///
+    /// <para><b>A record that keeps its own container</b> (<paramref name="keepsOwnContainer"/>, task 133 r1). Once the
+    /// team owns it, the 409 marker answers every later call, so it can never be resumed. Two rules follow. (1) It is
+    /// moved only once the creator's share can be set up FIRST: when the pre-call share set cannot be read, share-first is
+    /// impossible and the run is refused before any write (a transient read failure — the same caller retries), instead
+    /// of moving it with no share. The fallback to a post-move grant for a creator who OWNS the record (live gate (a))
+    /// stays, because refusing there would refuse every re-securing for good if Dataverse never accepts a share to a
+    /// record's owner. (2) Every failure after its move tells the truth about the next call — <c>already_provisioned</c>,
+    /// not a resume — and names the recovery that works without it: an administrator's Manage Access share
+    /// (<c>containerKept: true</c>).</para>
+    ///
+    /// <para><b>A shared container is unlinked before the move</b> (<paramref name="sharedContainerToUnlink"/>, task 133
+    /// r1). Otherwise a failure after the move (the share and the undo, or Step 6 / Step 7) would leave the team owning a
+    /// record with a container recorded — the 409 marker — that was never finished, and whose uploads go to the shared
+    /// container. Unlinked, every such failure leaves "owned by the team, no container", which the next call resumes.
+    /// The unlink is the first write, after every read: a failure of it changes nothing else.</para>
     /// </remarks>
     private static async Task<CreatorShareStep> MoveWithCreatorShareAsync(
         DataverseWebApiClient dataverseClient,
@@ -940,6 +1002,8 @@ public static class ProvisionProjectEndpoint
         Guid recordId,
         RootRow row,
         Guid ownerTeamId,
+        bool keepsOwnContainer,
+        string? sharedContainerToUnlink,
         ILogger logger,
         string traceId,
         CancellationToken ct)
@@ -1000,6 +1064,65 @@ public static class ProvisionProjectEndpoint
                 root.WireToken, recordId, traceId);
         }
 
+        // ── A record that keeps its own container moves only after share-first (task 133 r1) ──
+        if (keepsOwnContainer && preCreatorMask is null)
+        {
+            logger.LogWarning(
+                "[PROVISION] {RecordType} {RecordId} keeps its own container, and its shares could not be read before " +
+                "any change, so its creator's share cannot be set up before the owner move. Refusing before any change: " +
+                "once the team owns a record that records a container, no provisioning call can finish it. " +
+                "TraceId={TraceId}", root.WireToken, recordId, traceId);
+
+            return CreatorShareStep.Failed(Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()} keeps its own SPE container, so it is moved to the Secure " +
+                "Record owner team only once its creator's share is set up first — once the team owns it, a later call " +
+                "answers already_provisioned and cannot finish it. The record's shares could not be read, so that share " +
+                "could not be set up, and provisioning stopped BEFORE changing anything: its ownership and shares are as " +
+                "they were. The same caller may retry once Dataverse is reachable.",
+                traceId, (ReasonKey, ReasonCreatorShareFailed),
+                ("ownershipRestored", true), ("sharesRestored", true), ("containerKept", true)));
+        }
+
+        // ── Step 4.2: unlink a SHARED container before the owner move (task 133 r1) ──
+        var unlinkedNote = string.Empty;
+        if (sharedContainerToUnlink is not null)
+        {
+            try
+            {
+                await dataverseClient.UpdateAsync(
+                    root.EntitySet,
+                    recordId,
+                    new Dictionary<string, object?> { ["sprk_containerid"] = null },
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] Could not unlink shared container {ContainerId} from {RecordType} {RecordId} before the " +
+                    "owner move. Stopped: nothing else was written. TraceId={TraceId}",
+                    sharedContainerToUnlink, root.WireToken, recordId, traceId);
+
+                return CreatorShareStep.Failed(Problem(
+                    StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    $"The {root.DisplayLabel.ToLowerInvariant()} records a shared SPE container (a business unit's, or " +
+                    "one this service uses for many records), which provisioning replaces with a container of its own. " +
+                    "That link is removed before the record is moved to the Secure Record owner team, and removing it " +
+                    "failed, so provisioning stopped: the record's ownership and shares were not changed (the link may or " +
+                    "may not have been removed). The same caller may retry.",
+                    traceId, (ReasonKey, ReasonSharedContainerNotCleared), ("speContainerId", sharedContainerToUnlink)));
+            }
+
+            logger.LogInformation(
+                "[PROVISION] Unlinked shared container {ContainerId} from {RecordType} {RecordId} before the owner move " +
+                "(its business unit or configuration keeps it); the record gets its own container.",
+                sharedContainerToUnlink, root.WireToken, recordId);
+
+            unlinkedNote = "The shared SPE container it recorded was unlinked from it before the move (its business " +
+                           "unit or configuration keeps it), so uploads to the record are refused until it has a container " +
+                           "of its own. ";
+        }
+
         var wroteCreatorShare = false;   // this call wrote, or tried to write, the creator's share
         var creatorShareProven = false;  // a read has shown the creator holding exactly CreatorAccessMask
 
@@ -1041,7 +1164,7 @@ public static class ProvisionProjectEndpoint
                             ? "The creator's share is as it was before the call (read back). "
                             : "A share this call may have issued to the creator could not be confirmed removed; it " +
                               "shows under Manage Access. ") +
-                        "The same caller may retry.",
+                        unlinkedNote + "The same caller may retry.",
                         traceId, (ReasonKey, ReasonCreatorShareFailed),
                         ("ownershipRestored", true), ("sharesRestored", restored)));
                 }
@@ -1071,9 +1194,10 @@ public static class ProvisionProjectEndpoint
 
             return CreatorShareStep.Failed(Problem(
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
-                cause + " The owner was read back and is unchanged, so the record was not moved. " + (restored
-                    ? "The creator's share is as it was before the call."
-                    : "A share this call issued to the creator could not be confirmed removed; it shows under Manage Access."),
+                (cause + " The owner was read back and is unchanged, so the record was not moved. " + (restored
+                    ? "The creator's share is as it was before the call. "
+                    : "A share this call issued to the creator could not be confirmed removed; it shows under Manage " +
+                      "Access. ") + unlinkedNote).TrimEnd(),
                 traceId,
                 (ReasonKey, move.PatchRefused ? ReasonOwnerAssignmentFailed : ReasonOwnerAssignmentNotApplied),
                 ("ownerTeamId", ownerTeamId), ("sharesRestored", restored)));
@@ -1111,36 +1235,58 @@ public static class ProvisionProjectEndpoint
 
             if (shareIssued)
             {
+                string afterText;
+                if (shareConfirmed)
+                {
+                    afterText = "The creator's share is in place (read back), so the creator can open the record either " +
+                                "way, and the same caller may retry: " + (keepsOwnContainer
+                                    ? "the record keeps its own SPE container, so if the team now owns it provisioning " +
+                                      "is complete and that call answers already_provisioned; if the team does not own " +
+                                      "it, it is provisioned from the start."
+                                    : "a record the team now owns is resumed, and one it does not own is provisioned " +
+                                      "from the start.");
+                }
+                else if (keepsOwnContainer)
+                {
+                    afterText = "A share to the creator was issued but could not be read back, so it is NOT confirmed. " +
+                                "If the team does not own the record, it is where it was and the creator may call again: " +
+                                "it is provisioned from the start. If the team owns it, " + KeptContainerRecovery;
+                }
+                else
+                {
+                    afterText = "A share to the creator was issued but could not be read back, so it is NOT confirmed. If " +
+                                "the creator can open the record they may call again: a record the team now owns is " +
+                                "resumed, and one it does not own is provisioned from the start. If they cannot, an " +
+                                "administrator (who holds Write on it) calls provisioning again: it resumes and ensures " +
+                                "the share for the person who created the record.";
+                }
+
                 return CreatorShareStep.Failed(Problem(
                     StatusCodes.Status500InternalServerError, "Internal Server Error",
                     "The record's owner could not be read back after the assignment, so whether it is now owned by the " +
-                    "Secure Record owner team is not known. " + (shareConfirmed
-                        ? "The creator's share is in place (read back), so the creator can open the record either way, " +
-                          "and the same caller may retry: a record the team now owns is resumed, and one it does not " +
-                          "own is provisioned from the start."
-                        : "A share to the creator was issued but could not be read back, so it is NOT confirmed. If the " +
-                          "creator can open the record they may call again: a record the team now owns is resumed, and " +
-                          "one it does not own is provisioned from the start. If they cannot, an administrator (who holds " +
-                          "Write on it) calls provisioning again: it resumes and ensures the share for the person who " +
-                          "created the record."),
+                    "Secure Record owner team is not known. " + unlinkedNote + afterText,
                     traceId, (ReasonKey, ReasonOwnerAssignmentUnverified), ("ownerTeamId", ownerTeamId),
-                    ("creatorShareConfirmed", shareConfirmed)));
+                    ("creatorShareConfirmed", shareConfirmed), ("containerKept", keepsOwnContainer)));
             }
 
             logger.LogCritical(
                 "[PROVISION] {RecordType} {RecordId}: the owner move could not be verified AND no share to creator " +
-                "{CreatorId} could be issued. If the Secure Record owner team now owns it, NOBODY can open it. An " +
-                "administrator must call provisioning again to resume. TraceId={TraceId}",
-                root.WireToken, recordId, creatorId, traceId);
+                "{CreatorId} could be issued. If the Secure Record owner team now owns it, NOBODY can open it. " +
+                "{Recovery} TraceId={TraceId}",
+                root.WireToken, recordId, creatorId, AdministratorRecoveryForLog(keepsOwnContainer), traceId);
 
             return CreatorShareStep.Failed(Problem(
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The record's owner could not be read back after the assignment, and no share to its creator could be " +
-                "issued. If the record is now owned by the Secure Record owner team, nobody can open it, and its creator " +
-                "no longer passes the Write check this endpoint requires: an administrator (who holds Write on it) " +
-                "calls provisioning again, which resumes and shares the record to the person who created it. If the " +
-                "assignment did not take effect, the record is where it was and its creator calls provisioning again.",
-                traceId, (ReasonKey, ReasonCreatorShareFailedResumable), ("ownerTeamId", ownerTeamId)));
+                "issued. " + unlinkedNote + "If the record is now owned by the Secure Record owner team, nobody can open " +
+                "it, and its creator no longer passes the Write check this endpoint requires: " + (keepsOwnContainer
+                    ? KeptContainerRecovery + " "
+                    : "an administrator (who holds Write on it) calls provisioning again, which resumes and shares the " +
+                      "record to the person who created it. ") +
+                "If the assignment did not take effect, the record is where it was and its creator calls provisioning " +
+                "again.",
+                traceId, (ReasonKey, ReasonCreatorShareFailedResumable), ("ownerTeamId", ownerTeamId),
+                ("containerKept", keepsOwnContainer)));
         }
 
         // ── Step 5.5: prove the creator's share on the moved record ───────────
@@ -1196,7 +1342,7 @@ public static class ProvisionProjectEndpoint
                 StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "The record could not be shared to its creator once it was owned by the Secure Record owner team, so " +
                 "the move was undone: its owner is back to the owner it had before the call (read back). " + sharesText +
-                "The same caller may retry.",
+                unlinkedNote + "The same caller may retry.",
                 traceId, (ReasonKey, ReasonCreatorShareFailed),
                 ("ownershipRestored", true), ("sharesRestored", sharesRestored),
                 ("creatorShareRemoved", creatorShareRemoved)));
@@ -1209,25 +1355,59 @@ public static class ProvisionProjectEndpoint
         logger.LogCritical(
             "[PROVISION] {RecordType} {RecordId}: the creator's share could not be proven AND the move back to " +
             "{OwnerKind} {OwnerId} {UndoState} (outcome {Outcome}). It may be owned by the memberless Secure Record " +
-            "owner team without a confirmed creator share — possibly NOBODY can open it. An administrator must call " +
-            "provisioning again to resume. TraceId={TraceId}",
+            "owner team without a confirmed creator share — possibly NOBODY can open it. {Recovery} TraceId={TraceId}",
             root.WireToken, recordId, preOwner.Kind, preOwner.Id,
-            undoUnverified ? "could not be verified" : "did not take effect", back.Outcome, traceId);
+            undoUnverified ? "could not be verified" : "did not take effect", back.Outcome,
+            AdministratorRecoveryForLog(keepsOwnContainer), traceId);
+
+        // What the creator can do now. A share-first grant that was PROVEN before the move has not been removed by this
+        // call (compensation removes it only after a verified move back), so — unless the move itself dropped it (live
+        // gate (b)) — the creator still opens the record; otherwise they may not, and may no longer pass the Write gate.
+        var creatorText = keepsOwnContainer && creatorShareProven
+            ? "The creator's share was confirmed before the move and this call has not removed it, so unless the move " +
+              "itself dropped it the creator can still open the record. "
+            : "Its creator may not be able to open it and may no longer pass the Write check this endpoint requires. ";
+
+        // The recovery that works against the marker: a record that keeps its own container is never resumed (task 133
+        // r1), so an administrator restores access directly; one with no container is resumed by their call.
+        var recoveryText = keepsOwnContainer
+            ? "While the team owns it, " + KeptContainerRecovery + " "
+            : "While the team owns it, an administrator (who holds Write on it) calls provisioning again: it resumes and " +
+              "shares the record to the person who created it. ";
 
         return CreatorShareStep.Failed(Problem(
             StatusCodes.Status500InternalServerError, "Internal Server Error",
-            "The record could not be shared to its creator once it was owned by the Secure Record owner team, and " +
-            (undoUnverified
-                ? "the move back to its previous owner could not be verified: its owner could not be read back, so it may " +
-                  "still be owned by that memberless team without a confirmed creator share. "
-                : "the move back to its previous owner did not take effect (read back). It is owned by that memberless " +
-                  "team without a confirmed creator share. ") +
-            "Its creator may not be able to open it and may no longer pass the Write check this endpoint requires. An " +
-            "administrator (who holds Write on it) calls provisioning again: it resumes and shares the record to the " +
-            "person who created it.",
+            ("The record could not be shared to its creator once it was owned by the Secure Record owner team, and " +
+             (undoUnverified
+                 ? "the move back to its previous owner could not be verified: its owner could not be read back, so it may " +
+                   "still be owned by that memberless team without a confirmed creator share. "
+                 : "the move back to its previous owner did not take effect (read back). It is owned by that memberless " +
+                   "team without a confirmed creator share. ") +
+             unlinkedNote + creatorText + recoveryText +
+             (undoUnverified
+                 ? "If the move back did take effect, the record is where it was before the call and its creator calls " +
+                   "provisioning again."
+                 : string.Empty)).TrimEnd(),
             traceId, (ReasonKey, ReasonCreatorShareFailedResumable),
-            ("ownerTeamId", ownerTeamId), ("ownershipRestored", false), ("ownershipVerified", !undoUnverified)));
+            ("ownerTeamId", ownerTeamId), ("ownershipRestored", false), ("ownershipVerified", !undoUnverified),
+            ("containerKept", keepsOwnContainer)));
     }
+
+    /// <summary>
+    /// The recovery for a record that KEEPS its own container when a failure after its move may have left it with no
+    /// confirmed creator share (task 133 r1): it reads as provisioned to every later call, so the recovery is a direct
+    /// share, not a provisioning call. Starts lower-case: it completes a sentence.
+    /// </summary>
+    private const string KeptContainerRecovery =
+        "a later provisioning call answers already_provisioned and does not resume it, because the record keeps its own " +
+        "SPE container; if the creator cannot open it, an administrator shares it to them directly — through Manage " +
+        "Access, or Share in the model-driven app.";
+
+    /// <summary>The administrator's recovery as the CRITICAL log line states it (task 133 r1).</summary>
+    private static string AdministratorRecoveryForLog(bool keepsOwnContainer) => keepsOwnContainer
+        ? "It keeps its own container, so a provisioning call answers already_provisioned: an administrator must share " +
+          "it to its creator through Manage Access (or Share in the model-driven app)."
+        : "An administrator must call provisioning again to resume.";
 
     /// <summary>
     /// On RESUME, refuses a request that names colleagues unless its caller IS the record's creator — before any write
@@ -1328,7 +1508,9 @@ public static class ProvisionProjectEndpoint
     /// is the BFF application user, and the person who asked for it is the BFF-stamped <c>sprk_createdbyperson</c>
     /// (<see cref="RecordCreatorPerson"/> — field-secured, writable only by the BFF). So a usable <c>createdby</c>
     /// wins; when it is absent, disabled or an application user the column is read, in its OWN query, so a BFF deployed
-    /// before the schema still provisions forward and only a resume that needs the column reports it unreadable.</para>
+    /// before the schema still provisions forward and only a resume that needs the column reports it — as
+    /// <c>column-missing</c> when Dataverse answers 400 (the column is not there: an administrator applies the schema;
+    /// calling again cannot help), as <c>unreadable</c> for any other failure (task 133 r1).</para>
     ///
     /// <para><b>An unreadable <c>createdby</c> stops the decision</b> rather than falling through to the column: it may
     /// well be a usable person, and the rule names it first. A failed read is a 500 (transient — the same caller may
@@ -1398,13 +1580,17 @@ public static class ProvisionProjectEndpoint
         }
         catch (Exception ex)
         {
+            // A 400 to this one-column read is how Dataverse answers a column the environment lacks (the schema has not
+            // run there): deterministic, so it is NOT the transient "unreadable" a caller may retry (task 133 r1,
+            // verifier round 4 finding 10 — the wizard's retry would fail until the schema is applied).
+            var columnState = IsColumnMissing(ex) ? UnusableColumnMissing : UnusableUnreadable;
             logger.LogError(ex,
-                "[PROVISION] The creator person ({Column}) of {RecordType} {RecordId} could not be read; createdby is " +
-                "{CreatedByState}. TraceId={TraceId}", RecordCreatorPerson.Column, root.WireToken, recordId,
-                createdByState, traceId);
+                "[PROVISION] The creator person ({Column}) of {RecordType} {RecordId} could not be read ({State}); " +
+                "createdby is {CreatedByState}. TraceId={TraceId}", RecordCreatorPerson.Column, root.WireToken, recordId,
+                columnState, createdByState, traceId);
             return ResumeCreatorRefused(root, recordId, ownerTeamId, logger, traceId,
-                decidingState: UnusableUnreadable, decidingColumn: RecordCreatorPerson.Column,
-                createdByState: createdByState, personState: UnusableUnreadable);
+                decidingState: columnState, decidingColumn: RecordCreatorPerson.Column,
+                createdByState: createdByState, personState: columnState);
         }
 
         if (person is not { } personId)
@@ -1454,6 +1640,20 @@ public static class ProvisionProjectEndpoint
     private const string UnusableUnreadable = "unreadable";
 
     /// <summary>
+    /// <c>sprk_createdbyperson</c> does not exist in this environment — its read answered 400 (task 133 r1). Deterministic
+    /// until an administrator applies the schema, so the client does not offer the same caller a retry.
+    /// </summary>
+    private const string UnusableColumnMissing = "column-missing";
+
+    /// <summary>
+    /// True when a read failed with HTTP 400 — <c>DataverseWebApiClient</c> raises <see cref="HttpRequestException"/>
+    /// carrying the status (<c>EnsureSuccessStatusCode</c>). For the one-column, by-id creator-person read, a 400 means the
+    /// column is not in the environment (Dataverse: "Could not find a property named …").
+    /// </summary>
+    private static bool IsColumnMissing(Exception ex) =>
+        ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.BadRequest };
+
+    /// <summary>
     /// The <c>resume_creator_unavailable</c> refusal: nothing written; the deciding state and the column it describes
     /// named (<c>creatorState</c>, <c>creatorColumn</c>), with both columns' states for the operator
     /// (<c>createdByState</c>, <c>creatorPersonState</c>); and only recoveries that work against this code (task 133
@@ -1470,7 +1670,8 @@ public static class ProvisionProjectEndpoint
         string createdByState,
         string? personState)
     {
-        var unreadable = decidingState == UnusableUnreadable;
+        // A failed read and a missing column are environment faults (500); an unusable person is a state of the data (409).
+        var serverFault = decidingState is UnusableUnreadable or UnusableColumnMissing;
 
         logger.LogWarning(
             "[PROVISION] Resume of {RecordType} {RecordId} refused: no usable person created it (createdby is " +
@@ -1495,6 +1696,10 @@ public static class ProvisionProjectEndpoint
                     " The person recorded as its creator (sprk_createdbyperson) could not be read — if this repeats, an " +
                     "administrator checks that the column exists in this environment " +
                     "(scripts/Set-RecordCreatorPersonSchema.ps1 -Verify).",
+                UnusableColumnMissing =>
+                    " The person recorded as its creator cannot be looked up: Dataverse refused the query naming " +
+                    "sprk_createdbyperson (400 Bad Request), which is how it answers when that column does not exist in " +
+                    "this environment.",
                 UnusableDisabled => " The person recorded as its creator (sprk_createdbyperson) has a disabled user record.",
                 UnusableApplicationUser => " The creator recorded in sprk_createdbyperson is an application user.",
                 _ => " The person recorded as its creator (sprk_createdbyperson) no longer exists."
@@ -1505,6 +1710,10 @@ public static class ProvisionProjectEndpoint
             UnusableUnreadable =>
                 "A read failed, so this refusal is not final: calling again once Dataverse is reachable repeats the check " +
                 "(the same caller may). ",
+            UnusableColumnMissing =>
+                "Calling again repeats this refusal until an administrator applies the column's schema " +
+                "(scripts/Set-RecordCreatorPersonSchema.ps1 -Apply, then -Verify must pass); then the resume can share it " +
+                "to the person recorded there, if one is. ",
             UnusableDisabled =>
                 "If that person should keep the record, an administrator re-enables their user and calls again: the " +
                 "resume then shares it to them. ",
@@ -1512,8 +1721,8 @@ public static class ProvisionProjectEndpoint
         };
 
         return CreatorShareStep.Failed(Problem(
-            unreadable ? StatusCodes.Status500InternalServerError : StatusCodes.Status409Conflict,
-            unreadable ? "Internal Server Error" : "Conflict",
+            serverFault ? StatusCodes.Status500InternalServerError : StatusCodes.Status409Conflict,
+            serverFault ? "Internal Server Error" : "Conflict",
             $"{root.DisplayLabel} {recordId} is owned by the Secure Record owner team with no container recorded, so " +
             "provisioning would resume and share it to the person who created it. " + createdByText + personText +
             " It is never shared to the caller or anyone else instead. Nothing was changed. " + recovery +
@@ -1938,32 +2147,22 @@ public static class ProvisionProjectEndpoint
     /// <para><c>sprk_containerid</c> is <c>NVARCHAR(100)</c> on all three roots (live metadata) — a PLAIN STRING
     /// write. No <c>@odata.bind</c>, no navigation property, nothing case-sensitive.</para>
     ///
-    /// <para>This is the ONLY writer of <c>sprk_containerid</c> on a provisionable root (task 076; see
-    /// <see cref="RootRow.IsProvisioned"/>). It overwrites a pre-existing value only when that value is SHARED storage
-    /// — a business unit's container (stamped by a client before task 076 removed that write) or one this BFF is
-    /// configured to use for many records — which the business unit or configuration keeps pointing at, so nothing is
-    /// orphaned. A record that already records a container of its OWN never reaches this step (it is kept, task 133),
-    /// and one whose container another root also records is refused before any write. The old value is still logged,
-    /// so the record's history stays traceable.</para>
+    /// <para>Provisioning is the ONLY writer of <c>sprk_containerid</c> on a provisionable root (task 076; see
+    /// <see cref="RootRow.IsProvisioned"/>), in exactly two places: this step, which records the record's own container,
+    /// and Step 4.2, which UNLINKS a shared container — a business unit's (stamped by a client before task 076 removed
+    /// that write) or one this BFF is configured to use for many records — before the owner move (task 133 r1; the
+    /// business unit or configuration keeps pointing at it, and the unlinked value is logged there). So this step never
+    /// overwrites a value: a record that records a container of its OWN never reaches it (it is kept, task 133 b2), and
+    /// one whose container another root also records is refused before any write.</para>
     /// </remarks>
     private static async Task RecordContainerAsync(
         DataverseWebApiClient dataverseClient,
         SecureRecordRoot root,
         Guid recordId,
         string speContainerId,
-        string? previousContainerId,
         ILogger logger,
         CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(previousContainerId))
-        {
-            logger.LogWarning(
-                "[PROVISION] Overwriting sprk_containerid on {RecordType} {RecordId}: '{Previous}' → '{New}'. The " +
-                "previous value is shared storage (a business unit's, or a configured, container) that keeps its " +
-                "own reference; it is logged so the record's history stays traceable.",
-                root.WireToken, recordId, previousContainerId, speContainerId);
-        }
-
         await dataverseClient.UpdateAsync(
             root.EntitySet,
             recordId,
@@ -2036,10 +2235,16 @@ public static class ProvisionProjectEndpoint
         /// <summary>No business unit, configured shared container or other root holds it: the record's own — KEPT.</summary>
         Own,
 
-        /// <summary>A business unit's shared container (the pre-task-076 cascade): replaced; the business unit keeps it.</summary>
+        /// <summary>
+        /// A business unit's shared container (the pre-task-076 cascade): unlinked before the move, then replaced; the
+        /// business unit keeps it.
+        /// </summary>
         BusinessUnit,
 
-        /// <summary>A container this BFF is configured to use for many records: replaced; the configuration keeps it.</summary>
+        /// <summary>
+        /// A container this BFF is configured to use for many records: unlinked before the move, then replaced; the
+        /// configuration keeps it.
+        /// </summary>
         Configured,
 
         /// <summary>Recorded on another project, matter or work assignment too: REFUSED before any write.</summary>
@@ -2103,6 +2308,7 @@ public static class ProvisionProjectEndpoint
         /// The container recorded on the record. Half of the marker — see <see cref="IsProvisioned"/>; never a marker
         /// on its own.
         /// </summary>
+        /// <remarks>Its value is whatever Step 1 read; a shared value unlinked at Step 4.2 is not re-read.</remarks>
         [JsonPropertyName("sprk_containerid")]
         public string? sprk_containerid { get; set; }
 
@@ -2179,26 +2385,32 @@ public static class ProvisionProjectEndpoint
         /// ever provisioned — a guard against double-provisioning had become a guard against provisioning. Ownership
         /// replaced it: owned by the named team is state only this endpoint (and the one-time migration script) writes.
         /// Ownership alone, though, cannot tell a finished run from one that stopped after the move, and refusing the
-        /// second locked its creator out (C11). Task 076 then made Step 7 the ONLY writer of <c>sprk_containerid</c> on
-        /// these tables (<c>EntityCreationService</c> deleted the client stamp; <c>RecordCreationService</c> never writes
-        /// it; live 2026-10-01: no field-mapping rule targets it). So on a team-owned record a recorded container means
-        /// Step 7 ran — and a container Step 6 created without Step 7 is unrecorded and could never receive content
-        /// (uploads to a secure record with no container of its own are refused), so a resume that creates a fresh one
-        /// orphans at most an empty container its failed run already named.</para>
+        /// second locked its creator out (C11). Task 076 then made provisioning the ONLY writer of <c>sprk_containerid</c>
+        /// on these tables (<c>EntityCreationService</c> deleted the client stamp; <c>RecordCreationService</c> never
+        /// writes it; live 2026-10-01: no field-mapping rule targets it) — Step 7 records the record's own container, and
+        /// Step 4.2 unlinks a shared one BEFORE the move (task 133 r1). A container Step 6 created without Step 7 is
+        /// unrecorded and could never receive content (uploads to a secure record with no container of its own are
+        /// refused), so a resume that creates a fresh one orphans at most an empty container its failed run named.</para>
         ///
-        /// <para><b>A provisioned record reassigned away from the team</b> (an administrator moves it out of the Secure
-        /// Record business unit) is no longer "provisioned" by this marker, so a later call runs forward. Until task 133
-        /// b2 that created a SECOND container and overwrote the first — live 2026-10-02, 65a3fab2. The forward path now
-        /// classifies the recorded container first (<c>ClassifyRecordedContainerAsync</c>): the record's own container is
-        /// KEPT, so a re-provisioning orphans nothing.</para>
+        /// <para><b>What a recorded container on a team-owned record can be</b> — and why none of them is resumable
+        /// here. (1) One Step 7 recorded, after Step 5.5 proved the creator's share: finished. (2) The record's OWN
+        /// container, KEPT (task 133 b2: a provisioned record later reassigned away from the team, or unsecured and
+        /// secured again, re-provisions without a second container — live 2026-10-02, 65a3fab2 was orphaned before
+        /// that). Such a record reaches the team exactly like (1) when the run succeeds; when a step after its move fails,
+        /// nothing on the row tells it from a finished one, so the run that failed says so and names the recovery that
+        /// works without this call — an administrator's Manage Access share (task 133 r1). It is also moved only once its
+        /// creator's share can be set up first, which removes the commonest such failure. Resuming it instead would make
+        /// this marker read more than ownership and the container — an owner decision (task 133 note §14). (3) A SHARED
+        /// container never reaches the team: it is unlinked before the move, so every failure after the move leaves
+        /// "owned, no container", which is resumed.</para>
         /// </remarks>
         public bool IsProvisioned(Guid ownerTeamId) =>
             IsOwnedBy(ownerTeamId) && !string.IsNullOrWhiteSpace(sprk_containerid);
 
         /// <summary>
         /// Owned INSIDE the Secure Record BU, but by a team other than the named one (task 144) — the retired
-        /// default team, before the migration. Refused like an already-provisioned record so a retry cannot create a
-        /// second container.
+        /// default team, before the migration. Refused before any write: the migration script, not a provisioning call,
+        /// moves it onto the named team.
         /// </summary>
         public bool IsOwnedInBusinessUnitByAnotherTeam(Guid secureBusinessUnitId, Guid ownerTeamId) =>
             _owningbusinessunit_value is { } bu && bu == secureBusinessUnitId && !IsOwnedBy(ownerTeamId);

@@ -596,3 +596,219 @@ shared), ADR-008 (delegation filter unchanged), ADR-010 (no new interface or reg
 `reasonCode`), ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; the schema-agreement source
 guard follows `ContactIdentitySchemaAgreementTests`): **compliant, 0 violations**. The §6.5 path-B citation for the chat
 handler's app-only write is owner round 7 item 3.
+
+---
+
+## 14. Round r1 (2026-10-02, branch `task/uac-r2-133-b2-r1`) — verifier round 4
+
+Base: `task/uac-r2-133-b2` (`30373dba1`) with `work/unified-access-control-r2` merged in — `8531711d6` (integration
+fixtures caught up with batch 3) and `ea6484102` (the integration-suite hard gate). **baseSha `d10db4252`** (HEAD right
+after that merge; clean, no overlap with this task's files).
+
+### 14.1 Finding 1 (BLOCKING) — the defect, proven first, and why the marker was NOT changed
+
+**Proven before any fix.** Ten new or rewritten tests were written first and run against the b2 logic: all ten failed,
+reproducing both probes (probe 2 — the S10 setup plus a container of the record's own — answered
+`creator_share_failed_resumable`, and its next call the 409, with nobody able to open the record).
+
+**Root cause, wider than reported.** The marker's premise — "on a team-owned record a recorded container means Step 7
+ran" — is false for ANY record that enters the owner move with `sprk_containerid` already set. b2 created two such paths:
+
+- a **kept own** container (the verifier's finding);
+- a **replaced shared** container (a business unit's, or a configured one — found while fixing finding 1): the shared
+  value stayed recorded from the move (Step 5) until Step 7 overwrote it. So a `container_creation_failed`,
+  `container_not_recorded` or double failure on such a record left it team-owned WITH the shared container recorded —
+  409 forever, while `RecordContainerResolver` sent the secure record's uploads to the business unit's shared container
+  (to the resolver, a secure record's `sprk_containerid` is its own container). Both details promised "the same caller
+  may call again: it resumes" — false. Same defect class as findings 1/13/14, so it is closed in this round.
+
+**Why the marker was not changed (verifier fix options (a)/(b)).** The closed acceptance criterion pins
+`ProvisionProject_WhenAlreadyOwnedBySecureTeam_IsRefusedAndWritesNothing` UNMODIFIED, and that test's seed — owned by
+the team, a container recorded, no share at all, `createdby` = the caller — is observably IDENTICAL to a kept-container
+record stranded with nobody shared. So no reading of the share state can resume the stranded record and keep that test
+green; and "a provisioning-complete signal other than `sprk_containerid`" is a new column. Either changes what the
+marker means — the owner's call (§14.3), and POML trigger 3's rule is "do not widen the resume condition on a guess".
+
+**What was done instead — verifier option (c), "do not keep the container until after the creator share is proven", and
+its counterpart for shared containers:**
+
+| # | Change | Effect |
+|---|---|---|
+| 1 | **Shared container unlinked BEFORE the owner move** (new Step 4.2: `sprk_containerid` set to null, after every read and before share-first; the business unit / configuration keeps the container) | Every failure after the move now leaves "owned by the team, NO container", which the next call resumes (tested for Step 6 and for the double failure). A failed unlink stops the run with nothing moved and no share issued: new code `sdap.provision.shared_container_not_cleared` (500, retryable). Each later failure detail says the link was removed ("unlinked"). Not undone by compensation: a secure-flagged record with no link refuses uploads (fail closed), which is stricter than the shared storage it pointed at |
+| 2 | **A record that keeps its own container is moved only when share-first is possible**: an unreadable pre-call share set refuses before any write (`creator_share_failed`, `containerKept: true`, transient — the same caller retries), instead of skipping share-first and moving it with no share | Closes probe 2 (the S10 state cannot be reached through an unreadable pre-call read). The fallback to a post-move grant for a creator who OWNS the record (live gate (a)) is kept: refusing there would refuse every re-securing for good (the unsecure endpoint assigns the record to the caller) if Dataverse never accepts a share to a record's owner |
+| 3 | **Every failure after a kept record's move tells the truth about the next call** — new extension `containerKept` on `owner_assignment_unverified` and `creator_share_failed_resumable`; the details say the next call answers `already_provisioned` and does not resume, and name the recovery that works without it: **an administrator shares the record to its creator through Manage Access** (or Share in the model-driven app). The CRITICAL log lines name it too. The double-failure detail also says when the creator's share was confirmed before the move and has not been removed (it still stands unless the move dropped it) | No response promises a resume that the marker makes impossible (findings 11, 13, 14) |
+| 4 | Every other stale claim: the comment that was at :442, the 409 `already_provisioned` detail ("Re-provisioning would create a second container…"), `owned_by_other_secure_team`'s detail and comments (same stale reason since b2), the `ProducesProblem(409)` comment, `RootRow.IsProvisioned` / `RecordContainerAsync` remarks ("Step 7 is the ONLY writer" → provisioning writes it in exactly two places), the class summary, the two reason-code docs, the double failure's "it resumes" when the undo is UNVERIFIED (now "while the team owns it", plus what applies if the undo landed), guide §4.3 / §7a | Finding 14 |
+
+**Kept-container record after each failure after the move** (with the hardening; each row tested; "next call" = the
+call the detail names):
+
+| Failure after the move | Response | Someone can open it? | Next call |
+|---|---|---|---|
+| Share proof fails, undo fails (probe 1) | `creator_share_failed_resumable`, `containerKept: true`, CRITICAL | **Yes** — the share proven before the move stands | 409 — and TRUE: team-owned, own container, creator holding exactly the creator rights |
+| Owner read-back fails, share read and grant fail | `owner_assignment_unverified`, `creatorShareConfirmed: false`, `containerKept: true` | **Yes** (same) | 409, as the detail says |
+| Owner read-back fails, share read back | `owner_assignment_unverified`, confirmed, `containerKept: true` | Yes | 409 (provisioning complete), as the detail says |
+| Pre-call shares unreadable (probe 2) | refused before any write | Yes (nothing moved) | 200, container kept |
+| Share to the current owner refused (live gate (a)) + read-back, read and grant all fail after the move | `creator_share_failed_resumable`, `containerKept: true`, CRITICAL | **No** — the residual (§14.3) | 409, as the detail says; recovery = the administrator's Manage Access share |
+
+**Residual, stated.** A kept-container record can be left with nobody able to open it only when (i) the move drops the
+creator's proven share (live gate (b) disproved) AND the re-grant AND the undo (or the owner read-back) fail, or (ii)
+Dataverse refuses a share to the record's current owner (live gate (a)) AND, after the move, the grant AND the undo (or
+the owner read-back) fail. Each is CRITICAL-logged with the recovery named. That is the same failure class a record with
+no container has (the double failure) — the difference is only the recovery: a Manage Access share instead of a
+provisioning call.
+
+### 14.2 Every verifier-round-4 item
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | BLOCKING: keeping the record's own container breaks the marker; the record cannot be resumed | **Closed** by §14.1 (prevention + truthful recovery, marker unchanged). Tests for the kept container under each failure after the move (S10-like via the pre-call read and via the (a) fallback, double failure, unverified unconfirmed, unverified confirmed), each making the NEXT call and asserting what the detail said, and `SomeoneCanOpen` wherever the design guarantees it. Where the verifier asked "the next administrator call resumes": it cannot without changing the marker — §14.3 |
+| 2 | Close to POML trigger 3; not surfaced | **Surfaced** — §14.4 (treated as fired by code; resolved by prevention, resume condition unchanged) and the owner question §14.3 |
+| 3 | Re-run results match | Confirmation — no action |
+| 4 | Hard gate not run; the PR must cite it | **Closed**: the work branch is merged in (baseSha above) and BOTH integration suites were run in full on the final commit (POML outcome); the PR text is prepared in §14.7 |
+| 5 | Round-3 items really closed | Confirmation — no action (the S19 test gained one assertion, §14.5) |
+| 6 | Owner round 7 item 2 implemented as decided | Confirmation — no action |
+| 7 | Schema script low gaps | **Closed**: (a) every mode now lists the WRITER profile's members and reports FAIL for any systemuser that is not one of the `-BffApplicationIds` users (a human, or another application user) and for any team — `-Verify` exits 1 on them; reported, never removed; (b) the informational count follows `@odata.nextLink` (`Measure-DvRows`, `Prefer: odata.maxpagesize=5000`). The script parses (PowerShell parser); not run live (no live writes) |
+| 8 | Merge resolved correctly | Confirmation — no action |
+| 9 | Chat handler cites item 3 for the interim app-only stamp; the PR should state path B explicitly | **Closed**: the class remarks now state it as a §6.5 path-B exception to the spec's "User-OBO ONLY" rule — item 2 (column BFF-written only) + item 3 (supersession for this handler) — and that neither item names this interim shape explicitly (the executor's reading, limited to one column, replaced by task 146). PR text in §14.7 |
+| 10 | Absent column → `unreadable` → a wizard retry that fails until the schema is applied | **Closed**: a 400 on the creator-column read (`HttpRequestException` with `StatusCode` 400 — how `DataverseWebApiClient` surfaces "Could not find a property named …") is `creatorState: column-missing` (500, deterministic): the detail names `Set-RecordCreatorPersonSchema.ps1 -Apply`/`-Verify` and says calling again repeats the refusal; the client maps it to `needs-administrator`, NOT retryable (jest). Any other failed read stays the transient `unreadable`. The fixture now raises the 400 in the real client's shape. Test rewritten (reason in §14.5) + a transient-read test added |
+| 11 | Criterion: the resumable code names an unreachable resume for a kept container | **Closed** — kept-container details name the Manage Access recovery and the `already_provisioned` answer; never "it resumes" (tested; seeds R3/R5/R12) |
+| 12 | Criterion: S5 / R3 — unverified move + no share + kept container leaves nobody and no resume | **Closed for the reported path** (probe 2 is refused before any write; tested). Amendment R3 lists success, compensated failure and resume — after each of those someone can open a kept record. The administrator-only states keep a named, working recovery; the residual is §14.1's, routed to §14.3 |
+| 13 | Criterion: after an unverified owner read-back, the next call follows the observed state — for a kept container it always reads 409 | **Closed**: for a kept container the 409 IS the rule for the observed state, and the response now says so; in the tested cases the 409 describes a record that really is provisioned (creator share exact) |
+| 14 | Criterion: every comment / detail describes what happened | **Closed** — §14.1 row 4; plus the shared-container class |
+| 15 | Publish size | **Not closed** — the main session measures (instruction) |
+| 16 | Pending live gate | **Not closed** — no live writes allowed; §14.8 |
+
+### 14.3 🔔 OWNER QUESTION — should a record that keeps its own container be resumable after a failure after its move?
+
+Today (shipped): no. Once the secure owner team owns a record with a container recorded, every call answers
+`already_provisioned`; a failed run on a kept-container record names the administrator's Manage Access share instead.
+
+- **(A) The marker reads the share state:** owned by the team + a container recorded + NO principal holding a share →
+  resume (keep the container; share to `createdby`, else `sprk_createdbyperson`; never the caller). Small change. It
+  also repairs a secure record emptied of shares outside the BFF, which S5 says must not exist. Requires amending the
+  acceptance criterion and its pinned test `ProvisionProject_WhenAlreadyOwnedBySecureTeam_IsRefusedAndWritesNothing`,
+  whose seed (no share at all) is exactly that state.
+- **(B) A BFF-written "provisioning state" column** (field-secured like `sprk_createdbyperson`): in-progress before the
+  move, complete at the end; the marker reads it. Exact, but a schema change with a deploy-order rule and a backfill for
+  rows provisioned before it.
+- **(C) As shipped:** no resume; the Manage Access recovery, named in every such response.
+
+**Recommendation:** keep (C) now; choose (A) if provisioning should be the ONE administrator recovery for every
+stranded secure record. Not decided here (POML trigger 3: do not widen the resume condition on a guess).
+
+### 14.4 Escalation triggers, re-evaluated (finding 2)
+
+| Trigger | This round |
+|---|---|
+| 3 — team-owned row with a non-provisioning container, or a create-time `sprk_containerid` writer | The live census's literal conditions did not fire (§2). But b2's own code could MANUFACTURE such rows — the kept container (verifier) and the replaced shared container (§14.1). Treated as **fired by code**, resolved by **prevention**: a shared container can no longer reach the team; a kept container reaches it only through share-first or the (a) fallback, and each failure after its move names a working recovery. The resume condition is unchanged — the trigger's "do not widen on a guess" holds. Residual → §14.3 |
+| Assign cascade under COMPENSATION (§13.6) | Unchanged: **STOP, still open** |
+| The others | Unchanged from §3 / §13 |
+
+### 14.5 Tests
+
+**New** (`ProvisionRecordedContainerTests`, +9): kept container — pre-call shares unreadable (probe 2) refused before any
+write, next call 200; share proof + undo fail (probe 1) → truthful detail, someone can open it, next call 409 with the
+creator share exact; unverified + share unconfirmed; unverified + confirmed; the (a)-fallback residual → Manage Access
+named, CRITICAL, next call 409. Shared container — Step 6 fails → next call resumes; configured container + share and undo
+fail → an administrator's call resumes; unlink fails → stopped before the move, next call 200; share-first fails after the
+unlink → "unlinked" stated, next call 200. **New** (`ProvisionResumeCreatorPersonTests`, +1): transient column read →
+`unreadable`, the same caller's retry shares to the recorded person.
+
+**Rewritten, one line each:** `Resume_WhenTheColumnCannotBeRead_Refuses500_NamingTheColumn` →
+`Resume_WhenTheColumnDoesNotExist_RefusesAsColumnMissing_NotAsARetry` — it pinned `unreadable` (offered as a retry) for
+an absent column, which finding 10 shows fails every time. **Strengthened:**
+`Provisioning_WhenTheCompensatingMoveCannotBeReadBack_IsTheAdministratorOnlyState` now also asserts "While the team owns
+it" and "If the move back did take effect" (the resume is no longer promised unconditionally when the undo is
+unverified). **Comment only:** `SecureNamedOwnerTeamProvisioningTests`' retired-team test summary (stale "second
+container" reason). **Fixture:** `ContainerClearSucceeds` (a null `sprk_containerid` write throws), `ContainerStampSucceeds`
+now applies to non-null writes only (its two existing users write non-null values — unchanged), `CreatorPersonReadFails`
+(transient), and the missing-column 400 raised as `HttpRequestException` with `StatusCode` 400 (the real client's
+shape). **Client:** `provisioningService.test.ts` +2 (`column-missing` → needs-administrator, not retryable; the new code
+in the emitted-code table, now 26).
+
+**Perturbation sweep (round r1)** — seed, build, run the affected classes, restore the original bytes + touch
+(`Environment.TickCount64 < 0` where a constant would be unreachable code under warnings-as-errors):
+
+| # | Seeded violation | Result |
+|---|---|---|
+| R1 | kept container: refusal on unreadable pre-call shares removed | BITES (1) |
+| R2 | shared container not unlinked before the move | BITES (4) |
+| R3 | `keepsOwnContainer` never passed (kept-container texts and extension off) | BITES (5) |
+| R4 | double failure never says the share proven before the move stands | BITES (1) |
+| R5 | CRITICAL log line not kept-container-aware | BITES (2) |
+| R6 | a 400 on the creator column read as transient `unreadable` | BITES (1) |
+| R7 | every creator-column failure read as `column-missing` | BITES (1) |
+| R8 | `column-missing` answered 409 instead of 500 | BITES (1) |
+| R9 | details never say the shared link was removed | BITES (2) |
+| R10 | the "if the move back did take effect" sentence dropped | BITES (1) |
+| R11 | an unlink failure ignored (the run continues) | BITES (1) |
+| R12 | kept container, unverified + unconfirmed: the resume promised | BITES (1) |
+| C1 | client: `shared_container_not_cleared` not classified | BITES (2) |
+| C2 | client: `column-missing` not read (falls to the default copy) | BITES (1) |
+
+**14/14 bite.** The schema script's new membership check and paging have no automated test (they need a live
+environment); the schema-agreement test still parses the script (its constants are unchanged).
+
+**Runs (round r1):** full BFF unit suite **14,319 passed / 0 failed / 54 skipped (14,373)**; NetArchTest **345/345**;
+**hard gate** — `Sprk.Bff.Api.IntegrationTests` **104/104** and `Spe.Integration.Tests` **403 passed / 0 failed / 25
+skipped (428)**, both in full on this branch; the verifier's affected classes **452 passed / 0 failed / 3 skipped**;
+Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard **96/96 (8 suites)**, package build (`tsc`) clean,
+prettier + eslint clean on the changed TS; `dotnet build` 0 warnings; `dotnet format whitespace --verify-no-changes`
+clean on the changed C#. No package changed.
+
+### 14.6 Placement and component justification (CLAUDE.md §10 / §11)
+
+All server code stays in `ProvisionProjectEndpoint` (plus a remarks-only change in `DataverseCreateRecordHandler`). No
+new endpoint, service, interface, DI registration, option, job, package or column.
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| Reason code `sdap.provision.shared_container_not_cleared` | the `sdap.provision.*` set; `container_ownership_unreadable` is a READ failure before any write | Extends the set; no existing code means "a write before the move failed, nothing moved, retry" | The client would show a generic error for a state the same caller can finish |
+| ProblemDetails extension `containerKept` (bool, on `owner_assignment_unverified` / `creator_share_failed_resumable` / the kept-container refusal) | `sharesRestored`, `creatorShareConfirmed` (same convention) | Extension member, additive | A client cannot tell whether the administrator's recovery is a provisioning call or a Manage Access share |
+| `creatorState` value `column-missing` | the existing `creatorState` vocabulary | Extends it | The wizard offers a "Try securing again" that fails until the schema is applied (finding 10) |
+| Step 4.2 (one `UpdateAsync` clearing `sprk_containerid`) | Step 7's write of the same column | Same column, same writer | A secure record can be 409'd forever while its uploads go to shared storage |
+| Private helpers `KeptContainerRecovery`, `AdministratorRecoveryForLog`, `IsColumnMissing`, `UnusableColumnMissing` | — | — | The same sentence duplicated across four branches, free to drift |
+| Fixture switches `ContainerClearSucceeds`, `CreatorPersonReadFails` | the fixture's switches | Extends the fixture | Seeds R11 / R7 could not be made to bite |
+
+**Removed:** `RecordContainerAsync`'s `previousContainerId` parameter and its "Overwriting sprk_containerid" warning —
+dead once a shared value is unlinked before the move (the unlinked value is logged at Step 4.2).
+
+### 14.7 PR description — required citations
+
+Paste into the PR (with the publish-size numbers the main session measures):
+
+> **Task 133 (#1054), round r1.** ADR-003 **path C (comply)**: compensation restores ownership and shares, never
+> `sprk_issecure`; the shared-container unlink (Step 4.2) is not undone — a secure-flagged record with no container
+> refuses uploads (fail closed). **CLAUDE.md §6.5 path B**: `DataverseCreateRecordHandler`'s interim app-only stamp of
+> `sprk_createdbyperson` is an exception to the spec's "User-OBO ONLY" rule — owner round 7 item 2 (the column is
+> BFF-written only) with item 3 (that rule superseded for this handler, the G5 pattern); neither names this interim shape
+> explicitly, and task 146 replaces it — reviewer sign-off requested. **Integration hard gate (`ea6484102`):**
+> `Sprk.Bff.Api.IntegrationTests` and `Spe.Integration.Tests` run in full on this branch — counts in the task POML.
+> **Open owner items:** §13.6 Assign cascade under compensation (STOP); §14.3 kept-container resume; the (e) replay
+> method. **Deploy order:** `Set-RecordCreatorPersonSchema.ps1` (dry run, `-Apply`, `-Verify` exit 0) in dev BEFORE this
+> reaches master.
+
+### 14.8 Pending manual gates (main session; nothing here was written live)
+
+1. **Schema, BEFORE this reaches master** — unchanged command (§13.7 item 1); `-Verify` now also fails on any
+   writer-profile member besides the BFF application user(s).
+2. Live gate (a)–(f) (§9) and (g)/(h) (§13.7) after a BFF deploy. (h) is unchanged: a record that already records its
+   own container → 200, `sprk_containerid` unchanged, no new container.
+3. **NEW (i) shared container unlinked:** provision a secure record whose `sprk_containerid` is a business unit's
+   container → 200; read back: the record records a NEW container of its own, and the business unit's
+   `sprk_containerid` is unchanged.
+4. Owner: §14.3, §13.6, the (e) replay acceptance. Publish size: main session.
+
+### 14.9 Quality gates (round r1)
+
+**code-review** (all severities):
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| `ProvisionProjectEndpoint.cs` grows to ~2,430 lines | Warning (size) | Accepted per COMPONENT-COMPLEXITY (as §13.9): one reason to change. Seams if it grows again: the container classification + Step 4.2, and the resume's person rule |
+| Step 4.2 adds a write BEFORE the owner move that compensation does not undo | Warning | Intended and stated (class remarks, guide §7a, PR text): unlinking a shared container from a secure-flagged record makes its uploads fail closed instead of landing in shared storage; nothing is orphaned (the business unit / configuration keeps the container). Every later failure detail says "unlinked" |
+| Kept records keep the live-gate-(a) post-move-grant fallback, which retains a nobody-can-open residual (with two further failures) | Suggestion | Deliberate (refusing would refuse every re-securing if (a) is disproved); residual stated, CRITICAL-logged, recovery named; owner question §14.3 |
+| A 400 on the creator-column read is classified `column-missing` without reading the body | Suggestion | `DataverseWebApiClient` surfaces only the status (`EnsureSuccessStatusCode`); for a by-id, one-column read a 400 has no other realistic cause, and either way it is deterministic — the property that decides retryability |
+| AI-smell scan: no new interface, no catch-log-rethrow, no null-check on a non-nullable, no swallowed failure (the unlink's catch returns a refusal) | — | Clean |
+
+**adr-check**: ADR-001 (no new endpoint), ADR-002 (no plugin), ADR-003 (every new branch fails closed: a failed unlink stops before the move; an unreadable share set refuses a kept record before any write; `column-missing` and `unreadable` both refuse with nothing written; no branch gives anyone access they lacked), ADR-008 (delegation filter unchanged), ADR-010 (no new interface or registration), ADR-019 (ProblemDetails + `reasonCode`; `containerKept` follows the extension convention), ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; the fixture models Dataverse's exception shape): **compliant, 0 violations**. CLAUDE.md §6.5: the chat handler's interim app-only stamp is cited as a path-B exception for reviewer sign-off (§14.7).

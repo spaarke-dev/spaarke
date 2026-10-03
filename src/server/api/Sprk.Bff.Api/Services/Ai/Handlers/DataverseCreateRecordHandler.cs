@@ -46,9 +46,15 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// write sets one column to a value the user-scoped create already established; it never creates, never reads a record
 /// the user could not, and a failure of it is logged, not surfaced (the row's <c>createdby</c> is that same person, and
 /// a resume reads <c>createdby</c> first). An item that names the column is refused before any Dataverse call: a caller
-/// never chooses who created a record. Authority for the app-only write in this otherwise user-OBO handler: owner round
-/// 7 items 2 and 3 (2026-10-02 — the column is BFF-written only; these handlers' "User-OBO ONLY" rule is superseded,
-/// §6.5 path B). Task 146 moves the create itself to the app and then stamps the column in that payload instead.
+/// never chooses who created a record.
+/// </para>
+/// <para>
+/// <b>Authority for this app-only write — a CLAUDE.md §6.5 path-B exception to the spec's "User-OBO ONLY" rule, cited
+/// as such in the PR.</b> Owner round 7 item 2 (2026-10-02) makes the column written ONLY by the BFF, so a user-OBO
+/// client cannot write it; item 3 supersedes "User-OBO ONLY" for this handler (the G5 pattern, task 146). Neither item
+/// names THIS interim shape — a user-OBO create followed by one app-only column update — explicitly: it is the executor's
+/// reading of the two together (task 133 r1, verifier round 4 finding 9), limited to one column, the row's own
+/// <c>createdby</c>, non-fatal, and replaced by task 146, which creates as the app and stamps the column in that payload.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, column COUNT, outcome,

@@ -187,4 +187,342 @@ public class ProvisionRecordedContainerTests : IClassFixture<ProvisionProjectTes
         retry.StatusCode.Should().Be(HttpStatusCode.OK, "the stated recovery — the same caller calls again — works");
         _fixture.ContainerIdOf(projectId).Should().Be(OwnContainer);
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 133 r1 (verifier round 4, finding 1): a record that KEEPS its own container cannot be resumed — once the
+    // team owns it, "owned by the team AND a container recorded" is the 409 marker, whatever happened after the move.
+    // So such a record is moved only after its creator's share is confirmed, and every failure after the move names a
+    // recovery that works against that marker. Each test then makes the NEXT call and asserts what the response said.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private const string ManageAccessRecovery = "Manage Access";
+
+    private static async Task<string> DetailOf(HttpResponseMessage response)
+        => (await ProblemOf(response)).GetProperty("detail").GetString() ?? string.Empty;
+
+    /// <summary>
+    /// The verifier's probe 2 (the S10 setup plus a container of its own): the record's shares cannot be read before the
+    /// move, so no share-first grant could be made — and for a record that keeps its container, moving it anyway could
+    /// strand it beyond any provisioning call. Refused BEFORE ANY WRITE; someone can still open it; the same caller's next
+    /// call, once the read works, finishes it with the container kept.
+    /// </summary>
+    [Fact]
+    public async Task Provision_KeepingItsOwnContainer_WhenThePreCallSharesCannotBeRead_RefusesBeforeAnyWrite()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, containerId: OwnContainer);
+        _fixture.FailNextStrictShareReads = 1;                                     // the pre-call read
+        _fixture.OwnerReadBackFails = true;                                        // the S10 faults after it
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeTrue();
+        problem.GetProperty("detail").GetString().Should().Contain("own SPE container").And.Contain("BEFORE");
+        AssertNothingWritten(projectId, OwnContainer);
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        _fixture.OwnerReadBackFails = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailShareWhileSecureOwned = null;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(projectId).Should().Be(OwnContainer);
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// The verifier's probe 1: the share proof after the move fails AND the compensating move fails. The record keeps its
+    /// own container, so the response must not promise a resume (the next call is the 409) — it names the administrator's
+    /// Manage Access share. The creator's share was confirmed before the move and is still there, so someone can open it,
+    /// and the next call's 409 is TRUE: owned by the team, its own container, the creator holding exactly the creator rights.
+    /// </summary>
+    [Fact]
+    public async Task Provision_KeepingItsOwnContainer_WhenTheShareProofAndTheUndoFail_NamesARecoveryThatWorks()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam, containerId: OwnContainer);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailOwnerBindTo = businessUnitTeam;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeTrue();
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("already_provisioned").And.Contain(ManageAccessRecovery)
+            .And.Contain("confirmed before the move");
+        detail.Should().NotContain("it resumes", "a team-owned record that keeps its container is never resumed");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == Microsoft.Extensions.Logging.LogLevel.Critical && e.Message.Contains(projectId.ToString())
+            && e.Message.Contains(ManageAccessRecovery));
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue("the creator's share confirmed before the move still stands");
+
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailOwnerBindTo = null;
+        var updatesBefore = _fixture.Updates.Count;
+        var grantsBefore = _fixture.Grants.Count;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.Conflict, "exactly what the detail said the next call answers");
+        (await ProblemOf(next)).GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonAlreadyProvisioned);
+        _fixture.Updates.Should().HaveCount(updatesBefore);
+        _fixture.Grants.Should().HaveCount(grantsBefore);
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        _fixture.ContainerIdOf(projectId).Should().Be(OwnContainer);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask, "so the 409 describes a record that IS provisioned");
+    }
+
+    /// <summary>
+    /// The owner move cannot be read back and the creator's share cannot be read back after it either (the share is NOT
+    /// confirmed). For a record that keeps its own container the response must not promise a resume; it names the
+    /// already_provisioned answer and the Manage Access recovery. The share confirmed before the move stands, so the next
+    /// call's 409 describes a provisioned record.
+    /// </summary>
+    [Fact]
+    public async Task Provision_KeepingItsOwnContainer_WhenTheMoveIsUnverifiedAndTheShareUnconfirmed_NamesARecoveryThatWorks()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, containerId: OwnContainer);
+        _fixture.OwnerReadBackFails = true;
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        problem.GetProperty("creatorShareConfirmed").GetBoolean().Should().BeFalse();
+        problem.GetProperty("containerKept").GetBoolean().Should().BeTrue();
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("NOT confirmed").And.Contain("already_provisioned").And.Contain(ManageAccessRecovery);
+        detail.Should().NotContain("resumed").And.NotContain("it resumes");
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+
+        _fixture.OwnerReadBackFails = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailShareWhileSecureOwned = null;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ProblemOf(next)).GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonAlreadyProvisioned);
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId)
+            .Should().Be(ProvisionProjectEndpoint.CreatorAccessMask);
+    }
+
+    /// <summary>
+    /// The owner move cannot be read back but the creator's share is (confirmed). For a record that keeps its own
+    /// container the next call is the 409 — provisioning is complete — and the detail says so instead of "resumed".
+    /// </summary>
+    [Fact]
+    public async Task Provision_KeepingItsOwnContainer_WhenTheMoveIsUnverifiedButTheShareIsConfirmed_SaysTheNextCallIsTheConflict()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, containerId: OwnContainer);
+        _fixture.OwnerReadBackFails = true;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentUnverified);
+        problem.GetProperty("creatorShareConfirmed").GetBoolean().Should().BeTrue();
+        problem.GetProperty("containerKept").GetBoolean().Should().BeTrue();
+        problem.GetProperty("detail").GetString().Should().Contain("already_provisioned").And.NotContain("resumed");
+
+        _fixture.OwnerReadBackFails = false;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The residual the owner question in the task note (§14) is about: Dataverse refuses a share to the record's CURRENT
+    /// owner (live gate (a)), so share-first falls back to the share after the move — and after the move the owner read-back,
+    /// the share read and the grant all fail. If the move landed, nobody can open the record, and because it keeps its own
+    /// container the next call is the 409, not a resume. The response must say exactly that and name the recovery that
+    /// works (an administrator's Manage Access share), logged CRITICAL — never "it resumes".
+    /// </summary>
+    [Fact]
+    public async Task Provision_KeepingItsOwnContainer_WhenNoShareExistsAfterAnUnverifiedMove_NamesManageAccess_NotAResume()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId, containerId: OwnContainer); // owned by the caller
+        _fixture.GrantToCurrentOwnerRefused = true;
+        _fixture.OwnerReadBackFails = true;
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailShareWhileSecureOwned = ProvisionProjectTestFixture.CallerSystemUserId;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeTrue();
+        var detail = problem.GetProperty("detail").GetString();
+        detail.Should().Contain("already_provisioned").And.Contain(ManageAccessRecovery).And.NotContain("resumes");
+        _fixture.Logs.Entries.Should().Contain(e =>
+            e.Level == Microsoft.Extensions.Logging.LogLevel.Critical && e.Message.Contains(ManageAccessRecovery));
+
+        _fixture.OwnerReadBackFails = false;
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailShareWhileSecureOwned = null;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.Conflict, "the detail said the next call is the 409, and it is");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 133 r1: a SHARED container (a business unit's, or a configured one) is unlinked BEFORE the owner move, so a
+    // failure after the move leaves "owned by the team, no container" — which the next call resumes — never "owned by
+    // the team with a shared container recorded", which the 409 marker would refuse forever while the secure record's
+    // uploads went to shared storage.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The container could not be created after the move. The business unit's container was unlinked before the move, so
+    /// the record is "owned by the team, no container", and the same caller's next call RESUMES it — as the detail says.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingABusinessUnitsContainer_WhenContainerCreationFails_TheNextCallResumes()
+    {
+        const string buContainer = "b!business-unit-shared";
+        var projectId = Guid.NewGuid();
+        _fixture.BusinessUnitContainers[Guid.NewGuid()] = buContainer;
+        _fixture.SeedProject(projectId, containerId: buContainer);
+        _fixture.SpeContainerCreationSucceeds = false;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        (await ProblemOf(response)).GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonContainerCreationFailed);
+        _fixture.ContainerIdOf(projectId).Should().BeNull("the shared container was unlinked before the move");
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId);
+        var clear = _fixture.Updates.Single(u => u.Payload.ContainsKey("sprk_containerid"));
+        clear.Payload["sprk_containerid"].Should().BeNull();
+        clear.Sequence.Should().BeLessThan(
+            _fixture.Updates.Single(u => u.Payload.ContainsKey("ownerid@odata.bind")).Sequence,
+            "unlinked BEFORE the owner move");
+
+        _fixture.SpeContainerCreationSucceeds = true;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// A configured shared container, and the share proof and the undo both fail after the move: the administrator-only
+    /// state — but the shared container was unlinked first, so the record is "owned by the team, no container" and an
+    /// administrator's call RESUMES it, sharing to the record's creator, exactly as the detail says.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingAConfiguredContainer_WhenTheShareAndTheUndoFail_AnAdministratorsCallResumes()
+    {
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam,
+            containerId: ProvisionProjectTestFixture.ConfiguredArchiveContainerId);
+        _fixture.FailStrictShareReadWhileSecureOwned = true;
+        _fixture.FailOwnerBindTo = businessUnitTeam;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailedResumable);
+        problem.GetProperty("containerKept").GetBoolean().Should().BeFalse();
+        problem.GetProperty("detail").GetString().Should().Contain("it resumes").And.Contain("unlinked");
+        _fixture.ContainerIdOf(projectId).Should().BeNull();
+
+        _fixture.FailStrictShareReadWhileSecureOwned = false;
+        _fixture.FailOwnerBindTo = null;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        using var body = JsonDocument.Parse(await next.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("resumed").GetBoolean().Should().BeTrue();
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// The shared container could not be unlinked before the move: refused, with the owner never moved and no share
+    /// issued; the same caller's next call finishes.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingASharedContainer_WhenItCannotBeUnlinked_StopsBeforeTheMove()
+    {
+        const string buContainer = "b!business-unit-shared";
+        var projectId = Guid.NewGuid();
+        _fixture.BusinessUnitContainers[Guid.NewGuid()] = buContainer;
+        _fixture.SeedProject(projectId, containerId: buContainer);
+        _fixture.ContainerClearSucceeds = false;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString()
+            .Should().Be(ProvisionProjectEndpoint.ReasonSharedContainerNotCleared);
+        problem.GetProperty("speContainerId").GetString().Should().Be(buContainer);
+        _fixture.Updates.Should().NotContain(u => u.Payload.ContainsKey("ownerid@odata.bind"));
+        _fixture.Grants.Should().BeEmpty();
+        _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+
+        _fixture.ContainerClearSucceeds = true;
+        var next = await ProvisionAsync(new { projectId });
+
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+    }
+
+    /// <summary>
+    /// A share-first failure AFTER the shared container was unlinked: the response says the link was removed (the record
+    /// is not "as it was" in that respect), and the next call, which no longer sees a container, finishes.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ReplacingASharedContainer_WhenShareFirstFails_SaysTheLinkWasRemoved()
+    {
+        const string buContainer = "b!business-unit-shared";
+        var projectId = Guid.NewGuid();
+        var businessUnitTeam = Guid.NewGuid();
+        _fixture.BusinessUnitContainers[Guid.NewGuid()] = buContainer;
+        _fixture.SeedProject(projectId, owningTeamId: businessUnitTeam, containerId: buContainer);
+        _fixture.FailShareForPrincipal = ProvisionProjectTestFixture.CallerSystemUserId;
+
+        var response = await ProvisionAsync(new { projectId });
+
+        var problem = await ProblemOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        problem.GetProperty("detail").GetString().Should().Contain("unlinked");
+        _fixture.ContainerIdOf(projectId).Should().BeNull();
+        _fixture.OwningTeamOf(projectId).Should().Be(businessUnitTeam);
+
+        _fixture.FailShareForPrincipal = null;
+        var next = await ProvisionAsync(new { projectId });
+        next.StatusCode.Should().Be(HttpStatusCode.OK, await next.Content.ReadAsStringAsync());
+    }
 }

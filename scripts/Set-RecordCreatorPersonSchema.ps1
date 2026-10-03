@@ -31,6 +31,9 @@
                      Named for the CLASS of column, not this one: task 150 locks sprk_issecure the same way and adds it
                      to these two profiles.
                      Members are associated BEFORE the columns are secured, so the BFF never loses access.
+                     Any OTHER member of the writer profile — a human, an application user not named in
+                     -BffApplicationIds, or any team — is reported FAIL in every mode (and fails -Verify): the
+                     profile's membership IS the lock. Reported, never removed.
       (c) FLS        Each column becomes field-secured; the reader profile gets read=4, the writer profile
                      read=4 create=4 update=4. Any OTHER profile (besides the platform's System Administrator profile)
                      that can create or update the column is reported FAIL — the lock is only as strong as its writer list.
@@ -38,7 +41,8 @@
       (e) PUBLISH    sprk_project, sprk_matter, sprk_workassignment.
 
     INFORMATIONAL (never written): how many existing rows of each table were created by an application user and carry
-    no sprk_createdbyperson. Those rows predate the column; there is no person to backfill (createdonbehalfby is empty),
+    no sprk_createdbyperson (every page counted, past Dataverse's 5,000-row page). Those rows predate the column; there
+    is no person to backfill (createdonbehalfby is empty),
     so a resume of one of them still refuses with resume_creator_unavailable and the guide's administrator recovery
     applies (SECURE-PROJECT-ENVIRONMENT-SETUP.md §7a).
 
@@ -125,6 +129,18 @@ $headers = @{
     'Content-Type'     = 'application/json; charset=utf-8'
 }
 function Invoke-DvGet([string]$Path) { Invoke-RestMethod -Uri "$Api/$Path" -Headers $headers -Method Get }
+# Counts every row a query matches, following @odata.nextLink past Dataverse's 5,000-row page (task 133 r1, verifier
+# finding 7: the informational count stopped at the first page).
+function Measure-DvRows([string]$Path) {
+    $h = $headers.Clone(); $h['Prefer'] = 'odata.maxpagesize=5000'
+    $count = 0; $next = "$Api/$Path"
+    while ($next) {
+        $page = Invoke-RestMethod -Uri $next -Headers $h -Method Get
+        $count += @($page.value).Count
+        $next = $page.'@odata.nextLink'
+    }
+    $count
+}
 function Invoke-DvWrite([string]$Method, [string]$Path, $Body, [hashtable]$Extra = @{}) {
     $h = $headers.Clone(); foreach ($k in $Extra.Keys) { $h[$k] = $Extra[$k] }
     $json = if ($null -eq $Body) { $null } else { $Body | ConvertTo-Json -Depth 20 -Compress }
@@ -239,6 +255,25 @@ function Ensure-Member([string]$ProfileId, [string]$ProfileName, [string]$Nav, [
 foreach ($u in $bffUsers) { Ensure-Member $writerId $WriterProfileName 'systemuserprofiles_association' 'systemusers' $u.systemuserid "app user '$($u.fullname)'" }
 foreach ($t in $defaultTeams) { Ensure-Member $readerId $ReaderProfileName 'teamprofiles_association' 'teams' $t.teamid "default team '$($t.name)'" }
 
+# The writer profile's membership IS the lock (task 133 r1, verifier finding 7): a human — or a team — added to it can
+# name anyone as a record's creator, and the resume would share the record to them. So every member that is not one of
+# the -BffApplicationIds users is FAIL, in every mode. Reported, never removed: who belongs there is an operator decision.
+if ($writerId) {
+    $allowedWriters = @($bffUsers | ForEach-Object { $_.systemuserid.ToString().ToLowerInvariant() })
+    $writerUsers = @((Invoke-DvGet "fieldsecurityprofiles($writerId)/systemuserprofiles_association?`$select=systemuserid,fullname,applicationid").value)
+    foreach ($m in $writerUsers | Where-Object { $_.systemuserid.ToString().ToLowerInvariant() -notin $allowedWriters }) {
+        $kind = if ($m.applicationid) { "application user (appId $($m.applicationid)) not in -BffApplicationIds" } else { 'a HUMAN user' }
+        Report 'FAIL' "$WriterProfileName member '$($m.fullname)' ($($m.systemuserid)) is $kind — only the BFF may write $Column"
+    }
+    $writerTeams = @((Invoke-DvGet "fieldsecurityprofiles($writerId)/teamprofiles_association?`$select=teamid,name").value)
+    foreach ($tm in $writerTeams) {
+        Report 'FAIL' "$WriterProfileName has team '$($tm.name)' ($($tm.teamid)) as a member — every member of it could write $Column"
+    }
+    if (($writerUsers | Where-Object { $_.systemuserid.ToString().ToLowerInvariant() -notin $allowedWriters }).Count -eq 0 -and $writerTeams.Count -eq 0) {
+        Report 'OK' "$WriterProfileName has no member besides the BFF application user(s)"
+    }
+}
+
 # ── (c) FIELD-LEVEL SECURITY ────────────────────────────────────────────────────────────────────────────────
 Write-Host "`n(c) Field-level security"
 foreach ($t in $Tables) {
@@ -316,6 +351,7 @@ else {
 # ── INFORMATIONAL: app-created rows the column cannot help (never written) ─────────────────────────────────────
 Write-Host "`nInformational: rows created by an application user with no person recorded"
 $appUserIds = @((Invoke-DvGet 'systemusers?$select=systemuserid&$filter=applicationid ne null').value | ForEach-Object systemuserid)
+if ($appUserIds.Count -eq 0) { Report 'INFO' 'no application users in this environment' }
 foreach ($t in $Tables) {
     $set = (Invoke-DvGet "EntityDefinitions(LogicalName='$t')?`$select=EntitySetName").EntitySetName
     $count = 0
@@ -323,7 +359,7 @@ foreach ($t in $Tables) {
         $batch = $appUserIds[$i..([math]::Min($i + 19, $appUserIds.Count - 1))]
         $or = ($batch | ForEach-Object { "_createdby_value eq $_" }) -join ' or '
         $filter = if ($attrs[$t]) { "($or) and _$($Column)_value eq null" } else { "($or)" }
-        $count += @((Invoke-DvGet "$set`?`$select=$($t)id&`$filter=$filter").value).Count
+        $count += Measure-DvRows "$set`?`$select=$($t)id&`$filter=$filter"
     }
     Report 'INFO' "$t : $count app-created row(s) with no person recorded (a resume of one refuses; guide §7a administrator recovery)"
 }

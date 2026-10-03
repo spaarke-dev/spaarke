@@ -507,6 +507,9 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         var detail = problem.RootElement.GetProperty("detail").GetString();
         detail.Should().Contain("could not be verified").And.Contain("calls provisioning again");
         detail.Should().NotContainEquivalentOf("nothing").And.NotContainEquivalentOf("retry");
+        // Task 133 r1: the undo's outcome is unknown, so the resume is promised only "while the team owns it" — if the
+        // undo DID land, an administrator's call would run from the start instead, and the detail says what applies then.
+        detail.Should().Contain("While the team owns it").And.Contain("If the move back did take effect");
         _fixture.Logs.Entries.Should().Contain(e => e.Level == LogLevel.Critical && e.Message.Contains(projectId.ToString()));
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
     }

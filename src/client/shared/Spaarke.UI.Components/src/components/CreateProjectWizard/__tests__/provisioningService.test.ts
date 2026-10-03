@@ -172,8 +172,12 @@ describe('provisionSecureProject — failure classification', () => {
   // Task 133 b2 (verifier finding): `resume_creator_unavailable` follows the server's `creatorState`. `unreadable` is a
   // failed READ — the server's detail and guide §7a tell the same caller they may call again — so it is retryable with
   // copy that says only that the creator could not be looked up. Every other state is the administrator's.
+  //
+  // Task 133 r1 (verifier finding 10): `column-missing` — the creator column is not in this environment (a deterministic
+  // 400) — is NOT the retryable `unreadable`: a "Try securing again" would fail until an administrator applies the schema.
   it.each([
     ['unreadable', 'not-started', true, /could not be looked up/i],
+    ['column-missing', 'needs-administrator', false, /not yet set up to record who created/i],
     ['disabled', 'needs-administrator', false, /administrator needs to finish/i],
     ['application-user', 'needs-administrator', false, /administrator needs to finish/i],
     ['absent', 'needs-administrator', false, /administrator needs to finish/i],
@@ -182,7 +186,7 @@ describe('provisionSecureProject — failure classification', () => {
     'reads creatorState=%s from the problem body for resume_creator_unavailable',
     async (creatorState, kind, retryable, says) => {
       const authFetch = jest.fn().mockResolvedValue(
-        problemResponse(creatorState === 'unreadable' ? 500 : 409, {
+        problemResponse(creatorState === 'unreadable' || creatorState === 'column-missing' ? 500 : 409, {
           detail: 'operator text',
           reasonCode: 'sdap.provision.resume_creator_unavailable',
           ...(creatorState === undefined ? {} : { creatorState }),
@@ -253,6 +257,9 @@ describe('provisionSecureProject — failure classification', () => {
     // decides; could not be checked — a read failed, the same caller may call again. Both refused before any change.
     ['sdap.provision.container_shared_with_another_record', 'not-started', false],
     ['sdap.provision.container_ownership_unreadable', 'not-started', true],
+    // Task 133 r1: a SHARED container is unlinked before the move; that failed, so nothing moved and the same caller may
+    // call again.
+    ['sdap.provision.shared_container_not_cleared', 'not-started', true],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -299,7 +306,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(25);
+    expect(EMITTED).toHaveLength(26);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {
