@@ -59,7 +59,11 @@ public static class AssignedAccessReason
     /// <summary>On the record's No Access list (FR-23 / owner Q4), or the list could not be checked.</summary>
     public const string NoAccess = "no-access";
 
-    /// <summary>A secure-record wall check could not be completed (task 143 guard: Unverifiable).</summary>
+    /// <summary>
+    /// A No Access check could not be completed: task 143's secure-record wall guard answered Unverifiable, or (task 142
+    /// r3) a contact/organization deny-list check THREW — the latter also reported as a
+    /// <c>deny-list-unreadable</c> failure. Never a grant, never "no-access" (an entry).
+    /// </summary>
     public const string NoAccessUnverifiable = "no-access-unverifiable";
 
     /// <summary>The auto share was removed by task 143's No Access enforcer: restored once the wall is lifted.</summary>

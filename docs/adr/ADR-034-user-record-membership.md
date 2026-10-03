@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
-| Updated | 2026-09-04 (Amendment A1) |
+| Updated | 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
@@ -22,7 +22,7 @@
 > that surface only, and states the event semantics: an owner event names the row's REAL owner (team or user) in
 > Dataverse ids.
 >
-> ⚠️ **[Amendment A4](#amendment-a4-2026-10-03-proposed-assigned-to-access-for-contacts-is-materialized-as-removable-grants) (PROPOSED, §6.5 path B; task 142) gives the registry a second, WRITE-time consumer:**
+> ⚠️ **[Amendment A4](#amendment-a4-2026-10-03-accepted-assigned-to-access-for-contacts-is-materialized-as-removable-grants) (ACCEPTED by the owner, round 11, 2026-10-03 — §6.5 path B; task 142) gives the registry a second, WRITE-time consumer:**
 > the "Assigned *" contacts and organizations receive Collaborate as explicit, removable grants (or a POA share for a
 > linked internal user), maintained by one invariant owner with a provenance ledger. The read-time terms stay.
 
@@ -480,11 +480,14 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 
 ---
 
-## Amendment A4 (2026-10-03, PROPOSED): Assigned-To access for contacts is materialized as removable grants
+## Amendment A4 (2026-10-03, accepted): Assigned-To access for contacts is materialized as removable grants
 
-> **Status**: **PROPOSED** — resolution path **B — amendment**, per root CLAUDE.md §6.5. **Awaiting the owner's
-> explicit §6.5 acceptance** (round 3 D1 accepted path B for the 036 and 152 amendments only; this one is new). The
-> SUBSTANCE is already owner-decided and binding: round 2 item 5 ("The 'Assigned To *' auto grants were one of the core
+> **Status**: **ACCEPTED** (owner round 11, 2026-10-03) — resolution path **B — amendment**, per root CLAUDE.md §6.5.
+> The owner accepted it explicitly in round 11, item 1: "142: ADR-034 Amendment A4 is ACCEPTED (§6.5 path B).
+> Assigned-To access for contacts is materialized as removable Collaborate grants (the substance is round 2 item 5 and
+> Q5). The main session applies the concise `.claude/adr/ADR-034` edit with the 142 PR." (Round 3 D1 had accepted path B
+> for the 036 and 152 amendments only; this acceptance is A4's own.) The SUBSTANCE is owner-decided and binding:
+> round 2 item 5 ("The 'Assigned To *' auto grants were one of the core
 > reasons for the UAC — this needs to continue being a feature") and **Q5** ("the 'Assigned *' contacts are automatically
 > granted Collaborate by a function that ADDS the contact to the grant-access list, so an operator can remove it");
 > round 3 **A1** (Collaborate, no grantor cap), **A2 reversed** (standing grants and organization access STAY; Assigned-To
@@ -494,8 +497,8 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 > **Driver**: `unified-access-control-r2` task 142 (GitHub #1065). Full record:
 > `projects/unified-access-control-r2/notes/task-142-assigned-field-auto-grants.md`.
 > **Concise version**: `.claude/adr/ADR-034-user-record-membership.md` is applied by the MAIN session (sub-agents cannot
-> write `.claude/`), with the task 142 PR. **Merge rule**: the task 142 code merges with this amendment accepted, never
-> before.
+> write `.claude/`), with the task 142 PR. **Merge rule**: the task 142 code merges with this amendment accepted (it is,
+> round 11) and with that concise edit in the same PR, never before.
 
 ### Why
 

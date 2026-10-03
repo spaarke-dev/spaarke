@@ -607,7 +607,10 @@ public static class GrantExternalAccessEndpoint
             logger.LogError(ex,
                 "[EXT-GRANT] The No Access check for {RootType} {RootId} threw; refusing (fail closed).",
                 rootType, rootId);
-            denied = true;
+
+            // Task 142 r3: a FAULT, not an entry — the same wire answer as GranteeDenied, flagged so an in-process caller
+            // (the Assigned-To materializer) reports it instead of waiting on it as the record's policy.
+            return GrantCheck.Refused(GrantPolicyDecision.GranteeDenyListUnreadable, requestedLevel);
         }
 
         if (denied)

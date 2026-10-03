@@ -128,6 +128,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         var materialized = 0;
         var writes = 0;
         var wouldRevoke = 0;
+        var denyListUnreadable = 0;
         var candidates = 0;
         var truncated = false;
         var rotating = false;
@@ -190,6 +191,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 materialized++;
                 writes += outcome.Writes;
                 wouldRevoke += outcome.Entries.Count(e => e.Action == AssignedAccessAction.WouldRevoke);
+                denyListUnreadable += outcome.Failures.Count(f => f.Kind == AssignedAccessMaterializer.DenyListUnreadableFailure);
 
                 // A deleted root (NotFound) and a root type with no registry are answers, not failures.
                 if (outcome.Status is AssignedAccessStatus.NotFound or AssignedAccessStatus.NoRegistry)
@@ -220,6 +222,14 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             problems.Add($"{incompleteRoots.Count} root(s) could not be fully materialized; see the per-root errors.");
         }
 
+        if (denyListUnreadable > 0)
+        {
+            // Task 142 r3: counted on its own, so a deny-list read outage is visible as such — never a policy hold. The
+            // roots are already incomplete (the run is red); this names the cause.
+            problems.Add($"DENY-LIST-UNREADABLE: the No Access list could not be checked for {denyListUnreadable} subject(s), " +
+                         "so nothing was granted, suggested, renewed or put back for them (fail closed).");
+        }
+
         if (!revokeOnChange && wouldRevoke > 0)
         {
             // The configured posture, not a failure: reported (heartbeat + ResultJson.wouldRevoke) so the owner's flip of
@@ -238,9 +248,11 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         _logger.LogInformation(
             "[ASSIGNED-ACCESS-RECON] heartbeat status={Status} candidates={Candidates} materialized={Materialized} " +
             "writes={Writes} wouldRevoke={WouldRevoke} revokeOnChange={RevokeOnChange} incomplete={Incomplete} " +
+            "denyListUnreadable={DenyListUnreadable} " +
             "truncated={Truncated} rotating={Rotating} cacheTenantConfigured={CacheTenant} durationMs={DurationMs} " +
             "attempt={Attempt} correlationId={CorrelationId}",
-            status, candidates, materialized, writes, wouldRevoke, revokeOnChange, incompleteRoots.Count, truncated, rotating,
+            status, candidates, materialized, writes, wouldRevoke, revokeOnChange, incompleteRoots.Count, denyListUnreadable,
+            truncated, rotating,
             tenant is not null, (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
 
         return new JobRunResult(
@@ -262,6 +274,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                     cacheTenantConfigured = tenant is not null,
                     incompleteRoots = incompleteRoots.Take(MaxSampledRoots).ToArray(),
                     incompleteTotal = incompleteRoots.Count,
+                    denyListUnreadable,
                     attempt = context.Attempt,
                 },
                 ResultJsonOptions));

@@ -1,10 +1,11 @@
 # Task 142 — Assigned-To auto-grants (#1065)
 
 > Branch `task/uac-r2-142` (from `task/uac-r2-143-r2` + `task/uac-r2-137-b2` + `work/unified-access-control-r2`, base
-> `ee925b903`); verifier fix rounds **`task/uac-r2-142-r1`** (§11) and **`task/uac-r2-142-r2`** (§12). Server, client, web
-> resources, ribbon source and schema script complete. **Live writes: none** — every live step is a pending manual gate
-> (§7). The ADR-034 amendment A4 is drafted and **awaits the owner's §6.5 acceptance** (§8); the code merges with it,
-> never before — and only after the dependency merges in §7 G-0.
+> `ee925b903`); verifier fix rounds **`task/uac-r2-142-r1`** (§11), **`task/uac-r2-142-r2`** (§12) and
+> **`task/uac-r2-142-r3`** (§13). Server, client, web resources, ribbon source and schema script complete. **Live writes:
+> none** — every live step is a pending manual gate (§7). The ADR-034 amendment A4 was **ACCEPTED by the owner in round 11
+> (2026-10-03)** (§8); the main session applies the concise `.claude/adr` edit (exact text: §13.4) with the PR, and the
+> code merges only after the dependency merges in §7 G-0.
 
 ## 1. Owner answers applied (no escalation fired as a stop)
 
@@ -19,7 +20,7 @@
 | (g) Job posture | R3 = enabled, writes on for create/convert/renew; removal behind a positive switch, report-only by default; **cadence ≤ 5 min** (round 3 R3/R4 overrides "hourly") | `AssignedAccessReconciliationJob`, `*/5 * * * *`, `AddScheduledJob`; switch `ExternalAccess:AssignedAccess:JobRevokeOnChangeEnabled` (absent/false = report-only, result `wouldRevoke`). The sync route and L1 writers always revoke. Turning it on in dev is a manual gate AFTER criterion 21 (§7) |
 | (h) Registry vs live | — | Not fired: live metadata matches the registry (§2) |
 | (i) Writer cannot call after commit | — | Not fired: every census writer calls after its write without an API or transaction change (two AI handlers take an OPTIONAL `IServiceScopeFactory`; `RecordCreationService` takes one more DI parameter) |
-| (j) Live gate user/root pair | — | Not reached (live gates are the main session's). It may fire at criterion 21 (ii) — see §7 |
+| (j) Live gate user/root pair | — | Not reached (live gates are the main session's). It may fire at criterion 21 (ii) — see §7. Since round 11 a child-BU test user exists (`uac.child.user@demo.spaarke.com`, Spaarke Business Unit 1, Basic + Core User, no shares — owner note, "Test user"), so (j) need not fire if that user can be linked (141) and a NON-secure root it cannot open is found (§7 G-7) |
 | A7 (reversed) | Office quick-create assigns the maker (round 3) | Already implemented by task 152 (`RecordCreationService.ApplyMakerAssignedInternalAsync`); this task's L1 call after the create issues the maker's share/grant |
 | A8 | Limited: write contact grants; Restricted refused (round 3) | Limited → contact grants written, organization grants not (`IsDirectOnly`); Restricted → no contact/org grant, linked internal users still shared |
 | T1 | (b) fresh test records for the 142 live gate (round 3) | Recorded in §7 — creating them is a live write (main session) |
@@ -111,10 +112,10 @@ existing `FakeRecordShareTable`, a `GrantTable` interpreting the core's real ODa
 
 | File | Tests | Covers |
 |---|---|---|
-| `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | 78 (55 + 14 in round r1 + 9 in round r2) | criteria 2–11, 16 (conversion, renewal, cache key, Restricted after a grant), A6, inline gating; r1: expired grants never cover (P1/P2 + twins), never "granted"/"restored" over a lapsed grant (P3, the read race, the lapsed restore), the share half of criterion 10 (other field, modified mask, S5), the R2 known cause, a disabled linked user |
+| `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | 83 (55 + 14 in round r1 + 9 in round r2 + 5 in round r3) | criteria 2–11, 16 (conversion, renewal, cache key, Restricted after a grant), A6, inline gating; r1: expired grants never cover (P1/P2 + twins), never "granted"/"restored" over a lapsed grant (P3, the read race, the lapsed restore), the share half of criterion 10 (other field, modified mask, S5), the R2 known cause, a disabled linked user |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs` | 12 | criterion 12 THROUGH the real `/api/v1/external-access` filter pipeline (Write → handler; no Write and unknown id → the same filter 403; 401; body subject ids ignored; ProblemDetails with reason codes; list + dismiss gated; cache key = caller tenant) |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessMarkerTests.cs` | 13 | criteria 6, 9, 17 through the production `/revoke`, `/unshare-user`, `/grant`, `/share-user` handlers |
-| `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | 14 | criterion 16 (sweep, idempotent second run, switch on/off, cadence/enabled values, faulted scan → Success=false, TRUNCATED, ROTATING + recent-first, deployment-tenant cache key, no tenant, incomplete root, link conversion) |
+| `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | 16 (14 + a 2-row theory in round r3) | criterion 16 (sweep, idempotent second run, switch on/off, cadence/enabled values, faulted scan → Success=false, TRUNCATED, ROTATING + recent-first, deployment-tenant cache key, no tenant, incomplete root, link conversion) |
 | `tests/integration/data-mutation/ExternalAccess/AssignedAccessWriterTriggerTests.cs` | 10 | criterion 13 — one per census writer + the no-op twins + "a materializer fault never fails the create" |
 | `AssignedAccessTestDoubles.cs` | — | the shared harness |
 | Client: `services/__tests__/assignedAccessSync.test.ts` | 9 | criterion 14 (each wizard; failure logged, wizard not failed; secure project synced after provisioning only) |
@@ -192,6 +193,20 @@ byte-for-byte — MD5 re-checked after every restore — and touched; §12):
 | S11 every restore refusal is a hold | 1 — the unreadable-policy twin |
 | S12 an expired grant above Collaborate is skipped instead of given Collaborate | 1 — the finding-3 deviation pin |
 
+Round r3 seeds (each alone, applied by exact string replacement through a scratch script; build + the now **134**
+AssignedAccess tests; restored from a backup with the MD5 re-checked after every restore, and touched; §13):
+
+| Seed | Failed |
+|---|---|
+| V2 the raise records the EARLIEST conferring date (`conferring.Max(r => r.ExpiresDate)` → `.Min(…)`, the verifier's r2 seed) | 1 — the new two-row test (0 in r2) |
+| T1 the grant core answers a THROWING No Access check with the plain `GranteeDenied` (the r2 behaviour) | 4 — restore, fresh grant, renewal, job (throws) |
+| T2 `IsPolicyHold` ignores the fault flag | 1 — the restore test |
+| T7 the restore path's explicit fault branch removed (a generic `restore-refused`, kind not distinct) | 1 — the restore test |
+| T3 the secure-suggestion check's throw reads as an entry again (warning + `denied = true`, the r2 behaviour) | 1 — the secure-suggestion test |
+| T4 a renewal refused by the fault is only a warning | 1 — the renewal test |
+| T5 the fresh path reads the fault as `no-access` | 2 — the fresh-grant test, the job (throws) |
+| T6 the job does not count the fault | 1 — the job (throws) |
+
 Web resources (no test harness exists for classic scripts): `node --check` both; a scratch smoke run in a fake form
 confirmed — helper absent: OnPostSave logs "BffAuth is not loaded" and makes no call, `canUpdateAccess` = false,
 Update Access shows the reload message; no token: no call + "Sign-in needed"; with a token: exactly one POST to
@@ -245,32 +260,33 @@ last modal change).
 
 | # | Gate | Command / action |
 |---|---|---|
-| G-0 | **Dependency merges FIRST** (verifier r0 finding 7). This branch carries the non-merge commits of tasks 133, 137 and 143 that `work/unified-access-control-r2` does not have yet, including two `WIP … UNVERIFIED, do not merge` commits — `b38756ba6` (133-b1, an ancestor of `task/uac-r2-133-b2` / `-b2-r2`) and `33108909e` (137-b1, an ancestor of `task/uac-r2-137-b2`), each superseded inside its own verified line. Merging 142 first would bring them in unreviewed. | Into `work/unified-access-control-r2`, in order: `task/uac-r2-133-b2-r2` (`5a8b66c15`), `task/uac-r2-137-b2` (`a8fe5b428`), `task/uac-r2-143-r2` (`7668bbc1f`) — each verified in its own round. ⚠️ 137-b2 + 143-r2 have a SEMANTIC conflict with no textual one (143 r1 added `IContactIdentityStore` to `AccessibleRecordSetService`'s constructor; 137's seam test used the old one): bring `843d62b46` (`tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs`, +3 lines) with the second of the two merges, or the test project does not compile. Then re-merge `work` into the 142 line and merge it. Confirm with `git log --oneline work/unified-access-control-r2..task/uac-r2-142-r1 --no-merges` = only 142 commits |
+| G-0 | **Dependency merges FIRST** (verifier r0 finding 7). This branch carries the non-merge commits of tasks 133, 137 and 143 that `work/unified-access-control-r2` does not have yet, including two `WIP … UNVERIFIED, do not merge` commits — `b38756ba6` (133-b1, an ancestor of `task/uac-r2-133-b2` / `-b2-r2`) and `33108909e` (137-b1, an ancestor of `task/uac-r2-137-b2`), each superseded inside its own verified line. Merging 142 first would bring them in unreviewed. | Into `work/unified-access-control-r2`, in order: `task/uac-r2-133-b2-r2` (`5a8b66c15`), `task/uac-r2-137-b2` (`a8fe5b428`), `task/uac-r2-143-r2` (`7668bbc1f`) — each verified in its own round. ⚠️ 137-b2 + 143-r2 have a SEMANTIC conflict with no textual one (143 r1 added `IContactIdentityStore` to `AccessibleRecordSetService`'s constructor; 137's seam test used the old one): bring `843d62b46` (`tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs`, +3 lines) with the second of the two merges, or the test project does not compile. Then re-merge `work` into the 142 line and merge it. Confirm with `git log --oneline work/unified-access-control-r2..task/uac-r2-142-r3 --no-merges` = only 142 commits. **Re-checked in round r3** (`git merge-base --is-ancestor`, work at `3850eda5a`): none of `task/uac-r2-133-b2-r2`, `task/uac-r2-137-b2`, `task/uac-r2-143-r2` or `843d62b46` is an ancestor of `work` yet; still open — the main session's integration order |
 | G-1 | Ledger schema, BEFORE any BFF deploy of this branch (without it every materialization reads `ledger-unreadable` and writes nothing — fail closed) | `pwsh scripts/Set-AssignedAccessLedgerSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry run), then `-Apply`, then `-Verify` (exit 0) and `describe('tables/sprk_assignedaccess')`; confirm `sprk_AssignedAccessLedgerKey` Active and the privilege census lists only System Administrator / System Customizer for Create/Write/Delete. Record in `src/solutions/SpaarkeCore/entities/sprk_assignedaccess/entity-schema.md` |
 | G-2 | BFF deploy | the usual BFF deploy of the merged branch (job registers enabled; `ExternalAccess__AssignedAccess__JobRevokeOnChangeEnabled` absent = report-only) |
 | G-3 | Web resources | dataverse-deploy: `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`; `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`; publish |
 | G-4 | Form libraries | project, matter, work assignment MAIN forms: `sprk_/scripts/bff_auth.js` FIRST, then `sprk_/scripts/assignedaccess_postsave.js`; OnLoad `Spaarke.AssignedAccess.onLoad` (pass execution context) |
 | G-5 | Ribbon | per `infrastructure/dataverse/ribbon/AccessRibbons/README.md`: record the before-import command lists; export the three form ribbons (dedicated ribbon solution); check in the exported work-assignment `RibbonDiff.xml`; `Merge-AccessRibbon.ps1` per entity; import; verify every before-list command still renders and runs, Update Access visible to a Write-holder (cold cache too) and hidden for a Read-only user whose direct sync call gets 403 |
 | G-6 | TrackingFieldTrio 1.0.34 | pack + import (`src/client/pcf/TrackingFieldTrio/Solution/pack.ps1`) |
-| G-7 | Live gate criterion 21 (i)–(v) + the UX ui-tests | child-BU non-admin users only (#1081); fresh test records per owner T1 (b). (ii) needs a LINKED internal user with no prior Dataverse access to the chosen root — **if no such pair exists without relocating a user, escalation (j) fires**: ask the owner for the record/user pair |
+| G-7 | Live gate criterion 21 (i)–(v) + the UX ui-tests | child-BU non-admin users only (#1081); fresh test records per owner T1 (b). (ii) needs a LINKED internal user with no prior Dataverse access to the chosen root — **if no such pair exists without relocating a user, escalation (j) fires**: ask the owner for the record/user pair. Candidate since round 11: `uac.child.user@demo.spaarke.com` (systemuser `d6f8f439-40bf-f111-a05b-3833c5e9614d`, Spaarke Business Unit 1, Basic + Core User, no shares). Before the save: link it (141 first sign-in, or the 141 link job), choose a NON-secure root (on a secure root A3 suggests instead of sharing) and record `RetrievePrincipalAccess` = None for that user on it; a root its role depth reaches does not qualify |
 | G-8 | After G-7 passes | set `ExternalAccess__AssignedAccess__JobRevokeOnChangeEnabled=true` on the dev BFF app settings (owner R3/(g)); record the date here |
-| G-9 | ADR-034 A4 | owner's §6.5 acceptance; then the main session applies the concise `.claude/adr/ADR-034-user-record-membership.md` edit and the spec/design text (§8) with the PR |
+| G-9 | ADR-034 A4 | **Owner's §6.5 acceptance: DONE** (round 11 item 1, 2026-10-03; `docs/adr` marked ACCEPTED in round r3). Remaining (main session, with the PR): apply the concise `.claude/adr/ADR-034-user-record-membership.md` edit — exact text in §13.4 — plus its `.claude/CHANGELOG.md` entry; apply the spec/design amendment text (`docs/adr` A4 § "Spec / design amendment text"); paste the §8 block into the PR description |
 
 Ordering note for **task 036**: 036's flag must not be turned on until G-1..G-4 are live and the job has completed a full
 sweep (its ROTATING report clears) — that sweep IS the backfill.
 
 ## 8. ADR-034 amendment A4 (§6.5 path B) — PR description block
 
-Drafted in full in `docs/adr/ADR-034-user-record-membership.md` § "Amendment A4 (2026-10-03, PROPOSED)", incl. the
-spec.md (MUST NOT list, FR-32) and design.md §7 amendment text. Paste into the PR:
+Drafted in full in `docs/adr/ADR-034-user-record-membership.md` § "Amendment A4 (2026-10-03, accepted)" — **ACCEPTED by
+the owner in round 11, item 1 (2026-10-03)** — incl. the spec.md (MUST NOT list, FR-32) and design.md §7 amendment
+text. Paste into the PR:
 
-> 🔔 **ADR Conflict — Resolution Required**
+> 🔔 **ADR Conflict — Resolved (§6.5 path B, owner-accepted 2026-10-03, round 11 item 1)**
 > - **ADR in question**: ADR-034 User-Record Membership (A1 read-time conferral) + spec.md "❌ MUST NOT materialize derived
 >   access into grant rows", FR-32 acceptance, design.md §7.
 > - **Specific rule**: "MUST NOT materialize derived access into grant rows."
 > - **Conflict**: owner round 2 Q5 requires the Assigned-To access to be a REMOVABLE entry on the grant-access list; a
 >   read-time term is invisible on MDA (C9) and removable only by a veto (the No Access List — a different statement).
-> - **Proposed path**: **B** — amendment A4: the registry gains a write-time consumer; one invariant owner
+> - **Path**: **B** (ACCEPTED by the owner, round 11 item 1) — amendment A4: the registry gains a write-time consumer; one invariant owner
 >   (`AssignedAccessMaterializer`) materializes Collaborate grants / POA shares with a provenance ledger; read-time
 >   terms KEPT (A2 reversed).
 > - **Rationale**: the rule is repo-wide via ADR-034; a project exception (A) leaves every later reader facing the
@@ -300,7 +316,19 @@ spec.md (MUST NOT list, FR-32) and design.md §7 amendment text. Paste into the 
 - **R-7** The field-mapping push route has no record-level authorization (route sweep finding 67, medium, owned by the
   sweep's fix task). The L1 hook inherits it: a push writes the PARENT's own mapped values to its children and the
   materializer then grants the subjects those values name. No new hole — the push already writes as the app — but its
-  effect now includes access; the sweep's fix closes both.
+  effect now includes access; the sweep's fix closes both. **Coordination (round r3, verifier r2 finding 11)**: finding 67
+  is task **166**'s F11 (#1105; `tasks/166-…poml` F11 + its F11 criterion — caller probe on the source first, the child
+  query AS the caller through `IImpersonatedCommunicationQuery`, every child write with `impersonateSystemUserId`). No
+  change here. For 166 / the integrator: (1) both tasks edit `Api/FieldMappings/FieldMappingEndpoints.cs` — 142's L1 hook
+  is the `RunAfterWriteAsync(scopes, targetEntity, childRecordId, updatePayload.Keys, grantorOid: null, …)` call right
+  after `UpdateRecordFieldsAsync` in `ApplyMappingsToChildRecordsAsync` (~`:726`), and the handler passes its
+  `IServiceScopeFactory` (~`:439`, `:563`); 166's rewrite must keep that call after each SUCCESSFUL child update (its
+  writer test `AssignedAccessWriterTriggerTests.FieldMappingPush_ThatWritesAnAssignedColumnOfARootChild_MaterializesIt`
+  fails if it is dropped, and calls `ApplyMappingsToChildRecordsAsync` directly, so a signature change there updates it
+  too), expect a textual conflict there at integration,
+  and resolve it keeping both; (2) once 166 lands, the push acts only on children the caller can write, so R-7 closes with
+  it; (3) optional for 166: the push then has a caller, so the hook's `grantorOid: null` could pass the caller's oid
+  (closes R-4 for this trigger) — not required by either task.
 - **R-8** A contact whose internal user is not yet linked (141) receives a contact GRANT first; the job converts it to a
   share (Declined carried) once the link appears.
 - **R-9** Coordination: tasks 064/066 should show Assigned-To provenance from `GET /api/v1/external-access/assigned-access`
@@ -334,9 +362,21 @@ spec.md (MUST NOT list, FR-32) and design.md §7 amendment text. Paste into the 
   path suppresses the same grant on the same terms; the deny check fails closed on both paths). Residual: between the
   policy change and that pass the grant confers at Collaborate, not the operator's lower level — a form save or Update
   Access applies it at once (the post-save script syncs on every save), otherwise the job within 5 minutes (owner
-  R3/R4 cadence). The core reports an unreadable deny list with the same `grantee_denied` code as an entry, so that case
-  also holds rather than fails; it is retried every pass. An unreadable POLICY (`policy_unreadable`) is still a failure
-  (pinned by the unreadable-policy twin, seed S11). The form shows nothing for a hold (no message names it).
+  R3/R4 cadence). ~~The core reports an unreadable deny list with the same `grantee_denied` code as an entry, so that case
+  also holds rather than fails~~ — **fixed in r3 (§13.2)**: a No Access check that THROWS is a fault
+  (`deny-list-unreadable`, `Success=false`), never a hold; faults the deny-veto code absorbs itself are R-13. An
+  unreadable POLICY (`policy_unreadable`) is still a failure (pinned by the unreadable-policy twin, seed S11). The form
+  shows nothing for a hold (no message names it).
+- **R-13** (r3) Only a No Access check that THROWS is distinguishable as a fault. The deny-veto code
+  (`AccessibleRecordSetService.ResolveDenyVetoAsync` / `IsGranteeDeniedOnRecordAsync`) ABSORBS other read faults — the
+  contact's memberships unreadable, a referenced-organization read unreadable, the deny-list reader's own `null`, any
+  non-cancellation exception — into "denied" (fail closed) and returns a plain `bool`, so they still reach the
+  materializer as `grantee_denied`: a restore HOLDS (green) and a fresh grant is `Skipped(no-access)`. Nothing is exposed
+  (fail closed on both paths) and each is retried every pass; monitoring sees them only through the veto code's own
+  error lines (`[WF-AUTHZ] Deny-veto resolution FAILED …` / `… cannot proceed …`), not in the job result. Closing it means
+  a tri-state answer from `IsGranteeDeniedOnRecordAsync` (or a fault-reporting overload) — an interface change to
+  `AccessibleRecordSetService`, which this POML scopes out (relevant-files: "ONLY per the owner's answer to escalation
+  (d)" = keep → untouched) and which tasks 139/140 also call. Not changed; reported for the owner/main session.
 
 ## 10. Quality gates (Step 9.5)
 
@@ -354,7 +394,7 @@ ADR-009 (tenant cache only), ADR-010 (no new interface; concretes registered), A
 ADR-038 (KEEP paths, no banned shapes) — compliant; NetArchTest 346/346 after the three path-C fixes in §5. Warnings: ADR-006 (two classic `.js` web resources — mandated by
 the POML/UX amendment, thin, no UI; ADR-006 permits ribbon-command scripts); ADR-028 client contract (the web resources
 send a Bearer token with `fetch` — through `Spaarke.BffAuth`, the established classic-form helper, as
-`sprk_kpiassessment_quickcreate.js` does; not React code). **ADR-034: path B in flight** (A4 drafted; acceptance G-9).
+`sprk_kpiassessment_quickcreate.js` does; not React code). **ADR-034: path B** (A4 drafted; **accepted by the owner in round 11**, 2026-10-03 — the concise edit is the main session's, §13.4).
 
 ## 11. Round r1 — verifier findings (2026-10-03, branch `task/uac-r2-142-r1`)
 
@@ -426,3 +466,189 @@ GrantLifecycleCharacterization, InternalUserShare, GrantorCeiling, RecordCreatio
 unit suite (once, at the end): **14,609 passed, 0 failed, 54 skipped (14,663)**, 17m46s — the previous 14,654 plus the 9
 new tests. BFF build 0 errors / 0 warnings. No client file changed (no client build/test needed). Publish size left to
 the main session.
+
+## 13. Round r3 — the r2 verifier's open items + owner round 11 (2026-10-03, branch `task/uac-r2-142-r3`)
+
+Base: `task/uac-r2-142-r2` (`aa7ab9cbf`) plus two merges of `work/unified-access-control-r2` (`6b243f092`, then
+`3850eda5a`; docs, POMLs, the owner note and the batch-4 integration checklist only — no conflict, nothing resolved) =
+**`655450ab0`**. Binding input: owner rounds 1–11 (round 11 item 1: **ADR-034 A4 ACCEPTED**) and the "Peer report: #1081"
+section, read from `work/unified-access-control-r2`. Live writes: none.
+
+### 13.1 The verifier's items (`b4c-findings.json` key "142")
+
+| # | Verifier item | Disposition |
+|---|---|---|
+| 1 | The r2 code fixes (findings 1, 2) are correct and proven | Verified OK — no action |
+| 2 | Its seed V1 (policy hold settles `Revoked`) bites 5 | No action |
+| 3 | LOW, UNPROVEN GUARD: `priorExpiry = conferring.Max(…)` — seed V2 (`Min`) failed 0 of 127 | **Closed — §13.3** (V2 now fails 1) |
+| 4 | LOW, MONITORING GAP: a No Access check that THROWS reads as `grantee_denied`, so a restore is a green `restore-pending` | **Closed — §13.2** |
+| 5 | Merge precondition G-0 (133/137/143 not ancestors of `work`) | **Recorded, not closable here** — the main session's integration order. Re-checked this round (§7 G-0): still open |
+| 6 | Merge precondition G-9 / criterion 18 (A4 PROPOSED; no concise edit; no PR block) | **Owner accepted A4 (round 11 item 1).** `docs/adr` marked ACCEPTED (§13.4); the concise `.claude/adr` text is §13.4; the PR block is §8. Criterion 18 is met apart from the main session's `.claude` edit and the PR text |
+| 7 | Independent re-runs at `aa7ab9cbf` | No action |
+| 8 | POML well-formed; status-note correct | Status-note and execution block updated this round |
+| 9 | No live write (G-1 not applied) | No action — G-1 is the main session's (round 11 approved it) |
+| 10 | Peer report #1081 consistent with the gate plan | No action |
+| 11 | Coordination: route-sweep finding 67 (field-mappings push) now also confers access | **Recorded — §13.5 / R-7** (task 166 F11, #1105); no change here |
+| 12 | Finding-3 deviation accepted as an owner-revisit item | No action |
+| 13 | Criterion 18 not met | As item 6 |
+| 14 | Criterion 20 (part): publish size not measured | **Pending — main session** (harness: skip publish size). No package added |
+| 15 | Criterion 19 (minor): V2 survived | **Met** — §13.3 |
+| 16 | Criterion 21: live gate G-7 + UX live items (a)(b)(c)(e)(f), G-5 | **Pending — main session** (live writes). §7 G-7 now names the round-11 child-BU test user as the (ii) candidate |
+| esc (j) | May fire at 21 (ii) | Not reached; likely avoidable with the round-11 test user (§1, §7 G-7) |
+
+### 13.2 Item 3 — a No Access check that THROWS is a fault, never an entry or a policy hold
+
+**The defect (verifier r2 finding 4).** `GrantExternalAccessEndpoint.CheckGrantAsync` turned a THROWING No Access check
+(an HttpClient timeout, which the deny-veto code rethrows) into `GrantPolicyDecision.GranteeDenied` — the code an ENTRY
+on the list gets. `IsPolicyHold` treated that code as the record's policy, so a deny-list read outage during a restore
+was a green, non-failing `restore-pending:…grantee_denied` pass; on the fresh path it was `Skipped(no-access)`; on a
+renewal a warning; on a secure suggestion (the materializer's own check) `Skipped(no-access)`. Nothing was exposed
+(every path failed closed) but a sustained outage was invisible in the job result.
+
+**The fix.**
+- **Grant core** (`GrantExternalAccessEndpoint.cs` catch at `:605`): returns
+  `GrantPolicyDecision.GranteeDenyListUnreadable` = `GranteeDenied with { IsDenyListReadFault = true }`
+  (`ExternalGrantLifecycle.cs`). **The wire contract is unchanged** — same reason code, 422 and detail ("… or that list
+  could not be checked"), so `/grant`, `/invite-and-grant` and task 140 answer exactly as before (pinned by task 139's
+  `GrantorCeilingTests.Grant_WhenTheNoAccessCheckThrowsATimeout_Is422GranteeDenied_AndWritesNothing`, still green). The
+  flag is in-process only (`PolicyRefusalProblem` maps code, status and detail explicitly).
+- **Materializer** — the four places a No Access check result is consumed:
+  - restore (the verifier's case): `IsPolicyHold` excludes the fault; the fault is reported, nothing written, the row
+    stays `Granted` so every pass retries;
+  - fresh grant: reported, `Skipped(no-access-unverifiable)` (not `no-access` — nobody is known to be on the list),
+    re-decided next pass;
+  - secure suggestion (its own `IsGranteeDeniedOnRecordAsync` call): reported, not suggested,
+    `Skipped(no-access-unverifiable)`;
+  - renewal: reported, not renewed this pass, the grant kept as it is.
+
+  Each goes through one private helper `DenyListFault`: an ERROR log line tagged `DENY-LIST-UNREADABLE` and an
+  `AssignedAccessFailure` of kind `deny-list-unreadable` (`AssignedAccessMaterializer.DenyListUnreadableFailure`), so
+  `Complete` is false → the sync answers 500 `sync_incomplete` with that message, and the job's root is incomplete.
+- **Job**: counts those failures — `denyListUnreadable` in the heartbeat line and in `ResultJson`, plus a
+  `DENY-LIST-UNREADABLE: …` problem line; the run is `Success=false` (the roots are incomplete). Fail closed throughout:
+  no grant, suggestion, renewal or restore is written while the list cannot be read.
+
+**Tests** (5 materializer + a 2-row job theory): `ARestoreWhoseNoAccessCheckThrows_IsADenyListFault_NeverAPolicyHold_AndIsPutBackOnceTheListReads`
+(twin: the existing hold theory's "no-access" row — an ENTRY still holds green), `AFreshGrantWhoseNoAccessCheckThrows_…`,
+`ASecureSuggestionWhoseNoAccessCheckThrows_…`, `ARenewalWhoseNoAccessCheckThrows_…` — each asserts the failure kind for
+the subject, `Complete=false`, the distinct ERROR line (existing `CapturingLogger<T>` from
+`Services/Communication/RungTestSupport.cs`, set through a new test-only `Harness.Logger`), never a hold and never
+`no-access`, nothing written, then the normal outcome once the list reads again; and
+`AssignedAccessReconciliationJobTests.ANoAccessCheckThatThrows_FailsTheRun_CountedAsADenyListFault_WhileAnEntryOnTheListDoesNot`
+(throws → `Success=false`, `DENY-LIST-UNREADABLE`, `denyListUnreadable=1`; an entry → clean, `0`). The throw is a
+`TaskCanceledException` from the deny-list reader's wire seam (`SeamNoAccessListReader.Throws`, task 139 r1's double).
+Seeds T1–T7 (§5) each bite.
+
+**Not closed — R-13 (§9).** Read faults the deny-veto code ABSORBS (memberships unreadable, a referenced-organization
+read unreadable, the reader's own `null`, any non-cancellation exception) still arrive as a plain `true` and read as an
+entry; distinguishing them needs an interface change to `AccessibleRecordSetService`, which this POML scopes out.
+
+### 13.3 Item 2 — the raise records the LATEST conferring date (criterion 19)
+
+`TwoConferringLowerGrantsOnOneKey_TheRaiseRecordsTheLaterDate_AndTheRestoreNeverShortensTheSurvivor`: two conferring View
+Only rows on one key (today + 30, today + 200) before the raise. The core collapses the key onto the longest-conferring
+survivor (today + 200); the ledger reason must be `raised-from:100000000@{today + 200}`, and the end of the assignment must
+put the SURVIVOR back to View Only with today + 200. The verifier's seed V2 (`.Min(…)`) now fails it (1); a `First()`
+variant would too (the earlier row is seeded first). Code unchanged — the choice was right, now it is proven.
+
+### 13.4 Item 4 — ADR-034 A4 ACCEPTED; the concise `.claude/adr` text (exact, for the main session)
+
+`docs/adr/ADR-034-user-record-membership.md` (this branch): the header table's "Updated" row, the A4 call-out (now
+"ACCEPTED by the owner, round 11, 2026-10-03"), the A4 heading (now "(2026-10-03, accepted)" — anchor
+`#amendment-a4-2026-10-03-accepted-assigned-to-access-for-contacts-is-materialized-as-removable-grants`, the call-out link
+updated with it; no other file links the old anchor) and the Status block (quotes round 11 item 1). The A4 rules are
+unchanged — the owner accepted that text.
+
+The MAIN session applies the following to `.claude/adr/ADR-034-user-record-membership.md` with the 142 PR (sub-agents
+cannot write `.claude/`), plus a `.claude/CHANGELOG.md` entry. It is independent of task 152's A3 concise edit; if A3's
+call-out has been applied first, put A4's after it.
+
+**Edit 1** — insert after line 12 (the end of the A1 call-out, `…#amendment-a1-2026-09-04-the-access-conferring-allow-list-becomes-first-class-and-per-surface).`) and before `> **Domain**: …`:
+
+```markdown
+>
+> ⚠️ **Amendment A4 (2026-10-03, `unified-access-control-r2` task 142, path B — ACCEPTED by the owner, round 11)**: the
+> access-conferring registry gains a second, **write-time** consumer. Every registry-listed Contact- or
+> Organization-typed "Assigned *" column on a project, matter or work assignment gives the named subject **Collaborate**
+> as an explicit, **removable** grant (`sprk_externalrecordaccess`), or a POA share when the contact is linked (task 141)
+> to an eligible internal user — maintained by ONE invariant owner, `AssignedAccessMaterializer`, with provenance in the
+> `sprk_assignedaccess` ledger. The read-time standing-grant and organization-expansion terms are **kept** (owner A2
+> reversed). Full rules: [full ADR](../../docs/adr/ADR-034-user-record-membership.md#amendment-a4-2026-10-03-accepted-assigned-to-access-for-contacts-is-materialized-as-removable-grants).
+```
+
+**Edit 2** — replace line 14:
+
+```markdown
+> **Last Updated**: 2026-06-22 (post-implementation polish per R3 task 100)
+```
+
+with:
+
+```markdown
+> **Last Updated**: 2026-10-03 (Amendment A4 accepted, `unified-access-control-r2` task 142); 2026-06-22 (post-implementation polish per R3 task 100)
+```
+
+**Edit 3** — in the ✅ MUST list, after the bullet that begins `- **MUST** (A1) treat adding a conferring column as a **registry edit**.`, append:
+
+```markdown
+- **MUST** (**A4**, 2026-10-03, task 142, owner-accepted §6.5 path B) materialize Assigned-To access only through the ONE invariant owner, `AssignedAccessMaterializer` (`Services/ExternalAccess/`), from its three triggers: L1 inline after every BFF writer of the columns, `POST /api/v1/external-access/assigned-access/sync` (form post-save, the create wizards, "Update Access"), and L4 `AssignedAccessReconciliationJob` (every 5 min). The conferring columns come from the bound registry (`MembershipOptions.AccessConferringRoles`); child-entity entries (event, invoice, to-do, analysis) materialize nothing (owner A6).
+- **MUST** (A4) write at Collaborate through the existing cores only — grants via `GrantExternalAccessEndpoint.CreateGrantAsync` with `GrantCeiling.AssignedToRule` (uncapped by the saver's level, owner A1; an absent expiry becomes today + 90), shares via `IDataverseRecordShareService` with the `RecordShareLevels` Collaborate mask — and never lower existing conferring access: a lower grant is raised and put back, its level AND date, when the assignment ends.
+- **MUST** (A4) make an operator's removal stick: a Manage Access revoke/unshare, a Dismiss of a suggestion, or a removal outside the BFF with no known cause is recorded `Declined` and never re-created while the assignment persists. Declined is not a veto — a manual grant still succeeds (`Adopted`). When the column changes or is cleared, remove only the owner's own UNMODIFIED access, never while another registry column on the root still names the subject.
+- **MUST** (A4) apply the record's policy before writing: Restricted → no contact or organization grant (a linked internal user's share is unaffected); Secure or Limited → no organization grant; Secure → contact grants and shares are SUGGESTED (`PendingConfirmation`), not written; the No Access list always. Write nothing when a flag set, deny list, link or ledger cannot be read (ADR-003).
+```
+
+**Edit 4** — in the ❌ MUST NOT list, after the bullet that begins `- **MUST NOT** (A1) build a second membership mechanism for the registry.`, append:
+
+```markdown
+- **MUST NOT** (A4) add a second writer of Assigned-To access, a plugin, a flow or a service-endpoint step (ADR-002), or write `sprk_externalrecordaccess` for it directly.
+- **MUST NOT** (A4) read "derived access is not materialized into grant rows" (spec / FR-32 / design §7) as covering Assigned-To access: A4 is the one exception, and its grants are ordinary, audited grant rows.
+```
+
+**Edit 5 (recommended accuracy fix, same PR)** — line 41 says the 8 Q4 `sprk_assigned*` fields "are exclusively maker-portal
+edits, NOT mutated by any BFF endpoint". 142's writer census (§3) found BFF writers. Replace exactly:
+
+```markdown
+the 8 Q4 sprk_assigned* fields are exclusively maker-portal edits, NOT mutated by any BFF endpoint
+```
+
+with:
+
+```markdown
+the 8 Q4 sprk_assigned* fields were then exclusively maker-portal edits (since 2026-10-03, task 142's writer census lists BFF writers — Office quick-create, the AI record tools, `UpdateRecordActionCore`, the field-mapping push — each of which calls the A4 materializer after its write)
+```
+
+### 13.5 Item 5 — route-sweep finding 67 is task 166's (#1105)
+
+Recorded in R-7 (§9): sweep row 67 = task 166's **F11** (`POST /api/v1/field-mappings/push`, caller probe on the source
+first; the child query and every child write AS the caller). No change here. The integration points for 166 — the L1 hook
+it must keep after each successful child update, the textual conflict to expect in `FieldMappingEndpoints.cs`, the writer
+test that pins the hook, and the optional `grantorOid` follow-up (R-4) — are listed in R-7.
+
+### 13.6 Surface (CLAUDE.md §10/§11), self-review, runs
+
+**Placement**: unchanged — BFF, beside the external-access writers. No new service, DI registration, endpoint, option,
+job, column or package; no plugin (ADR-002). New members, each with the three-question test:
+
+| New | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `GrantPolicyDecision.GranteeDenyListUnreadable` + init property `IsDenyListReadFault` | `GranteeDenied` (same wire); `Unreadable` (`policy_unreadable`, 503) | Extends `GranteeDenied` (`with`), no new reason code — a new code (or `Unreadable`'s 503) would change task 139's tested `/grant` contract | The materializer cannot tell a deny-list read fault from an entry: a sustained outage reads green (finding 4) |
+| `AssignedAccessMaterializer.DenyListUnreadableFailure` (const) + private `DenyListFault` | Failure kinds are inline strings (`restore-refused`, `grant-not-conferring`, …) | One more kind; a const because the job counts it | The job cannot count the cause; four call sites would each format their own log and failure |
+| Job result `denyListUnreadable` (heartbeat, `ResultJson`, a problem line) | `incompleteTotal` (counts roots, not causes) | Additive field on the existing result | Monitoring cannot tell a deny-list outage from any other incomplete root |
+| `Harness.Logger` (test-only) | `NullLogger` hard-coded in the harness | Settable property, default unchanged | The distinct log line could not be asserted |
+
+**Self-review (Step 9.5 scope, this round's diff)**: ADR-003 — every fault site writes nothing (no grant, suggestion,
+renewal or restore) and is reported, never "done"; the wire contract of the grant routes is unchanged (task 139's tests
+green). ADR-036 A1 — a fault makes the root incomplete and the run `Success=false`, counted by name; a real policy hold
+stays green (the existing hold theory, untouched). ADR-038 — production materializer, grant core and deny-veto code run
+between module-boundary doubles; the throw is injected at the reader's wire seam; no banned shape; every new guard bites
+(§5). ADR-010 — no new interface. `.claude/**`: none written (§13.4 is the main session's).
+
+**Round r3 runs.** AssignedAccess set **134/134** (127 + 5 materializer + 2 job rows); every seed in §5 ("Round r3
+seeds") run alone against it. Wider affected set (AccessControl, ExternalAccess, AssignedAccess, Grant*, NoAccess,
+RecordCreation, FieldMapping, UpdateRecordActionCore, the two AI record handlers) **2,695 passed, 0 failed, 1 skipped**
+(incl. task 139's `GrantorCeilingTests` — the grant routes' wire answer to a throwing No Access check is unchanged). Once at
+the end, sequentially: BFF build 0 warnings / 0 errors; full BFF unit suite **14,616 passed, 0 failed, 54 skipped
+(14,670)**, 22m17s — the previous 14,663 plus the 7 new; `Spaarke.ArchTests` **346/346**;
+`Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **403 passed, 0 failed, 25 skipped (428)**. No
+timing failure, so no isolated re-run was needed. No client file changed (no client build/test). Publish size: skipped
+(harness) — main session; no package added.

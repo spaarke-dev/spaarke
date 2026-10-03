@@ -243,6 +243,41 @@ public class AssignedAccessReconciliationJobTests
         Result(result).GetProperty("incompleteTotal").GetInt32().Should().Be(1);
     }
 
+    /// <summary>
+    /// Task 142 r3 (verifier r2 finding 4): a No Access check that THROWS is a deny-list read FAULT — the run fails and counts
+    /// it by name, so a sustained outage of that read is visible to monitoring. The twin: an ENTRY on the list is the
+    /// record's policy (a skip, nothing granted either way), and the run stays clean.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ANoAccessCheckThatThrows_FailsTheRun_CountedAsADenyListFault_WhileAnEntryOnTheListDoesNot(bool throws)
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        if (throws)
+            _h.DenyList.Throws = new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
+        else
+            _h.DenyList.DenyContactOnRecord(contact, matter);
+
+        var result = await RunAsync();
+
+        _h.Grants.ActiveRowsOf(matter, contact).Should().BeEmpty("fail closed either way");
+        var json = Result(result);
+        if (throws)
+        {
+            result.Success.Should().BeFalse();
+            result.ErrorMessage.Should().Contain("DENY-LIST-UNREADABLE");
+            json.GetProperty("denyListUnreadable").GetInt32().Should().Be(1);
+            json.GetProperty("incompleteTotal").GetInt32().Should().Be(1);
+        }
+        else
+        {
+            result.Success.Should().BeTrue(result.ErrorMessage);
+            json.GetProperty("denyListUnreadable").GetInt32().Should().Be(0);
+        }
+    }
+
     [Fact]
     public async Task ALinkThatAppearsBetweenRuns_ConvertsTheGrantToAShare()
     {

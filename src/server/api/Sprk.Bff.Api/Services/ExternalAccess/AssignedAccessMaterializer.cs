@@ -163,7 +163,9 @@ public sealed record AssignedAccessListEntry(
 /// already says it, and no grant or share is written over access that is already there.</para>
 ///
 /// <para><b>Fails closed</b> (ADR-003 / WP-6): an unreadable root, ledger or flag set writes nothing; an unreadable link,
-/// wall or deny list skips the subject; a failed write is a <see cref="AssignedAccessFailure"/>, never "done".</para>
+/// wall or deny list skips the subject; a failed write is a <see cref="AssignedAccessFailure"/>, never "done". A No Access
+/// check that THREW is also a failure of its own kind (<see cref="DenyListUnreadableFailure"/>, task 142 r3) — never read
+/// as an entry or a policy hold, so the job reports it.</para>
 /// </remarks>
 public sealed class AssignedAccessMaterializer
 {
@@ -172,6 +174,12 @@ public sealed class AssignedAccessMaterializer
     /// so a still-assigned auto grant is renewed before its first reminder would be sent.
     /// </summary>
     internal static int RenewalWindowDays => GrantExpiryReminderJob.ReminderDays.Max();
+
+    /// <summary>
+    /// The failure kind of a No Access check that could not be completed (it threw — task 142 r3): never an entry, never a
+    /// policy hold. Counted by <see cref="AssignedAccessReconciliationJob"/> so monitoring sees a deny-list read fault.
+    /// </summary>
+    internal const string DenyListUnreadableFailure = "deny-list-unreadable";
 
     private static readonly int CollaborateMask = RecordShareLevels.MaskForRightsCsv(RecordShareLevels.CollaborateRights);
 
@@ -676,9 +684,18 @@ public sealed class AssignedAccessMaterializer
                     return true;
                 }
 
-                _logger.LogWarning(
-                    "[ASSIGNED-ACCESS] Renewal of {Subject} on {Type} {RootId} was refused ({Reason}); the grant is left to lapse.",
-                    subject, run.Logical, run.RootId, outcome.Refusal.ReasonCode);
+                if (outcome.Refusal.IsDenyListReadFault)
+                {
+                    // Task 142 r3: the No Access check could not be completed — a fault, reported; nothing is renewed this
+                    // pass and the next one tries again (the grant is kept as it is below).
+                    DenyListFault(run, subject, "its renewal");
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[ASSIGNED-ACCESS] Renewal of {Subject} on {Type} {RootId} was refused ({Reason}); the grant is left to lapse.",
+                        subject, run.Logical, run.RootId, outcome.Refusal.ReasonCode);
+                }
             }
 
             await EnsureRowsAsync(run, subject, byField,
@@ -867,8 +884,10 @@ public sealed class AssignedAccessMaterializer
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
-                _logger.LogWarning(ex, "[ASSIGNED-ACCESS] The No Access check for {Subject} threw; not suggesting (fail closed).", subject);
-                denied = true;
+                // Task 142 r3: a check that THREW is a fault, not an entry — not suggested (fail closed), and reported.
+                DenyListFault(run, subject, "its suggestion", ex);
+                await SkipAsync(AssignedAccessReason.NoAccessUnverifiable).ConfigureAwait(false);
+                return;
             }
 
             if (denied)
@@ -907,6 +926,15 @@ public sealed class AssignedAccessMaterializer
         var outcome = await WriteGrantAsync(run, subject, ExternalAccessLevel.Collaborate, expiry, ct).ConfigureAwait(false);
         if (outcome.Refusal is { } refusal)
         {
+            if (refusal.IsDenyListReadFault)
+            {
+                // Task 142 r3: the core's No Access check THREW. Not "no-access" (an entry): a fault — nothing granted
+                // (fail closed), reported, and decided again next pass (Skipped is never sticky).
+                DenyListFault(run, subject, "its access");
+                await SkipAsync(AssignedAccessReason.NoAccessUnverifiable).ConfigureAwait(false);
+                return;
+            }
+
             await SkipAsync(refusal.ReasonCode == ExternalGrantLifecycle.GranteeDeniedReasonCode
                     ? AssignedAccessReason.NoAccess
                     : AssignedAccessReason.GrantRefusedPrefix + refusal.ReasonCode)
@@ -1069,6 +1097,15 @@ public sealed class AssignedAccessMaterializer
                                 "policy ({Reason}).", run.Logical, run.RootId, subject, refusal.ReasonCode);
                             run.Entry(subject, fields, null, AssignedAccessState.Granted,
                                 AssignedAccessReason.RestorePendingPrefix + refusal.ReasonCode, AssignedAccessAction.None);
+                            return;
+                        }
+
+                        if (refusal.IsDenyListReadFault)
+                        {
+                            // Task 142 r3 (verifier r2 finding 4): the core's No Access check THREW. Same wire code as an
+                            // entry, but not the record's policy: a fault, reported (Success=false), never a green
+                            // "restore-pending". Nothing written; the row stays Granted, so the next pass retries.
+                            DenyListFault(run, subject, "its earlier level");
                             return;
                         }
 
@@ -1505,11 +1542,31 @@ public sealed class AssignedAccessMaterializer
     /// The grant core's refusals that state the record's CURRENT policy or No Access list — task 138's Restricted and
     /// direct-only organization rules, FR-23's deny check — rather than a fault. A restore refused for one of them waits
     /// (task 142 r2, finding 2); any other refusal (an unreadable policy, a ceiling refusal) is a failure the job reports.
+    /// A No Access check that THREW carries the deny check's code but is a fault (task 142 r3,
+    /// <see cref="GrantPolicyDecision.IsDenyListReadFault"/>), so it is never a hold.
     /// </summary>
     private static bool IsPolicyHold(GrantPolicyDecision refusal)
-        => refusal.ReasonCode is ExternalGrantLifecycle.RecordRestrictedReasonCode
-            or ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode
-            or ExternalGrantLifecycle.GranteeDeniedReasonCode;
+        => !refusal.IsDenyListReadFault
+           && refusal.ReasonCode is ExternalGrantLifecycle.RecordRestrictedReasonCode
+               or ExternalGrantLifecycle.OrgGrantDirectOnlyReasonCode
+               or ExternalGrantLifecycle.GranteeDeniedReasonCode;
+
+    /// <summary>
+    /// A No Access check that could not be completed — it THREW (task 142 r3, verifier r2 finding 4). Never read as an
+    /// entry or as a policy hold: the caller writes nothing (fail closed, ADR-003), and the subject is reported as a
+    /// <see cref="DenyListUnreadableFailure"/> — logged as its own line and counted by the job — so a sustained outage of
+    /// the deny-list read turns the job red (ADR-036 A1) instead of passing green. The next pass decides again.
+    /// </summary>
+    private void DenyListFault(Run run, AssignedSubject subject, string what, Exception? ex = null)
+    {
+        _logger.LogError(ex,
+            "[ASSIGNED-ACCESS] DENY-LIST-UNREADABLE {Type} {RootId}: the No Access check for {Subject} could not be " +
+            "completed, so {What} was not written (fail closed); the next pass tries again.",
+            run.Logical, run.RootId, subject, what);
+        run.Fail(subject, DenyListUnreadableFailure,
+            $"The No Access list could not be checked for {subject} on this record, so {what} was not written. " +
+            "It is tried again automatically.");
+    }
 
     private static ExternalGrantKey GrantKeyFor(Run run, AssignedSubject subject)
         => subject.Kind == AssignedSubjectKind.Contact

@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Azure.Core;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
@@ -514,6 +515,9 @@ internal static class AssignedAccessTestDoubles
             .AddInMemoryCollection(new Dictionary<string, string?> { ["AzureAd:TenantId"] = TestTenant })
             .Build();
 
+        /// <summary>The materializer's logger; set a capturing logger to assert what it reports (task 142 r3).</summary>
+        public ILogger<AssignedAccessMaterializer> Logger { get; set; } = NullLogger<AssignedAccessMaterializer>.Instance;
+
         public AccessibleRecordSetService AccessibleRecords => GrantPolicyTestDoubles.RealDenyList(Participations, DenyList);
 
         public SecureShareNoAccessGuard Guard =>
@@ -521,7 +525,7 @@ internal static class AssignedAccessTestDoubles
 
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, AccessibleRecords, Identities, Guard, Shares, Cache.Mock.Object, Standing, Registry,
-            Configuration, Time, NullLogger<AssignedAccessMaterializer>.Instance);
+            Configuration, Time, Logger);
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)

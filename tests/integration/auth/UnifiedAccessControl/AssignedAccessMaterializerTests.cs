@@ -1,8 +1,10 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.ExternalAccess;
+using Sprk.Bff.Api.Tests.Services.Communication;
 using Xunit;
 using static Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles;
 
@@ -1376,5 +1378,184 @@ public class AssignedAccessMaterializerTests
         await Sync();
 
         _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("the subject had no access here before the assignment");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r3, item 2 (verifier r2 finding 3 / criterion 19) — a raise records the LATEST conferring date
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Two conferring View Only grants on ONE key before the raise (pre-existing duplicates, or a lost create race). The
+    /// grant core collapses the key onto the longest-conferring survivor, so the operator's access ran until the LATER
+    /// date: the raise records that one, and the end of the assignment puts it back — never the earlier date, which would
+    /// shorten the surviving grant (constraint "never shortens an expiry").
+    /// </summary>
+    [Fact]
+    public async Task TwoConferringLowerGrantsOnOneKey_TheRaiseRecordsTheLaterDate_AndTheRestoreNeverShortensTheSurvivor()
+    {
+        var contact = _h.Contact();
+        var earlier = Today.AddDays(30);
+        var later = Today.AddDays(200);
+        _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, earlier);
+        _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, later);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var raise = await Sync();
+
+        raise.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Raised);
+        var survivor = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle(
+            "the core collapses the key onto the longest-conferring row").Subject;
+        survivor.ExpiresDate.Should().Be(later);
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.RaisedFromLevel(ViewOnly, later),
+            "the subject's access ran until the LATER of the two conferring dates");
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        var end = await Sync();
+
+        end.Complete.Should().BeTrue();
+        end.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Restored);
+        var restored = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        restored.Id.Should().Be(survivor.Id);
+        restored.AccessLevel.Should().Be(ViewOnly);
+        restored.ExpiresDate.Should().Be(later, "a restore never shortens the operator's surviving grant");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r3, item 3 (verifier r2 finding 4) — a No Access check that THROWS is a fault, never an entry or a hold
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>An HttpClient timeout: the deny-veto code rethrows it, so the No Access check THROWS (task 139 r1).</summary>
+    private static TaskCanceledException DenyListTimeout() => new("Simulated HttpClient timeout (the caller did not cancel).");
+
+    private CapturingLogger<AssignedAccessMaterializer> CaptureLog()
+    {
+        var log = new CapturingLogger<AssignedAccessMaterializer>();
+        _h.Logger = log;
+        return log;
+    }
+
+    /// <summary>The fault's fingerprint: not complete, one failure of its own kind for the subject, its own error line,
+    /// and never a policy hold or a No Access entry.</summary>
+    private static void AssertDenyListFault(AssignedAccessOutcome outcome, CapturingLogger<AssignedAccessMaterializer> log, Guid subject)
+    {
+        outcome.Complete.Should().BeFalse("a deny-list read fault is reported: the job goes red and the form is told");
+        var failure = outcome.Failures.Should().ContainSingle().Subject;
+        failure.Kind.Should().Be(AssignedAccessMaterializer.DenyListUnreadableFailure);
+        failure.SubjectId.Should().Be(subject);
+        log.Entries.Should().Contain(e => e.Level == LogLevel.Error && e.Message.Contains("DENY-LIST-UNREADABLE"),
+            "logged as its own line, so monitoring can alert on a deny-list read fault");
+        outcome.Entries.Should().NotContain(
+            e => e.Reason != null && e.Reason.StartsWith(AssignedAccessReason.RestorePendingPrefix, StringComparison.Ordinal),
+            "a fault is never the record's policy (a hold)");
+        outcome.Entries.Should().NotContain(e => e.Reason == AssignedAccessReason.NoAccess, "a fault is never an entry on the list");
+    }
+
+    /// <summary>
+    /// The verifier's case: a raised grant's restore whose No Access check THROWS. The core answers with the deny check's
+    /// wire code, but it is a FAULT: reported (never a green "restore-pending"), nothing written, the row kept live and the
+    /// restore made once the list reads again. The twin — an ENTRY on the list, a real hold — is the "no-access" row of
+    /// <see cref="ARaisedGrantWhoseRestoreThePolicyForbids_WaitsWithoutFailing_AndIsPutBackOnceThePolicyAllows"/>.
+    /// </summary>
+    [Fact]
+    public async Task ARestoreWhoseNoAccessCheckThrows_IsADenyListFault_NeverAPolicyHold_AndIsPutBackOnceTheListReads()
+    {
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, Today.AddDays(200));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // raised to Collaborate
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        _h.DenyList.Throws = DenyListTimeout();
+        var before = _h.TotalWrites;
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        _h.TotalWrites.Should().Be(before, "nothing is written while the list cannot be read");
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().AccessLevel.Should().Be(Collaborate);
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted, "kept live, so the next pass retries");
+
+        _h.DenyList.Throws = null;
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        next.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Restored);
+        var restored = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        restored.AccessLevel.Should().Be(ViewOnly);
+        restored.ExpiresDate.Should().Be(Today.AddDays(200));
+    }
+
+    /// <summary>A fresh grant whose No Access check (the grant core's) THROWS: nothing granted, reported, not "no-access".</summary>
+    [Fact]
+    public async Task AFreshGrantWhoseNoAccessCheckThrows_IsADenyListFault_NotNoAccess_AndNothingIsGranted()
+    {
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.DenyList.Throws = DenyListTimeout();
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        _h.Grants.Rows.Should().BeEmpty("fail closed");
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped);
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable, "nobody is known to be on the list");
+
+        _h.DenyList.Throws = null;
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle("decided again once the list reads (Skipped is never sticky)");
+    }
+
+    /// <summary>On a SECURE record the materializer's own No Access check runs before suggesting: a throw is a fault too.</summary>
+    [Fact]
+    public async Task ASecureSuggestionWhoseNoAccessCheckThrows_IsADenyListFault_AndIsNotSuggested()
+    {
+        Secure();
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.DenyList.Throws = DenyListTimeout();
+
+        var faulted = await Sync();
+
+        AssertDenyListFault(faulted, log, contact);
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped, "never suggested while the list cannot be read");
+        row.Reason.Should().Be(AssignedAccessReason.NoAccessUnverifiable);
+        _h.Grants.Rows.Should().BeEmpty();
+
+        _h.DenyList.Throws = null;
+        var next = await Sync();
+
+        next.Complete.Should().BeTrue();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.PendingConfirmation);
+    }
+
+    /// <summary>A renewal (owner A5) whose No Access check THROWS: reported, not renewed this pass, the grant kept as it is.</summary>
+    [Fact]
+    public async Task ARenewalWhoseNoAccessCheckThrows_IsADenyListFault_AndTheGrantIsKeptAsItIs()
+    {
+        var log = CaptureLog();
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // granted, today + 90
+        _h.Time.Now = _h.Time.Now.AddDays(70); // 20 days left: inside the 30-day renewal window
+        _h.DenyList.Throws = DenyListTimeout();
+
+        var faulted = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        AssertDenyListFault(faulted, log, contact);
+        faulted.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.None);
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(90), "not renewed this pass");
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+
+        _h.DenyList.Throws = null;
+        var next = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        next.Complete.Should().BeTrue();
+        next.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Renewed);
     }
 }
