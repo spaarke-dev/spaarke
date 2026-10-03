@@ -4,11 +4,26 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// Maps a regarding-target entity logical name to its primary display-name attribute.
 /// Single source of truth (§11 reuse) shared by the denorm writer
 /// (<see cref="IncomingAssociationResolver"/>, which resolves the FILED primary's
-/// <c>sprk_regardingrecordname</c>) and the add-in suggestion preview
-/// (<c>OfficeCommunicationsEndpoints.GetSuggestionsByMessageIdAsync</c>, task 042 — which resolves
-/// UN-filed candidate names so the picker shows a real name, not a GUID). Returns <c>null</c> for
-/// entity types with no known primary-name attribute (the caller falls back to the id).
+/// <c>sprk_regardingrecordname</c>), the add-in suggestion preview and the communication suggest route
+/// (<see cref="SuggestionCandidateAccess"/> — which reads each candidate AS THE CALLER), and the communication
+/// routes that authorize a caller-named regarding record (<c>CommunicationRecordAuthorizationFilter</c>, task 161).
+/// Returns <c>null</c> for entity types with no known primary-name attribute (the caller falls back to the id).
 /// </summary>
+/// <remarks>
+/// <para><b>Every value here is LIVE-VERIFIED</b> (spaarkedev1, read-only <c>EntityDefinitions</c> and
+/// <c>Attributes</c> GETs, 2026-10-03, task 161 note §2) and pinned by <c>RegardingNameFieldsTests</c>. Task 161 found
+/// and corrected two values that had been written from convention rather than metadata:</para>
+/// <list type="bullet">
+///   <item><c>sprk_organization</c>'s display name is <c>sprk_organizationname</c>. <c>sprk_name</c> does NOT exist on
+///   that table, so every read that selected it failed with a 400 — the denorm writer recorded no name, and the
+///   suggestion previews dropped every organization candidate's name.</item>
+///   <item><c>sprk_analysis</c>'s entity set is <c>sprk_analysises</c>, not <c>sprk_analyses</c>. A wrong set name
+///   fails as a 404, which a delegated read cannot tell apart from "the caller may not read this record" — so an
+///   analysis candidate the caller WAS entitled to see was silently treated as hidden.</item>
+/// </list>
+/// <para>Both functions are case-SENSITIVE: callers normalize a caller-supplied type with
+/// <c>ToLowerInvariant()</c> first (the regarding writers accept any case).</para>
+/// </remarks>
 public static class RegardingNameFields
 {
     /// <summary>The primary display-name attribute for <paramref name="entityLogicalName"/>, or <c>null</c>.</summary>
@@ -21,8 +36,9 @@ public static class RegardingNameFields
         "sprk_workassignment" => "sprk_name",
         "sprk_servicerequest" => "sprk_name",
         "sprk_budget" => "sprk_name",
+        "sprk_reportcard" => "sprk_name",
         "sprk_analysis" => "sprk_name",
-        "sprk_organization" => "sprk_name",
+        "sprk_organization" => "sprk_organizationname",
         "contact" => "fullname",
         "account" => "name",
         _ => null,
@@ -38,7 +54,7 @@ public static class RegardingNameFields
     /// by entity-set name rather than by logical name.
     /// <para>
     /// Written as an explicit map rather than by pluralising the logical name, because Dataverse's
-    /// pluralisation is not a simple suffix rule (<c>sprk_analysis</c> → <c>sprk_analyses</c>), and a
+    /// pluralisation is not a simple suffix rule (<c>sprk_analysis</c> → <c>sprk_analysises</c>), and a
     /// wrong guess here fails as a 404 that would be indistinguishable from "the caller may not read
     /// this record" — silently dropping a candidate the caller was entitled to see.
     /// </para>
@@ -56,7 +72,8 @@ public static class RegardingNameFields
         "sprk_workassignment" => "sprk_workassignments",
         "sprk_servicerequest" => "sprk_servicerequests",
         "sprk_budget" => "sprk_budgets",
-        "sprk_analysis" => "sprk_analyses",
+        "sprk_reportcard" => "sprk_reportcards",
+        "sprk_analysis" => "sprk_analysises",
         "sprk_organization" => "sprk_organizations",
         "contact" => "contacts",
         "account" => "accounts",

@@ -1209,10 +1209,13 @@ public class RouteAuthorizationGuardTests
                 + "token and denies without either. Identity precondition for a gateway, not a document "
                 + "route — it serves no document metadata or bytes, so it is outside Rule A's subject too.",
             ["CommunicationAuthorizationFilter"] =
-                "Gates SENDING a communication, not reading a record. Its own summary is explicit that "
-                + "Phase 1 permits any authenticated user with a valid oid, so it does not misrepresent "
-                + "itself as a per-resource gate. Per-record scoping is ICommunicationAccessFilter's job, "
-                + "which is a separate seam already in DecisionServices.",
+                "IDENTITY PRECONDITION only (authenticated + a resolvable oid) for the /api/communications "
+                + "routes; it decides nothing about any record, and its summary says so. The 2026-10-02 route "
+                + "sweep found the old reason here ('per-record scoping is ICommunicationAccessFilter's job') "
+                + "false for twelve routes whose paths never reached that seam. Since task 161 the per-record "
+                + "decision is CommunicationRecordAuthorizationFilter, attached AFTER this filter in each such "
+                + "route's chain (.AddCommunicationRecordAuthorizationFilter) and inspected by Rule B in its own "
+                + "right; routes carrying ONLY this filter must scope their reads to the caller in the handler.",
             ["WorkspaceAuthorizationFilter"] =
                 "Resolves the caller's oid, denies 401 when absent, and stashes it in HttpContext.Items so "
                 + "handlers do not repeat claim extraction. A claim-resolution precondition by construction "

@@ -23,7 +23,17 @@ namespace Sprk.Bff.Api.Tests.Services.Office;
 [Trait("Category", "Security")]
 public class CommunicationsDelegatedReadGuardTests
 {
-    private static string Source()
+    private static string Source() =>
+        ReadBffSource("Api", "Office", "CommunicationsEndpoints.cs");
+
+    /// <summary>
+    /// The candidate read moved out of the Office endpoints file into the shared caller-scoped helper (task 161), so
+    /// the suggest route and this surface share one trimming path. The guards below follow it there.
+    /// </summary>
+    private static string CandidateAccessSource() =>
+        ReadBffSource("Services", "Communication", "SuggestionCandidateAccess.cs");
+
+    private static string ReadBffSource(params string[] relative)
     {
         var dir = AppContext.BaseDirectory;
         while (dir is not null)
@@ -32,10 +42,8 @@ public class CommunicationsDelegatedReadGuardTests
             var git = Path.Combine(dir, ".git");
             if (Directory.Exists(git) || File.Exists(git))
             {
-                var path = Path.Combine(
-                    dir, "src", "server", "api", "Sprk.Bff.Api", "Api", "Office",
-                    "CommunicationsEndpoints.cs");
-                File.Exists(path).Should().BeTrue($"CommunicationsEndpoints.cs must exist at {path}");
+                var path = Path.Combine(new[] { dir, "src", "server", "api", "Sprk.Bff.Api" }.Concat(relative).ToArray());
+                File.Exists(path).Should().BeTrue($"{relative[^1]} must exist at {path}");
                 return File.ReadAllText(path);
             }
 
@@ -93,14 +101,25 @@ public class CommunicationsDelegatedReadGuardTests
     {
         var source = Source();
 
-        // The communication lookup, the candidate-name resolution and the linked-todos query.
+        // The communication lookup and the linked-todos query, in this file.
         System.Text.RegularExpressions.Regex
             .Matches(source, @"userClient\.GetAsync")
             .Count
             .Should().BeGreaterThanOrEqualTo(
-                3,
-                "the communication lookup, the candidate display-name resolution and the linked-todos "
-                + "query must each read under the caller's context");
+                2,
+                "the communication lookup and the linked-todos query must each read under the caller's context");
+
+        // The candidate read: this surface hands the delegated client to the shared helper, and the helper reads
+        // each candidate through it (task 161 moved it there; it was the third read in this file).
+        source.Should().Contain(
+            "SuggestionCandidateAccess.EvaluateForCallerAsync(",
+            "the suggestions route must take its candidates from the caller-scoped helper");
+        System.Text.RegularExpressions.Regex
+            .IsMatch(source, @"EvaluateForCallerAsync\([^;]*userClient")
+            .Should().BeTrue("the helper must receive THIS request's delegated client");
+        CandidateAccessSource().Should().Contain(
+            "userClient.GetAsync(",
+            "each candidate must be read under the caller's context");
     }
 
     [Fact]
@@ -110,9 +129,13 @@ public class CommunicationsDelegatedReadGuardTests
         // that the record exists and was associated with the email — the same disclosure, minus the
         // label. The old code swallowed every resolution failure into "no name", which under a
         // delegated client would have turned a denial into a silent omission.
-        Source().Should().Contain(
+        var helper = CandidateAccessSource();
+        helper.Should().Contain(
             "not readable by caller",
             "a candidate the caller cannot read must be dropped from the suggestions response");
+        helper.Should().Contain(
+            "removedIds.Add(target.Id)",
+            "an unreadable candidate must be removed from the decision itself, not merely left unnamed");
     }
 
     [Fact]

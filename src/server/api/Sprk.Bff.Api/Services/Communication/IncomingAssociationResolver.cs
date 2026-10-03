@@ -110,7 +110,7 @@ public sealed class IncomingAssociationResolver
         // EvaluateAsync (task 074) so the on-demand suggestion endpoint can preview the decision WITHOUT
         // writing. The real communicationId is threaded through so per-rung + resolving-rung telemetry is
         // unchanged on this path (behavior-preserving).
-        var decision = await EvaluateInternalAsync(message, context, communicationId, ct);
+        var decision = await EvaluateInternalAsync(message, context, communicationId, admitTargets: null, ct);
 
         await ApplyDecisionAsync(communicationId, decision, ct);
     }
@@ -130,17 +130,53 @@ public sealed class IncomingAssociationResolver
         CancellationToken ct)
         // No record id on the read-only path; telemetry logs with an empty id (preview, no prior behavior to
         // preserve). ResolveAsync uses the id-carrying overload so inbound/outbound telemetry is unchanged.
-        => EvaluateInternalAsync(message, context, Guid.Empty, ct);
+        => EvaluateInternalAsync(message, context, Guid.Empty, admitTargets: null, ct);
+
+    /// <summary>
+    /// Evaluate-only path RESTRICTED to the regarding targets <paramref name="admitTargets"/> admits
+    /// (unified-access-control-r2 task 161). The SAME rungs and the SAME ladder run as in
+    /// <see cref="EvaluateAsync(NormalizedMessage, AssociationContext, CancellationToken)"/>; the one difference is
+    /// that, after every rung has run, the distinct regarding targets the rungs proposed are handed to
+    /// <paramref name="admitTargets"/> once, and the final ladder decision is taken over the matches whose target
+    /// it admitted (metadata-only signals with no target are always kept).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the ladder re-runs rather than the response being trimmed afterwards.</b> The suggestion
+    /// previews must carry nothing about a candidate the caller may not read. Removing a hidden candidate from the
+    /// projected list is not enough: <c>Status</c>, <c>AutoFileEligible</c> and each candidate's <c>Conflict</c> /
+    /// <c>Written</c> flag were computed WITH it, so an "Ambiguous" status beside one visible candidate would still
+    /// say a second, hidden one exists. Deciding over the admitted matches gives exactly the answer the engine
+    /// would give if the hidden records did not exist.</para>
+    /// <para>The engine itself makes no access decision: the admission callback is the caller's (the endpoint's
+    /// candidate-access helper, which reads each target AS THE CALLER). The inbound/outbound filing path
+    /// (<see cref="ResolveAsync"/>) never passes one, so system callers are unaffected.</para>
+    /// </remarks>
+    /// <param name="message">The normalized envelope (channel-neutral).</param>
+    /// <param name="context">Ambient association context (mailbox account, tenant key, etc.).</param>
+    /// <param name="admitTargets">Receives the distinct proposed targets; returns the subset to keep. A fault propagates.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public Task<AssociationDecision> EvaluateAsync(
+        NormalizedMessage message,
+        AssociationContext context,
+        Func<IReadOnlyList<EntityReference>, CancellationToken, Task<IReadOnlyCollection<EntityReference>>> admitTargets,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(admitTargets);
+        return EvaluateInternalAsync(message, context, Guid.Empty, admitTargets, ct);
+    }
 
     /// <summary>
     /// Shared evaluate core: deterministic pass → ladder → cost-gated AI escalation → resolving-rung telemetry.
     /// Returns the decision; never writes. <paramref name="communicationId"/> is used only for telemetry
     /// correlation (the real id on the resolve path, <see cref="Guid.Empty"/> on the read-only preview path).
+    /// <paramref name="admitTargets"/> (preview path only) restricts the final ladder decision to the targets it
+    /// admits — see the restricted <see cref="EvaluateAsync(NormalizedMessage, AssociationContext, Func{IReadOnlyList{EntityReference}, CancellationToken, Task{IReadOnlyCollection{EntityReference}}}, CancellationToken)"/>.
     /// </summary>
     private async Task<AssociationDecision> EvaluateInternalAsync(
         NormalizedMessage message,
         AssociationContext context,
         Guid communicationId,
+        Func<IReadOnlyList<EntityReference>, CancellationToken, Task<IReadOnlyCollection<EntityReference>>>? admitTargets,
         CancellationToken ct)
     {
         // Deterministic pass: run every deterministic rung and collect all matches (writable + signals).
@@ -159,6 +195,29 @@ public sealed class IncomingAssociationResolver
         {
             await EvaluateRungsAsync(_aiRungs, message, context, communicationId, matches, ct);
             decision = _statusMapper.Decide(matches, message.Direction, context.TenantKey);
+        }
+
+        // Task 161: a caller-scoped preview decides over the targets the caller may read — see the restricted
+        // EvaluateAsync overload. Distinct by (logical name, id); a match with no target (a signal) is kept.
+        if (admitTargets is not null)
+        {
+            static (string Entity, Guid Id) KeyOf(EntityReference t) => ((t.LogicalName ?? string.Empty).ToLowerInvariant(), t.Id);
+
+            var proposed = matches
+                .Where(m => m.Target is not null)
+                .Select(m => m.Target!)
+                .GroupBy(KeyOf)
+                .Select(g => g.First())
+                .ToList();
+
+            var admitted = await admitTargets(proposed, ct).ConfigureAwait(false);
+            var admittedKeys = admitted.Select(KeyOf).ToHashSet();
+
+            var kept = matches
+                .Where(m => m.Target is null || admittedKeys.Contains(KeyOf(m.Target)))
+                .ToList();
+
+            decision = _statusMapper.Decide(kept, message.Direction, context.TenantKey);
         }
 
         // Per-envelope "resolving rung" telemetry (DEC-8 / NFR-05): a single dashboard-able signal showing
