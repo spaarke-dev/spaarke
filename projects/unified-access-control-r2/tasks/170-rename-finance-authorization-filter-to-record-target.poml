@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="170" project="unified-access-control-r2">
+  <metadata>
+    <title>Rename FinanceAuthorizationFilter to RecordTargetAuthorizationFilter once the route-sweep tasks (159-166) are integrated: it is now the shared record-target filter for finance, AI, communications and other routes, so its name and its deny log lines must stop saying "Finance"</title>
+    <phase>Session 27 — route authorization sweep (owner rounds 9-10), follow-up</phase>
+    <gate>after 159, 161, 162, 163, 164 and 166 are integrated into work/unified-access-control-r2 (they reuse the filter under its current name, by the 2026-10-03 main-session ruling)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits an authorization filter's type and every call site on the BFF route surface, plus RouteAuthorizationGuardTests' filter-name recognition (task 074/167), which credits filters by name. A rename that the guard does not learn would read every route as ungated.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical and fully specified, but the guard's name-based crediting makes a missed site a build break or a silent de-credit, so the closed criteria below are exact.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches every endpoint file that adds the filter (finance, the AI surfaces, communications and others) and tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs. Run it alone, after the sweep tasks are integrated.</parallel-reason>
+    <deps>159, 161, 162, 163, 164, 166 (integrated)</deps>
+    <tags>bff-api, auth, refactor, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <origin>Main-session ruling of 2026-10-03, made while authoring tasks 159-169 (reviewer concerns 162.2, 163.2 and 164.3). Several sweep tasks reuse FinanceAuthorizationFilter in parallel, and one of them proposed generalizing it into a RecordAccessAuthorizationFilter. That move would conflict with every other branch, so the parallel tasks reuse the filter as it is, and the rename happens once, here, after they land. The owner's no-deferral rule (session 27) makes this a tracked task, not a note.</origin>
+  </metadata>
+
+  <prompt>FinanceAuthorizationFilter (src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs) was written for the finance routes (task 130) and is now reused, unchanged, by the route-sweep tasks for AI, communications and other routes. Rename the type, its extension methods and its log text to RecordTargetAuthorizationFilter, with no behaviour change. Update every call site and every test. Make sure task 074/167's RouteAuthorizationGuardTests credits the new name exactly as it credited the old one.</prompt>
+
+  <role>SPAARKE platform developer: BFF endpoint filters (ADR-008), the route authorization guard (RouteAuthorizationGuardTests, tasks 074 and 167).</role>
+
+  <goal>After this task the filter is RecordTargetAuthorizationFilter, with AddRecordTargetAuthorizationFilter extension methods of the same signatures. Its deny and allow log lines say "Record target authorization" instead of "Finance authorization". No source file under src/ or tests/ names FinanceAuthorizationFilter or AddFinanceAuthorizationFilter (outside one historical note in the type's remarks). Every route that carried the filter before carries it after, with identical behaviour. The route guard credits exactly the same routes as before the rename.</goal>
+
+  <context>
+    <background>Read on work/unified-access-control-r2 after the sweep tasks are integrated. The filter and its extensions are in src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs (the extensions start at about line 31). RouteAuthorizationGuardTests credits route filters by NAME (a FilterMarker / known-filter set, and task 167's Rule A). Grep it for "FinanceAuthorizationFilter" before editing.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/FinanceAuthorizationFilter.cs (rename the file to RecordTargetAuthorizationFilter.cs)</file>
+      <file role="modify">every src/server/api/Sprk.Bff.Api/Api/**/*.cs that calls AddFinanceAuthorizationFilter (find them with the Grep tool)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (the filter-name recognition)</file>
+      <file role="modify">every test under tests/** that names the filter</file>
+    </relevant-files>
+    <dependencies>Tasks 159, 161, 162, 163, 164 and 166 are integrated (they add call sites).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">No behaviour change. Same decisions, same status codes, same ProblemDetails, same reason codes. Only the type, file, method and log-text names change.</constraint>
+    <constraint source="project">Keep a single type. Do NOT leave an [Obsolete] alias or a forwarding FinanceAuthorizationFilter type: every call site is in this repo.</constraint>
+    <constraint source="task 074/167">RouteAuthorizationGuardTests must credit the renamed filter exactly as it credited the old name. Remove the old name from its recognition set; never keep both.</constraint>
+    <constraint source="ADR-038">No new tests of the banned kinds. Existing tests are renamed, not rewritten.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file>projects/unified-access-control-r2/notes/route-authorization-sweep-2026-10-02.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Record the guard's verdict for every governed route BEFORE the rename (the scanner's output, or the test's route list): this is the baseline the closed criteria compare against.</step>
+    <step order="1">Rename the type, the file and the extension methods, and change the log text.</step>
+    <step order="2">Update every call site and every test (use the Grep tool, not bash grep -rn).</step>
+    <step order="3">Update RouteAuthorizationGuardTests' recognition of the filter name.</step>
+    <step order="4">Re-run the guard and compare every route's verdict with the step 0 baseline: identical.</step>
+    <step order="5">Run the affected tests, the full BFF unit suite, NetArchTest and BOTH integration suites in full (the project hard gate).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion id="1">The Grep tool finds no "FinanceAuthorizationFilter" or "AddFinanceAuthorizationFilter" under src/ or tests/, except one historical sentence in the renamed type's XML remarks.</criterion>
+    <criterion id="2">Every route that called AddFinanceAuthorizationFilter at step 0 calls AddRecordTargetAuthorizationFilter with the same arguments. The note lists them all.</criterion>
+    <criterion id="3">RouteAuthorizationGuardTests passes, and its per-route verdicts are identical to the step 0 baseline (the note shows the comparison).</criterion>
+    <criterion id="4">Negative control: temporarily removing the new name from the guard's recognition set turns the guard red on the renamed routes (seeded, then restored).</criterion>
+    <criterion id="5">The full BFF unit suite, NetArchTest, tests/integration/Sprk.Bff.Api.IntegrationTests and tests/integration/Spe.Integration.Tests all pass, with exact counts reported.</criterion>
+    <criterion id="6">The deny log text reads "Record target authorization ..." (a test or a grep of the source pins it).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A call site outside src/server/api/Sprk.Bff.Api (another assembly or a client) depends on the old type or method name: stop and report it.</trigger>
+    <trigger>The guard's verdict for any route changes after the rename: stop. Do not "fix" it by widening the recognition set.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FinanceAuthorizationFilter is the existing record-target filter. Nothing new is added.</existing>
+    <extension>This is a rename of the existing component, not a new one.</extension>
+    <cost-of-doing-nothing>Deny log lines for AI and communications routes would read "Finance authorization", which misleads incident triage on routes that have nothing to do with finance. The type name would keep telling the next author that it is finance-only, inviting a duplicate filter: the fork CLAUDE.md §11 forbids.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/RecordTargetAuthorizationFilter.cs (renamed)</output>
+    <output type="code">updated call sites and tests</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-170-rename-record-target-filter.md (baseline comparison, call-site list, suite counts)</output>
+  </outputs>
+</task>

@@ -1,5 +1,37 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-03 ~03:00Z (checkpoint #3). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #3 (READ FIRST)
+>
+> | Field | Value |
+> |---|---|
+> | **Standing instruction** | Owner: "continue autonomous". Stop only for a genuine owner decision (CLAUDE.md §6 / §6.5). Subagents ARE available again (the probe passed 2026-10-02 ~20:00Z). |
+> | **Master / dev BFF** | Master `818840ac6` (#1096 batch 3 + #1097 the 141 create-by-POST fix). **Dev BFF = `818840ac6`** (deployed 2026-10-03 02:2xZ). |
+> | **Work branch** | `work/unified-access-control-r2` = master + docs (`d746422f7`: owner rounds 8-9, the route sweep note, 141 G-6). |
+> | **141 live gates** | G-1 to G-6 **PASS**. G-6: 7 created, then two runs changed nothing; 9 of 11 users linked; `IdentityLink__Reconciliation__WritesEnabled=true` stays. **G-7/G-8 are manual (the owner).** Notes: `notes/task-141-live-gates-2026-10-02.md`. |
+> | **Owner rounds 8 + 9** | Recorded in `notes/session27-owner-decisions-and-research.md`. **R8 (156):** the AI update tool re-stamps inline (path B); TaskActionCore writes the ADR-024 pair; lock the four regarding columns on the forms (= task 168). **R9 (route sweep):** UAC-r2 fixes all 82 now, in parallel; plus an every-route build guard (= task 167). |
+> | **Route sweep** | `notes/route-authorization-sweep-2026-10-02.md`: 82 of 419 routes are sign-in-only plus app-only (17 critical / 29 high / 30 medium / 6 low). The evidence JSON is in the scratchpad (`idor-sweep.json`, `idor-group-NNN.json`). Events = **#1098**. |
+>
+> ### Running workflows (check the journals; do NOT re-launch)
+> | Workflow | Run | State at checkpoint |
+> |---|---|---|
+> | **batch 4 DAG** | `wf_7bcc9b69-43b` | 133 (`task/uac-r2-133-b2-r2`), 137 (`task/uac-r2-137-b2`) and 146 (`task/uac-r2-146-b2-r2`) are **ready-to-merge**. 143, 149 and 150 are executing; 148→147 and 142→140 follow. **132 FAILED** (its executor died) and was re-run in 4b. **158 will be SKIPPED** (156 was not ok): run it after 148 + 156. 157 used up its rounds and was re-run in 4b. |
+> | **batch 4b** | `wf_002cb0ff-0b4` | 156 fix (R8 items 1-2) on `task/uac-r2-156-c1`; 157 redesign (runtime-enforced in the shared DataGrid, plus F1: the external saved-query routes are restricted) on `task/uac-r2-157-c1`; 132 executes on 137-b2. |
+> | **authoring 159-169** | `wf_8b8ccf52-d29` | Returns POML text plus index rows plus issues. The MAIN SESSION writes the files: `tasks/NNN-*.poml`, TASK-INDEX rows, GitHub issues (159 = #1098). Then launch their execution DAG (159-167 in parallel; 168 and 169 after 156). |
+>
+> ### NEXT ACTIONS
+> 1. Authoring done → write the POMLs, index rows and issues; check drift; commit; launch the execution DAG for 159-169.
+> 2. Batch 4 + 4b done → collect the OWNER QUESTIONS the lanes raised (133 fix1: is a record that keeps its own container resumable after a failure after its move; 146 fixb2: does F3's unsecure limit apply when a child moves out of a secure root; plus any `ownerQuestionsOpen`), then ask the owner in ONE round.
+> 3. Integrate the ready lanes on an integ branch: run BOTH integration suites in full (hard gate), reconcile task 167's Pending waivers, apply the **146 role extension 9→26 live BEFORE deploying 146**, then PR → merge → deploy → live gates.
+> 4. Run 158 (parents 148 + 156).
+>
+> ### Lessons this checkpoint
+> - Run both integration suites in full before every PR (now a project hard gate). Batch 3 hit three integration failures in CI only.
+> - The in-memory store modelled a Dataverse behaviour wrongly: a keyed `PATCH` with `If-None-Match: *` answers 404 on the platform. **Probe the platform before trusting a fake.**
+> - Agent worktrees nested in the project worktree (`.claude/worktrees/`) were picked up by the repo scans (fixed for ADR-052 in `9a81025ea`).
+>
+
 > **Last Updated**: 2026-10-02 ~19:30Z (by context-handoff). **This block supersedes every block below it.**
 >
 > ## ⚡ QUICK RECOVERY — SESSION 27 HANDOFF #2 (READ FIRST)

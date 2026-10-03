@@ -51,8 +51,8 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// finish).</para>
 ///
 /// <para><b>Idempotent per row, so no chunk claims.</b> Every write is conditional: a bind and a link carry the
-/// row version read with the row (<c>If-Match</c>), a create is create-only through the alternate key on the
-/// uniqueness mirror (<c>If-None-Match: *</c>; owner round 4 item 4, B2), a collision party is recorded once per
+/// row version read with the row (<c>If-Match</c>), a create carries the uniqueness mirror whose alternate key's
+/// unique index refuses a second contact for the oid (owner round 4 item 4, B2), a collision party is recorded once per
 /// contact, and a flag is pruned or cleared only on the row version its verdict was made on. A second run — or a
 /// second instance, or a BFF deployed against a target environment reconciling it too — re-decides from current
 /// data and finds nothing to do, which is the at-most-once property ADR-036 A1 rule 3 asks for, without a claim
