@@ -258,6 +258,14 @@ internal static class AssignedAccessTestDoubles
         public List<(string Set, Guid Id, string Payload)> Updates { get; } = new();
         public bool FailQueries { get; set; }
 
+        /// <summary>
+        /// Runs before every grant-table query with its 1-based ordinal — lets a test change a row BETWEEN two reads
+        /// (the materializer's, then the grant core's), as a concurrent writer or a midnight would.
+        /// </summary>
+        public Action<int>? BeforeGrantQuery { get; set; }
+
+        private int _grantQueries;
+
         /// <summary>Every Dataverse write this table took (grant creates and updates).</summary>
         public int WriteCount => Creates.Count + Updates.Count;
 
@@ -309,6 +317,9 @@ internal static class AssignedAccessTestDoubles
         {
             if (FailQueries)
                 throw new HttpRequestException("Simulated Dataverse query failure.");
+
+            if (entitySetName == GrantSet)
+                BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
 
             object rows = entitySetName switch
             {

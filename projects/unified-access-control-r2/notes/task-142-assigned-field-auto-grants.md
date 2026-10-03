@@ -1,9 +1,10 @@
 # Task 142 — Assigned-To auto-grants (#1065)
 
 > Branch `task/uac-r2-142` (from `task/uac-r2-143-r2` + `task/uac-r2-137-b2` + `work/unified-access-control-r2`, base
-> `ee925b903`). Server, client, web resources, ribbon source and schema script complete. **Live writes: none** — every
-> live step is a pending manual gate (§7). The ADR-034 amendment A4 is drafted and **awaits the owner's §6.5 acceptance**
-> (§8); the code merges with it, never before.
+> `ee925b903`); verifier fix round **`task/uac-r2-142-r1`** (§11). Server, client, web resources, ribbon source and schema
+> script complete. **Live writes: none** — every live step is a pending manual gate (§7). The ADR-034 amendment A4 is
+> drafted and **awaits the owner's §6.5 acceptance** (§8); the code merges with it, never before — and only after the
+> dependency merges in §7 G-0.
 
 ## 1. Owner answers applied (no escalation fired as a stop)
 
@@ -110,7 +111,7 @@ existing `FakeRecordShareTable`, a `GrantTable` interpreting the core's real ODa
 
 | File | Tests | Covers |
 |---|---|---|
-| `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | 55 | criteria 2–11, 16 (conversion, renewal, cache key), A6, inline gating |
+| `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | 69 (55 + 14 in round r1) | criteria 2–11, 16 (conversion, renewal, cache key, Restricted after a grant), A6, inline gating; r1: expired grants never cover (P1/P2 + twins), never "granted"/"restored" over a lapsed grant (P3, the read race, the lapsed restore), the share half of criterion 10 (other field, modified mask, S5), the R2 known cause, a disabled linked user |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs` | 12 | criterion 12 THROUGH the real `/api/v1/external-access` filter pipeline (Write → handler; no Write and unknown id → the same filter 403; 401; body subject ids ignored; ProblemDetails with reason codes; list + dismiss gated; cache key = caller tenant) |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessMarkerTests.cs` | 13 | criteria 6, 9, 17 through the production `/revoke`, `/unshare-user`, `/grant`, `/share-user` handlers |
 | `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | 14 | criterion 16 (sweep, idempotent second run, switch on/off, cadence/enabled values, faulted scan → Success=false, TRUNCATED, ROTATING + recent-first, deployment-tenant cache key, no tenant, incomplete root, link conversion) |
@@ -159,6 +160,24 @@ from a backup and touched:
 | C4 the sync helper rejects on a network failure | 2 |
 | C5 the organization residual copy is generic | 1 |
 
+Round r1 seeds (each alone; build + the now **118** AssignedAccess tests; restored byte-for-byte and touched — §11):
+
+| Seed | Failed |
+|---|---|
+| S1 the fresh covering check counts a non-conferring (expired) row | 3 |
+| S2 the covered re-check counts a non-conferring row | 1 |
+| S2b a lapsed covering grant is not a known cause (→ Declined) | 1 |
+| S3 no explicit today + 90 when no row on the key confers | 4 |
+| S4 the fresh path ignores the core's `expired_not_restored` Warning | 1 |
+| S5 the restore path ignores the core's Warning | 1 |
+| J (verifier) share: another registry column naming the subject ignored | 1 |
+| F (verifier) share: a modified mask removed on change | 2 |
+| G (verifier) share: the S5 keep-on-secure rule disabled | 1 |
+| D (verifier) R2 inactive organization not a known cause | 1 |
+| R the materializer's renewal guard ignores Restricted | **0** — the grant core's own task-138 Restricted refusal is a second layer |
+| R2 the renewal guard AND the core's Restricted refusal both removed | 1 |
+| E a Shared row is re-decided when its user turns ineligible | 1 |
+
 Web resources (no test harness exists for classic scripts): `node --check` both; a scratch smoke run in a fake form
 confirmed — helper absent: OnPostSave logs "BffAuth is not loaded" and makes no call, `canUpdateAccess` = false,
 Update Access shows the reload message; no token: no call + "Sign-in needed"; with a token: exactly one POST to
@@ -201,6 +220,7 @@ last modal change).
 
 | # | Gate | Command / action |
 |---|---|---|
+| G-0 | **Dependency merges FIRST** (verifier r0 finding 7). This branch carries the non-merge commits of tasks 133, 137 and 143 that `work/unified-access-control-r2` does not have yet, including two `WIP … UNVERIFIED, do not merge` commits — `b38756ba6` (133-b1, an ancestor of `task/uac-r2-133-b2` / `-b2-r2`) and `33108909e` (137-b1, an ancestor of `task/uac-r2-137-b2`), each superseded inside its own verified line. Merging 142 first would bring them in unreviewed. | Into `work/unified-access-control-r2`, in order: `task/uac-r2-133-b2-r2` (`5a8b66c15`), `task/uac-r2-137-b2` (`a8fe5b428`), `task/uac-r2-143-r2` (`7668bbc1f`) — each verified in its own round. ⚠️ 137-b2 + 143-r2 have a SEMANTIC conflict with no textual one (143 r1 added `IContactIdentityStore` to `AccessibleRecordSetService`'s constructor; 137's seam test used the old one): bring `843d62b46` (`tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs`, +3 lines) with the second of the two merges, or the test project does not compile. Then re-merge `work` into the 142 line and merge it. Confirm with `git log --oneline work/unified-access-control-r2..task/uac-r2-142-r1 --no-merges` = only 142 commits |
 | G-1 | Ledger schema, BEFORE any BFF deploy of this branch (without it every materialization reads `ledger-unreadable` and writes nothing — fail closed) | `pwsh scripts/Set-AssignedAccessLedgerSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry run), then `-Apply`, then `-Verify` (exit 0) and `describe('tables/sprk_assignedaccess')`; confirm `sprk_AssignedAccessLedgerKey` Active and the privilege census lists only System Administrator / System Customizer for Create/Write/Delete. Record in `src/solutions/SpaarkeCore/entities/sprk_assignedaccess/entity-schema.md` |
 | G-2 | BFF deploy | the usual BFF deploy of the merged branch (job registers enabled; `ExternalAccess__AssignedAccess__JobRevokeOnChangeEnabled` absent = report-only) |
 | G-3 | Web resources | dataverse-deploy: `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`; `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`; publish |
@@ -260,6 +280,29 @@ spec.md (MUST NOT list, FR-32) and design.md §7 amendment text. Paste into the 
   share (Declined carried) once the link appears.
 - **R-9** Coordination: tasks 064/066 should show Assigned-To provenance from `GET /api/v1/external-access/assigned-access`
   (source field + state), not re-derive it; task 087's FR-32 hooks see auto grants automatically (`CreateGrantAsync`).
+- **R-10** (r1, verifier finding 9 — disproven, coordination kept) The wizard creates a secure project WITH
+  `sprk_issecure = true` in the create payload (`CreateProjectWizard/projectService.ts:281-286`, pinned by
+  `projectService.test.ts:116-132`), and `IsSecure` is read from that column alone (`ExternalParticipationService.FlagsFrom`,
+  `RootFlagColumns`). So the job sees a secure record from the first instant and SUGGESTS (A3); provisioning changes
+  ownership and storage, not the flag. **Coordination**: whoever applies round 2 item 2's lock on `sprk_issecure`
+  (FLS + endpoint-only writes) must keep the record secure FROM ITS CREATE (e.g. secure it in the server create path);
+  if the client create can no longer carry the flag, this window opens.
+- **R-11** (r1, verifier finding 11) A `Shared` ledger row follows its user, not later link changes. Under the 141
+  contract (`notes/141-link-contract.md` §2–§3, owner decision I2 = (1)) a link is never re-pointed and never cleared,
+  `systemuser.sprk_primarycontact` is FLS-locked to the BFF, and a second user cannot link to a contact bound to
+  another oid (a collision, refused and flagged) — so "the link moves to another systemuser" has no product path. A
+  disabled user keeps the share (pinned: `ALinkedAssigneeWhoseUserIsLaterDisabled_KeepsTheShare_WithZeroWrites`):
+  Dataverse refuses a disabled user's sign-in, and re-enabled, the still-assigned user should have it (owner round 7:
+  inactive principals are read guards, no data repair). An operator hand-editing the locked link outside the product
+  would leave the old user's share until the field changes.
+- **R-12** (r1, found while pinning finding 10 — NOT changed here, out of this round's scope) A RAISED manual grant
+  whose assignment ends while the record is Restricted cannot be put back: the grant core refuses every contact-grant
+  write on a Restricted record (`record_restricted`), so each sync and each job tick reports `restore-refused`
+  (`Success=false`) until the record is no longer Restricted, when the restore succeeds. Probed 2026-10-03: two passes,
+  both `restore-refused`, level stays Collaborate, ledger stays `Granted`. No exposure (the read path suppresses contact
+  access on a Restricted record) and the report is truthful, but the job is red for as long as the record stays
+  Restricted. Candidate fix for the next round: settle the row as "restore pending (restricted)" without a failure and
+  retry on the transition back.
 
 ## 10. Quality gates (Step 9.5)
 
@@ -278,3 +321,39 @@ ADR-038 (KEEP paths, no banned shapes) — compliant; NetArchTest 346/346 after 
 the POML/UX amendment, thin, no UI; ADR-006 permits ribbon-command scripts); ADR-028 client contract (the web resources
 send a Bearer token with `fetch` — through `Spaarke.BffAuth`, the established classic-form helper, as
 `sprk_kpiassessment_quickcreate.js` does; not React code). **ADR-034: path B in flight** (A4 drafted; acceptance G-9).
+
+## 11. Round r1 — verifier findings (2026-10-03, branch `task/uac-r2-142-r1`)
+
+Each finding, what changed (or why nothing did), and the proof. Seeds and counts are in §5 ("Round r1 seeds").
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | DEFECT (high): an expired grant counted as covering — `QueryActiveRowsAsync` filters on statecode only, and expired rows stay at statecode 0; P1/P2 left an assigned contact `CoveredByExisting` with no access, permanently | **Fixed.** A grant covers only while it CONFERS access: `Conferring()` = `ExternalParticipationService.ConfersAccessOn`, the read filter's own predicate (no private copy). `FreshAsync`'s covering check and `ContinueCoveredAsync`'s re-check use it. A covering grant that is still there but LAPSED is a known cause (expiry, owner (e)/A5) — decided fresh, which gives the still-assigned subject Collaborate again; a covering grant DEACTIVATED is still an operator's removal (Declined). Tests: P1, its expiring-today twin (the date itself still confers), P2, its deactivated twin. Seeds S1 (3), S2 (1), S2b (1) |
+| 2 | DEFECT (medium, ADR-003): `FreshAsync` and the restore path ignored the core's `expired_not_restored` Warning (P3: "raised" over a grant that confers nothing) | **Fixed at the cause and guarded at the symptom.** Cause: when rows exist on the key but NONE confers, the rule asks the core for an explicit `DefaultExpiry(today)` (today + 90 — the date renewal writes; no conferring date exists to shorten), so the core never warns there; a lapsed row's level is not a "prior" to put back (it conferred nothing), so the end of the assignment removes the access instead of resurrecting an expired manual grant. Guard: a Warning on the fresh path is a failure (`grant-not-conferring`), never `Granted`, and the ledger is untouched so the next pass decides again (reachable only when a row lapses between the rule's read and the core's — tested through a `GrantTable.BeforeGrantQuery` hook). On the restore path, a Warning means the raised grant had lapsed: the level is put back, recorded `Revoked(prior-level-restored-lapsed)` with action `ledger` (no access was restored, none is reported; nothing to retry). New reason code added to `AssignedAccessReason` and the ledger schema doc. Tests: P3, the read race, the lapsed restore. Seeds S3 (4), S4 (1), S5 (1) |
+| 3 | UNPROVEN GUARD: share `stillNamedElsewhere` | **Test added** (`ClearingOneField_DoesNotRemoveTheShare_WhenAnotherRegistryColumnStillNamesTheLinkedAssignee`, incl. a following job pass — no Declined). Verifier seed J now fails 1 |
+| 4 | UNPROVEN GUARD: share `written != current` (modified mask) | **Test added** (theory: widened to Full Access and narrowed to Read through the OOB dialog, which marks nothing Adopted). Seed F fails 2 |
+| 5 | UNPROVEN GUARD: S5 never removes an auto share on a secure record | **Test added** (`ClearingTheField_OnASecureRecord_NeverRemovesTheAutoShare_OwnerS5`). Seed G fails 1 |
+| 6 | UNPROVEN GUARD: R2 inactive organization = known cause | **Test added** (org grant deactivated with its organization → `Skipped(subject-inactive)`, never Declined; reactivated → granted again). Seed D fails 1. The §5 "beyond the contract" claim is now true |
+| 7 | MERGE PRECONDITION: 133/137/143 commits (two WIP) not in `work` | **Not closable by this agent** (no merges into `work/*`). Verified: `b38756ba6` is an ancestor of `task/uac-r2-133-b2` / `-b2-r2`; `33108909e` of `task/uac-r2-137-b2`; none of 133-b2-r2 / 137-b2 / 143-r2 is in `work`. The exact merge order, incl. the 137×143 semantic-conflict fix `843d62b46`, is gate **G-0** (§7) |
+| 8 | MERGE PRECONDITION: ADR-034 A4 only PROPOSED; no PR yet | **Not closable by this agent** (owner acceptance; sub-agents cannot write `.claude/`; no PRs). The path-B block is ready to paste (§8); gate **G-9** |
+| 9 | LOW (race): wizard secure project "created non-secure, secured afterwards" | **Disproven from code.** The create payload carries `sprk_issecure = true` (`projectService.ts:281-286`, pinned by `projectService.test.ts:116-132`), and `IsSecure` is that column alone (`ExternalParticipationService.FlagsFrom`). The job therefore sees a secure record from its first instant and SUGGESTS (A3); provisioning changes owner and container, not the flag. Coordination kept as R-10 (round 2 item 2's future lock on `sprk_issecure`) |
+| 10 | LOW: Restricted after Granted untested | **Test added** (kept, not renewed inside the window, read-time suppression flag asserted; renewed once Standard again). Seed R (the materializer's renewal guard alone) does NOT bite — the grant core's own task-138 Restricted refusal is a second layer; seed R2 (both) fails 1. Found while pinning it: R-12 (a raised grant cannot be put back while Restricted — reported, not changed) |
+| 11 | LOW: Shared rows ignore later link/eligibility changes | **Premise disproven for links; eligibility pinned.** The 141 contract never re-points or clears a link and refuses a second link to a contact bound to another oid, so there is no product path by which "the link moves" (R-11). A disabled user keeps the share with zero writes — pinned (`ALinkedAssigneeWhoseUserIsLaterDisabled_KeepsTheShare_WithZeroWrites`); seed E (re-decide a Shared row whose user turned ineligible) fails 1 |
+| 12–13 | Verified-OK / criterion status | No action |
+| 14 | criterion 8 not met | Met — finding 1 |
+| 15 | criterion 9 not met | Met for grants — finding 1 (lapse = known cause) and finding 6 (R2 proven) |
+| 16 | criterion 10 not met for shares | Met — findings 3, 4, 5 |
+| 17 | criterion 19 not met | Met — every guard named now has a biting test (§5) |
+| 18 | criterion 18 partial | Still partial — G-9 owner acceptance and the PR description (main session) |
+| 19 | ADR-003 (raise/restore over a Warning) | Met — finding 2 |
+
+**Not changed** (scope): R-12 (restore refused while Restricted) is reported for the next round; the wizard's step-1e
+comment ("synced only now, after provisioning, so the rule sees the secure flag") over-explains (the flag is there at
+create) but is harmless and was left as is.
+
+**Round r1 runs.** AssignedAccess server set **118/118** (104 + 14 new). `Spaarke.ArchTests` **346/346**. Full BFF unit
+suite (once, at the end): **14,600 passed, 0 failed, 54 skipped (14,654)**, 17m39s — the previous 14,640 plus the 14 new
+tests. BFF build 0 errors / 0 warnings. No client file changed in this round (no client build/test needed). No new
+service, DI registration, endpoint, option, job, column or package — one reason-code constant
+(`AssignedAccessReason.PriorLevelRestoredLapsed`) and one test-double hook (`GrantTable.BeforeGrantQuery`); publish size
+left to the main session.

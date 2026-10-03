@@ -902,4 +902,306 @@ public class AssignedAccessMaterializerTests
         AssignedAccessMaterializer.SourceFieldLabel("sprk_assignedlawfirmattorney1").Should().Be("Assigned Law Firm Attorney 1");
         AssignedAccessMaterializer.SourceFieldLabel("sprk_somethingelse").Should().Be("sprk_somethingelse");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r1, finding 1 (criteria 8 + 9) — only a grant that CONFERS access covers; a lapse is a known cause
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task P1_AnExpiredCollaborateGrant_DoesNotCover_TheAssignedContactIsGivenAccessThatConfers()
+    {
+        var contact = _h.Contact();
+        var expired = _h.Grants.Seed(Matter, _matter, contact, null, Collaborate, Today.AddDays(-1));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeTrue();
+        outcome.Entries.Should().ContainSingle().Which.Action.Should().Be(AssignedAccessAction.Granted);
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        grant.Id.Should().Be(expired.Id, "one row per (subject, root): the core's upsert gives the lapsed row a live date");
+        grant.AccessLevel.Should().Be(Collaborate);
+        grant.ExpiresDate.Should().Be(Today.AddDays(90));
+        ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, Today).Should().BeTrue();
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Granted, "never CoveredByExisting over a grant that confers nothing");
+        row.GrantedExpiry.Should().Be(Today.AddDays(90));
+        row.Reason.Should().BeNull("a lapsed grant conferred nothing, so there is no earlier level to put back");
+    }
+
+    [Fact]
+    public async Task ACollaborateGrantExpiringToday_StillConfers_SoItCovers_TheTwinOfP1()
+    {
+        var contact = _h.Contact();
+        var existing = _h.Grants.Seed(Matter, _matter, contact, null, Collaborate, Today);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        await Sync();
+
+        _h.Grants.WriteCount.Should().Be(0, "the expiry date itself still confers (the read filter's ge)");
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.CoveredByExisting);
+        row.GrantId.Should().Be(existing.Id);
+    }
+
+    [Fact]
+    public async Task P2_ACoveringManualGrantThatLapsesLater_IsAKnownCause_AndTheStillAssignedContactIsGivenAccessAgain()
+    {
+        var contact = _h.Contact();
+        _h.Grants.Seed(Matter, _matter, contact, null, Collaborate, Today.AddDays(1));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.CoveredByExisting);
+        var later = Today.AddDays(3);
+        _h.Time.Now = _h.Time.Now.AddDays(3); // the covering grant expired yesterday
+
+        var outcome = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        outcome.Complete.Should().BeTrue();
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Granted, "a lapse is a known cause (owner (e)) — never Declined, never left covered");
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        grant.ExpiresDate.Should().Be(later.AddDays(90));
+        ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, later).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ACoveringManualGrantDeactivatedOutsideTheBff_IsAnOperatorRemoval_Declined_TheTwinOfP2()
+    {
+        var contact = _h.Contact();
+        var manual = _h.Grants.Seed(Matter, _matter, contact, null, Collaborate, Today.AddDays(200));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        _h.Grants.DeactivateOutOfBand(manual.Id);
+
+        await Sync();
+        await Sync(trigger: AssignedAccessTrigger.Job);
+
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Declined);
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.RemovedOutOfBand);
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("a deliberate removal is not a lapse");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r1, finding 2 (ADR-003) — never "granted" or "restored" over a grant that confers nothing
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task P3_AnExpiredLowerGrant_IsGivenCollaborateWithADateThatConfers_AndTheEndOfTheAssignmentLeavesNoAccess()
+    {
+        var contact = _h.Contact();
+        var lapsed = _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, Today.AddDays(-5));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeTrue("the core's expired_not_restored warning cannot occur: the rule asks for a date");
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        grant.Id.Should().Be(lapsed.Id);
+        grant.AccessLevel.Should().Be(Collaborate);
+        grant.ExpiresDate.Should().Be(Today.AddDays(90));
+        ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, Today).Should().BeTrue();
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Granted);
+        row.GrantedExpiry.Should().Be(Today.AddDays(90), "the ledger records the date the grant really carries");
+        row.Reason.Should().BeNull("the lapsed View Only conferred nothing — not a level to put back");
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        await Sync();
+
+        _h.Grants.ActiveRowsOf(_matter, contact).Should().BeEmpty("the subject had no access here before the assignment");
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+    }
+
+    [Fact]
+    public async Task AGrantThatLapsesBetweenTheRulesReadAndTheCoresRead_IsAFailure_NeverRecordedGranted_AndTheNextPassHealsIt()
+    {
+        var contact = _h.Contact();
+        var manual = _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, Today); // confers today
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        // Read 1 is the rule's (it sees a conferring View Only and asks to raise it, keeping its date); read 2 is the
+        // grant core's — by then the row has lapsed, so the core writes and answers expired_not_restored.
+        _h.Grants.BeforeGrantQuery = n =>
+        {
+            if (n == 2)
+                manual.ExpiresDate = Today.AddDays(-1);
+        };
+
+        var outcome = await Sync();
+
+        outcome.Complete.Should().BeFalse();
+        outcome.Failures.Should().ContainSingle().Which.Kind.Should().Be("grant-not-conferring");
+        outcome.Entries.Should().NotContain(e => e.Action == AssignedAccessAction.Raised || e.Action == AssignedAccessAction.Granted);
+        _h.Store.RowsOf(_matter, contact).Should().NotContain(r => r.State == AssignedAccessState.Granted);
+
+        _h.Grants.BeforeGrantQuery = null;
+        var next = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        next.Complete.Should().BeTrue();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Single();
+        ExternalParticipationService.ConfersAccessOn(grant.ExpiresDate, Today).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ARaisedGrantThatLapsedBeforeTheAssignmentEnded_IsPutBackToItsLevel_ButNeverReportedRestored()
+    {
+        var contact = _h.Contact();
+        _h.Grants.Seed(Matter, _matter, contact, null, ViewOnly, Today.AddDays(10));
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // raised to Collaborate, keeping its 10-day date
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.RaisedFromLevelPrefix + ViewOnly);
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        await Sync(revokeOnChange: false, trigger: AssignedAccessTrigger.Job); // report-only: kept, no longer renewed
+        _h.Time.Now = _h.Time.Now.AddDays(11); // it lapses
+
+        var outcome = await Sync();
+
+        var grant = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        grant.AccessLevel.Should().Be(ViewOnly, "the operator's level is put back");
+        grant.ExpiresDate.Should().Be(Today.AddDays(10), "never extended by the rule");
+        var entry = outcome.Entries.Should().ContainSingle().Subject;
+        entry.Action.Should().Be(AssignedAccessAction.Ledger, "no access was put back, so none is reported");
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Revoked);
+        row.Reason.Should().Be(AssignedAccessReason.PriorLevelRestoredLapsed);
+        outcome.Complete.Should().BeTrue("the rule's own access had ended by expiry — nothing is left to retry");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r1, findings 3–5 (criterion 10 for SHARES; owner S5)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ClearingOneField_DoesNotRemoveTheShare_WhenAnotherRegistryColumnStillNamesTheLinkedAssignee()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        _h.Store.Assign(Matter, _matter, Paralegal1, contact);
+        await Sync();
+        ShareMask(user).Should().Be(CollaborateMask);
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        await Sync();
+        await Sync(trigger: AssignedAccessTrigger.Job); // and the next pass sees the share there — never a decline
+
+        ShareMask(user).Should().Be(CollaborateMask, "the user is still assigned through Paralegal 1");
+        _h.Shares.Writes.Should().NotContain(w => w.StartsWith("RevokeAccess", StringComparison.Ordinal));
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Revoked);
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.KeptOtherField);
+        LedgerRow(contact, Paralegal1).State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    [Theory]
+    [InlineData(true)]  // the operator widened it to Full Access in the OOB MDA Share dialog
+    [InlineData(false)] // the operator narrowed it to Read in the same dialog
+    public async Task ClearingTheField_DoesNotRemoveAShareWhoseRightsAnOperatorChangedOutsideTheBff(bool widened)
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        var changedMask = widened ? RecordShareLevels.MaskForRightsCsv(RecordShareLevels.FullAccessRights) : 1;
+        _h.Shares.Seed(MatterTable, _matter, DataversePrincipalRef.User(user), changedMask);
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared, "the OOB dialog marks nothing Adopted");
+
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+        await Sync();
+
+        ShareMask(user).Should().Be(changedMask, "deliberately granted access is never removed by the rule");
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.KeptModified);
+    }
+
+    [Fact]
+    public async Task ClearingTheField_OnASecureRecord_NeverRemovesTheAutoShare_OwnerS5()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync(); // shared while the record was standard
+        Secure();     // became secure (A3: kept)
+        _h.Store.Assign(Matter, _matter, Attorney1, null);
+
+        await Sync();
+
+        ShareMask(user).Should().Be(CollaborateMask, "a secure record always keeps someone who can see it (S5)");
+        _h.Shares.Writes.Should().NotContain(w => w.StartsWith("RevokeAccess", StringComparison.Ordinal));
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Revoked);
+        LedgerRow(contact, Attorney1).Reason.Should().Be(AssignedAccessReason.KeptSecureRecord);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r1, finding 6 (criterion 9) — an inactive organization (R2) is a known cause, not a decline
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task AnOrganizationGrantDeactivatedByR2_IsAKnownCause_NotADecline_AndIsRestoredWhenTheOrganizationIsActiveAgain()
+    {
+        var firm = Guid.NewGuid();
+        _h.Store.Assign(Matter, _matter, LawFirm1, firm);
+        await Sync();
+        var grant = _h.Grants.ActiveRowsOf(_matter, organizationId: firm).Single();
+        _h.Store.OrganizationStates[firm] = 1;   // the organization is deactivated…
+        _h.Grants.DeactivateOutOfBand(grant.Id); // …and ExternalAccessReconciliationJob R2 deactivates its grant
+
+        await Sync(trigger: AssignedAccessTrigger.Job);
+
+        LedgerRow(firm, LawFirm1).State.Should().Be(AssignedAccessState.Skipped, "R2 is a known cause, never an operator's removal");
+        LedgerRow(firm, LawFirm1).Reason.Should().Be(AssignedAccessReason.SubjectInactive);
+
+        _h.Store.OrganizationStates[firm] = 0;   // reactivated
+        await Sync(trigger: AssignedAccessTrigger.Job);
+
+        _h.Grants.ActiveRowsOf(_matter, organizationId: firm).Should().ContainSingle("restored once the organization is active");
+        LedgerRow(firm, LawFirm1).State.Should().Be(AssignedAccessState.Granted);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r1, finding 10 (criterion 16) — Restricted AFTER the grant
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task WhenARecordBecomesRestricted_TheAutoGrantIsKeptButNotRenewed_AndRenewedOnceItIsStandardAgain()
+    {
+        var contact = _h.Contact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        Restricted();
+        _h.Time.Now = _h.Time.Now.AddDays(70); // inside the renewal window
+        var before = _h.Grants.WriteCount;
+
+        var restricted = await Sync(trigger: AssignedAccessTrigger.Job);
+
+        restricted.Complete.Should().BeTrue();
+        _h.Grants.WriteCount.Should().Be(before, "no renewal (and no other grant write) on a Restricted record");
+        var kept = _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Subject;
+        kept.ExpiresDate.Should().Be(Today.AddDays(90));
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+        _h.Participations.Flags[_matter].RemovesContactSourcedAccess.Should().BeTrue(
+            "the read path suppresses contact access on a Restricted record (round 2 item 3)");
+
+        _h.Participations.Flags[_matter] = RootRecordFlags.None;
+        await Sync(trigger: AssignedAccessTrigger.Job);
+
+        _h.Grants.ActiveRowsOf(_matter, contact).Single().ExpiresDate.Should().Be(Today.AddDays(70).AddDays(90));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Round r1, finding 11 — eligibility changes after a share (the link itself never moves: 141 contract §2–§3)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ALinkedAssigneeWhoseUserIsLaterDisabled_KeepsTheShare_WithZeroWrites()
+    {
+        var (contact, user) = _h.LinkedContact();
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        var candidate = _h.Store.UsersByLink[contact].Single();
+        _h.Store.UsersByLink[contact] = new() { candidate with { IsDisabled = true } };
+        var before = _h.TotalWrites;
+
+        await Sync(trigger: AssignedAccessTrigger.Job);
+
+        ShareMask(user).Should().Be(CollaborateMask, "a disabled user cannot sign in; re-enabled, the still-assigned user keeps it");
+        _h.TotalWrites.Should().Be(before);
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared);
+    }
 }

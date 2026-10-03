@@ -140,9 +140,11 @@ public sealed record AssignedAccessListEntry(
 /// became secure is kept (A3). Limited: contact grants are written (A8).</item>
 /// <item>No Access: a denied contact or organization gets nothing (the core's FR-23 check); a walled internal user on a
 /// secure record gets no share (task 143's guard, reused). An unreadable list or flag set writes nothing.</item>
-/// <item>Never lower: an existing active grant at Collaborate or above, or a share already carrying Collaborate's
-/// rights, is left untouched (<see cref="AssignedAccessState.CoveredByExisting"/>). A lower one is raised, and put back
-/// when the assignment ends.</item>
+/// <item>Never lower: an existing grant that CONFERS access today (not merely statecode 0 — an expired row confers
+/// nothing) at Collaborate or above, or a share already carrying Collaborate's rights, is left untouched
+/// (<see cref="AssignedAccessState.CoveredByExisting"/>). A lower conferring one is raised, and put back when the
+/// assignment ends. A covering grant that LAPSES is a known cause (owner (e)), not an operator's removal: the
+/// still-assigned subject is given its access again.</item>
 /// <item>Operator removal sticks (item 5): /revoke, /unshare-user, Dismiss, and a removal outside the BFF all record
 /// <see cref="AssignedAccessState.Declined"/>, which no trigger re-creates while the assignment persists. A KNOWN cause
 /// is not a decline: a closed record, an inactive organization (R2), task 143's enforcer.</item>
@@ -738,6 +740,7 @@ public sealed class AssignedAccessMaterializer
         AssignedAccessLedgerRow covered, Target target, RootRecordFlags flags, CancellationToken ct)
     {
         bool stillCovered;
+        var lapsed = false;
         if (covered.SystemUserId is { } user && user != Guid.Empty && target.Kind == TargetKind.Share)
         {
             stillCovered = Covers(await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false));
@@ -746,7 +749,15 @@ public sealed class AssignedAccessMaterializer
         {
             var active = await ExternalGrantLifecycle.QueryActiveRowsAsync(_dataverse, GrantKeyFor(run, subject), ct)
                 .ConfigureAwait(false);
-            stillCovered = active.Any(r => (r.AccessLevel ?? 0) >= (int)ExternalAccessLevel.Collaborate);
+            var atCollaborate = active.Where(r => (r.AccessLevel ?? 0) >= (int)ExternalAccessLevel.Collaborate).ToList();
+
+            // Covered only while the covering row CONFERS access (task 142 r1, finding 1): an expired grant stays at
+            // statecode 0, and counting it left a still-assigned subject with nothing, permanently.
+            stillCovered = Conferring(atCollaborate, run.Today).Count > 0;
+
+            // The covering grant is still there but no longer confers (it lapsed): a KNOWN cause — expiry, owner (e) /
+            // A5 — never an operator's removal. Decided fresh below, which gives the still-assigned subject its access.
+            lapsed = !stillCovered && atCollaborate.Count > 0;
         }
         else
         {
@@ -763,9 +774,10 @@ public sealed class AssignedAccessMaterializer
             return true;
         }
 
-        // The covering access is gone. A known cause → decide fresh (which skips for the same cause); otherwise someone
-        // removed access from an assigned subject on purpose — respect it, as for the owner's own grant.
-        if (KnownGrantRemovalCause(target, flags) is not null)
+        // The covering access is gone. A known cause → decide fresh (which skips for the same cause, or renews a lapsed
+        // one); otherwise someone removed access from an assigned subject on purpose — respect it, as for the owner's own
+        // grant.
+        if (lapsed || KnownGrantRemovalCause(target, flags) is not null)
             return false;
 
         await EnsureRowsAsync(run, subject, byField,
@@ -824,8 +836,13 @@ public sealed class AssignedAccessMaterializer
         var active = await ExternalGrantLifecycle.QueryActiveRowsAsync(_dataverse, GrantKeyFor(run, subject), ct)
             .ConfigureAwait(false);
 
-        // Never lower (and never extend someone else's grant): anything at Collaborate or above covers.
-        if (active.FirstOrDefault(r => (r.AccessLevel ?? 0) >= (int)ExternalAccessLevel.Collaborate) is { } covering)
+        // Only a row that CONFERS access today counts (task 142 r1, finding 1). An expired row stays at statecode 0, so
+        // "active" alone let a lapsed grant cover the assignment and left the subject with nothing — permanently, since
+        // renewal applies only to the rule's own grants. Conferral is the read filter's own predicate.
+        var conferring = Conferring(active, run.Today);
+
+        // Never lower (and never extend someone else's live grant): a CONFERRING row at Collaborate or above covers.
+        if (conferring.FirstOrDefault(r => (r.AccessLevel ?? 0) >= (int)ExternalAccessLevel.Collaborate) is { } covering)
         {
             await EnsureRowsAsync(run, subject, byField,
                 new AssignedAccessLedgerWrite(AssignedAccessState.CoveredByExisting, null, covering.Id), ct).ConfigureAwait(false);
@@ -861,9 +878,16 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        // A lower grant is raised (and put back when the assignment ends); otherwise a new one is created.
-        var prior = active.Count > 0 ? active.Max(r => r.AccessLevel ?? 0) : (int?)null;
-        var outcome = await WriteGrantAsync(run, subject, ExternalAccessLevel.Collaborate, expiry: null, ct).ConfigureAwait(false);
+        // A lower CONFERRING grant is raised (and put back when the assignment ends). Otherwise the subject has no access
+        // here and the rule gives it — a new row, or, when the key's rows all confer nothing (lapsed, or never bounded),
+        // the core's elected row at Collaborate with an EXPLICIT today + 90 (task 142 r1, finding 2). Without that date the
+        // core keeps the lapsed one and answers expired_not_restored, and the rule would report "granted" over a grant
+        // that confers nothing. The date is the same DefaultExpiry renewal writes (owner A5); no conferring row exists
+        // whose date it could shorten. A lapsed row's level is not a "prior" to put back: it conferred nothing, so the end
+        // of the assignment leaves the subject where it started — with no access here.
+        var prior = conferring.Count > 0 ? conferring.Max(r => r.AccessLevel ?? 0) : (int?)null;
+        DateOnly? expiry = active.Count > 0 && conferring.Count == 0 ? ExternalGrantLifecycle.DefaultExpiry(run.Today) : null;
+        var outcome = await WriteGrantAsync(run, subject, ExternalAccessLevel.Collaborate, expiry, ct).ConfigureAwait(false);
         if (outcome.Refusal is { } refusal)
         {
             await SkipAsync(refusal.ReasonCode == ExternalGrantLifecycle.GranteeDeniedReasonCode
@@ -874,9 +898,23 @@ public sealed class AssignedAccessMaterializer
         }
 
         run.Writes++;
-        var survivorExpiry = active.Count > 0
-            ? ExternalGrantLifecycle.ElectSurvivor(active, run.Today).ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(run.Today)
-            : ExternalGrantLifecycle.DefaultExpiry(run.Today);
+        if (outcome.Warning is { } warning)
+        {
+            // ADR-003: the core wrote, but the grant does not confer access (a row lapsed between this read and the
+            // core's). Never reported as Granted: a failure, and nothing in the ledger changes, so the next pass decides
+            // again from fresh reads.
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: the grant for {Subject} was written but confers no access ({Warning}); " +
+                "not recorded as granted.", run.Logical, run.RootId, subject, warning);
+            run.Fail(subject, "grant-not-conferring",
+                $"Access for {subject} on this record was written but does not take effect yet. The next update will try again.");
+            return;
+        }
+
+        var survivorExpiry = expiry
+            ?? (active.Count > 0
+                ? ExternalGrantLifecycle.ElectSurvivor(active, run.Today).ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(run.Today)
+                : ExternalGrantLifecycle.DefaultExpiry(run.Today));
         var reason = prior is { } p ? AssignedAccessReason.RaisedFromLevelPrefix + p : null;
 
         await EnsureRowsAsync(run, subject, byField,
@@ -1003,6 +1041,18 @@ public sealed class AssignedAccessMaterializer
                     }
 
                     run.Writes++;
+
+                    if (restored.Warning is not null)
+                    {
+                        // ADR-003 (task 142 r1, finding 2): the earlier level is back on the row, but the grant had LAPSED,
+                        // so it confers nothing — no access was put back, and none is reported. The rule's own access had
+                        // already ended by expiry (a known cause, owner (e)); nothing is left to retry.
+                        _logger.LogWarning(
+                            "[ASSIGNED-ACCESS] {Type} {RootId}: {Subject}'s raised grant had lapsed; its earlier level was put " +
+                            "back, but it confers no access ({Warning}).", run.Logical, run.RootId, subject, restored.Warning);
+                        await EndAsync(AssignedAccessReason.PriorLevelRestoredLapsed, AssignedAccessAction.Ledger).ConfigureAwait(false);
+                        return;
+                    }
 
                     await EndAsync(AssignedAccessReason.PriorLevelRestored, AssignedAccessAction.Restored).ConfigureAwait(false);
                     return;
@@ -1372,6 +1422,13 @@ public sealed class AssignedAccessMaterializer
            || (ours.GrantedExpiry is { } expiry && grant.ExpiresDate != expiry);
 
     private static bool Covers(int mask) => (mask & CollaborateMask) == CollaborateMask;
+
+    /// <summary>
+    /// The rows that confer access on <paramref name="today"/> — <see cref="ExternalParticipationService.ConfersAccessOn"/>,
+    /// the read filter's own predicate (an expired or never-bounded row confers nothing, though it stays at statecode 0).
+    /// </summary>
+    private static List<ExternalGrantRow> Conferring(IEnumerable<ExternalGrantRow> rows, DateOnly today)
+        => rows.Where(r => ExternalParticipationService.ConfersAccessOn(r.ExpiresDate, today)).ToList();
 
     private static bool TryParsePrior(string? reason, string prefix, out int value)
     {

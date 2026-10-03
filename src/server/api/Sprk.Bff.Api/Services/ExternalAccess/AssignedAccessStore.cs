@@ -107,6 +107,12 @@ public static class AssignedAccessReason
     /// <summary>The assignment ended and a raised grant/share was put back to the level it had before.</summary>
     public const string PriorLevelRestored = "prior-level-restored";
 
+    /// <summary>
+    /// The assignment ended; a raised grant's earlier level was put back, but the grant had lapsed (expired), so it confers
+    /// nothing — no access was restored (ADR-003: never reported as done).
+    /// </summary>
+    public const string PriorLevelRestoredLapsed = "prior-level-restored-lapsed";
+
     /// <summary>The assignment ended; another registry column still names the subject, so access is kept.</summary>
     public const string KeptOtherField = "kept-other-field";
 
