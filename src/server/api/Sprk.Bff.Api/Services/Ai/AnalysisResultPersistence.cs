@@ -2,27 +2,27 @@ using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Resilience;
 using Sprk.Bff.Api.Models.Ai;
-using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
-using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
-/// Handles output storage, RAG indexing enqueue, working document finalization,
-/// export execution, and export telemetry for the analysis pipeline.
-/// Extracted from AnalysisOrchestrationService to reduce constructor dependency count (ADR-010).
+/// Handles output storage, RAG indexing enqueue and working document finalization for the analysis
+/// pipeline. Extracted from AnalysisOrchestrationService to reduce constructor dependency count (ADR-010).
 /// </summary>
+/// <remarks>
+/// unified-access-control-r2 task 162 (owner round 10 item 1): the export execution, export telemetry and
+/// save-to-SPE members were DELETED with their only callers, POST /api/ai/analysis/{analysisId}/export and
+/// /save (no caller in the repo, not in any published API description).
+/// </remarks>
 public class AnalysisResultPersistence
 {
     private readonly IAnalysisDataverseService _analysisService;
     private readonly IDocumentDataverseService _documentService;
     private readonly IWorkingDocumentService _workingDocumentService;
     private readonly IStorageRetryPolicy _storageRetryPolicy;
-    private readonly ExportServiceRegistry _exportRegistry;
-    private readonly AiTelemetry? _telemetry;
     private readonly JobSubmissionService? _jobSubmissionService;
     private readonly IPostUploadIndexingEnqueuer? _postUploadIndexingEnqueuer;
     private readonly ILogger<AnalysisResultPersistence> _logger;
@@ -32,9 +32,7 @@ public class AnalysisResultPersistence
         IDocumentDataverseService documentService,
         IWorkingDocumentService workingDocumentService,
         IStorageRetryPolicy storageRetryPolicy,
-        ExportServiceRegistry exportRegistry,
         ILogger<AnalysisResultPersistence> logger,
-        AiTelemetry? telemetry = null,
         JobSubmissionService? jobSubmissionService = null,
         IPostUploadIndexingEnqueuer? postUploadIndexingEnqueuer = null)
     {
@@ -42,28 +40,9 @@ public class AnalysisResultPersistence
         _documentService = documentService;
         _workingDocumentService = workingDocumentService;
         _storageRetryPolicy = storageRetryPolicy;
-        _exportRegistry = exportRegistry;
         _logger = logger;
-        _telemetry = telemetry;
         _jobSubmissionService = jobSubmissionService;
         _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
-    }
-
-    /// <summary>
-    /// Get the export service for the requested format.
-    /// </summary>
-    public IExportService? GetExportService(ExportFormat format)
-    {
-        return _exportRegistry.GetService(format);
-    }
-
-    /// <summary>
-    /// Record an export operation for telemetry tracking.
-    /// </summary>
-    public void RecordExport(string format, double elapsedMs, bool success,
-        string? errorCode = null, long? fileSizeBytes = null)
-    {
-        _telemetry?.RecordExport(format, elapsedMs, success, errorCode: errorCode, fileSizeBytes: fileSizeBytes);
     }
 
     /// <summary>
@@ -80,19 +59,6 @@ public class AnalysisResultPersistence
     public Task FinalizeAnalysisAsync(Guid analysisId, int inputTokens, int outputTokens, CancellationToken cancellationToken)
     {
         return _workingDocumentService.FinalizeAnalysisAsync(analysisId, inputTokens, outputTokens, cancellationToken);
-    }
-
-    /// <summary>
-    /// Save working document to SPE via working document service.
-    /// </summary>
-    public Task<SavedDocumentResult> SaveToSpeAsync(
-        Guid analysisId,
-        string fileName,
-        byte[] content,
-        string contentType,
-        CancellationToken cancellationToken)
-    {
-        return _workingDocumentService.SaveToSpeAsync(analysisId, fileName, content, contentType, cancellationToken);
     }
 
     /// <summary>

@@ -31,7 +31,9 @@ public class PlaybookService : IPlaybookService
     private const int CacheVersion = 1;
     private AccessToken? _currentToken;
 
-    private const string EntitySetName = "sprk_analysisplaybooks";
+    // internal (task 162): PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync asks Dataverse about the playbook
+    // row through this set name — one literal, never a second copy.
+    internal const string EntitySetName = "sprk_analysisplaybooks";
     private const string EntityLogicalName = "sprk_analysisplaybook";
 
     // N:N relationship names (from Task 020 verification)

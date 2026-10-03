@@ -31,8 +31,8 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Hosting approach</b> (mirrors <see cref="AnalysisPromoteEndpointContractTests"/> /
-/// <see cref="AnalysisForkEndpointContractTests"/>, ADR-038): a minimal in-process
+/// <b>Hosting approach</b> (mirrors <see cref="AnalysisPromoteEndpointContractTests"/>,
+/// ADR-038): a minimal in-process
 /// <see cref="WebApplication"/> mapping the REAL <c>MapReviewMemoEndpoints</c>. The handler runs
 /// against a REAL <see cref="ChatSessionManager"/> over an <see cref="InMemoryTenantCache"/> and the
 /// SAME <see cref="CapturingChatDataverseRepository"/> double the fork/promote tests use, and a REAL
@@ -557,7 +557,6 @@ public sealed class ReviewMemoEndpointTestFixture : IAsyncLifetime, IDisposable
         builder.Services.AddSingleton(Mock.Of<IDocumentDataverseService>());
         builder.Services.AddSingleton(Mock.Of<IWorkingDocumentService>());
         builder.Services.AddSingleton(Mock.Of<IStorageRetryPolicy>());
-        builder.Services.AddSingleton(new ExportServiceRegistry(Array.Empty<IExportService>()));
         builder.Services.AddSingleton<AnalysisResultPersistence>();
         // FR-14 (task 051) — the docx READ handler's rendering engine (real; pure/stateless, no I/O).
         builder.Services.AddSingleton<ComposeDocumentRenderer>();

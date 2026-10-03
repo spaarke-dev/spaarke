@@ -5,17 +5,16 @@ namespace Sprk.Bff.Api.Telemetry;
 
 /// <summary>
 /// Metrics for AI operations (OpenTelemetry-compatible).
-/// Tracks: summarization, RAG search, tool execution, and export operations.
+/// Tracks: summarization, RAG search and tool execution.
 ///
 /// Usage:
 /// - Meter name: "Sprk.Bff.Api.Ai" for OpenTelemetry configuration
-/// - Metrics prefixes: ai.summarize.*, ai.rag.*, ai.tool.*, ai.export.*
+/// - Metrics prefixes: ai.summarize.*, ai.rag.*, ai.tool.*
 /// - Common dimensions: ai.status (success/failed), ai.error_code
 ///
 /// Application Insights custom queries:
 /// - RAG latency: customMetrics | where name == "ai.rag.duration" | summarize percentile(value, 95)
 /// - Tool success rate: customMetrics | where name == "ai.tool.requests" | summarize count() by customDimensions["ai.status"]
-/// - Export by format: customMetrics | where name == "ai.export.requests" | summarize count() by customDimensions["ai.format"]
 /// </summary>
 public class AiTelemetry : IDisposable
 {
@@ -41,10 +40,8 @@ public class AiTelemetry : IDisposable
     private readonly Histogram<double> _toolDuration;
     private readonly Counter<long> _toolTokens;
 
-    // Export metrics
-    private readonly Counter<long> _exportRequests;
-    private readonly Histogram<double> _exportDuration;
-    private readonly Histogram<long> _exportFileSize;
+    // Export metrics (ai.export.*) were DELETED by unified-access-control-r2 task 162 with their only caller,
+    // POST /api/ai/analysis/{analysisId}/export.
 
     // Privilege filter metrics (AIPU2-027)
     private readonly Counter<long> _privilegeFilterApplied;
@@ -220,22 +217,6 @@ public class AiTelemetry : IDisposable
             name: "ai.tool.tokens",
             unit: "{token}",
             description: "Total tokens used by tools");
-
-        // === Export Metrics ===
-        _exportRequests = _meter.CreateCounter<long>(
-            name: "ai.export.requests",
-            unit: "{request}",
-            description: "Total number of export requests");
-
-        _exportDuration = _meter.CreateHistogram<double>(
-            name: "ai.export.duration",
-            unit: "ms",
-            description: "Export operation duration in milliseconds");
-
-        _exportFileSize = _meter.CreateHistogram<long>(
-            name: "ai.export.file_size",
-            unit: "By",
-            description: "Size of exported files in bytes");
     }
 
     /// <summary>
@@ -734,43 +715,6 @@ public class AiTelemetry : IDisposable
 
     #endregion
 
-    #region Export Metrics
-
-    /// <summary>
-    /// Record an export operation.
-    /// </summary>
-    /// <param name="format">Export format (docx, pdf, email)</param>
-    /// <param name="durationMs">Export duration in milliseconds</param>
-    /// <param name="success">Whether the operation succeeded</param>
-    /// <param name="fileSizeBytes">Size of exported file in bytes (null for action-based exports)</param>
-    /// <param name="errorCode">Error code if failed</param>
-    public void RecordExport(
-        string format,
-        double durationMs,
-        bool success,
-        long? fileSizeBytes = null,
-        string? errorCode = null)
-    {
-        var tags = new TagList
-        {
-            { "ai.format", format.ToLowerInvariant() },
-            { "ai.status", success ? "success" : "failed" }
-        };
-        if (!success && errorCode != null)
-        {
-            tags.Add("ai.error_code", errorCode);
-        }
-
-        _exportRequests.Add(1, tags);
-        _exportDuration.Record(durationMs, tags);
-
-        if (fileSizeBytes.HasValue && fileSizeBytes.Value > 0)
-        {
-            _exportFileSize.Record(fileSizeBytes.Value, tags);
-        }
-    }
-
-    #endregion
 
     /// <summary>
     /// Dispose the meter when the service is disposed.
