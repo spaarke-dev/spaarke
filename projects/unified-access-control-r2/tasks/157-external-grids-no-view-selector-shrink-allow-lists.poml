@@ -498,7 +498,9 @@
       - Not testable: the picked-view gate (pickedViewId). On the external host no ViewSelector renders, so nothing
         can set a picked view. It is pinned, not behaviour-tested.
       - Residuals removed (closed by the runtime rule): a variable-built shared-library import(); edits to
-        DataGrid.tsx ignoring the switch (now pinned); element-tree peeling (Q8).
+        DataGrid.tsx ignoring the switch (now pinned); element-tree peeling (Q8). [Corrected in fix round c1-r1:
+        "edits to DataGrid.tsx ignoring the switch" is NARROWED by the pin, not closed. Review round 8's seed J4, an
+        added nested-scope shadow, passed the guard 194/194. It is residual 4; see the c1-r1 outcome.]
       - Residuals kept (honest): (1) a new npm dependency shipping its OWN grid or picker; (2) build config that
         drops or overrides the define, or re-points the grid module; (3) a new, differently named picker inside
         DataGrid.tsx.
@@ -531,7 +533,8 @@
         - B6, the duplicate check removed: 1 red.
         - B7, the project module registers an internal view: 4 red.
         The HTTP savedquery/{id} row does not bite B1 on its own: the fixture's Dataverse returns no view. The core
-        rows do.
+        rows do. [Corrected in fix round c1-r1: so no row guarded the by-id ROUTE wiring (review round 8, seed X1).
+        A fourth HTTP row now does; see the c1-r1 outcome.]
       ITEM 3, V7 in the remaining scan: CLOSED.
       - UnscannedImportTargets: every path-like specifier (static, side-effect, dynamic; SPA files and shipped
         library files, the grid's own included) is resolved as Vite does: the exact file, then the default
@@ -592,6 +595,63 @@
       - SPA tsc --noEmit: 25 errors. The one in a changed line is App.tsx TS2786 on the provider mount, the same
         React-18/19 types class as the pre-existing TS2786 on ExternalDataGrid.tsx's DataGrid mount (F2). vite
         build does not typecheck.
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c1-r1" round="review-8-fix-c1-r1" base="55dfb9d8f">
+      Base: task/uac-r2-157-c1 at 55dfb9d8f. Status stays "completed-with-escalation": the MANUAL live gate
+      (criterion 6) is still the one open item, pending by design. Criterion 7 is now met on BOTH routes.
+      Review round 8 verified items 2, 3, 7-10 and 12 with no change asked; this round changes no source file.
+      ITEM 1 (BLOCKING), criterion 7 on the by-id ROUTE: CLOSED.
+      - Finding, reproduced: seed X1 (the GET savedquery/{id} handler skips GetSavedQueryCoreAsync and returns to
+        the pre-157 passthrough, which serves any view of a registered entity) left all 46 rows of
+        ExternalModuleSavedQueryScopeTests and ExternalModuleDataContractTests green. Every by-id negative drove the
+        core directly, and the one HTTP row used an unknown id, which 404s whether or not the allow-list runs.
+      - New HTTP contract row, ExternalModuleDataContractTests.ModuleSavedQuery_WhenTheIdIsAnInternalViewOfARegisteredEntity_Returns404.
+        It plants an internal sprk_project view in the distributed cache that the app's own SavedQueryService reads
+        first (key sdap:dv:savedquery:{id:D}; the service's Dataverse read needs a live ServiceClient). As a
+        precondition it asserts that the service really returns that view, so a 404 cannot come from an absent view.
+        Then the route must answer 404 DV_SAVEDQUERY_NOT_FOUND, and the body must hold neither the view's name nor
+        its FetchXML column. The cache key is removed in finally.
+      - Seed X1 re-planted (the handler's one return replaced by the old passthrough; built; restored hash-matched
+        19e6e832... and touched): exactly the new row red, "expected 404 but found 200", which is the F1 leak over
+        HTTP. The other 46 rows stayed green. Restored: 47/47.
+      ITEM 4 (MINOR), the overclaim: CORRECTED, restated as NARROWED, not closed.
+      - Seed J4 re-planted (const showViewSelector = true; after fetchConfigRecord in the load effect; restored
+        hash-matched 944dd3fb... and touched): the guard class passed 194/194, and jest
+        DataGrid.externalHost.test.tsx went 5 of 7 red (7/7 before and after).
+      - The pin checks statements and counts, not scopes. Residual 4 is now "an edit to DataGrid.tsx that ignores
+        the switch without touching a pinned statement: narrowed by the pin, not closed". It is restated in the
+        guard's class remarks (and its earlier "a change to either ... is gated in CI" sentence), the
+        ScanSharedGridRule summary, note G6, and the c1 outcome above (correction marker).
+      - Only the jest suite catches J4, and CI does not run that package's jest. Data impact: nil, because the BFF
+        404s every view no module grid registers, which today is every view. Running the DataGrid jest folder in CI
+        would close it. That is a ci-workflows hot-path change, which this project's design.md declares N, so it is
+        not made in this round.
+      ITEM 11 (INFO), the SPA tsc --noEmit count: a one-line note added (note F2), with measurements from this
+      worktree. tsc follows the SPA's paths into the shared library's src, so the count depends on whether that
+      library's node_modules is installed.
+      - Installed: 24 errors at base f55f3d426, 25 at 55dfb9d8f. The diff is exactly App.tsx(232) TS2786 on the
+        provider mount. DataGrid.tsx(1234) TS2322 is in both.
+      - Hidden: 6 errors at 55dfb9d8f.
+      - That explains the 6 / 24 / 25 spread across earlier rounds. CI runs vite build for the SPA, not tsc.
+      ITEMS 5 and 6 (INFO): no change. Residual 2 already states that a build config overriding the define leaves
+      only the provider (S2). A standalone DataGridViewSelector in the SPA would list nothing, because both
+      external savedquery routes 404 every view.
+      Section 10/11: no new service, DI registration, endpoint, option, job, Dataverse column or package. Changes:
+      one test row, test-file comments, the note and this POML. Live: none (no read, no write). Publish size:
+      skipped per instructions (no BFF source change).
+      Runs (this branch):
+      - BFF affected (ExternalModuleSavedQueryScopeTests + ExternalModuleDataContractTests): 47/47 (46 + 1 new);
+        under seed X1, 1 failed and 46 passed; restored, 47/47.
+      - ExternalSpaGridViewSelectorGuardTests: 194/194, and 194/194 under seed J4 (the gap this round documents).
+      - jest DataGrid.externalHost.test.tsx: 7/7; under seed J4, 5 of 7 failed.
+      - Once at the end, all four started together on one machine:
+        - BFF unit (dotnet test tests/unit/Sprk.Bff.Api.Tests): Passed 14307, Failed 0, Skipped 54, Total 14361
+          (Debug, 23m7s). One more than c1's 14360: the new row.
+        - NetArchTest (dotnet test tests/Spaarke.ArchTests): Passed 540, Failed 0, Total 540.
+        - Integration, tests/integration/Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Skipped 0, Total 104.
+        - Integration, tests/integration/Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m35s).
+      - No client file changed, so no SPA build was run in this round. The npm installs used for the tsc and jest
+        measurements left no tracked change: the SPA package-lock.json npm touched was reverted with git checkout.
     </outcome>
   </execution>
 </task>

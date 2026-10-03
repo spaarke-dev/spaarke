@@ -47,11 +47,13 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// <para>
 /// <see cref="SharedDataGrid_EnforcesTheExternalHostRule"/> pins the rule's text in the shared library (the host
-/// module verbatim, and the statements in <c>DataGrid.tsx</c>), so a change to either is a change to this guard and
-/// is gated in CI. The behavioural proof is the jest suite
+/// module verbatim, and the statements and counts in <c>DataGrid.tsx</c>), so removing or rewriting a pinned statement
+/// fails this guard in CI. It does NOT see an ADDED statement that shadows the forced value in a nested scope (review
+/// round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect passed this class 194/194); see residual 4.
+/// The behavioural proof is the jest suite
 /// <c>Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx</c>: under either
 /// switch, with <c>showViewSelector={true}</c> passed directly, no picker renders and the list is never requested.
-/// That package's jest suite is not run by CI today, which is why the pin exists.
+/// That suite catches J4, but the package's jest suite is not run by CI today, which is why the pin exists.
 /// </para>
 /// <para>
 /// <b>The scan is defence in depth.</b> The rules below stay because each is zero-false-positive on the current
@@ -162,15 +164,22 @@ namespace Spaarke.ArchTests;
 /// than the pinned switch. The pins refuse a third <c>&lt;ViewSelector</c>, any other use of the raw prop, and any
 /// other call of <c>retrieveSavedQueriesForEntity</c>; a differently named picker is a reviewed change to the shared
 /// grid.</item>
+/// <item>An edit to <c>DataGrid.tsx</c> that ignores the switch WITHOUT touching a pinned statement: NARROWED by the pin,
+/// not closed. The pin refuses removing or rewriting the rule's statements, but not an added statement that shadows the
+/// forced value in a nested scope (review round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect
+/// passed this class 194/194, so the grid would request <c>/savedqueries/{entity}</c> again on the external host). Only
+/// the jest suite <c>DataGrid.externalHost.test.tsx</c> catches J4, and CI does not run that package's jest today. The
+/// data impact is nil: the BFF's external <c>savedqueries</c> / <c>savedquery</c> routes 404 every view no module grid
+/// registers (task 157 F1), which today is every view.</item>
 /// </list>
-/// <para>Items 1–3 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
+/// <para>Items 1–4 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
 /// every column the picker's views would need, with a 400; it is the data control.</para>
-/// <para><b>Closed by the runtime rule, and removed from this list in fix round c1</b> (residuals 3–5 through fix
-/// round b2-r2): a shared-library dynamic <c>import()</c> whose path is built in a variable; edits to
-/// <c>DataGrid.tsx</c> that ignore the switch (now pinned, narrowed to item 3); and element-tree peeling (Q8,
-/// <c>.props.children</c> / <c>.type</c> by hand, or a fiber walk). Whatever element, tree or module instance reaches
-/// the shared grid, the grid applies the rule itself. V7 (round 7) is closed the same way, and the round-7 scan rule
-/// above stops the remaining scan going blind on it.</para>
+/// <para><b>Closed by the runtime rule, and removed from this list in fix round c1</b> (residuals 3 and 5 through fix
+/// round b2-r2): a shared-library dynamic <c>import()</c> whose path is built in a variable; and element-tree peeling
+/// (Q8, <c>.props.children</c> / <c>.type</c> by hand, or a fiber walk). Whatever element, tree or module instance
+/// reaches the shared grid, the grid applies the rule itself. V7 (round 7) is closed the same way, and the round-7 scan
+/// rule above stops the remaining scan going blind on it. Residual 4 through b2-r2 (edits to <c>DataGrid.tsx</c>) is
+/// narrowed, not closed: it is item 4 above (corrected in fix round c1-r1; fix round c1 had listed it as closed).</para>
 /// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each
 /// rule is paired with a negative control proving it fires and a positive control proving it does not fire
 /// on the sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected
@@ -1589,7 +1598,9 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     /// <summary>
     /// The runtime rule's text in the shared library: the host module verbatim, the grid's statements present, and
-    /// exactly as many uses of the raw prop, the list call, the picker element and the hook as the rule needs.
+    /// exactly as many uses of the raw prop, the list call, the picker element and the hook as the rule needs. It
+    /// checks statements and counts, not scopes: an ADDED nested-scope shadow of the forced value (seed J4,
+    /// <c>const showViewSelector = true;</c> in the load effect) passes it. That is residual 4 in the class remarks.
     /// </summary>
     internal static IReadOnlyList<string> ScanSharedGridRule(string gridSource, string hostSource)
     {
