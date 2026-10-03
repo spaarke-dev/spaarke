@@ -682,6 +682,21 @@ internal sealed class GrantCeiling
     public static GrantCeiling FromGrantorRights(AccessRights grantorRights)
         => new(ExternalAccessLevels.GrantCeilingFor(grantorRights), $"grantor rights {grantorRights}");
 
+    /// <summary>
+    /// The ceiling of an Assigned-To auto-grant (unified-access-control-r2 task 142): exactly Collaborate, with NO
+    /// grantor-level cap. Owner round 3 A1 and round 3b: "Assigned-To auto-grants follow rule 5: always Collaborate,
+    /// uncapped" — the grantor is the owner's rule, not a person, so there is no person's level to cap at (the cap stays
+    /// for MANUAL Grant Access). Used ONLY by <c>AssignedAccessMaterializer</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never-lower is the materializer's</b> (this type's remarks): a request for exactly Collaborate is not
+    /// narrowed, so the core's never-lower rule would not fire. The materializer therefore reads the key's active rows
+    /// first and writes nothing over a row at Collaborate or above (CoveredByExisting); it calls the core only to create,
+    /// to raise a lower row, to renew its OWN unmodified row, or to put a raised row back to its prior level.</para>
+    /// </remarks>
+    public static GrantCeiling AssignedToRule { get; } =
+        new(ExternalAccessLevel.Collaborate, "owner rule 5 (task 142): Assigned-To auto-grant, uncapped Collaborate");
+
     public override string ToString() => $"{Level?.ToString() ?? "none"} ({Basis})";
 }
 

@@ -151,6 +151,11 @@ public static class ExternalAccessEndpoints
         // "immediate on save"). On this group so the delegation filter gates it on Write on the ENTRY; it only removes.
         adminGroup.MapNoAccessEnforceEndpoint();
 
+        // POST /assigned-access/sync · GET /assigned-access · POST /assigned-access/dismiss — the Assigned-To auto-grants
+        // (task 142, owner Q5 + R3: the form save, the wizards and "Update Access" call the BFF; owner A3: suggestions on
+        // secure records). On this group so the delegation filter gates each on Write on the RECORD.
+        adminGroup.MapAssignedAccessEndpoints();
+
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();
 

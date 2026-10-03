@@ -66,6 +66,7 @@ public static class InviteAndGrantExternalUserEndpoint
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
         IConfiguration configuration,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -329,6 +330,10 @@ public static class InviteAndGrantExternalUserEndpoint
         logger.LogInformation(
             "[EXT-INVITE-GRANT] Onboarded ({Status}) + granted Contact {ContactId} to {RootType} {RootId} — access record {AccessRecordId}",
             onboardStatus, contactId, grantRoot.Type, grantRoot.Id, accessRecordId);
+
+        // Task 142: a manual grant onto a contact the Assigned-To ledger holds becomes ADOPTED (as /grant). Never thrown.
+        await assignedAccess.MarkGrantAdoptedAsync(
+            grantRoot.Type, grantRoot.Id, contactId, null, accessRecordId, CancellationToken.None);
 
         return TypedResults.Ok(new InviteAndGrantResponse(
             contactId, onboardStatus, accessRecordId, portalUrl,

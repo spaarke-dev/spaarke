@@ -26,6 +26,7 @@ import {
 } from '../../services/EntityCreationService';
 import { discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -393,6 +394,14 @@ export class ProjectService {
       // IDataService.createRecord returns Promise<string> (just the id)
       const projectId = await this._dataService.createRecord('sprk_project', entity);
       console.info('[ProjectService] createRecord success, projectId:', projectId);
+
+      // Task 142 (owner Q5 + R3): the project's "Assigned *" people get their access now — unless it is about to be
+      // SECURED, in which case the wizard syncs AFTER provisioning so the rule sees a secure record and SUGGESTS
+      // (owner A3 = prompt) instead of granting first. Never throws, never fails the create.
+      if (!formValues.isSecure) {
+        await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'project', projectId);
+      }
+
       return {
         projectId,
         projectName: formValues.projectName.trim(),

@@ -131,13 +131,19 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
     private readonly ILogger<DataverseCreateRecordHandler> _logger;
     private readonly HandoffUrlBuilder _handoffUrlBuilder;
     private readonly IGenericEntityService _appOnly;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after a root is
+    /// created. Optional so a host composing the tool framework without the external-access module still resolves this
+    /// handler (CLAUDE.md §10 F.1); the materializer itself is looked up with GetService and skipped when absent.</param>
     public DataverseCreateRecordHandler(
         IDataverseUserClient dataverse,
         ILogger<DataverseCreateRecordHandler> logger,
         HandoffUrlBuilder handoffUrlBuilder,
-        IGenericEntityService appOnly)
+        IGenericEntityService appOnly,
+        IServiceScopeFactory? scopes = null)
     {
+        _scopes = scopes;
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _handoffUrlBuilder = handoffUrlBuilder ?? throw new ArgumentNullException(nameof(handoffUrlBuilder));
@@ -320,6 +326,15 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
             if (createdId is { } stampedId && RecordCreatorPerson.IsStamped(tablename))
             {
                 await StampCreatorPersonAsync(tablename, stampedId, response.Body, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Task 142 (L1, owner Q5 + R3): a created project/matter/work assignment's "Assigned *" contacts get their
+            // Collaborate grant or share now. After the create committed; never throws, never fails this create.
+            if (createdId is { } createdRoot)
+            {
+                await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                    _scopes, tablename, createdRoot, writtenColumns: null, grantorOid: null, _logger, cancellationToken)
+                    .ConfigureAwait(false);
             }
 
             var citationPath = createdId.HasValue

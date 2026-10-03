@@ -287,6 +287,7 @@ public class GrantLifecycleCharacterizationTests
             new SpeContainerMembershipService(
                 Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
             OpenRecordPolicy,
+            AssignedAccessTestDoubles.InertMaterializer(),
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static RevokeAccessResponse RevokeBody(IResult result) =>
@@ -1351,6 +1352,7 @@ public class GrantLifecycleCharacterizationTests
             client.Object,
             new SpeContainerMembershipService(Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
             participations,
+            AssignedAccessTestDoubles.InertMaterializer(),
             AdminRequest(), NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>

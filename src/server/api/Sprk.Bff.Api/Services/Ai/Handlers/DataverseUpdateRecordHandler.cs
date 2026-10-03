@@ -48,13 +48,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
 
     private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 142 (L1): the scope the Assigned-To materializer is resolved from after an update that
+    /// wrote a root's "Assigned *" column. Optional for the same reason as on <c>DataverseCreateRecordHandler</c>.</param>
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
-        ILogger<DataverseUpdateRecordHandler> logger)
+        ILogger<DataverseUpdateRecordHandler> logger,
+        IServiceScopeFactory? scopes = null)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _scopes = scopes;
     }
 
     /// <inheritdoc />
@@ -173,6 +178,13 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 // Privilege-denied update surfaces the USER's own access error — never escalates.
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
             }
+
+            // Task 142 (L1, owner Q5 + A4): an update that wrote a root's "Assigned *" column grants the new subject and
+            // removes the previous one's unmodified auto access now. After the PATCH committed; never throws, never fails
+            // this update (a non-root or a non-registry column is a no-op).
+            await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                _scopes, tablename, recordId, mapped.Item!.Columns, grantorOid: null, _logger, cancellationToken)
+                .ConfigureAwait(false);
 
             var result = ToolResult.Ok(
                 HandlerId, tool.Id, tool.Name,

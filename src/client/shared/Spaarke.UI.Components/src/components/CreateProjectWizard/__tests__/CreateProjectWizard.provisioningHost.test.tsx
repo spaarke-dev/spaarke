@@ -126,8 +126,24 @@ describe('CreateProjectWizard — routes a provisioning failure to the right des
     await userEvent.click(screen.getByRole('button', { name: 'Try securing again' }));
 
     await waitFor(() => expect(screen.getByText(/now secured, with its own document container/)).toBeInTheDocument());
-    expect(authFetch).toHaveBeenCalledTimes(2);
-    expect(JSON.parse(authFetch.mock.calls[1][1].body).projectId).toBe(PROJECT_ID);
+    // Task 142: the wizard also syncs the project's Assigned-To access once provisioning has run; the provisioning
+    // calls themselves are still exactly two — the first attempt and the retry, on the SAME project.
+    const provisionCalls = authFetch.mock.calls.filter(([url]) => String(url).includes('/provision-project'));
+    expect(provisionCalls).toHaveLength(2);
+    expect(JSON.parse(provisionCalls[1][1].body).projectId).toBe(PROJECT_ID);
+  });
+
+  it('syncs a SECURE project’s Assigned-To access only AFTER provisioning ran (task 142, owner A3 = prompt)', async () => {
+    const authFetch = jest.fn().mockResolvedValue(ok);
+
+    await finishWithProvisioningFailure(authFetch);
+
+    const urls = authFetch.mock.calls.map(([url]) => String(url));
+    const provisionAt = urls.findIndex(u => u.includes('/provision-project'));
+    const syncAt = urls.findIndex(u => u.includes('/assigned-access/sync'));
+    expect(provisionAt).toBeGreaterThanOrEqual(0);
+    expect(syncAt).toBeGreaterThan(provisionAt);
+    expect(JSON.parse(authFetch.mock.calls[syncAt][1].body)).toEqual({ recordType: 'project', recordId: PROJECT_ID });
   });
 
   it('shows a non-retryable failure as its warning, with no action and no retry advice', async () => {

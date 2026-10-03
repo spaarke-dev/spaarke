@@ -116,6 +116,14 @@ public sealed record SpeOrgMemberCleanupSummary(
 /// the verdict — "some members retain access" is <c>Failed</c>, never a success — and this carries the
 /// arithmetic behind it.</para>
 /// </param>
+/// <param name="ResidualAccessTerms">
+/// Task 142 (criterion 17, owner A2 reversed — standing and organization access STAY): when the revoked grant was an
+/// Assigned-To auto grant, the read-time terms that still confer access: for a CONTACT, those that bring it to the record
+/// (<c>standing-grant</c>, <c>organization-standing-grant</c>); for an ORGANIZATION, <c>organization-members-standing-grant</c>
+/// when its members keep reaching the record through organization expansion; <c>unknown</c> when they could not be read.
+/// So Manage Access never shows "removed" while access silently remains. Empty when nothing remains or the grant was not
+/// an auto grant.
+/// </param>
 /// <remarks>
 /// <b>Removed by task 017</b>: <c>WebRoleRemoved</c>, a Power Pages relic (register H-8b). It was
 /// hard-coded to <c>false</c> at every call site — Spaarke does not manage Power Pages web roles — so it
@@ -125,4 +133,5 @@ public record RevokeAccessResponse(
     bool SpeContainerMembershipRevoked,
     SpeContainerRevokeOutcome SpeContainerOutcome,
     int DeactivatedCount = 0,
-    SpeOrgMemberCleanupSummary? SpeOrgMemberCleanup = null);
+    SpeOrgMemberCleanupSummary? SpeOrgMemberCleanup = null,
+    IReadOnlyList<string>? ResidualAccessTerms = null);

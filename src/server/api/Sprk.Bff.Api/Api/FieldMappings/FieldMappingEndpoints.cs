@@ -436,6 +436,7 @@ public static class FieldMappingEndpoints
     private static async Task<IResult> PushFieldMappingsAsync(
         [FromBody] PushFieldMappingsRequest request,
         IFieldMappingDataverseService dataverseService,
+        IServiceScopeFactory scopes,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -558,7 +559,8 @@ public static class FieldMappingEndpoints
                 request.TargetEntity,
                 childRecords.RecordIds,
                 logger,
-                ct);
+                ct,
+                scopes);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -680,14 +682,17 @@ public static class FieldMappingEndpoints
     /// <summary>
     /// Applies mapping rules to each child record and updates them.
     /// </summary>
-    private static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
+    /// <remarks>Internal (not private) so task 142's writer test can assert the inline Assigned-To trigger after a push
+    /// that wrote a root's "Assigned *" column (InternalsVisibleTo).</remarks>
+    internal static async Task<(int Updated, int Failed, int Skipped, PushFieldMappingsError[] Errors, FieldMappingResultDto[] FieldResults)> ApplyMappingsToChildRecordsAsync(
         IFieldMappingDataverseService dataverseService,
         FieldMappingRuleDto[] rules,
         Dictionary<string, object?> sourceValues,
         string targetEntity,
         Guid[] childRecordIds,
         ILogger logger,
-        CancellationToken ct)
+        CancellationToken ct,
+        IServiceScopeFactory? scopes = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -714,6 +719,12 @@ public static class FieldMappingEndpoints
                 {
                     await dataverseService.UpdateRecordFieldsAsync(targetEntity, childRecordId, updatePayload, ct);
                     updated++;
+
+                    // Task 142 (L1): a push that wrote a ROOT's "Assigned *" column (a project/matter/work assignment
+                    // child of the source) materializes its Assigned-To access now. A non-root target or a non-registry
+                    // column is a no-op; after the update committed; never throws, never fails this push.
+                    await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+                        scopes, targetEntity, childRecordId, updatePayload.Keys, grantorOid: null, logger, ct);
                 }
                 else
                 {
