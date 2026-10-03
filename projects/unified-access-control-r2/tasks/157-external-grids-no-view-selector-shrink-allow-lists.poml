@@ -653,5 +653,81 @@
       - No client file changed, so no SPA build was run in this round. The npm installs used for the tsc and jest
         measurements left no tracked change: the SPA package-lock.json npm touched was reverted with git checkout.
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c2" round="fix-c2-residual-4" base="381707788">
+      Base: task/uac-r2-157-c1-r1 merged with work/unified-access-control-r2 (clean, no conflict) = 381707788.
+      Status stays "completed-with-escalation": the MANUAL live gate (criterion 6) is still the one open item,
+      pending by design. Residual 4 is CLOSED.
+      ITEM 1 (main-session ruling under owner round 10, residual 4): the shared DataGrid's jest folder is a BLOCKING
+      CI check on the Router path.
+      - Premise correction: the Compose Client Gate is NOT on the blocking path. It lives only in sdap-ci.yml and
+        carries continue-on-error: true. Tier 1 had no client gate at all. The classification mechanism used is the
+        one Tier 1's BFF-conditional job uses: the router's classify job (dorny/paths-filter) passes a string input
+        to ci-tier1-blocking.yml.
+      - ci-router.yml: new paths-filter output ui_components ('src/client/shared/Spaarke.UI.Components/**'); passed
+        to Tier 1 as ui_components_changed = ui_components OR ci_workflows (an edit to the gate job runs the gate);
+        added to the docs_only exclusion; a summary row. Found while wiring it: docs_only counted only BFF,
+        SpaarkeAi and CI workflows as code, so a PR editing DataGrid.tsx plus any *.md file read as docs_only and
+        skipped Tier 1 entirely. Without the exclusion the new gate would be skippable that way.
+      - ci-tier1-blocking.yml: new input ui_components_changed (default 'true'; the job's if is
+        inputs.ui_components_changed != 'false', so an omitted input or a workflow_dispatch run executes it). New
+        job datagrid-external-host-gate (ubuntu-latest, Node 20, timeout 15 min, no continue-on-error): npm install
+        --legacy-peer-deps --no-audit --no-fund in Spaarke.UI.Components; npx jest --ci --json src/components/DataGrid/
+        (8 suites, 75 tests; no --coverage, because the package's global coverageThreshold would fail a folder run);
+        then a node step that fails unless DataGrid.externalHost.test.tsx ran with at least 7 tests, all passing
+        (a rename, deletion or skip would otherwise leave the folder green); job summary via the existing
+        scripts/ci/summarize-jest-results.js; artifact on failure. Header CONTENTS list item 5 added.
+      - No shared-lib dist is needed: measured from a clean worktree (fresh npm install, no Spaarke.Auth or
+        Spaarke.SdapClient dist), 8/8 suites and 75/75 tests, also under TZ=UTC, America/Los_Angeles and
+        Asia/Kolkata with --randomize.
+      - Freeze: the three tier files are frozen for the shadow window, with a GATE REPAIR carve-out for "a guard
+        present but not armed" (projects/INDEX.md). This is that case: no PR-triggered workflow ran the jest suite.
+        Disclosed in a new INDEX.md disclosure record; the window re-baselines from this merge.
+      - actionlint 1.7.12 (-shellcheck=, as workflows-validate.yml runs it): exit 0 on both files and on all of
+        .github/workflows (exit 0 before the change too).
+      - /conflict-check: no open PR touches ci-tier1-blocking.yml or ci-router.yml. Dependabot #909 bumps
+        setup-node in other workflow files; the new job uses actions/setup-node@v4 like ci-tier2-advisory.yml.
+        projects/INDEX.md is also touched by #935 (code-quality-and-assurance-r4), in other rows.
+      - Self-protection, new arch fact ExternalSpaGridViewSelectorGuardTests.SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate
+        (runs in the blocking arch-tests job) plus a 10-row negative-control Theory over the real workflow text:
+        job renamed, continue-on-error added, "|| true", if changed, jest narrowed, suite assertion dropped, input
+        default flipped, router filter dropped, docs_only exclusion removed, input not passed. Each row produces a
+        violation.
+      - Proof it bites (each restored hash-matched and touched): seed J4 in DataGrid.tsx (restored 944dd3fb...): the
+        job's jest step, run from the YAML's own run: text, exits 1 (5 of 7 failed) and the assertion step exits 1;
+        the external-host suite renamed: jest exits 0, the assertion step exits 1 ("did not run"); one of its tests
+        it.skip'd: jest exits 0, assertion exits 1 ("6 of 7 passed"); continue-on-error written into the job on
+        disk: the new fact red; the docs_only exclusion removed on disk: the new fact red.
+      - design.md hot-path declaration: ci-workflows N to Y. projects/INDEX.md: the project's row (which already
+        read Y) notes the correction and this change; disclosure record added.
+      - Guard remarks, ScanSharedGridRule summary and note G6 / section 7 updated: residual 4 moved from the
+        residual list to closed.
+      Not observed on ubuntu-latest: every run here was on Windows (Node 22.14; the job pins Node 20 like the repo's
+      other client jobs). The repo's "green runs on the runner before blocking" standard is waived by the
+      main-session ruling that this gate lands blocking. If the first ubuntu-latest run is red for an environment
+      reason, fix the environment rather than add continue-on-error.
+      Section 10/11: no new service, DI registration, endpoint, option, job (background), Dataverse column or
+      package. The CI job is a new workflow job, justified:
+      - Existing: sdap-ci.yml compose-client-gate (advisory, other package, being retired); client-tests.yml
+        (nightly, advisory by construction, its header forbids promotion into the tiers); office-addins-tests.yml
+        (another package, not a required check). None runs this suite on a PR in a blocking way.
+      - Extension: tier1's existing jobs are .NET jobs on other runners; a step in one would couple a Node install
+        to a .NET job's verdict and run it on every BFF change. A conditional job beside them is the smallest change.
+      - Cost of doing nothing: seed J4 (one added line in DataGrid.tsx) merges green, and the external SPA's grid
+        requests the internal saved-query list again.
+      No new script file (the suite assertion is an inline node -e, the office-addins-tests.yml pattern). Live:
+      none. Publish size: skipped per instructions (no BFF source change). ADR-002: no plugin. ADR-003: the input
+      defaults fail closed (the gate runs unless explicitly classified out).
+      Runs (this branch; detail in the note, section 7, "Fix round c2"):
+      - actionlint 1.7.12: exit 0 (both edited files, and all of .github/workflows).
+      - jest src/components/DataGrid/ (clean install): 8/8 suites, 75/75 tests; external-host suite 7/7.
+      - ExternalSpaGridViewSelectorGuardTests: 205/205 (194 + 1 fact + 10 Theory rows).
+      - Once at the end, all four started together on one machine:
+        - NetArchTest: Passed 551, Failed 0, Total 551 (540 + 11).
+        - BFF unit: Passed 14307, Failed 0, Skipped 54, Total 14361 (Debug, 19m11s).
+        - Integration, Sprk.Bff.Api.IntegrationTests: concurrent run Passed 103, Failed 1, Total 104
+          (PlaybookByNameDeprecationTests.ByName_SetsActivityTag_DeprecatedEndpoint_OnEveryCall, an activity-tag
+          capture on an unrelated surface); isolated re-run of the class 3/3, then the full suite 104/104. Contention.
+        - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m31s).
+    </outcome>
   </execution>
 </task>

@@ -53,7 +53,11 @@ namespace Spaarke.ArchTests;
 /// The behavioural proof is the jest suite
 /// <c>Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx</c>: under either
 /// switch, with <c>showViewSelector={true}</c> passed directly, no picker renders and the list is never requested.
-/// That suite catches J4, but the package's jest suite is not run by CI today, which is why the pin exists.
+/// That suite catches J4. Since fix round c2 (2026-10-03) it runs BLOCKING in CI: Tier 1's
+/// <c>datagrid-external-host-gate</c> job runs the DataGrid jest folder on every change to
+/// <c>Spaarke.UI.Components</c> or to a CI workflow, and
+/// <see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/> refuses the ways that job could stop
+/// blocking. The pin stays as a fast first check.
 /// </para>
 /// <para>
 /// <b>The scan is defence in depth.</b> The rules below stay because each is zero-false-positive on the current
@@ -164,22 +168,26 @@ namespace Spaarke.ArchTests;
 /// than the pinned switch. The pins refuse a third <c>&lt;ViewSelector</c>, any other use of the raw prop, and any
 /// other call of <c>retrieveSavedQueriesForEntity</c>; a differently named picker is a reviewed change to the shared
 /// grid.</item>
-/// <item>An edit to <c>DataGrid.tsx</c> that ignores the switch WITHOUT touching a pinned statement: NARROWED by the pin,
-/// not closed. The pin refuses removing or rewriting the rule's statements, but not an added statement that shadows the
-/// forced value in a nested scope (review round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect
-/// passed this class 194/194, so the grid would request <c>/savedqueries/{entity}</c> again on the external host). Only
-/// the jest suite <c>DataGrid.externalHost.test.tsx</c> catches J4, and CI does not run that package's jest today. The
-/// data impact is nil: the BFF's external <c>savedqueries</c> / <c>savedquery</c> routes 404 every view no module grid
-/// registers (task 157 F1), which today is every view.</item>
 /// </list>
-/// <para>Items 1–4 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
+/// <para>Items 1–3 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
 /// every column the picker's views would need, with a 400; it is the data control.</para>
+/// <para><b>Residual 4, closed by CI in fix round c2 (2026-10-03).</b> An edit to <c>DataGrid.tsx</c> that ignores the
+/// switch WITHOUT touching a pinned statement. The pin refuses removing or rewriting the rule's statements, but not an
+/// added statement that shadows the forced value in a nested scope (review round 8, seed J4:
+/// <c>const showViewSelector = true;</c> in the load effect passed this class 194/194, so the grid would request
+/// <c>/savedqueries/{entity}</c> again on the external host). The jest suite <c>DataGrid.externalHost.test.tsx</c>
+/// catches J4 (5 of 7 red), and it now runs blocking in Tier 1 (<c>datagrid-external-host-gate</c>; seed J4 re-planted
+/// in fix round c2 failed that job's jest step), guarded by
+/// <see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/>. Data impact, had it shipped: nil, because
+/// the BFF's external <c>savedqueries</c> / <c>savedquery</c> routes 404 every view no module grid registers (task 157
+/// F1), which today is every view.</para>
 /// <para><b>Closed by the runtime rule, and removed from this list in fix round c1</b> (residuals 3 and 5 through fix
 /// round b2-r2): a shared-library dynamic <c>import()</c> whose path is built in a variable; and element-tree peeling
 /// (Q8, <c>.props.children</c> / <c>.type</c> by hand, or a fiber walk). Whatever element, tree or module instance
 /// reaches the shared grid, the grid applies the rule itself. V7 (round 7) is closed the same way, and the round-7 scan
-/// rule above stops the remaining scan going blind on it. Residual 4 through b2-r2 (edits to <c>DataGrid.tsx</c>) is
-/// narrowed, not closed: it is item 4 above (corrected in fix round c1-r1; fix round c1 had listed it as closed).</para>
+/// rule above stops the remaining scan going blind on it. Residual 4 through b2-r2 (edits to <c>DataGrid.tsx</c>) was
+/// narrowed by the pin in fix round c1-r1 (fix round c1 had listed it as closed too early) and is closed by the
+/// blocking CI run of the jest suite in fix round c2 (above).</para>
 /// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each
 /// rule is paired with a negative control proving it fires and a positive control proving it does not fire
 /// on the sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected
@@ -1600,7 +1608,8 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// The runtime rule's text in the shared library: the host module verbatim, the grid's statements present, and
     /// exactly as many uses of the raw prop, the list call, the picker element and the hook as the rule needs. It
     /// checks statements and counts, not scopes: an ADDED nested-scope shadow of the forced value (seed J4,
-    /// <c>const showViewSelector = true;</c> in the load effect) passes it. That is residual 4 in the class remarks.
+    /// <c>const showViewSelector = true;</c> in the load effect) passes it. That is residual 4 in the class remarks,
+    /// closed by the blocking CI run of the jest suite (<see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/>).
     /// </summary>
     internal static IReadOnlyList<string> ScanSharedGridRule(string gridSource, string hostSource)
     {
@@ -1675,6 +1684,145 @@ public class ExternalSpaGridViewSelectorGuardTests
         var violations = ScanSharedGridRule(File.ReadAllText(grid), File.ReadAllText(host));
 
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
+    }
+
+    internal const string Tier1WorkflowFile = ".github/workflows/ci-tier1-blocking.yml";
+
+    internal const string RouterWorkflowFile = ".github/workflows/ci-router.yml";
+
+    internal const string DataGridGateJob = "datagrid-external-host-gate";
+
+    /// <summary>
+    /// Residual 4 closed by CI (task 157 fix round c2): the jest suite <c>DataGrid.externalHost.test.tsx</c>, the only
+    /// check that catches an added nested-scope shadow in <c>DataGrid.tsx</c> (seed J4), runs BLOCKING in Tier 1. This
+    /// reads the two workflow files as text and refuses the ways that gate could stop blocking without a test failing:
+    /// the job or its <c>jest</c> call or its suite assertion removed, <c>continue-on-error</c> or <c>|| true</c>
+    /// added, its <c>if:</c> changed, the input's fail-closed default changed, or the router no longer classifying
+    /// <c>Spaarke.UI.Components</c> (including the <c>docs_only</c> exclusion, without which a PR touching the grid plus
+    /// any <c>*.md</c> file skips Tier 1). Crude by design: line and regex checks over YAML, not a YAML parse.
+    /// </summary>
+    internal static IReadOnlyList<string> ScanDataGridCiGate(string tier1Yaml, string routerYaml)
+    {
+        var violations = new List<string>();
+        var tier1 = tier1Yaml.Replace("\r\n", "\n");
+        var router = routerYaml.Replace("\r\n", "\n");
+
+        var job = Regex.Match(tier1, @"(?m)^  " + Regex.Escape(DataGridGateJob) + @":[ \t]*\n(?<body>(?:(?:[ \t]*#.*|[ \t]*|    .*)\n)*)");
+        if (!job.Success)
+        {
+            violations.Add($"{Tier1WorkflowFile}: the job `{DataGridGateJob}` is missing. It is the blocking CI run of the "
+                           + "shared DataGrid's external-host jest suite (task 157 residual 4).");
+            return violations;
+        }
+
+        var body = job.Groups["body"].Value;
+        var code = string.Join("\n", body.Split('\n').Where(line => !line.TrimStart().StartsWith('#')));
+        if (Regex.IsMatch(code, @"(?m)^\s*continue-on-error\s*:"))
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` carries continue-on-error; the gate must be able to fail the build.");
+        }
+
+        if (Regex.IsMatch(code, @"\|\|\s*(?:true\b|exit\s+0\b|:(?=\s|$))", RegexOptions.Multiline))
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` swallows a failure with `|| true` (or similar).");
+        }
+
+        var ifLines = Regex.Matches(code, @"(?m)^    if\s*:\s*(?<cond>.*)$");
+        if (ifLines.Count != 1 || ifLines[0].Groups["cond"].Value.Trim() != "${{ inputs.ui_components_changed != 'false' }}")
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` must carry exactly `if: ${{{{ inputs.ui_components_changed != 'false' }}}}` "
+                           + "(fail closed: an empty or omitted input runs the gate).");
+        }
+
+        if (!Regex.IsMatch(code, @"(?m)^\s*working-directory:\s*src/client/shared/Spaarke\.UI\.Components\s*\n\s*run:\s*npx jest --ci\b[^\n]*\ssrc/components/DataGrid/(?:\s|$)"))
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` no longer runs `npx jest --ci … src/components/DataGrid/` in "
+                           + "src/client/shared/Spaarke.UI.Components.");
+        }
+
+        if (!code.Contains("src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx 7", StringComparison.Ordinal)
+            || !code.Contains("process.exit(1)", StringComparison.Ordinal))
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` no longer asserts that DataGrid.externalHost.test.tsx ran with "
+                           + "at least 7 tests, all passing (a rename or deletion of the suite would leave the folder green).");
+        }
+
+        var input = Regex.Match(tier1, @"(?m)^      ui_components_changed:[ \t]*\n(?<body>(?:        .*\n|[ \t]*\n)*)");
+        if (!input.Success || !Regex.IsMatch(input.Groups["body"].Value, @"(?m)^\s*default:\s*'true'\s*$"))
+        {
+            violations.Add($"{Tier1WorkflowFile}: the workflow_call input `ui_components_changed` must default to 'true' (fail closed).");
+        }
+
+        if (!Regex.IsMatch(router, @"(?m)^      ui_components: \$\{\{ steps\.filter\.outputs\.ui_components \}\}\s*$"))
+        {
+            violations.Add($"{RouterWorkflowFile}: the classify job no longer outputs `ui_components`.");
+        }
+
+        if (!Regex.IsMatch(router, @"(?m)^            ui_components:\s*\n              - 'src/client/shared/Spaarke\.UI\.Components/\*\*'\s*$"))
+        {
+            violations.Add($"{RouterWorkflowFile}: the paths filter `ui_components` must classify 'src/client/shared/Spaarke.UI.Components/**'.");
+        }
+
+        if (!Regex.IsMatch(router, @"(?m)^\s*if \[\[ ""\$docs"" == ""true"" &&[^\n]*&& ""\$ui_components"" != ""true"" \]\]; then\s*$"))
+        {
+            violations.Add($"{RouterWorkflowFile}: docs_only must exclude ui_components; otherwise a PR touching the shared grid plus "
+                           + "any *.md file is docs_only and skips Tier 1, gate included.");
+        }
+
+        if (!Regex.IsMatch(router, @"(?m)^      ui_components_changed: \$\{\{ \(needs\.classify\.outputs\.ui_components == 'true' \|\| needs\.classify\.outputs\.ci_workflows == 'true'\) && 'true' \|\| 'false' \}\}\s*$"))
+        {
+            violations.Add($"{RouterWorkflowFile}: the tier1 call must pass `ui_components_changed` from the ui_components and "
+                           + "ci_workflows classification.");
+        }
+
+        return violations;
+    }
+
+    [Fact(DisplayName = "The shared DataGrid's external-host jest suite runs as a blocking Tier 1 gate (task 157 residual 4)")]
+    public void SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate()
+    {
+        var tier1 = Path.Combine(SourceScan.RepoRoot, Tier1WorkflowFile.Replace('/', Path.DirectorySeparatorChar));
+        var router = Path.Combine(SourceScan.RepoRoot, RouterWorkflowFile.Replace('/', Path.DirectorySeparatorChar));
+        Assert.True(File.Exists(tier1), $"the Tier 1 workflow must exist at {Tier1WorkflowFile}");
+        Assert.True(File.Exists(router), $"the CI router must exist at {RouterWorkflowFile}");
+        var suite = Path.Combine(SourceScan.RepoRoot, "src", "client", "shared", "Spaarke.UI.Components", "src", "components",
+            "DataGrid", "__tests__", "DataGrid.externalHost.test.tsx");
+        Assert.True(File.Exists(suite), "the gated jest suite must exist at …/DataGrid/__tests__/DataGrid.externalHost.test.tsx");
+
+        var violations = ScanDataGridCiGate(File.ReadAllText(tier1), File.ReadAllText(router));
+
+        Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
+    }
+
+    public static TheoryData<string, string, string> DataGridCiGateSeeds() => new()
+    {
+        // (name, find, replace) applied to the REAL tier1 or router text; each must produce a violation.
+        { "tier1:job-renamed", "  datagrid-external-host-gate:\n", "  datagrid-gate-renamed:\n" },
+        { "tier1:continue-on-error", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    continue-on-error: true\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
+        { "tier1:or-true", "src/components/DataGrid/\n", "src/components/DataGrid/ || true\n" },
+        { "tier1:if-false", "    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    if: ${{ false }}\n" },
+        { "tier1:jest-narrowed", "--outputFile=datagrid-jest-results.json src/components/DataGrid/\n", "--outputFile=datagrid-jest-results.json src/components/DataGrid/chips/\n" },
+        { "tier1:assert-dropped", "DataGrid.externalHost.test.tsx 7", "DataGrid.externalHost.test.tsx 0" },
+        { "tier1:input-default", "        type: string\n        default: 'true'\n  workflow_dispatch:", "        type: string\n        default: 'false'\n  workflow_dispatch:" },
+        { "router:filter-dropped", "              - 'src/client/shared/Spaarke.UI.Components/**'\n", "              - 'src/client/shared/Spaarke.UI.Components/README.md'\n" },
+        { "router:docs-only", " && \"$ui_components\" != \"true\" ]]", " ]]" },
+        { "router:not-passed", "      ui_components_changed: ${{ (needs.classify.outputs.ui_components == 'true' || needs.classify.outputs.ci_workflows == 'true') && 'true' || 'false' }}\n", "      ui_components_changed: 'false'\n" },
+    };
+
+    [Theory(DisplayName = "Negative control: each way of disarming the DataGrid CI gate is refused")]
+    [MemberData(nameof(DataGridCiGateSeeds))]
+    public void ScanDataGridCiGate_RefusesEachDisarming(string name, string find, string replace)
+    {
+        var tier1 = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, Tier1WorkflowFile.Replace('/', Path.DirectorySeparatorChar))).Replace("\r\n", "\n");
+        var router = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, RouterWorkflowFile.Replace('/', Path.DirectorySeparatorChar))).Replace("\r\n", "\n");
+        var inTier1 = name.StartsWith("tier1:", StringComparison.Ordinal);
+        var target = inTier1 ? tier1 : router;
+        Assert.True(target.Contains(find, StringComparison.Ordinal), $"seed {name}: the text to perturb must exist in the real workflow");
+
+        var seeded = target.Replace(find, replace, StringComparison.Ordinal);
+        var violations = inTier1 ? ScanDataGridCiGate(seeded, router) : ScanDataGridCiGate(tier1, seeded);
+
+        Assert.NotEmpty(violations);
     }
 
     [Fact(DisplayName = "No external-SPA file reaches the shared DataGrid except ExternalDataGrid.tsx, whose mount passes showViewSelector={false}")]

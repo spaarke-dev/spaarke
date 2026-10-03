@@ -12,6 +12,9 @@
 #   2. arch-tests             — the FULL NetArchTest suite, blocking (28-54s)
 #   3. changed-surface-smoke  — Spe.Integration.Tests filtered by changed src/ paths (60-90s)
 #   4. auth-smoke             — auth integration tests (conditional, <60s)
+#   5. datagrid-external-host-gate — the shared DataGrid's jest folder (conditional
+#      on Spaarke.UI.Components or a CI workflow changing, ~2 min). Added 2026-10-03
+#      by unified-access-control-r2 task 157 as a GATE REPAIR: see the job.
 #
 # NOT IN TIER 1 (live in ci-tier2-advisory.yml or nightly-health.yml):
 #   format, lint, markdown link validator, dependency audit, Trivy,
@@ -20,6 +23,8 @@
 # INPUTS (from ci-router.yml `classify` job)
 #   bff_changed       — true if src/server/api/Sprk.Bff.Api/** or shared server changed
 #   spaarke_ai_changed — true if src/solutions/SpaarkeAi/** or AI client libs changed
+#   ui_components_changed — true if src/client/shared/Spaarke.UI.Components/** or
+#                       .github/workflows/** changed (gates datagrid-external-host-gate)
 #
 # AUTH + NAMESPACE DETECTION
 #   Done in-workflow via a dedicated classify-tier1 job using dorny/paths-filter.
@@ -57,6 +62,14 @@ on:
         required: false
         type: string
         default: 'false'
+      ui_components_changed:
+        # Defaults 'true' and the job tests `!= 'false'`, so a caller that omits it,
+        # and a workflow_dispatch run (where inputs.* is empty), RUN the gate. Only an
+        # explicit 'false' from the router's classification skips it (fail closed).
+        description: 'True if PR diff touches Spaarke.UI.Components or a CI workflow (per router classification)'
+        required: false
+        type: string
+        default: 'true'
   workflow_dispatch:
 
 permissions:
@@ -748,3 +761,111 @@ jobs:
           name: fidelity-gate-result
           path: tests/unit/Sprk.Bff.Api.Tests/bin/**/fidelity-gate-result.json
           if-no-files-found: warn  # absent only if the run crashed pre-sink; the test step is already red then
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # DataGrid external-host gate (unified-access-control-r2 task 157, residual 4)
+  # — BLOCKING. Added 2026-10-03 as a GATE REPAIR under the shadow-window
+  # carve-out (projects/INDEX.md: "a guard present but not armed").
+  #
+  # WHAT IT GATES: the shared DataGrid's jest folder
+  # (src/client/shared/Spaarke.UI.Components/src/components/DataGrid: 8 suites,
+  # 75 tests at landing), and in it __tests__/DataGrid.externalHost.test.tsx
+  # (7 tests). That suite is the BEHAVIOURAL proof of an authorization rule:
+  # inside the external SPA (outside counsel, CIAM contacts) the shared grid
+  # never shows the internal MDA view picker and never requests the entity's
+  # saved-query list, whatever props reach it. Before this job no CI workflow
+  # ran that package's jest on a pull request, so the proof could go red while
+  # the PR stayed green.
+  #
+  # WHY IT MUST BLOCK: the arch guard that does run in CI
+  # (ExternalSpaGridViewSelectorGuardTests) pins the rule's statements in
+  # DataGrid.tsx, but it cannot see an ADDED nested-scope shadow of the forced
+  # value. Review round 8's seed J4 (one added line,
+  # `const showViewSelector = true;` in the load effect) passed that guard
+  # 194/194 and turned this jest suite 5 of 7 red. Only this suite catches it.
+  #
+  # WHY HERE: tier1 is the blocking surface (`CI / Router` is master's one
+  # required check). sdap-ci.yml is pending retirement, and its
+  # compose-client-gate is advisory, so a step there could not block.
+  #
+  # CLASSIFICATION: ci-router.yml's `classify` job emits `ui_components`
+  # (src/client/shared/Spaarke.UI.Components/**) and passes
+  # `ui_components_changed` = ui_components OR ci_workflows, so an edit to this
+  # job also runs it. The router's docs_only derivation now counts
+  # ui_components as production code. Before, a PR touching DataGrid.tsx plus
+  # any `*.md` file was classified docs_only and skipped Tier 1 entirely.
+  #
+  # NO SHARED-LIB DIST NEEDED: measured from a clean checkout (no Spaarke.Auth /
+  # Spaarke.SdapClient dist, fresh npm install), the folder passes 8/8 suites,
+  # 75/75 tests, also under TZ=UTC, America/Los_Angeles and Asia/Kolkata with
+  # --randomize. No --coverage: the package's global coverageThreshold applies
+  # to the whole suite and would fail a folder run. `npm install`, never
+  # `npm ci`, per root CLAUDE.md §12.
+  #
+  # SELF-PROTECTION: ExternalSpaGridViewSelectorGuardTests
+  # .SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate (run blocking by
+  # arch-tests above) fails if this job, its jest call or its suite assertion,
+  # the router's classification, or the docs_only exclusion is removed, or if
+  # continue-on-error is added.
+  # ──────────────────────────────────────────────────────────────────────────
+  datagrid-external-host-gate:
+    name: DataGrid External-Host Gate (jest)
+    runs-on: ubuntu-latest
+    # Install ~45s + jest ~45s measured locally. 15 minutes is a hang guard, not a budget.
+    timeout-minutes: 15
+    if: ${{ inputs.ui_components_changed != 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Spaarke.UI.Components deps
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: DataGrid jest folder (external-host rule, merge-blocking)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci --json --outputFile=datagrid-jest-results.json src/components/DataGrid/
+
+      # A rename or deletion of the external-host suite would leave the folder green
+      # with the proof gone. This step fails unless that suite ran, with every test
+      # passing and at least the 7 it landed with.
+      - name: Assert the external-host suite ran
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: |
+          node -e '
+            const [file, suffix, min] = process.argv.slice(1);
+            const r = require(require("path").resolve(file));
+            const s = r.testResults.find(t => t.name.split(String.fromCharCode(92)).join("/").endsWith(suffix));
+            if (!s) { console.log("::error::" + suffix + " did not run"); process.exit(1); }
+            const n = s.assertionResults.length;
+            const passed = s.assertionResults.filter(a => a.status === "passed").length;
+            if (n < Number(min) || passed !== n) {
+              console.log("::error::" + suffix + ": " + passed + " of " + n + " passed (at least " + min + ", all passing, required)");
+              process.exit(1);
+            }
+            console.log(suffix + ": " + passed + " of " + n + " passed");
+          ' datagrid-jest-results.json src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx 7
+
+      - name: Report result (job summary + annotation)
+        if: always()
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: |
+          if [ ! -f datagrid-jest-results.json ]; then
+            echo "::error::datagrid-external-host-gate produced no jest results - the run crashed before jest reported"
+            echo "### DataGrid External-Host Gate - no results (jest crashed)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node "$GITHUB_WORKSPACE/scripts/ci/summarize-jest-results.js" datagrid-jest-results.json "DataGrid External-Host Gate (jest)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload jest results (per-suite breakdown)
+        uses: actions/upload-artifact@v6
+        if: failure()   # the breakdown matters MOST when the gate is red
+        with:
+          name: datagrid-jest-results
+          path: src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
+          if-no-files-found: warn  # absent only if the run crashed before jest reported
