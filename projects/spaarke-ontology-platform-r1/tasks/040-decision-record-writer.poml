@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The Decision Record writer with record class and mandatory fact snapshot</title>
+    <phase>4 The Decision Record</phase>
+    <gate>001,030 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes the append-only artifact the whole defensibility story rests on; it cannot be edited after the fact.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified writer; the judgement was settled by D-2 and the BR-1 reversal.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 041 and 042 both build on the writer.</parallel-reason>
+    <deps>001,030</deps>
+    <tags>bff-api,dataverse,decision-record</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write a Decision Record on EVERY human resolution, typed by record class, with a mandatory fact snapshot.</prompt>
+  <role>SPAARKE backend developer. Append-only means you get one chance per row.</role>
+  <goal>Every human resolution of a Work Item writes a Decision Record and populates the Signal decision reference; the class distinguishes judgement from routine work.</goal>
+
+  <context>
+    <background>BR-1 was REVERSED. The earlier rule (Do-lane completions write no record) was drawn at the wrong granularity: resolving a Do item is rarely a bare mark-complete, it also sends email, creates follow-ons and closes records, and one of those is outward-facing. The lane is not a safe proxy for whether a judgement occurred. The fix is write everything, type it, filter on read.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: EVERY human resolution writes a record: complete, reschedule, reassign, send email, create follow-on, close record, dismiss. Decide lane and Do lane alike. Do NOT reintroduce a lane-based carve-out.</constraint>
+    <constraint source="project">Scope: sprk_factsnapshot is MANDATORY. Do not make it optional. The gap it closes is invisible until the first time someone audits an old decision.</constraint>
+    <constraint source="project">Scope: sprk_recordclass is derived from WHICH ACTION was taken, not chosen by the user. Bare completion or reschedule of one own assigned work maps to Routine; send-email, create-follow-on and close-record map to Judgement; dismiss maps to Dismissal.</constraint>
+    <constraint source="project">Scope: sprk_action is NULLABLE and stays null on deny paths. An action taken outside a Signal equally has no decision.</constraint>
+    <constraint source="ADR-015">Scope: copy sprk_privilegeflagged forward and NEVER branch on it. Privilege is flagged, never decided.</constraint>
+    <constraint source="project">Scope: sprk_decisionoutcome (Authorized, Denied, Dismissed) answers what the human decided at the gate. It is DISTINCT from sprk_servicerequest.sprk_disposition, which answers how the Inquiry turned out. One word per concept; do not merge them.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Append-only decision ledger</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement the writer taking the resolved Signal, the action taken, the confirming user and the fact values at decision time.</step>
+    <step order="2">Derive sprk_recordclass from the action per the mapping above, and document the mapping in code as a single table rather than scattered conditionals.</step>
+    <step order="3">Populate sprk_matter, sprk_policyversion, sprk_factsnapshot, sprk_proposedaction, sprk_decisionoutcome, sprk_confirmedby, sprk_decidedon.</step>
+    <step order="4">Populate sprk_action when there is one; leave it null on deny.</step>
+    <step order="5">Copy sprk_privilegeflagged forward from the Signal.</step>
+    <step order="6">Set sprk_signal.sprk_decisionrecord on the resolved Signal, and set its resolution type to Acted or Dismissed.</step>
+    <step order="7">Add tests for each record class, the deny path with a null action, and the mandatory snapshot refusal.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an action arises that maps cleanly to none of Judgement, Routine or Dismissal, STOP and escalate rather than defaulting it. Defaulting silently mis-types the Report Card, and the option set is closed.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CommunicationRuleDecision already carries the full decision on both the authorize and deny paths, but it is written to ILogger and LOST. SessionGate (ADR-040) carries Kind, Status, SideEffectClass, BindingId and Turn but no authority, policy version, evidence or confirmer. sprk_emailreviewlog is append-only but domain-specific.</existing>
+    <extension>No. The value already exists in memory; what is missing is persistence to a durable, per-matter-queryable row. ADR-040 was amended in task 003 to name the two as siblings rather than forcing one to serve both.</extension>
+    <cost-of-doing-nothing>Suppression is impossible, so a Signal dismissed three times keeps firing and users mute the system. Thresholds stay guesses forever (criterion 5). And there is no answer to why did nothing happen, which Dataverse audit structurally cannot give because nothing changed.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/DecisionRecordWriterTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Decide-lane authorization, when resolved, then a record exists with class Judgement and the Signal decision reference is set.</criterion>
+    <criterion testable="true">Given a bare Do-lane completion, when resolved, then a record exists with class Routine (NOT absent).</criterion>
+    <criterion testable="true">Given a Do-lane resolution that also sends an email, when resolved, then the class is Judgement, not Routine.</criterion>
+    <criterion testable="true">Given a dismissal, when resolved, then the class is Dismissal and a reason is recorded.</criterion>
+    <criterion testable="true">Negative: given a deny, when resolved, then the record saves with sprk_action null.</criterion>
+    <criterion testable="true">Negative: attempting to write a record without sprk_factsnapshot is refused.</criterion>
+    <criterion testable="true">Negative: nothing in the writer branches on sprk_privilegeflagged.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-18, FR-19, FR-20. design.md BR-1 as reversed, and notes/schema-draft.md section 6 for the full rationale.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The Signal writer: dedupe upsert, resolver fields and owner from the grouping matter</title>
+    <phase>3 Evaluator and Signal lifecycle</phase>
+    <gate>021 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes a secured Dataverse row; an ownership mistake here is a data-exposure bug that is invisible because nothing errors.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified writer reusing a canonical resolver; the judgement was already made in D-3 and FR-14.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Every later lifecycle task depends on the writer existing and on its ownership behavior.</parallel-reason>
+    <deps>021</deps>
+    <tags>bff-api,dataverse,security,signals</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Write Signals idempotently via the dedupe key, populate the subject through the canonical polymorphic resolver, and set the owner from the grouping matter.</prompt>
+  <role>SPAARKE backend developer. Security fails closed; ownership is part of the write, not a follow-up.</role>
+  <goal>Re-evaluation upserts rather than duplicating, the subject is written as both a typed lookup and the denormalized trio, and every Signal is owned via its grouping matter.</goal>
+
+  <context>
+    <background>D-3 settled that the worklist reads Signals and groups them by matter, so the shape needs a polymorphic subject PLUS an always-populated matter lookup derived from it. FR-14 is one line in the writer and free now; retrofitting means re-owning every row.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: SET THE OWNER (or owning business unit) FROM THE GROUPING MATTER AT CREATION. A Signal is secured by its OWN owner, not by the matter it points at, while sprk_sentence can carry matter detail. A service-owned Signal at depth-4 read could expose a matter the reader cannot open, with the matter lookup rendering BLANK while the sentence tells them anyway. Live across 6 business units. Spaarke Ontology Service already holds Assign, so no privilege change is needed.</constraint>
+    <constraint source="ADR-024">Scope: write the typed sprk_regarding lookup AND the denormalized resolver fields in ONE call. They are not alternatives. CORRECTED 2026-10-03: the canonical PolymorphicResolverService.applyResolverFields is CLIENT-SIDE TYPESCRIPT (src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts) and a C# writer CANNOT call it. The server-side mirror of the same ADR-024 semantics is Services/Workspace/TodoRegardingBuilder.cs (smart-todo-decoupling-r3), which does exactly this job for sprk_todo. Mirror TodoRegardingBuilder; treat the TypeScript service as the semantic specification, not as a callable dependency. Do NOT invent a third implementation.</constraint>
+    <constraint source="project">Scope: store record ids LOWERCASE with braces stripped. The audit found two divergent regexes in circulation (section 8.3 U1).</constraint>
+    <constraint source="project">Scope: sprk_dedupekey is policycode plus regardingrecordtype plus regardingrecordid. There is NO sprk_subjecttype column on sprk_signal (only on sprk_policy). The alternate key is Active, so the platform enforces uniqueness.</constraint>
+    <constraint source="project">Scope: sprk_matter is ALWAYS populated, derived from the subject. sprk_regardingmatter means the subject IS this matter; sprk_matter is the grouping key. Both are needed and conflating them breaks the worklist grouping.</constraint>
+    <constraint source="project">Scope: write sprk_factsnapshot at DETECTION time. A Signal that auto-closes as ConditionCleared never produces a Decision Record, so without this the detection-time facts are lost entirely.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Signal persistence, polymorphic subjects and ownership</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic subject write" location="src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs">The SERVER-SIDE ADR-024 implementation: sets the typed regarding lookup and the denormalized resolver fields together for sprk_todo. Mirror its shape for sprk_signal. The client-side counterpart it names in its own header, PolymorphicResolverService.applyResolverFields, is TypeScript - it is the semantics to match, not code this writer can call.</pattern>
+      <pattern name="Idempotent signal upsert" location="src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs">Lines 241-258 show the OLD key (matter plus type) which does NOT survive a polymorphic subject. Read it to understand what is being replaced, not to copy it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Implement the writer taking a policy, a policy version, a subject reference and a fact snapshot.</step>
+    <step order="2">Write the typed sprk_regarding lookup AND the denormalized resolver fields for the subject in one call, mirroring Services/Workspace/TodoRegardingBuilder.cs (the server-side ADR-024 implementation). The TypeScript PolymorphicResolverService is the semantic spec and is NOT callable from C# - read it to match behavior, then follow TodoRegardingBuilder for the server-side shape.</step>
+    <step order="3">Derive the grouping matter from the subject and populate sprk_matter unconditionally. If it cannot be derived, do not write a Signal with a null grouping matter.</step>
+    <step order="4">Set the owner or owning business unit from the grouping matter.</step>
+    <step order="5">Compose sprk_dedupekey and upsert on it, so re-evaluation updates rather than duplicating.</step>
+    <step order="6">Write sprk_factsnapshot, sprk_sentence (from the version message template), sprk_evidencerefs, sprk_policycode, sprk_firstdetected and sprk_lastevaluated.</step>
+    <step order="7">Verify sprk_sentence against section 0.3: it may assert only what the predicate read.</step>
+    <step order="8">Add tests including the ownership assertion and the upsert-not-duplicate assertion.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="10">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the grouping matter cannot be derived for some subject type, STOP and escalate rather than writing a Signal with a null sprk_matter or a service owner. Both break the worklist grouping and the security model respectively, and both fail silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SignalEvaluationService writes sprk_spendsignal rows, but its idempotency key GenerateDeterministicId(matterId, signalType) (:241-258) is matter plus type only and has no room for a polymorphic subject.</existing>
+    <extension>No. The key shape is the thing that must change, and it is embedded in a private method of a service whose rule interface is also private and constructor-instantiated.</extension>
+    <cost-of-doing-nothing>Re-evaluation duplicates Signals instead of updating them, so the worklist fills with repeats and suppression counts become meaningless. Separately, without owner-from-matter a reader can see a Signal about a matter they cannot open.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/SignalWriterTests.cs</output>
+    <output type="test">tests/integration/seam/SignalWriterSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a subject and a firing policy, when the writer runs twice, then exactly ONE Signal row exists and sprk_lastevaluated was updated on the second run.</criterion>
+    <criterion testable="true">Given a Signal about a communication on matter X, when written, then sprk_matter is X and the typed sprk_regardingcommunication lookup is set along with the denormalized trio.</criterion>
+    <criterion testable="true">Given any Signal created by the writer, when read, then its owner derives from its grouping matter and is NOT the service identity.</criterion>
+    <criterion testable="true">Given a record id with braces or uppercase, when stored, then it is lowercase with braces stripped.</criterion>
+    <criterion testable="true">Negative: a subject whose grouping matter cannot be derived does NOT produce a Signal with a null sprk_matter; it escalates.</criterion>
+    <criterion testable="true">Negative: sprk_sentence asserts nothing the rule body did not read.</criterion>
+    <criterion testable="true">sprk_factsnapshot is populated at detection time on every Signal.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-03, FR-14 and NFR-08. FR-14 is the item most likely to be lost into implementation: one line now, a re-own of every row later, and invisible until then because nothing errors.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

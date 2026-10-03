@@ -7,6 +7,26 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-03 — ADR-040 amended: a durable decision ledger is a SIBLING of `SessionGate` (spaarke-ontology-platform-r1 task 003)
+
+`.claude/adr/ADR-040-session-ledger.md` and `docs/adr/ADR-040-session-ledger.md` now name **`SessionGate` and
+`sprk_decisionrecord` as siblings over one decision**, linked by **`sprk_decisionrecord.sprk_gatesessionid` →
+`SessionGate.GateId`** (nullable by design — most Decision Records originate in the worklist, not in chat).
+`SessionGate` owns the gate **state machine** (session-scoped, Redis→Cosmos TTL); the Decision Record owns
+decision **authority** (`sprk_authority`, `sprk_policyversion`, `sprk_factsnapshot`, `sprk_confirmedby`,
+`sprk_recordclass` — matter-scoped, durable). Two new MUSTs (authority goes to the durable record, never to
+`SessionGate`, which has no field for it; set `sprk_gatesessionid` when a gate did originate the decision) and
+two new MUST NOTs (never read the Decision Record as session context — `ledger_resolution` does not reach it;
+the existing "no second session-state store" rule governs **session** state and does not reach matter state).
+**Deliberately narrow**: `SessionGate` does not become durable, no field is added to any ledger entry type,
+and storage-precedes-rendering / addressability / `disposition` / the 128 KB cap / the ADR-015 tier mapping are
+untouched. Blast radius is documentation, not migration, because **no consumer depended on `SessionGate` being
+the only record of a decision — `sprk_emailreviewlog` already is a durable per-decision authority record in
+production.** Path **B** per root `CLAUDE.md` §6.5, chosen by the owner as **D-9** after deferring it on
+2026-09-30 until the Decision Record's shape (D-2) was settled. The paired **ADR-039** tension took path **A**
+(project-scoped exception — Policy decides whether a claim is *true*, Binding decides what *executes*);
+**ADR-039 is NOT amended.** Record: `projects/spaarke-ontology-platform-r1/spec.md` §6.
+
 ###### 2026-10-03 — ADR-002 WP-1 amended: a platform-native declarative mechanism may own an invariant (spaarkeai-word-add-in-r1 task 087)
 
 Root `CLAUDE.md` (the "Dataverse write path" pointer row), `.claude/adr/ADR-002-thin-plugins.md` and

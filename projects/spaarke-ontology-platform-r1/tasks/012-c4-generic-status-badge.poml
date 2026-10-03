@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>C-4: add the generic status and severity badge</title>
+    <phase>1 Cleanup that gates the row</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New shared-library component; needs the section 11 justification and dark-mode verification.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New but small and well-specified component following an established library pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>frontend,fluent-ui,new-component</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a generic status and severity badge to the shared UI library. This is the one legitimately new component the worklist row needs.</prompt>
+  <role>SPAARKE front-end developer. Fluent v9, tokens only, light and dark both correct.</role>
+  <goal>A reusable badge in the shared library that renders Signal status and severity, with no hardcoded colors and no domain coupling.</goal>
+
+  <context>
+    <background>Every badge in the shared libraries is domain-specific: CitationBadge, PinnedMemoryProvenanceBadge, ChannelBadge. None takes a generic status. The worklist row needs one, and per spec FR-28 it lands in the shared library, not in the Console app.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Scope: this component. Fluent v9 semantic tokens only. No hardcoded colors; light and dark must both be correct.</constraint>
+    <constraint source="project">Scope: it lands in @spaarke/ui-components, NOT in src/solutions/SpaarkeAi/. A component living in the app is not reusable, and the componentization audit already lists that coupling as debt.</constraint>
+    <constraint source="project">Scope: ONE component with data-driven variants, not a family. Severity (Info, Warning, Critical) and status (Open, Acknowledged, Resolved) are props, not separate components.</constraint>
+    <constraint source="project">Scope: no domain vocabulary in the component API. It takes a label plus a tone, not a Signal.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared Fluent v9 components</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/standards/UI-DESIGN-STANDARDS.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared-lib component with data-driven variants" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx">Follow its token usage, prop shape and export pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Grep the shared libraries for existing badge components and confirm none takes a generic status or tone. Record the grep in the justification.</step>
+    <step order="2">Implement StatusBadge with a label plus a tone prop covering the neutral, informational, warning and critical cases.</step>
+    <step order="3">Use Fluent v9 semantic tokens throughout; verify no hex or rgb literal appears in the file.</step>
+    <step order="4">Export it from the package index.</step>
+    <step order="5">Add unit tests covering each tone and the empty or unknown tone fallback.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Grepped the shared libraries: CitationBadge, PinnedMemoryProvenanceBadge and ChannelBadge all exist and all are domain-specific. None accepts a generic status or tone.</existing>
+    <extension>No. Each existing badge encodes its own domain in its API, so extending one would mean giving a citation badge a Signal status, which couples two unrelated domains.</extension>
+    <cost-of-doing-nothing>The worklist row cannot render Signal status at all. Each consumer then hand-rolls its own badge, which is exactly how three separate bespoke row menus came to exist in this codebase.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Badge renders every tone">
+      <steps>
+        <step>Render StatusBadge once per tone in the harness</step>
+        <step>Inspect each</step>
+      </steps>
+      <expected>Each tone renders with a distinct, legible treatment.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Re-render every tone</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens; no hardcoded color survives the toggle.</expected>
+    </test>
+    <test name="Unknown tone falls back safely">
+      <steps>
+        <step>Render with an unrecognised tone value</step>
+      </steps>
+      <expected>It renders the neutral treatment rather than throwing or rendering invisibly.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given StatusBadge, when rendered with each tone, then each renders distinctly and legibly in both light and dark.</criterion>
+    <criterion testable="true">Given the component source, when scanned, then it contains no hex, rgb or named color literal.</criterion>
+    <criterion testable="true">Given an unrecognised tone, when rendered, then the neutral treatment is used and nothing throws.</criterion>
+    <criterion testable="true">Given the package index, when read, then StatusBadge is exported.</criterion>
+    <criterion testable="true">Negative: the component API contains no Signal, Policy or other domain type.</criterion>
+    <criterion testable="true">Unit tests pass and the package builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-28 and FR-41 (C-4). This is the ONLY genuinely new UI primitive the row needs; everything else extends something named in FR-27.
+
+Completed 2026-10-03. StatusBadge added at
+src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/{StatusBadge.tsx,index.ts,__tests__/StatusBadge.test.tsx}.
+Exported from src/components/index.ts (not the top-level src/index.ts — see deviation note). 9/9 unit
+tests pass; eslint clean; `npx tsc --noEmit` clean for all StatusBadge-related files (9 pre-existing,
+unrelated errors remain elsewhere from unbuilt sibling workspace packages). code-review + adr-check both
+clean (0 Critical/Warning). Three deviations from the POML's literal file list, all recorded in
+projects/spaarke-ontology-platform-r1/notes/task-012-statusbadge-deviations.md: (1) barrel export lands in
+src/components/index.ts per existing convention, not the top-level src/index.ts; (2) test file lives under
+a __tests__/ subfolder (required for Jest discovery per jest.config.js testMatch); (3) an additional
+StatusBadge/index.ts was required for the folder-based component to resolve at all under tsc.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,9 +1,9 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-09-30 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first, then `design.md`. This began as a design/strategy project; on
-> 2026-09-29 it also shipped **code fixes to the communication/notification path** (PR #1032), and on
-> 2026-09-30 it took an **external architecture review** that corrected the central claim.
+> **Last Updated**: 2026-10-03 (task 004 completion)
+> **Recovery**: read "Quick Recovery" first. Everything needed to continue is in this file.
+> *(Supersedes the 2026-09-30 checkpoint entirely — that one named rev 3, a now-dead branch, and the D-1 spike
+> as the next action. All three are obsolete.)*
 
 ---
 
@@ -11,206 +11,214 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | Design — `design.md` **rev 3** reviewed and corrected; **not yet `/design-to-spec`** |
-| **Branch** | `docs/ontology-platform-phase0` — **clean, fully pushed** through `d0b310c1e` |
-| **Status** | in-progress, no blockers for the next step |
-| **Next Action** | **Run the D-1 scoping spike** — `design.md` §8.1, timeboxed one day. `sprk_spendsnapshot` has **ZERO rows**, so the differentiated claim is untestable today. This gates every build item |
-| **PR** | [#1032](https://github.com/spaarke-dev/spaarke/pull/1032) — `MERGEABLE`, CI **23 pass / 6 pending / 0 fail** at checkpoint. `BLOCKED` = required `Router` context awaiting its Tier 1 children |
+| **Phase** | **PIPELINE COMPLETE — ready to implement.** `design.md` rev 11 · `spec.md` (44 FRs) · `plan.md` (10 phases) · **42 task POMLs**, all passing `Validate-TaskPoml.ps1` with 0 errors / 0 warnings |
+| **Active task** | **004 complete** (✅, STANDARD) — first `sprk_policy`/`sprk_policyversion` seeded. Several other tasks (010/011/012/020/023/082/083 etc.) are running concurrently in this worktree — re-read this file before trusting "none" |
+| **Dataverse** | ✅ Five tables CREATED in `spaarkedev1` · roles assigned and **verified by query** · auditing on all five **and at org level** · ✅ task 001's four columns done · ✅ task 004 seeded `sprk_policy` POL-COMMIT-BUDGET = `4d204810-61bf-f111-aaaf-0022482913fc` (disabled) + `sprk_policyversion` v1 = `42b3e716-61bf-f111-aaaf-0022482913fc` — see `notes/004-seed-policy-rows.md` |
+| **NEXT ACTION** | **`task-execute` on [`tasks/005-seed-dev-data-and-negative-controls.poml`](tasks/005-seed-dev-data-and-negative-controls.poml)** (deps: 004, now satisfied) — or just say **"continue"**, which reads `tasks/TASK-INDEX.md` and picks the first 🔲. Task 002 is 🔄 escalated (see its row); task 003 is ✅ |
+| **Branch** | `docs/ontology-platform-design` — ⚠️ **NOT** `docs/ontology-platform-phase0` (squash-merged, dead) |
+| **Git** | 4 ahead / **44 behind** `origin/master`. Clean, all pushed. **Merge master before any deploy** |
+| **PR #1032** | ✅ **MERGED** to master as `93634db58` |
 
-### ⚠️ Three things that will bite a fresh session
+### Do NOT re-litigate
 
-1. **`origin/master` moves fast — 374 commits landed in one day.** Before ANY BFF deploy, merge master and
-   confirm `git rev-list --left-right --count HEAD...origin/master` shows **0 on the right**. Deploying
-   without it reverts other projects' merged work. (Done twice this session; expect to do it again.)
-2. **The BFF unit suite takes ~15 minutes**, not 8. It will exceed a 600s foreground timeout. Run it with
-   `run_in_background: true`. Last green: **13,044 passed / 0 failed / 54 skipped** post-merge.
-3. **The swallow-and-log paths are undiagnosable without App Insights.** appId
-   `6a76b012-46d9-412f-b4ab-4905658a9559`; `traces` carries `[comms-policy]` / `[comms-ri]`, `exceptions`
-   carries the swallowed throws. That is how 2026-09-29's silent `InvalidCastException` was found, and it is
-   the only way to find the next one.
+`design.md` §10 holds **29 settled decisions** and §8 has **no open items** — D-1..D-8, CM-2, CM-4, CM-6..CM-11,
+BR-1..BR-6 are all closed, several of them twice (BR-1 and §5.1 were each reversed once). The schema is **built**.
+If something feels unsettled, read §8.0 / §8.0a / §8.0b before reopening it.
 
-### Read in this order — do NOT read all six
+### Critical context in three sentences
 
-| # | File | Read when |
-|---|---|---|
-| 1 | **`design.md`** | **Always, first.** Rev 3 holds the decisions: §0 differentiation test · §1 the corrected claim · §5 scope + the §5.0 scope rule · §8 open decisions incl. CM-6..CM-11 · §8.1 the D-1 spike |
-| 2 | `notes/defer-issues.md` | Before filing anything new. Three entries, all with GitHub Issue URLs |
-| 3 | `notes/mvp-technical-spec.md` | For field-level detail. §0.3 · §3.4a (`Existence` body) · §11 (the corrected predicate + both failed attempts) · §17 (the eight fixes) |
-| 4 | `notes/ontology-architecture-feedback.md` | The external review rev 3 applies. §2 (eight signal shapes) and §4 (worklist row contract) are material not yet absorbed anywhere else |
-| 5 | `notes/ontology-component-model.md` | **Vocabulary — authoritative.** Read §3 before writing anything |
-| 6 | `notes/mvp-synopsis.md` · `notes/phase0-codebase-inventory.md` | Scope narrative · verified codebase state |
-
-### Critical Context
-
-**The claim, as the predicate actually tests it** (Path B, CM-6):
-
-> A communication on this matter was classified as a **fee or scope change** within the window, **and** no
-> **budget revision** was recorded in that same window.
-
-Two conjuncts, two sources. The spend snapshot is attached as **evidence**, not tested as a condition — the
-rule asserts no comparison it did not compute.
+R1 builds the **intelligence layer from the Spaarke data model forward** — no connector, no LEDES; the data is
+assumed present. The differentiated claim is one predicate: *a communication classified **fee or scope change**
+in the window **AND** no **budget revision** in that window* — two sources, which no incumbent can evaluate. A
+**Signal** is a condition that held; a **Work Item** is the actionable unit it produces; every human resolution
+writes a **Decision Record**.
 
 ---
 
-## What happened 2026-09-29 — the RI loop executed for the first time
+## What exists now — verified 2026-10-02, not assumed
 
-Four real emails through the capture path found **eight defects**, all fixed, and completed the
-communication→notification loop for the first time ever. **Seven were in code shipped months earlier that
-had never run its happy path.**
+### Dataverse — solution `OntologyPlatformSolution`, publisher **Spaarke** (`sprk`)
 
-**Proof**: communication `99eb9b52` → task `sprk_event edfef460` → outbox `OUTBOX-001324`
-(`kind=communication-assessed`, **the first ever out of 326 rows**) → appnotification `f0fef460`.
+| Table | OTC | `sprk_` cols | Notes |
+|---|---|---|---|
+| `sprk_signal` | 11003 | 59 | Alternate key `sprk_dedupekey` → **Active** |
+| `sprk_decisionrecord` | 11002 | 22 | Append-only by privilege |
+| `sprk_policy` | 11000 | 17 | Alternate key `sprk_policycode` → **Active** |
+| `sprk_policyversion` | 11001 | 17 | Immutable by privilege |
+| `sprk_budgetrevision` | 10999 | 15 | Path B's second conjunct reads `sprk_revisedon` |
 
-| # | Defect | Fix |
-|---|---|---|
-| 1 | Zero `sprk_communicationrule` rows → gate always fail-closed | rule row `dc423a8b` (data) |
-| 2 | RI confidence was `urgency × agreement`, so an unfilable email scored **0** regardless of urgency | weighted sum `0.7×urgency + 0.3×agreement` + a regression guard on all four one-factor-zero cases |
-| 3 | Threshold 0.8 unreachable; 0.35 would have authorized **~90%** of mail (242/270 lack a triage priority) | **0.45** |
-| 4 | `sprk_regardingrecordtype` is a LOOKUP read as `string` → `InvalidCastException` swallowed by the NFR-05 guard, killing the RI action **while the logs read as success** | `ReadRegardingTypeLabel` reads by shape |
-| 5 | `Deploy-ActionMirrors.ps1` couldn't deploy a JPS mirror and printed `UNCHANGED` | `Get-JpsSystemPrompt` + sidecar schema ownership |
-| 6 | `DailyBriefingCollector` selected `sprk_eventdescription`, which **does not exist** → briefing blind to tasks. **The unit test pinned the bug** | → `sprk_description` |
-| 7 | Tasks created `Draft(1)`; briefing filters `Open(659490001)`. **49 rows** stranded | `TaskActionCore` sets Open |
-| 8 | RI tasks had **both** due-date fields null; task channels filter by date | due days **declared on the rule row** |
+130 `sprk_` columns · 24 lookups · both alternate keys **Active** · zero logical names with an underscore between
+words. Field detail + the creation recipe: [`notes/schema-draft.md`](notes/schema-draft.md).
 
-Also: prompt structure reordered **evidence-before-conclusions** in both the prompt *and*
-`sprk_outputschemajson` (the schema is the lever); boundary examples 1→4; an `Unclassified` abstain row.
+### Security — three roles, privileges verified by query
 
----
+`Spaarke Console User` · `Spaarke Ontology Administrator` · `Spaarke Ontology Service` (6 copies each — one per
+business unit, which is normal). Auditing enabled on the two ledger tables. Matrix:
+[`notes/security-roles.md`](notes/security-roles.md).
 
-## What happened 2026-09-30 — the review corrected the central claim
+**Verified present** on `Spaarke Console User`, all at depth **4** (Parent: Child BU): `prvReadsprk_Signal`,
+`prvWritesprk_Signal`, `prvCreatesprk_DecisionRecord`, `prvReadsprk_DecisionRecord`.
 
-`notes/ontology-architecture-feedback.md` found the rev-1 cross-source predicate contained **no budget term**
-while its message asserted *"unreconciled against its budget"*. **Single-source, so it failed the §0 test it
-was written to pass** — in the same spec section that says *"the join is the differentiator, not the
-arithmetic."* **The join was what got dropped.**
+**Verified ABSENT** — the four that carry the guarantees: `prvCreatesprk_Signal` (so a Work Item can exist
+*only* because a rule produced it), `prvWritesprk_DecisionRecord`, `prvDeletesprk_DecisionRecord`,
+`prvWritesprk_PolicyVersion`.
 
-Applied as `design.md` rev 3 and propagated to the spec and synopsis:
-
-- **§0 inlined** into `design.md` (it was a dangling reference from decision 12, criterion 9 and §1.1), plus
-  new **§0.3**: *a capability must TEST what its message CLAIMS.* Data being theoretically available is not
-  the test.
-- **§1's claim rewritten** to the two conjuncts Path B tests, with an explicit statement of what it does not
-  assert.
-- **Criterion 10 restored** (the effect loop) — criteria 1–9 covered detect/record/surface/suppress/tune/
-  render and **not one required an effect**, which is also how an incumbent alerting product behaves.
-- **Criterion 11 added** — a classifier-recall floor. The predicate is a conjunction and inherits its weakest
-  input; at 70% recall the claim silently misses 30% of cases while every other criterion passes.
-- **Off-by-one eliminated by class** — §8 now references scope items **by name**, not index.
-- **Three new scope items**: `Existence` rule type (CM-7 — the predicate fitted no allowed body and §3.5
-  refuses to save an invalid one, so the capability was **unsavable**), `sprk_budgetrevision` (CM-10 —
-  verified necessary), the **Inquiry action** (CM-11 — restored).
-
-### 🚩 The lesson worth carrying into the next review
-
-**Two assertions in this project were satisfiable by the very defect they were meant to prevent:**
-
-- Synopsis **criterion 8** read *"fires on evidence the e-billing system does not hold"* — the budget-blind
-  predicate **would have passed it**, because an email *is* such evidence.
-- The unit test that **pinned** `sprk_eventdescription`, a column that does not exist, staying green for
-  months over a query that threw on every run.
-
-Both were written one level too abstract. The question to ask of every criterion and every test:
-**would this still pass if the implementation were wrong in the most likely way?**
+> ### ✅ The union check was run — the result is benign, and must not be "fixed"
+>
+> Append-only is a property of the **union** of all roles, so every role was checked for Write/Delete on the two
+> ledger tables. Three hold them: **System Administrator** and **System Customizer** (both unavoidable and
+> already documented), plus the platform roles **`Service Writer` / `Service Deleter`**.
+>
+> Those two are held **exclusively by Microsoft first-party application identities** — every holder has an
+> `applicationid` and the `#` system-user prefix (AIBuilder, DV-MetadataService, PowerPages Data Runtime, PPMI
+> managed identities, Power Apps Checker, AppDeploymentOrchestration …). **No human user and no Spaarke identity
+> holds either one.** Dataverse auto-grants these to its own services on every new custom table.
+>
+> **No action — and specifically do not strip privileges from those roles**: it would break Power Pages, AI
+> Builder and solution deployment. Append-only holds against every human and against Spaarke's own application
+> identity, which is the realistic bar.
 
 ---
 
-## Decisions — do not re-litigate
+## The next action, concretely
 
-| # | Decision |
+**`task-execute` on task 001**, or say **"continue"**. The pipeline is done; what remains is execution.
+
+### Where to start, and why that order
+
+**001 (schema) first** — four columns are missing and two of them block a path outright: without
+`sprk_decisionrecord.sprk_action` the deny path cannot save, and without the three `sprk_servicerequest`
+columns success criterion 10 cannot be measured. Exact settings are in the POML.
+
+**003 (ADR-040 amendment) in parallel** — it touches `.claude/` so it is **main-session only** (sub-agents
+cannot write there; that boundary is working correctly, not a bug). It must merge **before or alongside task
+031**, so starting it early removes it from the critical path.
+
+**Then wave A** (010, 011, 012) — the three cleanup items that gate the worklist row.
+
+### The two tasks that carry the project's risk
+
+| Task | Why |
 |---|---|
-| 1 | **Naming**: Spaarke Console · Spaarke Matter Management · Spaarke External Access · Connection Engine / Spaarke Connect |
-| 2 | **Three engines**: Connection · Insights · Action — decoupled *by* the ontology. Agents are a **surface** |
-| 3 | **CM-1**: Policy lives in the Insights Engine; signals are Insights outputs |
-| 4 | **CM-5**: Inquiry → `sprk_servicerequest` with a direction discriminator |
-| 5 | **CM-3**: rule body = a Dataverse filter; facts as rollup + calculated columns (zero C#) |
-| 6 | **Ingestion = Option A** — our own worker on `UpsertMultiple` |
-| 7 | **Console hosting**: web resource + `appid` + **`navbar=off`** |
-| 8 | **Authority is post-MVP** — the human *is* the authority |
-| 9 | **Action Engine is not in MVP** — the MVP needs an Action row, not the engine |
-| 10 | **Terminology**: Spaarke Connect's existing entities. "Ledger" → **Decision Record** |
-| 11 | **Connection Engine stays in this project** — harvest, don't fork |
-| 12 | **§0 differentiation test is binding** (now inlined in `design.md` §0) |
-| 13 | **Recall over precision for NOTIFYING, never for FILING.** Auto-file stays 0.85 — filing writes data, where a false positive is worse than a miss |
-| 14 | **Policy knobs are DECLARED on the rule row**, options as fallback only |
-| 15 | **LLM classifies; deterministic code decides; a human acts** |
-| 16 | **CM-6 → Path B.** Path A would mean rewriting the claim to match a weaker implementation — backwards when the claim *is* the product |
-| 17 | **CM-7 → `Existence` in scope.** Without it the differentiated capability cannot be saved |
-| 18 | **CM-8 → deferred.** Adopt the eight-shape taxonomy as a *derivation method*, not a stored `sprk_detectionshape`; storing it needs a reader and `sprk_ruletype` already selects the evaluator |
-| 19 | **No cross-clause variable passing in a rule body.** A bound reference needs two queries + correlation, breaking CM-3 and reintroducing one of the four properties that made node graphs hard. Clauses are independent, each windowed on *now* |
-| 20 | **`sprk_budget.modifiedon` is NOT a substitute for revision history.** Any unrelated edit bumps it, so a stray edit suppresses a true signal — a false negative, against decision 13 |
-| 21 | **§5.0 scope rule**: work goes where it is **cheapest**, not where it is topically pure — and **nothing is ever merely listed**; every item is fixed or scheduled |
+| **021** — the predicate compiler | 🔴 `notExists` has **no prior art anywhere in the repo**. A broken anti-join fails by returning *every* row or *no* row, and **both read as a working predicate** — which is why its acceptance criteria include an empty-source-table test. Serial, opus, xhigh |
+| **074** — the recall measurement | 🔴 **It can fail the project.** At 70% recall the differentiated claim misses 30% of real cases **while every other criterion passes green**. Floor is ≥80% on ≥50 labelled items |
 
----
+And the one most easily lost into implementation: **030 includes FR-14**, setting the Signal's owner from its
+grouping matter. One line now; a re-own of every row later; invisible until then because nothing errors.
 
-## Next Actions — in order
+### What `/design-to-spec` produced and decided (2026-10-03)
 
-1. **Run the D-1 spike** (`design.md` §8.1, one day). Four questions, with an exit condition: a matter
-   carrying **both** an over-budget `sprk_spendsnapshot` **and** a scope/fee-classified communication. Until
-   that pair exists, the differentiated claim cannot be built against anything real.
-2. **Settle D-2, D-3, D-4**, and the deferred **`sprk_signal` shape** question — which per CM-9 now also
-   covers resolution semantics (`sprk_dedupekey` alternate key, `sprk_resolutiontype`, `sprk_lastevaluated`,
-   a resolution sweep). **Decide before the evaluator writes its first signal**; after that it is a migration.
-3. **`/design-to-spec`** → `/project-pipeline` → `task-execute`.
-4. **Merge PR #1032** once CI is terminal (watch for `Router`; Tier 2 is advisory and does not block).
-5. Record the shape × binding-mode feasibility matrix (review §1.5) in component model §4.5/§4.7 —
-   non-blocking. It is the concrete reason to ask for API access: **API access buys the obligation module;
-   MCP alone does not.**
-6. Run the §0 test retroactively across strategy-synopsis §8 Wave 2 / Wave 3 before any of those is specced.
+[`spec.md`](spec.md) — 44 FRs in ten groups (A schema · B policy · C evaluator+lifecycle · D Decision Record ·
+E worklist · F Do lane · G Inquiry · H classifier · I cleanup · J repairs), 9 NFRs, 11 success criteria, the
+§11 three-question table for six new components, and a non-empty **ADR Tensions** section.
 
-### Open owner decisions
+**Four new decisions — `design.md` §8.0c, spec §9.** None is a re-litigation:
 
 | ID | Decision |
 |---|---|
-| **D-1** | The spend-data spike (§8.1) — **the critical path** |
-| **D-2** | Decision Record field list. `sprk_factsnapshot` **mandatory**; must not foreclose a **nullable** action ref |
-| **D-3** | Worklist surface (Console / MDA / both) and row subject (matters or communications). Also sets the `spaarke-ai` hot-path flag |
-| **D-4** | Does `sprk_memo` reuse `sprk_triagecategory`? *(recommend reuse)* |
-| **D-5** | Is the MM connector in MVP? Export-only ≈2 months; API mirror adds ≈2 |
-| **CM-2** · **CM-4** | Object-definition registry (post-MVP) · reuse "disposition" for an Inquiry's typed outcome (now load-bearing for criterion 10) |
+| **D-9** | **ADR-039 → path A** (exception: Policy decides what is *true*, Binding what *executes*) · **ADR-040 → path B** (amendment: `SessionGate` and Decision Record are **siblings**). ⚠️ **The ADR-040 amendment must merge before or alongside the evaluator** |
+| **D-10** | Classifier recall floor **≥ 80% on ≥ 50 labelled items** — makes criterion 11 a real gate |
+| **D-11** | Suppression counts per **(policy, matter)**, expires **30 days** — resolves the dedupe-grain conflict |
+| **D-12** | **One evaluator, cadence by lane, two event hooks.** Reasoning is load-bearing and now in `design.md` **§8.3** |
 
-### Filed and scheduled — NOT lost
+🔴 **Three schema deltas found by querying the built tables against the draft** — the five tables exist, but:
 
-| ID | Issue | What |
-|---|---|---|
-| ISS-001 | [#1048](https://github.com/spaarke-dev/spaarke/issues/1048) | `suggest-followups` running a stale prompt (repo mirror 1,058 chars longer than the live row). Another domain's to fix |
-| ISS-002 | [#1049](https://github.com/spaarke-dev/spaarke/issues/1049) | `$choices` resolution degrades **silently** to the known 100%-null failure — the mechanism the whole taxonomy design rests on, with one Warning line as its only signal |
-| ISS-003 | [#1050](https://github.com/spaarke-dev/spaarke/issues/1050) | 49 `sprk_event` rows stranded in Draft. **Not** bulk-updated — some may be genuine user drafts |
+1. **`sprk_decisionrecord.sprk_action` was never created** → spec **FR-01**. One of D-2's four binding
+   constraints ("a deny path has no action"), so the deny path currently cannot save.
+2. **`sprk_servicerequest` lacks both** the `Inbound`/`Outbound` discriminator **and** `sprk_disposition` →
+   spec **FR-02**. CM-5 and **success criterion 10** both depend on them.
+3. `sprk_signal` has **no `sprk_subjecttype`** (only `sprk_policy` does), so `sprk_dedupekey` composes from
+   `sprk_regardingrecordtype` + `sprk_regardingrecordid` → spec **FR-03**. No decision needed.
+
+All five tables are at **0 rows** — §8.1 seeding is still outstanding, and spec assumption **A-3** adds the
+**two negative controls** criterion 2 needs and the checklist omits.
+
+**Two things to carry into the spec that are easy to lose:**
+
+1. 🔴 **Signal ownership — one line in the writer, free now, a migration later.** When the evaluator creates a
+   Signal, **set its owner (or owning BU) from its grouping matter.** A Signal is secured by *its own* owner, not
+   by the matter it points at, while `sprk_sentence` can carry matter detail — so a service-owned Signal at
+   depth-4 read could expose a matter the reader cannot open, with the matter lookup rendering blank while the
+   sentence tells them anyway. With **6 business units** this is live, not theoretical.
+   [`notes/security-roles.md`](notes/security-roles.md) §4 has it; true privilege *inheritance* stays a deferred ADR.
+2. **Both Path B conjuncts are NEW CODE.** `ILiveFactResolver`'s *dispatch* is generic but its **predicates are a
+   closed C# `switch`** — nothing reads `sprk_communication`, and the **NOT-EXISTS half has no prior art in the
+   repo** (EXISTS does: `DataversePrecedentBoard.cs:182-190`). Do not let *"the resolver is already generic"*
+   read as *"no new code."*
+
+**Parallel, blocking nothing**: prototype round-2 review (agree the component kit as the Console's UI contract);
+§8.1 dev-data seeding (the exit triple criterion 2 needs).
+
+### Two Dataverse settings still open (owner's call — neither blocks the spec)
+
+A second verification pass on 2026-10-03 ([`notes/security-roles.md`](notes/security-roles.md) **§7**) closed
+everything except two choices. It also **fixed** one gap: `sprk_budgetrevision` auditing was off and is now on
+(§7.2 — it is the only table whose *absence* a Signal asserts, and §8.2 ruled out bitemporality, so its audit
+log is the only way to reconstruct what was true when the evaluator ran).
+
+1. **Add the five tables to the `Spaarke Platform` app** (§7.6). None of them is in **any** app module, so no
+   Policy / Signal / Decision Record form can be opened by hand. Harmless for the Console (BFF-read, no
+   sitemap) but it bites **§8.1 seeding and debugging**. `Spaarke Platform` is the config app — 90 entities, 87
+   `sprk_`; `Matter Management` and `Spaarke AI Setup` hold 0 entity components.
+2. **Assign `Spaarke Ontology Administrator` to someone** (§7.7). Nobody holds it, so Policy authoring happens
+   as System Administrator and the role's 25 privileges stay **unexercised** until a customer environment hits
+   them.
+
+> **Do not re-raise** as defects, both verified normal in §7.3/§7.5: per-BU role copies carry privileges only
+> on the **root-BU record** (`Spaarke Core User` shows the same 744-vs-0 shape), and **no** field security
+> profile touches the 130 columns — which must stay true, or the `sprk_regarding*` trio diverges per user.
 
 ---
 
-## Verified — do not re-verify
+## Operational traps — each cost real time
 
-- The **full RI loop works end to end** (record ids above).
-- `sprk_spendsnapshot` = **0 rows**; `sprk_budget` = 2; `sprk_billingevent` = 1. **No budget revision history
-  exists** and auditing is not a fallback (component model §6: zero `RetrieveRecordChangeHistory`, no policy).
-- `sprk_triagecategory` is a **table** (10 rows), resolved per run into the prompt *and* as a
-  constrained-decoding enum → a new row is live on the next enrichment with **zero deployment**. Rows live
-  **only in Dataverse**, never the repo. `sprk_enabled` **defaults to false** on create.
-- `sprk_classifierguidance` populated on all 10 rows but **INERT** — `LookupChoicesResolver` reads
-  `sprk_name` only (spec §14 step 2).
-- Dataverse logical names carry **no underscores**. The MCP `update_table` tool derives the logical name from
-  the display name and converts spaces to underscores, so it **cannot** produce a convention-correct
-  multi-word column — use the metadata API (`POST EntityDefinitions/Attributes`) where `SchemaName` and
-  `DisplayName` are independent. Three columns had to be recreated for this reason.
-- `sprk_event` has `sprk_description` (**not** `sprk_eventdescription`); statuses Draft(1) / Open(659490001) /
-  Completed(659490002) / Cancelled(659490004).
-- Daily Briefing is **deterministic-query-based**, six channels, **no appNotification dependency**.
-- Spaarke does **not** use OOB `task`/`activitypointer` — tasks are `sprk_event` (FAILURE-MODES **AP-14**).
-- `sprk_signaltype` / `sprk_signalvalue` are **taken** — columns on `sprk_affinity`.
-
-### Research completed (`.claude/agent-memory/researcher/`)
-
-Fabric IQ · Foundry IQ + Work IQ · Entra Agent ID / Agent 365 / Dataverse audit · Dataverse ingestion
-options. **Do not re-research.**
-
----
-
-## Session Log
-
-| Date | Work |
+| Trap | What to do |
 |---|---|
-| 2026-09-19 | Phase 0 codebase inventory |
-| 2026-09-21 → 24 | Strategy synopsis → v2.2 · component model · MVP synopsis · MVP tech spec · 4 research passes · Console hosting · differentiation test |
-| 2026-09-25 | Committed + pushed all design artifacts |
-| 2026-09-29 | Spec §10–17. **Eight defects found and fixed; the RI loop completed for the first time.** Prompt structure reordered. Taxonomy extended + guidance authored. 4 BFF deploys. Master merged (240 commits; AP-13 collision → ours renumbered **AP-14**). **PR #1032 opened** |
-| 2026-09-30 | Three Dataverse columns renamed to convention. `design.md` **drafted → rev 2 → rev 3**. `notes/defer-issues.md` + **3 GitHub Issues** filed. External architecture review absorbed; spec + synopsis corrected. Master merged again (**374 commits**). 13,044 tests green |
+| **`origin/master` moves very fast** | 70 commits behind within hours; 44 now. **Merge master before any deploy**, or you revert other projects' work |
+| **MCP `create_table` cannot set the publisher** | It uses the env default, whose prefix here is **`new`** (CDS default `cr140`). Logical names are **immutable**, so a wrong prefix is delete-and-recreate, not a rename. Use Web API `POST EntityDefinitions` with explicit **PascalCase `SchemaName`** + the `MSCRM.SolutionUniqueName` header |
+| **Every `DateTimeAttributeMetadata` needs `DateTimeBehavior`** | Omit it → behavior `None` → filtered-view generation breaks → **every later relationship on that entity fails**, with an error naming the *datetime column*, not the lookup you were creating |
+| **The solution-create POST must NOT carry `MSCRM.SolutionUniqueName`** | It validates the header against a solution that does not exist yet → `404 not valid` |
+| **BFF unit suite takes ~15 min** | Always `run_in_background`; a foreground run blows the 600s timeout |
+| **Swallow-and-log paths are invisible** | App Insights appId `6a76b012-46d9-412f-b4ab-4905658a9559` — `traces` for `[comms-policy]`/`[comms-ri]`, `exceptions` for swallowed throws. How the silent `InvalidCastException` was found |
+| **Apostrophes break bash heredocs** | Write commit messages to a file, `git commit -F` |
+| **Delegated wide audits failed five times** | A coordinator agent kept fanning out and returning status updates. Run targeted agents **directly** and re-verify load-bearing claims yourself — doing so corrected a finding in our favour |
+
+---
+
+## Scope
+
+**In**: cross-source evaluator · `Existence` rule type · `sprk_budgetrevision` · Inquiry action · Decision Record
+· worklist row · `sprk_memo` as source #2 · guidance injection · the **Do lane** (Briefing items *enhanced into*
+Work Items) · landing-contract columns only · two repairs (space-bearing matter-number tokenizer; the false
+association `reason` string) · **27 component-cleanup items C-1..C-27**.
+
+**Out**: Connection Engine / connector / LEDES · the Action **Engine** (an Action *row* on the shipped spine is
+in) · Authority · MCP server · bitemporality · per-entity fact or signal tables.
+
+**Cleanup**: only **C-1, C-3, C-4** gate the worklist row. Six items are hazards found here but not caused here —
+an untested bulk-delete (`CommandRegistry`), a bypassed ADR-015 privacy contract (Pillar-9), a production render
+path that silently shows a placeholder (`InsightSummaryCard`), a function that **already lost data**
+(`composeCommentThreadsToDocxAnnotations`), a **live one-day Kanban drift**, and an untrue root-`CLAUDE.md`
+Calendar statement. Full list: [`notes/reuse-verification-2026-10-02.md`](notes/reuse-verification-2026-10-02.md)
+§8.7 + §8.9.
+
+---
+
+## Document map
+
+| File | Role |
+|---|---|
+| [`spec.md`](spec.md) | **The specification — what `/project-pipeline` consumes.** 44 FRs · 9 NFRs · ADR Tensions resolved · §9 = D-9..D-12 · §10 assumptions · §11 three unresolved questions |
+| [`design.md`](design.md) | **rev 11 — the decisions.** §10 = 29 settled · §8.0c = D-9..D-12 · **§8.3 = why evaluation is scheduled *and* event-driven** |
+| [`notes/schema-draft.md`](notes/schema-draft.md) | The five tables field by field + the creation recipe and its traps |
+| [`notes/security-roles.md`](notes/security-roles.md) | Privilege matrix, scopes, the Signal-ownership question |
+| [`notes/mvp-technical-spec.md`](notes/mvp-technical-spec.md) | Evidence base. **§10.7 = authoritative live row counts** |
+| [`notes/reuse-verification-2026-10-02.md`](notes/reuse-verification-2026-10-02.md) | Reuse + duplication audit; C-1..C-27 |
+| [`notes/daily-briefing-ontology-fit.md`](notes/daily-briefing-ontology-fit.md) | Why Briefing items become Work Items |
+| [`notes/ontology-component-model.md`](notes/ontology-component-model.md) | **Authoritative vocabulary (§3)**; §3.1 = the Signal → Work Item chain |
+| [`notes/mvp-synopsis.md`](notes/mvp-synopsis.md) | Scope narrative |
+| [`notes/defer-issues.md`](notes/defer-issues.md) | 4 entries, all with GitHub Issue URLs (#1048–1050, #1095) |
+| Stamped historical | `ontology-architecture-feedback.md` (APPLIED) · `console-prototype-prompt.md` (CONSUMED) · `phase0-codebase-inventory.md` (SNAPSHOT) · `spaarke-ontology-strategy-synopsis-v2.md` (strategy; superseded for scope) |
+
+**Console prototype** — the UI/UX contract, *not* the implementation (standalone Vite, mocked, reuses nothing):
+`c:\code_files\spaarke-prototype\projects\2026-10-spaarke-console\` — v2.1, findings 1–17, round-2 review pending.

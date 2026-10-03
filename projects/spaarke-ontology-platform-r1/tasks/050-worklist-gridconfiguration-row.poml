@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Author the worklist grid configuration row</title>
+    <phase>5 The worklist surface</phase>
+    <gate>034 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Configuration data against a shipped framework; no new code surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration authoring following four existing examples.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>034</deps>
+    <tags>dataverse,configuration,frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the sprk_gridconfiguration row that defines worklist membership, columns and actions, so changing them later needs no code change.</prompt>
+  <role>SPAARKE platform developer. Membership is configuration; the row component is code.</role>
+  <goal>Worklist membership and presentation come from a configuration row, with membership computed by rule evaluation rather than a user filter.</goal>
+
+  <context>
+    <background>The DataGrid framework takes a configId and reads a sprk_gridconfiguration row. Four live examples exist for reconciliation (needs-review, email-review-all, email-review-completed, per-team), with membership already expressed in FetchXML.</background>
+    <relevant-files>
+      <file role="new">Dataverse: sprk_gridconfiguration row for the worklist</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: membership must come from RULE EVALUATION, never from a user-authored filter. The query selects Signals whose status is Open or Acknowledged and which are not suppressed; it does not re-implement the predicate.</constraint>
+    <constraint source="project">Scope: read the DENORMALIZED sprk_suppresseduntil so the query is cheap rather than counting Decision Records per load.</constraint>
+    <constraint source="project">Scope: group by sprk_matter. Worklist rows ARE matters grouping Work Items (D-3, decision 28).</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DataGrid framework configuration</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Grid configuration row" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid">Four live gridconfiguration JSON examples; copy the membership-in-FetchXML approach and the columnRenderers override shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read the four existing reconciliation grid configuration rows and the configuration guide.</step>
+    <step order="2">Author the worklist row: FetchXML selecting Open and Acknowledged Signals, excluding suppressed ones, ordered by sprk_rankscore then matter.</step>
+    <step order="3">Define the columns the row component needs, and the actions available per row.</step>
+    <step order="4">Verify the configuration loads and the membership query returns the seeded positive matter.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Four live sprk_gridconfiguration rows already exist for reconciliation (needs-review, email-review-all, email-review-completed, per-team), all expressing membership in FetchXML.</existing>
+    <extension>No, in the sense that a new ROW is the intended extension mechanism of the DataGrid framework: the framework is reused and only a configuration row is added. No new code surface.</extension>
+    <cost-of-doing-nothing>Worklist membership would have to be hardcoded in the component, so changing which Signals appear becomes a deployment, which fails success criterion 7 and criterion 1 directly.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Worklist membership loads from configuration">
+      <steps>
+        <step>Open the surface hosting the worklist grid</step>
+        <step>Confirm the seeded positive matter appears</step>
+      </steps>
+      <expected>Membership renders from the configuration row with no hardcoded query in the component.</expected>
+    </test>
+    <test name="Suppressed and closed Signals are excluded">
+      <steps>
+        <step>Suppress one Signal and close another</step>
+        <step>Reload the grid</step>
+      </steps>
+      <expected>Neither appears, proving the FetchXML reads the denormalized suppression column and the status filter.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Reload the grid</step>
+      </steps>
+      <expected>The grid and its column renderers adapt via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: sprk_gridconfiguration row for the worklist</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the configuration row, when the grid loads, then the seeded positive matter appears.</criterion>
+    <criterion testable="true">Given a suppressed Signal, when the grid loads, then it does NOT appear.</criterion>
+    <criterion testable="true">Given a closed Signal, when the grid loads, then it does NOT appear.</criterion>
+    <criterion testable="true">Negative: changing which Signals appear requires only a configuration edit, demonstrated by changing the row and reloading with no code change.</criterion>
+    <criterion testable="true">Rows are grouped by matter.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-24 and success criterion 7 (the membership half).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

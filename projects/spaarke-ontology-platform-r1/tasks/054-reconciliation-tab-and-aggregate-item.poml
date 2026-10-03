@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Mount reconciliation as a Console tab plus one aggregate Work Item</title>
+    <phase>5 The worklist surface</phase>
+    <gate>051 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One registration file plus a computed count; the surface itself already exists.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows an existing registration template.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>051</deps>
+    <tags>frontend,configuration</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Mount the already-built reconciliation surface as a Console tab and add one aggregate Work Item linking to it.</prompt>
+  <role>SPAARKE front-end developer. The deliverable is a registration, not a surface.</role>
+  <goal>Reconciliation is reachable as a Console tab, and the worklist carries exactly one aggregate item pointing at it.</goal>
+
+  <context>
+    <background>The surface is ALREADY BUILT: ReconciliationGrid plus four grid configuration rows, ReconciliationBrowseShell, ReconcileTabs, EmailConnectionsReview, and its own code page. What is missing is only the mount: there is no SectionRegistration and nothing in WorkspaceWidgetRegistry references it.</background>
+    <relevant-files>
+      <file role="new">src/solutions/SpaarkeAi/src/components/workspace/reconciliation.registration.ts</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONE registration file, following dailyBriefing.registration.ts as the template. Do not rebuild any part of the reconciliation surface.</constraint>
+    <constraint source="project">Scope: the aggregate Work Item is a COMPUTED COUNT rendered in the worklist, NOT a Signal. Making it a Signal would make the association engine a policy producer, which it is not.</constraint>
+    <constraint source="project">Scope: exactly ONE aggregate item. Decision 9: one needs-attention surface, not four queues. Four places to look means nobody looks.</constraint>
+    <constraint source="project">Scope: reconciliation is NOT a worklist lane. Bulk triage is a different interaction from a gated single decision, and its volume would bury the Decide lane.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Widget registration and surface mounting</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Widget registration" location="src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts">The template; one registry entry mounts an existing surface.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read dailyBriefing.registration.ts and the surface-launch mechanism doc.</step>
+    <step order="2">Write the reconciliation registration so the existing surface mounts as a Console tab.</step>
+    <step order="3">Add the aggregate Work Item to the worklist: a computed count of emails awaiting a match confirmation, linking to the tab.</step>
+    <step order="4">Confirm the reconciliation policy (if one exists) has countstowardsuppression No, so misresolution dismissals are recorded without feeding the three-dismissal counter.</step>
+    <step order="5">Add a test that the registration mounts and the count renders.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>dailyBriefing.registration.ts is the existing registration of the same shape. The reconciliation SURFACE itself already exists in full (ReconciliationGrid, four grid configuration rows, ReconciliationBrowseShell, ReconcileTabs, EmailConnectionsReview, and its own code page).</existing>
+    <extension>No file to extend: there is no SectionRegistration for reconciliation and nothing in WorkspaceWidgetRegistry references it. The new surface is ONE registration file following the existing template; the extension recipe in ASSISTANT-SURFACE-LAUNCH-MECHANISM is exactly one registry entry.</extension>
+    <cost-of-doing-nothing>Reconciliation stays reachable only as its own separate code page, so the Console has no path to it and decision 9 (one needs-attention surface) is violated by omission rather than by proliferation.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Reconciliation mounts as a tab">
+      <steps>
+        <step>Open the Console</step>
+        <step>Select the reconciliation tab</step>
+      </steps>
+      <expected>The existing reconciliation surface renders inside the Console.</expected>
+    </test>
+    <test name="One aggregate item, not a lane">
+      <steps>
+        <step>Open the worklist</step>
+      </steps>
+      <expected>Exactly one aggregate reconciliation item appears; individual emails do not appear as Work Items.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Open the reconciliation tab</step>
+      </steps>
+      <expected>The mounted surface adapts via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/reconciliation.registration.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Console, when the reconciliation tab is opened, then the existing surface renders with no part of it rebuilt.</criterion>
+    <criterion testable="true">Given the worklist, when loaded, then exactly one aggregate reconciliation item appears.</criterion>
+    <criterion testable="true">Negative: individual emails awaiting a match do NOT appear as separate Work Items.</criterion>
+    <criterion testable="true">Negative: the aggregate item is not a sprk_signal row.</criterion>
+    <criterion testable="true">Misresolution dismissals are recorded and queryable but do not feed suppression.</criterion>
+    <criterion testable="true">The client builds and the registration test passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-29. design.md section 5.1 and decision 29.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

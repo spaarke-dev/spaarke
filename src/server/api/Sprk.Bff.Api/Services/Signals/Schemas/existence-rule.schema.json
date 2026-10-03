@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/ontology/existence-rule.schema.json",
+  "title": "Existence rule body",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = Existence (spec FR-05; design.md section 8.0.1(a) / CM-7). An 'all' array of independent EXISTS / NOT EXISTS clauses over a fixed window, each expressible as a single Dataverse FetchXML link-entity filter (design.md CM-3). Cross-clause variable binding is REFUSED at this schema level, not merely by review: clauses additionalProperties=false forbids a 'bind' property outright, and every filter value is pattern-restricted to reject a leading '$' variable-dereference token (e.g. '$commitment.sprk_receiveddate').",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "subject", "all"],
+  "properties": {
+    "type": {
+      "const": "Existence"
+    },
+    "subject": {
+      "description": "The subject entity's logical name this rule evaluates against (e.g. sprk_matter).",
+      "type": "string",
+      "minLength": 1
+    },
+    "when": {
+      "description": "Optional scope filter over the subject. Empty object = all subjects.",
+      "type": "object"
+    },
+    "all": {
+      "description": "Every clause must hold (AND). No cross-clause references between elements.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/clause"
+      }
+    },
+    "then": {
+      "description": "The signal to produce when every clause holds (signalType/severity/messageTemplate/proposedAction/evidenceRefs). Validated structurally only here; semantic validation is a later task's concern.",
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "clause": {
+      "description": "Exactly one of 'exists' or 'notExists' naming a related entity, reached via 'path' (the relationship/lookup field), bounded by 'filter'. No other property is permitted on a clause -- this is what makes a 'bind' (variable-binding) property a schema-level refusal rather than a review-time catch.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "filter"],
+      "properties": {
+        "exists": {
+          "description": "The related entity logical name that must exist for this clause to hold.",
+          "type": "string",
+          "minLength": 1
+        },
+        "notExists": {
+          "description": "The related entity logical name that must NOT exist for this clause to hold.",
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "description": "The relationship/lookup field on the related entity pointing back to the subject.",
+          "type": "string",
+          "minLength": 1
+        },
+        "filter": {
+          "$ref": "#/$defs/filter"
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["exists"],
+          "not": { "required": ["notExists"] }
+        },
+        {
+          "required": ["notExists"],
+          "not": { "required": ["exists"] }
+        }
+      ]
+    },
+    "filter": {
+      "description": "A bounded Dataverse-filter-shaped bag of field -> value/operator constraints. Filter values are ids, never labels (mvp-technical-spec.md section 3.4a).",
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/filterValue"
+      }
+    },
+    "filterValue": {
+      "description": "A scalar, an array of scalars (e.g. an id list), or a single-operator comparison object. No variant admits a cross-clause variable reference.",
+      "anyOf": [
+        { "$ref": "#/$defs/scalar" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scalar" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "maxProperties": 1,
+          "patternProperties": {
+            "^(>=|<=|>|<|<>|=)$": { "$ref": "#/$defs/scalar" }
+          }
+        }
+      ]
+    },
+    "scalar": {
+      "description": "A literal string, number or boolean. Strings MUST NOT begin with '$' -- that token is reserved for cross-clause variable dereferencing (e.g. '$commitment.sprk_receiveddate'), which this grammar does not support (design.md section 8.0.1(a)).",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^(?!\\$).*$"
+        },
+        { "type": "number" },
+        { "type": "boolean" }
+      ]
+    }
+  }
+}

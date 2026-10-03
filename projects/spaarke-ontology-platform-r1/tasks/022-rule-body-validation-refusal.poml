@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule-body validation refuses invalid bodies at save</title>
+    <phase>2 Policy and rule bodies</phase>
+    <gate>020 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>A validation gate; if it is lenient, an unparseable rule body reaches the evaluator at runtime.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified validation against the schema from task 020.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>bff-api,validation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make an invalid rule body unsavable, with a field-level error, so no sprk_policyversion row can exist with an unparseable body.</prompt>
+  <role>SPAARKE backend developer. Fail closed.</role>
+  <goal>No sprk_policyversion row can be created or updated with a sprk_rulebody that fails its rule-type schema.</goal>
+
+  <context>
+    <background>A policy version is immutable after create, so an invalid body saved once is permanent. The validation is therefore the only point of control.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: validation happens on the WRITE path in the BFF (ADR-002: invariants live on the server, one owner per invariant). It must not be client-only, because a policy row can be authored from the model-driven app.</constraint>
+    <constraint source="ADR-002">Scope: no plugins. The BFF write path is the single owner of this invariant.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Write-path invariants and validation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Identify the BFF write path for sprk_policyversion and confirm it is the single owner of this invariant.</step>
+    <step order="2">Validate sprk_rulebody against the schema for its sprk_ruletype on create and on any update.</step>
+    <step order="3">Return a field-level error naming the offending clause, not a generic failure.</step>
+    <step order="4">Add tests: valid body saves; malformed JSON refused; valid JSON failing the schema refused; a body whose rule type does not match its shape refused.</step>
+    <step order="5">Document the gap if a model-driven-app author can still write the row directly via Xrm.WebApi, and record it as a known limitation with its mitigation.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a policy row can be authored by a path that bypasses the BFF (for example directly via Xrm.WebApi from the model-driven app), STOP and escalate. That is the WP-3 problem in the Dataverse write-path architecture, and silently accepting it means the invariant is not actually enforced.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a valid Existence body, when saved via the BFF, then it is accepted.</criterion>
+    <criterion testable="true">Negative: given malformed JSON, when saved, then a field-level error is returned and no row is created.</criterion>
+    <criterion testable="true">Negative: given valid JSON that fails the Existence schema, when saved, then it is refused with the offending clause named.</criterion>
+    <criterion testable="true">Negative: given a body whose shape does not match its declared rule type, when saved, then it is refused.</criterion>
+    <criterion testable="true">Any bypass path that can still write an invalid row is documented with its mitigation.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-08. Immutability makes this the only point of control: a bad body saved once cannot be edited out.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

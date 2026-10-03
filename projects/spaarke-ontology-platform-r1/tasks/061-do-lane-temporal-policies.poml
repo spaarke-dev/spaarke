@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Do lane: three temporal policies as a predicate migration</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>060,034 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves membership from hardcoded queries into declared rules across a shipped collector.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Framed deliberately as a predicate migration with the exact constants identified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 062 and 063 build on the Do lane existing.</parallel-reason>
+    <deps>060,034</deps>
+    <tags>bff-api,policy,do-lane</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move DailyBriefingCollector hardcoded predicates into three policy rows, reusing its query shape verbatim.</prompt>
+  <role>SPAARKE backend developer. A predicate migration, NOT a collector rewrite.</role>
+  <goal>Three Do-lane policies exist (overdue task, task due within 3 days, work assignment past response due date) and membership comes from declared rules.</goal>
+
+  <context>
+    <background>The framing that keeps this small: the collector query SHAPE (entities, columns, joins) is reused verbatim; only its hardcoded predicates move into policy rows. Those are the task-type GUID (:101), statuscode Open (:104), the TaskOverdueDaysPast = 5 C# constant (:116), and highpriority OR monitor (:500-502).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+      <file role="new">Dataverse: three sprk_policy plus sprk_policyversion rows</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: reuse the collector query SHAPE verbatim. Only the hardcoded predicates move. This is what keeps the task small and is why folding the Briefing in broadens the MVP without lengthening it.</constraint>
+    <constraint source="project">Scope: QueryTodosAsync (:999) is hardcoded to owninguser equals systemUserId with NO resolver call at all, because sprk_todo carries no membership-bearing fields. A To Do rule is therefore PER-USER BY CONSTRUCTION. Do not spec around this as if it were configurable.</constraint>
+    <constraint source="project">Scope: the three rules are all Temporal over data Spaarke already holds. Live counts confirm there is data to fire on: sprk_todo 50, sprk_workassignment 22, sprk_event 73.</constraint>
+    <constraint source="project">Scope: these are NOT differentiated (every matter-management system shows overdue tasks). They join for completeness and adoption, never for the pitch. That is why the lane split exists.</constraint>
+    <constraint source="project">Scope: Do-lane policies are evaluated NIGHTLY ONLY (cadence from sprk_lane).</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Temporal policies and the briefing collector</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/daily-briefing-ontology-fit.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Collector query shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs">Reuse entities, columns and joins verbatim; replace only the hardcoded predicate values with policy-driven ones.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Read DailyBriefingCollector and record each hardcoded predicate with its line number.</step>
+    <step order="2">Author three policy plus version rows: overdue task, task due within 3 days, work assignment past sprk_responseduedate. Lane Do.</step>
+    <step order="3">Replace the hardcoded predicates with values read from the policy rows, keeping the query shape identical.</step>
+    <step order="4">Confirm the TaskOverdueDaysPast = 5 constant now comes from the policy row, so changing it needs no deployment.</step>
+    <step order="5">Add tests proving each rule fires on the live counts and that changing a policy row changes membership with no code change.</step>
+    <step order="6">Document the per-user To Do constraint explicitly so it is not mistaken for a bug later.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reusing the collector query shape requires changing its joins or columns, STOP and escalate. That turns a predicate migration into a collector rewrite, which is a materially bigger task than this one is scoped for.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>DailyBriefingCollector already queries all three entities with working joins and columns.</existing>
+    <extension>Yes, extend: the query shape is reused verbatim and only the predicate VALUES move out to policy rows. The three policy rows themselves are data, not code.</extension>
+    <cost-of-doing-nothing>Membership stays hardcoded, so there is no stated reason on a line, no versioning, no suppression, no freshness and no deterministic answer to why is this not here. Those five properties are the entire reason the Briefing items become Work Items.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
+    <output type="data">Dataverse: three Do-lane policy and version rows</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Briefing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the three Do-lane policies, when the nightly evaluator runs, then each produces Signals over existing data.</criterion>
+    <criterion testable="true">Given the overdue-days value changed on the policy row, when evaluation re-runs, then membership changes with NO deployment.</criterion>
+    <criterion testable="true">Given the collector, when diffed, then its entities, columns and joins are unchanged.</criterion>
+    <criterion testable="true">Negative: a To Do rule remains per-user, and that constraint is documented rather than worked around.</criterion>
+    <criterion testable="true">Negative: Do-lane policies are not evaluated by the event triggers.</criterion>
+    <criterion testable="true">All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-30. design.md BR-2. The collector query shape is reused verbatim; that framing is what keeps this affordable.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

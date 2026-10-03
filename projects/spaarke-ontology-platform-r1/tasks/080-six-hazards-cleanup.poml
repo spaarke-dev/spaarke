@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Resolve the six cleanup hazards</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Each hazard is a live correctness or privacy risk in shipped code, one of which already lost data.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Six independent, well-diagnosed fixes with named files.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>cleanup,bug,technical-debt</tags>
+    <estimated-effort>5-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the six hazards the reuse audit found. None was caused by this project; all are being absorbed per the scope rule.</prompt>
+  <role>SPAARKE full-stack developer.</role>
+  <goal>All six hazards are resolved, or filed as GitHub Issues if a fix proves to belong to another domain.</goal>
+
+  <context>
+    <background>The owner scope rule: if work identified in the course of this project can be addressed most efficiently here, that is the correct approach. Nothing is merely listed; everything is fixed or scheduled.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src</file>
+      <file role="modify">CLAUDE.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: C-19 delete the CommandRegistry cluster. It is dead infra from a DELETED PCF whose deleteCommand loops webAPI.deleteRecord over EVERY selected record, and it sits beside the live CommandExecutor reading as the generic privilege-aware command builder. A dev adding a grid toolbar could ship an untested bulk delete.</constraint>
+    <constraint source="project">Scope: C-21 resolve the Pillar-9 getAgentVisibleState shim. It is an ADR-015 privacy contract that looks enforcing and is structurally bypassed because the server re-derives the shapes itself. Fixing a privacy bug there changes nothing at runtime, which is the hazard.</constraint>
+    <constraint source="project">Scope: C-22 resolve InsightSummaryCard. Its mount bundle DOES NOT EXIST in the repo, so production renders the Phase 4 placeholder forever while every other link in the chain reads as live.</constraint>
+    <constraint source="project">Scope: C-5 delete composeCommentThreadsToDocxAnnotations. It ALREADY CAUSED silent comment loss on save, was abandoned for exactly that, and is still barrel-exported.</constraint>
+    <constraint source="project">Scope: C-10 is a LIVE BUG, not debt. The To-Do urgency scorer three copies have drifted: useKanbanColumns.ts:85-89 never received todoScoring.ts:71-75 local-midnight fix, so they disagree BY ONE DAY in every negative-UTC-offset zone and a To Do can sit in a different Kanban column than its own detail view. Converge on ONE scorer.</constraint>
+    <constraint source="project">Scope: C-23 root CLAUDE.md is wrong. It documents CalendarFilterPane as one of two intentional Calendar variants, but the live consumer imports CalendarSection, and two live files import a type the barrels never export. Touching root CLAUDE.md requires a .claude/CHANGELOG.md entry.</constraint>
+    <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cleanup hazards</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Take the six in order of blast radius: C-10 (live bug) first, then C-5, C-19, C-22, C-21, C-23.</step>
+    <step order="2">For C-10, converge the three scorer copies on one implementation carrying the local-midnight fix, and add a test asserting agreement across a negative-UTC-offset zone.</step>
+    <step order="3">For C-5, remove the function and its barrel export; confirm no consumer remains.</step>
+    <step order="4">For C-19, delete the CommandRegistry cluster after confirming the owning PCF is genuinely deleted.</step>
+    <step order="5">For C-22, either restore the mount bundle or remove the dead render path, so production does not silently show a placeholder.</step>
+    <step order="6">For C-21, make the ADR-015 shim either genuinely enforcing or explicitly not a contract; do not leave it looking enforcing.</step>
+    <step order="7">For C-23, correct the root CLAUDE.md Calendar statement and add a .claude/CHANGELOG.md entry.</step>
+    <step order="8">For anything that turns out to belong to another domain, file a GitHub Issue and record the URL in notes/defer-issues.md.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="10">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the six turns out to be load-bearing (for example CommandRegistry has a live consumer after all), STOP and escalate rather than deleting it. One claim in this audit was already wrong once: the briefing hooks were asserted to be barrel-exported and were not.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src</output>
+    <output type="doc">CLAUDE.md</output>
+    <output type="doc">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the three To-Do scorer copies, when tested in a negative-UTC-offset zone, then they agree; a To Do appears in the same column in Kanban and in its detail view.</criterion>
+    <criterion testable="true">Given composeCommentThreadsToDocxAnnotations, when grepped, then it does not exist and is not barrel-exported.</criterion>
+    <criterion testable="true">Given the CommandRegistry cluster, when grepped, then it does not exist, and the live CommandExecutor is untouched.</criterion>
+    <criterion testable="true">Given InsightSummaryCard in production, when rendered, then it either renders real content or the dead path is gone; it does not silently show a placeholder.</criterion>
+    <criterion testable="true">Given the Pillar-9 shim, when read, then it is either genuinely enforcing or explicitly documented as not a contract.</criterion>
+    <criterion testable="true">Given root CLAUDE.md, when read, then its Calendar statement matches what the code imports, and a CHANGELOG entry exists.</criterion>
+    <criterion testable="true">Negative: anything not fixed has a GitHub Issue URL recorded in notes/defer-issues.md.</criterion>
+    <criterion testable="true">All affected packages build and their tests pass.</criterion>
+  </acceptance-criteria>
+
+  <completion date="2026-10-03">All six hazards diagnosed and fixed. Under the owner placement rule the fixes unrelated to ontology land in their own PRs: C-10 in task 084, C-5 in 085, C-19 in 086, C-22 in 088, C-23 in PR #1114. C-21 resolved by owner decision (delete), executed in 086; the C-19 residual (#1113) is also resolved in 086.</completion>
+  <notes>spec.md FR-42. notes/reuse-verification-2026-10-02.md sections 8.7 and 8.9. None of these was caused by this project.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

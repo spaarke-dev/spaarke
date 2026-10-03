@@ -1,7 +1,14 @@
 /**
- * MetricCard Component
- * Displays a single aggregate value with optional trend indicator
- * Supports click-to-drill for viewing underlying records
+ * VisualMetricCard Component (exported as `VisualMetricCard`, this file's historical/local
+ * name was `MetricCard` — renamed 2026-10-03, item C-3, to remove a name collision with the
+ * unrelated `MetricCard` in `Spaarke.UI.Components/src/components/WorkspaceShell/MetricCard.tsx`,
+ * which is the clickable count-filter card. **Do not confuse the two.** This component:
+ *   - Displays a single aggregate value with optional trend indicator
+ *   - Supports click-to-drill for viewing underlying records
+ *   - Serves the VisualHost PCF's chart/report-card rendering (via `ChartRenderer.tsx`)
+ *
+ * No behavior or prop change in the rename — only the exported identifier (`MetricCard` →
+ * `VisualMetricCard`) and the type (`IMetricCardProps` → `IVisualMetricCardProps`) changed.
  */
 
 import * as React from 'react';
@@ -12,7 +19,7 @@ import { formatValue as formatValueUtil } from '../utils/valueFormatters';
 
 export type TrendDirection = 'up' | 'down' | 'neutral';
 
-export interface IMetricCardProps {
+export interface IVisualMetricCardProps {
   /** The main metric value to display */
   value: string | number;
   /** Label describing what the metric represents */
@@ -250,9 +257,9 @@ const formatDisplayValue = (val: string | number, format?: ValueFormatType, null
 };
 
 /**
- * MetricCard - Displays a single metric value with optional trend indicator
+ * VisualMetricCard - Displays a single metric value with optional trend indicator
  */
-export const MetricCard: React.FC<IMetricCardProps> = ({
+export const VisualMetricCard: React.FC<IVisualMetricCardProps> = ({
   value,
   label,
   description,

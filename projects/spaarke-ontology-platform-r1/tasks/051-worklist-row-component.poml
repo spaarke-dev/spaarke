@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The one worklist row component</title>
+    <phase>5 The worklist surface</phase>
+    <gate>050,012 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New UI surface carrying the row contract; a second row component would be a design failure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New component but tightly specified by the row contract and the prototype findings.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Tasks 052, 053 and 054 all extend or host this component.</parallel-reason>
+    <deps>050,012</deps>
+    <tags>frontend,fluent-ui,new-component</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build ONE row component that renders every signal shape with data-driven variants, satisfying all five row-contract requirements.</prompt>
+  <role>SPAARKE front-end developer. One component, data-driven variants, not a family.</role>
+  <goal>A single component in the shared library renders threshold, cross-source, SLA and Do-lane Work Items, with expandable evidence tiers and a why-this-fired disclosure.</goal>
+
+  <context>
+    <background>Prototype finding 9: the row contract needs expandable evidence tiers, a why-this-fired disclosure, outcome cards and a gate host, none of which a column renderer provides. Finding 10 is the recovered half: ONE component carried all three signal shapes once five things were present in the data, so the cost is build-once, not build-per-signal.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/WorkItemRow/WorkItemRow.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONE component with data-driven variants. A second row component is a design failure, not a feature (prototype finding 10 proves one suffices).</constraint>
+    <constraint source="project">Scope: it lands in @spaarke/ui-components, NOT in src/solutions/SpaarkeAi/.</constraint>
+    <constraint source="project">Scope: evidence is separated by EPISTEMIC TIER. A Fact is stated flatly; an Observation is hedged with a confidence and a citation. The tier comes from sprk_evidencerefs, not from the component guessing.</constraint>
+    <constraint source="project">Scope: the row must resolve to an OBJECT, never a text string (row-contract requirement 1).</constraint>
+    <constraint source="project">Scope: rank and membership are given to the component, never computed by it (row-contract requirement 2). The component must not sort.</constraint>
+    <constraint source="project">Scope: the row must offer at least one action that CHANGES SOMETHING (requirement 4). No action, no signal.</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 semantic tokens only; light and dark both correct; no hardcoded colors.</constraint>
+    <constraint source="project">Scope: the row is a CARD per ASSISTANT-UI-ELEMENT-CRITERIA (a persistent act-on item), not a chip or a bubble.</constraint>
+    <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Worklist row component and the row contract</topic>
+    <files>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/standards/UI-DESIGN-STANDARDS.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md</file>
+    </files>
+    <patterns>
+      <pattern name="Worklist-shaped section" location="src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx">Already a worklist in structure: type badge, status chip, per-row menu. This is the ancestry; it lacks evidence tiers, the disclosure, outcome cards and a gate host.</pattern>
+      <pattern name="Generic status badge" location="src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/StatusBadge.tsx">Built in task 012; use it rather than adding another badge.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Enumerate the five row-contract requirements as a checklist and keep it in the component test file, so each is covered by a named test.</step>
+    <step order="2">Implement the row: short headline, matter and policy identity, the sentence, an expandable evidence block grouped by tier, a why-this-fired disclosure citing the policy version, and an action area.</step>
+    <step order="3">Render Facts flatly and Observations hedged with their confidence and citation, driven by the tier in sprk_evidencerefs.</step>
+    <step order="4">Use StatusBadge for status and severity; do not add a new badge.</step>
+    <step order="5">Accept rank and membership as props and never sort internally.</step>
+    <step order="6">Add tests covering each signal shape through the same component, plus each row-contract requirement.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any signal shape cannot render through the same component without a second component, STOP and escalate. Prototype finding 10 says one suffices, and a second component contradicts the design contract rather than extending it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>HighPrioritySection is already a worklist in structure (type badge, status chip, per-row menu) and is the closest neighbour.</existing>
+    <extension>Partially: it is the ancestry and its patterns are reused, but it has no expandable evidence tiers, no why-this-fired disclosure, no outcome-card host and no gate host. Prototype finding 9 established that a column renderer cannot supply these.</extension>
+    <cost-of-doing-nothing>Signals stay invisible, exactly as sprk_spendsignal has been since it shipped: computed, stored, marked active, and never surfaced to anyone.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="All signal shapes render through one component">
+      <steps>
+        <step>Render the row with a threshold Signal, a cross-source Signal, an SLA Signal and a Do-lane item</step>
+        <step>Confirm each renders correctly</step>
+      </steps>
+      <expected>One component renders all four with only data differing.</expected>
+    </test>
+    <test name="Evidence tiers render differently">
+      <steps>
+        <step>Expand the evidence block on a Signal carrying both a Fact and an Observation</step>
+      </steps>
+      <expected>The Fact is stated flatly; the Observation is hedged with its confidence and a citation link.</expected>
+    </test>
+    <test name="Why this fired disclosure">
+      <steps>
+        <step>Open the why-this-fired disclosure</step>
+      </steps>
+      <expected>It names the policy and the policy version in force when the Signal fired.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Re-render every shape and expand the evidence block</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens; nothing hardcoded is revealed.</expected>
+    </test>
+    <test name="An action that changes something is present">
+      <steps>
+        <step>Inspect the action area of each shape</step>
+      </steps>
+      <expected>Every row offers at least one action that changes state, never a read-only row.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkItemRow/WorkItemRow.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkItemRow/WorkItemRow.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the four shapes, when rendered, then the SAME component renders all of them and the repo contains exactly one worklist row component.</criterion>
+    <criterion testable="true">Given a Signal with Fact and Observation evidence, when expanded, then tiers render distinctly and the Observation shows a confidence and a citation.</criterion>
+    <criterion testable="true">Given the disclosure, when opened, then the policy version in force at firing is named.</criterion>
+    <criterion testable="true">Given rank-ordered props, when rendered, then the component does not re-sort them.</criterion>
+    <criterion testable="true">Negative: the row resolves to an object; no row renders only a text string.</criterion>
+    <criterion testable="true">Negative: no row renders without at least one state-changing action.</criterion>
+    <criterion testable="true">Negative: the component source contains no hex, rgb or named color literal.</criterion>
+    <criterion testable="true">Unit tests cover all five row-contract requirements by name; the package builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-25, FR-26 and success criterion 7 (the one-component half). The prototype is the DESIGN contract, not the implementation: carry its shapes and behaviours, do NOT port its source.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

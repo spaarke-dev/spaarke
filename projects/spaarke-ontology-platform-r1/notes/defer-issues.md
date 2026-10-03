@@ -189,7 +189,87 @@ fix ships.
 
 ---
 
+### ISS-005 — C-21: Pillar-9 `getAgentVisibleState` client derivation is structurally bypassed
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round (privacy/architecture judgment call) |
+| **Filed** | 2026-10-03 |
+| **Source** | Task 080 (six-hazards cleanup), escalated per root CLAUDE.md §6.5 rather than guessed |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1112 |
+
+**Description**
+
+`@spaarke/ai-widgets`' Pillar-9 `getAgentVisibleState()` machinery (`pillar9-visibility.ts`,
+`getWorkspaceWidgetVisibleStateFn`, 8+ per-widget visibility wrappers) is an ADR-015-governed privacy contract
+with extensive doc comments describing caps and minimization — and is never consulted at runtime. Verified: it
+has zero call sites outside its own test; the server independently re-derives the same shapes via its own C#
+mirror (`SprkChatAgentFactory.TryDeriveVisibleState`), by design (the server's own comment: "not by trusting
+client serialization"); and as of a later change the server's actual prompt output is trimmed to
+`{type, label, active}` only, so even the server's own richer derivation output is mostly unused today.
+
+**Why not fixed here**: three remediation paths exist (delete as dead code / wire into the live request path /
+re-document as non-authoritative), and choosing between them is a privacy + architecture judgment call — path
+2 in particular would mean trusting client-computed data for an LLM prompt, which root CLAUDE.md §6 reserves
+for human sign-off. The hazard this project found ("fixing a privacy bug here changes nothing at runtime")
+remains true regardless of which path is chosen, so it is reported rather than guessed.
+
+**Entry-points**: see the GitHub issue for the full file:line list (TS + the C# mirror).
+
+**Suggested fix**: owner picks one of the three paths in the issue body; re-run `/adr-check` against ADR-015
+once chosen.
+
+**Estimated effort**: 2-4 hours once a path is chosen (mostly path A or C; path B is materially larger)
+**Blockers**: owner decision on which path
+**Related**: `notes/reuse-verification-2026-10-02.md` §8.8 finding X15 · task 080 · ADR-015
+
+---
+
+### ISS-006 — C-19 residual: `useKeyboardShortcuts.ts` liveness unresolved
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | low (cleanup follow-up, no hazard) |
+| **Filed** | 2026-10-03 |
+| **Source** | Task 080 (six-hazards cleanup) |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1113 |
+
+**Description**
+
+C-19 deleted the confirmed-dead `CommandRegistry` cluster (`CommandRegistry.ts`,
+`EntityConfigurationService.ts`, `CustomCommandFactory.ts`, `components/Toolbar/CommandToolbar.tsx` — zero
+consumers outside their own tests). `src/hooks/useKeyboardShortcuts.ts` was NOT deleted: it has one real,
+non-test importer, `components/PageChrome/CommandBar.tsx`. Per the task's own escalation trigger, a live
+consumer stops a deletion — so it was kept. But `PageChrome/CommandBar.tsx` itself appears to have zero
+consumers outside its own test (grepped its barrel-exported types across `src/solutions/` and `src/client/pcf/`;
+none found), so this may simply push the same dead-code question one level up a chain that is itself
+unreachable. Confirming that needs a more thorough consumer trace than this cleanup task's narrow scope covered
+(see the reuse audit §8.6's own warning about grep over/under-counting).
+
+**Entry-points**: see the GitHub issue.
+
+**Suggested fix**: trace `PageChrome`'s real reachability (including lazy/dynamic imports); if genuinely
+unreachable, delete `useKeyboardShortcuts.ts` + `PageChrome/CommandBar.tsx` + its barrel export together.
+
+**Estimated effort**: 30-60 minutes
+**Blockers**: none
+**Related**: `notes/reuse-verification-2026-10-02.md` §8.8 finding X11 · task 080
+
+---
+
 ## Deferred scope
 
 *(none — scope deferrals are recorded in `design.md` §5 "Out" with rationale, and the two items previously
 listed as D-6/D-7 were pulled INTO scope rather than deferred.)*
+
+---
+
+## Owner decisions 2026-10-03 (cleanup placement)
+
+| Item | Decision | Where it lands |
+|---|---|---|
+| **C-21** Pillar-9 `getAgentVisibleState` shim (ISS-005, #1112) | **DELETE.** The server re-derives the shape itself and trims it to identity fields; wiring the client copy live would feed browser-computed data into an LLM prompt. | Dead-code PR for `Spaarke.UI.Components`; trace `SerializedWidgetState.ts` / `WorkspaceTab.ts` consumers first. Closes #1112. |
+| **C-17** to-do due-date tier scheme | **3/7/10 days.** | This branch (Do lane). |
+| Cleanup placement rule | Fix everything, never defer to issues; items unrelated to ontology go to their own PRs grouped by area. | See `notes/cleanup-placement-plan.md`. |

@@ -497,7 +497,8 @@ export async function fetchBriefingNarration(channels: ChannelFetchResult[]): Pr
  *
  * Exported (R7 Wave 12 cutover, 2026-06-30) so `useBriefingRender` can call
  * `/render` unconditionally on mount, without the appnotification load gate
- * that `useBriefingNarration` had.
+ * that the old pre-cutover narration hook had (that hook, `useBriefingNarration`,
+ * was deleted as dead code by ontology-platform-r1 task 010 / C-1, 2026-10-03).
  */
 /**
  * Optional per-user briefing windows (r5 settings-wiring, 2026-07-09), sourced from the

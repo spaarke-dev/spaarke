@@ -348,7 +348,7 @@ The canonical reference. Live in production as of R7 Wave 11.
 
 **Structure**: Start → LoadKnowledge → (GenerateTldr ‖ GenerateChannelNarratives parallel) → ValidateEntityNames (post-LLM scrubber) → ReturnResponse.
 
-**Output destination**: HTTP response → `useBriefingNarration.ts` widget hook → Daily Briefing widget UI.
+**Output destination**: HTTP response → `useBriefingRender` widget hook (`fetchBriefingLive` in `briefingService.ts`, behind the `USE_LIVE_RENDER` flag) → Daily Briefing widget UI.
 
 **What to study**:
 - Note `instruction.task` in both BRIEF-NARRATE actions — pure instructions, no `{{X}}` for data.
