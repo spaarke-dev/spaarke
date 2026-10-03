@@ -440,7 +440,14 @@ const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.would_lower_existing',
   'sdap.access.grant.grantee_denied',
   'sdap.access.user_share.caller_cannot_grant',
+  // Task 149: the share on the record WAS written, but some of a secure record's related records (documents, events,
+  // to-dos, communications) could not be updated yet. The server's sentence names how many and says they complete
+  // automatically; a generic "failed, try again" would wrongly say nothing was shared.
+  'sdap.access.user_share.children_incomplete',
 ]);
+
+/** Task 149: `/unshare-user` removed the share on the record, but not yet from every related record of a secure one. */
+const USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE = 'sdap.access.user_share.children_incomplete';
 
 /** Task 139 (owner round 3, S5): `/unshare-user` refuses to remove the last
  * person who can open a secure record. Its `detail` says what to do instead. */
@@ -1213,6 +1220,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // Task 139 (S5): the last person who can open a secure record cannot be
         // removed. The server's sentence says what to do; nothing was removed.
         setPendingRevoke(null);
+        setNotice({ intent: 'warning', text: err.detail });
+      } else if (
+        pendingRevoke.kind === 'share' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode === USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE
+      ) {
+        // Task 149: the share on the record IS gone; some related records of the secure record still need
+        // updating (the server completes them within minutes). Reload so the row disappears, and show the
+        // server's sentence — never "Failed to revoke", which would claim the share is still there.
+        setPendingRevoke(null);
+        await loadData();
         setNotice({ intent: 'warning', text: err.detail });
       } else {
         setNotice({

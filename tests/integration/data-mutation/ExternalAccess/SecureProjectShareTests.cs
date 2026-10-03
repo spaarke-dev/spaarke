@@ -73,6 +73,32 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         creatorShare.AccessRightsCsv.Should().Be(ProvisionProjectEndpoint.CreatorAccessRights);
     }
 
+    /// <summary>
+    /// Task 149: Step 5.5 is a root-share writer, so provisioning fans its shares out to the record's secure children —
+    /// here a document the Secure team already owns (a secure child filed before the root finished provisioning, task
+    /// 158's shape). The child receives the creator, through the SAME synchronizer the share endpoints use, and never
+    /// with Share.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_FansTheNewSharesOutToTheRecordsSecureChildren()
+    {
+        var projectId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.ChildWorld = SecureChildShareWorld.Standard()
+            .SecureRoot("sprk_project", projectId)
+            .SecureChild("sprk_document", documentId, ("sprk_project", "sprk_project", projectId));
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var childShare = _fixture.Grants.Should().ContainSingle(g => g.RecordId == documentId).Subject;
+        childShare.EntitySet.Should().Be("sprk_documents");
+        childShare.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+        childShare.AccessRightsCsv.Should().NotContain("ShareAccess");
+    }
+
     [Fact]
     public async Task Provisioning_GivesTheCreatorShareAccess_SoTheyCanAddColleaguesWithoutAnAdministrator()
     {

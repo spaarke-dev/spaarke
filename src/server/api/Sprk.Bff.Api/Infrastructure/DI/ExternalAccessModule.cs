@@ -504,6 +504,23 @@ public static class ExternalAccessModule
         // unconditional (and IGenericEntityService, resolved per run from a scope, is too), so no Null-Object is needed.
         services.AddScheduledJob<SecureRecordIsolationCensusJob>(SecureRecordIsolationCensusJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 149 (C10 part 2, sharees; ships with task 146) — the ONE synchronizer that keeps
+        // every child of a secure record shared with exactly its root's internal sharees (never wider; Share and Assign
+        // never mirrored). Called by /share-user and /unshare-user (fan-out in the request), by secure provisioning, and by
+        // the reconcile job below. Concrete singleton (ADR-010: no second implementation, no interface); its dependencies
+        // — IGenericEntityService and the one POA seam IDataverseRecordShareService — are singletons registered
+        // unconditionally. Placement + §11 justification: notes/task-149-secure-child-sharee-access.md §6.
+        services.AddSingleton<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+
+        // Task 149 — the scheduled safety net and the mechanism for every writer that does not pass through the share
+        // endpoints: children created or re-filed under a secure record, and model-driven-app Share/Unshare of a secure root
+        // (no relationship cascades either, live metadata 2026-10-02). Every two minutes. ENABLED WITH WRITES: it IS the
+        // mechanism (report-only would leave new children invisible to the root's sharees), and every write is bounded by
+        // the root's own shares. ADR-052 places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6).
+        // UNCONDITIONAL registration (ADR-032): IServiceScopeFactory, TimeProvider and the synchronizer are unconditional.
+        services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob>(
+            Sprk.Bff.Api.Services.Access.SecureChildShareReconciliationJob.DefaultCronSchedule);
+
         return services;
     }
 

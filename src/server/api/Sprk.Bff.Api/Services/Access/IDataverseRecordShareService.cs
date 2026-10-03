@@ -64,6 +64,14 @@ public interface IDataverseRecordShareService
         string entityLogicalName,
         Guid recordId,
         CancellationToken ct = default);
+
+    /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessForRecordsOrThrowAsync"/>
+    /// <remarks>unified-access-control-r2 task 149: the strict read for many records of one table, for the secure-child
+    /// share synchronizer. Every record asked about is in the answer, or the call throws.</remarks>
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -119,4 +127,11 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         Guid recordId,
         CancellationToken ct = default)
         => _dataverse.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default)
+        => _dataverse.GetPrincipalAccessForRecordsOrThrowAsync(entityLogicalName, recordIds, ct);
 }

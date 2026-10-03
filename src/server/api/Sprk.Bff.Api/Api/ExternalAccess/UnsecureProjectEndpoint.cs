@@ -247,6 +247,12 @@ public static class UnsecureProjectEndpoint
         }
 
         // ── Step 4: Revoke the explicit shares ───────────────────────────────
+        //
+        // Task 149: deliberately NO fan-out to the children here. From Step 3 the record is no longer secure, and the
+        // secure-child synchronizer never touches the children of a non-secure record. Its children stay owned by the
+        // Secure Record Owners team, readable by the people their mirrored shares name, until task 148 re-owns them into
+        // the record's business unit (owner round 6: there is no unsecure cascade for secured child roots either).
+        // Revoking those child shares here, before the re-own, would leave the children readable by nobody.
         var sweep = await RevokeAllSharesAsync(
             recordShare, root, recordId, logger, traceId, ct);
 
