@@ -4,7 +4,7 @@
     <title>The every-route authorization guard (owner round 9 item 3): extend task 074's RouteAuthorizationGuardTests so EVERY BFF route file is governed and every route declares a per-resource check, an admin policy, or a reasoned waiver; the 82 sweep findings (90 route keys) start as Pending waivers owned by their fix tasks 159-166</title>
     <phase>Session 27, owner round 9 (2026-10-03): the route authorization sweep</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** (root CLAUDE.md §8 TEST-MODIFYING override: code-review + adr-check run unconditionally). The guard decides which BFF routes the build accepts as authorized; a false "gated" verdict hides a disclosure.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -856,5 +856,44 @@ The route counts in the background come from a Python approximation of the scann
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL, TEST-MODIFYING).</protocol>
+    <outcome date="2026-10-03" branch="task/uac-r2-167" base="6b243f092" result="completed">
+      Full record: notes/task-167-every-route-authorization-guard.md. Test code only; no file under src/ changed.
+      DONE: RouteAuthorizationGuardTests is now three partials (rules+controls / Scanner / Ledger data). Census = GovernedFiles
+      (120 files, asserted EQUAL; HandlerAuthorized scope retired; ProjectClosureEndpoint NotMapped, zero callers). Scanner
+      resolves MapMethods (three verb forms), MapHealthChecks, same-file const paths, and call-site binding through method
+      parameters and three pinned aggregators: 431 registrations, 430 live, 0 unparseable, 0 duplicate keys. Rule A over every
+      live route: PerResource 108, HandlerDecision 43 (verified in source, up to two hops plus same-type helpers),
+      AdminOnly 83 (pinned in 24 file groups), Anonymous 16, None 180. Credit = an explicit allow-list of 20 forms;
+      12 NonDecidingAttachments pinned to source evidence with owners (160-165 or "-"); 10 NotAuthorization forms;
+      every authorization-shaped call classified exactly once. Rule B tokens match whole identifiers (IAiAuthorizationService
+      added); PlaybookAuthorizationFilter moved to an OWNER-COMPARISON ClaimOnly entry (it passed only on a substring);
+      SessionOwnershipFilter and DelegationRuleFilter inspected. Waivers 212: 122 Pending (90 sweep per the pinned 90-key
+      ledger; 11 owned by 161/166 amendments; 21 UNOWNED-NEW listed in the note) + 90 Permanent with a closed basis and a
+      file:line. Sweep ledger resolves only by credit (ResolvedBy + ProofTest).
+      ESCALATIONS: trigger 7 fired (GET /healthz/dataverse/doc/{id}, anonymous document-metadata read, HIGH) and was sent to
+      the main session on confirmation; owner set to 166 per its amendment (a), not UNOWNED-NEW. Trigger 6 recorded
+      (SystemAdmin "admin" scope substring; task 165 fixes the policy). Triggers 1, 2, 3, 4, 5 and 8 did not fire; three
+      closed-set readings are listed for owner confirmation (note section 9).
+      SEEDING PROOFS: 18 violations seeded on the real data file, each failed the named rule, file restored byte-for-byte.
+      TESTS: Guard 47/47 (35 Facts + 1 Theory over 12 entries); ArchTests 378/378 on the final state; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed, 25 skipped, 0 failed.
+      BFF unit suite: run 1 14157 passed / 55 failed / 54 skipped; run 2 (TRX) 14009 / 203 / 54. All 203 are
+      cancellations under machine contention (249-254 dotnet processes, CPU 87-88 percent): 201 TaskCanceledException at
+      the 2-minute client timeout, 1 client-aborted IOException, 1 fidelity-gate case failing on a TaskCanceledException.
+      Isolated re-run of the 73 classes: 880 passed, 4 failed (again cancellations), 2 skipped; those 4 run serially:
+      9/9 passed. The unit assembly compiles nothing this task changed (note section 12).
+      QUALITY GATES: code-review (no Critical; warnings recorded in the note section 13) and adr-check (ADR-038/003/008/002
+      compliant; nothing else applicable) run. /conflict-check: no open PR or master change on the guard; tasks 159-166 edit it
+      in parallel by owner decision.
+    </outcome>
+    <justification-of-new-files>
+      tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs and RouteAuthorizationGuardTests.Ledger.cs.
+      EXISTING: RouteAuthorizationGuardTests.cs (task 074) is the only route guard (grep found no other); these files are
+      partial-class parts of it, not a new guard. EXTENSION: yes, the guard is extended in place; the split separates three
+      reasons to change (rules, parser, data) inside one class. COST OF DOING NOTHING: one 6,000-line file in which every
+      159-166 waiver deletion conflicts with rule edits; and without the parser rewrite the guard keeps reading 25 of 120 files
+      and keying aggregator routes as fragments, so a waiver for S-09 would silently cover the external module route.
+      No BFF service, registration, endpoint, option, job, column or package is added (CLAUDE.md section 10 not triggered:
+      no publish-size or CVE impact). No Dataverse plugin (ADR-002).
+    </justification-of-new-files>
   </execution>
 </task>
