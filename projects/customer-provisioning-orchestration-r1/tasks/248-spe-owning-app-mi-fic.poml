@@ -169,6 +169,17 @@
   <notes>
     Filed 2026-10-02 from plan §7 T248 / owner D16. Live state at filing: owning app + consent + FIC exist (plan §2 D16);
     the container type does not yet (owner action).
+
+    2026-10-03 — CONTAINER TYPE CREATED by the owner (SharePoint admin center): `Spaarke Model 1`, id `fb3817a8-5a55-42ba-8cc9-12cf055168b8`.
+    Read-only checks (operator identity): the id is not an app registration or service principal (it is the container
+    type); standard billing IS attached — `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b`
+    (`identityType: ContainerType`, `identityId: fb3817a8-5a55-42ba-8cc9-12cf055168b8`, created 2026-10-03T15:55Z by the operator) in subscription
+    *Spaarke Model 1 Production*, resource group `rg-spaarke-shared-prod`, eastus. The owning app
+    `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e` still has 0 secrets / 0 certificates (the admin-center flow asked for a client
+    secret; none was added). NOT yet verified: the container type's owning app (Graph `containerTypes/{id}` is 403 for the
+    Azure CLI identity — owner to confirm in the admin center). Escalation trigger #2 stays armed until it is.
+    🔴 The billing account sits in `rg-spaarke-shared-prod`, which T241 planned to delete; the billing binding is permanent
+    (notes/spe-billing-attach-requirement.md) — T241 row updated to keep it.
   </notes>
 
   <execution>
