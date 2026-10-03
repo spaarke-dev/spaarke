@@ -201,9 +201,37 @@ public static partial class ProblemDetailsHelper
     }
 
     /// <inheritdoc cref="RecordOwnerRefused(string?, string?, string, string?)"/>
+    /// <remarks>
+    /// A refusal the F3 check made (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.IsForbidden"/>:
+    /// the caller may not move a child out of a secure root, owner round 10 item 7) is NOT an owner refusal: it is
+    /// answered with the unsecure endpoint's ProblemDetails shape — its status (403, or 500 when the permission could
+    /// not be read), title, the F3 message as the detail, <c>reasonCode</c> and <c>traceId</c>.
+    /// </remarks>
     public static IResult RecordOwnerRefused(
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal, string noun, string? traceId = null) =>
-        RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
+        refusal.IsForbidden
+            ? SecureRemovalRefused(refusal.ForbiddenStatus!.Value, refusal.RefusalCode!, refusal.Reason, traceId)
+            : RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
+
+    /// <summary>
+    /// The F3 refusal (task 146 c1): the same ProblemDetails the unsecure endpoint answers with — status, title
+    /// ("Forbidden", or "Internal Server Error" when the permission could not be read), the message as the detail, and
+    /// the <c>reasonCode</c> and <c>traceId</c> extensions.
+    /// </summary>
+    private static IResult SecureRemovalRefused(int statusCode, string reasonCode, string? detail, string? traceId)
+    {
+        var extensions = new Dictionary<string, object?> { ["reasonCode"] = reasonCode };
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
+        return Results.Problem(
+            title: statusCode == StatusCodes.Status403Forbidden ? "Forbidden" : "Internal Server Error",
+            statusCode: statusCode,
+            detail: detail,
+            extensions: extensions);
+    }
 
     private static string GetErrorCode(string? errorCode, int status)
     {

@@ -98,6 +98,7 @@ public static class DataverseDocumentsEndpoints
             IDocumentDataverseService dataverseService,
             Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
             Spaarke.Core.Auth.AuthorizationService authorization,
+            [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -156,6 +157,11 @@ public static class DataverseDocumentsEndpoints
                             CallerObjectId = Guid.TryParse(CallerResolution.ResolveObjectId(context.User), out var callerOid)
                                 ? callerOid
                                 : null,
+                            // Owner round 10 item 7 (task 146 c1): replacing a lookup can move the document OUT of a
+                            // secure root — an un-secure. The resolver asks THIS caller's F3 rights (Full Access on the
+                            // root, or the document's creator) before anything is written; a refusal is the unsecure
+                            // endpoint's 403 ProblemDetails.
+                            SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, context),
                         },
                         token => dataverseService.UpdateDocumentAsync(id, request, token),
                         context.RequestAborted);

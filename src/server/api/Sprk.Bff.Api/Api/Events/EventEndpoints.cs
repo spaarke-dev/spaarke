@@ -466,6 +466,7 @@ public static class EventEndpoints
         IEventDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Spaarke.Core.Auth.AuthorizationService authorization,
+        [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -573,6 +574,9 @@ public static class EventEndpoints
                         RecordId = id,
                         ParentChanges = parentChanges,
                         CallerObjectId = Guid.TryParse(oid, out var callerOid) ? callerOid : null,
+                        // Owner round 10 item 7 (task 146 c1): a change of regarding can move the event OUT of a secure
+                        // root — an un-secure, decided by THIS caller's F3 rights before anything is written.
+                        SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, httpContext),
                     },
                     token => dataverseService.UpdateEventAsync(id, dataverseRequest, token),
                     ct);
@@ -582,7 +586,8 @@ public static class EventEndpoints
                     logger.LogWarning(
                         "Refused event re-file. EventId={EventId} ({Code}: {Reason})",
                         id, reparent.RefusalCode, reparent.Reason);
-                    return OwnerRefusalProblem(reparent, "event");
+                    return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                        reparent, "event", httpContext.TraceIdentifier);
                 }
 
                 // The event's owner after the re-file IS its log row's owner — no second resolution after the write.

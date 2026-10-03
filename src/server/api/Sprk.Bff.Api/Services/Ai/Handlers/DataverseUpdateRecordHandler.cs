@@ -351,6 +351,12 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     WhenUnfiled = string.Equals(tablename, "sprk_communication", StringComparison.OrdinalIgnoreCase)
                         ? Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator
                         : Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.ActingUserTeam,
+                    // Owner round 10 item 7 (task 146 c1): a re-file that moves the row OUT of a secure root is an
+                    // un-secure. F3 is asked AS THE CALLER — WhoAmI above, RetrievePrincipalAccess under their own token —
+                    // before anything is written.
+                    SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
+                        _ => Task.FromResult<Guid?>(me.SystemUserId),
+                        (entitySet, id, token) => OwnedChildWrite.RightsOnAsync(_dataverse, me.SystemUserId, entitySet, id, token)),
                 },
                 async token =>
                 {
@@ -362,11 +368,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 },
                 ct).ConfigureAwait(false);
 
-            return resolution.IsRefused
-                ? new RefileStep(Error(tool,
+            return resolution switch
+            {
+                // F3 (owner round 10 item 7): the caller may not move the row out of a secure root — the unsecure
+                // endpoint's message and reason code, not an owner refusal.
+                { IsForbidden: true } => new RefileStep(Error(tool,
+                    $"The update was NOT written. {resolution.Reason}",
+                    resolution.RefusalCode ?? DataverseUserClientErrorCodes.AccessDenied, startedAt), false),
+                { IsRefused: true } => new RefileStep(Error(tool,
                     $"The update was NOT written: the record's owner could not be decided — {resolution.Reason} ({resolution.RefusalCode}).",
-                    resolution.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false)
-                : new RefileStep(null, true);
+                    resolution.RefusalCode ?? ToolErrorCodes.ValidationFailed, startedAt), false),
+                _ => new RefileStep(null, true),
+            };
         }
         catch (CallerWriteFailedException failed)
         {

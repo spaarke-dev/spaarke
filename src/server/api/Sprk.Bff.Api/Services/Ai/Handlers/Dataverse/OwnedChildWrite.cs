@@ -349,17 +349,7 @@ internal static class OwnedChildWrite
     {
         foreach (var lookup in lookups.DistinctBy(l => (l.RelatedEntitySet, l.RecordId)))
         {
-            var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{lookup.RelatedEntitySet}({lookup.RecordId:D})\"}}");
-            var access = await user.GetAsync(
-                $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}", ct)
-                .ConfigureAwait(false);
-
-            var rights = access.IsSuccess
-                && access.Body is { } body
-                && body.TryGetProperty("AccessRights", out var value)
-                && value.ValueKind == JsonValueKind.String
-                    ? DataverseAccessRightsMapper.FromAccessRightsString(value.GetString())
-                    : AccessRights.None;
+            var rights = await RightsOnAsync(user, me, lookup.RelatedEntitySet, lookup.RecordId, ct).ConfigureAwait(false);
 
             if (!rights.HasFlag(AccessRights.AppendTo))
             {
@@ -371,6 +361,27 @@ internal static class OwnedChildWrite
         }
 
         return Outcome.Allowed;
+    }
+
+    /// <summary>
+    /// AS THE CALLER, their rights on one record (<c>RetrievePrincipalAccess</c> under their own token);
+    /// <see cref="AccessRights.None"/> when Dataverse does not answer. Shared by the AppendTo check above and the update
+    /// tool's F3 question on a secure root a re-file would leave (task 146 c1, owner round 10 item 7).
+    /// </summary>
+    internal static async Task<AccessRights> RightsOnAsync(
+        IDataverseUserClient user, Guid me, string entitySet, Guid recordId, CancellationToken ct)
+    {
+        var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySet}({recordId:D})\"}}");
+        var access = await user.GetAsync(
+            $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}", ct)
+            .ConfigureAwait(false);
+
+        return access.IsSuccess
+            && access.Body is { } body
+            && body.TryGetProperty("AccessRights", out var value)
+            && value.ValueKind == JsonValueKind.String
+                ? DataverseAccessRightsMapper.FromAccessRightsString(value.GetString())
+                : AccessRights.None;
     }
 
     /// <summary>The caller's <c>systemuserid</c> — <c>WhoAmI()</c> under their own token, which cannot name anyone else.</summary>

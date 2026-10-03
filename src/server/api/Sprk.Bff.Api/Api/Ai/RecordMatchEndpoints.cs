@@ -155,6 +155,8 @@ public static class RecordMatchEndpoints
         AssociateRecordRequest request,
         IDocumentDataverseService dataverseService,
         Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+        HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
@@ -201,12 +203,16 @@ public static class RecordMatchEndpoints
                     EntityLogicalName = "sprk_document",
                     RecordId = Guid.Parse(request.DocumentId),
                     ParentChanges = Sprk.Bff.Api.Services.Dataverse.RecordReparent.ParentChangesOf(updateRequest),
+                    // Owner round 10 item 7 (task 146 c1): associating replaces a lookup, so it can move the document
+                    // OUT of a secure root — an un-secure, decided by THIS caller's F3 rights before anything is written.
+                    SecureExitCaller = Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForRequest(callerAccessProbe, httpContext),
                 },
                 token => dataverseService.UpdateDocumentAsync(request.DocumentId, updateRequest, token),
                 cancellationToken);
             if (reparent.IsRefused)
             {
-                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(reparent, "association");
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                    reparent, "association", httpContext.TraceIdentifier);
             }
 
             logger.LogInformation(

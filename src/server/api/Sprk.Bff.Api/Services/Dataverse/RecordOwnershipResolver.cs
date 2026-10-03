@@ -390,6 +390,16 @@ public sealed record RecordReparent
     public UnfiledOwnership WhenUnfiled { get; init; } = UnfiledOwnership.ActingUserTeam;
 
     /// <summary>
+    /// The person making the change, for owner round 10 item 7 (2026-10-03, BINDING): "moving a CHILD out of a secure
+    /// root is an un-secure, so F3's limit applies". When the change would take the row out from under a secure root —
+    /// to no secure root, or to a different one — <see cref="IRecordOwnershipResolver.ReparentAsync"/> asks
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureRemovalPermission"/> about THIS caller for every secure root the
+    /// row leaves, before anything is written. <c>null</c> means the writer acts for no person (a background job, an
+    /// app-only automation): such a move is refused (fail closed, ADR-003). Moves that leave no secure root never ask.
+    /// </summary>
+    internal Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller { get; init; }
+
+    /// <summary>
     /// The parent changes as <see cref="EntityReference"/> values from an update payload: every
     /// <see cref="EntityReference"/> value whose type is an ownership parent. A payload that names no parent yields
     /// an empty map — the caller then has no reparent to do.
@@ -529,6 +539,19 @@ public sealed record RecordOwnerResolution(
     /// team of its own.
     /// </summary>
     public bool IsSecureOwner { get; init; }
+
+    /// <summary>
+    /// Set on a refused RE-FILE that would have taken the row out of a secure record without F3's permission (owner round
+    /// 10 item 7, task 146 c1). <see cref="RefusalCode"/> is then one of the unsecure endpoint's two reason codes, and an
+    /// HTTP writer answers with that endpoint's 403 ProblemDetails shape
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(RecordOwnerResolution, string, string?)"/>).
+    /// </summary>
+    public Sprk.Bff.Api.Services.Access.SecureRemovalDecision? SecureRemovalRefusal { get; init; }
+
+    /// <summary>True for a refusal the F3 check made (<see cref="SecureRemovalRefusal"/>): an AUTHORIZATION answer, not an
+    /// owner refusal — HTTP writers answer it with the unsecure endpoint's ProblemDetails, not the owner refusal's 409.</summary>
+    public bool IsForbidden => IsRefused && SecureRemovalRefusal is not null;
+
     /// <summary>A resolved team.</summary>
     public static RecordOwnerResolution Owned(Guid teamId) => new(RecordOwnerOutcome.Owned, teamId, null, null);
 
@@ -539,6 +562,14 @@ public sealed record RecordOwnerResolution(
     /// <summary>The row keeps its creator (opted-in contexts only).</summary>
     public static RecordOwnerResolution Unchanged(string reason) =>
         new(RecordOwnerOutcome.Unchanged, null, null, reason);
+
+    /// <summary>
+    /// The F3 check refused the move out of a secure root (owner round 10 item 7): the decision's reason code, and the
+    /// move-out message for <paramref name="childNoun"/> as the reason.
+    /// </summary>
+    internal static RecordOwnerResolution SecureRemovalRefused(
+        Sprk.Bff.Api.Services.Access.SecureRemovalDecision decision, string childNoun) =>
+        Refused(decision.ReasonCode!, decision.MoveOutDetail(childNoun)) with { SecureRemovalRefusal = decision };
 
     /// <summary>
     /// Writes this answer's owner onto a row about to be created: <c>ownerid</c> = the team when
@@ -783,6 +814,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             }
         }
 
+        // Every parent the row is filed under BEFORE the change — what a move OUT of a secure root is measured against
+        // (owner round 10 item 7, task 146 c1).
+        var filedUnderBefore = byColumn.Values.Distinct().ToArray();
+
         // What the row was filed under BEFORE the change, for every column the change moves — so a failed owner
         // assignment after the change can put the row back where its CURRENT owner belongs (CompensateAsync).
         var restore = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
@@ -848,6 +883,20 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
             return resolution;
         }
 
+        // Owner round 10 item 7 (2026-10-03, BINDING): "moving a CHILD out of a secure root is an un-secure, so F3's
+        // limit applies". A change that takes the row out from under a secure root — to no secure root, or to a
+        // different one — needs the caller's F3 rights on every secure root it leaves, decided BEFORE anything is
+        // written, by the same check the unsecure endpoint makes (SecureRemovalPermission).
+        var exitRefusal = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
+            request, current, filedUnderBefore, parents, resolution, ct).ConfigureAwait(false);
+        if (exitRefusal is not null)
+        {
+            _logger.LogWarning(
+                "Refusing to re-file {Entity} {RecordId} out of a secure record: {Reason} ({Code}). The change was NOT "
+                + "written.", request.EntityLogicalName, request.RecordId, exitRefusal.Reason, exitRefusal.RefusalCode);
+            return exitRefusal;
+        }
+
         await applyChange(ct).ConfigureAwait(false);
 
         if (!resolution.IsOwned)
@@ -908,6 +957,153 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         var row = await _dataverse.RetrieveAsync(
             request.EntityLogicalName, request.RecordId, new[] { OwningTeamColumn }, ct).ConfigureAwait(false);
         return row?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
+    }
+
+    /// <summary>Who sent the row's create — the F3 creator for a row a person created (task 146 c1).</summary>
+    private const string CreatedByColumn = "createdby";
+
+    /// <summary>
+    /// The server-stamped creator person (task 133's <c>sprk_createdbyperson</c>, <c>RecordCreatorPerson.Column</c>) —
+    /// the F3 creator for a row the BFF created app-only. Read from the row's own columns: a table without it records
+    /// nobody (task 133 stamps the three roots; no child table carries it today).
+    /// </summary>
+    private const string CreatedByPersonColumn = "sprk_createdbyperson";
+
+    /// <summary>
+    /// Owner round 10 item 7 (task 146 c1): the refusal to send when the re-file takes the row out from under a secure
+    /// root and the caller may not, or <c>null</c> when it may proceed. Nothing is written here.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which secure roots the row leaves.</b> The secure roots above the row's parents BEFORE the change, less
+    /// those above its parents AFTER it (<see cref="SecureRootsAboveAsync"/>). Leaving one root for another secure root
+    /// still leaves the first ("or to a different root"); adding a parent, or moving between ordinary records, leaves
+    /// none and asks nothing.</para>
+    /// <para><b>Who may.</b> For each root left, <see cref="Sprk.Bff.Api.Services.Access.SecureRemovalPermission"/> —
+    /// the unsecure endpoint's F3 check — with Full Access counted on that ROOT and the creator counted on the ROW
+    /// (<c>sprk_createdbyperson</c>, else <c>createdby</c>). A writer that acts for no person
+    /// (<see cref="RecordReparent.SecureExitCaller"/> null) is refused: there is nobody whose rights could be checked.</para>
+    /// <para><b>Fail closed.</b> A row held in the Secure Record business unit that would leave its isolation although no
+    /// secure root above it can be named (its secure parent is not one of its own columns) is refused rather than
+    /// guessed. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as the owner decision does.</para>
+    /// </remarks>
+    private async Task<RecordOwnerResolution?> RefuseUnlessPermittedToLeaveSecureRootsAsync(
+        RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
+        IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, RecordOwnerResolution resolution, CancellationToken ct)
+    {
+        var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
+        if (secureBu.Ambiguous)
+        {
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.SecureBusinessUnitAmbiguous,
+                "more than one business unit carries the Secure Record name, so whether the change leaves a secure record "
+                + "cannot be decided");
+        }
+
+        var before = await SecureRootsAboveAsync(filedUnderBefore, secureBu.Id, ct).ConfigureAwait(false);
+        var after = await SecureRootsAboveAsync(filedUnderAfter, secureBu.Id, ct).ConfigureAwait(false);
+        if ((before.TooDeepAt ?? after.TooDeepAt) is { } tooDeep)
+        {
+            return RecordOwnerResolution.Refused(
+                RecordOwnerRefusal.ParentUnresolved,
+                $"the record's filing runs through more than {MaxLineageDepth} levels of records (still unresolved at "
+                + $"{tooDeep.EntityLogicalName} {tooDeep.RecordId:D}), so whether the change leaves a secure record cannot "
+                + "be decided");
+        }
+
+        var left = before.Roots.Where(root => !after.Roots.Contains(root)).ToList();
+        if (left.Count == 0)
+        {
+            var heldSecure = secureBu.Id is { } secureBuId
+                && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId;
+            if (!heldSecure || resolution.IsSecureOwner || resolution.Outcome == RecordOwnerOutcome.Unchanged)
+            {
+                return null; // no secure root is left, and the row is not taken out of secure isolation
+            }
+
+            return RecordOwnerResolution.Forbidden(
+                StatusCodes.Status403Forbidden,
+                Sprk.Bff.Api.Services.Access.SecureRemovalPermission.ReasonPermissionUnverifiable,
+                "This record is held secure, but the secure record it belongs to could not be identified, so whether you "
+                + "may move it out of it could not be checked. Nothing was changed.");
+        }
+
+        var createdBy = current.GetAttributeValue<EntityReference>(CreatedByColumn)?.Id;
+        var createdByPerson = current.GetAttributeValue<EntityReference>(CreatedByPersonColumn)?.Id;
+
+        foreach (var root in left)
+        {
+            var removal = new Sprk.Bff.Api.Services.Access.SecureRemoval
+            {
+                RootEntityLogicalName = root.EntityLogicalName,
+                RootId = root.RecordId,
+                CreatedBy = createdBy,
+                CreatedByPersonAsync = _ => Task.FromResult(createdByPerson),
+                MovedChildEntityLogicalName = request.EntityLogicalName,
+            };
+
+            if (request.SecureExitCaller is not { } caller)
+            {
+                return RecordOwnerResolution.Forbidden(
+                    StatusCodes.Status403Forbidden,
+                    Sprk.Bff.Api.Services.Access.SecureRemovalPermission.ReasonPermissionUnverifiable,
+                    removal.NoCallerMessage);
+            }
+
+            var decision = await Sprk.Bff.Api.Services.Access.SecureRemovalPermission
+                .DecideAsync(caller, removal, _logger, ct).ConfigureAwait(false);
+            if (!decision.Permitted)
+            {
+                return RecordOwnerResolution.Forbidden(decision.StatusCode, decision.ReasonCode!, decision.Detail!);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The secure ROOTS (the three <c>sprk_issecure</c> tables) that <paramref name="parents"/> sit under: each parent
+    /// that is such a root and is owned in the Secure Record business unit or flagged <c>sprk_issecure</c>, and — for a
+    /// parent that is itself a child — the secure roots above what IT is filed under, up to <see cref="MaxLineageDepth"/>
+    /// levels (team-owned or not: a child under a secure-team-owned communication is still under that communication's
+    /// root). A missing row is not a root to leave. <c>TooDeepAt</c> names a filing left unread at the limit; a Dataverse
+    /// fault propagates.
+    /// </summary>
+    private async Task<(IReadOnlyList<RecordOwnershipParent> Roots, RecordOwnershipParent? TooDeepAt)> SecureRootsAboveAsync(
+        IEnumerable<RecordOwnershipParent> parents, Guid? secureBuId, CancellationToken ct)
+    {
+        static RecordOwnershipParent Normalize(RecordOwnershipParent p) =>
+            p with { EntityLogicalName = p.EntityLogicalName.Trim().ToLowerInvariant() };
+
+        var roots = new List<RecordOwnershipParent>();
+        var seen = new HashSet<RecordOwnershipParent>();
+        var frontier = parents.Where(p => p.IsSpecified).Select(Normalize).Distinct().ToList();
+
+        for (var depth = 0; depth <= MaxLineageDepth && frontier.Count > 0; depth++)
+        {
+            var next = new List<RecordOwnershipParent>();
+            foreach (var node in frontier)
+            {
+                if (!seen.Add(node))
+                    continue;
+
+                if (SecureFlaggedRoots.Contains(node.EntityLogicalName))
+                {
+                    var fact = await ReadParentAsync(node, ct).ConfigureAwait(false);
+                    if (fact is not null && (fact.FlaggedSecure || (secureBuId is { } sbu && fact.BusinessUnitId == sbu)))
+                        roots.Add(node);
+                }
+                else if (IsReparentableChild(node.EntityLogicalName))
+                {
+                    var filing = await ReadOwnershipParentsOfAsync(node, ct).ConfigureAwait(false);
+                    if (filing is not null)
+                        next.AddRange(filing.Select(Normalize));
+                }
+            }
+
+            frontier = next.Where(n => !seen.Contains(n)).Distinct().ToList();
+        }
+
+        return (roots, frontier.Count > 0 ? frontier[0] : null);
     }
 
     /// <summary>Event id of a re-file whose owner assignment failed AFTER the change was written and whose filing was
