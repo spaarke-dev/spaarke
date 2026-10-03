@@ -17,6 +17,10 @@
 //       loses every document, event, to-do and communication on it in MDA and Office; and an MDA Share/Unshare of a
 //       secure root never reaches its children (an Unshare that does not is an over-share).
 //
+// Round r3 (merged after task 143): the No Access guard (SecureShareNoAccessGuard, task 143's ONE write-time check) is
+// a constructor dependency, consulted before every child grant or widening — no new component. It is registered SCOPED,
+// so this synchronizer is scoped too (every consumer resolves it from a request or job scope).
+//
 // Placement (bff-extensions.md §A/§D; ADR-052): in the BFF. The fan-out runs inside the /share-user and /unshare-user
 // request (the caller is told how many children were and were not updated); the safety net is an in-process scheduled
 // job (SecureChildShareReconciliationJob, ADR-036). BFF identity, BFF domain code, low volume. No package, no endpoint.
@@ -27,6 +31,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -104,10 +109,18 @@ public sealed record SecureChildShareSyncResult(
 /// endpoints'.</para>
 /// <para><b>The mirror.</b> For each principal (system user or team) with a direct share on the root: the root's rights
 /// restricted to <see cref="RecordShareLevels.ChildMirrorableMask"/> — Read, Write, Append, AppendTo, Delete; never
-/// Share (escalation trigger 6, the recommended default), never Assign. A child under SEVERAL secure roots gets the
-/// INTERSECTION: a principal must be shared on every one of them, at the lowest rights (escalation trigger 2, fail closed
-/// until the owner decides). Every direct share on the child outside the mirror is revoked; a wider one is narrowed; a
+/// Share, never Assign (owner round 11 item 4: "ShareAccess is NOT mirrored onto children"). A child under SEVERAL secure
+/// roots gets the INTERSECTION: a principal must be shared on every one of them, at the lowest rights (owner round 11
+/// item 4, fail closed). Every direct share on the child outside the mirror is revoked; a wider one is narrowed; a
 /// missing one is granted. Inherited-only POA rows (mask 0) are neither read as shares nor touched.</para>
+/// <para><b>The No Access list</b> (task 143, owner Q4; wired here because this task merged second — AC6). Before any
+/// child GRANT or WIDENING, every system user that <see cref="SecureShareNoAccessGuard"/> refuses for ANY of the child's
+/// secure roots is dropped: walled, or the check could not be answered (ADR-003). Such a principal keeps only the
+/// narrowing part of its change, and an unanswered check leaves the child not updated (retried next run). So a walled
+/// user is never put on a child, even while their ROOT share still stands (the enforcer has not acted yet, or owner S5
+/// kept it as the last reader). Removal stays the enforcer's: after it removes a root share it calls
+/// <see cref="SyncRootAsync"/>. Teams are not asked about: an entry cannot name a team, and a team share is never the
+/// wall's to remove (owner N2).</para>
 /// <para><b>Fail closed</b> (ADR-003 / WP-6).
 /// <list type="bullet">
 /// <item>A root's shares that cannot be read: NO write on any child that needs that root (the strict read; never the soft
@@ -121,8 +134,10 @@ public sealed record SecureChildShareSyncResult(
 /// </list>
 /// Writes run revokes first, then narrowings, then grants, and every changed child is read back.</para>
 /// <para><b>Triggers</b> (notes/task-149 §4): after a BFF share/unshare on a root (<see cref="SyncRootAsync"/>, in the
-/// request), after secure provisioning, and on a short schedule (<see cref="ReconcileAllAsync"/>, which catches creates,
-/// re-files, client-side writes and out-of-the-box MDA sharing of a secure root).</para>
+/// request), after secure provisioning, after the No Access enforcer removes a root share, and on a short schedule
+/// (<see cref="ReconcileAllAsync"/>, which catches creates, re-files, client-side writes and out-of-the-box MDA sharing of
+/// a secure root). Owner round 11 item 2 accepted that schedule as the mechanism: at most 2 minutes for MDA Share/Unshare
+/// and for new or re-filed children, the job shipping with writes on, and no table-wide platform cascade.</para>
 /// <para><b>What each trigger reads.</b> <see cref="SyncRootAsync"/> first proves from the record's own row that it can be
 /// secure (an ordinary record is answered without consulting the Secure Record business unit), then finds its descendants
 /// by walking the lineage lookups DOWNWARD from it — through the same rows the upward walk follows (Secure-team-owned and
@@ -152,17 +167,20 @@ public sealed class SecureChildShareSynchronizer
 
     private readonly IGenericEntityService _dataverse;
     private readonly IDataverseRecordShareService _recordShare;
+    private readonly SecureShareNoAccessGuard _noAccessGuard;
     private readonly IConfiguration _configuration;
     private readonly ILogger<SecureChildShareSynchronizer> _logger;
 
     public SecureChildShareSynchronizer(
         IGenericEntityService dataverse,
         IDataverseRecordShareService recordShare,
+        SecureShareNoAccessGuard noAccessGuard,
         IConfiguration configuration,
         ILogger<SecureChildShareSynchronizer> logger)
     {
         _dataverse = dataverse;
         _recordShare = recordShare;
+        _noAccessGuard = noAccessGuard;
         _configuration = configuration;
         _logger = logger;
     }
@@ -362,6 +380,7 @@ public sealed class SecureChildShareSynchronizer
         private readonly Dictionary<RowRef, Row?> _otherRows = new();
         private readonly Dictionary<RowRef, RootFacts?> _roots = new();
         private readonly Dictionary<RowRef, IReadOnlyDictionary<DataversePrincipalRef, int>?> _rootMirrors = new();
+        private readonly Dictionary<(RowRef Root, Guid User), SecureShareWallOutcome> _walls = new();
 
         private int _granted, _changed, _revoked;
 
@@ -855,8 +874,11 @@ public sealed class SecureChildShareSynchronizer
                 var fresh = await FreshDesiredAsync(lineage).ConfigureAwait(false);
                 if (fresh is null)
                 {
+                    // Nothing is added from a stale read. A MIXED change (it adds some rights and removes others) keeps its
+                    // narrowing part — the rights the roots no longer give still go — and only its widening part is
+                    // dropped (task 149 r3, verifier finding 2).
                     grants.Clear();
-                    modifies.RemoveAll(m => (m.Mask & ~have[m.Principal]) != 0);
+                    modifies = NarrowingPartOnly(modifies, have, _ => true, revokes);
                     failed = true;
                 }
                 else
@@ -878,6 +900,45 @@ public sealed class SecureChildShareSynchronizer
                     modifies = rechecked;
                 }
             }
+
+            // Task 143 (AC6; this task merged second): a system user the No Access list walls off ANY of the child's secure
+            // roots is never given a right on the child — not even while their ROOT share still stands (the enforcer has not
+            // acted yet, or kept it under owner S5). Asked only for what ADDS a right; such a principal keeps only the
+            // narrowing part of its change. A check that cannot be answered refuses too (ADR-003), and the child is then
+            // not updated, so the next run asks again.
+            var adding = grants.Select(g => g.Principal)
+                .Concat(modifies.Where(m => (m.Mask & ~have[m.Principal]) != 0).Select(m => m.Principal))
+                .Where(p => p.Kind == DataversePrincipalKind.SystemUser)
+                .Distinct()
+                .ToList();
+            if (adding.Count > 0)
+            {
+                var refused = new HashSet<DataversePrincipalRef>();
+                foreach (var principal in adding)
+                {
+                    var wall = await WallAsync(lineage, principal.Id).ConfigureAwait(false);
+                    if (wall is SecureShareWallOutcome.Walled or SecureShareWallOutcome.Unverifiable)
+                    {
+                        refused.Add(principal);
+                        failed |= wall == SecureShareWallOutcome.Unverifiable;
+                        Log.LogWarning(
+                            "[SECURE-CHILD-SHARES] {Principal} is {Wall} for a secure root of {Child}; nothing is added for " +
+                            "them there.",
+                            principal,
+                            wall == SecureShareWallOutcome.Walled ? "on the No Access list" : "not verifiable against the No Access list",
+                            row.Ref);
+                    }
+                }
+
+                if (refused.Count > 0)
+                {
+                    grants.RemoveAll(g => refused.Contains(g.Principal));
+                    modifies = NarrowingPartOnly(modifies, have, refused.Contains, revokes);
+                }
+            }
+
+            if (revokes.Count == 0 && modifies.Count == 0 && grants.Count == 0)
+                return failed ? ChildOutcome.NotUpdated : heldBack ? ChildOutcome.Held : ChildOutcome.Unchanged;
 
             var entitySet = SecureChildLineage.Children[row.Ref.Table].EntitySet;
 
@@ -923,6 +984,65 @@ public sealed class SecureChildShareSynchronizer
             if (failed)
                 return ChildOutcome.NotUpdated;
             return heldBack ? ChildOutcome.Held : ChildOutcome.Updated;
+        }
+
+        /// <summary>
+        /// Each change <paramref name="restrict"/> selects, cut down to the part that only REMOVES rights: its mask AND what
+        /// the share already carries. A change that would only add is dropped; one left with no Read becomes a revoke
+        /// (added to <paramref name="revokes"/>). Changes not selected are kept as they are.
+        /// </summary>
+        private static List<(DataversePrincipalRef Principal, int Mask)> NarrowingPartOnly(
+            IEnumerable<(DataversePrincipalRef Principal, int Mask)> modifies,
+            IReadOnlyDictionary<DataversePrincipalRef, int> have,
+            Func<DataversePrincipalRef, bool> restrict,
+            List<DataversePrincipalRef> revokes)
+        {
+            var kept = new List<(DataversePrincipalRef Principal, int Mask)>();
+            foreach (var (principal, mask) in modifies)
+            {
+                if (!restrict(principal))
+                {
+                    kept.Add((principal, mask));
+                    continue;
+                }
+
+                var narrowed = mask & have[principal];
+                if (narrowed == have[principal])
+                    continue; // nothing to remove: the change only added rights
+                if (RecordShareLevels.CanRead(narrowed))
+                    kept.Add((principal, narrowed));
+                else
+                    revokes.Add(principal);
+            }
+
+            return kept;
+        }
+
+        /// <summary>
+        /// Whether the No Access list refuses <paramref name="systemUserId"/> on the child's secure roots (task 143's ONE
+        /// write-time question, asked of each root and cached for the run): <see cref="SecureShareWallOutcome.Unverifiable"/>
+        /// when any root's answer could not be read, else <see cref="SecureShareWallOutcome.Walled"/> when any root walls them,
+        /// else <see cref="SecureShareWallOutcome.NotWalled"/>.
+        /// </summary>
+        private async Task<SecureShareWallOutcome> WallAsync(Lineage lineage, Guid systemUserId)
+        {
+            var walled = false;
+            foreach (var root in lineage.SecureRoots.OrderBy(r => r.Table, StringComparer.Ordinal).ThenBy(r => r.Id))
+            {
+                if (!_walls.TryGetValue((root, systemUserId), out var outcome))
+                {
+                    var decision = await _owner._noAccessGuard
+                        .CheckAsync(root.Table, root.Id, systemUserId, _ct).ConfigureAwait(false);
+                    outcome = decision.Outcome;
+                    _walls[(root, systemUserId)] = outcome;
+                }
+
+                if (outcome == SecureShareWallOutcome.Unverifiable)
+                    return SecureShareWallOutcome.Unverifiable;
+                walled |= outcome == SecureShareWallOutcome.Walled;
+            }
+
+            return walled ? SecureShareWallOutcome.Walled : SecureShareWallOutcome.NotWalled;
         }
 
         private async Task<bool> TryWriteAsync(

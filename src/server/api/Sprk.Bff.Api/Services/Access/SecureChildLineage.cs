@@ -16,7 +16,8 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <c>sprk_analysises</c>). Every relationship read had Share, Unshare, Reparent and Assign = <c>NoCascade</c> — the platform
 /// shares nothing to children, which is why this map exists (notes/task-149-secure-child-sharee-access.md §2).</para>
 /// <para><b>Every lookup is kept, on purpose.</b> A row's secure roots are the roots reachable through ANY of its lookups,
-/// and a child's mirror is the INTERSECTION of their share sets (escalation trigger 2, fail closed). An extra lookup can
+/// and a child's mirror is the INTERSECTION of their share sets (escalation trigger 2, fail closed; owner decision, round
+/// 11 item 4, 2026-10-03). An extra lookup can
 /// only add a root, which can only narrow the intersection; a dropped lookup could leave out the root with the fewest
 /// sharees and widen it. So links that are not "filing" in the business sense (a document's current version, its
 /// canonical copy, an analysis's output file) are kept too — they can never widen what a child receives.</para>

@@ -252,7 +252,9 @@ public static class UnsecureProjectEndpoint
         // secure-child synchronizer never touches the children of a non-secure record. Its children stay owned by the
         // Secure Record Owners team, readable by the people their mirrored shares name, until task 148 re-owns them into
         // the record's business unit (owner round 6: there is no unsecure cascade for secured child roots either).
-        // Revoking those child shares here, before the re-own, would leave the children readable by nobody.
+        // Revoking those child shares here, before the re-own, would leave the children readable by nobody. Owner round 11
+        // item 3 (2026-10-03) makes this a SHIP GATE: no record is unsecured in a shared environment until task 148 is
+        // deployed (guide SECURE-PROJECT-ENVIRONMENT-SETUP.md §7a).
         var sweep = await RevokeAllSharesAsync(
             recordShare, root, recordId, logger, traceId, ct);
 

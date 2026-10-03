@@ -519,12 +519,21 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
 
 - **The rule.** Every child carries exactly its secure root's internal sharees — users and teams — at the root's rights
   restricted to Read, Write, Append, AppendTo and Delete. **Never Share** (share the ROOT; the children follow) and
-  never Assign. A child filed under two secure records gets only the people shared on BOTH, at the lower rights. Any
-  other share on a child is removed.
+  never Assign — owner decision, round 11 item 4. A child filed under two secure records gets only the people shared on
+  BOTH, at the lower rights (the INTERSECTION, fail closed — owner decision, round 11 item 4). Any other share on a
+  child is removed.
+- **The No Access list wins** (task 143). A user on a secure record's No Access list is never given anything on its
+  children, even while their share on the record itself is still there (the No Access enforcement has not run yet, or
+  kept them as the record's last reader). When the enforcement removes their share on the record, its children follow
+  in the same call. If the list cannot be checked for someone, they are given nothing and the child is retried.
 - **When.** Immediately when a share is added, changed or removed through Manage Access (the response says how many
-  related records could not be updated yet, if any); immediately after secure provisioning; and every two minutes for
-  everything else — a new or re-filed child, a client-side create, and a Share/Unshare made in the model-driven app's
-  own dialog on a secure record.
+  related records could not be updated yet, if any); immediately after secure provisioning; immediately after the No
+  Access enforcement removes a share on the record; and every two minutes for everything else — a new or re-filed
+  child, a client-side create, and a Share/Unshare made in the model-driven app's own dialog on a secure record.
+- **The two-minute window is accepted** (owner decision, round 11 item 2, 2026-10-03). For a model-driven-app
+  Share/Unshare and for a NEW or RE-FILED child, the children catch up within at most two minutes: an unshared user can
+  keep a child for that long, and a sharee may wait that long to open a child just created. The reconcile job is the
+  mechanism, ships with **writes on**, and Dataverse's table-wide Share/Unshare/Reparent cascade is **not** enabled.
 - **Held children.** A child whose secure roots cannot be determined from the data (a missing parent, a root marked
   secure whose provisioning did not complete, a filing chain deeper than six levels) is only ever narrowed — nobody is
   added to it — and is reported as `held` until the data is fixed. When none of its secure records can be found at all,
@@ -534,11 +543,12 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
   messaging grant skips Secure-team-owned messages); share the record to give someone its conversation.
 - **Not this mechanism.** Contacts (SPA/Teams) reach children through the external data plane's root scoping, not POA
   shares.
-- **🔴 Unsecure is not yet followed by the children (ship gate, task 149 r2).** A record that has been made ordinary
-  again keeps its children owned by `Secure Record Owners` and shared with its FORMER sharees, untouched, until task 148
-  moves the children into the record's business unit; there is no other repair. Removing those shares first would leave
-  the children readable by nobody. Until task 148 is deployed, either do not unsecure records in a shared environment,
-  or the owner accepts this window in writing (`notes/task-149-secure-child-sharee-access.md` §12, decision 4).
+- **🔴 SHIP GATE — no record is unsecured in a shared environment until task 148 is deployed** (owner decision, round
+  11 item 3, 2026-10-03). Tasks 146 and 149 may deploy. A record that has been made ordinary again keeps its children
+  owned by `Secure Record Owners` and shared with its FORMER sharees, untouched, until task 148 moves the children into
+  the record's business unit and then calls the synchronizer; there is no other repair. Removing those shares first
+  would leave the children readable by nobody. So until 148 is deployed, **do not unsecure** a record in any
+  environment other people use (`notes/task-149-secure-child-sharee-access.md` §12 decision 4, §13).
 
 ### ⚠️ Privilege caching will lie to you
 
@@ -669,7 +679,8 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 | Set `sprk_containerid` on the secure BU | That is the *shared* cascade container. A secure project uses its own |
 | Use `pac` without checking the active profile | `pac auth list` may be pointed at production. Mint a token against an explicit URL instead |
 | Share an individual CHILD of a secure record (a document, a to-do) with someone | The reconcile removes any child share its root does not carry, within two minutes. Share the secure record itself; its children follow (§7a) |
-| Turn on Share / Unshare / Reparent cascade on a project, matter or work-assignment relationship | The setting is TABLE-WIDE: every ordinary record's children would be shared too, a product-wide behaviour change. Owner decision only (task 149 note §5) |
+| Turn on Share / Unshare / Reparent cascade on a project, matter or work-assignment relationship | The setting is TABLE-WIDE: every ordinary record's children would be shared too, a product-wide behaviour change. The owner decided against it (round 11 item 2): the two-minute reconcile is the mechanism (§7a) |
+| Unsecure a record in a shared environment before task 148 is deployed | Its children keep their former sharees and nobody in its business unit can read them (§7a ship gate, owner round 11 item 3) |
 | Disable the `secure-child-share-reconciliation` job in a shared environment | It is the only mechanism for new children and for model-driven-app Share/Unshare of a secure record; disabled, a removed user keeps every child (§7a) |
 
 ---

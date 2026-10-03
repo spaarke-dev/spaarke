@@ -1196,6 +1196,168 @@ public class SecureChildShareMirrorTests
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 149 r3 — the third verifier's findings 1 and 2, and the merge with task 143 (AC6)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Finding 1: a HELD child is never widened. B already holds View on a document filed under R AND under a project
+    /// flagged secure but never isolated (so its roots cannot be determined); R gives B Collaborate. The known roots would
+    /// allow the widening — and the fresh re-check reads only the known roots, so it would let it through — but a held
+    /// child is only ever narrowed: B stays at View.
+    /// </summary>
+    [Fact]
+    public async Task AHeldChild_WhoseShareIsNarrowerThanTheKnownRootsAllow_IsNeverWidened()
+    {
+        var heldDoc = Guid.NewGuid();
+        var world = World()
+            .FlaggedNotIsolatedRoot("sprk_project", FlaggedProject)
+            .SecureChild("sprk_document", heldDoc,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", FlaggedProject));
+        _shares.Seed("sprk_project", ProjectR, User(UserB), Collaborate);
+        _shares.Seed("sprk_document", heldDoc, User(UserB), ViewOnly); // narrower than R allows
+
+        var result = await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_document", heldDoc, User(UserB)).Should().Be(ViewOnly, "a held child is never widened");
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == heldDoc, "nothing on the held child needed narrowing");
+        result.ChildrenHeld.Should().Be(1);
+        _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(CollaborateOnChild, "R's other children still mirror");
+    }
+
+    /// <summary>
+    /// Finding 2: when the fresh re-read of the root fails, a MIXED change — one that adds rights and removes others — is
+    /// not dropped whole. A holds Read + Delete on the event while R gives A Collaborate (no Delete): the widening part
+    /// (Write, Append, AppendTo) is not written from the stale read, but the narrowing part (Delete) still goes.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheFreshReReadFails_AMixedChange_KeepsItsNarrowingPart_AndDropsOnlyItsWideningPart()
+    {
+        const int ReadAndDelete = 65537;
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        _shares.Seed("sprk_event", EventR, User(UserA), ReadAndDelete);
+        var race = new RootReadRace(_shares, "sprk_project", ProjectR, afterFirstRead: null, failLaterReads: true);
+
+        var world = World();
+        var result = await SecureChildShareWorld.SynchronizerOver(() => world, race).ReconcileAllAsync(CancellationToken.None);
+
+        race.RootReads.Should().BeGreaterThan(1, "the change reached the fresh re-read, which failed");
+        _shares.MaskOf("sprk_event", EventR, User(UserA)).Should().Be(ViewOnly,
+            "Delete is removed (R no longer gives it); Write/Append/AppendTo are not added from a stale read");
+        var eventWrite = _shares.WriteLog.Where(w => w.RecordId == EventR).Should().ContainSingle().Subject;
+        eventWrite.Action.Should().Be("ModifyAccess");
+        eventWrite.Rights.Should().Be(ViewCsv);
+        result.Status.Should().Be(SecureChildShareSyncStatus.Incomplete, "the widening still has to happen next run");
+    }
+
+    // ── AC6: the No Access list (task 143) before any child grant or widening ─────────────────────────────────────────
+
+    private readonly GrantPolicyTestDoubles.SeamNoAccessListReader _denyList = new();
+    private readonly Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore _identities = new();
+
+    /// <summary>Task 143's REAL guard over secure flags, the deny list above and the users seeded in the identity store.</summary>
+    private SecureShareNoAccessGuard SecureGuard(params Guid[] knownUsers)
+    {
+        foreach (var user in knownUsers)
+            _identities.AddSystemUser(user, oid: null, email: null);
+        return new SecureShareNoAccessGuard(
+            new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false)),
+            _denyList, _identities, NullLogger<SecureShareNoAccessGuard>.Instance);
+    }
+
+    /// <summary>
+    /// AC6 (merge-order obligation item 3): B is on R's No Access list, but the enforcer has not removed B's ROOT share yet
+    /// (or kept it as the last reader). Neither the root's fan-out nor the reconcile ever puts B on a child; A, shared on
+    /// R and not walled, gets every child.
+    /// </summary>
+    [Theory]
+    [InlineData("fan-out")]
+    [InlineData("reconcile")]
+    public async Task AWalledUser_WhoseRootShareIsNotYetRemoved_IsNeverGrantedAChildShare(string trigger)
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        _shares.Seed("sprk_project", ProjectR, User(UserB), Collaborate);
+        _denyList.DenySystemUserOnRecord(UserB, ProjectR);
+        var synchronizer = World().Synchronizer(_shares, SecureGuard(UserA, UserB));
+
+        var result = trigger == "fan-out"
+            ? await synchronizer.SyncRootAsync("sprk_project", ProjectR, CancellationToken.None)
+            : await synchronizer.ReconcileAllAsync(CancellationToken.None);
+
+        foreach (var (table, id) in ChildrenOfR)
+        {
+            _shares.MaskOf(table, id, User(UserB)).Should().BeNull($"B is walled off R, so never on its {table}");
+            _shares.MaskOf(table, id, User(UserA)).Should().Be(CollaborateOnChild);
+        }
+
+        _shares.WriteLog.Should().NotContain(w => w.Principal == User(UserB));
+        _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().Be(Collaborate, "the ROOT share is the enforcer's to remove");
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed, "leaving a walled user out is the mirror, not a failure");
+    }
+
+    /// <summary>
+    /// AC6: when the walled user's grant was the ONLY change a child needed, nothing is written and the child is counted
+    /// as unchanged — never "updated" with no write behind it.
+    /// </summary>
+    [Fact]
+    public async Task WhenAWalledUsersGrantWasTheOnlyChange_NothingIsWritten_AndTheChildrenCountAsUnchanged()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserB), Collaborate);
+        _denyList.DenySystemUserOnRecord(UserB, ProjectR);
+
+        var result = await World().Synchronizer(_shares, SecureGuard(UserB))
+            .SyncRootAsync("sprk_project", ProjectR, CancellationToken.None);
+
+        _shares.WriteLog.Should().BeEmpty();
+        result.ChildrenUpdated.Should().Be(0);
+        result.ChildrenUnchanged.Should().Be(ChildrenOfR.Length);
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+    }
+
+    /// <summary>
+    /// AC6: a walled user who already holds child shares is never WIDENED on them — a narrower share stays as it is — but
+    /// a change that only removes rights still applies (B's Delete on the event goes, Write is not added).
+    /// </summary>
+    [Fact]
+    public async Task AWalledUser_IsNeverWidenedOnAChild_ButANarrowingStillApplies()
+    {
+        const int ReadAndDelete = 65537;
+        _shares.Seed("sprk_project", ProjectR, User(UserB), Collaborate);
+        _shares.Seed("sprk_document", DocR, User(UserB), ViewOnly);
+        _shares.Seed("sprk_event", EventR, User(UserB), ReadAndDelete);
+        _denyList.DenySystemUserOnRecord(UserB, ProjectR);
+
+        await World().Synchronizer(_shares, SecureGuard(UserB)).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(ViewOnly, "never widened");
+        _shares.MaskOf("sprk_event", EventR, User(UserB)).Should().Be(ViewOnly, "Delete removed, nothing added");
+        _shares.WriteLog.Where(w => w.Principal == User(UserB))
+            .Should().OnlyContain(w => w.Action == "ModifyAccess" && w.Rights == ViewCsv && w.RecordId == EventR);
+    }
+
+    /// <summary>
+    /// AC6, fail closed (ADR-003): when the No Access check cannot be answered for B (B's identity cannot be read), B is
+    /// given nothing and every child that needed B counts as NOT updated (the next run asks again); A is still mirrored.
+    /// </summary>
+    [Fact]
+    public async Task WhenTheNoAccessCheckCannotBeAnswered_NothingIsGivenToThatUser_AndTheChildrenAreNotUpdated()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+        _shares.Seed("sprk_project", ProjectR, User(UserB), ViewOnly);
+
+        var result = await World().Synchronizer(_shares, SecureGuard(UserA)) // B unknown: the check is unverifiable
+            .ReconcileAllAsync(CancellationToken.None);
+
+        foreach (var (table, id) in ChildrenOfR)
+        {
+            _shares.MaskOf(table, id, User(UserB)).Should().BeNull();
+            _shares.MaskOf(table, id, User(UserA)).Should().Be(ViewOnly);
+        }
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Incomplete);
+        result.ChildrenNotUpdated.Should().Be(ChildrenOfR.Length);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Task 149 r1 — F3: thread participants are never granted a SECURE message (DirectThreadAccessService)
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 

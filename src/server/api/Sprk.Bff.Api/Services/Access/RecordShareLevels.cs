@@ -206,9 +206,9 @@ internal static class RecordShareLevels
     /// Delete. Never Share, never Assign, never Create.
     /// </summary>
     /// <remarks>
-    /// <para><b>No Share on a child</b> (task 149 escalation trigger 6, implemented as the recommended default until the
-    /// owner decides otherwise). Collaborate and Full Access carry Share on the root (task 139), so a sharee can pass the
-    /// ROOT on. Mirrored onto a child, it would let them share one child with someone the root is not shared with, and
+    /// <para><b>No Share on a child</b> (task 149 escalation trigger 6; owner decision, round 11 item 4, 2026-10-03:
+    /// "ShareAccess is NOT mirrored onto children"). Collaborate and Full Access carry Share on the root (task 139), so a
+    /// sharee can pass the ROOT on. Mirrored onto a child, it would let them share one child with someone the root is not shared with, and
     /// the reconcile would then revoke that share — a fight with a legitimate-looking user action. Sharing happens at the
     /// root and fans out. Omitting it is narrower than the root, which "never wider than the parent" allows.</para>
     /// <para><b>No Assign</b>: no level carries it, and a child's owner is the Secure team's (task 146). <b>No Create</b>:

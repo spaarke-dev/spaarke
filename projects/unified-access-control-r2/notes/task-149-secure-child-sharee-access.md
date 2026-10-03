@@ -3,11 +3,16 @@
 > Branch `task/uac-r2-149` (base `task/uac-r2-146-b2-r2` + `work/unified-access-control-r2` merged at `874bb1c2f`);
 > fix round r1 on `task/uac-r2-149-r1` (§11 — the adversarial verifier's findings, item by item);
 > fix round r2 on `task/uac-r2-149-r2` (§12 — the second verifier's findings: five fail-closed guards pinned, the
-> unsecure gap made a ship gate, the 143 coordination made an orchestrator obligation).
+> unsecure gap made a ship gate, the 143 coordination made an orchestrator obligation);
+> fix round r3 on `task/uac-r2-149-r3` (§13 — merged with task 143 and DISCHARGED the merge-order obligation: the No
+> Access guard before child grants/widenings, the enforcer fans out, the walled-user negative test; verifier findings
+> 1-3; owner round 11 recorded; the 133/146 creator-stamp conflict resolved per owner round 10).
 > Status: **code complete, not deployed.** Ships together with task 146. Live steps are manual gates (§8).
 > Owner decisions that bind this task: round 7 item 5 ("each child's principals and rights equal the root's POA share
 > set ... never wider"), round 5 (production topology), round 6 (secured child roots stay secure; task 158), round 3
-> R3/R4 ("minutes, never hourly"), C4 (Write-holders share out of the box).
+> R3/R4 ("minutes, never hourly"), C4 (Write-holders share out of the box), **round 11 items 2-4 (2026-10-03): the
+> ≤2-minute window accepted with the job writing and no platform cascade; the ship gate "no record unsecured in a
+> shared environment until 148 deploys"; INTERSECTION for two secure roots; ShareAccess not mirrored.**
 
 ## 1. Outcome
 
@@ -18,13 +23,14 @@ every Secure-team-owned child shared with exactly the internal principals its se
 | Rule | Implementation |
 |---|---|
 | Who | every SYSTEM USER and TEAM with a direct POA share on the root (inherited-only rows, mask 0, are not shares) |
-| Rights | the root's rights restricted to Read, Write, Append, AppendTo, Delete — **never Share** (trigger 6 default), never Assign, never Create (`RecordShareLevels.ChildMirrorMask`) |
-| Several secure roots | the **intersection**: a principal must be shared on every one, at the lowest rights (trigger 2 default) |
+| Rights | the root's rights restricted to Read, Write, Append, AppendTo, Delete — **never Share** (owner round 11 item 4), never Assign, never Create (`RecordShareLevels.ChildMirrorMask`) |
+| Several secure roots | the **intersection**: a principal must be shared on every one, at the lowest rights (owner round 11 item 4) |
+| No Access list (task 143, r3) | a system user the guard refuses (walled, or unverifiable) for ANY of the child's secure roots is never granted or widened on the child; they keep only the narrowing part of a change |
 | Anything else on the child | revoked; a wider share is narrowed; a missing one granted |
 | Which rows | rows of the 23 codified child tables owned by the Secure team, whose lookups lead (through Secure-team-owned or user-owned children, never ordinary-team-owned ones) to a Secure-team-owned root |
 | Never touched | children of non-secure roots; rows owned by any other team; the roots themselves |
 
-One component, `Services/Access/SecureChildShareSynchronizer.cs`, over the one POA seam. Three triggers:
+One component, `Services/Access/SecureChildShareSynchronizer.cs`, over the one POA seam. Four triggers:
 
 1. **`/share-user` and `/unshare-user`** fan out in the request, after the root write is confirmed (also when the root
    was already right / already absent, so repeating a request completes it). Some children not updated → **500
@@ -34,7 +40,11 @@ One component, `Services/Access/SecureChildShareSynchronizer.cs`, over the one P
    (task 148 re-owns existing children, then calls the same synchronizer).
 3. **`SecureChildShareReconciliationJob`** — every two minutes, every secure child in the environment. This is the
    mechanism for new and re-filed children (about thirty BFF writer sites plus the client writers of task 147) and for
-   out-of-the-box MDA Share/Unshare of a secure root.
+   out-of-the-box MDA Share/Unshare of a secure root. Owner round 11 item 2 accepted it as the mechanism (≤ 2 minutes,
+   writes on, no platform cascade).
+4. **`NoAccessShareEnforcer`** (r3, task 143 merged) — after it removes a walled user's share on a secure root, it
+   calls `SyncRootAsync(root)`, so the user leaves every child in the same call; a fan-out that cannot finish is a
+   `children-incomplete` failure in its report (the reconcile completes it).
 
 ## 2. Part A — live evidence (read-only, spaarkedev1, 2026-10-02)
 
@@ -114,29 +124,37 @@ present and future, from one place. Its cost is the latency in §5 decision 3.
 6. Each child's shares from the new batched strict read (`GetPrincipalAccessForRecordsOrThrowAsync`, 25 per call); a
    batch that cannot be read → no write on those children.
 7. Diff and write: revokes, then narrowings (ModifyAccess), then grants (GrantAccess only where no direct share exists —
-   task 063's rule). A held child is only revoked/narrowed, never granted or widened. Anything that ADDS a right is
-   re-checked against the roots read FRESH right before it is written, so a root unshare that lands mid-run (the
-   endpoint's fan-out racing the reconcile) is not undone by a stale grant. Every changed child is read back.
+   task 063's rule). A held child is only revoked/narrowed, never granted or widened (pinned since r3 by
+   `AHeldChild_WhoseShareIsNarrowerThanTheKnownRootsAllow_IsNeverWidened`). Anything that ADDS a right is re-checked
+   against the roots read FRESH right before it is written, so a root unshare that lands mid-run (the endpoint's
+   fan-out racing the reconcile) is not undone by a stale grant; if that fresh read fails, nothing is added, and a
+   mixed change keeps only its narrowing part (r3). Then (r3, task 143) every system user still to be granted or
+   widened is checked against the No Access list for each of the child's secure roots: refused (walled, or the check
+   unanswerable) → nothing added, only the narrowing part kept; unanswerable also leaves the child not updated. A child
+   left with nothing to write counts as unchanged. Every changed child is read back.
 
 ## 5. Escalations (CLAUDE.md §6 / §6.5). None blocks the code; each is recorded with the default implemented.
 
 | # | Trigger | State |
 |---|---|---|
 | 1 | A relationship cascades Assign | **Does not fire** (§2a). |
-| 2 | A child under TWO secure roots with different sharee sets | **INTERSECTION implemented** (fail closed). Owner decision pending. Recommendation: keep the intersection — a child filed under P1 and P2 is reachable only by people trusted on both; the alternative (union) shows P1's document to P2-only sharees. |
+| 2 | A child under TWO secure roots with different sharee sets | **DECIDED — INTERSECTION** (owner round 11 item 4, 2026-10-03: "a child under TWO secure roots gets the INTERSECTION of their sharee sets (fail closed)"). Implemented since the first round; nothing changes. |
 | 3 | Mixed cascade + synchronizer | **Does not fire** (synchronizer only). |
-| 4 | MDA Share/Unshare cannot be synchronized inside an accepted window | **Fires as a decision, not a stop.** An MDA Unshare of a secure root is an over-share until the next reconcile tick: **≤ 2 minutes** (the job's cadence). The owner's R3/R4 "minutes, never hourly" covers it; the deployment-gating constraint's condition is met by the scheduled job shipped here (it is "an interim schedule of the same job"; 147/148 reuse it, never duplicate it). Removing prvShare from ordinary roles is NOT proposed (it contradicts C4). **Decision 3 for the owner:** accept the ≤ 2-minute window for (i) MDA Share/Unshare and (ii) NEW and RE-FILED children (the creator, if shared on the root, may not open a child they just created for up to two minutes), OR choose the platform option: Share + Unshare + Reparent cascade on the secure-relevant relationships, which removes both windows — but see trigger 5. Recommendation: accept the window now; if UX testing shows the create latency matters, prefer a targeted inline mirror at the two or three interactive create paths (document upload, Office save, event/to-do create) over the platform cascade. |
-| 5 | Enabling Share/Unshare/Reparent cascade is table-wide | **Not applied, not proposed for this task.** It would share every ORDINARY record's children with whoever the record is shared with — a product-wide behaviour change (e.g. a user outside the root's business unit would reach all its children). Owner decision only; the guide lists it as a "must NOT" until then. Also unproven live: whether a Reparent cascade gives inherited access on CREATE (probe b in G149-1, only if this option is chosen). |
-| 6 | ShareAccess mirrored onto children | **Omitted** (recommended default): sharing happens at the root and fans out. Owner decision pending. |
-| — | Job posture | The reconcile ships **enabled with writes** (unlike the report-only jobs of tasks 137/141): it IS the mechanism, and every write is bounded by the root's own shares. Owner may ask for report-only first; then 146 + 149 must not reach a shared environment until writes are enabled (the deployment gate). |
+| 4 | MDA Share/Unshare cannot be synchronized inside an accepted window | **DECIDED — window accepted** (owner round 11 item 2, 2026-10-03: "a window of at most 2 minutes is accepted for MDA Share/Unshare and for NEW or RE-FILED children ... The scheduled reconcile is the mechanism, and it ships with writes on. Dataverse's table-wide Share/Unshare/Reparent cascade is NOT enabled"). The deployment-gating constraint's condition is met: the reconcile runs on a schedule AND the owner accepted the window in writing. Removing prvShare from ordinary roles was never proposed (it contradicts C4). The earlier recommendation (a targeted inline mirror at the interactive create paths if UX testing shows the create latency matters) stays a future option, not work for this task. |
+| 5 | Enabling Share/Unshare/Reparent cascade is table-wide | **DECIDED — not enabled** (owner round 11 item 2). The guide keeps it as a "must NOT". Probe (b) of G149-1 (whether a Reparent cascade gives inherited access on create) is therefore no longer needed. |
+| 6 | ShareAccess mirrored onto children | **DECIDED — not mirrored** (owner round 11 item 4: "ShareAccess is NOT mirrored onto children"). Sharing happens at the root and fans out. Implemented since the first round; nothing changes. |
+| — | Job posture | **DECIDED — writes on** (owner round 11 item 2: "it ships with writes on"). Unlike the report-only jobs of tasks 137/141, this one IS the mechanism, and every write is bounded by the root's own shares. |
 
-**Other root-share writers.** Task 142 (Assigned-To POA shares on roots) and task 143 (No Access for internal users on
-secure records) have NOT landed on this branch (no guard type exists; `InternalShareEndpoints` remarks: "task 143's ...
-not checked here"). Per the constraint, **whichever lands second wires it: 142 and 143 do.** What they need: after their
-root-share write/removal call `SecureChildShareSynchronizer.SyncRootAsync` (or rely on the two-minute reconcile). Because a
-child's sharees are by construction a subset of the root's, a walled user whose ROOT share 143 removes or refuses can
-never hold a mirrored child share after the next sync — the "guard before child write" is satisfied by deriving from the
-root (143 should still add a negative test: a walled user is never on a child).
+**Other root-share writers.** Task 143 (No Access for internal users on secure records) merged into THIS branch in r3,
+and **this task wired it** — the merge-order obligation binds whichever of 143/149 lands second, and 149 lands second
+(§12 "Merge-order obligation", discharged in §13): the synchronizer asks `SecureShareNoAccessGuard` about each child's
+ROOT before any child grant or widening, `NoAccessShareEnforcer` calls `SyncRootAsync(root)` after it removes a root
+share, and the walled-user negative tests exist. (Before r3 this paragraph said "142 and 143 do" and that deriving from
+the root satisfied the guard; both statements are superseded: the guard is now consulted, because a walled user's ROOT
+share can stand — the enforcer has not run, or owner S5 kept it — while the mirror would otherwise grant the children.)
+Task 142 (Assigned-To POA shares on roots) has not landed on this branch: its root-share writes reach the children
+through the 2-minute reconcile, and the guard above applies to them too; 142 calls `SyncRootAsync` after its own write if
+it wants them at once.
 
 **Handoffs.** Task 148: a child moved OUT of a secure record (or a record made ordinary — `UnsecureProjectEndpoint` now
 says why it does not fan out) keeps its mirrored shares until 148 re-owns it; a child moved between two secure records
@@ -350,7 +368,11 @@ fault (`SecureChildShareWorld.EndlessPagesOf`), the guide's ship gate for unsecu
 | 19 | AC12 | **Pending G149-2** (after G146-1 and the joint 146+149 deploy). |
 | 20 | AC13: publish size | **Main session** (this round's instructions). No package added; no production code changed in r2. |
 
-### Decision 4 for the owner: the unsecure transition (🔔 Human Input Required)
+### Decision 4 for the owner: the unsecure transition — DECIDED (owner round 11 item 3, 2026-10-03): option (a)
+
+> **Owner, round 11 item 3:** "ship gate. 146 and 149 may deploy, but no record is unsecured in a shared environment
+> until task 148 (which re-owns the children, then calls `SyncRootAsync`) is deployed." Recorded in the guide §7a as a
+> 🔴 ship gate and a "must NOT" row. The text below is the r2 record the decision answered.
 
 - **Situation.** `/unsecure-project` moves the root out of the Secure team and revokes every share on it. The root's
   Secure-team-owned children are then "outside secure roots": the synchronizer leaves them untouched, so they keep their
@@ -369,7 +391,7 @@ fault (`SecureChildShareWorld.EndlessPagesOf`), the guide's ship gate for unsecu
   - **(c) Pull 148's re-own into this task.** Rejected here: it is 148's scope (its probe (g) is unanswered) and the
     constraint "do not change anything else" binds this round.
 
-### Merge-order obligation (for the orchestrator; AC6)
+### Merge-order obligation (for the orchestrator; AC6) — DISCHARGED in r3 (§13): 149 merged second and did all three
 
 Task 143 (`task/uac-r2-143-r1`, `d248dff11`) is complete and unmerged. Its POML (:246, :268) says "149 must call this
 task's guard ... and extend the enforcer to child shares, if 149 lands after this task". §5 of this note says "142 and
@@ -388,7 +410,11 @@ this is done, a walled user's child shares follow their ROOT share: they are rem
 removes the root share, and never granted while 143 refuses the root share. The only gap is the interval before the
 enforcer acts.
 
-### Decision 3, restated (unchanged; the verifier asked that it stay owner-visible)
+### Decision 3, restated — DECIDED (owner round 11 item 2, 2026-10-03): the window, the posture and the cost accepted together
+
+> **Owner, round 11 item 2:** "a window of at most 2 minutes is accepted for MDA Share/Unshare and for NEW or
+> RE-FILED children to pick up the root's sharees. The scheduled reconcile is the mechanism, and it ships with writes
+> on. Dataverse's table-wide Share/Unshare/Reparent cascade is NOT enabled." The text below is the r2 record.
 
 - **The window.** ≤ 2 minutes for MDA Share/Unshare and for new or re-filed children.
 - **The job posture.** It ships with writes on.
@@ -402,3 +428,81 @@ V6b 1, V1 2, V2 1, V3 1, V4 1, V5 1, V11 1 failures, each passing again after re
 clean on `src/`). A first V2 seed did not compile (CS0642, empty statement) and was redone as an empty block. Full
 BFF unit suite 14,510: 14,456 passed, 54 skipped (pre-existing), 0 failed. That is r1's 14,502 plus the 8 new cases.
 ArchTests 372/372, including `PoaShareClientSingletonGuardTests`. No client file changed in r2.
+
+## 13. Fix round r3 (2026-10-03) — merged with task 143; the third verifier's findings; owner round 11
+
+Branch `task/uac-r2-149-r3` from `task/uac-r2-149-r2` (`8a0527fd0`), with `work/unified-access-control-r2`
+(`6b243f092`, owner round 11) and `task/uac-r2-143-r2` (`7668bbc1f`, verified, ready to merge) merged in. **baseSha
+(HEAD right after the merges) = `57e14adc4`.** This branch therefore lands SECOND of 143/149, and the merge-order
+obligation (§12) is discharged here.
+
+### 13.1 The merge (commit `57e14adc4`)
+
+Ten conflicts, each resolved keeping both sides' intent:
+
+| File | Resolution |
+|---|---|
+| `RecordShareLevels.cs` | 149's `ChildMirrorableMask` / `ChildMirrorMask` / `ChildMirrorRights` AND 143/133's `AllShareRights` / `MaskForRightsCsv` / `RightsCsvForMask` |
+| `InternalShareEndpoints.cs` | both reason codes (`children_incomplete`; `subject_no_access`, `no_access_unverifiable`); `/share-user` takes the synchronizer AND the guard — the guard runs before any share read or write, the child fan-out after the confirmed root write |
+| `ExternalAccessModule.cs` | both scheduled jobs (secure-child reconcile every 2 min; No Access every 5 min) |
+| `DataverseCreateRecordHandler.cs` | **146's G5 create-as-the-app vs 133's interim creator stamp** — decided by owner round 10 ("superseded at integration by task 146's create-as-the-app, which writes the stamp in the create payload"; 133 note §13.8). The owned create of `sprk_project` / `sprk_matter` / `sprk_workassignment` now carries `sprk_createdbyperson` = the caller (`WhoAmI()` under their own token), re-mapped through metadata as a SERVER-set lookup (`WithCreatorPersonAsync`); 133's follow-up app-only update and its `IGenericEntityService` dependency are gone; the refusal of an item that names the column is kept (pre-suspend and on execute). `OwnedChildWrite.CheckCallerMayCreateAsync` exempts ONLY that server-set column from the field-security question (it is field-secured precisely so that only the BFF writes it). Schema not deployed → created without it, logged (133's non-fatal posture) |
+| `InternalUserShareTests`, `BusinessSliceDeterminismContractTests`, `P2LoopInjectionEvalSuiteTests`, `DataverseToolNameFreezeTests`, `DataverseCreateRecordHandlerTests`, `ProvisionProjectTestFixture` | constructor shapes from 146 / both endpoint parameters / both fixture members; the three run-as-user stamp tests (obsolete: those tables take the owned path) replaced by owned-path tests in `SecureChildOwnershipAiToolTests` |
+
+Merge-only compile fixes: `NoAccessShareEnforcerTests.InterleavingShares` gains the batched strict read (149's seam
+method); `SecureChildShareMirrorTests` passes a guard that walls nobody to `/share-user`
+(`SecureChildShareWorld.NobodyWalled()`).
+
+New tests (`SecureChildOwnershipAiToolTests`, +6 cases): the three roots carry `sprk_CreatedByPerson@odata.bind =
+/systemusers(caller)` in the app's own create with the column field-secured, no POST and no PATCH as the user; a child
+table is never stamped; a request-named field-secured column on a root is still refused (the exemption is the creator
+column only); the column not deployed → created without it, the "for" column kept. Seeds: **M1** stamp call removed → 3
+fail; **M2** FLS exemption removed → 4 fail; **M3** column-not-mapped made fatal → 1 fails.
+
+### 13.2 Items
+
+| # | Item | Disposition |
+|---|---|---|
+| 1 | Verifier open items (`b4c-findings.json` "149") | Findings 1-3 below; AC6 below; AC4 owner part below. **Still pending for the main session:** live gates G149-1 (AC1, AC5) and G149-2 (AC12), and the publish size (AC13). |
+| 2 | **Merge-order obligation with task 143 (AC6)** | **Done, all three.** (1) `SecureChildShareSynchronizer.MirrorAsync`, after the fresh re-check: every SYSTEM USER still to be granted or widened is asked about through `SecureShareNoAccessGuard.CheckAsync` for EACH of the child's secure ROOTS (cached per run); refused — walled, or unverifiable (ADR-003) — means no grant, no widening, only the narrowing part of the change (`NarrowingPartOnly`); unverifiable also leaves the child not updated (retried). Teams are not asked: an entry cannot name a team, and a team share is never the wall's (owner N2). (2) `NoAccessShareEnforcer` calls `SyncRootAsync(root)` after it removed a share on a record (`SyncChildrenAsync`); an incomplete fan-out is a `children-incomplete` failure naming the record (the root removal stands; the 2-minute reconcile completes it); nothing removed → no fan-out. (3) Negative tests below. The guard is scoped, so the synchronizer is now **scoped** (every consumer already resolves it from a scope). |
+| 3 | **Finding 1** — `heldBack ? mask & want : want` unproven | **Closed.** `AHeldChild_WhoseShareIsNarrowerThanTheKnownRootsAllow_IsNeverWidened`: B holds View on a document filed under R and under a flagged-but-not-isolated project; R gives B Collaborate; B stays View, nothing is written on the held child. Seed **S1** (`var target = want;`) → it fails. The two older `…OnlyNarrowedNeverWidened` tests keep their names; the "never widened" half is now this test's. |
+| 4 | **Finding 2** — a MIXED modify dropped whole when the fresh re-read fails | **Fixed.** On that path every change is cut to its narrowing part (mask AND what the share carries): a pure widening is dropped, a mixed one keeps the rights it removes, one left with no Read becomes a revoke. Test `WhenTheFreshReReadFails_AMixedChange_KeepsItsNarrowingPart_AndDropsOnlyItsWideningPart` (A holds Read+Delete on the event, R gives Collaborate: Delete goes, Write/Append/AppendTo are not added, one ModifyAccess to ReadAccess, run Incomplete). Seed **S2** (the old `RemoveAll`) → it fails. The same helper serves the No Access refusal (item 2). |
+| 5 | **Finding 3** — §5 said "142 and 143 do" wire the guard | **Fixed.** §5 "Other root-share writers" now says this task wired it (149 merged second) and why deriving from the root was not enough. §12's obligation and decisions are marked discharged / decided. |
+| 6 | **Owner round 11 items 2-4** | **Recorded** in this note (header, §1, §5 rows 2/4/5/6 + job posture, §12 decisions 3 and 4), the POML (r3 outcome) and the guide (§7a: the rule, the No Access rule, the accepted 2-minute window, the ship gate; must-NOT rows), plus the write-path I-2 row and three code comments. **AC4's owner part is CLOSED**: the window, the writes-on posture and "no platform cascade" are owner-accepted; the deployment-gating constraint's condition is met (a scheduled reconcile AND the owner's written acceptance). Its live check remains G149-2 step 4. |
+
+**New negative tests (AC6, `SecureChildShareMirrorTests`):** `AWalledUser_WhoseRootShareIsNotYetRemoved_IsNeverGrantedAChildShare`
+(theory: the root's fan-out and the reconcile; B walled on R and still shared on R → no child write for B, A mirrored,
+B's root share untouched, run Completed); `WhenAWalledUsersGrantWasTheOnlyChange_NothingIsWritten_AndTheChildrenCountAsUnchanged`;
+`AWalledUser_IsNeverWidenedOnAChild_ButANarrowingStillApplies` (View stays View; Read+Delete → Read);
+`WhenTheNoAccessCheckCannotBeAnswered_NothingIsGivenToThatUser_AndTheChildrenAreNotUpdated`. **Enforcer
+(`NoAccessShareEnforcerTests`):** `Enforce_ARemovedRootShare_RemovesTheWalledUserFromEveryChildAtOnce_NotAtTheNextTick`,
+`Enforce_WhenTheChildrenCannotBeUpdated_IsAFailureNamingTheRecord_AndTheRootRemovalStands`,
+`Enforce_WhenNothingWasRemovedOnTheRecord_DoesNotReadItsChildren`. The guard in these tests is task 143's REAL guard
+over its documented doubles (flags, deny-list seam, identity row store).
+
+**Seed-and-bite (r3; each failed, then passed after restore, file touched):**
+
+| Seed | Mutation | Failed |
+|---|---|---|
+| S1 | held child: `target = want` | 1 (finding 1 test) |
+| S2 | fresh failure: drop a mixed change whole (the old `RemoveAll`) | 1 (finding 2 test) |
+| S3 | the No Access guard never consulted | 4 |
+| S4 | an unverifiable check does not fail the child | 1 |
+| S5 | unverifiable treated as not walled | 1 |
+| S6 | a refused principal keeps its widening | 1 |
+| S7 | a refused principal loses its narrowing too | 1 |
+| S8 | the enforcer does not fan out after a removal | 2 |
+| S9 | the enforcer reports an incomplete fan-out as complete | 1 |
+| S10 | the enforcer fans out with nothing removed | 1 |
+| S11 | a child with nothing left to write counted as "updated" | 1 |
+
+**Deviations.** None from owner decisions. One behaviour refinement beyond the four items, needed by item 2 and pinned
+(S11): a child whose planned writes are all dropped (a walled grant was the only change, or the fresh re-check removed
+everything) is counted unchanged, not "updated" with no write behind it. Task 143's own note (§ "Task 149 child-share
+fan-out ... HOOK for 149") and POML (:246, :268) still describe the hook as future work; they are 143's files and were
+not edited — the main session may point them at this §13.
+
+**`.claude/**` edits needed:** none.
+
+### 13.3 r3 test results (2026-10-03)
+
+__RESULTS__

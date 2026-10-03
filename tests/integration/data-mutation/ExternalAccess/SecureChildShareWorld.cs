@@ -145,15 +145,18 @@ internal sealed class SecureChildShareWorld
     private static EntityReference TeamRef(Guid id) => new("team", id);
 
     /// <summary>The REAL synchronizer over this world and the given share table.</summary>
-    public SecureChildShareSynchronizer Synchronizer(FakeRecordShareTable shares) => SynchronizerOver(() => this, shares);
+    public SecureChildShareSynchronizer Synchronizer(FakeRecordShareTable shares, SecureShareNoAccessGuard? noAccessGuard = null)
+        => SynchronizerOver(() => this, shares, noAccessGuard);
 
     /// <summary>
     /// The REAL synchronizer over whichever world <paramref name="current"/> answers at query time — for a shared host
-    /// fixture whose world changes per test — and any share seam.
+    /// fixture whose world changes per test — and any share seam. <paramref name="noAccessGuard"/> is task 143's REAL guard;
+    /// by default one that walls nobody (<see cref="NobodyWalled"/>).
     /// </summary>
     public static SecureChildShareSynchronizer SynchronizerOver(
-        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares)
-        => new(EntitiesOver(current).Object, shares, Configuration(), NullLogger<SecureChildShareSynchronizer>.Instance);
+        Func<SecureChildShareWorld> current, IDataverseRecordShareService shares, SecureShareNoAccessGuard? noAccessGuard = null)
+        => new(EntitiesOver(current).Object, shares, noAccessGuard ?? NobodyWalled(), Configuration(),
+            NullLogger<SecureChildShareSynchronizer>.Instance);
 
     /// <summary>
     /// Task 143's REAL guard over flags that call every record NOT secure — so it answers

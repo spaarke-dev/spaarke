@@ -524,10 +524,13 @@ public static class ExternalAccessModule
         // unified-access-control-r2 task 149 (C10 part 2, sharees; ships with task 146) — the ONE synchronizer that keeps
         // every child of a secure record shared with exactly its root's internal sharees (never wider; Share and Assign
         // never mirrored). Called by /share-user and /unshare-user (fan-out in the request), by secure provisioning, and by
-        // the reconcile job below. Concrete singleton (ADR-010: no second implementation, no interface); its dependencies
-        // — IGenericEntityService and the one POA seam IDataverseRecordShareService — are singletons registered
-        // unconditionally. Placement + §11 justification: notes/task-149-secure-child-sharee-access.md §6.
-        services.AddSingleton<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+        // the reconcile job below, and by NoAccessShareEnforcer after it removes a root share (task 143 merge, r3). Concrete
+        // class (ADR-010: no second implementation, no interface). SCOPED since r3: it consults task 143's scoped
+        // SecureShareNoAccessGuard before every child grant or widening; every consumer resolves it from a request or job
+        // scope (the endpoints' handler parameters, the reconcile job's per-run scope, the scoped enforcer). Every
+        // dependency — IGenericEntityService, the one POA seam IDataverseRecordShareService, the guard — is registered
+        // unconditionally. Placement + §11 justification: notes/task-149-secure-child-sharee-access.md §6 and §13.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
 
         // Task 149 — the scheduled safety net and the mechanism for every writer that does not pass through the share
         // endpoints: children created or re-filed under a secure record, and model-driven-app Share/Unshare of a secure root
