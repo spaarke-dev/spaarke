@@ -10,18 +10,27 @@
  *   Office Dialog API (Spike-2 Option 3)
  */
 
-import { buildOpenRecordUrl, openRecord } from '../openRecordLauncher';
+import { buildOpenRecordUrl, openRecord, openUrlInBrowserWindow } from '../openRecordLauncher';
 
 describe('buildOpenRecordUrl', () => {
-  it('builds the main.aspx deep link for an existing record', () => {
+  it('builds the main.aspx deep link for an existing record, focused (navbar=off, task 086 / FR-10)', () => {
     const url = buildOpenRecordUrl(
       'https://contoso.crm.dynamics.com',
       'sprk_matter',
       '11111111-1111-1111-1111-111111111111'
     );
     expect(url).toBe(
-      'https://contoso.crm.dynamics.com/main.aspx?etn=sprk_matter&id=11111111-1111-1111-1111-111111111111&pagetype=entityrecord'
+      'https://contoso.crm.dynamics.com/main.aspx?etn=sprk_matter&id=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&navbar=off'
     );
+  });
+
+  it('never sets cmdbar=false — the command bar stays available (task 086 / FR-10 acceptance criterion)', () => {
+    const url = buildOpenRecordUrl(
+      'https://contoso.crm.dynamics.com',
+      'sprk_matter',
+      '11111111-1111-1111-1111-111111111111'
+    );
+    expect(url).not.toContain('cmdbar=false');
   });
 });
 
@@ -29,7 +38,9 @@ describe('openRecord', () => {
   let warnSpy: jest.SpyInstance;
 
   beforeEach(() => {
-    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => { /* no-op */ });
+    warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {
+      /* no-op */
+    });
   });
 
   afterEach(() => {
@@ -51,7 +62,7 @@ describe('openRecord', () => {
     expect(result).toEqual({ opened: true });
     expect(opener).toHaveBeenCalledTimes(1);
     expect(opener).toHaveBeenCalledWith(
-      'https://contoso.crm.dynamics.com/main.aspx?etn=sprk_document&id=aaaa1111-bbbb-2222-cccc-333344445555&pagetype=entityrecord'
+      'https://contoso.crm.dynamics.com/main.aspx?etn=sprk_document&id=aaaa1111-bbbb-2222-cccc-333344445555&pagetype=entityrecord&navbar=off'
     );
   });
 
@@ -112,10 +123,27 @@ describe('openRecord', () => {
 
     expect(result.opened).toBe(true);
     expect(openBrowserWindowSpy).toHaveBeenCalledWith(
-      'https://contoso.crm.dynamics.com/main.aspx?etn=sprk_document&id=11111111-1111-1111-1111-111111111111&pagetype=entityrecord'
+      'https://contoso.crm.dynamics.com/main.aspx?etn=sprk_document&id=11111111-1111-1111-1111-111111111111&pagetype=entityrecord&navbar=off'
     );
     expect(windowOpenSpy).not.toHaveBeenCalled();
 
     windowOpenSpy.mockRestore();
+  });
+});
+
+describe('openUrlInBrowserWindow (task 086 / FR-15 — the Word Send Email choice reuses this opener)', () => {
+  it('calls the default opener (Office.context.ui.openBrowserWindow) with the given url', () => {
+    const openBrowserWindowSpy = jest.fn();
+    (global.Office.context.ui as unknown as { openBrowserWindow: jest.Mock }).openBrowserWindow = openBrowserWindowSpy;
+
+    openUrlInBrowserWindow('https://outlook.office.com/mail/deeplink/compose?subject=Hi');
+
+    expect(openBrowserWindowSpy).toHaveBeenCalledWith('https://outlook.office.com/mail/deeplink/compose?subject=Hi');
+  });
+
+  it('calls an injected opener instead of the default when one is supplied', () => {
+    const opener = jest.fn();
+    openUrlInBrowserWindow('https://example.test/', opener);
+    expect(opener).toHaveBeenCalledWith('https://example.test/');
   });
 });

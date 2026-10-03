@@ -1949,6 +1949,8 @@ public class OfficeService : IOfficeService
     {
         RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
         RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
+        // Task 076: the platform's next numbers were all held by rows; a retry later (or a re-seed) succeeds.
+        RecordCreationFailureKind.NumberUnavailable => StatusCodes.Status409Conflict,
         _ => StatusCodes.Status500InternalServerError
     };
 
