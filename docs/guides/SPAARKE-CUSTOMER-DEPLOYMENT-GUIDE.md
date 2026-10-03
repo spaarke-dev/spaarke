@@ -761,6 +761,22 @@ Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct
 
 **H7** sets the 7 per-customer env-var values (§6.4).
 
+**After H6 — record numbering (interim; required in EVERY environment).** Matters and Projects are numbered by
+Dataverse's platform autonumber (`MAT-######` / `PRJ-######`, `spaarkeai-word-add-in-r1` task 076; interim until the
+numbering function). `SpaarkeCore` carries the column format and the alternate keys, but **the seed is per environment
+and is not carried by a solution import** — without this step the first number is `MAT-001000`, and an environment
+whose format is missing creates **nameless** Matters and Projects (the number is the primary name; the BFF logs
+`record_number_unassigned`). The first `-Apply` also numbers any existing blank rows, oldest first (each write updates
+the row's `modifiedon`). Production: check existing matter numbers are unique first (the script lists duplicates and
+writes nothing for that table). Where the tables are managed, the format and keys must arrive with the `SpaarkeCore`
+import — the script never customises a managed component (ADR-027); it then only seeds and backfills.
+
+```powershell
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com           # dry run: every write it would make
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
+```
+
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
 **H8** provisions container-type + root container. **T6 fix**: uses confidential-client (app-only) token with cert bootstrapped from KV — delegated tokens produce `public client not allowed` 403s.
@@ -1198,6 +1214,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
 | 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
 | 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
+| 2026-10-02 | §7.4: record numbering after H6 — `scripts/Set-RecordNumberingSchema.ps1` in every environment (the autonumber seed is not carried by a solution import; first run numbers blank rows) | `spaarkeai-word-add-in-r1` task 076 (owner decisions 2026-10-02: platform autonumber, interim until the numbering function) |
 
 ---
 

@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-02 17:15 UTC (by context-handoff, before /compact). 079 ✅; 080 backfill APPLIED; next: task 076
+> **Last Updated**: 2026-10-03 (task-execute Step 11). 076 ✅ + 086 ✅; next: commit/push → PR for everything since `5e39f2bea` → task 087
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,31 +18,36 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: task 076 (numbering — no blank primary name) — IN PROGRESS (started 2026-10-02 ~19:40 UTC)
+### ▶️ NEXT: open the PR, then task 087
 
 | Field | Value |
 |---|---|
-| **Progress (checkpoint 2026-10-03 ~02:40 UTC)** | ✅ conflict-check (master merged `141ad4c4b`) · ✅ reproduce (blank name live; To Do lookup had NO display annotation) · ✅ **OWNER DECISIONS 2026-10-02**: (1) **Dataverse autonumber** `MAT-{SEQNUM:6}`/`PRJ-{SEQNUM:6}`; (2) **backfill blanks** on first run; (3) FR-13 wording: *"the dataverse auto numbering is just an interim solution until we build the numbering function"* — amend FR-13 framed as INTERIM; (4) dev apply APPROVED after the dry-run preview · ✅ `scripts/Set-RecordNumberingSchema.ps1` written + **APPLIED to dev** (matter: format + `sprk_MatterNumber` key created Active; project: format, key pre-existed; 7 wizard projects now `PRJ-000001…007`) · `-Verify` PASS, dry run proposes 0 · ✅ live: pane matter `MAT-000002`/project `PRJ-000009`; **6 concurrent → 6 distinct**; To Do lookup shows `MAT-000001`; supplied `PAT-…` kept; typed-ahead collision **refused `0x80060892`**, next attempt got the next number. All 14 test rows deleted (named "076 …") |
-| **Next Action** | BFF: `RecordCreationService` — retry create on `DataverseServiceClientImpl.IsAlternateKeyDuplicate` (3 attempts) → new `RecordCreationFailureKind.NumberUnavailable` → 409 `record_number_unavailable` (map in `OfficeService.MapCreationFailureStatus`); read back the number after create → warning + log `record_number_unassigned` if blank; update header/protected-set comments (number is platform-assigned, interim). Tests: rename `AssertNoMatterNumberSent`/`AssertNoProjectNumberSent` (reason: the platform assigns it), + retry / exhaustion / read-back-blank tests. Docs: spec FR-13 (interim), write-path registry **I-11**, customer deployment guide step, scripts/README, notes/076, 030 handoff header, 042 SC-8 evidence, defer-issues, TASK-INDEX. Gates: build, full suite, ArchTests, publish vs fresh master, CVE |
-| **Facts measured live (do not re-derive)** | `GetNextAutoNumberValue`/`GetAutoNumberSeed` are **POST actions**; GetNext returns the RAW number and **reads one high until the first number is issued after a seed**; `SetAutoNumberSeed(X)` → next create gets X; right after setting the format, SetAutoNumberSeed can refuse `0x80060884` (propagation — retried); omitted/empty → generated; supplied kept; update allowed |
-| **086** | ✅ committed `a6d73bd8c` (reviewed; 2 note claims corrected) |
-| **Task** | 076, `tasks/076-record-numbering-no-blank-primary-name.poml`. **Start via `task-execute`** (FULL, opus/xhigh). **Owner answers 2026-10-02 are in the POML**: Matter `MAT-######`, Project `PRJ-######`, both **sequential**; owner checks production uniqueness manually; interim until a numbering-schema component — **not a spike**. Fixes SC-8 (now FAIL) and the blank primary name. Design question to settle first in the task: where the sequence lives (Dataverse autonumber on the column vs a server-side sequence with an alternate key) — both columns are their table's primary name; wizards still supply their own numbers and must not be modified |
-| **Next Action** | `task-execute` task 076. Then **086** (Word Send Email choice A+B + focused record open `navbar=off`; client-only, parallel-safe with 076). Then open the PR for everything since `5e39f2bea` |
-| **Branch** | `work/spaarkeai-word-add-in-r1`, clean, pushed. Ahead of master by the 060/068 live-check records, 079, and these handoffs — **not yet PR'd**. Ship by PR; merge with `--merge` (**NEVER `--delete-branch`**) once `Router` **and** `Build & Test (Debug)` pass (both required) and nothing is pending |
-| **Queue** | 076 → 086 → PR. 042 UAT (owner, live Word/Outlook — list in `defer-issues.md` register). 090 wrap-up (`/test-diet`) after 042. 083 waits on UAC-r2 141 |
-| **Owner, in flight** | **078 add-in install**: the owner is uploading `C:\tmp\spaarke-addin-package\spaarke-addin-1.1.0-TEST.zip` (from run `37046260279`) to *Just me*; how to tell it worked was given 2026-10-02 (a "Spaarke (TEST)" ribbon group in Word/Outlook, desktop + web — 078 §6). Record the outcome in 078 when reported |
-| **Done 2026-10-02** | 080 backfill **applied** (31 docs + 10 To Dos, 0 failed; Test User 1 verified; manifests in `notes/080-backfill-2026-10-02/`). #1081 relayed to UAC-r2 **by the owner**. Redis `JobStatusSequence` approved. Hard-kill live checks for 060/068 pass. Probe data deleted |
+| **Next Action** | (1) Commit + push the 076 close. (2) Open ONE PR `work/spaarkeai-word-add-in-r1` → master for everything since `5e39f2bea`: 060/068 live-check records, 079, 080 backfill records, **086**, **076** (+ the `141ad4c4b` master merge). PR body: §10 Placement (076: no new BFF component; platform owner, notes/076 §2), publish **+981 B**, CVE none, ADR-002 WP-1 **path A** (spec ADR Tensions) + task 087, test-diet n/a until 090. Merge `--merge` (**NEVER `--delete-branch`**) once `Router` **and** `Build & Test (Debug)` pass. (3) Then `task-execute` **087** (ADR-002 amendment, path B; opus; MAIN SESSION — `.claude/`; owner signs the wording) |
+| **Branch** | `work/spaarkeai-word-add-in-r1`; master merged in as `141ad4c4b` (2026-10-02) |
+| **Queue** | PR → 087. 042 UAT (owner, live Word/Outlook; `defer-issues.md` register). 090 wrap-up (`/test-diet`) after 042. 083 waits on UAC-r2 141 |
+| **Owner, open** | (a) **Production numbering**: check matter numbers are unique, then `scripts/Set-RecordNumberingSchema.ps1 -Apply` in each environment after its SpaarkeCore import (guide §7.4). (b) **078 add-in**: the owner saw THREE Spaarke groups in Word ("Spaarke (TEST)" + 2 × "Spaarke") — expected if BOTH zips were uploaded (office-js #6938: Word cannot hide the XML add-in); hover *Save to Spaarke*: XML says "…Spaarke DMS", the unified package "…Spaarke Document Management System". Tidy-up: remove the TEST app; unassign the Word XML add-in for Word ≥ 2501 users. Record the outcome in 078 when the owner confirms which zips were uploaded |
+| **Live checks pending a deploy** | 086 AC8 (Word Send Email both choices; Word-web popup-blocker risk; the `data=` URL form has no shipped precedent) and 076's BFF retry/warning (the platform half is verified live) |
 
-### Files modified this session (all committed)
-`spec.md` · `tasks/TASK-INDEX.md` · 24 POMLs (079 repairs/syncs, 076 answers, new 086) · `notes/079-record-integrity.md` ·
-`notes/defer-issues.md` (register) · `notes/042-uat-results.md` · `notes/parity-checklist.md` · `notes/060-…` §11 ·
-`notes/068-…` §9 · `notes/080-record-ownership.md` §6.9 · `notes/uac-r2-findings-2026-09-30.md` §11 ·
-`src/…/Infrastructure/Cache/SystemCacheKeys.cs` (approval comment) · `src/…/Api/Filters/TodoSourceAccessFilter.cs` (comment)
+### ✅ Closed 2026-10-03: task 076 (numbering) — `notes/076-record-numbering.md`
 
-### Critical context
-Master `5e39f2bea` is deployed to `spaarke-bff-dev`. The drift checker on master cannot read this index layout —
-`customer-provisioning-orchestration-r1` commit `233ff9341` fixes it (unmerged; it reads this index 87/87, no drift), so
-push-to-github Step 1.65 is red for a parser reason. Board #945: 87 tasks, 82 closed.
+- Owner decisions 2026-10-02/03: **Dataverse platform autonumber** `MAT-`/`PRJ-{SEQNUM:6}`, INTERIM ("until we build the
+  numbering function"); backfill blanks on first run; dev apply approved after the dry run; **ADR-002 WP-1 → path A now
+  + path B as task 087**.
+- Dev applied (`sprk_MatterNumber` key created; 7 nameless wizard projects → `PRJ-000001…007`); `-Verify` PASS. Next
+  numbers in dev: `MAT-000011`, `PRJ-000010` (gaps from deleted test rows are normal).
+- Live: 6 concurrent → 6 distinct; To Do lookup shows the number; collision refused `0x80060892`, next attempt
+  succeeds. BFF: retry (3) → 409 `record_number_unavailable`; read-back warning; cancelled read never fails a create.
+- Gates: 78/78 touched; seeds 3/1/2 + W3 2; suite 14,217 / 1 pre-existing flake (PinnedMemory, passes alone) / 54;
+  ArchTests 345; publish +981 B; CVE none. Step 9.5: W1–W4/W6 + most suggestions fixed; notes §9.
+- **Facts measured live (do not re-derive)**: `GetNextAutoNumberValue`/`GetAutoNumberSeed` are POST actions;
+  GetNext returns the RAW number and reads ONE HIGH until the first number is issued after a seed;
+  `SetAutoNumberSeed(X)` → next create gets X; just after the format is set, SetAutoNumberSeed can refuse
+  `0x80060884`; a supplied value is kept, omitted/empty generated; Get-AllPages rows carry `@odata.etag`.
+
+### ✅ Closed 2026-10-02: task 086 (Word Send Email choice + focused record open) — `a6d73bd8c`
+
+- Run as a parallel Sonnet subagent beside 076; reviewed + gates re-run in the main session (two suites 16 → 35;
+  typecheck 68 / 0 prod; lint 0; build 0). Two note claims corrected (no `data=` precedent; test count).
 
 ### ✅ Closed 2026-10-02: task 079 (record integrity) — `notes/079-record-integrity.md`
 

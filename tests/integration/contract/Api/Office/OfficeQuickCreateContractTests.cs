@@ -16,6 +16,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
@@ -529,21 +530,25 @@ public class OfficeQuickCreateContractTests
     // ── Numbering: the platform's autonumber (task 076, interim until the numbering function) ─────────────
 
     [Fact]
-    public async Task Post_Matter_WhenThePlatformsNumberIsAlreadyHeld_RetriesWithTheNextNumber_Returns201()
+    public async Task Post_Matter_WhenTheNumberKeyRefusesTheFirstCreate_RetriesOnce_AndStillSendsNoNumber_Returns201()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
         ArrangeBusinessUnit(factory);
-        var created = CaptureCreate(factory);
+        ArrangeNumberReadBack(factory, PlatformNumber);
+        var attempts = new List<Entity>();
         factory.Entities
-            .SetupSequence(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(NumberKeyViolation())
-            .ReturnsAsync(CreatedMatterId);
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((entity, _) => attempts.Add(entity))
+            .Returns(() => attempts.Count == 1
+                ? Task.FromException<Guid>(NumberKeyViolation())
+                : Task.FromResult(CreatedMatterId));
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Collides Once", MatterTypeId = Guid.Empty });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created, "a number typed in ahead of the sequence costs one retry, not the create");
-        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        attempts.Should().HaveCount(2);
+        attempts.ForEach(AssertNumberLeftToThePlatform); // the retry leaves the number to the platform too
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Id.Should().Be(CreatedMatterId);
         body.Warnings.Should().NotContain(w => w.Contains("number"), "the retry got a number; nothing is missing");
@@ -562,7 +567,7 @@ public class OfficeQuickCreateContractTests
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Always Collides" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
-        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("record_number_unavailable");
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be(RecordCreationService.NumberUnavailableCode);
         factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(3),
             "the attempts are bounded; a run of typed-ahead numbers is the operator's re-seed, not an endless loop");
     }
@@ -631,10 +636,9 @@ public class OfficeQuickCreateContractTests
     };
 
     /// <summary>
-    /// No key on the create payload names the matter number, in any casing or padding. Updated by task 076: it once
-    /// encoded "numbering is out of scope" (owner, 2026-09-11) — and SC-8 was wrongly recorded PASS against it. Now the
-    /// platform's autonumber assigns the number, and fills it ONLY when the create leaves it empty (measured live
-    /// 2026-10-02), so a value sent here would pre-empt the sequence. The same assertion, for the opposite reason.
+    /// No key on the create payload names the matter number, in any casing or padding: the platform's autonumber
+    /// assigns it, and fills it ONLY when the create leaves it empty (measured live 2026-10-02), so a value sent here
+    /// would pre-empt the sequence (task 076).
     /// </summary>
     private static void AssertNumberLeftToThePlatform(Entity matter)
         => matter.Attributes.Keys
@@ -735,17 +739,26 @@ public class OfficeQuickCreateContractTests
     /// <summary>The created matter's number as the read-back sees it; <see langword="null"/> = the column came back blank.</summary>
     private static void ArrangeNumberReadBack(OfficeQuickCreateTestWebAppFactory factory, string? number)
         => factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_matter", CreatedMatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.RetrieveAsync(
+                "sprk_matter", CreatedMatterId,
+                It.Is<string[]>(columns => columns.Length == 1 && columns[0] == "sprk_matternumber"),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_matter", CreatedMatterId) { ["sprk_matternumber"] = number });
 
-    /// <summary>The alternate-key duplicate fault Dataverse raises when the platform's number is already held (live, 2026-10-02).</summary>
-    private static FaultException<OrganizationServiceFault> NumberKeyViolation() => new(
-        new OrganizationServiceFault
-        {
-            ErrorCode = unchecked((int)0x80060892),
-            Message = "Entity Key Matter Number (unique) violated. A record with the same value for Matter Number already exists.",
-        },
-        new FaultReason("Entity Key Matter Number (unique) violated"));
+    /// <summary>
+    /// The alternate-key duplicate Dataverse raises when the platform's number is already held (live, 2026-10-02), in the
+    /// shape production delivers it: <c>DataverseServiceClientImpl.CreateAsync</c> wraps every fault in an
+    /// <see cref="InvalidOperationException"/>, and the classifier walks to the inner fault.
+    /// </summary>
+    private static InvalidOperationException NumberKeyViolation() => new(
+        "Failed to create sprk_matter record: Entity Key Matter Number (unique) violated.",
+        new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault
+            {
+                ErrorCode = unchecked((int)0x80060892),
+                Message = "Entity Key Matter Number (unique) violated. A record with the same value for Matter Number already exists.",
+            },
+            new FaultReason("Entity Key Matter Number (unique) violated")));
 
     private static FieldMappingRuleEntity Rule(
         string name, string sourceField, int sourceType, string targetField, int targetType,

@@ -395,7 +395,7 @@ public class OfficeQuickCreateProjectContractTests
     }
 
     [Fact]
-    public async Task Post_Project_WhenThePlatformsNumberIsAlreadyHeld_RetriesWithTheNextNumber_Returns201()
+    public async Task Post_Project_WhenTheNumberKeyRefusesTheFirstCreate_RetriesOnce_Returns201()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -403,13 +403,15 @@ public class OfficeQuickCreateProjectContractTests
         CaptureCreate(factory);
         factory.Entities
             .SetupSequence(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
-                new OrganizationServiceFault
-                {
-                    ErrorCode = unchecked((int)0x80060892),
-                    Message = "Entity Key Project Number (unique) violated. A record with the same value for Project Number already exists.",
-                },
-                new FaultReason("Entity Key Project Number (unique) violated")))
+            .ThrowsAsync(new InvalidOperationException( // production's wrapping (DataverseServiceClientImpl.CreateAsync)
+                "Failed to create sprk_project record: Entity Key Project Number (unique) violated.",
+                new FaultException<OrganizationServiceFault>(
+                    new OrganizationServiceFault
+                    {
+                        ErrorCode = unchecked((int)0x80060892),
+                        Message = "Entity Key Project Number (unique) violated. A record with the same value for Project Number already exists.",
+                    },
+                    new FaultReason("Entity Key Project Number (unique) violated"))))
             .ReturnsAsync(CreatedProjectId);
 
         var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Collides Once" });
@@ -506,7 +508,10 @@ public class OfficeQuickCreateProjectContractTests
     /// <summary>The created project's number as the read-back sees it; <see langword="null"/> = the column came back blank.</summary>
     private static void ArrangeNumberReadBack(OfficeQuickCreateTestWebAppFactory factory, string? number)
         => factory.Entities
-            .Setup(e => e.RetrieveAsync("sprk_project", CreatedProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Setup(e => e.RetrieveAsync(
+                "sprk_project", CreatedProjectId,
+                It.Is<string[]>(columns => columns.Length == 1 && columns[0] == "sprk_projectnumber"),
+                It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_project", CreatedProjectId) { ["sprk_projectnumber"] = number });
 
     private static FieldMappingRuleEntity Rule(

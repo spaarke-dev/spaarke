@@ -102,7 +102,8 @@ public sealed record RecordCreationResult
     /// <summary>The name actually written (a field-mapping rule may have replaced the requested one).</summary>
     public string Name { get; init; } = string.Empty;
 
-    /// <summary>Non-fatal diagnostics (field-mapping skips, no or unknown matter type, BU defaults unavailable).</summary>
+    /// <summary>Non-fatal diagnostics (field-mapping skips, no or unknown matter type, BU defaults unavailable, the
+    /// created record came back without a number — task 076).</summary>
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
 
     /// <summary>Set when the creation was refused; <see langword="null"/> on success.</summary>
@@ -209,6 +210,10 @@ public sealed class RecordCreationService
     /// </summary>
     internal const int MaxNumberAttempts = 3;
 
+    /// <summary>The refusal code when every attempt collided (task 076) — 409 via <c>OfficeService.MapCreationFailureStatus</c>.
+    /// Snake case like this service's other Matter/Project refusal codes; only the quick-create route raises it.</summary>
+    internal const string NumberUnavailableCode = "record_number_unavailable";
+
     /// <summary>
     /// The core record's internal Assigned-To contact column (matter and project). Owner decision A7 (round 3,
     /// reversed; unified-access-control-r2 task 152): a quick-created record names its MAKER here, editable.
@@ -311,7 +316,7 @@ public sealed class RecordCreationService
     private static RecordCreationResult NumberUnavailable(string entityLabel) =>
         RecordCreationResult.Failed(new RecordCreationFailure(
             RecordCreationFailureKind.NumberUnavailable,
-            "record_number_unavailable",
+            NumberUnavailableCode,
             $"The new {entityLabel} could not be given a number because the next numbers are already in use, so it was "
             + "not created. Try again; if it keeps failing, ask an administrator to check record numbering."));
 
@@ -327,6 +332,11 @@ public sealed class RecordCreationService
     /// draws the next number (measured live 2026-10-02: the refused attempt's number is consumed, the next attempt gets
     /// the one after). Every other fault propagates on the first attempt, as before — a timeout, for one, may have
     /// created the row, and retrying it could create a second.
+    /// <para>Scope: the classifier matches ANY alternate-key duplicate. Today the number's key is the only alternate key
+    /// on <c>sprk_matter</c> (<c>sprk_MatterNumber</c>) and on <c>sprk_project</c> (<c>sprk_ProjectNumber</c>), so that is
+    /// exact; a key added later on another column would be retried and reported as a number collision — revisit this
+    /// then. Each refused attempt is also logged as an error by <c>DataverseServiceClientImpl.CreateAsync</c> itself, so a
+    /// retried create leaves one such error per refusal in telemetry; the warning below names it as a number collision.</para>
     /// </remarks>
     private async Task<Guid?> CreateNumberedAsync(Entity entity, string entityLabel, CancellationToken ct)
     {
@@ -360,8 +370,9 @@ public sealed class RecordCreationService
     /// run. The record is kept; the user is told and the condition is logged as <c>record_number_unassigned</c>.
     /// </summary>
     /// <remarks>
-    /// Never fails or alarms a create that succeeded: a read that faults is logged and otherwise ignored, since it says
-    /// nothing about the number.
+    /// Never fails or alarms a create that succeeded. The row already exists when this runs, so a read that faults — a
+    /// cancelled request included — is logged and otherwise ignored: it says nothing about the number, and turning a
+    /// committed create into an error would hide the record the user just made.
     /// </remarks>
     private async Task WarnIfNumberMissingAsync(
         string entityName, Guid recordId, string numberAttribute, string entityLabel, List<string> warnings, CancellationToken ct)
@@ -371,10 +382,6 @@ public sealed class RecordCreationService
         {
             created = await _entities.RetrieveAsync(entityName, recordId, [numberAttribute], ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            throw;
-        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
@@ -382,6 +389,7 @@ public sealed class RecordCreationService
             return;
         }
 
+        // The real boundary never answers null; a substituted one (a loose test double) may — that says nothing either.
         if (created is null || !string.IsNullOrWhiteSpace(created.GetAttributeValue<string>(numberAttribute)))
         {
             return;

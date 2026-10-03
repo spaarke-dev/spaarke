@@ -38,7 +38,7 @@ requirement of THIS project's `spec.md` unfinished?
 
 | Item | Owner | Spec link |
 |---|---|---|
-| **Task 076** — pane-created Matter/Project has a **blank name** (no number written) | This project — owner answered 2026-10-02: `MAT-######` / `PRJ-######`, sequential; owner checks uniqueness manually | **FR-13 / SC-8 (FAIL until 076 ships)** |
+| ~~**Task 076** — pane-created Matter/Project has a **blank name** (no number written)~~ ✅ **DONE 2026-10-03** — Dataverse platform autonumber `MAT-`/`PRJ-######` (interim until the numbering function); dev applied; `notes/076-record-numbering.md`. **Open: run `scripts/Set-RecordNumberingSchema.ps1` in every other environment** (production after the owner's uniqueness check) | This project — owner answered 2026-10-02 | FR-13 / **SC-8 → PASS** |
 | **Task 083** — Office To Do names its person | Blocked on UAC-r2 task 141's link contract | FR-14 (completeness) |
 | **Task 042 UAT** — the live list: SC-1/3/7/9 manual halves, SC-11 parity rows; the `<ui-tests>` of 010, 013, 021, 026, 027, 033, 034, 036, 037, 040, 077; #1005 live re-check; 037's ribbon Quick Save/Share (only live attempt, 09-30, failed — blamed on the environment, never re-run); the unexplained 09-30 Create To Do failure; 084's latency check | **Project owner** (needs live Word/Outlook) | Several |
 | ~~Task 079 sign-offs~~ ✅ all signed 2026-10-02. **Task 086** builds two of them: Word Send Email choice (Spaarke email / Outlook on the web) and the focused record page (`navbar=off`) | This project (task 086) | FR-15, FR-10 |
