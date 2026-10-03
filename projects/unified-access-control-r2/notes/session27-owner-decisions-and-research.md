@@ -229,6 +229,33 @@ Also from task 156's verifier, filed as work rather than decisions (the owner's 
 **Test user:** the main session creates ONE Entra test user plus its Dataverse user in "Spaarke Business Unit 1" (Spaarke Core User + Basic User, no shares on secure records). The credentials go to the owner, never into the repo.
 - **Created 2026-10-03:** `uac.child.user@demo.spaarke.com`, display name "UAC Child BU Test User", Entra oid `94047962-97fb-4588-ab69-79c7d6d226ec`, licence `POWERAPPS_VIRAL` (the same as the other dev test users), usage location US. Dataverse systemuser `d6f8f439-40bf-f111-a05b-3833c5e9614d`, added through the Power Platform admin API, moved to **Spaarke Business Unit 1** (`cb15f587-baa0-f111-aaac-000d3a99d1d7`), roles **Spaarke Basic User** + **Spaarke Core User** (that BU's copies), no shares. `RetrievePrincipalAccess` on secure project `65a3fab2` = **None**. The password was given to the owner in session; it is not stored anywhere in the repo.
 
+## Owner answers, round 12 (2026-10-03). BINDING. Task 167's nine verifier questions; "Accept all 9 (Recommended)".
+
+1. `GET /healthz`, `/healthz/catalog`, `/ping` (anonymous) get **rate limiting**; the strict AnonymousByDesign rule (a compensating control is mandatory) is kept.
+2. ReferenceData "takes no record id" means **"selects nothing by a record id"** (catalog keys, the static model-deployment id, NDA `clauseRef`, the context-mapping cache key, the saved-query lookup).
+3. A HandlerDecision body may include **same-type helpers it calls directly, one level deep**.
+4. Routes gated only by an owner comparison on a caller-chosen id get a new **OWNER-COMPARISON** basis. `DELETE /api/memory/pins/{pinId}` must answer a **uniform 404** for unknown and not-yours (no 404/403 oracle): task 166.
+5. Daily briefing render/email: **CallerScopedOnly**, as recorded.
+6. Playbook lists: **CallerScopedOnly**, and the oid-vs-systemuserid mismatch in the user-list `_ownerid_value` filter (and `PlaybookAuthorizationFilter` if it shares it) is **fixed**: task 164.
+7. `POST /api/communications/threads/direct`: **CallerScopedOnly**, as recorded.
+8. Non-sweep findings named in the 161/166 amendments **stay owned by 161/166**.
+9. Credited routes 166 must fix (revoke `ContainerId`, office to-do Create, close-project) get **Pending InsufficientDecision waivers owned by 166** so the guard tracks them until 166 resolves them.
+
+## Owner answers, round 13 (2026-10-03). BINDING. Batch 4c's open verifier questions; each "(Recommended)" option chosen.
+
+1. **133 / 148:** when a record is UNSECURED, its `sharepointdocumentlocation` / `sharepointdocument` rows are re-owned by **the same rule task 146 applies to any non-secure child**, not left with the new root owner by the Assign cascade. One ownership invariant everywhere.
+2. **133 gate (e)** (replaying the provisioning compensation on a throwaway TEST project) is **covered** by round 11's approval.
+3. **146 gates G146-3** (hold-alert recipients) **and G146-5** (default-team roles on Dev1/Test1) are **covered** by round 11's "all of them".
+4. **142 R-13: fix now.** The deny-veto check gets a **tri-state answer** (allowed / denied / unverifiable) so a read fault (Dataverse 5xx, throttling, unreadable memberships) is reported as a fault, not absorbed into "denied". It stays fail closed. The `AccessibleRecordSetService` interface change is accepted (139 and 140 consume it). Runs as a 142 r4 fix round.
+5. **142:** a 143 wall-guard **Unverifiable** answer on the internal-user share path **fails the run**, exactly like the deny-list fault.
+6. **146 / 150 F3:** the shared helper's behaviour is kept (a missing creator column → 403 `permission_unverifiable`; a Full Access holder is admitted when the creator read fails).
+7. **146:** the update tool's re-file step is **folded into ADR path B**, as round 8 did for 156's re-stamp.
+8. **146:** a playbook that impersonates a user is **checked under F3 as that user**; only truly person-less writers are refused.
+9. **146:** children the BFF creates as the application **record the person who asked**: `sprk_createdbyperson` is added to the child tables (schema step, dry run / apply / verify, approved as a dev live step) and stamped by every app-create writer, so F3's "or the creator" branch works for them.
+10. **150:** the new user-facing copy uses **option B** wording throughout (F6 rows 7-11).
+11. **157:** `datagrid-external-host-gate` lands **advisory** and becomes blocking after N green runs on the CI runner (the repo's standard).
+12. **157 / CI router:** the pre-existing `docs_only` skip belongs to `ci-cd-unit-test-remediation-r1`; the main session **files a GitHub issue** there. No router change in this project.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
