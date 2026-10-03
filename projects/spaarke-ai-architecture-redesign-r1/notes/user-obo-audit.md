@@ -7,7 +7,11 @@
 > **Amended 2026-10-02 (spec "Amendment A-UAC146", CLAUDE.md §6.5 path B, owner round 7 item 3):** `dataverse.create_record`
 > and `email.draft` now CREATE app-only after an as-the-caller rights check (the G5 pattern), owned by the team
 > `IRecordOwnershipResolver` names, so this audit's "user-OBO" classification of those two creates is superseded by
-> design. Reads, updates and deletes are unchanged. Record: `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §13.
+> design. Reads and deletes are unchanged, and an update's PATCH still runs as the caller. One update step is no longer
+> user-OBO: when `dataverse.update_record` re-files a CHILD row (a lookup set or cleared onto a project, matter, work
+> assignment or other ownership parent), `RecordOwnershipResolver.ReparentAsync` reads app-only, assigns the owner
+> app-only, and on a failed assignment restores the filing app-only. That step is task 146's §6.5 **path-A** exception
+> (task note §12c, still in force for it), not the path-B amendment. Record: `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §12c, §13, §14.
 
 ---
 

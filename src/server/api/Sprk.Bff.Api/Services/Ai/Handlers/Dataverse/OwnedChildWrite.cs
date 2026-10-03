@@ -27,7 +27,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 /// note §13). <c>dataverse.create_record</c> therefore takes this path for EVERY create (<see cref="PathFor"/>), except
 /// where the resolver keeps the creator (unfiled communications/threads, E1/E2), per-user tables, and tables with no
 /// user/team ownership. <c>email.draft</c> takes it for a filed draft (an unfiled draft keeps its creator, E1).
-/// Reads, updates and deletes stay user-OBO.</para>
+/// Reads and deletes stay user-OBO, and so does an update's PATCH. The update tool's re-file owner assignment
+/// (<c>DataverseUpdateRecordHandler</c> → <c>ReparentAsync</c>) is app-only under task 146's separate path-A exception
+/// (note §12c), which this amendment does not supersede.</para>
 /// <para><b>What "as the user" covers</b> — everything a run-as-user create would have had Dataverse check, so the
 /// app-only create grants nothing the caller lacks: (1) the table's Create privilege, and Append when the row sets a
 /// lookup, by the privilege names the table's own metadata declares (activity tables share <c>prvCreateActivity</c>);

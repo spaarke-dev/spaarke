@@ -18,7 +18,10 @@ namespace Spaarke.ArchTests;
 /// not re-owned, with a reason and a kind — <c>Pending</c> (an open owner decision, named) or <c>Permanent</c>.</para>
 /// <para><b>What the scanner sees, and what it does not.</b> It counts the create shapes that name a table literally
 /// or through a <c>const</c>: <c>new Entity("t")</c> / <c>new DataverseEntity(T)</c> (single argument — a two-argument
-/// construction is an update or a keyed upsert target), and a Web API POST to a literal entity set. Writers whose
+/// construction is an update or a keyed upsert target, unless its id is fresh), <c>new Entity { LogicalName = "t" }</c>
+/// and <c>e.LogicalName = "t"</c> after <c>new Entity()</c> (b2-r1; unless given an existing id), a create-by-upsert of a
+/// fresh id, and a Web API POST to a literal entity set. The shapes it does not see are listed under "KNOWN LIMITS" in
+/// the maintenance procedure. Writers whose
 /// create it cannot see — a create-by-upsert PATCH, a keyed <c>UpsertRequest</c>, a POST to a computed URL, a
 /// caller of a seam, a REPARENT (an update that files a child under a new parent) — are listed in
 /// <see cref="UnscannedWriters"/>, and each must still call the resolver
@@ -79,6 +82,20 @@ public class RecordOwnerAssignmentCensusTests
     //   2. Counts are per (file, table), so removing one site and adding another elsewhere cannot pass unnoticed.
     //   3. Never add a Waived entry to make a build green. A row that carries a secure record's content or names its
     //      participants is a child and is routed, not waived (task 146 constraint).
+    //   4. KNOWN LIMITS (b2-r1, verifier b2 items 5 and 6) — shapes neither census sees. In src/server today (Grep,
+    //      2026-10-02) none of them creates a listed child table or writes an owner, except SpendSnapshotService's keyed
+    //      UpsertRequest, which is listed in UnscannedWriters (the other KeyAttributeCollection uses are keyed READS or a
+    //      non-child junction). A writer that needs one must list itself in UnscannedWriters (which must call the
+    //      resolver) or extend the scanner with a negative control, never rely on the gap:
+    //        - creates: a table name that is neither a literal nor a const (a variable / a computed entity set), a keyed
+    //          construction (`new Entity(t, keyName, keyValue)` / a KeyAttributeCollection), an UpsertRequest /
+    //          CreateRequest / ExecuteMultiple built elsewhere, a POST to a computed URL, string-embedded JSON;
+    //        - owner writes: `new KeyValuePair<string, object>("ownerid", …)`, `AddRange`, a DTO property serialized as
+    //          `[JsonPropertyName("ownerid@odata.bind")]`, an owner key held in a non-const field or built at runtime,
+    //          an AssignRequest;
+    //        - the value check follows a builder's arguments only within its own FILE (calls from another file are not
+    //          seen), and its taint is name-based (a variable assigned from ANY call to a member that reaches the resolver
+    //          counts as a resolution).
     // =============================================================================================
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
@@ -449,22 +466,24 @@ public class RecordOwnerAssignmentCensusTests
                 problems.Add($"{entry.FileName}.{entry.Member}: Routed, but the file makes no IRecordOwnershipResolver call");
         }
 
+        var globalKeys = GlobalOwnerKeys(files);
         foreach (var entry in OwnerWrites.Where(e => e.Kind == OwnerWriteKind.UnfiledOnly))
         {
             var body = CodeOf(files, entry.FileName) is { } code ? MethodBody(code, entry.Member) : null;
-            if (body is null || !UnfiledOnlyGateComesFirst(body))
+            if (body is null || !UnfiledOnlyGateComesFirst(body, globalKeys))
                 problems.Add($"{entry.FileName}.{entry.Member}: UnfiledOnly, but it does not call {UnfiledGate} before its owner write");
         }
 
         Assert.True(problems.Count == 0, "Owner writes that no longer keep their kind:\n" + string.Join("\n", problems));
     }
 
-    /// <summary>True when <paramref name="memberBody"/> calls the filing gate before its first owner write.</summary>
-    private static bool UnfiledOnlyGateComesFirst(string memberBody)
+    /// <summary>True when <paramref name="memberBody"/> calls the filing gate before its first owner write — of ANY shape
+    /// the owner-write census sees (b2-r1: it used to look at <c>["ownerid"] =</c> only).</summary>
+    private static bool UnfiledOnlyGateComesFirst(string memberBody, IReadOnlySet<string>? globalKeys = null)
     {
         var gate = Regex.Match(memberBody, @"\b" + UnfiledGate + @"\s*\(");
-        var write = Regex.Match(memberBody, @"\[\s*""ownerid(?:@odata\.bind)?""\s*\]\s*=(?!=)");
-        return gate.Success && write.Success && gate.Index < write.Index;
+        var writes = OwnerWritesIn(memberBody, globalKeys ?? new HashSet<string>()).Select(w => w.Index).ToList();
+        return gate.Success && writes.Count > 0 && gate.Index < writes.Min();
     }
 
     [Fact(DisplayName = "Task 146 r2: negative control — an unlisted owner override is found, by member; a lost filing gate is found")]
@@ -495,6 +514,11 @@ public class RecordOwnerAssignmentCensusTests
             "{ var teamId = await ResolveTeamIdByNameAsync(n, ct); fields[\"ownerid\"] = new EntityReference(\"team\", teamId); }"));
         Assert.True(UnfiledOnlyGateComesFirst(
             "{ if (await " + UnfiledGate + "(id, ct)) return; fields[\"ownerid\"] = new EntityReference(\"team\", t); }"));
+
+        // b2-r1: an owner write of another shape BEFORE the gate is found too.
+        Assert.False(UnfiledOnlyGateComesFirst(
+            "{ row.SetAttributeValue(\"ownerid\", new EntityReference(\"team\", t)); if (await " + UnfiledGate
+            + "(id, ct)) return; fields[\"ownerid\"] = new EntityReference(\"team\", t); }"));
     }
 
     /// <summary>(file, member) → the 1-based lines of each owner write in it.</summary>
@@ -524,11 +548,12 @@ public class RecordOwnerAssignmentCensusTests
             .ToHashSet(StringComparer.Ordinal);
 
     /// <summary>
-    /// The owner writes in <paramref name="code"/>: the index of each and the index its VALUE starts at. Three shapes
-    /// (task 146 b2, verifier AC10 — the last two were proven blind by seeding):
+    /// The owner writes in <paramref name="code"/>: the index of each and the index its VALUE starts at. Four shapes
+    /// (task 146 b2 and b2-r1, verifier AC10 and b2 item 6 — the last three were proven blind by seeding):
     /// <list type="bullet">
     /// <item><c>x["ownerid"] = v</c> / <c>x["ownerid@odata.bind"] = v</c> (or through a const holding either key);</item>
     /// <item><c>x.Add("ownerid", v)</c> / <c>x.Attributes.Add(…)</c> / <c>TryAdd</c>;</item>
+    /// <item><c>x.SetAttributeValue("ownerid", v)</c> (b2-r1);</item>
     /// <item>a collection-initializer element <c>{ "ownerid", v }</c> — only when the element CLOSES after its value, so a
     /// list of column names (<c>{ "ownerid", "owninguser", … }</c>) is not an owner write.</item>
     /// </list>
@@ -543,7 +568,7 @@ public class RecordOwnerAssignmentCensusTests
         foreach (Match m in new Regex(@"\[\s*(?:" + keys + @")\s*\]\s*=(?![=>])").Matches(code))
             yield return (m.Index, m.Index + m.Length);
 
-        foreach (Match m in new Regex(@"\.(?:Add|TryAdd)\s*\(\s*(?:" + keys + @")\s*,").Matches(code))
+        foreach (Match m in new Regex(@"\.(?:Add|TryAdd|SetAttributeValue)\s*\(\s*(?:" + keys + @")\s*,").Matches(code))
             yield return (m.Index, m.Index + m.Length);
 
         foreach (Match m in new Regex(@"\{\s*(?:" + keys + @")\s*,").Matches(code))
@@ -617,7 +642,10 @@ public class RecordOwnerAssignmentCensusTests
     // while a sibling member made the call — proven by seeding a hard-coded team into ThreadResolver's default-thread
     // owner write. This asks it of the VALUE: every owner write in a Routed member must take its value from a resolution
     // made in that member (a resolver call, or a call to a member of the file that reaches one), from a
-    // RecordOwnerResolution handed to it, or — for a builder — from a parameter every caller of which resolves.
+    // RecordOwnerResolution handed to it, or — for a builder — from a parameter that EVERY same-file call passes a
+    // resolution in (the argument itself, in the caller; b2-r1). The b2 builder rule ("every caller reaches the resolver")
+    // passed any parameter of a member that called the resolver itself, because its callers reached it through that very
+    // member — the verifier proved it in ThreadResolver.FindOrCreateDefaultThreadAsync (verifier b2 item 5).
     // =============================================================================================
 
     [Fact(DisplayName = "Task 146 b2: every Routed owner write takes its value from a resolution in the member that writes it")]
@@ -650,8 +678,10 @@ public class RecordOwnerAssignmentCensusTests
             yield break;
         }
 
-        var reaching = MembersReachingTheResolver(code);
-        var tainted = ResolvedNamesIn(body, member, reaching, IsFedOnlyByResolvingMembers(code, member, reaching));
+        // b2-r1 (verifier item 5): the member under check never counts as reaching the resolver for its OWN value — a
+        // caller that reaches the resolver only THROUGH this member resolved nothing it could hand in.
+        var reaching = MembersReachingTheResolver(code, exclude: member);
+        var tainted = ResolvedNamesIn(body, member, reaching, ParametersFedByResolution(code, member));
 
         var writes = OwnerWritesIn(body, globalKeys).ToList();
         if (writes.Count == 0)
@@ -685,9 +715,10 @@ public class RecordOwnerAssignmentCensusTests
     /// <summary>
     /// The members of <paramref name="code"/> that reach the resolver: those whose body calls it, and — to a fixpoint —
     /// those whose body calls one of them (<c>ThreadResolver.ResolveRecordThreadOwnerAsync</c>,
-    /// <c>ExternalProjectDataEndpoints.ResolveChildOwnerAsync</c>).
+    /// <c>ExternalProjectDataEndpoints.ResolveChildOwnerAsync</c>). <paramref name="exclude"/> is never counted as
+    /// reaching, so neither is a member that reaches the resolver only through it.
     /// </summary>
-    private static HashSet<string> MembersReachingTheResolver(string code)
+    private static HashSet<string> MembersReachingTheResolver(string code, string? exclude = null)
     {
         var names = MemberDeclaration.Matches(code)
             .Select(m => Regex.Match(code[m.Index..], @"\b(?<name>\w+)\s*(?:<[^>()]*>)?\s*\(").Groups["name"].Value)
@@ -702,7 +733,7 @@ public class RecordOwnerAssignmentCensusTests
         {
             grew = false;
             var call = ResolverOrReachingCall(reaching);
-            foreach (var name in names.Where(n => !reaching.Contains(n)))
+            foreach (var name in names.Where(n => !reaching.Contains(n) && n != exclude))
             {
                 // A member's own declaration ("Name(") is not a call of itself.
                 var body = bodies[name];
@@ -719,10 +750,30 @@ public class RecordOwnerAssignmentCensusTests
         return reaching;
     }
 
-    /// <summary>True when <paramref name="member"/> is called in this file only by members that reach the resolver (and
-    /// at least once) — so the values its parameters carry are the callers' resolutions (a builder of the owned row).</summary>
-    private static bool IsFedOnlyByResolvingMembers(string code, string member, IReadOnlySet<string> reaching)
+    /// <summary>
+    /// The parameters of <paramref name="member"/> that are fed a resolution at EVERY call of it in this file (and it is
+    /// called at least once) — so a builder of the owned row may write them. Decided per ARGUMENT (b2-r1, verifier item 5):
+    /// the argument bound to the parameter (by position, or by name) must itself be a resolution in the CALLER — a
+    /// resolving call, or a name the caller's own taint holds — and never a GUID literal. The caller's taint is computed
+    /// without this member in the reaching set and without a builder clause of its own (a builder fed by a builder fails
+    /// closed). The b2 rule only asked whether every caller REACHED the resolver; a caller that reached it only through
+    /// the member itself always did, so any parameter passed — proven by the verifier with
+    /// <c>anchor!.RecordId</c> and <c>ParseKey(keyId)</c> in <c>ThreadResolver.FindOrCreateDefaultThreadAsync</c>.
+    /// Calls from OTHER files are not followed: a builder whose owner rests on its parameters must be private to the
+    /// file in practice (the two today: <c>InvoiceReviewService.BuildInvoiceCreateFields</c>,
+    /// <c>SignalEvaluationService.UpsertSignalAsync</c>).
+    /// </summary>
+    private static IReadOnlySet<string> ParametersFedByResolution(string code, string member)
     {
+        var none = new HashSet<string>(StringComparer.Ordinal);
+        var body = MethodBody(code, member);
+        if (body is null)
+            return none;
+
+        var parameters = ParametersOf(body, member).Select(p => p.Name).ToList();
+        if (parameters.Count == 0)
+            return none;
+
         var members = MemberDeclaration.Matches(code).ToList();
 
         // The '(' that opens each declaration of the member — a match ending there is the declaration, not a call.
@@ -730,38 +781,94 @@ public class RecordOwnerAssignmentCensusTests
             .Where(d => MemberNameAt(code, members, d.Index) == member)
             .Select(d => code.IndexOf('(', d.Index))
             .ToHashSet();
-        var callers = Regex.Matches(code, @"\b" + Regex.Escape(member) + @"\s*(?:<[^>()]*>)?\s*\(")
+        var calls = Regex.Matches(code, @"\b" + Regex.Escape(member) + @"\s*(?:<[^>()]*>)?\s*\(")
             .Where(m => !declarationParens.Contains(m.Index + m.Length - 1))
-            .Select(m => MemberNameAt(code, members, m.Index))
             .ToList();
+        if (calls.Count == 0)
+            return none;
 
-        return callers.Count > 0 && callers.All(reaching.Contains);
+        var reaching = MembersReachingTheResolver(code, exclude: member);
+        var call = ResolverOrReachingCall(reaching);
+        var callerTaint = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var fed = new HashSet<string>(parameters, StringComparer.Ordinal);
+
+        foreach (var site in calls)
+        {
+            var caller = MemberNameAt(code, members, site.Index);
+            if (!callerTaint.TryGetValue(caller, out var resolved))
+            {
+                callerTaint[caller] = resolved = MethodBody(code, caller) is { } callerBody
+                    ? ResolvedNamesIn(callerBody, caller, reaching, none)
+                    : new HashSet<string>(StringComparer.Ordinal);
+            }
+
+            var open = site.Index + site.Length - 1;
+            var arguments = ArgumentsByParameter(SplitTopLevel(code[(open + 1)..MatchingClose(code, open)]), parameters);
+            foreach (var parameter in parameters.Where(fed.Contains).ToList())
+            {
+                var isResolution = arguments.TryGetValue(parameter, out var argument)
+                                   && !HardCodedId.IsMatch(argument)
+                                   && (call.IsMatch(argument)
+                                       || Regex.Matches(argument, @"\b[A-Za-z_]\w*\b").Any(m => resolved.Contains(m.Value)));
+                if (!isResolution)
+                    fed.Remove(parameter);
+            }
+        }
+
+        return fed;
+    }
+
+    /// <summary>The arguments of one call keyed by the parameter each binds to: <c>name: value</c> by name, the rest by
+    /// position. A parameter left to its default is absent.</summary>
+    private static Dictionary<string, string> ArgumentsByParameter(IEnumerable<string> arguments, IReadOnlyList<string> parameters)
+    {
+        var bound = new Dictionary<string, string>(StringComparer.Ordinal);
+        var position = 0;
+        foreach (var raw in arguments.Select(a => a.Trim()).Where(a => a.Length > 0))
+        {
+            var named = Regex.Match(raw, @"^(?<n>[A-Za-z_]\w*)\s*:(?!:)\s*(?<v>[\s\S]*)$");
+            if (named.Success && parameters.Contains(named.Groups["n"].Value))
+                bound[named.Groups["n"].Value] = named.Groups["v"].Value;
+            else if (position < parameters.Count)
+                bound[parameters[position]] = raw;
+            position++;
+        }
+
+        return bound;
+    }
+
+    /// <summary>The parameters of <paramref name="member"/>, in order (name and declaration text). The list opens right
+    /// after the member's NAME (a tuple return type has a '(' of its own before it).</summary>
+    private static IReadOnlyList<(string Name, string Text)> ParametersOf(string body, string member)
+    {
+        var name0 = Regex.Match(body, @"\b" + Regex.Escape(member) + @"\s*(?:<[^>()]*>)?\s*\(");
+        if (!name0.Success)
+            return Array.Empty<(string, string)>();
+
+        var open = name0.Index + name0.Length - 1;
+        return SplitTopLevel(body[(open + 1)..MatchingClose(body, open)])
+            .Select(p => (Name: Regex.Match(p, @"(?<name>\w+)\s*(?:=[^,]*)?\s*$").Groups["name"].Value, Text: p))
+            .Where(p => p.Name.Length > 0)
+            .ToList();
     }
 
     /// <summary>
     /// The names in <paramref name="body"/> that hold a resolution (a crude taint): parameters typed
-    /// <c>RecordOwnerResolution</c>; every parameter when <paramref name="fedByResolution"/>; any variable assigned from a
-    /// resolver call, a call to a reaching member, or an expression over a resolved name; any pattern variable bound from
-    /// a resolved name or a resolving call (<c>recordOwner is { } ownerTeamId</c>,
-    /// <c>await ResolveSnapshotOwnerAsync(…) is not { } owningTeamId</c>) — to a fixpoint.
+    /// <c>RecordOwnerResolution</c>; the parameters in <paramref name="fedParameters"/> (fed a resolution at every call,
+    /// <see cref="ParametersFedByResolution"/>); any variable assigned from a resolver call, a call to a reaching member,
+    /// or an expression over a resolved name; any pattern variable bound from a resolved name or a resolving call
+    /// (<c>recordOwner is { } ownerTeamId</c>, <c>await ResolveSnapshotOwnerAsync(…) is not { } owningTeamId</c>) — to a
+    /// fixpoint.
     /// </summary>
     private static HashSet<string> ResolvedNamesIn(
-        string body, string member, IReadOnlySet<string> reaching, bool fedByResolution)
+        string body, string member, IReadOnlySet<string> reaching, IReadOnlySet<string> fedParameters)
     {
         var resolved = new HashSet<string>(StringComparer.Ordinal);
 
-        // The parameter list opens right after the member's NAME (a tuple return type has a '(' of its own before it).
-        var name0 = Regex.Match(body, @"\b" + Regex.Escape(member) + @"\s*(?:<[^>()]*>)?\s*\(");
-        var open = name0.Success ? name0.Index + name0.Length - 1 : -1;
-        if (open >= 0)
+        foreach (var (name, text) in ParametersOf(body, member))
         {
-            var close = MatchingClose(body, open);
-            foreach (var parameter in SplitTopLevel(body[(open + 1)..close]))
-            {
-                var name = Regex.Match(parameter, @"(?<name>\w+)\s*(?:=[^,]*)?\s*$").Groups["name"].Value;
-                if (name.Length > 0 && (fedByResolution || parameter.Contains("RecordOwnerResolution", StringComparison.Ordinal)))
-                    resolved.Add(name);
-            }
+            if (fedParameters.Contains(name) || text.Contains("RecordOwnerResolution", StringComparison.Ordinal))
+                resolved.Add(name);
         }
 
         var call = ResolverOrReachingCall(reaching);
@@ -879,6 +986,78 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "FromResolution", keys));
         Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "BuildFields", keys));
         Assert.Single(RoutedValueProblems(code, "Seeded.cs", "BuildUnfedFields", keys)); // fed by a non-resolving caller
+    }
+
+    [Fact(DisplayName = "Task 146 b2-r1: negative control — a parameter-sourced owner fails, even in a member that resolves itself")]
+    public void RoutedValueCheck_NegativeControl_ParameterSourcedOwner()
+    {
+        // The verifier's b2 item 5, seeded: a member that calls the resolver ITSELF writes the owner from a parameter. Its
+        // only caller reaches the resolver through that very member, so the b2 rule ("every caller reaches the resolver")
+        // tainted every parameter and passed both writes.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private static readonly Guid OtherTeam = Guid.NewGuid();",
+            "    private async Task<Guid?> ResolveRowOwnerAsync(Anchor? anchor, CancellationToken ct)",
+            "    {",
+            "        var owner = await _ownership.ResolveOwnerAsync(Context(anchor), ct);",
+            "        return owner.OwningTeamId;",
+            "    }",
+            "    private async Task<Guid> FindOrCreateFromAnchorAsync(string keyId, Anchor? anchor, CancellationToken ct)",
+            "    {",
+            "        var recordOwner = await ResolveRowOwnerAsync(anchor, ct);",
+            "        var thread = new Entity(\"sprk_communicationthread\");",
+            "        if (recordOwner is { } ownerTeamId)",
+            "            thread[\"ownerid\"] = new EntityReference(\"team\", anchor!.RecordId);",
+            "        return await _svc.CreateAsync(thread, ct);",
+            "    }",
+            "    private async Task<Guid> FindOrCreateFromKeyAsync(string keyId, Anchor? anchor, CancellationToken ct)",
+            "    {",
+            "        var recordOwner = await ResolveRowOwnerAsync(anchor, ct);",
+            "        var thread = new Entity(\"sprk_communicationthread\");",
+            "        if (recordOwner is { } ownerTeamId)",
+            "            thread[\"ownerid\"] = new EntityReference(\"team\", ParseKey(keyId));",
+            "        return await _svc.CreateAsync(thread, ct);",
+            "    }",
+            "    private async Task<Guid> FindOrCreateOwnedAsync(string keyId, Anchor? anchor, CancellationToken ct)",
+            "    {",
+            "        var recordOwner = await ResolveRowOwnerAsync(anchor, ct);",
+            "        var thread = new Entity(\"sprk_communicationthread\");",
+            "        if (recordOwner is { } ownerTeamId)",
+            "            thread[\"ownerid\"] = new EntityReference(\"team\", ownerTeamId);",
+            "        return await _svc.CreateAsync(thread, ct);",
+            "    }",
+            "    private async Task LadderAsync(Request request, CancellationToken ct)",
+            "    {",
+            "        var anchor = await ReadAnchorAsync(request.Id, ct);",
+            "        var a = await FindOrCreateFromAnchorAsync(anchor.RecordId, anchor, ct);",
+            "        var k = await FindOrCreateFromKeyAsync(anchor.RecordId, anchor, ct);",
+            "        var o = await FindOrCreateOwnedAsync(anchor.RecordId, anchor, ct);",
+            "    }",
+            // A caller that DOES resolve — and hands the builder something else.
+            "    private static Dictionary<string, object> BuildHandedFields(string name, Guid teamId) => new() { { \"ownerid\", new EntityReference(\"team\", teamId) } };",
+            "    private async Task ResolvesButHandsAnotherTeamAsync(Guid id, CancellationToken ct)",
+            "    {",
+            "        var team = await _ownership.ResolveOwningTeamAsync(Context(id), ct);",
+            "        var fields = BuildHandedFields(\"x\", OtherTeam);",
+            "    }",
+            // The same builder shape, fed its resolution by NAME at every call — accepted.
+            "    private static Dictionary<string, object> BuildNamedFields(string name, Guid teamId) => new() { { \"ownerid\", new EntityReference(\"team\", teamId) } };",
+            "    private async Task FeedsByNameAsync(Guid id, CancellationToken ct)",
+            "    {",
+            "        var team = await _ownership.ResolveOwningTeamAsync(Context(id), ct);",
+            "        var fields = BuildNamedFields(teamId: team!.Value, name: \"x\");",
+            "    }",
+            "}",
+        });
+        var keys = new HashSet<string>();
+
+        Assert.Single(RoutedValueProblems(code, "Seeded.cs", "FindOrCreateFromAnchorAsync", keys)); // anchor!.RecordId
+        Assert.Single(RoutedValueProblems(code, "Seeded.cs", "FindOrCreateFromKeyAsync", keys));    // ParseKey(keyId)
+        Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "FindOrCreateOwnedAsync", keys));       // its own resolution
+        Assert.Single(RoutedValueProblems(code, "Seeded.cs", "BuildHandedFields", keys));           // a resolving caller, another value
+        Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "BuildNamedFields", keys));             // fed by name
     }
 
     /// <summary>
@@ -1207,6 +1386,41 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Equal(4, sites[("Seeded.cs", "sprk_todo")].Count); // A, B, C, D — never the updates E and F
     }
 
+    [Fact(DisplayName = "Task 146 b2-r1: negative control — a create naming its table through LogicalName is a create; an update is not")]
+    public void Detector_NegativeControl_LogicalNameCreates()
+    {
+        // The verifier's b2 item 6 seed: `new Entity { LogicalName = "sprk_todo" }` + CreateAsync — an owner-less app-only
+        // create of a listed table — was invisible to the census.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private const string TodoEntity = \"sprk_todo\";",
+            "    private async Task A() { var row = new Entity { LogicalName = \"sprk_todo\" }; await _s.CreateAsync(row, ct); }",
+            "    private async Task B() { await _s.CreateAsync(new Entity() { LogicalName = TodoEntity, [\"sprk_name\"] = \"x\" }, ct); }",
+            "    private async Task C() { var row = new Entity(); row.LogicalName = \"sprk_todo\"; await _s.CreateAsync(row, ct); }",
+            "    private async Task D(Guid existing) { await _s.UpdateAsync(new Entity { LogicalName = \"sprk_todo\", Id = existing }, ct); }",
+            "    private async Task E() { var row = new Entity { LogicalName = \"sprk_todo\", Id = Guid.NewGuid() }; await _s.UpsertAsync(row, ct); }",
+            "    private void F() { var request = new RetrieveEntityRequest { LogicalName = \"sprk_todo\" }; }",
+            "    private async Task G(RecordOwnerResolution owner) { var row = new Entity { LogicalName = \"sprk_todo\", [\"sprk_regarding\"] = new EntityReference { LogicalName = \"sprk_matter\", Id = m } }; owner.ApplyTo(row); await _s.CreateAsync(row, ct); }",
+            "    private void H(Guid existing) { var row = new Entity(); row.LogicalName = \"sprk_todo\"; row.Id = existing; }",
+            "    private async Task I(Guid team) { var row = new Entity(); row.LogicalName = \"sprk_todo\"; row.SetAttributeValue(\"ownerid\", new EntityReference(\"team\", team)); await _s.CreateAsync(row, ct); }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+
+        var sites = ScanSites(files);
+
+        Assert.Equal(new[] { 4, 5, 6, 8, 10, 12 }, sites[("Seeded.cs", "sprk_todo")].OrderBy(l => l)); // A B C E G I
+        Assert.False(sites.ContainsKey(("Seeded.cs", "sprk_matter")));                                 // the nested reference
+
+        // As Routed sites: A, B, C and E write no owner on their row; G (ApplyTo) and I (SetAttributeValue) do.
+        var problems = SiteOwnerProblems(code, "Seeded.cs", "sprk_todo", ScanSiteIndexes(files)[("Seeded.cs", "sprk_todo")]).ToList();
+        Assert.Equal(4, problems.Count);
+        Assert.DoesNotContain(problems, p => p.Contains("Seeded.cs:10", StringComparison.Ordinal));
+        Assert.DoesNotContain(problems, p => p.Contains("Seeded.cs:12", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "Task 146 b2: negative control — Add(...) and initializer owner writes are found; a list of column names is not")]
     public void OwnerWriteDetector_NegativeControl_AddAndInitializerForms()
     {
@@ -1220,15 +1434,19 @@ public class RecordOwnerAssignmentCensusTests
             "    private Dictionary<string, object> Initializer(Guid t) => new() { { \"ownerid\", new EntityReference(\"team\", t) } };",
             "    private static readonly HashSet<string> ServerColumns = new() { \"ownerid\", \"owninguser\", \"createdby\" };",
             "    private void ColumnList(List<string> c) { c.Add(\"ownerid\"); }",
+            // b2-r1 (verifier b2 item 6): the SDK's SetAttributeValue — an owner write; one on another column is not.
+            "    private void SetOwner(Entity row, Guid t) { row.SetAttributeValue(\"ownerid\", new EntityReference(\"team\", t)); }",
+            "    private void SetPaging(XElement root, string c) { root.SetAttributeValue(\"paging-cookie\", c); }",
             "}",
         });
 
         var sites = ScanOwnerWrites(new Dictionary<string, string> { ["Seeded.cs"] = code });
 
-        Assert.Equal(3, sites.Count);
+        Assert.Equal(4, sites.Count);
         Assert.Contains(("Seeded.cs", "AttributesAdd"), sites.Keys);
         Assert.Contains(("Seeded.cs", "DictionaryAdd"), sites.Keys);
         Assert.Contains(("Seeded.cs", "Initializer"), sites.Keys);
+        Assert.Contains(("Seeded.cs", "SetOwner"), sites.Keys);
     }
 
     [Fact(DisplayName = "Task 146 b2: negative control — the per-site check needs an owner on an upsert's field map")]
@@ -1423,8 +1641,15 @@ public class RecordOwnerAssignmentCensusTests
             var construction = code[index..(statementEnd < 0 ? code.Length : statementEnd)];
             var lead = code[Math.Max(0, index - 120)..index];
             var assigned = Regex.Match(lead, @"\b(?<v>[A-Za-z_]\w*)\s*=\s*$");
-            var isPost = !construction.StartsWith("new", StringComparison.Ordinal)
-                         || construction.StartsWith("new HttpRequestMessage", StringComparison.Ordinal);
+
+            // b2-r1: `e.LogicalName = "t";` — the row is `e`, named by the site itself.
+            var namedRow = Regex.Match(construction, @"^(?<v>[A-Za-z_]\w*)\s*\.\s*LogicalName\s*=");
+            if (namedRow.Success)
+                assigned = namedRow;
+
+            var isPost = !namedRow.Success
+                         && (!construction.StartsWith("new", StringComparison.Ordinal)
+                             || construction.StartsWith("new HttpRequestMessage", StringComparison.Ordinal));
 
             bool written;
             if (Regex.IsMatch(construction, ownerKey))
@@ -1495,7 +1720,7 @@ public class RecordOwnerAssignmentCensusTests
     {
         var name = Regex.Escape(v);
         if (Regex.IsMatch(region,
-                $@"\b{name}\s*\[\s*(?:{ownerKey})\s*\]\s*=|\b{name}(?:\.Attributes)?\.(?:Add|TryAdd)\s*\(\s*(?:{ownerKey})\s*,"
+                $@"\b{name}\s*\[\s*(?:{ownerKey})\s*\]\s*=|\b{name}(?:\.Attributes)?\.(?:Add|TryAdd|SetAttributeValue)\s*\(\s*(?:{ownerKey})\s*,"
                 + $@"|\.ApplyTo\s*\(\s*{name}\s*\)|\bApply\w*Owner\w*\s*\(\s*{name}\b"))
         {
             return true;
@@ -1586,9 +1811,93 @@ public class RecordOwnerAssignmentCensusTests
                 if (IsFreshId(code, members, m.Index, m.Groups["rid"].Value))
                     Add(Resolve(m), m.Index);
             }
+
+            // Task 146 b2-r1 (verifier b2 item 6): a construction that names its table through LogicalName — in its
+            // object initializer (`new Entity { LogicalName = "t" }`), or assigned in the same member after a
+            // parameterless construction (`var e = new Entity(); e.LogicalName = "t";`). A create, exactly like the
+            // one-argument form, unless the row is given an EXISTING id (`Id = existing` / `e.Id = existing`).
+            foreach (Match m in InitializerEntityCreate.Matches(code))
+            {
+                var open = m.Index + m.Length - 1;
+                var initializer = TopLevelOfInitializer(code[open..(MatchingClose(code, open) + 1)]);
+                var named = InitializerLogicalName.Match(initializer);
+                if (!named.Success)
+                    continue;
+
+                var id = InitializerId.Match(initializer);
+                if (!id.Success || IsFreshId(code, members, m.Index, id.Groups["rid"].Value))
+                    Add(Resolve(named), m.Index);
+            }
+
+            foreach (Match m in LogicalNameAssignment.Matches(code))
+            {
+                var v = Regex.Escape(m.Groups["v"].Value);
+                var start = members.LastOrDefault(i => i <= m.Index);
+                var end = members.FirstOrDefault(i => i > m.Index);
+                var member = code[start..(end > m.Index ? end : code.Length)];
+                var constructed = Regex.IsMatch(member,
+                    $@"\b{v}\s*=\s*new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*(?:\(\s*\))?\s*[;{{]"
+                    + $@"|\b(?:DataverseEntity|Entity)\s+{v}\s*=\s*new\s*\(\s*\)");
+                if (!constructed)
+                    continue;
+
+                var id = Regex.Match(member, $@"\b{v}\s*\.\s*Id\s*=\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.]*)");
+                if (!id.Success || IsFreshId(code, members, m.Index, id.Groups["rid"].Value))
+                    Add(Resolve(m), m.Index);
+            }
         }
 
         return sites;
+    }
+
+    /// <summary>An entity construction with an object initializer and no constructor argument — the match ends at the
+    /// initializer's opening brace.</summary>
+    private static readonly Regex InitializerEntityCreate = new(
+        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*(?:\(\s*\))?\s*\{",
+        RegexOptions.Compiled);
+
+    /// <summary>The table an entity initializer names (top level only — not a nested EntityReference's).</summary>
+    private static readonly Regex InitializerLogicalName = new(
+        @"\bLogicalName\s*=\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))",
+        RegexOptions.Compiled);
+
+    /// <summary>The id an entity initializer gives its row (top level only).</summary>
+    private static readonly Regex InitializerId = new(
+        @"\bId\s*=\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.]*)",
+        RegexOptions.Compiled);
+
+    /// <summary><c>e.LogicalName = "t";</c> — a create when <c>e</c> was constructed without a table in the same member.</summary>
+    private static readonly Regex LogicalNameAssignment = new(
+        @"\b(?<v>[A-Za-z_]\w*)\s*\.\s*LogicalName\s*=\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*;",
+        RegexOptions.Compiled);
+
+    /// <summary>An initializer's text with every NESTED brace's content blanked, so a nested
+    /// <c>new EntityReference { LogicalName = …, Id = … }</c> is never read as the row's own table or id.</summary>
+    private static string TopLevelOfInitializer(string braced)
+    {
+        var chars = braced.ToCharArray();
+        var depth = 0;
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] == '{')
+            {
+                depth++;
+                if (depth > 1)
+                    chars[i] = ' ';
+            }
+            else if (chars[i] == '}')
+            {
+                if (depth > 1)
+                    chars[i] = ' ';
+                depth--;
+            }
+            else if (depth > 1)
+            {
+                chars[i] = ' ';
+            }
+        }
+
+        return new string(chars);
     }
 
     /// <summary>A field-map PATCH of a record id — a CREATE when the id is fresh (Dataverse upserts).</summary>

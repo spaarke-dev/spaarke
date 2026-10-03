@@ -43,8 +43,10 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// separate write and read back — the same re-file every other BFF writer makes. Before anything is decided, the caller
 /// must see the row and hold AppendTo on each record it is moved under, so a refusal never answers questions about
 /// records they cannot see. A row of any other table moved under a SECURE record is refused (it cannot be re-owned here).
-/// The owner assignment is the one app-only step (owner S1 / G5: "owned by the team, never the user"; CLAUDE.md §6.5
-/// path A recorded in the task note).
+/// The app-only steps are the resolver's reads, the owner assignment and, if that assignment fails, the restore of the
+/// filing columns the PATCH moved (owner S1 / G5: "owned by the team, never the user"). They run under CLAUDE.md §6.5
+/// PATH A, task 146 note §12c, which stays in force for this tool. spaarke-ai-architecture-redesign-r1 spec Amendment
+/// A-UAC146 (path B, owner round 7 item 3) covers the two CREATE tools only, and records this exception beside it.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,

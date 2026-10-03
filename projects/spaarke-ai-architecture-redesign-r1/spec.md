@@ -274,7 +274,8 @@ it does not re-open design.
   tool chain to the ledger before rendering; ✅ MUST gate side effects via the ONE gate by
   declared `side_effect_class`; ✅ MUST keep both catalogs closed; ✅ MUST run user-OBO for all
   Dataverse tool access (**AMENDED 2026-10-02 for the two CREATE tools — see "Amendment A-UAC146" under ADR
-  Tensions**); ✅ MUST ship Null-Object peers for gated registrations (ADR-032);
+  Tensions, which also records the update tool's app-only re-file owner assignment, a separate path-A exception**);
+  ✅ MUST ship Null-Object peers for gated registrations (ADR-032);
   ✅ MUST keep new composites as `coded` workflows.
 - ❌ MUST NOT add a second intent-detection mechanism anywhere; ❌ MUST NOT add routing config
   outside the Binding table; ❌ MUST NOT gate by tool-name lists; ❌ MUST NOT land new capability
@@ -304,8 +305,10 @@ it does not re-open design.
   app-only Dataverse path reachable from AI"), for the two CREATE tools only: `dataverse.create_record`
   (`DataverseCreateRecordHandler`) and `email.draft` (`EmailDraftToolHandler`).
 - **Path**: CLAUDE.md §6.5 **path B**, decided by the owner — unified-access-control-r2 owner decisions round 7
-  item 3 (`projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`). It supersedes the
-  narrower path-A exception task 146 r2 had recorded (filed child rows only).
+  item 3 (`projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`). For the two create
+  tools it supersedes the narrower path-A exception task 146 r2 had recorded (filed child rows only). The same r2
+  record's OTHER scope — the update tool's re-file owner assignment — is NOT superseded; see "Not user-OBO, and not
+  covered by this amendment" below.
 - **New rule (the G5 pattern)**: check the caller's rights AS THE USER (Create on the table — plus Append when the row
   sets a lookup — and AppendTo on every record a lookup names, via `RetrievePrincipalAccess`; no field-secured or
   owner/audit column), then the APPLICATION creates the row OWNED BY THE TEAM `IRecordOwnershipResolver` names (the named
@@ -314,11 +317,24 @@ it does not re-open design.
 - **Why**: a run-as-user create leaves the row owned by the caller in their own business unit — readable by every
   colleague with ordinary depth, including the children of a secure record (UAC C10, CRITICAL), and contrary to owner
   round 5 ("records … assigned to the creating user's business unit/team").
-- **Still user-OBO**: every read, update and delete tool, and the creates where the resolver keeps the creator
-  (per-user tables, unfiled communications/threads — UAC escalation E1/E2 — and tables with no user/team ownership).
-- **Implementation and tests**: `Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs`;
+- **Still user-OBO**: every read and delete tool; every update tool's PATCH; and the creates where the resolver keeps
+  the creator (per-user tables, unfiled communications/threads — UAC escalation E1/E2 — and tables with no user/team
+  ownership).
+- **Not user-OBO, and not covered by this amendment — the update tool's re-file** (`dataverse.update_record`,
+  `DataverseUpdateRecordHandler`). When the caller's PATCH sets or clears a lookup to a project, matter, work assignment
+  or other ownership parent on a CHILD table, the row is re-filed through `RecordOwnershipResolver.ReparentAsync`. After
+  as-the-caller checks (the row is visible to them; AppendTo on every record it is moved under), the resolver reads the
+  row and its parents' owners APP-ONLY, the caller's own PATCH is applied (still user-OBO — Dataverse authorizes it),
+  and the owner is then ASSIGNED APP-ONLY and read back. If that assignment fails, the filing columns the PATCH moved
+  are restored APP-ONLY. These steps run under task 146 r2's **CLAUDE.md §6.5 path-A** project-scoped exception (owner
+  decisions S1 / G5: "owned by the team, never the user"), recorded in
+  `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §12c. That record stays in force for this
+  scope. The owner's round-7 decision names only the two create tools, so it is not claimed here. Folding this step into
+  path B is the owner's call at review.
+- **Implementation and tests**: `Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs` (creates),
+  `Services/Ai/Handlers/DataverseUpdateRecordHandler.cs` (the re-file);
   `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs`; record:
-  `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §13.
+  `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §12c, §13 and §14.
 
 ## Success Criteria
 

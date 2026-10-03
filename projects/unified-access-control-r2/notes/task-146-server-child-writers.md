@@ -608,7 +608,9 @@ Several 152 tests needed fixes the merge could not see:
   resolution. Accepted sources:
   - a resolution made in that member: a resolver call, or a call to a same-file member that reaches one;
   - a `RecordOwnerResolution` parameter;
-  - for a builder: a parameter every same-file caller of which resolves.
+  - for a builder: a parameter every same-file caller of which resolves. **Superseded in b2-r1 (§14a):** this let a
+    member that resolves ITSELF write any of its parameters, because its callers reached the resolver through it. The
+    rule is now per ARGUMENT: every same-file call must pass a resolution in that parameter's position.
 
   The check is a crude taint: assignments, `is { } x` bindings and fixpoint. A GUID literal or `Guid.Parse` is always
   rejected.
@@ -687,7 +689,9 @@ fields:
 3. The APPLICATION creates the row by a fresh-id PATCH that carries the owner.
 4. The caller is named in the table's "for" column.
 
-This supersedes r2's narrower path A (filed child rows only).
+For the two create tools, this supersedes r2's narrower path A (filed child rows only). **It does not supersede §12c's
+other scope** (b2-r1, verifier b2 item 7): `dataverse.update_record`'s re-file owner assignment is still app-only under
+§12c's path A, which stays in force for it (§14c).
 
 **The creator is kept** (a run-as-user create) only where the resolver's own rules keep it:
 
@@ -741,6 +745,12 @@ automatically". Changing it needs three things at once:
 Without step 3, `RoutingConsumerTypeHealthCheck` reports the BFF Unhealthy on description drift. **Follow-up for the
 main session (with the deploy):** replace that sentence in all three with "Records you create are owned by the team of
 the record they are filed under (or your own team) and name you as their Assigned To where the table has one."
+
+**b2-r1 addition: a fourth place carries the same false claim.** The `create-matter` Binding row's `toolDescription`
+(`CREATE-MATTER@v1`, `infra/dataverse/sprk_playbookconsumer-rows.json`) ends its `dataverse.create_record`
+instructions with "Records you create belong to the calling user automatically". Its live row is pushed by
+`scripts/dataverse/Seed-PlaybookConsumers.ps1`. Change it in the same follow-up. `.claude/catalogs/scope-model-index.json`
+is a generated snapshot: refresh it with `/jps-scope-refresh` after the re-push.
 
 ### 13c. Owner round 7 item 4: the live role extension, 9 → 26 tables (READY, not applied)
 
@@ -807,6 +817,10 @@ foreach ($t in $pending) {
 # 5) NFR-05 census live run (clause 5: 26 of 26 at Basic):
 $env:SPAARKE_NFR05_DATAVERSE_URL = $DvUrl; $env:SPAARKE_NFR05_REQUIRED = 'true'; $env:AZURE_TOKEN_CREDENTIALS = 'AzureCliCredential'
 dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "Category=LiveDataverseRoleDepth" --logger "console;verbosity=detailed"
+#    Reading step 5 in dev (b2-r1, #1081): the test asserts EVERY clause and headlines a clause-1 exposure over a
+#    clause-5 gap. The root team 'Spaarke' now holds Spaarke Basic User (#1081, decided 2026-10-02) — an accepted dev
+#    finding under owner round 5. A red verdict naming that root reach is therefore NOT a G146-1 failure. G146-1 passes
+#    on the summary line "... covering 26 of 26 codified table(s) at Basic" with no clause-5 table named in the message.
 ```
 
 Before/after for the record: before = the 9 above; after = 26, all Basic, diff +17, nothing removed.
@@ -930,10 +944,234 @@ There is no new service, endpoint, DI registration, option, job or package. The 
 > - `dataverse.create_record` applies the G5 pattern to EVERY create: an as-the-caller rights check, an app-only
 >   create owned by the resolver's team, and the caller in the table's Assigned-To / "for" column. This is a §6.5
 >   **path B** amendment of spaarke-ai-architecture-redesign-r1's "user-OBO for all Dataverse tool access" MUST, and it
->   supersedes r2's path A.
+>   supersedes r2's path A for the two create tools. (b2-r1: `dataverse.update_record`'s re-file owner assignment stays
+>   under r2's path A, §12c — see §14e for the consolidated PR text.)
 > - The creator is kept only for per-user tables, unfiled communications (E1) and non-user-owned tables.
 > - `email.draft` is unchanged: filed drafts are G5, unfiled drafts follow E1.
 >
 > **G146-1 (Secure Record Owner role, 9 → 26 tables) must run BEFORE this deploys.** A re-file whose owner assignment
 > fails is now rolled back (or left in the safe direction) and logged CRITICAL. The FR-E7 routing owner write is
 > conditional on the version its filing was read at.
+
+## 14. Fix round b2-r1 (2026-10-02, branch `task/uac-r2-146-b2-r1`)
+
+**Base.** `task/uac-r2-146-b2` @ `aa512cbda`, with `work/unified-access-control-r2` @ `ea6484102` merged in (merge
+commit `b5e55cf9d`, no conflicts). The merge brings `8531711d6`, the integration fixtures for batch 3, and `ea6484102`,
+the project hard gate "run both integration suites in full before a PR".
+
+### 14a. The b2 verifier's items
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Re-run of the committed tree | Informational. Nothing to do. |
+| 2 | On the branch HEAD, the integration suites failed 3 tests inherited from the base | **Closed.** The work tip is merged (`b5e55cf9d`). Both suites were run in full on the merged tree, with the counts in §14d. |
+| 3, 4 | Behaviour and census seed-and-bite: every plant bit | Informational. |
+| 5 | The per-member owner-value check passed an owner taken from ANY parameter of a Routed member that calls the resolver itself | **Closed** (§14b). The builder clause is now decided per ARGUMENT, and the member under check never counts as reaching the resolver. Negative control added. The verifier's two seeds bite (S1, S2), and so do two seeds the old rule also passed (S3, S4). |
+| 6 | Two blind spots: `row.SetAttributeValue("ownerid", …)`, and an owner-less `new Entity { LogicalName = "sprk_todo" }` create | **Closed** (§14b). Both shapes are seen, plus `e.LogicalName = …` after `new Entity()`, with negative controls. Seeds S5, S6 and S7 bite. The shapes still unseen are listed in the census's MAINTENANCE PROCEDURE item 4 ("KNOWN LIMITS"). |
+| 7 | The update tool's app-only owner assignment was recorded nowhere current | **Closed** (§14c). §12c's path A is kept in force for that step and recorded wherever the amendment is. |
+| 8 | The model-facing description of `dataverse.create_record` is false for owned creates | **Deferred to the main session, unchanged.** It needs a live re-push. b2-r1 found a fourth place carrying the same sentence, the `create-matter` Binding row, and added it to the follow-up in §13b. |
+| 9, 10 | Merge resolution; round 7 items 3 and 4 | Informational: confirmed by the verifier. |
+| 11 | AC10 | **Closed** by items 5 and 6. |
+| 12 | AC13 | **Partly closed.** The merge is done, and the unit, arch and both integration suites are green (§14d). Publish size and #1034 belong to the main session. |
+| 13 | AC11 | **Not closed.** G146-4 is a live gate, run after deploy together with task 149. |
+| 14 | AC14 | **Not closed.** G146-1, the live grant of 17 new tables, is a hard pre-deploy gate for the main session. Its evidence entries stay `VERBATIM REFUSAL PENDING` until the live negative control writes them. |
+| 15 | AC16 | **Not closed.** This session may not open a PR. The consolidated PR text is in §14e. It cites the pairing with task 149, the ordering with task 152, path B (Amendment A-UAC146) and path A (§12c). |
+
+### 14b. Census changes (`tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs`)
+
+**Item 5: the per-member value check.**
+- **The b2 defect.** The builder clause asked whether every same-file CALLER of a member reached the resolver.
+  A member that calls the resolver itself makes each of its callers "reach" it through that very call. So for any such
+  member the clause passed trivially, and every parameter counted as a resolution.
+- **The new rule** (`ParametersFedByResolution`). A parameter counts as a resolution only when EVERY same-file call
+  passes a resolution in that argument:
+  - the argument is matched by name (`teamId: …`) or by position;
+  - it must be a resolving call, or name a value the CALLER's own taint holds;
+  - it must never be a GUID literal.
+  The caller's taint is computed without the member in the reaching set and without a builder clause of its own, so a
+  builder fed by another builder fails closed.
+- **No self-credit.** `MembersReachingTheResolver(code, exclude: member)` keeps the member under check out of the
+  reaching set for its own value.
+- **No change on the real tree.** The two real builders pass under the new rule, because each caller hands in its
+  resolution: `InvoiceReviewService.BuildInvoiceCreateFields` gets `ownerTeamId.Value`, and
+  `SignalEvaluationService.UpsertSignalAsync` gets `owner.OwningTeamId!.Value`.
+- **Negative control** `RoutedValueCheck_NegativeControl_ParameterSourcedOwner`. Each case and its result:
+
+  | Case | Result |
+  |---|---|
+  | A self-resolving member writes `anchor!.RecordId` (the verifier's first seed) | flagged |
+  | The same member writes `ParseKey(keyId)` (the verifier's second seed) | flagged |
+  | The same member writes its own resolution | passes |
+  | A builder whose caller resolves but hands it another team | flagged |
+  | A builder fed its resolution by named argument | passes |
+
+**Item 6: shapes the census now sees.**
+- **Owner writes.** `x.SetAttributeValue(KEY, v)` is now an owner write. It is matched in `OwnerWritesIn` (the
+  owner-write census and the value check) and in `WritesOwnerOn` (the per-site check).
+- **The filing-gate check.** `UnfiledOnlyGateComesFirst` now checks the gate against the first owner write of ANY shape.
+  Before, it checked only `["ownerid"] =`.
+- **Creates.** `ScanSiteIndexes` counts two new shapes:
+  - `new Entity { LogicalName = T }` / `new Entity() { LogicalName = T, … }`;
+  - `e.LogicalName = T;` where the same member constructs `e = new Entity()`.
+
+  Neither counts when the row is given an EXISTING id (`Id = existing` / `e.Id = existing`). A fresh id still counts.
+  A nested `new EntityReference { LogicalName = …, Id = … }` is ignored, because only the initializer's top level is
+  read. For `e.LogicalName =`, the per-site check looks for the owner on `e`.
+- **Negative controls:**
+  - `Detector_NegativeControl_LogicalNameCreates`: 6 creates are found and 3 non-creates are not. As Routed sites, the
+    4 owner-less creates are flagged and the 2 owned ones are not (one owned by `ApplyTo`, one by `SetAttributeValue`).
+  - `OwnerWriteDetector_NegativeControl_AddAndInitializerForms` adds a `SetAttributeValue("ownerid", …)` write, which is
+    found, and an `XElement.SetAttributeValue("paging-cookie", …)`, which is not.
+  - `OwnerWriteDetector_NegativeControl` adds a `SetAttributeValue` owner write placed before the filing gate, which is
+    flagged.
+- **Known limits.** These are now written in the census's MAINTENANCE PROCEDURE item 4:
+  - creates:
+    - a table name that is neither a literal nor a const;
+    - keyed constructions;
+    - `UpsertRequest`, `CreateRequest` or `ExecuteMultiple` built elsewhere;
+    - a POST to a computed URL;
+    - string-embedded JSON;
+  - owner writes:
+    - `new KeyValuePair<string, object>("ownerid", …)`;
+    - `AddRange`;
+    - a `[JsonPropertyName("ownerid@odata.bind")]` DTO property;
+    - an owner key held in a non-const field;
+    - an `AssignRequest`;
+  - the value check follows a builder's arguments only within its own file, and its taint is name-based.
+
+  Grep on 2026-10-02: none of these shapes creates a listed child table or writes an owner in `src/server`, except
+  `SpendSnapshotService`'s keyed `UpsertRequest`, which is already in `UnscannedWriters`.
+
+### 14c. Item 7: the update tool's app-only owner assignment
+
+**What the code does.** `dataverse.update_record` re-files a CHILD row through `ReparentAsync`:
+1. The checks run as the caller: the row must be visible to them, and they must hold AppendTo on each record it moves
+   under.
+2. The resolver's reads run app-only.
+3. The caller's own PATCH runs user-OBO.
+4. The owner ASSIGNMENT and its read-back run app-only.
+5. If that assignment fails, the filing columns the PATCH moved are restored app-only.
+
+**Why §12c stays in force.** Before b2-r1, those app-only steps were covered only by §12c's path A. §13b, §13g, the
+spec amendment and the audit header all said they superseded §12c, while the amendment also said "updates stay
+user-OBO". Round 7 item 3 names the two CREATE tools, so b2-r1 does not claim that path B covers the update step. §12c's
+path A stays in force for it, and every place now says so:
+- `projects/spaarke-ai-architecture-redesign-r1/spec.md`: the MUST-rule marker; the amendment's "Path"; a new "Not
+  user-OBO, and not covered by this amendment" bullet; "Still user-OBO" narrowed to reads, deletes and every update's
+  PATCH;
+- `projects/spaarke-ai-architecture-redesign-r1/notes/user-obo-audit.md`: the header;
+- `DataverseUpdateRecordHandler`'s XML doc and `OwnedChildWrite`'s remarks;
+- `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` row I-2;
+- this note: §13b, §13g and §14e.
+
+**Owner option, offered at PR review.** Folding the update step into path B is the owner's call.
+
+### 14d. Tests
+
+**Counts on the merged tree** (`b5e55cf9d` plus this round's changes, Debug, 2026-10-02), each suite run once in full:
+
+| Suite | Result |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests` | 14,373 passed / 0 failed / 54 skipped (14,427) |
+| `tests/Spaarke.ArchTests` | 368 / 368. The census has 23 tests: +2, and 2 negative controls extended. |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | 104 / 104 |
+| `tests/integration/Spe.Integration.Tests` | 403 passed / 0 failed / 25 skipped |
+
+The integration figures match the verifier's run on a no-commit merge of the work tip, so the 3 base failures are gone
+and this round adds none.
+
+**New and changed tests.** All are in `RecordOwnerAssignmentCensusTests`; no other test changed.
+- New: `RoutedValueCheck_NegativeControl_ParameterSourcedOwner` and `Detector_NegativeControl_LogicalNameCreates`.
+- Extended: `OwnerWriteDetector_NegativeControl_AddAndInitializerForms` (`SetAttributeValue`, plus a non-owner
+  `SetAttributeValue`) and `OwnerWriteDetector_NegativeControl` (a `SetAttributeValue` write before the filing gate).
+- ADR-038: no `Mock<HttpMessageHandler>`, no DI-registration test, no constructor null-check test.
+
+**Seed-and-bite (b2-r1).** Every plant was made in the real source and checked with a `--no-build` census run (the
+scanner reads source at run time). Each was then restored from a byte copy and touched, and `git status` showed no
+`src/` change.
+
+| Plant | Item | What failed |
+|---|---|---|
+| S1: `ThreadResolver.FindOrCreateDefaultThreadAsync` writes `new EntityReference("team", anchor!.RecordId)` (the verifier's first seed) | 5 | `EveryRoutedOwnerWriteTakesItsValueFromAResolution` |
+| S2: the same write as `ParseKey(keyId)` (the verifier's second seed) | 5 | the same |
+| S3: `InvoiceReviewService` hands `BuildInvoiceCreateFields` `request.MatterId` instead of `ownerTeamId.Value` (its caller still resolves, so the b2 rule passed it) | 5 | the same, naming `BuildInvoiceCreateFields` |
+| S4: `SignalEvaluationService` hands `UpsertSignalAsync` `matterId` instead of the resolved team (same) | 5 | the same, naming `UpsertSignalAsync` |
+| S5: `entity.SetAttributeValue("ownerid", new EntityReference("team", Guid.NewGuid()))` in `TodoGenerationService.CreateTodoAsync` | 6 | `EveryOwnerWriteIsCensused` (COUNT CHANGED 1 → 2) and the value check |
+| S6: `var seeded = new Entity { LogicalName = "sprk_todo" }; await _dataverse!.CreateAsync(seeded, ct);` in `TodoGenerationService` (the verifier's seed) | 6 | `EveryChildCreateSiteIsCensused` (COUNT CHANGED 1 → 2) and `EveryRoutedCreateSiteWritesItsOwnRowsOwner` |
+| S7: `var seeded = new Entity(); seeded.LogicalName = EntityTodo;` + `CreateAsync` | 6 | the same two |
+
+### 14e. PR description (consolidated, ready to paste; replaces §12f + §13g)
+
+> **Task 146: server child writers own their rows through the one resolver** (C10 part 2; closes #1034 with
+> word-add-in-r1).
+>
+> Every BFF create and re-file of a child of a project, matter or work assignment decides `ownerid` through
+> `IRecordOwnershipResolver`:
+> - the named `Secure Record Owners` team when ANY parent is secure;
+> - otherwise, the primary parent's business-unit default team.
+>
+> When no owner resolves, the writer refuses in its own contract. A Dataverse fault propagates.
+>
+> A re-file whose owner assignment fails after the change is rolled back, or left in the safe direction when the owner
+> cannot be read, and logged CRITICAL.
+>
+> The census `RecordOwnerAssignmentCensusTests` pins this:
+> - creates, per site;
+> - owner writes, per member, with each routed write's VALUE traced to a resolution (per argument for builders);
+> - run-as-user POST/PATCH.
+>
+> Its known blind spots are listed in its maintenance procedure.
+>
+> **SHIP-TOGETHER with task 149** (the sharee mirror). Once a child is owned by the memberless Secure team, internal
+> sharees of the parent lose sight of it until 149 mirrors them. **Do not deploy to spaarke-bff-dev or any shared
+> environment before 149 merges.**
+>
+> **Ordering with task 152** (Assigned To / human targeting). Filed AI, external and Office to-dos, tasks and drafts
+> become team-owned and drop out of `owninguser = caller` surfaces such as the Daily Briefing until 152 deploys.
+> **Owner B2 accepted this interim drop-out.** 152 is already on `work/unified-access-control-r2`, and this branch
+> merged it (§13).
+>
+> **CLAUDE.md §6.5 — the AI tool plane's "user-OBO for all Dataverse tool access" MUST:**
+> - **Path B: spaarke-ai-architecture-redesign-r1 spec Amendment A-UAC146, owner round 7 item 3.** It covers
+>   `dataverse.create_record` and `email.draft`. Each create follows the G5 pattern:
+>   1. an as-the-caller check: Create/Append, AppendTo on every record named, no field-secured or owner column;
+>   2. an app-only create owned by the resolver's team;
+>   3. the caller recorded in the table's Assigned-To / "for" column.
+>
+>   The creator is kept for per-user tables, unfiled communications (E1) and non-user-owned tables. A root, or another
+>   table the Secure team would own, is refused; a root under a secure parent is task 158.
+> - **Path A: task note §12c, owner S1 / G5, kept in force for this one step.** `dataverse.update_record`'s re-file of a
+>   child runs its PATCH as the caller. The resolver's reads, the owner assignment and its failure restore run app-only.
+>   The owner may fold this step into path B at review.
+>
+> **Placement (bff-extensions.md):** no new service, endpoint, DI registration, package or job in r1–b2-r1. The task
+> as a whole added one option key, `CommunicationOptions.OwnershipHoldAlertUserIds`. The details, with the §11
+> justifications, are in task note §9 and §13e and the POML `<execution>` blocks.
+>
+> **Deploy gates (main session):**
+> - **G146-1, a HARD pre-deploy gate:** the Secure Record Owner role goes from 9 to 26 tables, owner round 7 item 4.
+>   Run it before this code deploys.
+> - G146-2 and G146-5: the business-unit default teams' Read on `sprk_emailreviewlog`, and the Dev 1 / Test 1 default
+>   teams' roles.
+> - G146-3: the hold-alert recipients.
+> - G146-4: the live check after deploy with task 149.
+> - The tool-description follow-up (task note §13b): four places, then a re-push.
+>
+> Publish size is measured by the main session against a fresh master build.
+
+### 14f. Not closed (and why)
+
+- **Owner questions, unchanged from §13f:**
+  - must F3's limit govern moving a CHILD out of a secure root;
+  - the E1 vs owner round 5 reconciliation.
+- **S6 b is task 158**, as before.
+- **Live gates, all main session:**
+  - G146-1 (AC14), a hard pre-deploy gate;
+  - G146-2, G146-3 and G146-5;
+  - G146-4 (AC11), after deploy with task 149.
+- **Main session:**
+  - publish size and #1034 (AC13);
+  - the PR (AC16, text in §14e);
+  - the tool-description follow-up (item 8, §13b).
+- **The #1081 relay (owner, 2026-10-02) changes nothing in 146's code or census.** That census grades OWNER writes,
+  not role reach. Its only bearing is on reading G146-1 step 5, which §13c now explains.
