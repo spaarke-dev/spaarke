@@ -186,3 +186,44 @@ cross-BU customer it is not.
    `sprk_decisionrecord` row and confirm it is refused. This is the one check worth doing by hand, because it is
    the property everything else rests on — and the `prvWrite` could be granted by any role the user happens to
    hold.
+
+---
+
+## 6. ✅ Applied and verified — 2026-10-02
+
+All six setup steps done by the owner. Verified by query, not assumed:
+
+**Roles exist**: `Spaarke Console User` · `Spaarke Ontology Administrator` · `Spaarke Ontology Service`
+(6 copies each — one per business unit, normal). Auditing enabled on the two ledger tables.
+
+**`Spaarke Console User` — present at depth 4 (Parent: Child BU)**: `prvReadsprk_Signal` ·
+`prvWritesprk_Signal` · `prvCreatesprk_DecisionRecord` · `prvReadsprk_DecisionRecord`.
+
+**Absent, as designed** — these four are the guarantees: `prvCreatesprk_Signal` ·
+`prvWritesprk_DecisionRecord` · `prvDeletesprk_DecisionRecord` · `prvWritesprk_PolicyVersion`.
+
+### The union check (§1's warning), run — and the answer is benign
+
+Every role in the environment was checked for Write/Delete on `sprk_decisionrecord` and Write on
+`sprk_policyversion`. **Four roles hold one or more:**
+
+| Role | What it holds | Verdict |
+|---|---|---|
+| **System Administrator** | Write + Delete DR, Write PV | Unavoidable, already documented in §1 |
+| **System Customizer** | Write + Delete DR, Write PV | Unavoidable, already documented in §1 |
+| **`Service Writer`** | Write DR (depth 8), Write PV (depth 8) | ✅ **Benign — see below** |
+| **`Service Deleter`** | Delete DR (depth 8) | ✅ **Benign — see below** |
+
+**Why the last two are benign.** Their membership is **exclusively Microsoft first-party application
+identities** — every holder has an `applicationid` and the `#` system-user prefix: AIBuilder (×2),
+ApolloProdFirstParty, AppDeploymentOrchestration, CatalogServiceNam, DV-MetadataService, InsightsAppsPlatform,
+MicrosoftCustomerEngagementPortalInfra, PowerPages Data Runtime PROD, three PPMI managed identities,
+PpdfCDSClient, Power Apps Checker. **No human user and no Spaarke application identity holds either role.**
+Dataverse auto-grants these to its own platform services on every new custom table.
+
+🔴 **Do not strip privileges from `Service Writer` / `Service Deleter`** to "close the gap" — that would break
+Power Pages, AI Builder and solution deployment. They are the same category as System Administrator:
+platform-level, unavoidable, and not a path a person or the application can take.
+
+**Net**: append-only holds against **every human user and against Spaarke's own application identity**, which is
+the bar §1 set. The check was worth running; the finding is "documented, no action."
