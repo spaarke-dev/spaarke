@@ -35,7 +35,10 @@
 | `deploy-bff-api.yml` | `deploy-staging` | Deploy API build artifact to staging slot |
 | `deploy-promote.yml` | `deploy-staging` | Direct-target deploy to the Staging App Service (no dev/prod chaining — see D-12) |
 | `redis-key-rotation.yml` | `rotate-staging` | Quarterly Redis access-key rotation for staging |
-| `deploy-infrastructure.yml` | `what-if` / `deploy` | Only when dispatched with `environment=staging` (defaults to `dev` otherwise) |
+
+> `deploy-infrastructure.yml` no longer uses any GitHub Environment *(retired by task 249, 2026-10-02)*: it is
+> now "Validate Bicep Infrastructure" — lint + compile only, no Azure login, no deploy. Customer stamps are
+> deployed only by the L2 control plane's handler H2a.
 
 ---
 
@@ -60,7 +63,9 @@
 | `deploy-bff-api.yml` | `swap-production` | Swap staging slot to production |
 | `deploy-promote.yml` | `deploy-prod` | Direct-target deploy to the Production App Service |
 | `deploy-spaarke-ai.yml` | `deploy-production` | Deploy the `sprk_spaarkeai` Dataverse web resource to production |
-| `deploy-infrastructure.yml` | `deploy` | Only when dispatched with `environment=production`, `deploy=true` |
+
+> `deploy-infrastructure.yml`'s `deploy` job (dispatched with `environment=production`, `deploy=true`) was
+> retired by task 249, 2026-10-02 — the workflow now only validates Bicep.
 
 > **`deploy-platform.yml` and `provision-customer.yml` removed** 2026-06-01 (commit `902bebc49c`, Wave C workflow rationalization, D-05 / D-08). Neither is a GitHub Actions workflow today:
 > - Platform infrastructure (Bicep applied by the old `deploy-platform.yml`) is now deployed by running `scripts/Deploy-Platform.ps1` directly from an operator shell (`az`/`pwsh`) — see that script's own header comment.
@@ -76,7 +81,7 @@ These secrets are already set at the repository level and available to all workf
 
 | Secret | Status | Used By | Purpose |
 |--------|--------|---------|---------|
-| `AZURE_CLIENT_ID` | Configured | Every workflow deploying to `staging`/`production` (`deploy-bff-api.yml`, `deploy-promote.yml`, `deploy-spaarke-ai.yml`, `deploy-infrastructure.yml`) | OIDC federated credential — app registration client ID |
+| `AZURE_CLIENT_ID` | Configured | Every workflow deploying to `staging`/`production` (`deploy-bff-api.yml`, `deploy-promote.yml`, `deploy-spaarke-ai.yml`) — `deploy-infrastructure.yml` no longer logs into Azure (task 249) | OIDC federated credential — app registration client ID |
 | `AZURE_TENANT_ID` | Configured | Same set | Azure AD tenant ID (`a221a95e-...`) |
 | `AZURE_SUBSCRIPTION_ID` | Configured | Same set | Target Azure subscription |
 
@@ -172,6 +177,6 @@ gh api repos/spaarke-dev/spaarke/actions/secrets --jq '.secrets[].name'
 
 ## Compliance Notes
 
-- **FR-09**: Every workflow deploying to production (`deploy-bff-api.yml`, `deploy-promote.yml`, `deploy-spaarke-ai.yml`, and `deploy-infrastructure.yml` when dispatched with `environment=production`) references the `production` GitHub Environment and its protection rules.
+- **FR-09**: Every workflow deploying to production (`deploy-bff-api.yml`, `deploy-promote.yml`, `deploy-spaarke-ai.yml`) references the `production` GitHub Environment and its protection rules. (`deploy-infrastructure.yml` deploys nothing since task 249, 2026-10-02.)
 - **NFR-05**: All deployment runs are logged in GitHub Actions history. Provisioning workflows upload logs as artifacts (90-day retention).
 - **FR-08**: No secrets are stored in code. All sensitive values are in GitHub Actions secrets or Azure Key Vault.

@@ -43,7 +43,7 @@ Understanding the distinction between CI, deployment, and sync:
    - Deploy the BFF — BFF deploys are **operator-driven** (`/bff-deploy`, or `deploy-bff-api.yml` via `workflow_dispatch`); CI never auto-deploys the BFF on merge
    - Sync the main repo's local master (must be done explicitly when using worktrees)
 
-3. **Two deploy workflows are path-triggered on push to master** (`deploy-spaarke-ai.yml` → dev, `deploy-office-addins.yml`) — they can fail independently of CI. `deploy-infrastructure.yml` is path-triggered too, but on push/PR it only validates + runs what-if; its `deploy` job runs only on `workflow_dispatch` with `deploy: true` and environment approval.
+3. **Two deploy workflows are path-triggered on push to master** (`deploy-spaarke-ai.yml` → dev, `deploy-office-addins.yml`) — they can fail independently of CI. `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") is path-triggered too, but it only lints and compiles Bicep — it has no deploy job since task 249 (customer stamps are deployed by the L2 control plane).
 
 ---
 
@@ -113,7 +113,7 @@ Verified against `.github/workflows/` on 2026-09-25. There is no staging environ
 | Workflow | Deploys | Trigger |
 |----------|---------|---------|
 | `deploy-bff-api.yml` | BFF API (App Service) | `workflow_dispatch` only — BFF deploys are operator-driven; prefer the `/bff-deploy` skill |
-| `deploy-infrastructure.yml` | Bicep infrastructure | PR + push to master on `infrastructure/bicep/**` → validate + what-if only; the `deploy` job runs only on `workflow_dispatch` with `deploy: true` + environment approval |
+| `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | Bicep infrastructure | PR + push to master on `infrastructure/bicep/**`, or `workflow_dispatch` → lint every Bicep file + compile `customer.bicep` and the remaining stacks; **deploys nothing** (task 249, D19) |
 | `deploy-spaarke-ai.yml` | SpaarkeAi code page | Push to master on `src/solutions/SpaarkeAi/**` / shared UI lib |
 | `deploy-office-addins.yml` | Office add-ins (Static Web App) | Push to master on `src/client/office-addins/**` |
 | `deploy-external-spa.yml` | External SPA (Static Web App) | `workflow_dispatch` |
@@ -177,7 +177,7 @@ None of these is a required check. Full per-workflow detail: [`docs/procedures/c
 2. Path-triggered workflows run if their paths changed — deploys:
    deploy-spaarke-ai (dev) / deploy-office-addins; publish-only:
    publish-provisioning-arm-artifacts / build-provisioning-sidecar;
-   validate + what-if only: deploy-infrastructure:
+   validate only: deploy-infrastructure:
    gh run list --limit 10
 3. Nothing else deploys automatically — the BFF is deployed by an operator
 ```
@@ -287,7 +287,7 @@ Each `deploy-*.yml` declares its own secrets / OIDC federation — read the work
 |-------|-------------------|
 | `push-to-github` | After push, check `gh pr checks` before merge |
 | `adr-check` | Local validation mirrors Tier 1 Arch Tests + Tier 2 ADR Compliance |
-| `azure-deploy` | Bicep / Key Vault deployment (automated counterpart: `deploy-infrastructure.yml`) |
+| `azure-deploy` | Bicep / Key Vault deployment (manual; `deploy-infrastructure.yml` only validates Bicep — customer stamps deploy via the L2 control plane) |
 | `bff-deploy` | BFF deployment (automated counterpart: `deploy-bff-api.yml`, `workflow_dispatch` only) |
 | `dataverse-deploy` | Solution / PCF / web resource deployment (no plugins — ADR-002) |
 | `code-review` | Local quality gate; CI's closest counterparts are Tier 2 format/lint/unit tests |

@@ -561,7 +561,7 @@ function Write-NotesArtifact {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('The following are NOT verified by this run and are recorded as follow-on work:')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('- **Model 2 dedicated per-customer full stack composition** (`stacks/model2-full.bicep`) — outside Wave C2 scope; not built here (`deploy-infrastructure.yml` builds every stack on push/PR). Reconciling it with `customer.bicep` is recorded for T235.')
+    [void]$sb.AppendLine('- *(retired)* `stacks/model2-full.bicep` was deleted by task 249 (owner D19, 2026-10-02) — `customer.bicep` is the only customer-stamp template; `deploy-infrastructure.yml` now only validates.')
     [void]$sb.AppendLine('- **Real RBAC principalId GUID verification** — what-if reports role-assignment RESOURCES; actual principalId GUID match against a live UAMI is only observable post-apply. Verified separately in Phase F acceptance.')
     [void]$sb.AppendLine('- **CI wiring of this test** — deferred to Phase H coordinated PR per root CLAUDE.md §10 (`ci-workflows=Y` overlap with `ci-cd-unit-test-remediation-r1`).')
     [void]$sb.AppendLine('')

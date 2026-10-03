@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15914772292603739852"
+      "templateHash": "1534481943534081023"
     }
   },
   "parameters": {
@@ -246,7 +246,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15519022507304554186"
+              "templateHash": "5920606518685923232"
             }
           },
           "parameters": {
@@ -355,7 +355,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+                "description": "ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip"
               }
             }
           },

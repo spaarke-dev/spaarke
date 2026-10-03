@@ -3,8 +3,8 @@
 > Owner: customer-provisioning-orchestration-r1 task 034
 > Wave: C2 (Bicep + UAMI)
 > Mode: Build
-> Started: 2026-10-02 11:31:27Z
-> Finished: 2026-10-02 11:31:40Z
+> Started: 2026-10-02 22:32:59Z
+> Finished: 2026-10-02 22:33:11Z
 > Test customer: itsttest in dev (westus2)
 
 ---
@@ -30,7 +30,7 @@ SKIPPED in Mode=Build. Re-run with `-Mode DryRun` (or `-Mode Full` for assertion
 
 The following are NOT verified by this run and are recorded as follow-on work:
 
-- **Model 2 dedicated per-customer full stack composition** (`stacks/model2-full.bicep`) — outside Wave C2 scope; not built here (`deploy-infrastructure.yml` builds every stack on push/PR). Reconciling it with `customer.bicep` is recorded for T235.
+- *(retired)* `stacks/model2-full.bicep` was deleted by task 249 (owner D19, 2026-10-02) — `customer.bicep` is the only customer-stamp template; `deploy-infrastructure.yml` now only validates.
 - **Real RBAC principalId GUID verification** — what-if reports role-assignment RESOURCES; actual principalId GUID match against a live UAMI is only observable post-apply. Verified separately in Phase F acceptance.
 - **CI wiring of this test** — deferred to Phase H coordinated PR per root CLAUDE.md §10 (`ci-workflows=Y` overlap with `ci-cd-unit-test-remediation-r1`).
 

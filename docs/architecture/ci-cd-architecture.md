@@ -10,7 +10,7 @@
 
 ## Overview
 
-The SDAP CI/CD system is implemented as a set of GitHub Actions workflows under `.github/workflows/` covering continuous integration, multi-environment deployment, infrastructure and provisioning-artifact publishing, and scheduled/operational checks. The architecture uses a **slot-swap strategy** for zero-downtime BFF API deployments, **direct-target promotion** (dev / staging / production, each deployed independently — not a sequential chain) with a manual approval gate for production, and **Bicep IaC** for infrastructure changes with what-if previews.
+The SDAP CI/CD system is implemented as a set of GitHub Actions workflows under `.github/workflows/` covering continuous integration, multi-environment deployment, infrastructure and provisioning-artifact publishing, and scheduled/operational checks. The architecture uses a **slot-swap strategy** for zero-downtime BFF API deployments, **direct-target promotion** (dev / staging / production, each deployed independently — not a sequential chain) with a manual approval gate for production, and **Bicep IaC** that CI validates (lint + compile) but never deploys — customer stamps are deployed only by the L2 control plane.
 
 The key design decision is separating the PR gate from deployment and from provisioning: the PR gate is a single router (`ci-router.yml`) that dispatches a blocking **Tier 1** suite and an advisory **Tier 2** suite; deployment is operator-driven (`workflow_dispatch`, or auto-deploy to non-production targets only); customer provisioning is **no longer a GitHub Actions workflow** at all — it runs through the L1 handler / L2 control-plane REST API / L3 `/provision-environment` Claude Code skill architecture. This document stays at the decisions-and-rationale level; for the complete, current workflow inventory and per-workflow trigger/job detail, see [`docs/procedures/ci-cd-workflow.md`](../procedures/ci-cd-workflow.md).
 
@@ -42,7 +42,7 @@ The key design decision is separating the PR gate from deployment and from provi
 
 | Workflow | File | Trigger | Purpose |
 |----------|------|---------|---------|
-| **Deploy Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch | Validate Bicep -> what-if preview (PR comment) -> deploy on approval. Deploys the **full per-customer stack**, which is the same in both deployment models (see the note below) |
+| **Validate Bicep Infrastructure** | `deploy-infrastructure.yml` | Push/PR on `infrastructure/bicep/**`, manual dispatch (no inputs) | Lint every Bicep file and compile `customer.bicep` + the remaining standalone `stacks/*.bicep`. **Deploys nothing** — no what-if, no Azure login, `contents: read`. `customer.bicep` is the only customer-stamp template, deployed only by the L2 control plane's handler H2a into each customer's own subscription (owner decision D19, amended ADR-027). *(Its former what-if + deploy stages, which targeted `stacks/model2-full.bicep`, were retired by task 249, 2026-10-02.)* |
 | **Publish Provisioning ARM Artifacts** | `publish-provisioning-arm-artifacts.yml` | Push to master (bicep paths), manual dispatch | Compiles `customer.bicep` to ARM JSON and publishes it for the H2a Azure-stamp deploy handler (`model1-shared` retired by task 225a) |
 
 > **`deploy-platform.yml` removed** 2026-06-01 (commit `902bebc49c`, D-05). Spaarke's own non-customer-serving platform infrastructure is now deployed by running `scripts/Deploy-Platform.ps1` directly from an operator shell (`az`/`pwsh`) — it is no longer wrapped in a GitHub Actions workflow; see the script's own header comment for current usage.
@@ -61,6 +61,9 @@ The key design decision is separating the PR gate from deployment and from provi
 > ARM manifest's `model1-shared` entry and the publish / deploy-infrastructure workflow steps. The only model-dependent CI behaviour is that
 > **Model 2 additionally requires H0.5 admin consent and Azure Lighthouse delegation**; Model 1 requires
 > neither.
+>
+> *(Task 249, 2026-10-02: infrastructure CI no longer deploys anything — the per-customer stack is deployed
+> only by the L2 control plane's handler H2a; `deploy-infrastructure.yml` now only validates.)*
 
 ### Quality & Monitoring
 

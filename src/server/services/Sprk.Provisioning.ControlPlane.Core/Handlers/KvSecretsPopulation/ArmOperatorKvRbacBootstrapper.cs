@@ -9,7 +9,7 @@
 // <see cref="Azure.ResourceManager.Authorization.RoleAssignmentCollection.CreateOrUpdateAsync(Azure.WaitUntil, string, Azure.ResourceManager.Authorization.Models.RoleAssignmentCreateOrUpdateContent, System.Threading.CancellationToken)"/>
 // to PUT a role assignment scoped to the target Key Vault so the L2-caller
 // principal — the L2 control plane's own UAMI, configured as
-// KvSecretsPopulationOptions.ControlPlanePrincipalObjectId (task 245b; it was
+// ControlPlaneIdentityOptions.PrincipalObjectId (task 245b, shared option since task 249; it was
 // wrongly the customer stamp's BFF UAMI, InterStepState.MiObjectId, before) —
 // gains data-plane write access BEFORE the first
 // <see cref="Azure.Security.KeyVault.Secrets.SecretClient.SetSecretAsync(Azure.Security.KeyVault.Secrets.KeyVaultSecret, System.Threading.CancellationToken)"/>
@@ -98,7 +98,7 @@ public sealed class ArmOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
         ArgumentNullException.ThrowIfNull(request);
 
         // (1) Guard: PrincipalObjectId must be a well-formed non-empty Guid.
-        //     H4 passes the validated KvSecretsPopulationOptions value, so an
+        //     H4 passes the validated ControlPlaneIdentityOptions value, so an
         //     empty id here means a caller bypassed that — surface as domain
         //     Failure with a specific diagnostic (Resumable per H4
         //     classification), NEVER a silent success + downstream 403 loop.
@@ -106,8 +106,8 @@ public sealed class ArmOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
         {
             return new OperatorKvRbacBootstrapOutcome.Failure(
                 $"KV RBAC bootstrap on vault '{request.KeyVaultName}' aborted: PrincipalObjectId is empty. " +
-                "It must be the L2 control plane's own principal (KvSecretsPopulationOptions:" +
-                "ControlPlanePrincipalObjectId). Resume after configuring it.");
+                "It must be the L2 control plane's own principal (ControlPlaneIdentity:" +
+                "PrincipalObjectId). Resume after configuring it.");
         }
         if (!Guid.TryParse(request.PrincipalObjectId, out var principalGuid) || principalGuid == Guid.Empty)
         {

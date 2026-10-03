@@ -2,8 +2,8 @@
 // BicepInfraDeployOptions.cs
 //
 // Bound options for the H2a handler's collaborators (runner + probes +
-// inspector). Loaded from the "BicepInfraDeploy" configuration section by
-// <see cref="Sprk.Provisioning.ControlPlane.Modules.HandlersModule"/> —
+// inspector). Loaded from the "BicepInfraDeployOptions" configuration section by
+// Worker/Program.cs and validated at Worker startup (ValidateOnStart, task 249) —
 // runtime-configurable so the linux-x64 App Service publish layout can be
 // honored without recompiling.
 //
@@ -22,7 +22,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 
 /// <summary>
 /// Bound options for <see cref="H2aBicepInfraDeployHandler"/> collaborators.
-/// Configuration key: <c>BicepInfraDeploy</c>.
+/// Configuration section: <c>BicepInfraDeployOptions</c>.
 /// </summary>
 public sealed class BicepInfraDeployOptions
 {
@@ -79,8 +79,8 @@ public sealed class BicepInfraDeployOptions
 
     /// <summary>
     /// Validates required fields are present. Called from
-    /// <c>PostConfigure&lt;BicepInfraDeployOptions&gt;</c> at composition-root
-    /// registration time (Worker/Program.cs) so a misconfigured deploy fails
+    /// <c>AddOptions&lt;BicepInfraDeployOptions&gt;().Validate(...).ValidateOnStart()</c>
+    /// (Worker/Program.cs, task 249) so a misconfigured deploy fails
     /// at boot (NFR-05), not on the first customer's H2a dispatch.
     /// </summary>
     public void Validate()
@@ -146,6 +146,9 @@ public sealed class BicepInfraDeployOptions
     /// </summary>
     public OpenAiDeploymentSetPolicy OpenAiDeploymentSetPolicy { get; set; }
         = OpenAiDeploymentSetPolicy.Strict;
+
+    // Task 249: the L2 principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId is
+    // ControlPlaneIdentityOptions.PrincipalObjectId (shared with H4) — not a field of this class.
 }
 
 /// <summary>

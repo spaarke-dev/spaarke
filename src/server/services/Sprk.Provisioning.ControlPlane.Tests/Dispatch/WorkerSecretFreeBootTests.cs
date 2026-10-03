@@ -162,7 +162,7 @@ public sealed class SecretFreeWorkerTestFactory : WebApplicationFactory<WorkerPr
         builder.UseSetting("BicepInfraDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
         builder.UseSetting("BffDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
         builder.UseSetting("SolutionImportOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
-        builder.UseSetting("KvSecretsPopulationOptions:ControlPlanePrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");   // task 245b
+        builder.UseSetting("ControlPlaneIdentity:PrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");   // tasks 245b + 249
         builder.UseEnvironment("Testing");
 
         builder.ConfigureServices(services =>

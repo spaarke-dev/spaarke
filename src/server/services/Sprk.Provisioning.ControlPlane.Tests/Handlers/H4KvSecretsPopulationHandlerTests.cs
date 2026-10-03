@@ -897,14 +897,14 @@ public sealed class H4KvSecretsPopulationHandlerTests
     [Fact]
     public async Task A38a2_DefaultOptions_AreSecretFree_OmitBothCredentialSecrets()
     {
-        // The production default (only the Worker-validated principal set): task 225b / G21 made
-        // RequireSecretFreeIdentity default to true.
+        // The production default (nothing set — the L2 principal lives in ControlPlaneIdentityOptions since
+        // task 249): task 225b / G21 made RequireSecretFreeIdentity default to true.
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-a38a2");
         var writer = FakeWriter.AllWrote();
         var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
             FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
-            options: new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = L2PrincipalObjectId });
+            options: new KvSecretsPopulationOptions());
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
@@ -1208,10 +1208,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
         var handler = new H4KvSecretsPopulationHandler(
             repo, FakeManifest.Success(BuildCanonicalEntries()), writer, FakeIdentityPatcher.Success(),
             FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(), FakeMarkerApplier.Success(), bootstrapper,
-            Options.Create(new KvSecretsPopulationOptions
-            {
-                ControlPlanePrincipalObjectId = L2PrincipalObjectId,
-            }),
+            Options.Create(new KvSecretsPopulationOptions()),
+            Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId }),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -1226,19 +1224,19 @@ public sealed class H4KvSecretsPopulationHandlerTests
     [InlineData("")]
     [InlineData("not-a-guid")]
     [InlineData("00000000-0000-0000-0000-000000000000")]
-    public void Options_Validate_RejectsMissingL2Principal(string principal)
+    public void IdentityOptions_Validate_RejectsMissingL2Principal(string principal)
     {
-        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = principal };
+        var options = new ControlPlaneIdentityOptions { PrincipalObjectId = principal };
 
         var act = () => options.Validate();
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlanePrincipalObjectId*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlaneIdentity:PrincipalObjectId*");
     }
 
     [Fact]
-    public void Options_Validate_AcceptsAPrincipalGuid()
+    public void IdentityOptions_Validate_AcceptsAPrincipalGuid()
     {
-        var options = new KvSecretsPopulationOptions { ControlPlanePrincipalObjectId = L2PrincipalObjectId };
+        var options = new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId };
 
         options.Invoking(o => o.Validate()).Should().NotThrow();
     }
@@ -1276,6 +1274,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
             FakeMarkerApplier.Success(),
             failingBootstrapper,
             Options.Create(ValidOptions()),
+            Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId }),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -1322,6 +1321,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
             markerApplier ?? FakeMarkerApplier.Success(),
             new StubOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: false)),
             Options.Create(options ?? ValidOptions()),
+            Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId }),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
     }
 
@@ -1335,7 +1335,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
     private static KvSecretsPopulationOptions ValidOptions(
         bool requireSecretFreeIdentity = false, bool secretFreeIdentityRollback = false) => new()
     {
-        ControlPlanePrincipalObjectId = L2PrincipalObjectId,
         RequireSecretFreeIdentity = requireSecretFreeIdentity,
         SecretFreeIdentityRollback = secretFreeIdentityRollback,
     };

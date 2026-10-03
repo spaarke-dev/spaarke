@@ -31,7 +31,7 @@ src/
 infrastructure/
 ├── bicep/
 │   ├── modules/                              # single-resource Bicep modules
-│   ├── stacks/                               # tier-level compositions (model2-full; model1-shared retired by T225a — the customer stamp is customer.bicep)
+│   ├── stacks/                               # standalone stacks (ai-foundry only; model1-shared retired by T225a, model2-full by T249 — the customer stamp is customer.bicep)
 │   ├── customer.bicep                        # per-customer stamp — the template H2a deploys (Model 2; Model 1 after T225b + T228)
 scripts/
 ├── canonical-secret-catalog/manifest.yaml    # single source of truth for secrets (task 084 / FR-36)

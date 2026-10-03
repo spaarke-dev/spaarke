@@ -3,9 +3,10 @@
 //
 // Task 245b (G25) — the run inputs L2 owns are Worker configuration, validated
 // at startup (ValidateOnStart), not run parameters:
-//   - KvSecretsPopulationOptions.ControlPlanePrincipalObjectId — the principal
-//     H4 grants Key Vault Secrets Officer on each customer vault (L2's own UAMI,
-//     never the stamp's). (The vendor-key platform-vault option went with the
+//   - ControlPlaneIdentityOptions.PrincipalObjectId (task 245b; one option shared
+//     by H4 and H2a since task 249) — the principal H4 grants Key Vault Secrets
+//     Officer on each customer vault (L2's own UAMI, never the stamp's) and H2a
+//     sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps. (The vendor-key platform-vault option went with the
 //     vendor keys — task 225b, owner D18 2026-10-02.)
 //   - SpeContainerOptions.ContainerTypeOwners — the SPE owning-app credential per
 //     container type (app id + the certificate's vault + secret), read by H0's
@@ -36,12 +37,12 @@ public sealed class WorkerL2OwnedOptionsBootTests
     public void MissingL2Principal_FailsHostStart()
     {
         using var factory = new L2OptionsWorkerTestFactory(b =>
-            b.UseSetting("KvSecretsPopulationOptions:ControlPlanePrincipalObjectId", string.Empty));
+            b.UseSetting("ControlPlaneIdentity:PrincipalObjectId", string.Empty));
 
         // Host start alone (ValidateOnStart) must fail — nothing reads the options here.
         var act = () => factory.Services;
 
-        act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlanePrincipalObjectId*");
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlaneIdentity:PrincipalObjectId*");
     }
 
     [Theory]

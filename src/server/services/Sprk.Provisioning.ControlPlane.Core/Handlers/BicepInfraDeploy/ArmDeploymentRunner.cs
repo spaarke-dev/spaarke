@@ -82,6 +82,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     private readonly ArmClient _armClient;
     private readonly BlobContainerClient _artifactsContainer;
     private readonly BicepInfraDeployOptions _options;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<ArmDeploymentRunner> _logger;
 
     /// <summary>
@@ -98,16 +99,19 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         ArmClient armClient,
         BlobContainerClient artifactsContainer,
         IOptions<BicepInfraDeployOptions> options,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<ArmDeploymentRunner> logger)
     {
         ArgumentNullException.ThrowIfNull(armClient);
         ArgumentNullException.ThrowIfNull(artifactsContainer);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
 
         _armClient = armClient;
         _artifactsContainer = artifactsContainer;
         _options = options.Value;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -166,7 +170,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         // (3) Deploy the ARM JSON. Incremental mode — parity with `az
         //     deployment sub create`'s default mode (the retired script
         //     never passed --mode Complete).
-        var parameters = BuildParametersPayload(request);
+        var parameters = BuildParametersPayload(request, _identity.PrincipalObjectId);
         var properties = new ArmDeploymentProperties(ArmDeploymentMode.Incremental)
         {
             Template = BinaryData.FromString(templateJson),
@@ -399,15 +403,25 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     /// Builds the ARM deployment parameters payload
     /// (<c>{ "paramName": { "value": ... } }</c> shape). Only parameters this
     /// handler's effective steps-1-3 scope owns — customer.bicep's
-    /// remaining parameters (platformKeyVaultName, storageSku,
-    /// keyVaultSku, ...) keep their Bicep-declared defaults; adding them here
-    /// would be scope creep beyond the run parameters
-    /// <see cref="BicepDeployRequest"/> actually carries (CLAUDE.md §11).
+    /// remaining parameters (storageSku, keyVaultSku, ...) keep their
+    /// Bicep-declared defaults; adding them here would be scope creep beyond
+    /// the run parameters <see cref="BicepDeployRequest"/> actually carries
+    /// (CLAUDE.md §11).
     /// <c>internal</c> so <see cref="ArmWhatIfDriftDetector"/> builds an
     /// IDENTICAL parameters payload for its preview call (the what-if MUST
     /// compare against the same inputs the real deploy would use).
     /// </summary>
-    internal static BinaryData BuildParametersPayload(BicepDeployRequest request)
+    /// <param name="request">Per-run deploy inputs.</param>
+    /// <param name="controlPlaneUamiPrincipalId">
+    /// Task 249: the L2 control plane's own identity object id
+    /// (<see cref="ControlPlaneIdentityOptions.PrincipalObjectId"/>, validated at Worker startup — an
+    /// L2-owned value, never a run parameter). Sent for <b>Model 1</b> stamps only, so
+    /// <c>modules/customer-l2-bff-rbac.bicep</c> grants it Website Contributor on the stamp BFF (H4b Kudu
+    /// log fetch + H9 zip-deploy). A Model 2 stamp lives in the customer's tenant, where a role assignment
+    /// cannot name a principal from Spaarke's tenant (it would fail the deployment); L2 reaches it
+    /// through its Lighthouse delegation instead (owner decision 2026-10-02).
+    /// </param>
+    internal static BinaryData BuildParametersPayload(BicepDeployRequest request, string controlPlaneUamiPrincipalId)
     {
         var payload = new Dictionary<string, object>
         {
@@ -416,6 +430,11 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             ["location"] = new { value = request.Location },
             ["signalrEnabled"] = new { value = request.SignalREnabled },
         };
+        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.Parse(request.TenancyModel)
+            == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1)
+        {
+            payload["controlPlaneUamiPrincipalId"] = new { value = Guid.Parse(controlPlaneUamiPrincipalId.Trim()).ToString("D") };
+        }
         // ISH-08 (Wave 5 punchlist, 2026-08-27): forward openAiLocation ONLY
         // when the caller populated it. Omitting the key lets customer.bicep's
         // openAiLocation param default (currently westus3, per bicep line 43)

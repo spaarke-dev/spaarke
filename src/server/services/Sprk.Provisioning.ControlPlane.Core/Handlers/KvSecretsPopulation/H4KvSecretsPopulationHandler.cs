@@ -54,10 +54,10 @@
 //   - H2a outputs, read from run.InterStepState: KeyVaultName (customer vault),
 //     ResourceGroupName, AppServiceName, AppServiceStagingSlotName (blank ⇒
 //     "staging"), MiResourceId (UAMI resource id — T1 PATCH target).
-//   - L2 configuration (KvSecretsPopulationOptions, validated at Worker startup — task 245b):
-//     ControlPlanePrincipalObjectId (the principal the KV RBAC bootstrap grants Secrets
-//     Officer — L2's own identity, never the stamp UAMI). The platform-vault vendor-key
-//     source option was removed by task 225b (owner D18, 2026-10-02).
+//   - L2 configuration, validated at Worker startup: ControlPlaneIdentityOptions.PrincipalObjectId
+//     (the principal the KV RBAC bootstrap grants Secrets Officer — L2's own identity, never the
+//     stamp UAMI; task 245b, moved to the option shared with H2a by task 249). The platform-vault
+//     vendor-key source option was removed by task 225b (owner D18, 2026-10-02).
 //   - The vault resource id is always derived (BuildKvResourceId) from
 //     subscriptionId + ResourceGroupName + KeyVaultName.
 //
@@ -229,6 +229,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     private readonly ISecretFreeMarkerApplier _markerApplier;
     private readonly IOperatorKvRbacBootstrapper _operatorKvRbacBootstrapper;
     private readonly KvSecretsPopulationOptions _options;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<H4KvSecretsPopulationHandler> _logger;
 
     /// <inheritdoc/>
@@ -255,6 +256,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         ISecretFreeMarkerApplier markerApplier,
         IOperatorKvRbacBootstrapper operatorKvRbacBootstrapper,
         IOptions<KvSecretsPopulationOptions> options,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<H4KvSecretsPopulationHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
@@ -266,6 +268,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(markerApplier);
         ArgumentNullException.ThrowIfNull(operatorKvRbacBootstrapper);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
@@ -277,6 +280,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         _markerApplier = markerApplier;
         _operatorKvRbacBootstrapper = operatorKvRbacBootstrapper;
         _options = options.Value;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -531,7 +535,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 // (InterStepState.MiObjectId): it only reads its vault (Secrets User, customer.bicep),
                 // and granting it Secrets Officer gave the customer workload write access to its own
                 // secrets while leaving the real writer without any.
-                PrincipalObjectId: Guid.Parse(_options.ControlPlanePrincipalObjectId.Trim()).ToString("D"),   // validated at startup
+                PrincipalObjectId: _identity.CanonicalPrincipalObjectId(),   // validated at startup (task 249: shared option)
                 RoleDefinitionId: KvBuiltInRoleIds.SecretsOfficer);
             var bootstrapOutcome = await _operatorKvRbacBootstrapper
                 .EnsureGrantedAsync(bootstrapRequest, cancellationToken).ConfigureAwait(false);

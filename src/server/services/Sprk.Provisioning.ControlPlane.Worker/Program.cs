@@ -40,6 +40,7 @@ using Azure.Core;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Dispatch;
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
@@ -217,9 +218,27 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 //   - §4C rollback: partial Bicep deploys are QuarantineRequired (orphaned
 //     resources per design.md §4C example); §4C classification is inline in
 //     H2aBicepInfraDeployHandler file header + the FailAsync helper.
-builder.Services.Configure<BicepInfraDeployOptions>(
-    builder.Configuration.GetSection(nameof(BicepInfraDeployOptions)));
-builder.Services.PostConfigure<BicepInfraDeployOptions>(o => o.Validate());
+// Task 249: the L2 control plane's own identity — ONE validated Worker option shared by H2a (sent as
+// customer.bicep's controlPlaneUamiPrincipalId, Model 1 stamps) and H4 (Key Vault Secrets Officer on each
+// customer vault). An L2-owned value (run-context contract): validated when the host starts.
+builder.Services.AddOptions<ControlPlaneIdentityOptions>()
+    .Bind(builder.Configuration.GetSection(ControlPlaneIdentityOptions.SectionName))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "ControlPlaneIdentityOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
+// Task 249: H2a's options are validated when the host starts too — a missing artifacts URI or manifest
+// name must not wait for the first customer's H2a (NFR-05; ADR-010 ValidateOnStart).
+builder.Services.AddOptions<BicepInfraDeployOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(BicepInfraDeployOptions)))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "BicepInfraDeployOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IBicepDeployRunner>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
@@ -227,8 +246,9 @@ builder.Services.AddSingleton<IBicepDeployRunner>(sp =>
     var options = sp.GetRequiredService<IOptions<BicepInfraDeployOptions>>();
     var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
         new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var identity = sp.GetRequiredService<IOptions<ControlPlaneIdentityOptions>>();
     var logger = sp.GetRequiredService<ILogger<ArmDeploymentRunner>>();
-    return new ArmDeploymentRunner(armClient, artifactsContainer, options, logger);
+    return new ArmDeploymentRunner(armClient, artifactsContainer, options, identity, logger);
 });
 builder.Services.AddSingleton<IArmKeyVaultRefProbe>(sp =>
 {
@@ -241,8 +261,9 @@ builder.Services.AddSingleton<IUpgradeDriftDetector>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var identity = sp.GetRequiredService<IOptions<ControlPlaneIdentityOptions>>();
     var logger = sp.GetRequiredService<ILogger<ArmWhatIfDriftDetector>>();
-    return new ArmWhatIfDriftDetector(armClient, logger);
+    return new ArmWhatIfDriftDetector(armClient, identity, logger);
 });
 // Task 245b: inspects the resolved ARM template JSON (the bytes H2a deploys), not .bicep source
 // on disk — the L2 publish never shipped infrastructure/bicep, so the file inspector failed every run.
@@ -460,17 +481,12 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // manifest.yaml). H4 handler + tests are UNCHANGED by this swap (parity with
 // H1's Null-probe -> real-ARM-probe transition) — only the DI registration
 // target changed.
-// Task 245b: validated at startup — ControlPlanePrincipalObjectId (the principal H4 grants Key Vault
-// Secrets Officer on each customer vault: L2's own UAMI) is required. (The platform-vault option — the
-// source of the Spaarke-shared vendor keys — was removed with those keys by task 225b, owner D18 2026-10-02.)
+// The principal H4 grants Key Vault Secrets Officer on each customer vault (task 245b) is
+// ControlPlaneIdentityOptions (registered above with H2a's options; task 249). Nothing left here needs
+// startup validation. (The platform-vault option — the source of the Spaarke-shared vendor keys — was
+// removed with those keys by task 225b, owner D18 2026-10-02.)
 builder.Services.AddOptions<KvSecretsPopulationOptions>()
-    .Bind(builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)))
-    .Validate(o =>
-    {
-        o.Validate();
-        return true;
-    }, "KvSecretsPopulationOptions failed validation — see inner exception (Validate throws).")
-    .ValidateOnStart();
+    .Bind(builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
 builder.Services.AddSingleton<IKvSecretManifest, FileKvSecretManifest>();
 builder.Services.AddSingleton<IKvSecretValueResolver>(sp =>
 {

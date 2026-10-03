@@ -46,7 +46,7 @@
 - Completed: `{ts}`
 - Status: `{Success | Failed}`
 - Resources provisioned: `{N}`
-- Bicep stack: `{stack-name}` (model2-full / customer) — *`model1-shared` and `model1-customer` retired 2026-09-28 per D-12 (files deleted by task 225a)*
+- Bicep stack: `customer` (the only customer-stamp template, D19) — *`model1-shared` and `model1-customer` retired 2026-09-28 per D-12 (files deleted by task 225a); `model2-full` retired by task 249, 2026-10-02*
 - Duration: `{N} min`
 - Notes: {any errors; deploymentId; RG name}
 

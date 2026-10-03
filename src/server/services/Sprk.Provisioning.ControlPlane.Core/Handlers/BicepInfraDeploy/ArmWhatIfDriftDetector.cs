@@ -25,6 +25,7 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.Resources;
 using Azure.ResourceManager.Resources.Models;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 
@@ -40,17 +41,26 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
 {
     private readonly ArmClient _armClient;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<ArmWhatIfDriftDetector> _logger;
 
-    /// <summary>Constructs the detector. Production DI reuses the shared UAMI-pinned ArmClient.</summary>
+    /// <summary>
+    /// Constructs the detector. Production DI reuses the shared UAMI-pinned ArmClient. Task 249: takes
+    /// the same <see cref="ControlPlaneIdentityOptions"/> <see cref="ArmDeploymentRunner"/> does, so the
+    /// what-if parameters payload it builds via <see cref="ArmDeploymentRunner.BuildParametersPayload"/>
+    /// is IDENTICAL to the real deploy's — including the L2 principal on Model 1 stamps.
+    /// </summary>
     public ArmWhatIfDriftDetector(
         ArmClient armClient,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<ArmWhatIfDriftDetector> logger)
     {
         ArgumentNullException.ThrowIfNull(armClient);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
 
         _armClient = armClient;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -65,7 +75,7 @@ public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
         // Task 245b: preview exactly the template H2a resolved (and versioned) for this run — the
         // tenancy model already selected it, so there is no second resolution here.
         var templateJson = request.Template.Json;
-        var parameters = ArmDeploymentRunner.BuildParametersPayload(request);
+        var parameters = ArmDeploymentRunner.BuildParametersPayload(request, _identity.PrincipalObjectId);
 
         var whatIfProperties = new ArmDeploymentWhatIfProperties(ArmDeploymentMode.Incremental)
         {

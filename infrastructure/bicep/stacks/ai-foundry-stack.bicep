@@ -1,6 +1,7 @@
 // infrastructure/bicep/stacks/ai-foundry-stack.bicep
 // Standalone AI Foundry deployment for Spaarke Document Intelligence
-// Can be deployed independently or as part of model2-full.bicep
+// Deployed independently — `customer.bicep` (the only customer-stamp template since task 249,
+// 2026-10-02, D19) does not invoke this stack; AI Foundry stays out of customer.bicep per D19 scope.
 
 targetScope = 'resourceGroup'
 

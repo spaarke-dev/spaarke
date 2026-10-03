@@ -535,6 +535,13 @@ public sealed class ProvisioningDispatchSpineSeamTests : IAsyncLifetime
             // Dispatch/HandlerRegistrationCompletenessTests.cs's WorkerTestFactory.
             builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com/");
 
+            // Options the Worker validates when the host starts (ValidateOnStart) -- placeholders,
+            // never invoked by the canary H1 path. Same values as WorkerTestFactory: H7 (task 142),
+            // the L2 principal (tasks 245b + 249), H2a's artifacts URI (task 249).
+            builder.UseSetting("EnvVarValues:ClientSecret", "l2-test-envvarvalues-client-secret-placeholder");
+            builder.UseSetting("ControlPlaneIdentity:PrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
+            builder.UseSetting("BicepInfraDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
+
             // Testing environment -- TelemetryModule's AzureMonitorGuard skips
             // exporter wiring silently on non-Development/Production envs.
             builder.UseEnvironment("Testing");

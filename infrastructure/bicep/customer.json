@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "6946112015181829184"
+      "templateHash": "1416685255353016258"
     }
   },
   "parameters": {
@@ -41,13 +41,6 @@
       "defaultValue": "westus3",
       "metadata": {
         "description": "Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it."
-      }
-    },
-    "platformKeyVaultName": {
-      "type": "string",
-      "defaultValue": "[format('sprk-{0}-kv', parameters('environmentName'))]",
-      "metadata": {
-        "description": "Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § \"KV-Secret & Resource Naming Standard\" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020."
       }
     },
     "storageSku": {
@@ -119,7 +112,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. Empty default skips the grant (what-if isolation only); real per-customer deploys MUST supply the L2 UAMI principalId."
+        "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. H2a (ArmDeploymentRunner) sends it for Model 1 stamps only (task 249): a Model 2 stamp is in the customer's tenant, where a role assignment cannot name a Spaarke-tenant principal, and L2 reaches it through its Lighthouse delegation. Empty skips the grant."
       }
     },
     "signalrEnabled": {
@@ -205,8 +198,7 @@
         "customer": "[parameters('customerId')]",
         "environment": "[parameters('environmentName')]",
         "application": "spaarke",
-        "managedBy": "bicep",
-        "createdDate": "[utcNow('yyyy-MM-dd')]"
+        "managedBy": "bicep"
       },
       "metadata": {
         "description": "Tags applied to ALL resources for cost tracking and management"
@@ -368,6 +360,9 @@
           "userAssignedIdentityPrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.logAnalyticsId.value]"
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -379,7 +374,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15519022507304554186"
+              "templateHash": "5920606518685923232"
             }
           },
           "parameters": {
@@ -488,7 +483,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+                "description": "ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip"
               }
             }
           },
@@ -643,6 +638,7 @@
         }
       },
       "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
@@ -2787,7 +2783,7 @@
             "value": "[parameters('signalrSku')]"
           },
           "bffPrincipalId": {
-            "value": "[parameters('bffPrincipalId')]"
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
           "tags": {
             "value": "[parameters('tags')]"
@@ -2941,7 +2937,8 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -3425,7 +3422,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "5945159200447773141"
+              "templateHash": "9333419783799827268"
             }
           },
           "parameters": {
@@ -3433,7 +3430,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Empty skips the grant (what-if isolation only -- a real per-customer deploy always needs it for H4b + H9 to function)."
+                "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Sent by H2a for Model 1 stamps only (task 249); empty (Model 2) skips the grant."
               }
             },
             "bffAppServiceName": {
@@ -4306,10 +4303,6 @@
     "appServiceStagingSlotName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApiSlot-{0}', variables('baseName'))), '2025-04-01').outputs.slotName.value]"
-    },
-    "platformKeyVaultName": {
-      "type": "string",
-      "value": "[parameters('platformKeyVaultName')]"
     }
   }
 }

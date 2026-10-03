@@ -54,7 +54,8 @@
 
 .PARAMETER PlatformKeyVaultName
     Name of the shared platform Key Vault (default: sprk-platform-prod-kv).
-    Used to read shared secrets (e.g., BFF API key, OpenAI key).
+    Read for the SPE container type id and written with the tenant registry entry. No longer passed to
+    customer.bicep — its platformKeyVaultName parameter was removed by task 249 (owner D19, 2026-10-02).
 
 .PARAMETER PlatformResourceGroup
     Resource group containing shared platform resources (default: rg-spaarke-platform-prod).
@@ -488,7 +489,6 @@ function Invoke-Step3_DeployBicep {
             customerId=$CustomerId `
             environmentName=$EnvironmentName `
             location=$Location `
-            platformKeyVaultName=$PlatformKeyVaultName `
         --output json 2>&1 | Out-String
 
     if ($LASTEXITCODE -ne 0) {

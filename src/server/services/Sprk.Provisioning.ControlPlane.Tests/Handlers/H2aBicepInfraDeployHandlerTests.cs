@@ -847,7 +847,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             Location: "westus2",
             SignalREnabled: false,
             OpenAiLocation: null);
-        var payload = ArmDeploymentRunner.BuildParametersPayload(request);
+        var payload = ArmDeploymentRunner.BuildParametersPayload(request, "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
         var json = payload.ToString();
         json.Should().NotContain("openAiLocation",
             "ISH-08 — absent override must NOT surface in the ARM parameters payload (Bicep default wins).");
@@ -866,7 +866,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             Location: "westus2",
             SignalREnabled: false,
             OpenAiLocation: "eastus2");
-        var payload = ArmDeploymentRunner.BuildParametersPayload(request);
+        var payload = ArmDeploymentRunner.BuildParametersPayload(request, "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
         var json = payload.ToString();
         json.Should().Contain("\"openAiLocation\"",
             "ISH-08 — populated override MUST appear in the ARM parameters payload so it overrides the Bicep default.");

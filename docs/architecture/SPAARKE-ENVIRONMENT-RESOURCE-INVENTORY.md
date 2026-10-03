@@ -143,7 +143,7 @@ T228 lands.
 | Optional | SignalR (flag-gated `signalrEnabled`, default off) | Dedicated | `sprk-{customerId}-prod-signalr` (`:165`) | H2a | ✅ |
 | Optional | ACS messaging + Event Grid (flag-gated `deployAcsMessaging`) | Dedicated | `sprk-{customerId}-prod-acs` (`:156`) | H2a | ✅ |
 | RBAC | Customer UAMI: Service Bus Data Sender + Receiver; AI Search Index Data Contributor + Service Contributor | Dedicated | On the customer's own SB + Search | H2a → `modules/bff-runtime-rbac.bicep` (`:657`) | ✅ for `customer.bicep`; 🔲 **T225a** removes the module's shared-UAMI branch |
-| RBAC | L2 UAMI: Website Contributor on the customer BFF (H4b log fetch, H9 deploy) | Dedicated | On the customer App Service | H2a → `modules/customer-l2-bff-rbac.bicep` (`:629`) | ✅ |
+| RBAC | L2 UAMI: Website Contributor on the customer BFF (H4b log fetch, H9 deploy) | Dedicated — **Model 1 only** (T249: a Model 2 stamp is in the customer's tenant and is reached through Lighthouse) | On the customer App Service | H2a → `modules/customer-l2-bff-rbac.bicep` | ✅ |
 
 ## Key Vault secrets and BFF app settings
 
@@ -173,7 +173,7 @@ T228 lands.
 | L2 fleet UAMI | Shared | `sprk-controlplane-{env}-uami` | `platform-controlplane.bicep` | ✅ — its role assignments on each **customer subscription** are a manual prerequisite (🔲 T228) |
 | BFF build artifacts + container registry | Shared | `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr` | `platform-controlplane.bicep` | ✅ |
 | Admin Dataverse environment (registry) | Shared | see Dataverse → Registry | once per platform | ✅ |
-| `customer.bicep` `platformKeyVaultName` parameter (default `sprk-{env}-kv`) | — | `customer.bicep:46`, surfaced only as an output (`:854`) | — | 🔲 **T225b** — confirm no consumer relies on it, then remove |
+| ~~`customer.bicep` `platformKeyVaultName` parameter~~ | — | — | — | ✅ **Removed by T249** (2026-10-02, D19) — no consumer read the output; `Provision-Customer.ps1` stopped passing it |
 
 ---
 

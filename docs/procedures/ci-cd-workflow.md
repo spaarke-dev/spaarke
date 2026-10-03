@@ -74,7 +74,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
    advisory) · css-reset-gate.yml (Code Page index.html paths) ·
    office-addins-tests.yml (office-addins + related server paths) ·
    build-provisioning-sidecar.yml (sidecar paths — build+Trivy+size only
-   on PR, no push) · deploy-infrastructure.yml validate/what-if (bicep
+   on PR, no push) · deploy-infrastructure.yml lint + compile only (bicep
    paths) · legacy sdap-ci.yml (paths-ignore: docs/**, **.md, .claude/**)
                               │
                               │ (merge to master)
@@ -97,8 +97,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │  deploy-bff-api.yml        — build → staging slot → swap → verify → │
 │                               (auto-rollback on prod health failure) │
 │  deploy-promote.yml        — direct-target dev / staging / production│
-│  deploy-infrastructure.yml — `deploy` job (manual, `deploy: true`,   │
-│                               environment approval)                  │
+│  deploy-infrastructure.yml — dispatch re-runs validation only (no    │
+│                               deploy; customer stamps = L2 H2a)      │
 │  deploy-teams-app.yml      — packages + publishes a GitHub artifact  │
 │                               (admin uploads to the org catalog)     │
 │  deploy-external-spa.yml   — deploy the external SPA to an SWA       │
@@ -129,7 +129,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `build-provisioning-sidecar.yml` | PR/push touching the sidecar; dispatch | n/a | Blocking for its own scope (fixable HIGH/CRITICAL Trivy finding hard-fails); push leg also publishes the image |
 | `deploy-bff-api.yml` | Manual dispatch | n/a | N/A (deploy) |
 | `deploy-promote.yml` | Manual dispatch | n/a | N/A (deploy) |
-| `deploy-infrastructure.yml` | PR/push (bicep paths), manual dispatch | n/a | N/A (validate/what-if are informational; `deploy` job is manual + environment approval) |
+| `deploy-infrastructure.yml` | PR/push (bicep paths), manual dispatch | n/a | Reports only — not in the required-check list (lint + compile; deploys nothing) |
 | `deploy-office-addins.yml` | Push to `master`/`work/SDAP-outlook-office-add-in` (paths), dispatch | n/a | N/A (auto-deploys) |
 | `deploy-spaarke-ai.yml` | Push to `master` (paths), dispatch | n/a | N/A (auto-deploys to dev; production is manual + environment approval) |
 | `deploy-teams-app.yml` | Manual dispatch | n/a | N/A (builds, packages, publishes an artifact — not a live deploy) |
@@ -159,7 +159,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `css-reset-gate.yml` | CSS Reset Gate | PR/push (scoped); reports only | Verifies every Code Page host `index.html` carries the box-sizing reset |
 | `deploy-bff-api.yml` | Deploy BFF API | Manual deploy | Build, test, publish a versioned artifact to blob storage (H9), deploy to staging slot, verify, swap to production, verify, auto-rollback |
 | `deploy-external-spa.yml` | Deploy External SPA (Static Web App) | Manual deploy | Build + deploy the external Secure Project Workspace SPA to Azure Static Web Apps |
-| `deploy-infrastructure.yml` | Deploy Bicep Infrastructure | PR/push validate+what-if; manual deploy | Lint/build Bicep templates, what-if preview (posted as PR comment), deploy on manual dispatch with environment approval |
+| `deploy-infrastructure.yml` | Validate Bicep Infrastructure | PR/push (scoped) / dispatch; reports only | Lint every Bicep file, compile `customer.bicep` + remaining `stacks/*.bicep`. Deploys nothing — customer stamps are deployed only by the L2 control plane (H2a) |
 | `deploy-office-addins.yml` | Deploy Office Add-ins to Azure Static Web App | Auto deploy (push) | Build the Outlook + Word add-ins (plus the unified Outlook+Word app package on `master`) and deploy to an Azure Static Web App |
 | `deploy-promote.yml` | Environment Promotion | Manual deploy | Direct-target deploy to dev/staging/production with smoke tests; production requires reviewer approval |
 | `deploy-spaarke-ai.yml` | Deploy SpaarkeAi | Auto deploy (push) to dev; manual+approval to prod | Build the single-file HTML bundle, deploy it as the `sprk_spaarkeai` Dataverse web resource |
@@ -455,7 +455,7 @@ Before merging any PR to master, verify all of the following:
 - [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. This is the only required status check; it is skipped entirely (and still reports pass) on a docs-only diff.
 - [ ] **Tier 1 (blocking) jobs pass** — compile (whole solution, Debug), the full NetArchTest ArchTests suite, changed-surface integration smoke (conditional on changed BFF paths), auth smoke (conditional on auth-path changes), the golden-utterance eval gate, the I1–I5 tenant-isolation invariants, and the Compose fidelity corpus round-trip
 - [ ] **Tier 2 (advisory) results reviewed** — format, lint, the full unit-test suite, ADR compliance, markdown-link validation, Last-Reviewed stamp, and plugin size are posted as one deduplicated "Tier 2 Advisory Report" PR comment; they never block, but address real failures
-- [ ] **Path-scoped gates reviewed if touched** — `office-addins-tests.yml` (office-addins + related server/test paths), `css-reset-gate.yml` (Code Page `index.html`), `build-provisioning-sidecar.yml` (sidecar paths, hard-fails on a fixable HIGH/CRITICAL Trivy finding), `deploy-infrastructure.yml`'s `validate`/`what-if` jobs (bicep paths) — none of these are in the required-check list, but each reports a real pass/fail
+- [ ] **Path-scoped gates reviewed if touched** — `office-addins-tests.yml` (office-addins + related server/test paths), `css-reset-gate.yml` (Code Page `index.html`), `build-provisioning-sidecar.yml` (sidecar paths, hard-fails on a fixable HIGH/CRITICAL Trivy finding), `deploy-infrastructure.yml`'s `validate` job (bicep paths; lint + compile) — none of these are in the required-check list, but each reports a real pass/fail
 - [ ] **actionlint clean** — `workflows-validate.yml` lints every workflow YAML file on every PR
 
 ### Manual Checks (Reviewer Responsibility)
@@ -481,8 +481,8 @@ Before merging any PR to master, verify all of the following:
 
 **If infrastructure changed:**
 - [ ] Bicep lint passes (`az bicep lint`)
-- [ ] Parameter files exist for all target environments
-- [ ] What-if preview reviewed (posted as a PR comment by `deploy-infrastructure.yml`)
+- [ ] `customer.bicep` (and any remaining `stacks/*.bicep`) compiles — `deploy-infrastructure.yml`'s `validate` job; a checked-in `.json` twin is recompiled with `az bicep build --outfile`
+- [ ] No CI what-if exists any more (retired by task 249, 2026-10-02): `customer.bicep` changes reach a stamp only through L2 handler H2a, which runs its own what-if drift check before deploying on upgrade runs (a new stamp has nothing to drift from)
 
 **If the provisioning sidecar changed (`src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/**`):**
 - [ ] `build-provisioning-sidecar.yml` PR run is green (build + Trivy scan + 250 MB compressed-size ceiling); it never pushes on a PR
@@ -582,15 +582,21 @@ Builds the Exchange-policy provisioning sidecar image, runs Trivy (`scan-type: i
 
 **Pipeline**: `build` → `test` → `deploy-staging` → `verify-staging` → `swap-production` (environment `production`, requires reviewer approval) → `verify-production` → `rollback` (auto, on production health-check failure) → `summary`. The `build` job additionally zips the publish output, runs three r3 gates (god-class ratchet, the I1–I5 ArchTests, naming-conformance), and pushes `bff-api-{buildId}.zip` + a `latest.json` manifest to the `provisioning-artifacts` blob container for the future H9 artifact-based customer-stamp deploy path (`graphAppRoleParity` is always recorded `Skipped` in the manifest — it is a per-customer-deployment property, not a property of this build). **Secrets**: `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC). Zero-downtime via staging-slot swap; `cancel-in-progress: false`.
 
-#### `deploy-infrastructure.yml` — Deploy Bicep Infrastructure
+#### `deploy-infrastructure.yml` — Validate Bicep Infrastructure
 
-**Triggers**: `pull_request`/`push` → `master` (paths: `infrastructure/bicep/**`), `workflow_dispatch` (`environment`, `stack`, `deploy` boolean inputs)
+Listed here for its file name only — **it deploys nothing.** `customer.bicep` is the only customer-stamp
+template and is deployed only by the L2 control plane's handler H2a, into each customer's own subscription
+(owner decision D19, amended ADR-027).
+
+**Triggers**: `pull_request`/`push` → `master` (paths: `infrastructure/bicep/**`), `workflow_dispatch` (no inputs)
 
 | Job | Purpose |
 |-----|---------|
-| `validate` | `az bicep lint` + `az bicep build` over every stack file; checks parameter files exist for dev/staging/prod |
-| `what-if` | Runs on PR or dispatch; posts the what-if diff as a PR comment on `pull_request` events |
-| `deploy` | Only on `workflow_dispatch` with `deploy: true`; targets the dispatched `environment` (GitHub Environment approval applies) |
+| `validate` | `az bicep lint` over every `.bicep` file under `infrastructure/bicep/`, then `az bicep build --outfile` of `customer.bicep` + the remaining standalone `stacks/*.bicep` |
+
+`permissions: contents: read`; no Azure login (no OIDC secrets), no GitHub Environment. *(The `what-if` and
+`deploy` jobs, the `environment` / `stack` / `deploy` dispatch inputs and their `stacks/model2-full.bicep`
+target were retired by task 249, 2026-10-02.)*
 
 #### `deploy-office-addins.yml` — Deploy Office Add-ins to Azure Static Web App
 
@@ -1044,9 +1050,9 @@ No secrets required — these run read-only against the repo's own code.
 
 ### Bicep Infrastructure (`deploy-infrastructure.yml`)
 
-| Secret | Purpose |
-|--------|---------|
-| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | OIDC |
+**None.** The workflow ("Validate Bicep Infrastructure") only lints and compiles Bicep and never
+authenticates to Azure (`permissions: contents: read`). *(It used the OIDC trio for its what-if/deploy
+stages until task 249, 2026-10-02 retired them.)*
 
 ### Static Web App Deploys
 

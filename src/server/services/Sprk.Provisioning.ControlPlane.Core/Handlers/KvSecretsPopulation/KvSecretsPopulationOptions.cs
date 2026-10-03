@@ -3,8 +3,9 @@
 //
 // Bound options for the H4 handler's collaborators (KV secrets writer +
 // App Service identity patcher + slot-identity role granter). Loaded from
-// the "KvSecretsPopulationOptions" configuration section by Program.cs and
-// validated at Worker startup (task 245b — ValidateOnStart).
+// the "KvSecretsPopulationOptions" configuration section by Program.cs. (Its one
+// required value, the L2 principal validated at Worker startup since task 245b,
+// moved to ControlPlaneIdentityOptions — task 249.)
 //
 // PATTERN PARITY:
 //   Mirrors Handlers/EntraAppReg/EntraAppRegOptions.cs and
@@ -97,35 +98,11 @@ public sealed class KvSecretsPopulationOptions
     /// </summary>
     public bool SecretFreeIdentityRollback { get; set; }
 
-    /// <summary>
-    /// Task 245b (🔒 owner-approved 2026-10-01): object id of the L2 control plane's own identity — the
-    /// Worker UAMI that writes the customer vault's secrets (H4, then H3). H4's KV RBAC bootstrap grants
-    /// THIS principal Key Vault Secrets Officer on the customer vault. Before T245b it granted
-    /// <c>InterStepState.MiObjectId</c> — the customer stamp's BFF UAMI — write access to its own vault,
-    /// while the identity that actually writes had none. The stamp UAMI keeps only Secrets User
-    /// (customer.bicep). Required GUID; validated at Worker startup. Same value
-    /// <c>platform-controlplane.bicep</c> passes as <c>controlPlanePrincipalId</c> to its Cosmos RBAC.
-    /// </summary>
-    public string ControlPlanePrincipalObjectId { get; set; } = string.Empty;
+    // Task 249 (owner decision 2026-10-02): the L2 principal H4 grants Key Vault Secrets Officer on each
+    // customer vault (task 245b) moved to ControlPlaneIdentityOptions.PrincipalObjectId, shared with H2a.
 
     // Task 225b (owner D18, 2026-10-02): the platform-vault option (the Spaarke platform vault H4 copied
     // the Spaarke-shared vendor keys from) was removed together with those keys and their manifest value
     // source — Bing Search v7 was retired by Microsoft 2025-08-11 and LlamaParse has no production
     // caller, so no customer stamp carries a vendor key.
-
-    /// <summary>
-    /// Startup validation (Worker/Program.cs ValidateOnStart). Throws
-    /// <see cref="InvalidOperationException"/> naming the invalid setting.
-    /// </summary>
-    public void Validate()
-    {
-        if (!Guid.TryParse(ControlPlanePrincipalObjectId?.Trim(), out var principal) || principal == Guid.Empty)
-        {
-            throw new InvalidOperationException(
-                "KvSecretsPopulationOptions:ControlPlanePrincipalObjectId must be the object id (GUID) of the L2 " +
-                "control plane's own identity — the principal H4 grants Key Vault Secrets Officer on each customer " +
-                $"vault (got '{ControlPlanePrincipalObjectId}'). Set by controlplane-worker-app-service.bicep " +
-                "(controlPlanePrincipalId).");
-        }
-    }
 }

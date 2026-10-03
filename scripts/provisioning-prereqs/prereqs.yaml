@@ -288,16 +288,16 @@ prereqs:
   # skips once_per_customer; H0 runs before the BFF exists). It is here for an operator diagnosing a
   # H4b Kudu-log fetch failure after H2a. Id kept.
   - id: PRQ-E-05
-    name: L2 UAMI has Website Contributor on the customer stamp's BFF App Service (for Kudu docker log fetch)
+    name: L2 UAMI has Website Contributor on a Model 1 customer stamp's BFF App Service (for Kudu docker log fetch)
     scope: once_per_customer
-    frequency: once per customer stamp (emitted by customer.bicep at H2a)
+    frequency: once per Model 1 customer stamp (emitted by customer.bicep at H2a; Model 2 — not granted, task 249)
     owner: Spaarke platform admin (Bicep)
     consequence_of_absence: H4b `KuduContainerLogFetcher` cannot fetch fail-fast diagnostics on BFF boot failure — falls back to generic diagnostic + Kudu URL.
     check_recipe:
       cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{stampSubscriptionId}/resourceGroups/rg-spaarke-{customerId}-{stampEnvironment}/providers/Microsoft.Web/sites/sprk-{customerId}-{stampEnvironment}-api" --query "[?roleDefinitionName=='Website Contributor']" -o tsv
       expect: non-empty
-    remediation: 'Emitted by `customer.bicep` (`modules/customer-l2-bff-rbac.bicep`) on every stamp; re-run H2a if missing.'
-    related_findings: [T201-h4b-kudu-rbac-deferred, T225a]
+    remediation: "Emitted by `customer.bicep` (`modules/customer-l2-bff-rbac.bicep`) on **Model 1** stamps — H2a sends `controlPlaneUamiPrincipalId` from the Worker setting `ControlPlaneIdentity__PrincipalObjectId` (task 249; before it the parameter was never passed, so the grant was never created). Re-run H2a if missing. Not applicable to Model 2: the stamp is in the customer's tenant, where a role assignment cannot name a Spaarke-tenant principal; L2 reaches it through its Lighthouse delegation."
+    related_findings: [T201-h4b-kudu-rbac-deferred, T225a, T249]
 
   # RETIRED 2026-09-30 by customer-provisioning-orchestration-r1 T226.
   #

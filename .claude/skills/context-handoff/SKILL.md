@@ -189,7 +189,7 @@ Example:
 | **Next Action** | Test deployment with: `az webapp deploy --slot staging` |
 
 ### Files Modified This Session
-- `infrastructure/bicep/stacks/model2-full.bicep` - Added AI Search config
+- `infrastructure/bicep/customer.bicep` - Added AI Search config
 - `src/server/api/Sprk.Bff.Api/Program.cs` - Registered RagService
 
 ### Critical Context

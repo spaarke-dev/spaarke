@@ -7,6 +7,25 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-02 — provisioning: one customer-stamp template (T249, D19)
+
+`customer-provisioning-orchestration-r1` T249 (owner decision D19).
+
+- **`.claude/skills/azure-deploy/SKILL.md`**: `customer.bicep` is the only customer-stamp template (H2a); the
+  `model2-full` half of the stamp row and the "routine infrastructure update via `deploy-infrastructure.yml`" path are
+  gone — that workflow ("Validate Bicep Infrastructure") now only lints and compiles; the `gh workflow run` example is
+  relabelled as on-demand validation.
+- **`.claude/skills/ci-cd/SKILL.md`**: `deploy-infrastructure.yml` described as validate-only (no what-if / deploy).
+- **`.claude/patterns/provisioning/INDEX.md`**: `stacks/` holds only standalone stacks.
+- The mechanism: `stacks/model2-full.{bicep,json}` + its 5 parameter files deleted; the workflow lost its what-if,
+  deploy, dispatch inputs and OIDC (it now also compiles `parameters/*.bicepparam`); `customer.bicep` wires SignalR
+  to the stamp UAMI, receives the L2 principal on **Model 1** stamps (Website Contributor on the stamp BFF — a Model 2
+  stamp is reached through Lighthouse; owner decision), logs Key Vault diagnostics to the workspace resource id, and
+  drops `platformKeyVaultName` + the drifting `createdDate: utcNow()` tag. The L2 principal is ONE Worker option,
+  `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`, ValidateOnStart), shared by H2a and H4 —
+  it replaces `KvSecretsPopulationOptions.ControlPlanePrincipalObjectId` (owner decision).
+
+---
 ###### 2026-10-02 — provisioning: Model 1 on the dedicated code path; secret-free default (T225b)
 
 `customer-provisioning-orchestration-r1` T225b (owner decisions D-12, D18).

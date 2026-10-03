@@ -62,7 +62,7 @@ param adminPrincipalIds array = []
 // DIAGNOSTIC SETTINGS PARAMETERS
 // ============================================================================
 
-@description('Log Analytics workspace ID for audit logs (empty to skip)')
+@description('ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip')
 param logAnalyticsWorkspaceId string = ''
 
 // ============================================================================

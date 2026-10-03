@@ -4,7 +4,7 @@
     <title>One customer-stamp template (owner D19) — delete `stacks/model2-full.bicep` + its parameter files, `deploy-infrastructure.yml` validates `customer.bicep`, and fix the five `customer.bicep` defects the comparison found</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T249 (owner decision D19, open item O5)</phase>
     <gate>startable after T225b (file overlap: customer.json, controlplane-worker-app-service.bicep); must land before T242</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes Bicep stacks + parameter files, edits a CI workflow, edits customer.bicep (deployed by H2a) and ArmDeploymentRunner (.cs) + its tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -155,6 +155,73 @@
   <notes>
     Filed 2026-10-02 from plan §7 T249 / owner D19 (open item O5). Evidence: the O5 comparison (main-session record in
     plan §2 D19). Dev/demo environments are hand-built and stay outside IaC until the D13 follow-on.
+
+    COMPLETION (2026-10-02). Verified: ControlPlane Api / Worker / Tests build 0 warnings 0 errors; ControlPlane.Tests
+    2127 pass / 6 fail (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; ArchTests 341/341;
+    customer.json, platform-controlplane.json and platform.json = fresh `az bicep build --outfile` compiles; every
+    `.bicep` lints (0 failures) and every `parameters/*.bicepparam` builds; bicep-e2e-dry-run.ps1 OVERALL PASS; prereqs
+    validate.ps1 OK (34 prereqs, manifest v5); catalog -Verify OK; Provision-Customer.ps1 binds (Get-Command).
+
+    DONE: stacks/model2-full.{bicep,json} + stacks/{dev,staging,prod}.bicepparam +
+    parameters/model2-customer-template.bicepparam + customer-deployment.bicepparam deleted (all `using` model2-full;
+    the deletions landed in checkpoint commit dcc15b560). deploy-infrastructure.yml → "Validate Bicep Infrastructure":
+    lint every .bicep, compile customer.bicep + stacks/*.bicep + parameters/*.bicepparam; no what-if, deploy, dispatch
+    inputs or OIDC (`permissions: contents: read`). customer.bicep: SignalR App Server → stamp UAMI; Key Vault diagnostics
+    → the stamp's Log Analytics workspace RESOURCE ID; `platformKeyVaultName` param + output removed; `createdDate:
+    utcNow()` tag removed. L2 principal → `controlPlaneUamiPrincipalId` (Website Contributor on the stamp BFF) for
+    Model 1 stamps. ~25 docs / comments repointed (docs agent + gate fixes).
+
+    OWNER DECISIONS taken during the task (AskUserQuestion 2026-10-02; plan §2 D20 + D21):
+    D20 — the L2 principal is ONE Worker option, `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`,
+    ValidateOnStart), shared by H2a and H4; it replaces KvSecretsPopulationOptions.ControlPlanePrincipalObjectId (T245b).
+    Background: escalation trigger #3 fired (H2a could reach H4's option only through H4's options class) and I added an
+    H2a-local option instead of stopping — the adr-check + code-review gates caught it; the owner chose the shared option.
+    D21 — H2a sends the principal for Model 1 only: a Model 2 stamp is in the customer's tenant (Lighthouse), where a role
+    assignment naming a Spaarke-tenant principal would fail the deployment; Model 2 keeps its pre-T249 behaviour (not sent).
+
+    QUALITY GATES (Step 9.5). code-review: C1 Critical FIXED — Key Vault diagnostics were given monitoring's
+    `logAnalyticsWorkspaceId` output (the workspace customerId GUID; every H2a deploy would have failed) → `logAnalyticsId`,
+    and key-vault.bicep's param description now says "ARM resource ID" (platform.json recompiled for the description);
+    W1 → D20; W2 FIXED (BicepInfraDeployOptions + the shared option ValidateOnStart; boot-test theory); W3 → D21; W4 FIXED
+    (Provision-Customer.ps1 stopped passing the removed parameter); W5 FIXED (runner theory captures the deployment PUT
+    body — Model 1 carries the configured principal, Model 2 does not; detector test captures the what-if body); S1 stale
+    parameter JSONs regenerated (and customer-template.bicepparam's placeholder customerId was 9 chars vs @maxLength(8) —
+    it never compiled); S2 inventory row; S3/S4/S9/S10/S11 comments + docs; S5 canonical GUID form; S6 workflow compiles
+    parameter files + WORKFLOWS.md no longer claims warnings fail; S8 test section header; S12 not done (matches the
+    file's pattern). adr-check: V1 = W4; V2 = W2; warnings 1→D20, 2/3 rollout + drift below, 4 below, 5 = S1, 6 inventory
+    fixed, 7 = S5, 8 = W5, 9/10 below. RE-REVIEW of the D20/D21 change (Opus, before commit): approve with warnings, no
+    Critical; W1/W2 (Model 2 Lighthouse roles unchecked; H4's vault grant is cross-tenant on Model 2 — predates T249) →
+    recorded on ControlPlaneIdentityOptions + FOLLOW-UPS; W3 = these notes (the POML constraint "do not add a new option"
+    and criterion "always sends it" are SUPERSEDED by D20/D21); S1 stale comments fixed; S2 rollout order in the guide;
+    S4 canonical GUID only on the Model 1 branch; S5 boot test reduced to one case; S6 PRQ-E-05 says Model 1; S3
+    (Validate-throws pattern hides later misconfigurations — pre-existing, 4 registrations) not changed.
+    Fix-at-discovery: the Seam test factory lacked two settings validated at Worker start since T142/T245b (the live-only
+    seam test could not boot) — added with the new ones.
+
+    DEVIATIONS: (1) AC "ArmDeploymentRunner always sends it" → Model 1 only (D21). (2) No separate L2-principal option on
+    BicepInfraDeployOptions (D20 shared option instead; the constraint "do not add a new option" is superseded by the
+    owner's choice). (3) `createdDate` tag dropped, not replaced (resource creation time is in ARM `systemData`). (4) The
+    workflow keeps its file name but is renamed "Validate Bicep Infrastructure" (job name `Validate Bicep` unchanged; the
+    master ruleset requires only `Router`). (5) customer.bicep's `bffPrincipalId` param (membership topic Sender/Receiver)
+    left as is — nothing passes it and the namespace-scoped Service Bus roles already cover the stamp UAMI.
+
+    ROLLOUT: deploy `platform-controlplane` (sets `ControlPlaneIdentity__PrincipalObjectId`) FIRST, then a Worker built
+    from this commit straight away — an older Worker refuses to start without KvSecretsPopulationOptions__
+    ControlPlanePrincipalObjectId, this one without the new name; queued messages wait (recorded in the deployment guide). Also still: Worker before the next `customer` ARM
+    artifact publish (T225b). One-time what-if drift: the first upgrade of a stamp deployed before T249 sees a tag-removal
+    Modify on every tagged resource (no such stamp exists — none passes H0 yet, G28).
+
+    Test-scope justification: runner theory (Model 1 sends / Model 2 omits, through DeployAsync with the configured option)
+    and one detector test (what-if payload = deploy payload) cover the changed payload contract; the boot test covers
+    the negative case (missing / non-GUID principal fails host start); H4's two Validate tests were retargeted to the
+    shared option. The literal-in/literal-out payload test and the runner's Validate theory were deleted (superseded).
+
+    FOLLOW-UPS (not done here): MODEL 2 (out of scope, owner 2026-09-30) — define + check the Lighthouse authorizations a
+    Model 2 stamp needs (H4b/H9 rely on them; H1 only checks a delegation exists) and resolve H4's cross-tenant Key Vault
+    grant (T245b) before Model 2 is brought back in scope. BFF comments still naming model2-full (CustomerOptions.cs, ConfigurationModule.cs,
+    SessionFileBlobStore.cs, appsettings.template.json) → T235. Dependabot `azure/cli` 2→3 PR will need a rebase on the
+    rewritten workflow. The now-unused `repo:…:pull_request` OIDC federated credential (GITHUB-ACTIONS-AZURE-OIDC-SETUP.md)
+    can be removed by an operator. infrastructure/README "Post-Deployment Steps" names scripts that do not exist.
   </notes>
 
   <execution>

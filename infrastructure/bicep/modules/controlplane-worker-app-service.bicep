@@ -183,7 +183,7 @@ var secretFreeCredentialAppSettings = [
   { name: 'SolutionImportOptions__Credentials__RequireSecretFreeIdentity', value: 'true' }
 ]
 
-@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as KvSecretsPopulationOptions__ControlPlanePrincipalObjectId -- the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead). REQUIRED: KvSecretsPopulationOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
+@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead), and the principal H2a sends as customer.bicep\'s controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
 param controlPlanePrincipalId string
 
 
@@ -414,8 +414,11 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
 
         // ---------------------------------------------------------------
         // Task 245b (G25): L2-owned run inputs, validated at Worker startup.
-        // H4's KV RBAC bootstrap grants THIS principal (L2's own identity)
-        // Secrets Officer on each customer vault. SPE owning-app credentials
+        // ControlPlaneIdentity__PrincipalObjectId (task 249 — one setting shared
+        // by two handlers): H4's KV RBAC bootstrap grants THIS principal (L2's
+        // own identity) Secrets Officer on each customer vault, and H2a sends it
+        // as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps
+        // (Website Contributor on the stamp BFF). SPE owning-app credentials
         // are appended below (speContainerTypeOwnerSettings). Task 225b (D18)
         // removed the vendor-key platform vault setting (no Spaarke-shared
         // vendor key remains in the customer catalog).
@@ -425,7 +428,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // credential-lifecycle rule; no sentinel). Stated explicitly so the
         // deployed Worker never depends on the code default.
         // ---------------------------------------------------------------
-        { name: 'KvSecretsPopulationOptions__ControlPlanePrincipalObjectId', value: controlPlanePrincipalId }
+        { name: 'ControlPlaneIdentity__PrincipalObjectId', value: controlPlanePrincipalId }
         { name: 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', value: 'true' }
       ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
     }

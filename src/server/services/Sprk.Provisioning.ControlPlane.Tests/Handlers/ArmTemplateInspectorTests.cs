@@ -112,13 +112,13 @@ public sealed class ArmTemplateInspectorTests
             CustomerId: "acme",
             TenantId: "00000000-1111-2222-3333-444444444444",
             SubscriptionId: "22222222-3333-4444-5555-666666666666",
-            TenancyModel: "Model2",
+            TenancyModel: "Model1",   // task 249: the superset — Model 1 also carries controlPlaneUamiPrincipalId
             Template: new ResolvedArmTemplate("customer", "customer-arm.json", "{}", "v1"),
             EnvironmentName: "prod",
             Location: "westus2",
             SignalREnabled: true,
             OpenAiLocation: "westus3");
-        using var payload = JsonDocument.Parse(ArmDeploymentRunner.BuildParametersPayload(request).ToString());
+        using var payload = JsonDocument.Parse(ArmDeploymentRunner.BuildParametersPayload(request, "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f").ToString());
         var sent = payload.RootElement.EnumerateObject().Select(p => p.Name).ToList();
 
         sent.Should().NotBeEmpty();

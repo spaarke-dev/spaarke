@@ -9,6 +9,7 @@
 //   missing per DataverseEnvironmentRegistryOptions.Validate / NFR-05).
 //   Discovered concurrently: the live-ceremony runbook was pointing at
 //   stacks/dev.bicepparam which actually targets model2-full.bicep -- wrong file.
+//   (Both since deleted by task 249, 2026-10-02.)
 //   This bicepparam is the correct one to pass to platform-controlplane.bicep.
 //
 // Usage:

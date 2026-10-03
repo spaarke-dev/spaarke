@@ -1,7 +1,8 @@
 // infrastructure/bicep/customer.bicep
 // Per-customer Bicep template for Spaarke production environment
 // Deploys isolated data resources into a dedicated customer resource group.
-// Run once per customer onboarding via Provision-Customer.ps1.
+// The ONLY customer-stamp template (owner D19, task 249): deployed by L2 handler H2a (ArmDeploymentRunner)
+// into the customer's own subscription, for new stamps and upgrades alike.
 //
 // Resources deployed:
 //   - Storage Account (temp files, document processing)
@@ -65,9 +66,6 @@ param location string = 'westus2'
 @description('Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it.')
 param openAiLocation string = 'westus3'
 
-@description('Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020.')
-param platformKeyVaultName string = 'sprk-${environmentName}-kv'
-
 // --- Storage Account options ---
 
 @description('SKU for the customer Storage Account')
@@ -95,7 +93,7 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
-@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. Empty default skips the grant (what-if isolation only); real per-customer deploys MUST supply the L2 UAMI principalId.')
+@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. H2a (ArmDeploymentRunner) sends it for Model 1 stamps only (task 249): a Model 2 stamp is in the customer\'s tenant, where a role assignment cannot name a Spaarke-tenant principal, and L2 reaches it through its Lighthouse delegation. Empty skips the grant.')
 param controlPlaneUamiPrincipalId string = ''
 
 // --- Optional SignalR (per ADR-032 Null-Object Kill-Switch pattern; ADR-034 realtime spine) ---
@@ -136,13 +134,21 @@ param redisCapacity int = 0
 
 // --- Tags ---
 
+// task 249 (D19, 2026-10-02): `createdDate: utcNow(...)` was dropped from the default. A `utcNow()`
+// parameter default is evaluated at EVERY deployment (not compile time), so on an UPGRADE run the tag
+// value changes on every deploy even though nothing about the customer or environment changed — the
+// upgrade what-if then reports a spurious tag Modify on every tagged resource (ArmWhatIfDriftDetector /
+// T225a CR-1 pattern). There is no Bicep-only way to compute a value that is genuinely stable "since
+// first deploy" without an external input this template does not have, and ARM already records creation
+// time (`systemData.createdAt` on most resource types; `createdTime` via `$expand=createdTime` on resource
+// listings) — this tag added nothing the platform doesn't expose, while actively causing drift. Dropped, not
+// replaced. One-time effect: the first upgrade of a stamp deployed before task 249 sees a tag-removal Modify.
 @description('Tags applied to ALL resources for cost tracking and management')
 param tags object = {
   customer: customerId
   environment: environmentName
   application: 'spaarke'
   managedBy: 'bicep'
-  createdDate: utcNow('yyyy-MM-dd')
 }
 
 // ============================================================================
@@ -254,6 +260,15 @@ module keyVault 'modules/key-vault.bicep' = {
     // per-customer UAMI (uami.bicep, task 028) via key-vault.bicep's existing
     // `userAssignedIdentityPrincipalId` param (task 030 wiring point).
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    // task 249 (D19, 2026-10-02): wire audit-log diagnostics to the stamp's OWN Log Analytics
+    // workspace (`monitoring` module below) via key-vault.bicep's existing `logAnalyticsWorkspaceId`
+    // param. It takes the workspace's ARM RESOURCE ID (`logAnalyticsId`) — NOT monitoring's
+    // `logAnalyticsWorkspaceId` output, which is the workspace's customerId GUID and makes the
+    // diagnostic setting fail at deploy time. The module already declares the diagnosticSettings resource (conditional on this being
+    // non-empty); this caller simply never supplied it. Referencing `monitoring.outputs.*` here creates
+    // an implicit dependency (keyVault after monitoring) regardless of declaration order — no cycle,
+    // since monitoring does not reference keyVault.
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsId
     tags: tags
   }
 }
@@ -513,8 +528,8 @@ module acsCommunication 'modules/acs-communication.bicep' = if (deployAcsMessagi
 //   - Feature-gated on `signalrEnabled` (default false). When false, NO SignalR
 //     resource is deployed AND the BFF DI container resolves the Null-Object
 //     variant (per ADR-032 P3 Fail-fast Null-Object).
-//   - When true, provisions the resource + grants the BFF Managed Identity the
-//     built-in "SignalR App Server" role (only when bffPrincipalId is non-empty).
+//   - When true, provisions the resource + grants the stamp's BFF identity (the per-customer
+//     UAMI, `uami.outputs.principalId` — task 249) the built-in "SignalR App Server" role.
 //   - `signalrEnabled=true` in Bicep is the *caller-side* half of the switch; the
 //     BFF-side half is the `Notifications:SignalRSpine:Enabled` config flag. Both
 //     must be true for end-to-end realtime; either false = feature disabled with
@@ -528,7 +543,12 @@ module signalr 'modules/signalr.bicep' = if (signalrEnabled) {
     signalrName: signalrName
     location: location
     signalrSku: signalrSku
-    bffPrincipalId: bffPrincipalId
+    // task 249 (D19, 2026-10-02): the stamp's BFF runs AS the UAMI (ADR-028 — no separate "BFF
+    // principal" exists; `bffPrincipalId` above defaults '' and H2a never passes it, so the role
+    // assignment this module makes conditional on a non-empty principal never fired). Pass the stamp
+    // UAMI's principalId — the same identity bffRuntimeRbac/cosmosDb/openAi/aiSearch already grant.
+    // Key auth stays disabled (signalr.bicep's own `disableLocalAuth: true` default — unchanged).
+    bffPrincipalId: uami.outputs.principalId
     tags: tags
   }
 }
@@ -874,6 +894,3 @@ output userAssignedIdentityClientId string = uami.outputs.clientId
 // (task 123) reads these exact names to populate BicepDeployOutputs.AppServiceName / AppServiceStagingSlotName. ---
 output appServiceName string = bffApi.outputs.appServiceName
 output appServiceStagingSlotName string = bffApiSlot.outputs.slotName
-
-// --- Platform cross-reference ---
-output platformKeyVaultName string = platformKeyVaultName

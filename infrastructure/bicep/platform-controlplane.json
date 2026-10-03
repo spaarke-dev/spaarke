@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "12638233916497465240"
+      "templateHash": "13489058810509134828"
     }
   },
   "parameters": {
@@ -461,7 +461,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15519022507304554186"
+              "templateHash": "5920606518685923232"
             }
           },
           "parameters": {
@@ -570,7 +570,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+                "description": "ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip"
               }
             }
           },
@@ -1517,7 +1517,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "12648884014575266452"
+              "templateHash": "5852170788431567528"
             }
           },
           "parameters": {
@@ -1686,7 +1686,7 @@
             "controlPlanePrincipalId": {
               "type": "string",
               "metadata": {
-                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as KvSecretsPopulationOptions__ControlPlanePrincipalObjectId -- the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead). REQUIRED: KvSecretsPopulationOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
+                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead), and the principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
               }
             },
             "speContainerTypeOwners": {
@@ -1760,7 +1760,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'ConnectionStrings__Redis', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('redisConnectionStringSecretName'))), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'KvSecretsPopulationOptions__ControlPlanePrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true')), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'ConnectionStrings__Redis', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('redisConnectionStringSecretName'))), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true')), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
                 }
               }
             },

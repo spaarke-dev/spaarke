@@ -162,7 +162,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
 | PRQ-C-08 | Exchange mail-enabled security group scoping the Spaarke ApplicationAccessPolicy — its id is the intake value `exchangePolicyScopeGroupId` (T245c) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
-| PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
+| PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |
 
 ---

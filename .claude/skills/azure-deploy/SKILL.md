@@ -121,7 +121,7 @@ az account show --query "{Name:name, Id:id}" -o table
 |-------|------|---------|
 | AI Foundry | `infrastructure/bicep/stacks/ai-foundry-stack.bicep` | AI Hub, Project, Storage, KV |
 | ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12); file deleted by task 225a (2026-10-01)** with `model1-customer.bicep` and `parameters/{dev,staging,prod}.bicepparam`. Model 1 customers are dedicated stamps built by the L2 control plane (H2a refuses Model 1 runs until tasks 225b + 228). |
-| Customer stamp (**both models**) | `infrastructure/bicep/customer.bicep` (deployed by L2 handler H2a) · `infrastructure/bicep/stacks/model2-full.bicep` (deployed by `deploy-infrastructure.yml`) | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). ⚠️ Two full-stamp templates exist and are not reconciled (recorded for T235). |
+| Customer stamp (**both models**) | `infrastructure/bicep/customer.bicep` — the ONLY customer-stamp template, deployed by L2 handler H2a (task 249, owner D19, 2026-10-02: `stacks/model2-full.bicep` and its parameter files were deleted) | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). Not deployed by any GitHub workflow — `deploy-infrastructure.yml` only validates. |
 
 ### Deploy Infrastructure
 
@@ -302,7 +302,7 @@ This skill documents **manual** Azure Infrastructure + Key Vault Secrets work. F
 
 | Workflow | Trigger | What It Deploys |
 |----------|---------|-----------------|
-| `.github/workflows/deploy-infrastructure.yml` | PR / push on `infrastructure/bicep/**` → validate + what-if only; deploys only on `workflow_dispatch` with `deploy: true` + environment approval | Azure Infrastructure (Bicep stacks) |
+| `.github/workflows/deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | PR / push on `infrastructure/bicep/**`, or `workflow_dispatch` | **Nothing** — lints every Bicep file and compiles `customer.bicep` + the remaining stacks (task 249). Customer stamps are deployed by L2 handler H2a. |
 | `.github/workflows/deploy-bff-api.yml` | `workflow_dispatch` only (never on merge) | BFF API — staging slot → swap → verify, with auto-rollback; see `bff-deploy` skill |
 | `.github/workflows/deploy-office-addins.yml` | Push to `master` on add-in paths, or `workflow_dispatch` | Office Add-ins SWA — see `office-addins-deploy` skill |
 | `.github/workflows/deploy-promote.yml` | `workflow_dispatch` | Direct-target deploy to dev / staging / production (production needs reviewer approval) |
@@ -313,29 +313,27 @@ This skill documents **manual** Azure Infrastructure + Key Vault Secrets work. F
 
 | Scenario | Use |
 |----------|-----|
-| Routine infrastructure update | Automated (`deploy-infrastructure.yml` workflow_dispatch) |
+| Customer stamp (new or upgrade) | L2 control plane via `/provision-environment` (H2a deploys `customer.bicep`) — never a GitHub workflow |
 | Emergency hotfix on Bicep | Manual deployment (this skill) |
 | First-time infrastructure stand-up | Manual deployment (this skill) |
 | Debugging deployment issues | Manual deployment (this skill) |
 | BFF API deploy | `bff-deploy` skill (DO NOT do BFF deploys via this skill) |
 
-### Trigger Automated Infrastructure Deployment
+### Run Bicep Validation On Demand
 
 ```powershell
-# Trigger infrastructure deployment manually
+# Lint + compile every Bicep template (deploys nothing — task 249)
 gh workflow run deploy-infrastructure.yml
 
-# Monitor deployment progress
+# Monitor the run
 gh run watch
-
-# View deployment status
 gh run list --workflow=deploy-infrastructure.yml --limit 5
 ```
 
-### Check Deployment Status
+### Check Workflow Runs
 
 ```powershell
-# View recent deployments
+# View recent validation runs
 gh run list --workflow=deploy-infrastructure.yml
 
 # View specific run details

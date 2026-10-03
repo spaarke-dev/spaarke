@@ -249,15 +249,21 @@ segregated and billed per customer natively (ADR-027, amended 2026-09-28). 🔴 
 App Service Plan — an App Service app cannot use a plan in a different subscription — which is the largest
 single per-customer fixed cost.
 
-**Bicep stack**: `infrastructure/bicep/customer.bicep` / `stacks/model2-full.bicep` — the same per-customer
-stamp for both models. ✅ The Model 1 shared-tier templates — `stacks/model1-shared.bicep` (+ its checked-in
+**Bicep stack**: `infrastructure/bicep/customer.bicep` — the **only** customer-stamp template, the same
+per-customer stamp for both models (owner decision D19, 2026-10-02). It is deployed **only** by the L2 control
+plane's handler H2a, into the customer's own subscription (amended ADR-027); no CI workflow deploys it —
+`deploy-infrastructure.yml` ("Validate Bicep Infrastructure") lints and compiles it and deploys nothing.
+✅ The Model 1 shared-tier templates — `stacks/model1-shared.bicep` (+ its checked-in
 JSON), `stacks/model1-customer.bicep`, `modules/model1-shared-l2-rbac.bicep`, `parameters/model1-prod.bicepparam`
 and `parameters/{dev,staging,prod}.bicepparam` — were **deleted by task 225a (2026-10-01)**, together with the
-inverted-polarity assertion in `bicep-e2e-dry-run.ps1` (now green with 3 stacks), the `model1-shared` compile +
+inverted-polarity assertion in `bicep-e2e-dry-run.ps1`, the `model1-shared` compile +
 upload in `publish-provisioning-arm-artifacts.yml` (its manifest schema requires only `customer`) and the
-`model1-shared` option of `deploy-infrastructure.yml`. H2a deploys `customer` for Model 2; for Model 1 it **fails closed**
-(`arm-template-unavailable`, nothing deployed) until T225b converges the Model 1 code path and T228 gives each Model 1
-run its own subscription.
+`model1-shared` option of `deploy-infrastructure.yml`. ✅ `stacks/model2-full.{bicep,json}`,
+`stacks/{dev,staging,prod}.bicepparam`, `parameters/model2-customer-template.bicepparam` and
+`customer-deployment.bicepparam` were **deleted by task 249 (2026-10-02)** together with that workflow's what-if
+and deploy stages — `model2-full.bicep` deployed no live environment. H2a deploys `customer` for Model 2; for
+Model 1 it **fails closed** (`arm-template-unavailable`, nothing deployed) until T228 gives each Model 1 run its own
+subscription (T225b, 2026-10-02, converged the rest of the Model 1 code path).
 
 ### 3.3 Handler behaviour — what differs
 
@@ -331,7 +337,7 @@ parameters: `POST /api/runs` rejects them. A missing or malformed value stops th
 
 | Setting (`Worker` app setting) | What it is | Read by |
 |---|---|---|
-| `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId` | Object id of L2's own UAMI — the principal H4 grants **Key Vault Secrets Officer** on each customer vault before writing it. Never the stamp's BFF UAMI (that one only reads its vault). | H4 |
+| `ControlPlaneIdentity__PrincipalObjectId` | Object id of L2's own UAMI (one setting since task 249; it replaced `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId`). H4 grants it **Key Vault Secrets Officer** on each customer vault before writing it — never the stamp's BFF UAMI, which only reads its vault. H2a sends it as `customer.bicep`'s `controlPlaneUamiPrincipalId` on **Model 1** stamps (Website Contributor on the stamp BFF). **Rollout**: deploy `platform-controlplane` (which sets the new name) FIRST, then the Worker code built from task 249 straight away (`Deploy-ControlPlane.ps1` deploys code only) — each Worker version refuses to start without the name it reads, so the Worker is down between the two steps; queued Service Bus messages wait. (The old name only ever existed on the project branch, since T245b.) | H4, H2a |
 | `KvSecretsPopulationOptions__RequireSecretFreeIdentity` | `true` — every new stamp is secret-free: H4 omits `BFF-API-ClientSecret` and `Dataverse-ClientSecret` (BINDING credential-lifecycle rule; no sentinel). The code default is also `true` (T225b, G21). | H4 |
 | `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId`, `OwnerAppId` (the container type's **owning** app), `OwnerCertKeyVaultName` + `OwnerCertSecretName` (its certificate, base64 PFX — canonical `SPE-OwnerCert-Pfx`). The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run until the topology runbook has created a container type + owning app and its entry is added. | H0 (SpeCertBootstrap), H8, H13 (T6) |
 | `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
@@ -527,7 +533,7 @@ tenants*, not *customers*, and its tests pass anyway because there is only ever 
 |---|---|
 | **Setting** | `Customer__Id` (configuration key `Customer:Id`) |
 | **Value** | the customerId — 3–8 chars, lowercase letters and digits, starting with a letter. See [`AZURE-RESOURCE-NAMING-CONVENTION.md` § "The `customerId` standard"](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). |
-| **Emitted by** | `infrastructure/bicep/customer.bicep` and `infrastructure/bicep/stacks/model2-full.bicep` (production site only), from the `customerId` they already hold; and **H4b** writes it to **both** slots from the run's customerId, verbatim (manifest `per_env_settings` → `Configure-AppServiceSettings.generated.ps1 -CustomerId`, customer-provisioning-orchestration-r1 T238) — so a staging → production swap cannot drop it. **No operator action** on a provisioned stamp |
+| **Emitted by** | `infrastructure/bicep/customer.bicep` (production site only), from the `customerId` it already holds; and **H4b** writes it to **both** slots from the run's customerId, verbatim (manifest `per_env_settings` → `Configure-AppServiceSettings.generated.ps1 -CustomerId`, customer-provisioning-orchestration-r1 T238) — so a staging → production swap cannot drop it. **No operator action** on a provisioned stamp |
 | **Verified by** | **H13 trap T7** (`CustomerIdentityT7Probe`): both slots must carry exactly the run's customerId; missing, blank or different on either slot quarantines the run (`h13-trap-T7-customer-identity`) |
 | **Assignment authority** | Dataverse `sprk_dataverseenvironment.sprk_customerid`. Bicep CONSUMES it; nothing mints one. |
 
