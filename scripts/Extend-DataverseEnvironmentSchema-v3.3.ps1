@@ -92,6 +92,10 @@ function Invoke-DV([string]$Ep, [string]$Method = "GET", [object]$Body = $null) 
 }
 
 function Test-AttributeExists([string]$LogicalName) {
+    # Dataverse LOGICAL names are lowercase even when the schema name is mixed case (sprk_ClientCacheBustToken ->
+    # sprk_clientcachebusttoken). Looking up the mixed-case name 404s, the create then 400s on the existing column
+    # (seen 2026-10-03 on spaarkedev1) — so always look up the lowercase form.
+    $LogicalName = $LogicalName.ToLowerInvariant()
     try {
         Invoke-RestMethod -Uri "$BaseUrl/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='$LogicalName')?`$select=LogicalName" `
             -Headers $headers -Method GET -UseBasicParsing -ErrorAction Stop | Out-Null
@@ -243,5 +247,4 @@ $r = Invoke-DV -Ep "PublishXml" -Method "POST" -Body @{
 if ($r.Success) { Write-Host "  Published" -ForegroundColor Green }
 else            { Write-Host "  Publish failed: $($r.Error)" -ForegroundColor Red }
 
-Write-Host "`nDONE - sprk_dataverseenvironment extended with 12 new columns (v3.3) in $EnvironmentDomain" -ForegroundColor Green
-Write-Host "Total columns now: 16 (v2 baseline) + 12 (v3.3 extension) = 28" -ForegroundColor Cyan
+Write-Host "`nDONE - sprk_dataverseenvironment carries the 13 extension columns (v3.3 + T225b) in $EnvironmentDomain (existing columns skipped, never modified)" -ForegroundColor Green

@@ -8,8 +8,7 @@
 > **v5 (2026-10-02, `customer-provisioning-orchestration-r1` T225b)**: `PRQ-E-14` **added** — the registry schema on
 > the admin environment, including the new `sprk_credentialmode` column. Every new stamp is secret-free by default
 > since T225b, so H4 always records the A38a marker; without the column H4 fails after writing the vault. The column
-> is added by the existing idempotent `Extend-DataverseEnvironmentSchema-v3.3.ps1` (not yet run on `spaarkedev1`,
-> checked 2026-10-02).
+> is added by the existing idempotent `Extend-DataverseEnvironmentSchema-v3.3.ps1` (applied to `spaarkedev1` 2026-10-03 with the operator identity — the column now exists).
 >
 > **v4 (2026-10-02, `customer-provisioning-orchestration-r1` T225a)**: the Model 1 shared stack is retired (files
 > deleted). `PRQ-E-05` moved `once_per_env` → `once_per_customer` and now targets the stamp's own BFF — it is an H2a

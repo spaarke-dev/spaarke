@@ -321,7 +321,7 @@ decision made once, at onboarding, and recorded on the registry row; it is not r
 
 **Reserved: `platform`, `shared`, `byok`.** They match the pattern but already occupy the customerId position in
 non-customer resource-group names — `rg-spaarke-platform-{env}` (the BFF and the L2 control plane),
-`rg-spaarke-shared-{env}` (the retired Model 1 tier), `rg-spaarke-byok-prod`. A customer with one of these ids would
+`rg-spaarke-shared-{env}` (Spaarke's shared production resources — the Model 1 SPE billing account and, from its first prod deployment, the L2 control plane; formerly the retired Model 1 tier, D23 2026-10-03), `rg-spaarke-byok-prod`. A customer with one of these ids would
 deploy into that group. Intake refuses them (`CustomerIdStandard.ReservedIds`), and the BFF refuses to derive them
 at runtime (`CustomerIdResolver`).
 
