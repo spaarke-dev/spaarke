@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT-3/8: Find fills the pane with one scroll bar, shows Similar Documents and Matching Records as two independent sections, opens every result in Spaarke, and says why a record matched</title>
     <phase>6 UAT round 3 (2026-10-03)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx`/`.ts` in the task pane (`FindView`, `FindResultsList`, `useFindRecordMatches`, `App.tsx`) and their tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -137,4 +137,23 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-10-03. FindResultsList.tsx split into two independent sections (DocumentsSection,
+    RecordsSection) inside one shared scroll container (no maxHeight cap); FindView.tsx no longer
+    gates FindResultsList's mount on the documents fetch and dropped its own overflow:auto layer;
+    useFindRecordMatches.ts's RecordMatch gained confidenceScore + matchReasons; App.tsx passes
+    canOpenRecord to FindView. Open actions wired via a single onOpenRecord(entityType, recordId)
+    callback to the existing openRecord launcher, gated on canOpenBrowserWindow + ORG_URL. Match
+    reasons rendered via a new renderMatchReason parser (em -> bold, any other tag dropped, never
+    dangerouslySetInnerHTML). Found and handled, client-side: a hub node's id is server-prefixed and
+    the SameThread relationship's "thread-" hub carries no real record id — extractHubRecordId
+    validates GUID shape before offering an open action, degrading safely to plain text otherwise.
+    Gates: 3 Find suites 79/79 (was 57/57; +22 new tests); full gated jest 63/63 suites, 885/885
+    tests; lint 0 errors/0 warnings on all touched files; typecheck 0 errors attributed to any file
+    this task touched (project-wide count fluctuated 68->86->73 during the task because task 088 was
+    concurrently mid-edit on SaveFlow.tsx/SaveView.tsx/the office-js mock in the same worktree - not
+    this task's regression). Criterion 8 (live verification) left UNVERIFIED - no Office host in this
+    worktree, same precedent as every prior Find task. Full detail: notes/092-find-tab.md.
+  </notes>
 </task>

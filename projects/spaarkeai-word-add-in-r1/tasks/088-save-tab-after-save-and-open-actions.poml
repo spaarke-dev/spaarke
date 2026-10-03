@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT-1/5/6/7: the Save tab keeps its form after a save (Saved state, Open Document, View Document opens the Spaarke record in the Spaarke app) and the name-collision prompt offers Open</title>
     <phase>6 UAT round 3 (2026-10-03)</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.ts`/`.tsx` (`SaveFlow.tsx`, `useSaveFlow.ts`, `openRecordLauncher.ts`) and BFF `.cs` (`OfficeService.cs` collision refusal, `OfficeEndpoints.cs` redaction), plus tests on both sides.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -178,4 +178,24 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-10-03 in wave UAT3-W1 (uncommitted; main session commits). Full record: notes/088-save-tab-after-save.md.
+    - Saved state replaces the success card: bar (record / "Not filed to a record.", View Document, Copy Link), name, profile,
+      footer [Cancel] [Open Document][Saved]. Name edit or accepted Generate Profile -> "Save version" (FR-11 version of the saved doc).
+    - All record links name the app (appname= from SPAARKE_APP_NAME, default sprk_MatterManagement; empty -> none). openRecord
+      defaults to the setting, so task 092's Find opens get it too. View Existing Document fixed (id passed as URL).
+    - Server: every owned collision carries id + name; new CanSaveAsVersion flag (editable AND filed to target); the Read gate
+      strips id, name and flag; flag written only with an id. Pane offers Save as new version from the flag only; Open uses
+      GET /api/documents/{id}/open-links.
+    - ESCALATION 1 FIRED: ms-word: cannot be launched by a supported call (openBrowserWindow is http/https only, office-js #2820
+      by design; window.open of Office URIs undocumented) -> webUrl everywhere, mechanism chosen by canOpenBrowserWindow.
+      Trigger 2 not fired (only gated "Save Another" pin was a Word capture test, rewritten, invariant kept). Trigger 3 judged
+      not fired: same existing access check, now also on filed-elsewhere collisions (<=1 OBO access query per refused save).
+    - Gates: gated jest 63 suites / 886 tests green (baseline 62/836); lint 0; typecheck 0 production (68 accepted test-file);
+      BFF Office scope 467 passed / 8 skipped (pre-existing) / 0 failed; ArchTests 346/346; CVE check clean.
+      Publish size OWED (worktree iterated; commit-less branch copy disallowed by the wave rules). Live AC (Word host) OPEN.
+    - Owner questions: a version save does not rename (task 023 D-5) though a name edit enables "Save version"; saved state is
+      lost on tab remount (App.tsx owns persistence); deploy BFF before the add-in (flag-only version offer).
+  </notes>
 </task>

@@ -43,6 +43,12 @@ const ENV_CONFIG = {
   // (email-communication-solution-r4 task 072 / FR-25). Config-driven, no
   // hardcoded org — when unset, Quick Create degrades to a no-op.
   ORG_URL: process.env.ORG_URL || '',
+  // Optional: the unique name of the Spaarke model-driven app every record link opens in
+  // (spaarkeai-word-add-in-r1 task 088 / UAT-1 — `main.aspx?appname=…`). A link with no app opens in the
+  // user's DEFAULT app, which may not be Spaarke's. The unique name travels with the solution, so it is the
+  // same in every environment; a customer whose app has another name changes this one setting. UNSET →
+  // `sprk_MatterManagement`; set to an EMPTY string → record links name no app (the pre-088 behaviour).
+  SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME !== undefined ? process.env.SPAARKE_APP_NAME : 'sprk_MatterManagement',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
   // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
@@ -359,6 +365,7 @@ module.exports = async (env, options) => {
         'process.env.BFF_API_BASE_URL': JSON.stringify(ENV_CONFIG.BFF_API_BASE_URL),
         'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
         'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
+        'process.env.SPAARKE_APP_NAME': JSON.stringify(ENV_CONFIG.SPAARKE_APP_NAME),
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
       }),

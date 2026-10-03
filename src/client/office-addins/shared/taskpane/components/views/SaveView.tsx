@@ -51,8 +51,8 @@ export interface SaveViewProps {
   onSaved?: (entity: EntitySearchResult) => void;
   /** Callback when Quick Create is triggered */
   onQuickCreate?: (entityType: EntityType, searchQuery: string) => void;
-  /** Callback when view document is clicked */
-  onViewDocument?: (documentUrl: string) => void;
+  // Task 088 (UAT-1): `onViewDocument` (and its `window.open` fallback, which opened the stored file's Graph
+  // webUrl — Word for the web) is REMOVED. SaveFlow's View Document now opens the Spaarke document record.
   /** Callback to navigate to different view */
   onNavigate?: (view: 'save' | 'status') => void;
   /** Entity types allowed for association */
@@ -102,7 +102,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
   onComplete,
   onSaved,
   onQuickCreate,
-  onViewDocument,
   onNavigate,
   allowedEntityTypes,
   resolvedDocumentId,
@@ -231,19 +230,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
     throw new Error('getAccessToken not provided');
   }, []);
 
-  // Handle view document click
-  const handleViewDocument = useCallback(
-    (url: string) => {
-      if (onViewDocument) {
-        onViewDocument(url);
-      } else {
-        // Default behavior: open in new tab
-        window.open(url, '_blank');
-      }
-    },
-    [onViewDocument]
-  );
-
   // Task 045: reads the CURRENT document bytes, live — never cached. `useSaveFlow.startSave` calls
   // this at the moment a save attempt actually submits (first Save, "Keep both", "Save as new
   // version", a `retry()`, or the next Save after "Save Another"), so every attempt uploads the
@@ -323,7 +309,6 @@ export const SaveView: React.FC<SaveViewProps> = ({
         hostType={hostType}
         attachments={attachments}
         getAccessToken={getAccessToken || defaultGetAccessToken}
-        onViewDocument={handleViewDocument}
         showDocumentInfo
         canOpenRecord={canOpenRecord}
         canSuggestRelatedRecords={canSuggestRelatedRecords}

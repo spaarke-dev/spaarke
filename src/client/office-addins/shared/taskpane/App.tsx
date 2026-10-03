@@ -869,6 +869,10 @@ export const App: React.FC<AppProps> = ({
             onRetryDocumentIdentity={retryDocumentIdentity}
             onGoToSave={() => setCurrentTab('save')}
             itemNoun={findItemNoun}
+            // task 092 (UAT-3, NFR-10): same pattern as SaveView's canOpenRecord — decided from the
+            // live adapter's capabilities, never a hostType check. Gates whether Find's document,
+            // parent-record and matching-record rows open in Spaarke or render as plain text.
+            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
           />
         )}
 

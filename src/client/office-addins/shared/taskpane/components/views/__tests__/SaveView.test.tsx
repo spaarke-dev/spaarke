@@ -138,7 +138,14 @@ beforeEach(() => {
 describe('SaveView', () => {
   describe('loading and error state', () => {
     it('shows a loading state while the adapter resolves', () => {
-      const adapter = makeWordAdapter({ getSubject: jest.fn(() => new Promise(() => { /* no-op */ })) });
+      const adapter = makeWordAdapter({
+        getSubject: jest.fn(
+          () =>
+            new Promise(() => {
+              /* no-op */
+            })
+        ),
+      });
       renderSaveView(adapter);
 
       expect(screen.getByText('Loading document information...')).toBeInTheDocument();
@@ -308,29 +315,20 @@ describe('SaveView', () => {
     });
   });
 
-  describe('onViewDocument', () => {
-    it('forwards to the provided onViewDocument callback', async () => {
-      const handleViewDocument = jest.fn();
-      const adapter = makeWordAdapter();
-      renderSaveView(adapter, { onViewDocument: handleViewDocument });
-
-      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
-
-      const props = lastSaveFlowProps();
-      (props.onViewDocument as (url: string) => void)('https://example.com/doc');
-      expect(handleViewDocument).toHaveBeenCalledWith('https://example.com/doc');
-    });
-
-    it('falls back to window.open when onViewDocument is not provided', async () => {
+  // Task 088 (UAT-1): the `onViewDocument` seam — a callback taking the stored file's Graph webUrl, with a
+  // `window.open(url, '_blank')` fallback here — was REMOVED: View Document opens the Spaarke document RECORD
+  // inside SaveFlow (pinned by SaveFlow.savedState.test.tsx). The two tests that pinned the old forwarding and
+  // fallback are replaced by this one, which pins that the webUrl path is gone rather than merely unused.
+  describe('View Document (task 088)', () => {
+    it('hands SaveFlow no onViewDocument callback — no path from the Save tab opens the file URL any more', async () => {
       const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
       const adapter = makeWordAdapter();
       renderSaveView(adapter);
 
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
-      const props = lastSaveFlowProps();
-      (props.onViewDocument as (url: string) => void)('https://example.com/doc');
-      expect(windowOpenSpy).toHaveBeenCalledWith('https://example.com/doc', '_blank');
+      expect(lastSaveFlowProps()).not.toHaveProperty('onViewDocument');
+      expect(windowOpenSpy).not.toHaveBeenCalled();
 
       windowOpenSpy.mockRestore();
     });

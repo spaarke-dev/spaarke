@@ -259,3 +259,14 @@ shared/taskpane/components/views/__tests__/SaveView.test.tsx
 shared/taskpane/components/views/__tests__/ShareView.test.tsx
 shared/taskpane/hooks/__tests__/useEntitySearch.test.ts
 shared/taskpane/hooks/__tests__/useSaveFlow.test.ts
+# --- Save tab after a save + Open on the collision prompt (task 088, UAT round 3: UAT-1/5/6/7) ------
+# Pins: the form STAYS after a save (confirmation bar naming the record or "not filed", View Document +
+# Copy Link; Open Document immediately left of a gray disabled "Saved"); an edited name or an accepted
+# Generate Profile -> "Save version" = a version of THE SAVED document, reverting -> "Saved"; View
+# Document / Open Document / View Existing Document open the Spaarke RECORD with appname= (none when
+# SPAARKE_APP_NAME is empty), never the Graph webUrl; no capability or no ORG_URL -> not rendered; an
+# Outlook save reaches the same state (read-only name, stays "Saved"). Changed suites already listed
+# above: SaveFlowCollision (Open + the canSaveAsVersion flag), errorMessages.collision,
+# openRecordLauncher (appname + openFileUrl), sendEmailService, DocumentProfileSection
+# (onProfileGenerated), SaveFlow.openRecord, SaveFlow.captureAtSave, SaveView.
+shared/taskpane/components/__tests__/SaveFlow.savedState.test.tsx
