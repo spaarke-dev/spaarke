@@ -490,7 +490,7 @@ public sealed class ContactIdentityBinder
                         case StoreWriteStatus.Written:
                         case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict when attempt == 0:
                             // Created without an id in the response, or a concurrent first sign-in won the race
-                            // (412 on If-None-Match). Either way the oid lookup now finds exactly one contact.
+                            // (the mirror key's 412 duplicate fault). Either way the oid lookup now finds exactly one contact.
                             continue;
                         case StoreWriteStatus.PreconditionFailed or StoreWriteStatus.KeyConflict:
                             // Refused by the key AGAIN although the binding read found no contact for this oid: no
