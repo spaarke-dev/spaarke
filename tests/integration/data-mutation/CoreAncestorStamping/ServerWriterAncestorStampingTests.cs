@@ -244,6 +244,99 @@ public class ServerWriterAncestorStampingTests
             "with no known name column there is nothing to read — a guessed column would only fail at Dataverse");
     }
 
+    // A sprk_recordtype_ref row is the one regarding target whose typed lookup on sprk_event IS the pair's type column
+    // (sprk_regardingrecordtype), so TaskActionCore writes no pair for it (owner round 8 item 2). Reachable: the playbook
+    // create-task node and the communication follow-up apply both pass the regarding type through as text.
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a task filed under a sprk_recordtype_ref row keeps that row in its typed lookup — which is also the pair's type column — and gets no pair id, name or url naming the record-type row")]
+    public async Task CreateTask_WhenRegardingARecordTypeRow_KeepsItsTypedLookupAndWritesNoPair()
+    {
+        var recordTypeRowId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+        // Every type has a record-type row here, sprk_recordtype_ref included, so a pair write would ALSO replace the typed
+        // lookup with a different record.
+        var recordTypes = new Mock<ICommunicationDataverseService>();
+        recordTypes
+            .Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string entity, CancellationToken _) =>
+                new Entity("sprk_recordtype_ref", Guid.NewGuid()) { ["sprk_recorddisplayname"] = entity });
+
+        var id = await new TaskActionCore(
+                entityService.Object,
+                CoreAncestorResolverFixtures.Inert(),
+                IdentityNormalizationFixtures.NoLinkedContact(),
+                recordTypes.Object,
+                NullLogger.Instance)
+            .CreateAsync(
+                new TaskActionInput("Review the type", null, null, recordTypeRowId, "sprk_recordtype_ref", null),
+                CancellationToken.None);
+
+        id.Should().NotBe(Guid.Empty, "a record-type row is outside the core-ancestor taxonomy, so nothing refuses the task");
+        var task = created.Should().ContainSingle().Subject;
+        var typed = task.GetAttributeValue<EntityReference>("sprk_regardingrecordtype");
+        typed.Should().NotBeNull();
+        typed!.LogicalName.Should().Be("sprk_recordtype_ref");
+        typed.Id.Should().Be(recordTypeRowId, "the typed lookup names the record the task is filed under, not a record-type row for its type");
+        task.Contains("sprk_regardingrecordid").Should().BeFalse("a pair id would name the record-type row as if it were a filed record");
+        task.Contains("sprk_regardingrecordurl").Should().BeFalse("no record URL is written for a record-type row");
+        task.Contains("sprk_regardingrecordname").Should().BeFalse("no pair is written at all");
+        recordTypes.Verify(
+            r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the pair's type lookup is not consulted for this target");
+    }
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a create cancelled during the regarding-name read is reported as cancelled — never swallowed into a 'created' result with an empty id — and nothing after the read runs")]
+    public async Task CreateTask_WhenCancelledDuringTheRegardingNameRead_PropagatesTheCancellationAndCreatesNothing()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var created = new List<Entity>();
+        // Every Dataverse call honours the token, as the real client does — the core-ancestor resolver's reads and column
+        // probe included. Without the name read's rethrow, the cancellation would be logged at Debug, the resolver would
+        // swallow its own as a failed derivation, and the caller would get the "degraded success" Guid.Empty: a cancelled
+        // request reported to ActionSeam as CreateTaskResult(true, Guid.Empty) and to the playbook as "Task created".
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        entityService
+            .Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string _, Guid __, string[] ___, CancellationToken ct) => Task.FromCanceled<Entity>(ct));
+        entityService
+            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity e, CancellationToken ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                created.Add(e);
+                return Guid.NewGuid();
+            });
+        var coreAncestors = new CoreAncestorResolver(
+            entityService.Object,
+            (_, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return CoreAncestorResolverFixtures.ProbeReturning(CoreAncestorResolverFixtures.AllRootColumns)(string.Empty, ct);
+            },
+            NullLogger<CoreAncestorResolver>.Instance);
+        var recordTypes = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
+
+        var act = () => new TaskActionCore(
+                entityService.Object,
+                coreAncestors,
+                IdentityNormalizationFixtures.NoLinkedContact(),
+                recordTypes.Object,
+                NullLogger.Instance)
+            .CreateAsync(
+                new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),
+                cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>(
+            "a cancelled create surfaces as a cancellation, not as a task 'created' with an empty id");
+        created.Should().BeEmpty();
+        recordTypes.Verify(
+            r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the create stops at the name read: the pair's type lookup after it never runs");
+    }
+
     /// <summary>The task create core over <paramref name="entityService"/>, a communication under <see cref="MatterId"/>, and no record-type rows.</summary>
     private static TaskActionCore TaskCore(Mock<IGenericEntityService> entityService) => new(
         entityService.Object,

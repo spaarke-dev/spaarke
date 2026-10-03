@@ -813,6 +813,69 @@ New: 4 tests (handler 1, `TaskActionCore` name branches 3). Nothing else changed
 - The pre-commit formatter (`dotnet format --include` on the two test files) was run before the suites and changed
   nothing.
 
+## Verifier round c1-r2 (2026-10-03, branch `task/uac-r2-156-c1-r2`)
+
+Branch created from `task/uac-r2-156-c1-r1` at `f2064feab` (baseSha). No merge: the only integration commit the branch
+lacks is the docs-only checkpoint `b18a7d321`, and the verifier found the merge clean. No production code changed: one
+test file and two documents changed.
+
+**Item 1 (AC7: seed V1 survived the whole BFF unit suite): closed with a test. The branch is reachable, so it stays.**
+- *How it is reached.* `CreateTaskNodeExecutor` passes the playbook's `config.RegardingObjectType` through as text, and
+  `ActionSeam` passes `CreateTaskRequest.RegardingObjectType` through, which `CommunicationCreateTaskApplyService`
+  fills from a proposal's `regardingObjectType`. Neither checks the type against a list. `TaskActionCore`'s
+  `RegardingFieldByEntity` maps `sprk_recordtype_ref` → `sprk_regardingrecordtype`, and `CoreAncestorResolver` classes
+  that type as `Unclassified`, which is a success. So the task is created.
+- *The test.* `CreateTask_WhenRegardingARecordTypeRow_KeepsItsTypedLookupAndWritesNoPair`, in
+  `ServerWriterAncestorStampingTests`, next to the other pair tests. In its world every type has a record-type row,
+  `sprk_recordtype_ref` included. That means a pair write would also replace the typed lookup. It asserts:
+  - the task is created;
+  - `sprk_regardingrecordtype` still names the filed record-type row (entity and id);
+  - no `sprk_regardingrecordid`, `sprk_regardingrecordurl` or `sprk_regardingrecordname` is written;
+  - the record-type lookup is never called.
+- Seed V1 (`if (regardingField.Length > 0)`): 1 red.
+
+**Item 2 (AC7: seed V16, the rethrow in `ReadRegardingNameAsync`): pinned. It is NOT an equivalent mutant.**
+- *The difference V16 makes.* Suppose every Dataverse call honours the token, as the real client does. Without the
+  rethrow, the name read logs the cancellation at Debug and returns null. Next, the resolver's column probe catches its
+  own cancellation as a failed derivation, which fails closed. `TaskActionCore` then returns the degraded `Guid.Empty`.
+- *What the caller sees.* `ActionSeam` reports `CreateTaskResult(true, Guid.Empty, null)`, and `CreateTaskNodeExecutor`
+  reports `NodeOutput.Ok` ("Task created"). So a cancelled request reads as a success.
+- *With the rethrow*, the cancellation propagates: the executor returns `NodeOutput.Error`, and `ActionSeam`'s caller
+  receives the `OperationCanceledException`.
+- *The test.* `CreateTask_WhenCancelledDuringTheRegardingNameRead_PropagatesTheCancellationAndCreatesNothing`. The
+  token is already cancelled. Every double honours it: the entity service's reads and create, and the resolver's own
+  reads and column probe. The test asserts:
+  - an `OperationCanceledException` is thrown;
+  - nothing is created;
+  - the record-type lookup after the name read never runs.
+- Seed V16 (the `catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }` removed): 1 red. The
+  failure was "no exception was thrown", which confirms the difference above.
+
+**Items 3-13: verified by the verifier; nothing to change.** **Item 14** (the AC7 shortfall) is closed by items 1 and 2.
+**AC8** (the manual dev live gate) remains the main session's, after deploy.
+
+### Seeds (each restored byte-identical from a backup, then touched; SHA-256 re-verified; every seed compiled)
+
+Run against the affected filter: the handler, data-mutation stamping, `TaskActionCore`, `CoreAncestor*`, create-task
+executor, `ActionSeam` and `TodoRegardingBuilder` tests (206 tests).
+
+| Seed | Mutation | Bit |
+|---|---|---|
+| V1 | `TaskActionCore`'s record-type skip → `if (regardingField.Length > 0)` | 1 red: `CreateTask_WhenRegardingARecordTypeRow_KeepsItsTypedLookupAndWritesNoPair` |
+| V16 | `ReadRegardingNameAsync`'s cancellation rethrow removed | 1 red: `CreateTask_WhenCancelledDuringTheRegardingNameRead_PropagatesTheCancellationAndCreatesNothing` |
+
+### Tests this round
+
+New: 2 tests, both in `ServerWriterAncestorStampingTests`. Nothing else changed.
+- Affected (the filter above): **206 / 206**.
+- Full BFF unit suite, run once at the end: **Passed 14399 / Failed 0 / Skipped 54 (Total 14453)**. That is round c1's
+  14397 plus the 2 new tests. There were no failures, so nothing was re-run for contention.
+- NetArchTest: **Passed 346 / Failed 0 (Total 346)**.
+- `tests/integration/Sprk.Bff.Api.IntegrationTests`, in full: **Passed 104 / Failed 0 / Skipped 0 (Total 104)**.
+- `tests/integration/Spe.Integration.Tests`, in full: **Passed 403 / Failed 0 / Skipped 25 (Total 428)** (the suite's own
+  25 skips).
+- The pre-commit formatter (`dotnet format --include` on the test file) was run before the suites and changed nothing.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
 All five new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
@@ -865,6 +928,9 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
 - **Verifier round c1**: 4 new tests (the AI update tool's direct-root re-file; `TaskActionCore`'s over-long, unreadable
   and unmapped regarding name). Affected **184 / 184**; 5 seeds (Q1, N1, R1, U2, U3), each red. Full suites: see the
   verifier round c1 section.
+- **Verifier round c1-r2**: 2 new tests (`TaskActionCore`: a task filed under a `sprk_recordtype_ref` row writes no pair;
+  a create cancelled during the regarding-name read propagates the cancellation). Affected **206 / 206**; 2 seeds (V1,
+  V16), each red. Full suites: see the verifier round c1-r2 section.
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,
