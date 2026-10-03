@@ -522,11 +522,16 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
   never Assign — owner decision, round 11 item 4. A child filed under two secure records gets only the people shared on
   BOTH, at the lower rights (the INTERSECTION, fail closed — owner decision, round 11 item 4). Any other share on a
   child is removed.
-- **The No Access list wins** (task 143). A user on a secure record's No Access list is never given anything new on
-  its children — no new share, no wider one — even while their share on the record itself is still there (the No
-  Access enforcement has not run yet, or kept them as the record's last reader); a share they already hold can only
-  narrow. When the enforcement removes their share on the record, its children follow in the same call. If the list
-  cannot be checked for someone, they are given nothing and the child is retried.
+- **The No Access list wins** (task 143). A user on the No Access list of ANY secure record a child is filed under is
+  never given anything new on that child — no new share, no wider one — even when the child's other secure record does
+  not wall them, and even while their share on the record itself is still there (the No Access enforcement has not run
+  yet, or kept them as the record's last reader); a share they already hold can only narrow. When the enforcement
+  removes their share on the record, its children follow in the same call. If the list cannot be checked for someone,
+  they are given nothing and the child is retried. The list applies where the record's **Secure flag**
+  (`sprk_issecure`) is set: a record owned by `Secure Record Owners` whose flag reads No or empty — possible only part
+  way through an unsecure (see the ship gate below) or after a hand edit before task 150 locks the flag — is not
+  checked for its children either. Its own share path (Manage Access and the No Access enforcement) skips it the same
+  way, so a child is never wider than its record.
 - **When.** Immediately when a share is added, changed or removed through Manage Access (the response says how many
   related records could not be updated yet, if any); immediately after secure provisioning; immediately after the No
   Access enforcement removes a share on the record; and every two minutes for everything else — a new or re-filed

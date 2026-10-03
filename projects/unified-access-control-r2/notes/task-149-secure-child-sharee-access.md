@@ -6,7 +6,9 @@
 > unsecure gap made a ship gate, the 143 coordination made an orchestrator obligation);
 > fix round r3 on `task/uac-r2-149-r3` (§13 — merged with task 143 and DISCHARGED the merge-order obligation: the No
 > Access guard before child grants/widenings, the enforcer fans out, the walled-user negative test; verifier findings
-> 1-3; owner round 11 recorded; the 133/146 creator-stamp conflict resolved per owner round 10).
+> 1-3; owner round 11 recorded; the 133/146 creator-stamp conflict resolved per owner round 10);
+> fix round r4 on `task/uac-r2-149-r4` (§14 — the multi-root half of the No Access guard pinned by test; the task-142
+> wiring made a BINDING merge-order obligation; the Secure-flag edge of the wall recorded).
 > Status: **code complete, not deployed.** Ships together with task 146. Live steps are manual gates (§8).
 > Owner decisions that bind this task: round 7 item 5 ("each child's principals and rights equal the root's POA share
 > set ... never wider"), round 5 (production topology), round 6 (secured child roots stay secure; task 158), round 3
@@ -25,7 +27,7 @@ every Secure-team-owned child shared with exactly the internal principals its se
 | Who | every SYSTEM USER and TEAM with a direct POA share on the root (inherited-only rows, mask 0, are not shares) |
 | Rights | the root's rights restricted to Read, Write, Append, AppendTo, Delete — **never Share** (owner round 11 item 4), never Assign, never Create (`RecordShareLevels.ChildMirrorMask`) |
 | Several secure roots | the **intersection**: a principal must be shared on every one, at the lowest rights (owner round 11 item 4) |
-| No Access list (task 143, r3) | a system user the guard refuses (walled, or unverifiable) for ANY of the child's secure roots is never granted or widened on the child; they keep only the narrowing part of a change |
+| No Access list (task 143, r3) | a system user the guard refuses (walled, or unverifiable) for ANY of the child's secure roots is never granted or widened on the child; they keep only the narrowing part of a change. Every root is asked, each answer remembered per (root, user) — pinned in r4 by a two-root test (§14) |
 | Anything else on the child | revoked; a wider share is narrowed; a missing one granted |
 | Which rows | rows of the 23 codified child tables owned by the Secure team, whose lookups lead (through Secure-team-owned or user-owned children, never ordinary-team-owned ones) to a Secure-team-owned root |
 | Never touched | children of non-secure roots; rows owned by any other team; the roots themselves |
@@ -131,7 +133,9 @@ present and future, from one place. Its cost is the latency in §5 decision 3.
    mixed change keeps only its narrowing part (r3). Then (r3, task 143) every system user still to be granted or
    widened is checked against the No Access list for each of the child's secure roots: refused (walled, or the check
    unanswerable) → nothing added, only the narrowing part kept; unanswerable also leaves the child not updated. A child
-   left with nothing to write counts as unchanged. Every changed child is read back.
+   left with nothing to write counts as unchanged. Every changed child is read back. (r4: the guard answers by the
+   root's `sprk_issecure` FLAG, while this step 4 counts a root as secure by its Secure-team OWNER; a Secure-team-owned
+   root whose flag reads No/empty is therefore not walled for its children — §14 item 7.)
 
 ## 5. Escalations (CLAUDE.md §6 / §6.5). None blocks the code; each is recorded with the default implemented.
 
@@ -152,9 +156,11 @@ ROOT before any child grant or widening, `NoAccessShareEnforcer` calls `SyncRoot
 share, and the walled-user negative tests exist. (Before r3 this paragraph said "142 and 143 do" and that deriving from
 the root satisfied the guard; both statements are superseded: the guard is now consulted, because a walled user's ROOT
 share can stand — the enforcer has not run, or owner S5 kept it — while the mirror would otherwise grant the children.)
-Task 142 (Assigned-To POA shares on roots) has not landed on this branch: its root-share writes reach the children
-through the 2-minute reconcile, and the guard above applies to them too; 142 calls `SyncRootAsync` after its own write if
-it wants them at once.
+Task 142 (Assigned-To POA shares on roots) has not landed on this branch: until it does, its root-share writes reach the
+children through the 2-minute reconcile, and the guard above applies to them too. **r4: wiring 142 is a BINDING
+merge-order obligation, not an option** — whichever of 142 and 149 merges second makes 142's materializer call
+`SyncRootAsync(root)` after a confirmed root share write and adds the tests (§14, "Merge-order obligation with task
+142"). (r3 said "142 calls `SyncRootAsync` after its own write if it wants them at once"; superseded.)
 
 **Handoffs.** Task 148: a child moved OUT of a secure record (or a record made ordinary — `UnsecureProjectEndpoint` now
 says why it does not fan out) keeps its mirrored shares until 148 re-owns it; a child moved between two secure records
@@ -532,3 +538,89 @@ not edited — the main session may point them at this §13.
 - **Client:** no client file changed in r3 (the merge brought 143-r2's `CreateProjectWizard` / `SummarizeFilesWizard`
   changes, which do not overlap 149's `AccessGrantModal` change; nothing was resolved there), so no client build was run.
 - **Publish size:** not measured (main session).
+
+## 14. Fix round r4 (2026-10-03) — the fourth verifier's findings, item by item
+
+Branch `task/uac-r2-149-r4` from `task/uac-r2-149-r3` (**baseSha `35da930fc`**). **No production code changed** (one
+comment in `SecureChildShareReconciliationJob.cs`). The round adds one 4-case theory, a binding merge-order obligation
+for task 142, and two documentation sentences (the multi-root rule and the Secure-flag edge of the wall).
+
+| # | Item | Disposition |
+|---|---|---|
+| 1 | Reproduced r3 results (ArchTests 372/372, both integration suites, the full unit suite with 104 contention failures passing 141/141 in isolation, POML well-formed, no package) | Confirmed; nothing to change. |
+| 2 | Seeds S1 and S2 bite (verifier findings 1 and 2 closed) | Confirmed; nothing to change. |
+| 3 | **Finding A** — `WallAsync` asks about EVERY secure root, but no test pinned it: seed B (`break;` after the first root) left all 223 tests green, and a two-root probe gave the walled user the child | **Closed.** New theory `AUserWalledOnOnlyOneOfAChildsTwoSecureRoots_IsNeverGrantedThatChild` (`SecureChildShareMirrorTests`), 4 cases = walled on {R, R2} × trigger {fan-out, reconcile}. A document is filed under R (`sprk_project`) and R2 (`sprk_relatedproject`); A and B hold View on both roots; B is walled on ONE root only (task 143's REAL guard over the seam deny list, `DenySystemUserOnRecord(UserB, <that root>)`). The fan-out runs from the root that does NOT wall B (the adversarial direction). Asserts: B gets no share on the two-root document and no write names B there; A gets it at View (the document is otherwise mirrored); B still gets the open root's own single-root child (the wall is per record) and never the walled root's own child; run Completed. A theory over BOTH roots, as F5's was, so a mutation that checks only the first OR only the last root bites whichever order the lineage set has. **Seeds (each restored from a byte copy, file touched, `git status` clean on `src/`):** **B** `break;` after the first root → 2 failures (the two `R2` cases); **C** the per-run cache keyed on the USER alone (`_walls[(default(RowRef)!, user)]`) → 4 failures (all four cases: an answer cached from one root, or from an earlier child, is served for the other root); **D** only the LAST root checked (`.TakeLast(1)`) → 2 failures (the two `R` cases). In every seed the other 223 tests of the affected suites stayed green, which confirms the gap was real: only this test pins the multi-root half and the (root, user) cache key. |
+| 4 | **Finding B** — AC6's task-142 half recorded only as optional ("142 calls `SyncRootAsync` ... if it wants them at once") | **Closed as a BINDING merge-order obligation** (below), §5's sentence replaced, and the job's remarks (`SecureChildShareReconciliationJob.cs`) no longer say "tasks 142 and 143 call the synchronizer when they land" (143 does since r3; 142 MUST, per the obligation). **Partly corrected from code:** at `task/uac-r2-142-r3` (`d48f5191e`; `task/uac-r2-142-r4` is at the same commit), the materializer never removes or narrows a share on a root whose `sprk_issecure` reads true: `EndAssignmentAsync` answers `KeptSecureRecord` before `RemoveOrRestoreShareAsync` (`:1174-1178`, owner S5), and the grant→share conversion requires `!flags.IsSecure` (`:652`). So "once 142 revokes an auto-share, the children keep that user" cannot happen on a FLAGGED secure root. It CAN happen on a Secure-team-OWNED root whose flag reads No/empty (item 7), where 142 revokes as on an ordinary root while the synchronizer still treats the root as secure. And 142's one write on a flagged secure root, the RESTORE of a share after a No Access wall is lifted (`FreshShareAsync` → `WriteShareAsync`, `:986-1016`), reaches the children only at the next tick: an under-share window (the fail-closed direction) that owner round 11 item 2 did NOT accept (it covers MDA Share/Unshare and new/re-filed children only). The POML constraint ("cover every BFF path that writes or removes a POA share on a secure root, including task 142's systemuser auto-share"; "whichever ... lands second does the wiring and its test") binds every write. The obligation therefore covers grants and removals alike. |
+| 5 | Merge integrity: no dropped behaviour | Confirmed; nothing to change. |
+| 6 | Verified correct in r3 | Confirmed; nothing to change. |
+| 7 | **LOW** — the guard answers `NotSecure` when the root's `sprk_issecure` reads false/null (`SecureShareNoAccessGuard.cs:148-151`; null reads false, `ExternalParticipationService.FlagsFrom`), while the synchronizer counts a root as secure by its Secure-team OWNER (`SecureChildShareSynchronizer.cs:582`; the flag only makes a non-isolated root "held", `:584`) | **Recorded** (no behaviour change requested): §4 step 7 above and guide §7a ("The No Access list wins") now say it. A Secure-team-owned root whose flag reads No/empty (only part way through an unsecure, which the ship gate forbids in shared environments, or a hand edit before task 150's FLS lock) is not walled for its children. Task 143's enforcer (`NoAccessShareEnforcer.cs:417-419`, `NotSecure`) and the `/share-user` guard skip that root the same way, so a child is never wider than its root. |
+| 8 | **LOW** housekeeping in other tasks' files | **Not changed here** (other tasks' files; editing them on this branch would only add integration conflicts). Still present at this branch: `ProvisionProjectEndpoint.cs:126` (`<see cref="AssignOwnerToSecureTeamAsync"/>`, 133's remarks; the method is `MoveOwnerAsync`) and `RecordOwnershipResolver.cs:862` (comment naming `ProvisionProjectEndpoint.AssignOwnerToSecureTeamAsync`). Task 143's note ("HOOK for 149") and POML (`:246`, `:268`) still describe the 149 hook as future work; it was done in r3 (§13). For the main session at integration. |
+| 9 | AC6 partly not met | **Multi-root half: CLOSED** (item 3). **142 half: met by AC6's own fallback clause** ("if those tasks have not landed, the note records which task wires it"): 142 has not landed, and the note now records the wiring as a binding obligation on whichever merges second. Fully met when that merge lands with its tests. **143 half:** met since r3 (confirmed by the verifier). |
+| 10 | AC1: Part A probe rows | **Pending live gate G149-1** (§8), unchanged. Live writes are outside this session (read-only). G149-1 has no precondition; owner round 11 approved it for the main session. |
+| 11 | AC5: does a share survive an Assign (probe g)? | **Pending G149-1 step 4**, unchanged. |
+| 12 | AC12 | **Pending G149-2.** Of its preconditions, G146-1 (role 9 → 26) is DONE on dev (2026-10-03, `work/unified-access-control-r2` `92d5f3cc1`, `notes/batch4-live-gates-2026-10-03.md`); the joint 146+149 deploy is still to come. |
+| 13 | AC13: publish size | **Main session** (this round's instructions). No package or csproj change in r4; no production code changed. |
+
+### Merge-order obligation with task 142 (for the orchestrator; AC6's 142 half) — BINDING
+
+**Facts** (read 2026-10-03 at `task/uac-r2-142-r3` `d48f5191e`; `task/uac-r2-142-r4` is at the same commit; neither is
+in `work/unified-access-control-r2` nor in this branch):
+
+- `AssignedAccessMaterializer` (registered **Scoped**, `ExternalAccessModule.cs:227` on 142) writes system-user POA shares
+  on ROOTS through the one seam: `WriteShareAsync` → GrantAccess `:1354` / ModifyAccess `:1357`, and
+  `RemoveOrRestoreShareAsync` → RevokeAccess `:1393` / ModifyAccess `:1395`. Neither the class, its tests nor 142's POML
+  mention `SyncRootAsync` or task 149.
+- Its callers: the inline L1 trigger after a BFF writer's commit, the sync endpoint (form post-save, wizards, the
+  "Update Access" ribbon), and `AssignedAccessReconciliationJob`. All three resolve it from a scope.
+
+**Whichever of 142 and 149 merges into `work/unified-access-control-r2` SECOND must, in that merge's branch:**
+
+1. Give `AssignedAccessMaterializer` a `SecureChildShareSynchronizer` constructor dependency. Both are Scoped; there is
+   no cycle (the synchronizer depends on `IGenericEntityService`, `IDataverseRecordShareService`,
+   `SecureShareNoAccessGuard`, `IConfiguration` and a logger, never on the materializer).
+2. At the end of `MaterializeAsync`, if this run made at least one CONFIRMED system-user share write on the root (a
+   `WriteShareAsync` that returned the confirmed mask after a GrantAccess/ModifyAccess, or a `RemoveOrRestoreShareAsync`
+   that returned `true`), call `SyncRootAsync(run.Logical, run.RootId, ct)` ONCE for the root, not once per subject.
+   With no confirmed share write there is no call, and the children are not read. On an ordinary root the call answers
+   `NotApplicable` after reading the root's own row.
+3. If the result is not complete (`!IsComplete`: `Incomplete` or `Failed`), or the fan-out throws (catch it), record a
+   run failure (e.g. `run.Fail(null, "children-incomplete", ...)` naming the counts), so the job reports `Success = false`.
+   The root write STANDS: it is never rolled back, and the 2-minute reconcile completes the children. This is the shape
+   of the enforcer's `SyncChildrenAsync` (r3).
+4. Add tests, each seeded to bite:
+   - (a) a 142 share REMOVAL on a root the synchronizer treats as secure (Secure-team-owned; with the flag reading No,
+     the only state in which 142-r3 removes one there) removes the user from every child in the same call, not at the
+     next tick;
+   - (b) the RESTORE after a lifted wall on a flagged secure root gives the user every child in the same call (the
+     guard is consulted, as for every child grant);
+   - (c) an incomplete fan-out is a failure of the run, and the root write stands;
+   - (d) a run with no confirmed share write does not read the children.
+
+Until this is done, 142's root-share writes reach the children at the next reconcile tick (≤ 2 minutes): a restore is
+late (an under-share), and a removal on a Secure-team-owned root whose flag reads No leaves the user on the children for
+up to 2 minutes. The No Access guard still applies to every child grant either way.
+
+**For the main session:** add a "142 × 149" line to `notes/batch4-integration-steps.md` (Code reconciliation), like the
+"143 × 149" one, pointing here. That file is on `work/unified-access-control-r2`, not on this branch.
+
+**`.claude/**` edits needed:** none.
+
+### 14.1 r4 test results (2026-10-03)
+
+- **New theory alone:** 4/4.
+- **Affected suites** (`SecureChildShare*`, `NoAccessShareEnforcer*`, `SecureShareNoAccessGuard*`, `InternalUserShare*`):
+  **227/227** (the verifier's 223 + the 4 new cases); with seeds B / C / D: 225 / 223 / 225 passed (2 / 4 / 2 failures,
+  all in the new theory); after restore: 227/227.
+- **ArchTests** (`dotnet test tests/Spaarke.ArchTests`): **372/372**, including `PoaShareClientSingletonGuardTests` and
+  `RecordOwnerAssignmentCensusTests` ("every owner write in the server is censused").
+- **Integration suites (project hard gate):** `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests`
+  **428 = 403 passed + 25 skipped, 0 failed**.
+- **Full BFF unit suite** (`dotnet test tests/unit/Sprk.Bff.Api.Tests`): **14,746 = 14,671 passed + 54 skipped
+  (pre-existing) + 21 failed**, in 35.7 minutes while other agents' suites ran on this machine. 14,746 is r3's 14,742
+  plus the 4 new cases. The 21 failures (21 distinct names) are all host-based contract, seam or Office tests that ran
+  about 3 minutes each (Insights, Office quick-create/save/search, Compose seam, drive-keyed route retirement, document
+  profile, related-record card, memory pins, eval harness, workspace layout, endpoint characterization). None is in a
+  file this round touched, and none is among the affected suites. Re-run in isolation on the same build:
+  **22/22 passed** in 1.2 minutes (the name filter matches 22 cases). This is contention, not this change.
+- **POML:** parses as well-formed XML.
+- **Client:** no client file changed in r4. **Publish size:** not measured (main session). No package or csproj change.

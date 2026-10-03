@@ -1357,6 +1357,52 @@ public class SecureChildShareMirrorTests
         result.ChildrenNotUpdated.Should().Be(ChildrenOfR.Length);
     }
 
+    /// <summary>
+    /// AC6, the multi-root half (task 149 r4, verifier finding A): the No Access guard is asked about EVERY secure root of
+    /// a child — "refused for ANY of the child's secure roots" — not only the first one, and its answer is remembered per
+    /// (root, user), never per user. A document is filed under R (<c>sprk_project</c>) AND R2 (<c>sprk_relatedproject</c>);
+    /// A and B are shared View on both; B is walled on ONE of them only. B never gets the two-root document, whichever root
+    /// walls B and whichever trigger runs (the fan-out runs from the root that does NOT wall B), while A does — the document
+    /// is otherwise mirrored. The wall is per record: B still gets the single-root child of the root that does not wall
+    /// them, and never the walled root's own child.
+    /// </summary>
+    [Theory]
+    [InlineData("R", "fan-out")]
+    [InlineData("R2", "fan-out")]
+    [InlineData("R", "reconcile")]
+    [InlineData("R2", "reconcile")]
+    public async Task AUserWalledOnOnlyOneOfAChildsTwoSecureRoots_IsNeverGrantedThatChild(string walledOn, string trigger)
+    {
+        var both = Guid.Parse("d0c00000-0000-4000-8000-0000000000c1");
+        var world = World().SecureChild("sprk_document", both,
+            ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", ProjectR2));
+        foreach (var root in new[] { ProjectR, ProjectR2 })
+        {
+            _shares.Seed("sprk_project", root, User(UserA), ViewOnly);
+            _shares.Seed("sprk_project", root, User(UserB), ViewOnly);
+        }
+
+        var walledRoot = walledOn == "R" ? ProjectR : ProjectR2;
+        var openRoot = walledOn == "R" ? ProjectR2 : ProjectR;
+        var walledRootsOwnChild = walledOn == "R" ? DocR : DocR2;
+        var openRootsOwnChild = walledOn == "R" ? DocR2 : DocR;
+        _denyList.DenySystemUserOnRecord(UserB, walledRoot);
+        var synchronizer = world.Synchronizer(_shares, SecureGuard(UserA, UserB));
+
+        var result = trigger == "fan-out"
+            ? await synchronizer.SyncRootAsync("sprk_project", openRoot, CancellationToken.None)
+            : await synchronizer.ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_document", both, User(UserB)).Should().BeNull(
+            $"B is walled on {walledOn}, one of the document's two secure roots");
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == both && w.Principal == User(UserB));
+        _shares.MaskOf("sprk_document", both, User(UserA)).Should().Be(ViewOnly, "A, walled on neither root, is mirrored");
+        _shares.MaskOf("sprk_document", openRootsOwnChild, User(UserB)).Should().Be(ViewOnly,
+            "the wall is per record: the root that does not wall B still gives B its own child");
+        _shares.MaskOf("sprk_document", walledRootsOwnChild, User(UserB)).Should().BeNull();
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed, "leaving a walled user out is the mirror, not a failure");
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // Task 149 r1 — F3: thread participants are never granted a SECURE message (DirectThreadAccessService)
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

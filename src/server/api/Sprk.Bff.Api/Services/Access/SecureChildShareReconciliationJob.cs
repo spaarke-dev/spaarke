@@ -18,7 +18,9 @@ namespace Sprk.Bff.Api.Services.Access;
 /// User and Spaarke Office Add In User; owner C4 keeps it). An Unshare that does not reach the children is an over-share
 /// for as long as nothing repairs it;</item>
 /// <item>a fan-out that partly failed (the endpoint names the counts; this completes it);</item>
-/// <item>any other root-share writer (tasks 142 and 143 call the synchronizer when they land).</item>
+/// <item>any other root-share writer: task 143's No Access enforcer calls the synchronizer after it removes a root share
+/// (wired in task 149 r3); task 142's Assigned-To materializer must call it after a confirmed root share write — a binding
+/// merge-order obligation on whichever of 142/149 merges second (notes/task-149 §14). Until then this job is the net.</item>
 /// </list>
 /// No relationship cascades Share/Unshare/Reparent (live metadata, 2026-10-02), so without this job none of the four would
 /// ever reach the children. The cadence bounds every one of them to about two minutes — the owner's "minutes, never hourly"
