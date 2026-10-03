@@ -4,7 +4,10 @@
 > declare how it is authorized: a record-level check, an admin policy, or an explicit, reasoned waiver ... A new route
 > with only a sign-in check fails the build."
 > **Evidence**: `notes/route-authorization-sweep-2026-10-02.md` (82 findings, 90 route keys).
-> **Branch**: `task/uac-r2-167` from `work/unified-access-control-r2` @ `6b243f092`. **No file under `src/` changed.**
+> **Branch**: `task/uac-r2-167` from `work/unified-access-control-r2` @ `6b243f092`; verifier round r1 on
+> `task/uac-r2-167-r1` (§15). **One `src/` file changed, by owner decision**: owner round 12 item 1 rate-limits
+> `GET /healthz`, `GET /healthz/catalog` and `GET /ping` (`Infrastructure/DI/EndpointMappingExtensions.cs`, three
+> `.RequireRateLimiting("anonymous")` lines). Nothing else under `src/` changed.
 
 ## 0. ⚠️ Read first — a HIGH finding the sweep never traced (escalation trigger 7, sent to the main session)
 
@@ -16,7 +19,8 @@ it to the `IDataverseService` singleton). It returns name, file name, `isEmailAr
 existence oracle. Proposed severity **high**.
 - **Owner**: task **166** — its amendment (a) already names this route ("remove or gate it, and move the smoke check that
   uses it to /healthz/dataverse"). The waiver is therefore `Pending("166", NoDecision)`, not `UNOWNED-NEW` (a deliberate
-  deviation from 167's AC text, which predates 166's amendment; recorded in §9).
+  deviation from 167's AC text, which predates 166's amendment; recorded in §9 and **accepted by owner round 12 item
+  8**).
 - **Consumer a fix breaks**: `.claude/skills/bff-deploy/SKILL.md` §9c (post-deploy "MI → Dataverse" smoke check), plus
   `projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md` and `051-operator-runbook.md`. The skill edit is
   main-session-only (`.claude/**`); 166 records its exact text.
@@ -51,9 +55,11 @@ reasons to change — rules (rare), parser (when the codebase invents a registra
   registration no longer collides: it is unbound).
 - **Credit** (live routes): PerResource **108** · HandlerDecision **43** · AdminOnly **83** · Anonymous **16** · None
   **180**. Flagged (None + Anonymous) = **196** = 74 sweep NoDecision + 122 other.
-- **Waivers**: 212 = **122 Pending** (90 sweep: 74 NoDecision + 16 InsufficientDecision; 11 owned by a fix task's
-  amendment; **21 UNOWNED-NEW**) + **90 Permanent** (AnonymousByDesign 14 · ReferenceData 31 · CallerScopedOnly 28 ·
-  CallerSuppliedContentOnly 15 · CreateWithNoPriorResource 1 · OperatorGateInHandler 1).
+- **Waivers** (after round r1 + owner round 12, §15): 214 = **125 Pending** (90 sweep: 74 NoDecision + 16
+  InsufficientDecision; **14** owned by a fix task's amendment or by owner round 12 — 161: 4, 166: 10, two of them
+  InsufficientDecision on credited routes; **21 UNOWNED-NEW**) + **89 Permanent** (CallerScopedOnly 31 · ReferenceData
+  26 · CallerSuppliedContentOnly 15 · AnonymousByDesign 14 · OwnerComparison 1 · CreateWithNoPriorResource 1 ·
+  OperatorGateInHandler 1). (At the first commit: 212 = 122 Pending + 90 Permanent.)
 - The sweep ledger's 90 keys are all present on the branch with the expected N/I credit state (escalation trigger 4 did
   not fire); no 159-166 commit had landed on this branch (§8).
 
@@ -86,11 +92,13 @@ Columns: route, registration, proposed severity, owner, evidence (handler file:l
 | 20 | `POST /api/compose/active-document` | `Api/ComposeActiveDocumentEndpoints.cs:31` | low | UNOWNED-NEW | The session owner IS checked (ComposeActiveDocumentEndpoints.cs:102-113), but a body DocumentId is recorded as the session's active document with no read check; downstream consumers may read it app-only. | none found |
 | 21 | `POST /api/compose/documents/{documentSpeId}/apply-template` | `Api/ComposeTemplateEndpoints.cs:35` | low | UNOWNED-NEW | Resolves a caller-named template with an APP token (ComposeTemplateEndpoints.cs:95-106). Safe only if every template is org-shared. | none found |
 
-## 4. Non-sweep routes already owned by a fix task's amendment (11)
+## 4. Non-sweep routes owned by a fix task's amendment or by owner round 12 (14)
 
-Pending NoDecision, owned by the task whose `<amendments>` names the route — more accurate than `UNOWNED-NEW`, and
-inside the closed owner set. These are NOT sweep ledger entries; when the owning task fixes one, its waiver goes stale
-(credited) or absent (deleted) and must be deleted.
+Pending, owned by the task whose `<amendments>` names the route (owner round 12 item 8 keeps them there) or to which
+owner round 12 assigns the fix — more accurate than `UNOWNED-NEW`, and inside the closed owner set. These are NOT
+sweep ledger entries; when the owning task fixes one, its waiver goes stale (credited, or its fingerprint changes) or
+absent (deleted) and must be deleted. Rows 1-11 are NoDecision from the first commit; rows 12-14 were added in round
+r1 (§15).
 
 | # | Route | Registered | Sev | Owner | Evidence | Consumer |
 |---|---|---|---|---|---|---|
@@ -105,12 +113,20 @@ inside the closed owner set. These are NOT sweep ledger entries; when the owning
 | 9 | `POST /api/reporting/reports` | `Api/Reporting/ReportingEndpoints.cs:87` | medium | 166 | Author/Admin role only, then creates a report in ANY caller-chosen workspaceId via the service principal (ReportingEndpoints.cs:87). Task 166 amendment (f). | none found |
 | 10 | `PUT /api/reporting/reports/{reportId:guid}` | `Api/Reporting/ReportingEndpoints.cs:97` | medium | 166 | Author/Admin role only, then updates a report in ANY caller-chosen workspace via the service principal (ReportingEndpoints.cs:97). Task 166 amendment (f). | none found |
 | 11 | `GET /api/reporting/reports` | `Api/Reporting/ReportingEndpoints.cs:66` | low | 166 | Lists reports in ANY caller-chosen workspaceId with the service principal (ReportingEndpoints.cs:228-251); only the Reporting role is checked. Task 166 amendment (f) and owner round 10 item 1 own the reporting module. | none found |
+| 12 | `DELETE /api/memory/pins/{pinId}` | `Api/Memory/PinnedMemoryEndpoints.cs:184` | low | 166 (NoDecision) | Loads ANY pin by caller-chosen id (`:499`) and answers 404 "Pin not found" (`:503`) for an unknown id but 403 "Caller does not own this pin" (`:515`) for another user's — a cross-user pin-existence oracle; the delete itself (`:521`) is owner-gated. Owner round 12 item 4: 166 makes both answers one 404, then replaces this waiver with Permanent **OwnerComparison** in the same diff. Was Permanent CallerScopedOnly at the first commit (verifier finding 6). | none found |
+| 13 | `POST /api/v1/external-access/revoke` | `Api/ExternalAccess/RevokeExternalAccessEndpoint.cs` (bound by the external-access aggregator) | medium | 166 (InsufficientDecision, observed `AddDelegationRuleFilter`) | DelegationRuleFilter decides Write on the project; the handler then acts on a client-supplied `ContainerId` (`RevokeExternalAccessEndpoint.cs:350-357`). 166 amendment (b); owner round 12 item 9. | none found |
+| 14 | `POST /api/office/todo` | `Api/Office/OfficeEndpoints.cs:1346` | medium | 166 (InsufficientDecision, observed `AddTodoSourceAccessFilter`) | TodoSourceAccessFilter gates the SOURCE read; the to-do row is created with no Create-privilege check (`CreateTodoAsync`, `OfficeEndpoints.cs:1368`, `:1409`). 166 amendment (c); owner round 12 item 9. | Office add-in to-do pane |
 
-## 5. Permanent waivers (90) — each basis verified by reading the handler; the reason cites file:line
+The third credited route owner round 12 item 9 names — `POST /api/v1/external-access/close-project`'s
+`RemoveAllExternalMembersAsync` stripping INTERNAL users (166 amendment (e)) — is already sweep S-39 (Pending
+InsufficientDecision, 166); a route carries one waiver, so S-39's reason now also names amendment (e).
 
-- **AnonymousByDesign** (14): `GET /healthz`, `GET /healthz/catalog`, `GET /healthz/dataverse`, `GET /healthz/dataverse/crud`, `GET /ping`, `GET /status`, `GET /api/config/client`, `GET /api/config`, `GET /api/office/health`, `POST /api/office/save-debug`, `POST /api/registration/demo-request`, `POST /api/onboarding/consent-callback`, `POST /api/compose/webhooks/spe-doc-changed`, `POST /api/communications/incoming-webhook`
-- **ReferenceData** (31): `GET /api/agent/playbooks`, `GET /api/ai/capabilities`, `GET /api/ai/chat/playbooks`, `GET /api/ai/chat/context-mappings`, `GET /api/ai/tools/handlers`, `GET /api/ai/handlers`, `GET /api/ai/handlers/{handlerId}`, `GET /api/ai/model-deployments`, `GET /api/ai/model-deployments/{id:guid}`, `GET /api/ai/nda-standard/clauses/{clauseRef}`, `GET /api/ai/nda-standard/clauses`, `GET /api/ai/playbooks`, `GET /api/ai/playbooks/public`, `GET /api/ai/playbooks/templates`, `GET /api/ai/scopes/skills`, `GET /api/ai/scopes/knowledge`, `GET /api/ai/scopes/tools`, `GET /api/ai/scopes/actions`, `GET /api/ai/scopes/personas`, `GET /api/ai/chat/context-mappings/standalone`, `GET /api/v1/field-mappings/profiles`, `GET /api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity}`, `GET /api/navmap/{entityLogicalName}/entityset`, `GET /api/navmap/{childEntity}/{relationship}/lookup`, `GET /api/navmap/{parentEntity}/{relationship}/collection`, `GET /api/v1/external/api/dataverse/metadata/{entityLogicalName}`, `GET /api/v1/external/api/dataverse/savedquery/{savedQueryId:guid}`, `GET /api/v1/external/api/dataverse/savedqueries/{entityLogicalName}`, `GET /api/office/search/matter-types`, `GET /api/workspace/sections`, `GET /api/workspace/templates`
-- **CallerScopedOnly** (28): `GET /api/ai/chat/event-rules/opt-out`, `PUT /api/ai/chat/event-rules/opt-out`, `GET /api/ai/chat/sessions`, `POST /api/ai/daily-briefing/render`, `POST /api/ai/daily-briefing/email`, `GET /api/ai/playbooks/runs/{runId:guid}`, `GET /api/ai/playbooks/runs/{runId:guid}/stream`, `POST /api/ai/playbooks/runs/{runId:guid}/cancel`, `GET /api/ai/playbooks/runs/{runId:guid}/detail`, `POST /api/communications/threads/direct`, `POST /api/compose/document/{documentId:guid}/heartbeat`, `GET /api/v1/external/me`, `GET /api/v1/external/me/entitlements`, `GET /api/users/me/memberships/{entityType}`, `GET /api/memory/user`, `POST /api/memory/user/seed`, `DELETE /api/memory/user/{itemId}`, `DELETE /api/memory/user`, `GET /api/memory/pins`, `DELETE /api/memory/pins/{pinId}`, `POST /api/notifications/negotiate`, `GET /api/notifications/pending`, `POST /api/notifications/{outboxRowId:guid}/dismiss`, `GET /api/me`, `GET /api/reporting/status`, `GET /api/workspace/portfolio`, `GET /api/workspace/health`, `GET /api/workspace/briefing`
+## 5. Permanent waivers (89 after round r1; 90 at the first commit) — each basis verified by reading the handler; the reason cites file:line
+
+- **AnonymousByDesign** (14): `GET /healthz`, `GET /healthz/catalog`, `GET /healthz/dataverse`, `GET /healthz/dataverse/crud`, `GET /ping`, `GET /status`, `GET /api/config/client`, `GET /api/config`, `GET /api/office/health`, `POST /api/office/save-debug`, `POST /api/registration/demo-request`, `POST /api/onboarding/consent-callback`, `POST /api/compose/webhooks/spe-doc-changed`, `POST /api/communications/incoming-webhook`. Every one now names a MANDATORY control (rate limit, HMAC, IsDevelopment-only mapping); `/healthz`, `/healthz/catalog` and `/ping` gained their rate limit in round r1 (owner round 12 item 1).
+- **ReferenceData** (26): `GET /api/ai/capabilities`, `GET /api/ai/chat/context-mappings`, `GET /api/ai/tools/handlers`, `GET /api/ai/handlers`, `GET /api/ai/handlers/{handlerId}`, `GET /api/ai/model-deployments`, `GET /api/ai/model-deployments/{id:guid}`, `GET /api/ai/nda-standard/clauses/{clauseRef}`, `GET /api/ai/nda-standard/clauses`, `GET /api/ai/scopes/skills`, `GET /api/ai/scopes/knowledge`, `GET /api/ai/scopes/tools`, `GET /api/ai/scopes/actions`, `GET /api/ai/scopes/personas`, `GET /api/ai/chat/context-mappings/standalone`, `GET /api/v1/field-mappings/profiles`, `GET /api/v1/field-mappings/profiles/{sourceEntity}/{targetEntity}`, `GET /api/navmap/{entityLogicalName}/entityset`, `GET /api/navmap/{childEntity}/{relationship}/lookup`, `GET /api/navmap/{parentEntity}/{relationship}/collection`, `GET /api/v1/external/api/dataverse/metadata/{entityLogicalName}`, `GET /api/v1/external/api/dataverse/savedquery/{savedQueryId:guid}`, `GET /api/v1/external/api/dataverse/savedqueries/{entityLogicalName}`, `GET /api/office/search/matter-types`, `GET /api/workspace/sections`, `GET /api/workspace/templates`
+- **CallerScopedOnly** (31): `GET /api/ai/chat/event-rules/opt-out`, `PUT /api/ai/chat/event-rules/opt-out`, `GET /api/ai/chat/sessions`, `POST /api/ai/daily-briefing/render`, `POST /api/ai/daily-briefing/email`, `GET /api/ai/playbooks/runs/{runId:guid}`, `GET /api/ai/playbooks/runs/{runId:guid}/stream`, `POST /api/ai/playbooks/runs/{runId:guid}/cancel`, `GET /api/ai/playbooks/runs/{runId:guid}/detail`, `POST /api/communications/threads/direct`, `GET /api/v1/external/me`, `GET /api/v1/external/me/entitlements`, `GET /api/users/me/memberships/{entityType}`, `GET /api/memory/user`, `POST /api/memory/user/seed`, `DELETE /api/memory/user/{itemId}`, `DELETE /api/memory/user`, `GET /api/memory/pins`, `POST /api/notifications/negotiate`, `GET /api/notifications/pending`, `POST /api/notifications/{outboxRowId:guid}/dismiss`, `GET /api/me`, `GET /api/reporting/status`, `GET /api/workspace/portfolio`, `GET /api/workspace/health`, `GET /api/workspace/briefing`, and (owner round 12 item 6, moved from ReferenceData) `GET /api/ai/playbooks`, `GET /api/ai/playbooks/public`, `GET /api/ai/playbooks/templates`, `GET /api/ai/chat/playbooks`, `GET /api/agent/playbooks`
+- **OwnerComparison** (1, new basis — owner round 12 item 4): `POST /api/compose/document/{documentId:guid}/heartbeat` (was CallerScopedOnly). `DELETE /api/memory/pins/{pinId}` (was CallerScopedOnly) does not meet it yet and is Pending 166 (§4 row 12).
 - **CallerSuppliedContentOnly** (15): `POST /api/ai/daily-briefing/summarize`, `POST /api/ai/daily-briefing/narrate`, `POST /api/ai/rag/embedding`, `POST /api/communications/draft`, `POST /api/compose/project`, `POST /api/compose/documents/{documentId:guid}/checkout`, `POST /api/compose/documents/{documentId:guid}/checkin`, `POST /api/v1/field-mappings/validate`, `POST /api/workspace/calculate-scores`, `POST /api/workspace/events/{id:guid}/scores`, `POST /api/workspace/files/extract-text`, `POST /api/workspace/files/summarize`, `POST /api/workspace/matters/pre-fill`, `POST /api/workspace/matters/ai-summary`, `POST /api/workspace/projects/pre-fill`
 - **CreateWithNoPriorResource** (1): `PUT /api/obo/me/files/{*path}`
 - **OperatorGateInHandler** (1): `GET /api/diagnostics/tenant-container-resolver`
@@ -213,28 +229,38 @@ existing `ContainerId`, written with no caller check — strict CreateWithNoPrio
   amendment they record "Route authorization ledger input" in their notes and the main session folds it into the
   ledger at integration. The data split (§1) keeps those edits on `.Ledger.cs`.
 
-## 9. Interpretations and decisions for the main session to confirm
+## 9. Interpretations and decisions — ANSWERED by owner round 12 (2026-10-03)
 
-1. **AnonymousByDesign "mandatory compensating control"** includes a response FIXED IN SOURCE that carries nothing:
-   `GET /healthz`, `GET /healthz/catalog` (HealthCheckOptions with no ResponseWriter) and `GET /ping` (constant "pong")
-   have no rate limit. Every other anonymous waiver names a rate limit, an HMAC, or the IsDevelopment-only mapping.
-2. **ReferenceData "takes no record id"** is read as "selects nothing by a record id": catalog keys (`{handlerId}`, the
-   static model-deployment `{id}`, NDA `{clauseRef}`) are not record ids; `GET /api/ai/chat/context-mappings/standalone`
-   takes an `entityId` that is only echoed into a cache key (`StandaloneChatContextProvider.cs:226`) — the one route that
-   depends on this reading.
-3. **HandlerDecision body = the method + same-type helpers it calls directly (one level)**, and a body never expands
-   its own name (so an overload cannot borrow a sibling's seam — pinned by a control). Without it,
-   `GET /api/office/search/entities` needs three type hops and no PermanentBasis fits a "query is the gate" search
-   (escalation trigger 2 would have fired). Type-level hops stay capped at two.
-4. **Daily briefing render/email are CallerScopedOnly**, not HandlerDecisions: the impersonated read is three hops deep
-   (`DailyBriefingCollector.cs:718`) and every row is the caller's own, keyed by the server-derived systemuserid.
-5. **Owners from amendments**: `GET /healthz/dataverse/doc/{id}` → 166 (a); the four thread/message write routes → 161;
-   Compose save + create-on-save → 166 (d); the four reporting report routes → 166 (f) + round 10 item 1. The 167 AC says
-   UNOWNED-NEW for the healthz route; 166's later amendment owns it, so the owner is 166.
-6. **Playbook lists** (`/api/ai/playbooks`, `/public`, `/templates`, the chat and agent pickers) are ReferenceData:
-   playbook definitions are configuration, and the user list is owner-filtered.
-7. **Direct thread** (`POST /api/communications/threads/direct`) is CallerScopedOnly: the other participant is a
-   principal to share WITH, not a record of theirs that is read.
+The first commit recorded these readings for confirmation instead of firing escalation trigger 2 for items 1-2 and
+the CallerScopedOnly cases (verifier finding 5: that should have been a stop). Owner round 12 answered every one; the
+code now follows the answers (§15).
+
+1. **AnonymousByDesign "mandatory compensating control"** — the first commit accepted "a response fixed in source" for
+   `GET /healthz`, `GET /healthz/catalog` and `GET /ping`. **Owner round 12 item 1: the strict rule is kept; rate-limit
+   the three.** Done (`EndpointMappingExtensions.cs:68`, `:76`, `:124`); the widening is removed from the waiver
+   procedure text.
+2. **ReferenceData "takes no record id" = "selects nothing by a record id"** (catalog keys, the static model-deployment
+   id, NDA `{clauseRef}`, the context-mapping cache key, the saved-query lookup). **Owner round 12 item 2: accepted.**
+   The waiver procedure text now says so.
+3. **HandlerDecision body = the method + same-type helpers it calls directly (one level).** **Owner round 12 item 3:
+   accepted.** (Round r1 also stops the SIGNATURE counting as body — §15 item 1.)
+4. **Daily briefing render/email are CallerScopedOnly.** **Owner round 12 item 5: as recorded.**
+5. **Owners from amendments** (`GET /healthz/dataverse/doc/{id}` → 166 (a); thread/message writes → 161; Compose save +
+   create-on-save → 166 (d); reporting → 166 (f)). **Owner round 12 item 8: they stay owned by 161/166** — the deviation
+   from the AC's literal "UNOWNED-NEW" is accepted.
+6. **Playbook lists** (`/api/ai/playbooks`, `/public`, `/templates`, `/api/ai/chat/playbooks`, `/api/agent/playbooks`)
+   were ReferenceData. **Owner round 12 item 6: CallerScopedOnly**, AND the oid-vs-systemuserid mismatch in the
+   user-list `_ownerid_value` filter (`PlaybookService.cs:318`; and `PlaybookAuthorizationFilter.cs:125` if the same) is a
+   code fix owned by **task 164**. Re-classified; the 164 assignment is for the main session to add to 164's POML.
+7. **Direct thread** (`POST /api/communications/threads/direct`) is CallerScopedOnly. **Owner round 12 item 7: as
+   recorded.**
+7a. **Owner comparisons on a caller-chosen id** (heartbeat, DELETE pin — classified CallerScopedOnly at the first
+   commit). **Owner round 12 item 4: a new OWNER-COMPARISON basis**, and DELETE pin must answer one uniform 404 (code
+   fix owned by task 166). Heartbeat → Permanent `OwnerComparison`; DELETE pin → Pending 166 (§4 row 12).
+   `POST /api/notifications/{outboxRowId:guid}/dismiss` and `DELETE /api/memory/user/{itemId}` stay CallerScopedOnly:
+   neither ever resolves the caller-chosen id outside the caller's own keyed set (`GetPendingAsync(systemUserId)` then a
+   membership test, `NotificationsEndpoints.cs:218-224`; a store partitioned by the caller's subject key,
+   `MemoryGovernanceEndpoints.cs:278-279`), so there is no other principal's record to compare against.
 8. **The SystemAdmin policy** passes any token whose scope CONTAINS "admin" (`AuthorizationModule.cs:371-373`;
    escalation trigger 6 — recorded, credit kept as specified). Task 165's amendment fixes the policy.
 
@@ -250,10 +276,10 @@ existing `ContainerId`, written with no caller check — strict CreateWithNoPrio
 - **`POST /api/ai/chat/sessions/{sessionId}/documents/from-document`** answers 404/422 before its in-handler check (an
   existence/type oracle); **`.../gates/{gateId}/resolve`** re-checks no target at approve time.
 - **`EntityAccessFilter`** passes through when `SaveRequest.TargetEntity` is null (`EntityAccessFilter.cs:234-244`).
-- **`POST /api/office/todo`** creates rows with no Create-privilege check (166 amendment (c));
-  **`POST /api/v1/external-access/revoke`** trusts a client ContainerId (166 (b)); **close-project**'s
-  `RemoveAllExternalMembersAsync` strips internal users (166 (e)); Office **suggestions** derived flags over the
-  untrimmed set (161 amendment).
+- ~~**`POST /api/office/todo`**, **`POST /api/v1/external-access/revoke`**, **close-project** internal-user strip~~ —
+  now TRACKED by the guard (owner round 12 item 9): Pending InsufficientDecision waivers owned by 166 (§4 rows 13-14;
+  S-39's reason for close-project). Office **suggestions** derived flags over the untrimmed set (161 amendment) remain
+  untracked here.
 - **`POST /api/{matters|projects}/{id}/recalculate-grades`** writes six fields on a Read decision; **`POST
   /api/ai/analysis/create`** creates an analysis on Read; **unsecure-project / provision-project / invite** (sweep
   noteworthy, external-membership slice).
@@ -361,7 +387,9 @@ reason to change (CLAUDE.md §11.5 — evaluated on cohesion, not LOC; the large
 by design). Findings, none Critical:
 - *Warning (high confidence)* — the scanner reads fluent-chain call NAMES only: a custom wrapper extension that hides
   `.AllowAnonymous()` or a filter is invisible. Mitigated (a hidden gate earns no credit = fail closed) and stated in the
-  Scanner summary; a hidden anonymity would need a reviewer. Accepted residual.
+  Scanner summary; a hidden anonymity would need a reviewer. Accepted residual. **[Round r1: the anonymity half is now
+  CLOSED — `AnonymityIsDeclaredOnlyOnAScannedChain` refuses attribute anonymity and any `.AllowAnonymous()` off a
+  scanned chain (§15 item 3).]**
 - *Warning (medium)* — three readings of the closed sets need owner confirmation (§9 items 1-3). Escalation trigger 2 was
   not fired because each reading is narrower than a new basis; recorded rather than silent.
 - *Warning (medium)* — `HandlerDecision` same-type expansion (§9 item 3) is wider than "two hops" read literally; it is
@@ -386,3 +414,107 @@ not measured per the harness rule). New surface = two test source files (justifi
 ## 14. Ledger input
 
 n/a — this task creates the ledger; it resolves no entry and changes no route.
+
+## 15. Verifier round r1 (2026-10-03) and owner round 12 — branch `task/uac-r2-167-r1`
+
+Base `1d1720348` (`task/uac-r2-167`). The adversarial verifier's 15 items, each closed or answered. Owner round 12
+(2026-10-03, binding) answered every reading §9 had parked; its nine items are applied as written.
+
+### 15.1 Per verifier item
+
+| # | Item | Disposition | Where |
+|---|---|---|---|
+| 1 | HandlerDecision credited a seam that appears only in the handler SIGNATURE (an unused DI parameter) | **Closed.** The verified "body" is now the code between the braces / after the lambda arrow, never the signature. The seam counts when it is a whole identifier in the body, or when the body USES a parameter (of the method whose body it is) or a top-level field/property whose declared type is the seam; qualified names (`Spaarke.Core.Auth.AuthorizationService`, `global::`, `?`) still match (`IsSeamType`). An unused seam parameter earns nothing; a named-argument label `f(auth: x)` is not a use. Side effect closed too: the hop-call check used to be satisfied by the handler's OWN name in its signature when it shares the hop method's name. Inline lambdas are split into parameters + body (`LambdaPart`); an unsplittable inline handler is a problem, not a pass. | `RouteAuthorizationGuardTests.cs` HANDLER DECISION VERIFICATION; control `HandlerDecision_NegativeControl_SignatureOnlyAndBorrowedSeamsFail` |
+| 2 | The field rule scanned the whole declaring TYPE, so a sibling method's `AccessRights rights` parameter lent its name to a handler's `string rights` | **Closed.** `SeamTypedMembers` reads only TOP-LEVEL member declarations: `TopLevelOf` blanks the contents of every bracketed region of the type body (method parameter lists, bodies, nested types) before matching. | same; the sibling-parameter case is in the control |
+| 3 | Attribute-borne anonymity (`[AllowAnonymous]` on a lambda) is invisible | **Closed, fail-closed.** New rule `AnonymityIsDeclaredOnlyOnAScannedChain`: any identifier containing `AllowAnonymous` in BFF + `src/server/shared` code (comments/literals blanked) must be a fluent `.AllowAnonymous()` call on a chain the scanner read (matched by file:line against every scanned route's chain). An attribute, `AllowAnonymousAttribute`, `IAllowAnonymous`, or an `.AllowAnonymous()` in a wrapper extension fails naming file:line. Non-vacuous: asserts the 16 anonymous routes are seen. The Scanner summary's residual text is rewritten (only non-routing middleware remains unseen). | rule + control `UnreadableShapes_NegativeControl_AttributeAnonymityAndUnreadFormsFail` |
+| 4 | `.Map(...)`, `MapFallback*`, `MapHub<T>`, `MapControllers` invisible to census and Rule A | **Closed, fail-closed.** New rule `NoRouteIsRegisteredInAFormTheScannerCannotRead`: every `.Map*(` / `.Map*<...>(` call in BFF + shared code must be in the read vocabulary (Map{Verb}, MapMethods, MapHealthChecks, MapGroup) or a method DECLARED under `src/server/**` (the BFF's own `MapXEndpoints`); 24 framework registration names are refused even if something declares a same-named method. The census vocabulary itself is unchanged (the POML's); the new rule refuses rather than counts. Zero hits today. | rule + the same control |
+| 5 | Basis widenings recorded as "readings to confirm" instead of firing trigger 2 | **Accepted as a process miss; answered by owner round 12.** AnonymousByDesign: the widening ("a response fixed in source") is REMOVED from the waiver procedure text and the three routes got their mandatory rate limit (item 1). ReferenceData "selects nothing by a record id": accepted (item 2), now written into the procedure text. CallerScopedOnly on heartbeat / DELETE pin: replaced by the new OWNER-COMPARISON basis (item 4). | Ledger waiver procedure; §9 |
+| 6 | DELETE pin answers 404 vs 403 — an oracle the round-9 fix pattern forbids — under a Permanent waiver | **Closed.** Now `Pending("166", NoDecision)` (owner round 12 item 4 assigns the uniform-404 code fix to 166, so it is not UNOWNED-NEW; `ExpectedUnownedNewCount` stays 21). Its reason names the in-diff conversion to Permanent `OwnerComparison` when 166 lands the fix (maintenance rule 4's one sanctioned exception, added). | Ledger; §4 row 12 |
+| 7 | `GET /healthz/dataverse/doc/{id}` and 11 non-sweep routes owned by 161/166, not UNOWNED-NEW | **Accepted by owner round 12 item 8.** No change. | §0, §4 |
+| 8 | Comments contradict code (`NoWaiverIsStale`, "PENDING waivers only", the non-existent `NoWaiverNamesARouteThatNoLongerExists`, "does not catch this case") | **Fixed** — each rewritten as history plus the current rule (`NoWaiverIsStaleAndEveryWaiverIsWellFormed` fails absent routes and REDUNDANT Permanent waivers). Also fixed in the same drift class: two `ExplicitlyCreditedFilterTypeNames` mentions (now `CreditedForms`), the `POST /todo` "NO waiver" history line, and the duplicate-key failure text. The `ci-tier1-blocking.yml:310` and `ContainerDocumentAuthorizationFilter` FilterMarker comments stay recorded in §10 (outside `tests/`). | Ledger comments; main file duplicate-key test |
+| 9 | Census negative control appended a synthetic name instead of running the census | **Closed.** The census is now two named functions, `LoadUnits(root)` and `CensusOf(units)`; `EndpointFiles()` is `CensusOf(LoadUnits(BffRoot))`. The control writes a TEMPORARY scan root (a MapMethods-only endpoint file, a route-less file, a commented-out route, an `obj/` file), runs the same two functions, gets exactly the endpoint file, then joins it to the real units: count = pinned + 1 and the set check names it. | `Census_CountsAFileThatRegistersOnlyMapMethodsOrMapHealthChecks`; Scanner `LoadUnits` / `CensusOf` |
+| 10-11 | Verified OK | No action. | — |
+| 12 | Criterion: seam not required in the declared BODY | = items 1-2. | — |
+| 13 | Criterion: DELETE pin basis disproved; widened definitions | = items 5-6. | — |
+| 14 | Criterion: /healthz, /healthz/catalog, /ping with no mandatory control | **Closed** by owner round 12 item 1 (rate limits). | `EndpointMappingExtensions.cs:68`, `:76`, `:124` |
+| 15 | Criterion: doc route owned by 166 | = item 7 (accepted). | — |
+
+### 15.2 Owner round 12, item by item
+
+| Item | Decision | Applied |
+|---|---|---|
+| 1 | Rate-limit `/healthz`, `/healthz/catalog`, `/ping`; the strict AnonymousByDesign rule is kept | `.RequireRateLimiting("anonymous")` added (the existing policy the four sibling probes use: 10/min per client IP, `RateLimitingModule.cs:95-104`). The three waivers cite it; `NamedRoutes_CarryTheirRecordedClassification` pins it on the chain. **The only `src/` change in task 167.** |
+| 2 | ReferenceData = selects nothing by a record id: accepted | Procedure text + the two dependent reasons cite item 2. |
+| 3 | HandlerDecision body may include same-type helpers one level deep: accepted | Kept; the body is now body-only (verifier item 1). |
+| 4 | New OWNER-COMPARISON basis; DELETE pin uniform 404 is 166's code fix | `PermanentBasis.OwnerComparison` with its definition (a uniform answer is required). Heartbeat → `OwnerComparison` (`DocumentCheckoutService.cs:489`; one 404 at `ComposeCheckoutEndpoints.cs:104-109`). DELETE pin → Pending 166. |
+| 5 | Daily briefing render/email: CallerScopedOnly | Unchanged. |
+| 6 | Playbook lists: CallerScopedOnly; fix the oid-vs-systemuserid user-list filter (and PlaybookAuthorizationFilter if the same) in task 164 | The five waivers moved ReferenceData → CallerScopedOnly with reasons naming the 164 fix. **Main session:** add the fix to task 164's POML (`PlaybookService.cs:318` `_ownerid_value eq {oid}`; `PlaybookAuthorizationFilter.cs:125` `playbook.OwnerId == userId`). |
+| 7 | `POST /api/communications/threads/direct`: CallerScopedOnly | Unchanged. |
+| 8 | Non-sweep findings named in 161/166 amendments stay with 161/166 | Unchanged. |
+| 9 | Credited routes 166 must fix get Pending InsufficientDecision waivers owned by 166 | `POST /api/v1/external-access/revoke` (observed `AddDelegationRuleFilter`) and `POST /api/office/todo` (observed `AddTodoSourceAccessFilter`) added; close-project already carries S-39 (Pending InsufficientDecision 166) — a route has one waiver, so S-39's reason now also names amendment (e). The AC line "revoke: no waiver" is superseded by this item; the named-routes test asserts the new state. |
+
+No escalation trigger remained unanswered; nothing was stopped.
+
+### 15.3 Placement and justification for the `src/` change (CLAUDE.md §10/§11)
+
+Three `.RequireRateLimiting("anonymous")` calls on EXISTING routes in `Infrastructure/DI/EndpointMappingExtensions.cs`.
+No new endpoint, service, DI registration, option, rate-limit policy, job, column or package — it reuses the existing
+`anonymous` policy, so the §11 three-question template (which applies to NEW surface) is not triggered, and the
+placement is the routes' own file. Publish size: not measured (harness rule; a three-line change to an existing file).
+No Dataverse plugin (ADR-002). Tests: the guard pins the control on the chain; `HealthAndHeadersTests` (unit) and
+`SystemIntegrationTests` (Spe.Integration) still call `/healthz` and `/ping` and pass (below).
+
+**Operational note for the main session (not a stop — owner item 1 decided the control).** `anonymous` is a fixed
+window of 10 requests/min per client IP with no queue. The App Service health check (1/min/instance) and swap warm-up
+are well under it, but `deploy-bff-api.yml`'s staging and production `/healthz` loops poll 12 times at 5 s: if the app
+answers Unhealthy for the first ten polls of a window and Healthy only on poll 11-12, those two get 429 and the step
+fails where it previously passed. `Deploy-BffApi.ps1` (24 x 5 s) treats a 429 as a retry and spans two windows, so it
+is unaffected. If that edge matters, the remedy is a looser dedicated probe policy — a new registration needing its own
+§11 justification, so it is not added here.
+
+**`.claude/` edit for the main session (main-session-only path), exact text** — append a row to the troubleshooting
+table in `.claude/skills/bff-deploy/SKILL.md` (the table that holds the "Health check fails at 60s" row):
+
+```
+| `/healthz` or `/ping` returns 429 during manual polling | Both are rate-limited like every anonymous probe ("anonymous": 10/min per client IP; owner round 12 item 1, UAC-r2 task 167) | Poll at most every 6 s, or wait for the next minute. A 429 is not a failed deploy. |
+```
+
+### 15.4 /conflict-check (round r1)
+
+`src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs` (BFF hot path) and the three guard files,
+checked 2026-10-03: no open PR (19 checked) touches any of them; `origin/master` has not changed them since the merge
+base `b8026dfa8`. Local sibling branches: `task/uac-r2-160` and `-161` edit `RouteAuthorizationGuardTests.cs` (their
+census/ledger lines — the main session reconciles at integration, by owner round 9 item 2); none edits
+`EndpointMappingExtensions.cs` yet. **Soft warn:** task 166 amendment (a) will edit the same file at the
+`/healthz/dataverse/doc/{id}` registration (`:88-121`), adjacent to this round's lines 68 / 76 / 124 — expect a trivial
+textual merge.
+
+### 15.5 Seeding proofs (round r1) — each seeded, run, failure captured, restored and touched
+
+| # | Rule | Seeded (temporary; restored with `git checkout` or a byte-exact backup) | Result |
+|---|---|---|---|
+| r1-1 | HandlerDecision body-only (item 1), REAL code | `PermissionsEndpoints.GetDocumentPermissionsAsync`: the `authorizationService.GetCallerAccessAsync(...)` call replaced by `Task.FromResult<AccessSnapshot>(null!)`, the unused `AuthorizationService` parameter KEPT (the verifier's seed) | 4 failed: `EveryHandlerDecisionIsVerified` — "GET /api/documents/{documentId}/permissions: the seam 'AuthorizationService' is not reached in 1 of 1 final body"; `EveryRouteDeclaresHowItIsAuthorized` names the route; the two controls that assert the real route is credited. (Before r1 this seed stayed green.) |
+| r1-2 | Attribute anonymity (item 3), REAL code | `[Microsoft.AspNetCore.Authorization.AllowAnonymous]` on `UserEndpoints.GetCurrentUserAsync` (GET /api/me) | 1 failed: `AnonymityIsDeclaredOnlyOnAScannedChain` — "Api/UserEndpoints.cs:73: AllowAnonymous used as an ATTRIBUTE (or other non-call) — the route would scan as signed-in and escape the AnonymousByDesign rule" |
+| r1-3 | Unread registration forms (item 4), REAL code | `app.MapFallback(() => Results.NotFound());` in `MapSpaarkeEndpoints` | 1 failed: `NoRouteIsRegisteredInAFormTheScannerCannotRead` — "Infrastructure/DI/EndpointMappingExtensions.cs:40: .MapFallback(...) — a route registration form the scanner does not read ..." |
+| r1-4 | Census (item 9), REAL code | a new `Api/ZzSeedR1Endpoints.cs` registering only `MapMethods(["PATCH"])` | 2 failed: `TheEndpointFileCensusIsPinned` — "expected 120, found 121"; the census control (real + temp root = 122) |
+| r1-5 | Owner item 1 pin | `.RequireRateLimiting("anonymous")` removed from `/ping` | 1 failed: `NamedRoutes_CarryTheirRecordedClassification` (the /ping chain lacks the rate limit) |
+| r1-6 | Owner item 4 pin | DELETE pin waiver put back to Permanent CallerScopedOnly | 1 failed: `NamedRoutes_...` — expected (Pending, "166", NoDecision), actual (Permanent, "167", None) |
+| r1-7 | Owner item 9 fingerprint | `POST /api/office/todo` waiver's ObservedMechanisms changed | 1 failed: `NoWaiverIsStaleAndEveryWaiverIsWellFormed` — "STALE — the route's authorization fingerprint changed from 'AddTodoSourceAccessFilter + AddEntityAccessFilter' to 'AddTodoSourceAccessFilter'" |
+
+Finding 2 (the sibling-parameter borrow) cannot be seeded on real code without inventing a handler, so it is proved
+by the inline negative control, which runs on every build. After the last restore, `git status` shows only the four
+intended files changed.
+
+### 15.6 Test runs (round r1, final state)
+
+| Suite | Result |
+|---|---|
+| Affected: `RouteAuthorizationGuardTests` | **51 / 51 passed** (47 + 4 new: `HandlerDecision_NegativeControl_SignatureOnlyAndBorrowedSeamsFail`, `AnonymityIsDeclaredOnlyOnAScannedChain`, `NoRouteIsRegisteredInAFormTheScannerCannotRead`, `UnreadableShapes_NegativeControl_AttributeAnonymityAndUnreadFormsFail`) |
+| `tests/Spaarke.ArchTests` (NetArchTest, full) | **382 / 382 passed**, 0 skipped (4 m 23 s) |
+| `Sprk.Bff.Api.IntegrationTests` | **104 / 104 passed** |
+| `Spe.Integration.Tests` | **403 passed, 25 skipped, 0 failed** (7 m 38 s) — includes `SystemIntegrationTests` hitting the now rate-limited `/ping` |
+| `Sprk.Bff.Api.Tests` (BFF unit, full, TRX) | **14,202 passed, 10 failed, 54 skipped** of 14,266 (38 m 41 s). All 10 are `TaskCanceledException` ("Error while copying content to a stream") after 2 m 28 s - 3 m 37 s — the client-timeout contention signature of §12, under the same multi-agent load; none is an assertion, none is a 429. The 10: `ComposeAuthoredWarningSuppressionTests.ImportedDocument_WithARealFidelityLoss_StillWarns`, `SearchItemsTests.SearchItems_MissingConfigId_Returns401WithoutToken`, `ComposeTransientKeyDedupSeamTests.SaveNew_ForkNew_SkipsTransientKeyDedup_ForksNewRecord_ThroughTheWire`, `DocumentProfileContractTests.GetDocument_WithNonCompletedStatus_Returns200WithStatusCodeAndNoProfileText(100000003)`, `DocumentIdentityContractTests.ResolveIdentity_WhenUnauthenticated_Returns401`, `SearchItemsTests.SearchItems_WithoutAuthentication_Returns401`, `DocumentProfileContractTests.GetDocument_WithCompletedProfile_Returns200WithAllFourFields`, `PinnedMemoryEndpointsContractTests.DeletePin_Authenticated_Returns204AndEmitsCounter`, `InsightsAssistantEndpointContractTests.Post_MissingQuery_Returns400_QueryRequired`, `InsightsSearchEndpointContractTests.PostSearch_FacadeThrows_Returns500ProblemDetails`. **Isolated re-run of those 10 (15 cases with the theory's parameters): 15 / 15 passed** (43 s). `HealthAndHeadersTests` (which calls the newly rate-limited `/healthz` and `/ping`) passed in the full run. |
+
+Test scope beyond the listed behaviours: none. ADR-038 bans: no `Mock<HttpMessageHandler>`, no DI-registration test, no
+constructor null-check test in anything added. No test calls Dataverse or Azure (the census control writes and deletes
+a temporary directory only).

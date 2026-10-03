@@ -885,6 +885,44 @@ The route counts in the background come from a Python approximation of the scann
       compliant; nothing else applicable) run. /conflict-check: no open PR or master change on the guard; tasks 159-166 edit it
       in parallel by owner decision.
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-167-r1" base="1d1720348" result="completed" round="verifier r1 + owner round 12">
+      Full record: notes/task-167-every-route-authorization-guard.md section 15.
+      VERIFIER ITEMS: (1) HandlerDecision now verifies the BODY only (braces / after the lambda arrow, never the
+      signature); the seam counts as a whole identifier in the body, or as a USED parameter or top-level field/property
+      whose declared type is the seam (qualified names match); an unused DI parameter earns nothing, and the hop-call
+      check can no longer be satisfied by the handler's own name. (2) The field rule reads only top-level members, so a
+      sibling method's parameter lends nothing. (3) New rule AnonymityIsDeclaredOnlyOnAScannedChain refuses attribute /
+      metadata / wrapper anonymity. (4) New rule NoRouteIsRegisteredInAFormTheScannerCannotRead refuses .Map, MapFallback*,
+      MapHub, MapControllers and any undeclared Map* call. (5) The basis widenings were answered by owner round 12. (6)
+      DELETE /api/memory/pins/{pinId} is Pending 166 (404-vs-403 oracle). (7) Accepted by owner round 12 item 8. (8)
+      Comment drift fixed. (9) The census is LoadUnits + CensusOf; its control runs them over a temporary scan root.
+      OWNER ROUND 12: item 1 rate limits added to GET /healthz, /healthz/catalog and /ping (the ONLY src/ change:
+      three .RequireRateLimiting("anonymous") lines in Infrastructure/DI/EndpointMappingExtensions.cs, the existing
+      policy); item 2 ReferenceData reading accepted; item 3 helpers accepted; item 4 new PermanentBasis.OwnerComparison
+      (heartbeat), DELETE pin Pending 166; item 6 the five playbook lists CallerScopedOnly, oid-vs-systemuserid filter fix
+      assigned to task 164 (main session to add to 164's POML); item 9 Pending InsufficientDecision 166 on
+      POST /api/v1/external-access/revoke and POST /api/office/todo, S-39 reason extended for close-project. No escalation
+      trigger was left unanswered.
+      WAIVERS: 214 = 125 Pending (90 sweep; 14 owned by 161/166 amendments or owner round 12; 21 UNOWNED-NEW) + 89
+      Permanent (CallerScopedOnly 31, ReferenceData 26, CallerSuppliedContentOnly 15, AnonymousByDesign 14,
+      OwnerComparison 1, CreateWithNoPriorResource 1, OperatorGateInHandler 1).
+      SEEDING: 7 seeds (4 on real src: the verifier's unused-parameter seed on PermissionsEndpoints, an [AllowAnonymous]
+      attribute on GET /api/me, an app.MapFallback, a MapMethods-only endpoint file), each failed the named rule and was
+      restored.
+      TESTS: Guard 51/51; ArchTests 382/382; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed,
+      25 skipped, 0 failed; BFF unit suite 14202 passed / 10 failed / 54 skipped (all 10 TaskCanceledException
+      client timeouts under machine contention; those 10 re-run in isolation: 15/15 theory cases passed).
+      /conflict-check: no open PR or master change on the four files; task 166 amendment (a) will edit
+      EndpointMappingExtensions.cs next to these lines (soft warn).
+    </outcome>
+    <justification-of-src-change round="r1">
+      Owner round 12 item 1 (binding) overrides this POML's "change NO file under src/" for one purpose: rate-limit
+      GET /healthz, GET /healthz/catalog and GET /ping. Three .RequireRateLimiting("anonymous") calls on EXISTING routes
+      in Infrastructure/DI/EndpointMappingExtensions.cs. CLAUDE.md section 10 placement: the routes' own registration file;
+      no new endpoint, service, DI registration, option, rate-limit policy, job, column or package (the existing
+      "anonymous" policy, RateLimitingModule.cs:95-104), so the section 11 three-question template for NEW surface is not
+      triggered. Publish size not measured (harness rule). No Dataverse plugin (ADR-002). Fail closed unchanged (ADR-003).
+    </justification-of-src-change>
     <justification-of-new-files>
       tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs and RouteAuthorizationGuardTests.Ledger.cs.
       EXISTING: RouteAuthorizationGuardTests.cs (task 074) is the only route guard (grep found no other); these files are

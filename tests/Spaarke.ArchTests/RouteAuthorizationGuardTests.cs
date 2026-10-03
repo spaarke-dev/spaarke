@@ -23,8 +23,9 @@ namespace Spaarke.ArchTests;
 ///   (<see cref="CreditedForms"/>), each entry read and found to decide. (A
 ///   <c>ResourceAccessRequirement</c> policy, <see cref="ResourcePolicies"/>, also counts and is pinned in
 ///   <see cref="PolicyOnlyRoutes"/>.)</item>
-///   <item><b>HandlerDecision</b> — a per-route declaration (<see cref="HandlerDecisions"/>) whose handler,
-///   followed through at most two named hops, contains a decision seam. Verified in source, not trusted.</item>
+///   <item><b>HandlerDecision</b> — a per-route declaration (<see cref="HandlerDecisions"/>) whose handler BODY
+///   (never its signature), followed through at most two named hops, reaches a decision seam. Verified in source,
+///   not trusted.</item>
 ///   <item><b>Admin</b> — one of exactly four admin mechanisms (<see cref="AdminMechanisms"/>), on a route in
 ///   the pinned <see cref="AdminOnlyRoutes"/> set.</item>
 ///   <item><b>Waiver</b> — Permanent with a basis from a closed set, or Pending with an owning task
@@ -518,13 +519,28 @@ public partial class RouteAuthorizationGuardTests
     // A PRESENCE check, the same limit Rule B has: it proves the handler (or a declared hop) reaches a decision
     // seam, not that the seam is applied to the right id. The 159-166 deny tests are the proof of behaviour.
     //
-    // A "body" is a method's signature and body PLUS the bodies of methods of the SAME type that it calls
-    // directly (one level) — so a decision factored into a private helper of the same class is found, while a
-    // hop across a type boundary must be declared. An interface in a hop is refused (name the implementation);
-    // every overload of a hop method must reach the next hop / the seam.
+    // A "body" is a method's BODY — the code between its braces, or after its arrow; never its signature — PLUS
+    // the bodies of methods of the SAME type that it calls directly (one level, owner round 12 item 3) — so a
+    // decision factored into a private helper of the same class is found, while a hop across a type boundary must
+    // be declared. An interface in a hop is refused (name the implementation); every overload of a hop method
+    // must reach the next hop / the seam.
+    //
+    // The seam is reached when the body contains it as a whole identifier, or when the body USES a parameter (of
+    // the method whose body it is) or a top-level field/property of the declaring type whose declared type is the
+    // seam. Task 167 r1 closed two false-credit paths here: the signature used to count, so an unused DI parameter
+    // of the seam type credited a handler with no decision in its body; and the field rule scanned the whole TYPE,
+    // so a sibling method's parameter named like a local of the handler lent the handler its seam.
     // =============================================================================================
 
-    private sealed record Body(SourceUnit Unit, string? DeclaringType, string Text);
+    /// <summary>One body (a method's or a lambda's) and the parameters in scope for it.</summary>
+    private sealed record BodyPart(string Code, IReadOnlyList<ParamDecl> Params);
+
+    /// <summary>A declared body plus the same-type helper bodies it calls directly. Code only — comments and
+    /// literals blanked, no signature.</summary>
+    private sealed record Body(SourceUnit Unit, string? DeclaringType, IReadOnlyList<BodyPart> Parts)
+    {
+        public string Text => string.Join("\n", Parts.Select(p => p.Code));
+    }
 
     private sealed class TypeIndex
     {
@@ -568,59 +584,231 @@ public partial class RouteAuthorizationGuardTests
     private static IReadOnlyList<string> AllSeams()
         => DecisionServices.Concat(CallerContextSeams.Keys).ToList();
 
+    /// <summary>Signature AND body — used only by the pass-through pins (<see cref="MethodBody"/>), where reading
+    /// more text can only make a pin fail, never credit a route.</summary>
     private static string SignatureAndBody(MethodDecl m) => m.Unit.Code[m.NameIndex..m.BodyEnd];
 
-    private static Body Expand(SourceUnit unit, string? declaringType, string text, string? selfName = null)
+    private static BodyPart PartOf(MethodDecl m) => new(m.Body, m.Params);
+
+    private static Body Expand(SourceUnit unit, string? declaringType, BodyPart root, string? selfName = null)
     {
         if (declaringType is null)
         {
-            return new Body(unit, null, text);
+            return new Body(unit, null, new[] { root });
         }
 
         var sameType = unit.Methods.Where(m => m.DeclaringType == declaringType).ToList();
-        var extra = new List<string>();
+        var parts = new List<BodyPart> { root };
         foreach (var name in sameType.Select(m => m.Name).Distinct(StringComparer.Ordinal))
         {
-            // The body's OWN name is in its signature: expanding it would pull its sibling overloads in and let one
-            // overload borrow another's seam — the exact case the overload rule exists to catch.
+            // Never expand the body's OWN name (a recursive call): that would pull its sibling overloads in and let
+            // one overload borrow another's seam — the exact case the overload rule exists to catch.
             if (name == selfName)
             {
                 continue;
             }
 
-            if (Regex.IsMatch(text, $@"(?<![\w.]){Regex.Escape(name)}\s*\(") || Regex.IsMatch(text, $@"\bthis\.{Regex.Escape(name)}\s*\("))
+            if (Regex.IsMatch(root.Code, $@"(?<![\w.]){Regex.Escape(name)}\s*\(") || Regex.IsMatch(root.Code, $@"\bthis\.{Regex.Escape(name)}\s*\("))
             {
-                extra.AddRange(sameType.Where(m => m.Name == name).Select(SignatureAndBody));
+                parts.AddRange(sameType.Where(m => m.Name == name).Select(PartOf));
             }
         }
 
-        return new Body(unit, declaringType, text + "\n" + string.Join("\n", extra));
+        return new Body(unit, declaringType, parts);
     }
 
     private static bool BodyHasSeam(Body body, string seam)
     {
-        if (ContainsToken(body.Text, seam))
+        var members = SeamTypedMembers(body.Unit, body.DeclaringType, seam);
+        foreach (var part in body.Parts)
         {
-            return true;
-        }
+            if (ContainsToken(part.Code, seam))
+            {
+                return true;
+            }
 
-        // A field or property of the declaring type whose declared type IS the seam, used in the body.
-        var type = body.Unit.Types.FirstOrDefault(t => t.Name == body.DeclaringType);
-        if (type is null)
-        {
-            return false;
-        }
+            // A parameter of THIS body's method whose declared type is the seam, actually used in the body.
+            if (part.Params.Any(p => IsSeamType(p.Type, seam) && UsesName(part.Code, p.Name)))
+            {
+                return true;
+            }
 
-        var span = body.Unit.Code[type.BodyStart..type.BodyEnd];
-        foreach (Match member in Regex.Matches(span, $@"(?<![\w.]){Regex.Escape(seam)}\??\s+([A-Za-z_]\w*)\s*[;=,){{]"))
-        {
-            if (ContainsToken(body.Text, member.Groups[1].Value))
+            // A top-level field or property of the declaring type whose declared type is the seam, used in the body.
+            if (members.Any(name => UsesName(part.Code, name)))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>True when <paramref name="type"/> (as written in a declaration) names the seam: a simple or
+    /// qualified name (Spaarke.Core.Auth.AuthorizationService, global::...), optionally nullable.</summary>
+    private static bool IsSeamType(string type, string seam)
+    {
+        var t = Regex.Replace(type, @"\s+", string.Empty).TrimEnd('?');
+        if (t.StartsWith("global::", StringComparison.Ordinal))
+        {
+            t = t["global::".Length..];
+        }
+
+        return t[(t.LastIndexOf('.') + 1)..] == seam;
+    }
+
+    /// <summary>True when <paramref name="name"/> is USED in <paramref name="code"/> as a variable: a whole identifier
+    /// that is not another object's member (<c>x.name</c>) and not a named-argument label (<c>f(name: v)</c>).
+    /// <c>this.name</c> counts.</summary>
+    private static bool UsesName(string code, string name)
+    {
+        foreach (Match m in Regex.Matches(code, $@"(?<![\w]){Regex.Escape(name)}(?!\w)"))
+        {
+            var p = m.Index - 1;
+            while (p >= 0 && char.IsWhiteSpace(code[p]))
+            {
+                p--;
+            }
+
+            if (p >= 0 && code[p] == '.')
+            {
+                var (owner, _) = IdentifierBefore(code, p);
+                if (owner != "this")
+                {
+                    continue;   // another object's member that merely shares the name
+                }
+            }
+
+            var label = Regex.Match(code[(m.Index + m.Length)..], @"^\s*:(?!:)");
+            if (label.Success && p >= 0 && code[p] is '(' or ',')
+            {
+                continue;   // f(name: value) — a label, not a use
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Names of the fields and properties declared at the TOP LEVEL of <paramref name="declaringType"/> whose declared
+    /// type is the seam. Method parameters, locals and nested types' members are excluded: every bracketed region's
+    /// contents are blanked before matching, so a sibling method's <c>Other(AccessRights rights)</c> parameter is not
+    /// a member of the type and lends nothing to a handler that happens to use a <c>string rights</c>.
+    /// </summary>
+    private static IReadOnlyList<string> SeamTypedMembers(SourceUnit unit, string? declaringType, string seam)
+    {
+        var type = unit.Types.FirstOrDefault(t => t.Name == declaringType);
+        if (type is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var top = TopLevelOf(unit.Code, type.BodyStart, type.BodyEnd);
+        return Regex.Matches(top, $@"(?<![\w.])(?:global::)?(?:[A-Za-z_]\w*\s*\.\s*)*{Regex.Escape(seam)}\s*\??\s+([A-Za-z_]\w*)\s*[;={{,]")
+            .Select(m => m.Groups[1].Value)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>The inside of a type body with the CONTENTS of every bracketed region blanked (the brackets are
+    /// kept), so only depth-one member declarations stay readable. Offsets and newlines are preserved.</summary>
+    private static string TopLevelOf(string code, int bodyStart, int bodyEnd)
+    {
+        var chars = code[(bodyStart + 1)..Math.Max(bodyStart + 1, bodyEnd - 1)].ToCharArray();
+        var depth = 0;
+        for (var i = 0; i < chars.Length; i++)
+        {
+            var c = chars[i];
+            if (c is '(' or '[' or '{')
+            {
+                if (depth > 0)
+                {
+                    chars[i] = ' ';
+                }
+
+                depth++;
+            }
+            else if (c is ')' or ']' or '}')
+            {
+                depth--;
+                if (depth > 0)
+                {
+                    chars[i] = ' ';
+                }
+            }
+            else if (depth > 0 && c != '\n')
+            {
+                chars[i] = ' ';
+            }
+        }
+
+        return new string(chars);
+    }
+
+    /// <summary>
+    /// Splits an inline lambda handler (code, literals blanked) into its parameters and its BODY — everything after
+    /// the top-level arrow. Handles attributes, <c>static</c>/<c>async</c>, an explicit return type and a single
+    /// untyped parameter. Null when the text has no top-level arrow (not a lambda this verifier can read).
+    /// </summary>
+    private static BodyPart? LambdaPart(string code)
+    {
+        var depth = 0;
+        for (var i = 0; i + 1 < code.Length; i++)
+        {
+            var c = code[i];
+            if (c is '(' or '[' or '{')
+            {
+                depth++;
+            }
+            else if (c is ')' or ']' or '}')
+            {
+                depth--;
+            }
+            else if (depth == 0 && c == '=' && code[i + 1] == '>')
+            {
+                var head = code[..i].TrimEnd();
+                IReadOnlyList<ParamDecl> parameters;
+                if (head.EndsWith(')'))
+                {
+                    var close = head.Length - 1;
+                    var open = close;
+                    var d = 0;
+                    for (; open >= 0; open--)
+                    {
+                        if (head[open] is ')' or ']' or '}')
+                        {
+                            d++;
+                        }
+                        else if (head[open] is '(' or '[' or '{' && --d == 0)
+                        {
+                            break;
+                        }
+                    }
+
+                    if (open < 0)
+                    {
+                        return null;
+                    }
+
+                    parameters = ParseParams(head[(open + 1)..close]);
+                }
+                else
+                {
+                    var single = Regex.Match(head, @"([A-Za-z_]\w*)$");
+                    if (!single.Success)
+                    {
+                        return null;
+                    }
+
+                    parameters = new[] { new ParamDecl(single.Groups[1].Value, string.Empty, false) };
+                }
+
+                return new BodyPart(code[(i + 2)..], parameters);
+            }
+        }
+
+        return null;
     }
 
     private static readonly Regex LambdaHandler = new(@"^(?:\[[^\]]*\]\s*)?(?:static\s+)?(?:async\s+)?(?:\([^)]*\)|[A-Za-z_]\w*)\s*=>",
@@ -657,7 +845,13 @@ public partial class RouteAuthorizationGuardTests
                 return (false, $"declared 'inline' but the registration's handler is '{Abbreviate(handlerText)}'");
             }
 
-            bodies = new List<Body> { Expand(unit, unit.TypeAt(route.HandlerStart)?.Name, unit.Code[route.HandlerStart..route.HandlerEnd]) };
+            var lambda = LambdaPart(unit.Code[route.HandlerStart..route.HandlerEnd]);
+            if (lambda is null)
+            {
+                return (false, "the inline handler cannot be split into its parameters and its body");
+            }
+
+            bodies = new List<Body> { Expand(unit, unit.TypeAt(route.HandlerStart)?.Name, lambda) };
         }
         else
         {
@@ -688,7 +882,7 @@ public partial class RouteAuthorizationGuardTests
                 }
             }
 
-            bodies = methods.Select(m => Expand(m.Unit, m.DeclaringType, SignatureAndBody(m), m.Name)).ToList();
+            bodies = methods.Select(m => Expand(m.Unit, m.DeclaringType, PartOf(m), m.Name)).ToList();
         }
 
         foreach (var hop in decision.Hops)
@@ -707,7 +901,7 @@ public partial class RouteAuthorizationGuardTests
                                + "overload(s))");
             }
 
-            bodies = methods.Select(m => Expand(m.Unit, m.DeclaringType, SignatureAndBody(m), m.Name)).ToList();
+            bodies = methods.Select(m => Expand(m.Unit, m.DeclaringType, PartOf(m), m.Name)).ToList();
         }
 
         var missing = bodies.Count(b => !BodyHasSeam(b, decision.Seam));
@@ -1244,12 +1438,44 @@ public partial class RouteAuthorizationGuardTests
         Assert.Matches(RegistrationCall, healthOnly);
         Assert.DoesNotMatch(RegistrationCall, commentOnly);
 
-        // Negative: a GovernedFiles entry naming a missing file, and a census file absent from GovernedFiles, each
-        // fail naming the file.
+        // Negative: a GovernedFiles entry naming a missing file fails naming the file.
         var withMissing = GovernedFiles.Append(new GovernedFile("Api/NoSuchEndpoints.cs", Scope.RouteLevelGate, "seeded by the negative control")).ToList();
         Assert.Contains(CensusViolations(EndpointFiles(), withMissing), v => v.StartsWith("Api/NoSuchEndpoints.cs", StringComparison.Ordinal));
-        var withExtra = EndpointFiles().Append("Api/SeededExtraEndpoints.cs").ToList();
-        Assert.Contains(CensusViolations(withExtra, GovernedFiles), v => v.StartsWith("Api/SeededExtraEndpoints.cs", StringComparison.Ordinal));
+
+        // Negative (task 167 r1 — the census ITSELF, not a name appended to its output): a TEMPORARY scan root holding
+        // a MapMethods-only endpoint file, a file with no route, a commented-out route and an obj/ file is read by the
+        // same LoadUnits + CensusOf the real census uses. Exactly the seeded endpoint file is selected.
+        const string seeded = """
+            public static class SeededExtraEndpoints
+            {
+                public static void MapSeeded(this IEndpointRouteBuilder app)
+                {
+                    app.MapMethods("/api/zzseed/{id}", ["PATCH"], (string id) => Results.Ok()).RequireAuthorization();
+                }
+            }
+            """;
+        var root = Path.Combine(Path.GetTempPath(), "uac167-census-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "Api"));
+            Directory.CreateDirectory(Path.Combine(root, "obj", "Debug"));
+            File.WriteAllText(Path.Combine(root, "Api", "SeededExtraEndpoints.cs"), seeded);
+            File.WriteAllText(Path.Combine(root, "Api", "Plain.cs"), "public class Plain { }");
+            File.WriteAllText(Path.Combine(root, "Api", "Commented.cs"), "// app.MapGet(\"/x\", H);\npublic class C { string s = \".MapPost(\"; }");
+            File.WriteAllText(Path.Combine(root, "obj", "Debug", "Generated.cs"), "app.MapGet(\"/generated\", H);");
+
+            var tempUnits = LoadUnits(root);
+            Assert.Equal(new[] { "Api/SeededExtraEndpoints.cs" }, CensusOf(tempUnits));
+
+            // The seeded file joined to the REAL units: the census count moves off the pin and the set check names it.
+            var census = CensusOf(Real.Set.Units.Concat(tempUnits));
+            Assert.Equal(ExpectedEndpointFileCount + 1, census.Count);
+            Assert.Contains(CensusViolations(census, GovernedFiles), v => v.StartsWith("Api/SeededExtraEndpoints.cs", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact(DisplayName = "Task 167: no two registrations produce the same route key")]
@@ -1258,7 +1484,8 @@ public partial class RouteAuthorizationGuardTests
         var duplicates = DuplicateKeys(Real.Live);
         Assert.True(duplicates.Count == 0,
             "Two registrations produce the same route key. A waiver or ledger entry written for one would silently "
-            + "cover the other, and NoWaiverIsStale would compare the wrong routes.\n  " + string.Join("\n  ", duplicates));
+            + "cover the other, and NoWaiverIsStaleAndEveryWaiverIsWellFormed would compare the wrong routes.\n  "
+            + string.Join("\n  ", duplicates));
     }
 
     private static List<string> DuplicateKeys(IEnumerable<RouteRegistration> routes)
@@ -1359,6 +1586,203 @@ public partial class RouteAuthorizationGuardTests
         Assert.Null(webhook.Aggregator);   // registered on `routes`, the root — not on the bound group
         Assert.NotNull(Real.Live.Single(r => r.Key == "POST /api/compose/upload").Aggregator);
         Assert.DoesNotContain("POST /api/dataverse/fetch", Real.Live.Where(r => r.File.Contains("ExternalAccess")).Select(r => r.Key));
+    }
+
+    // =============================================================================================
+    // THE TWO SHAPES THE SCANNER CANNOT READ — refused outright (task 167 r1, findings 3 and 4)
+    // ---------------------------------------------------------------------------------------------
+    // The scanner reads fluent chains of Map{Verb} / MapMethods / MapHealthChecks / MapGroup. Two things could
+    // put a route surface beside it without it noticing, and both fail OPEN, so both are refused rather than
+    // stated as residuals:
+    //   - Anonymity carried by an ATTRIBUTE ([AllowAnonymous] on a lambda or a handler method,
+    //     WithMetadata(new AllowAnonymousAttribute()), an IAllowAnonymous implementation) or by an .AllowAnonymous()
+    //     call hidden in a wrapper extension. Such a route would scan as signed-in and could carry any Permanent
+    //     basis, escaping the AnonymousByDesign rule. Today every anonymity in the BFF is an .AllowAnonymous() call
+    //     on a chain the scanner reads.
+    //   - A registration API outside the vocabulary: .Map(...) (all verbs), MapFallback*, MapHub<T>,
+    //     MapControllers and the like, or any Map* call that is not a method declared under src/server/**.
+    //     None exists today.
+    // MAINTENANCE: if one of these is genuinely needed, teach the scanner the shape (and its census) first, with a
+    // control — do not add an exemption list.
+    // =============================================================================================
+
+    /// <summary>Any identifier containing "AllowAnonymous", in code (comments and literals blanked).</summary>
+    private static readonly Regex AnonymityIdentifier = new(@"(?<![\w])\w*AllowAnonymous\w*", RegexOptions.Compiled);
+
+    private static List<string> AnonymityViolations(IEnumerable<SourceUnit> units, IEnumerable<RouteRegistration> routes)
+    {
+        var scanned = routes.SelectMany(r => r.Chain)
+            .Where(c => c.Name == "AllowAnonymous")
+            .Select(c => (c.File, c.Line))
+            .ToHashSet();
+        var violations = new List<string>();
+
+        foreach (var unit in units)
+        {
+            var code = unit.Code;
+            foreach (Match m in AnonymityIdentifier.Matches(code))
+            {
+                var at = $"{unit.Path}:{unit.LineOf(m.Index)}";
+                if (m.Value != "AllowAnonymous")
+                {
+                    violations.Add($"{at}: '{m.Value}' — anonymity carried by metadata or a type is invisible to the scanner");
+                    continue;
+                }
+
+                var p = m.Index - 1;
+                while (p >= 0 && char.IsWhiteSpace(code[p]))
+                {
+                    p--;
+                }
+
+                var next = SkipWs(code, m.Index + m.Length);
+                var fluentCall = p >= 0 && code[p] == '.' && next < code.Length && code[next] == '(';
+                if (!fluentCall)
+                {
+                    violations.Add($"{at}: AllowAnonymous used as an ATTRIBUTE (or other non-call) — the route would scan as "
+                                   + "signed-in and escape the AnonymousByDesign rule");
+                }
+                else if (!scanned.Contains((unit.Path, unit.LineOf(m.Index))))
+                {
+                    violations.Add($"{at}: an .AllowAnonymous() call on no route chain the scanner reads (a wrapper "
+                                   + "extension?) — every route it reaches would scan as signed-in");
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>A member call whose name starts with "Map" (generic arguments allowed).</summary>
+    private static readonly Regex AnyMapCall = new(@"\.\s*(?<name>Map[A-Za-z0-9_]*)\s*(?:<[^;(){}]*>)?\s*\(", RegexOptions.Compiled);
+
+    /// <summary>The registration vocabulary the scanner reads (plus MapGroup, which it follows).</summary>
+    private static readonly IReadOnlySet<string> ReadRegistrationVocabulary = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "MapGet", "MapPost", "MapPut", "MapPatch", "MapDelete", "MapMethods", "MapHealthChecks", "MapGroup",
+    };
+
+    /// <summary>ASP.NET Core registration APIs the scanner does not read — refused even if something in src/server
+    /// happens to declare a method of the same name.</summary>
+    private static readonly IReadOnlySet<string> UnreadFrameworkRegistrations = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "Map", "MapFallback", "MapFallbackToFile", "MapFallbackToPage", "MapFallbackToController",
+        "MapFallbackToAreaController", "MapHub", "MapControllers", "MapControllerRoute", "MapDefaultControllerRoute",
+        "MapAreaControllerRoute", "MapDynamicControllerRoute", "MapDynamicPageRoute", "MapRazorPages",
+        "MapRazorComponents", "MapBlazorHub", "MapGrpcService", "MapConnectionHandler", "MapConnections",
+        "MapIdentityApi", "MapOpenApi", "MapSwagger", "MapStaticAssets", "MapWhen",
+    };
+
+    private static List<string> UnreadRegistrationViolations(IEnumerable<SourceUnit> units, IReadOnlySet<string> declaredMethodNames)
+    {
+        var violations = new List<string>();
+        foreach (var unit in units)
+        {
+            foreach (Match m in AnyMapCall.Matches(unit.Code))
+            {
+                var name = m.Groups["name"].Value;
+                if (ReadRegistrationVocabulary.Contains(name))
+                {
+                    continue;
+                }
+
+                if (UnreadFrameworkRegistrations.Contains(name) || !declaredMethodNames.Contains(name))
+                {
+                    violations.Add($"{unit.Path}:{unit.LineOf(m.Index)}: .{name}(...) — a route registration form the scanner "
+                                   + "does not read (or an undeclared Map* call); its routes would be invisible to the census "
+                                   + "and to Rule A");
+                }
+            }
+        }
+
+        return violations;
+    }
+
+    /// <summary>The BFF's own units plus src/server/shared/** (a wrapper there would reach BFF builders). The other
+    /// server apps (provisioning control plane) have their own routes and are not the BFF.</summary>
+    private static IEnumerable<SourceUnit> BffAndSharedUnits()
+        => Real.Set.Units.Concat(ServerUnits.Value.Where(u => u.Path.StartsWith("src/server/shared/", StringComparison.Ordinal)));
+
+    private static readonly Lazy<IReadOnlySet<string>> DeclaredServerMethodNames = new(
+        () => ServerUnits.Value.SelectMany(u => u.Methods).Select(m => m.Name).ToHashSet(StringComparer.Ordinal),
+        LazyThreadSafetyMode.ExecutionAndPublication);
+
+    [Fact(DisplayName = "Task 167 r1: anonymity is declared only by an .AllowAnonymous() call on a chain the scanner reads")]
+    public void AnonymityIsDeclaredOnlyOnAScannedChain()
+    {
+        var violations = AnonymityViolations(BffAndSharedUnits(), Real.Routes);
+        Assert.True(
+            violations.Count == 0,
+            "An anonymity the scanner cannot see fails OPEN: the route scans as signed-in, escapes the AnonymousByDesign "
+            + "rule, and can carry any Permanent basis. Write .AllowAnonymous() on the registration (or its MapGroup) chain, "
+            + "or teach the scanner the new shape with a control.\n\n  " + string.Join("\n  ", violations));
+
+        Assert.Equal(16, Real.Live.Count(r => r.Anonymous));   // non-vacuous: the 16 anonymous routes ARE seen
+    }
+
+    [Fact(DisplayName = "Task 167 r1: no route is registered in a form the scanner and the census cannot read")]
+    public void NoRouteIsRegisteredInAFormTheScannerCannotRead()
+    {
+        var violations = UnreadRegistrationViolations(BffAndSharedUnits(), DeclaredServerMethodNames.Value);
+        Assert.True(
+            violations.Count == 0,
+            "These calls register routes (or may) in a form outside the scanner's vocabulary (Map{Verb}, MapMethods, "
+            + "MapHealthChecks, MapGroup). Their routes would be invisible to the census and to Rule A. Teach the scanner "
+            + "the form (RouteAuthorizationGuardTests.Scanner.cs) and the census vocabulary first, with a control.\n\n  "
+            + string.Join("\n  ", violations));
+    }
+
+    [Fact(DisplayName = "Task 167 r1 controls: attribute anonymity, wrapper anonymity and unread registration forms each fail")]
+    public void UnreadableShapes_NegativeControl_AttributeAnonymityAndUnreadFormsFail()
+    {
+        List<string> Anonymity(string source)
+        {
+            var routes = ScanFixtures(new[] { ("Api/Fake/Anon.cs", source), ("Program.cs", "var app = builder.Build();\napp.MapAnon();") },
+                "Api/Fake/Anon.cs");
+            return AnonymityViolations(new[] { new SourceUnit("Api/Fake/Anon.cs", source) }, routes);
+        }
+
+        static string Wrap(string body) => "public static class AnonEndpoints\n{\n    public static void MapAnon(this IEndpointRouteBuilder app)\n    {\n"
+                                           + body + "\n    }\n}";
+
+        // NEGATIVE: [AllowAnonymous] on an inline lambda — the scanner's Anonymous flag would be false.
+        var lambdaAttr = Wrap("        app.MapGet(\"/x\", [AllowAnonymous] () => Results.Ok()).RequireAuthorization();");
+        Assert.False(ScanFixtures(new[] { ("Api/Fake/Anon.cs", lambdaAttr), ("Program.cs", "var app = builder.Build();\napp.MapAnon();") },
+            "Api/Fake/Anon.cs").Single().Anonymous);
+        Assert.Contains(Anonymity(lambdaAttr), v => v.StartsWith("Api/Fake/Anon.cs:5:", StringComparison.Ordinal) && v.Contains("ATTRIBUTE"));
+
+        // NEGATIVE: [AllowAnonymous] on a named handler method, and WithMetadata(new AllowAnonymousAttribute()).
+        Assert.Contains(Anonymity(Wrap("        app.MapGet(\"/x\", H);") + "\n[AllowAnonymous] static IResult H() => Results.Ok();"),
+            v => v.Contains("ATTRIBUTE"));
+        Assert.Contains(Anonymity(Wrap("        app.MapGet(\"/x\", H).WithMetadata(new AllowAnonymousAttribute());")),
+            v => v.Contains("'AllowAnonymousAttribute'"));
+
+        // NEGATIVE: an .AllowAnonymous() hidden in a wrapper extension the chain calls by another name.
+        var wrapper = Wrap("        app.MapGet(\"/x\", H).Public();")
+                      + "\npublic static class Ext { public static RouteHandlerBuilder Public(this RouteHandlerBuilder b) => b.AllowAnonymous(); }";
+        Assert.Contains(Anonymity(wrapper), v => v.Contains("no route chain the scanner reads"));
+
+        // POSITIVE: .AllowAnonymous() on the registration chain is seen, and a comment or log text naming it is not code.
+        Assert.Empty(Anonymity(Wrap("        // [AllowAnonymous] was considered here\n        app.MapGet(\"/x\", H).AllowAnonymous().RequireRateLimiting(\"anonymous\");")));
+
+        // NEGATIVE: the four registration families finding 4 named, plus an undeclared Map* call.
+        var declared = new HashSet<string>(StringComparer.Ordinal) { "MapAnon", "MapX" };
+        foreach (var call in new[] { "app.Map(\"/x\", H);", "app.MapFallback(H);", "app.MapFallbackToFile(\"index.html\");",
+                                     "app.MapHub<ChatHub>(\"/hub\");", "app.MapControllers();", "app.MapSomethingNew(\"/y\");" })
+        {
+            var unit = new SourceUnit("Api/Fake/Unread.cs", Wrap("        " + call));
+            Assert.Single(UnreadRegistrationViolations(new[] { unit }, declared));
+        }
+
+        // A framework name stays refused even if something declares a method of the same name.
+        Assert.Single(UnreadRegistrationViolations(new[] { new SourceUnit("Api/Fake/U.cs", Wrap("        app.MapHub<H>(\"/h\");")) },
+            new HashSet<string>(StringComparer.Ordinal) { "MapHub" }));
+
+        // POSITIVE: the read vocabulary and a DECLARED Map* method (the BFF's own MapXEndpoints) pass; a comment is not code.
+        var fine = new SourceUnit("Api/Fake/Fine.cs", Wrap(
+            "        var g = app.MapGroup(\"/api/f\");\n        g.MapGet(\"/a\", H);\n        g.MapMethods(\"/b\", [\"PATCH\"], H);\n"
+            + "        app.MapHealthChecks(\"/h\");\n        app.MapX();\n        // app.MapFallback(H);"));
+        Assert.Empty(UnreadRegistrationViolations(new[] { fine }, declared));
     }
 
     // =============================================================================================
@@ -1950,10 +2374,103 @@ public partial class RouteAuthorizationGuardTests
             }
             """;
         var unit = new SourceUnit("Svc.cs", source);
-        Body BodyOf(string name) => Expand(unit, "Svc", SignatureAndBody(unit.Methods.Single(m => m.Name == name)), name);
+        Body BodyOf(string name) => Expand(unit, "Svc", PartOf(unit.Methods.Single(m => m.Name == name)), name);
 
         Assert.True(BodyHasSeam(BodyOf("Run"), "IImpersonatedCommunicationQuery"));     // Run → Helper → _query
         Assert.False(BodyHasSeam(BodyOf("Other"), "IImpersonatedCommunicationQuery"));  // Unused is never called
+    }
+
+    [Fact(DisplayName = "Task 167 r1 controls: a seam only in the signature, or borrowed from a sibling's parameter, earns nothing")]
+    public void HandlerDecision_NegativeControl_SignatureOnlyAndBorrowedSeamsFail()
+    {
+        // Each fixture is one endpoint file bound to the root, verified against a declaration that names its handler.
+        static string? ProblemOf(string source, string handler, string seam, params string[] hops)
+        {
+            var units = new[] { ("Api/Fake/SigEndpoints.cs", source), ("Program.cs", "var app = builder.Build();\napp.MapSig();") };
+            var route = ScanFixtures(units, "Api/Fake/SigEndpoints.cs").Single();
+            return VerifyHandlerDecision(new HandlerDecision(route.Key, handler, seam, hops, "x"), route,
+                new[] { new SourceUnit("Api/Fake/SigEndpoints.cs", source) }).Problem;
+        }
+
+        static string Endpoint(string registration, string members) => $$"""
+            public static class SigEndpoints
+            {
+                public static void MapSig(this IEndpointRouteBuilder app)
+                {
+                    {{registration}}
+                }
+
+                {{members}}
+            }
+            """;
+
+        // NEGATIVE (the verifier's fixture): an UNUSED DI parameter of the seam type, the work done by an app-only client.
+        Assert.Contains("is not reached", ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", Handle).RequireAuthorization();",
+            "private static Task<IResult> Handle(Guid id, AuthorizationService unused, IAppOnlyClient client) => client.ReadAnyRecordAsync(id);"),
+            "Handle", "AuthorizationService"));
+
+        // NEGATIVE: the same with a QUALIFIED type name and a block body (the SendToIndex spelling).
+        Assert.Contains("is not reached", ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", Handle).RequireAuthorization();",
+            "private static async Task<IResult> Handle(Guid id, Spaarke.Core.Auth.AuthorizationService unused, IAppOnlyClient client)\n"
+            + "{\n    return await client.ReadAnyRecordAsync(id);\n}"),
+            "Handle", "AuthorizationService"));
+
+        // NEGATIVE: an inline lambda whose parameter list carries the unused seam.
+        Assert.Contains("is not reached", ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", async (Guid id, AuthorizationService unused, IAppOnlyClient client) => await client.ReadAnyRecordAsync(id)).RequireAuthorization();",
+            string.Empty),
+            "inline", "AuthorizationService"));
+
+        // NEGATIVE (finding 2): a SIBLING method's parameter `AccessRights rights` is not a member of the type; the
+        // handler's own `string rights` is not the seam type.
+        Assert.Contains("is not reached", ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{rights}\", Handle).RequireAuthorization();",
+            "private static bool Other(AccessRights rights) => rights.HasFlag(AccessRights.Read);\n"
+            + "private static Task<IResult> Handle(string rights, IAppOnlyClient client) => client.ReadAnyRecordAsync(rights);"),
+            "Handle", "AccessRights"));
+
+        // NEGATIVE: a hop named only in the SIGNATURE (the handler shares the hop method's name and never calls it).
+        const string hopService = """
+            public class SigLoadService
+            {
+                private readonly AuthorizationService _auth;
+                public Task<IResult> LoadAsync(Guid id) => _auth.CheckAsync(id);
+            }
+            """;
+        var withHop = Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", LoadAsync).RequireAuthorization();",
+            "private static Task<IResult> LoadAsync(Guid id, IAppOnlyClient client) => client.ReadAnyRecordAsync(id);") + "\n" + hopService;
+        Assert.Contains("does not call LoadAsync", ProblemOf(withHop, "LoadAsync", "AuthorizationService", "SigLoadService.LoadAsync"));
+
+        // NEGATIVE: a named-argument LABEL that merely spells the parameter's name is not a use.
+        Assert.Contains("is not reached", ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", Handle).RequireAuthorization();",
+            "private static Task<IResult> Handle(Guid id, AuthorizationService auth, IAppOnlyClient client) => client.ReadAnyRecordAsync(id, auth: null);"),
+            "Handle", "AuthorizationService"));
+
+        // POSITIVE: the seam parameter USED in the body passes — simple and qualified, method and lambda.
+        Assert.Null(ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", Handle).RequireAuthorization();",
+            "private static Task<IResult> Handle(Guid id, Spaarke.Core.Auth.AuthorizationService auth) => auth.CheckAsync(id);"),
+            "Handle", "AuthorizationService"));
+        Assert.Null(ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", async ([FromServices] AuthorizationService auth, Guid id) => await auth.CheckAsync(id)).RequireAuthorization();",
+            string.Empty),
+            "inline", "AuthorizationService"));
+
+        // POSITIVE: a top-level FIELD of the seam type used by a same-type helper the handler calls (one level).
+        Assert.Null(ProblemOf(Endpoint(
+            "app.MapGet(\"/api/fake/{id}\", Handle).RequireAuthorization();",
+            "private static readonly IImpersonatedCommunicationQuery? _query = null;\n"
+            + "private static Task<IResult> Handle(Guid id) => Read(id);\n"
+            + "private static Task<IResult> Read(Guid id) => _query!.QueryAsync(id);"),
+            "Handle", "IImpersonatedCommunicationQuery"));
+
+        // POSITIVE, on the real code: the permissions handler USES its AuthorizationService parameter.
+        Assert.Equal(Credit.HandlerDecision, RealAssessments.Value.Single(a => a.Key == "GET /api/documents/{documentId}/permissions").Credit);
+        Assert.Equal(Credit.HandlerDecision, RealAssessments.Value.Single(a => a.Key == "POST /api/ai/rag/send-to-index").Credit);
     }
 
     [Fact(DisplayName = "Task 167 controls: unreadable registrations fail as unparseable, never skipped")]
@@ -2115,7 +2632,39 @@ public partial class RouteAuthorizationGuardTests
                  })
         {
             Assert.Equal(Credit.PerResource, byKey[key].Credit);
-            Assert.Null(WaiverOf(key));
+        }
+
+        Assert.Null(WaiverOf("POST /api/finance/matters/{matterId:guid}/recalculate"));
+        Assert.Null(WaiverOf("POST /api/finance/projects/{projectId:guid}/recalculate"));
+
+        // Owner round 12 item 9 (overrides the AC's "revoke: no waiver"): CREDITED routes task 166 must fix carry a
+        // Pending InsufficientDecision waiver owned by 166, so the guard tracks them until 166 resolves them.
+        foreach (var key in new[] { "POST /api/v1/external-access/revoke", "POST /api/office/todo", "POST /api/v1/external-access/close-project" })
+        {
+            var w = WaiverOf(key)!;
+            Assert.Equal((WaiverKind.Pending, "166", Gap.InsufficientDecision), (w.Kind, w.OwningTask, w.Gap));
+            Assert.Equal(Credit.PerResource, byKey[key].Credit);
+        }
+
+        // Owner round 12 item 1: the three probes that relied on "a response fixed in source" now carry the
+        // mandatory rate limit their AnonymousByDesign waiver names.
+        foreach (var key in new[] { "GET /healthz", "GET /healthz/catalog", "GET /ping" })
+        {
+            Assert.Equal(PermanentBasis.AnonymousByDesign, WaiverOf(key)!.Basis);
+            Assert.Contains(byKey[key].Route.Chain, c => c.Name == "RequireRateLimiting" && c.Args.Trim() == "\"anonymous\"");
+        }
+
+        // Owner round 12 item 4: OWNER-COMPARISON — heartbeat meets it (one uniform 404); DELETE pin does not yet
+        // (404 vs 403), so it is Pending, owned by 166.
+        Assert.Equal(PermanentBasis.OwnerComparison, WaiverOf("POST /api/compose/document/{documentId:guid}/heartbeat")!.Basis);
+        var pin = WaiverOf("DELETE /api/memory/pins/{pinId}")!;
+        Assert.Equal((WaiverKind.Pending, "166", Gap.NoDecision), (pin.Kind, pin.OwningTask, pin.Gap));
+
+        // Owner round 12 item 6: the five playbook lists are CallerScopedOnly.
+        foreach (var key in new[] { "GET /api/ai/playbooks", "GET /api/ai/playbooks/public", "GET /api/ai/playbooks/templates",
+                                    "GET /api/ai/chat/playbooks", "GET /api/agent/playbooks" })
+        {
+            Assert.Equal(PermanentBasis.CallerScopedOnly, WaiverOf(key)!.Basis);
         }
 
         Assert.Equal("UNOWNED-NEW", WaiverOf("GET /api/ai/chat/context-mappings/analysis/{analysisId}")!.OwningTask);

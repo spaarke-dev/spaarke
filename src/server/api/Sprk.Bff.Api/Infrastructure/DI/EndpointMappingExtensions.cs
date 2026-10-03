@@ -56,17 +56,24 @@ public static class EndpointMappingExtensions
         // drift (an unseeded catalog would recycle instances forever). The FR-P0-04
         // reconciliation check (tag "catalog") is exposed on its own endpoint below;
         // drift additionally logs at Error on startup via the hosted service.
+        //
+        // Rate-limited like every other anonymous route (owner round 12 item 1, unified-access-control-r2
+        // task 167): an anonymous route's control must be MANDATORY, and each call runs every non-catalog
+        // health check (Redis, the Service Bus processor, the Compose identity key). "anonymous" is 10/min
+        // per client IP; the App Service health check probes once a minute per instance.
         app.MapHealthChecks("/healthz", new HealthCheckOptions
         {
             Predicate = registration => !registration.Tags.Contains("catalog")
-        }).AllowAnonymous();
+        }).AllowAnonymous()
+            .RequireRateLimiting("anonymous");
 
         // FR-P0-04 catalog-reconciliation probe: Unhealthy on constants↔rows drift or
         // tool↔handler bijection violation. Verified green at gate task 014 after seeding.
         app.MapHealthChecks("/healthz/catalog", new HealthCheckOptions
         {
             Predicate = registration => registration.Tags.Contains("catalog")
-        }).AllowAnonymous();
+        }).AllowAnonymous()
+            .RequireRateLimiting("anonymous");   // owner round 12 item 1 (see /healthz above)
 
         // Anonymous smoke probes that hit Dataverse live — rate-limited to prevent abuse
         // (mirrors the /healthz/dataverse/doc/{id} sibling below). Task 023 (B-2): added
@@ -114,6 +121,7 @@ public static class EndpointMappingExtensions
 
         app.MapGet("/ping", () => Results.Text("pong"))
             .AllowAnonymous()
+            .RequireRateLimiting("anonymous") // owner round 12 item 1 (UAC-r2 task 167) — 10/min per IP
             .WithTags("Health")
             .WithDescription("Lightweight health check for warm-up agents. Returns 'pong' without authentication.");
 

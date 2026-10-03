@@ -24,12 +24,18 @@ namespace Spaarke.ArchTests;
 /// aggregator — is reported as a PROBLEM, never skipped. That is the fail-closed property ADR-003 asks of
 /// the guard's own decisions.</para>
 ///
-/// <para><b>What it deliberately does not see.</b> It reads the fluent chain, not runtime metadata. A
-/// custom extension that hides <c>.AllowAnonymous()</c> or a filter inside a wrapper with an unrelated name
-/// is invisible here; the attachment-form census only classifies calls whose NAME is
-/// authorization-shaped. That residual is stated rather than hidden: a hidden real gate earns no credit (the
-/// route is then flagged — fail closed), and a hidden anonymity is the one case a waiver reviewer must catch
-/// by reading the chain.</para>
+/// <para><b>What it deliberately does not see, and how each blind spot is closed.</b> It reads the fluent chain,
+/// not runtime metadata. (1) A FILTER inside a wrapper extension with an unrelated name is invisible, and the
+/// attachment-form census only classifies calls whose NAME is authorization-shaped — that fails CLOSED (the hidden
+/// gate earns no credit, so the route is flagged). (2) An ANONYMITY the chain does not show — an
+/// <c>[AllowAnonymous]</c> attribute on a lambda or a handler method, <c>WithMetadata(new
+/// AllowAnonymousAttribute())</c>, or an <c>.AllowAnonymous()</c> hidden in a wrapper — would fail OPEN, so
+/// <c>AnonymityIsDeclaredOnlyOnAScannedChain</c> refuses every one (task 167 r1). (3) A registration API outside
+/// the vocabulary — <c>.Map(...)</c>, <c>MapFallback*</c>, <c>MapHub&lt;T&gt;</c>, <c>MapControllers</c>, or any
+/// undeclared <c>Map*</c> call — would put routes beside the census, so
+/// <c>NoRouteIsRegisteredInAFormTheScannerCannotRead</c> refuses it (task 167 r1). What remains unseen is request
+/// handling that is not endpoint routing at all (terminal middleware via <c>app.Use</c>/<c>app.Run</c>); that is
+/// not a route registration and is reviewed as middleware.</para>
 /// </summary>
 public partial class RouteAuthorizationGuardTests
 {
@@ -1590,18 +1596,29 @@ public partial class RouteAuthorizationGuardTests
     private static string BffRelative(string file)
         => Path.GetRelativePath(BffRoot, file).Replace(Path.DirectorySeparatorChar, '/');
 
+    /// <summary>Every non-obj/bin .cs file under <paramref name="root"/>, lexed, keyed by its root-relative path. The
+    /// real scan reads <see cref="BffRoot"/>; the census control reads a temporary root through the SAME code.</summary>
+    private static List<SourceUnit> LoadUnits(string root)
+        => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
+            .Select(f => (Full: f, Relative: Path.GetRelativePath(root, f)))
+            .Where(f => !IsBuildOutput(Path.DirectorySeparatorChar + f.Relative))
+            .OrderBy(f => f.Full, StringComparer.Ordinal)
+            .Select(f => new SourceUnit(f.Relative.Replace(Path.DirectorySeparatorChar, '/'), File.ReadAllText(f.Full)))
+            .ToList();
+
+    /// <summary>THE census selection: a unit is an endpoint file when its code (comments and literals blanked)
+    /// registers a route in the scanner's vocabulary. <see cref="EndpointFiles"/> is this over the real units.</summary>
+    private static List<string> CensusOf(IEnumerable<SourceUnit> units)
+        => units.Where(u => RegistrationCall.IsMatch(u.Code)).Select(u => u.Path).ToList();
+
     private sealed class RealScan
     {
         public RealScan()
         {
-            var units = Directory.EnumerateFiles(BffRoot, "*.cs", SearchOption.AllDirectories)
-                .Where(f => !IsBuildOutput(f))
-                .OrderBy(f => f, StringComparer.Ordinal)
-                .Select(f => new SourceUnit(BffRelative(f), File.ReadAllText(f)))
-                .ToList();
+            var units = LoadUnits(BffRoot);
 
             Set = new SourceSet(units, Aggregators.Select(a => a.RelativePath).ToHashSet(StringComparer.Ordinal));
-            CensusFiles = units.Where(u => RegistrationCall.IsMatch(u.Code)).Select(u => u.Path).ToList();
+            CensusFiles = CensusOf(units);
             Routes = CensusFiles.SelectMany(path => RoutesIn(Set, Set.Get(path)!)).ToList();
         }
 
@@ -1617,7 +1634,7 @@ public partial class RouteAuthorizationGuardTests
     private static RealScan Real => RealLazy.Value;
 
     /// <summary>Every BFF file that registers HTTP routes — the census subject, by the scanner's own
-    /// vocabulary.</summary>
+    /// vocabulary (<see cref="CensusOf"/> over <see cref="LoadUnits"/> of the BFF root).</summary>
     private static IReadOnlyList<string> EndpointFiles() => Real.CensusFiles;
 
     private static List<RouteRegistration> ScanFile(string relativePath)

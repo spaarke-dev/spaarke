@@ -972,9 +972,14 @@ public partial class RouteAuthorizationGuardTests
     // or "inline" for a lambda), the decision seam, up to two "ConcreteType.Method" hops the handler calls, and a
     // reason citing file:line. EveryHandlerDecisionIsVerified locates the handler, follows each hop (each must be
     // called by the body before it; an interface is refused; every overload must reach the next step), and
-    // requires the seam as a whole identifier outside comments in the last body — a body includes the same-type
-    // helpers it calls directly. This is a PRESENCE check, the same limit Rule B has: it proves the seam is
-    // reached, not that it is applied to the right id. The behavioural deny tests of tasks 159-166 are the proof.
+    // requires the seam in the last BODY — the code between the braces (or after the lambda arrow), never the
+    // signature. The seam counts when it occurs there as a whole identifier outside comments, or when the body
+    // USES a parameter of that method, or a field/property declared at the top level of its type, whose declared
+    // type is the seam (a qualified name such as Spaarke.Core.Auth.AuthorizationService counts). An unused DI
+    // parameter of the seam type earns nothing (task 167 r1). A body includes the same-type helpers it calls
+    // directly, one level deep (owner round 12 item 3). This is a PRESENCE check, the same limit Rule B has: it
+    // proves the seam is reached, not that it is applied to the right id. The behavioural deny tests of tasks
+    // 159-166 are the proof.
     //
     // A HandlerDecision is allowed only when the decision covers EVERY caller-chosen identifier the handler acts
     // on; partial coverage is a finding (a Pending waiver), not a credit. A fix task's "the query is the gate"
@@ -1242,19 +1247,32 @@ public partial class RouteAuthorizationGuardTests
     //        Permanent — the route is genuinely safe without a per-resource decision. It names a PermanentBasis from
     //                    the CLOSED set, and its reason cites the handler file:line that proves the basis:
     //                      AnonymousByDesign         — AllowAnonymous, with a MANDATORY compensating control named at
-    //                                                  file:line (a rate limit, an HMAC, an IsDevelopment-only mapping,
-    //                                                  a response fixed in source). An optional control does not count.
+    //                                                  file:line (a rate limit, an HMAC, OAuth state, an
+    //                                                  IsDevelopment-only mapping). An optional control does not count,
+    //                                                  and neither does a harmless response on its own (owner round 12
+    //                                                  item 1 kept this strict rule and rate-limited /healthz,
+    //                                                  /healthz/catalog and /ping instead).
     //                      CallerScopedOnly          — reads/writes only rows keyed by a server-derived caller identity
     //                                                  (oid, systemuserid, contact id), no caller-chosen id of another
     //                                                  principal's record.
     //                      ReferenceData             — configuration, catalog or schema content, not customer records;
-    //                                                  selects nothing by a record id.
+    //                                                  "takes no record id" means SELECTS NOTHING BY a record id (owner
+    //                                                  round 12 item 2): a catalog key, a static model-deployment id, an
+    //                                                  NDA clauseRef, a context-mapping cache key or a system saved-query
+    //                                                  lookup is not a record id.
     //                      CreateWithNoPriorResource — the request names NO existing record, container, drive, owner,
     //                                                  parent or regarding id.
     //                      CallerSuppliedContentOnly — processes only the request's own bytes or text; reads no stored
     //                                                  record, index or file by any id.
     //                      OperatorGateInHandler     — the handler denies every caller outside an operator allow-list or
     //                                                  app-only classification before any data access.
+    //                      OwnerComparison           — (OWNER-COMPARISON, owner round 12 item 4) the handler loads the
+    //                                                  record a caller-chosen id names and refuses unless its recorded
+    //                                                  owner (or lock holder) IS the server-derived caller, before any
+    //                                                  of it reaches the response or any write; AND an unknown id and a
+    //                                                  not-yours id get the SAME answer (owner round 9 fix pattern). A
+    //                                                  route whose owner check answers 404-vs-403 does not qualify: it
+    //                                                  is Pending until the answers are made uniform.
     //                    No basis fits a genuinely safe route? STOP and propose a new one (task 167 trigger 2) — never
     //                    widen a basis.
     //
@@ -1264,14 +1282,19 @@ public partial class RouteAuthorizationGuardTests
     //
     //   4. Never add a Permanent waiver to make a build go green. Converting Permanent to Pending is allowed;
     //      Pending to Permanent is forbidden (the sweep ledger enforces it for sweep routes, review elsewhere).
+    //      The one sanctioned exception is the diff that LANDS THE FIX which makes a basis true — the fix is the work
+    //      in between, and the Permanent reason cites the fixed line (owner round 12 item 4: task 166 makes
+    //      DELETE /api/memory/pins/{pinId} answer one uniform 404, then replaces its Pending waiver with
+    //      OwnerComparison).
     //
     //   5. A sweep route (SweepFindings) carries exactly the Pending waiver its ledger entry names. A fix task
     //      resolves it ONLY by credit: make the route pass Rule A, delete the waiver, set ResolvedBy and ProofTest.
     //
-    // STATE AT TASK 167 (2026-10-03): 90 sweep Pending waivers (159-166), 21 UNOWNED-NEW findings for the main
-    // session to assign (listed in notes/task-167-every-route-authorization-guard.md), 11 Pending routes already
-    // named by a fix task's amendment, and 90 Permanent waivers each with a verified basis. The suite is green
-    // BECAUSE of the Pending entries — that is the honest state, not a passing grade.
+    // STATE AT TASK 167 r1 (2026-10-03, after owner round 12): 90 sweep Pending waivers (159-166), 21 UNOWNED-NEW
+    // findings for the main session to assign (listed in notes/task-167-every-route-authorization-guard.md), 14
+    // Pending routes owned by a fix task's amendment or by owner round 12 (161: 4, 166: 10), and 89 Permanent
+    // waivers each with a verified basis. The suite is green BECAUSE of the Pending entries — that is the honest
+    // state, not a passing grade.
     // =============================================================================================
 
     private enum WaiverKind
@@ -1289,6 +1312,10 @@ public partial class RouteAuthorizationGuardTests
         CreateWithNoPriorResource,
         CallerSuppliedContentOnly,
         OperatorGateInHandler,
+
+        /// <summary>OWNER-COMPARISON (owner round 12 item 4): a caller-chosen id is loaded and refused unless its
+        /// owner is the caller, with one uniform answer for unknown and not-yours.</summary>
+        OwnerComparison,
     }
 
     private enum Gap
@@ -1322,7 +1349,8 @@ public partial class RouteAuthorizationGuardTests
         //
         // POST /api/documents/{documentId}/share-link now carries
         // .AddDocumentAuthorizationFilter("share"). Deleted rather than left behind per maintenance rule
-        // 3 above — a Pending waiver whose route has become gated is STALE and fails NoWaiverIsStale.
+        // 3 above — a Pending waiver whose route has become gated is STALE and fails
+        // NoWaiverIsStaleAndEveryWaiverIsWellFormed (task 074 called it NoWaiverIsStale).
         //
         // What 072 actually closed, for the record: the missing per-document gate (the route's authority
         // was container-scoped OBO access), the permanent lifetime (expiration: null → bounded by
@@ -1340,9 +1368,10 @@ public partial class RouteAuthorizationGuardTests
         // PUT /api/containers/{containerId}/files/{*path}, POST /api/containers/{containerId}/upload and
         // PUT /api/upload-session/chunk were RETIRED by task 073, which deleted Api/UploadEndpoints.cs
         // outright rather than gating it. Deleted here rather than left behind per maintenance rule 3 — and
-        // note that NoWaiverIsStale could NOT have caught these on its own: it fires when a waived route
-        // becomes GATED, not when it is DELETED. That gap is now closed (see NoWaiverIsStale below), which
-        // makes 073 the last task that could leave dead waivers silently.
+        // note that the stale rule of that day (NoWaiverIsStale) could NOT have caught these on its own: it
+        // fired when a waived route became GATED, not when it was DELETED. That gap is now closed — any waiver
+        // on an absent route fails NoWaiverIsStaleAndEveryWaiverIsWellFormed — which makes 073 the last task
+        // that could leave dead waivers silently.
         //
         // What 073 actually closed, for the record: the routes carried RequireAuthorization("canwritefiles")
         // -> ResourceAccessRequirement -> ResourceAccessHandler — a real, fail-closed mechanism resolving
@@ -1389,8 +1418,9 @@ public partial class RouteAuthorizationGuardTests
         // Task 071 DELETED four routes from this group (children / PATCH / content / DELETE) — all had
         // zero callers and gated document-id-keyed equivalents already ship — so their waivers are gone
         // rather than updated. A waiver for a route that no longer exists is worse than noise: it reads
-        // as unfinished work and would be carried forward forever. (NoWaiverIsStale does not catch this
-        // case — it fires when a waived route becomes GATED, not when it is DELETED. Worth extending.)
+        // as unfinished work and would be carried forward forever. (When 071 ran, the stale rule did not
+        // catch this case — it fired only when a waived route became GATED. It has since been extended:
+        // NoWaiverIsStaleAndEveryWaiverIsWellFormed fails any waiver whose route no longer exists.)
         //
         // These three survived, and NOT because 071 ran out of time. They CREATE content: the wizard
         // ordering is uploadFilesToSpe THEN createDocumentRecords, so no sprk_document exists at
@@ -1427,8 +1457,8 @@ public partial class RouteAuthorizationGuardTests
         // existed (EmailComposer local attachments, the Analysis wizard's standalone document, and
         // DocumentUploadWizard "skip associate"). PUT /api/obo/me/files/{*path} gave all three a
         // callable upload that names no container, DocumentUploadWizard — the last client on the old
-        // route — cut over, and the route went with it. `NoWaiverNamesARouteThatNoLongerExists` is
-        // what would have caught this entry being left behind.
+        // route — cut over, and the route went with it. The absent-route rule in
+        // `NoWaiverIsStaleAndEveryWaiverIsWellFormed` is what would have caught this entry being left behind.
 
         // ---------- task 076: the record-LESS upload route. PERMANENT, and honestly so. ----------
         //
@@ -1524,9 +1554,12 @@ public partial class RouteAuthorizationGuardTests
         //   • /communications ×3 (#1020) — unified-access-control-r2 task 127. Permanent: query-is-the-gate.
         //   • /search/entities (#1021)   — spaarkeai-word-add-in-r1 task 062 (impersonated read). This
         //                                  branch's task 126 (OBO) fixed it too and was SUPERSEDED at merge.
-        //   • POST /todo (#1022)         — word-add-in-r1 task 064, TodoSourceAccessFilter: NO waiver, it is
-        //                                  a real endpoint filter credited in ExplicitlyCreditedFilterTypeNames.
-        //                                  (This branch's task 128 gated only the regarding id; superseded.)
+        //   • POST /todo (#1022)         — word-add-in-r1 task 064, TodoSourceAccessFilter: no waiver THEN, it
+        //                                  is a real endpoint filter (credited today in CreditedForms; task 074
+        //                                  called that list ExplicitlyCreditedFilterTypeNames). (This branch's task
+        //                                  128 gated only the regarding id; superseded.) ⚠️ Since owner round 12
+        //                                  item 9 it carries a Pending InsufficientDecision waiver owned by 166:
+        //                                  the filter gates the source read, not the Create privilege.
         //   • POST /quickcreate          — word-add-in-r1 QuickCreateSourceAccessFilter: NO waiver for the
         //                                  same reason. Its old Permanent "CREATE, nothing to authorize"
         //                                  waiver went stale the moment the source-record read was gated.
@@ -1584,11 +1617,12 @@ public partial class RouteAuthorizationGuardTests
         // POST /api/office/quickcreate/{entityType} — waiver DELETED at the 2026-09-30 merge. It read
         // "CREATE. There is no pre-existing resource to authorize", which stopped being true when
         // spaarkeai-word-add-in-r1 added QuickCreateSourceAccessFilter: the route now reads a caller-named
-        // SOURCE record to copy fields from, and gates that read. The filter is credited in
-        // ExplicitlyCreditedFilterTypeNames, so Rule A sees the gate directly. The old waiver's two caveats
+        // SOURCE record to copy fields from, and gates that read. The filter is credited (CreditedForms today;
+        // ExplicitlyCreditedFilterTypeNames then), so Rule A sees the gate directly. The old waiver's two caveats
         // were real and moved to the OfficeEndpoints GovernedFile entry rather than being lost.
-        // (NoWaiverIsStale would NOT have caught this: it inspects PENDING waivers only, so a Permanent
-        // waiver can outlive its premise silently.)
+        // (The stale rule of that day would NOT have caught this: it inspected PENDING waivers only, so a
+        // Permanent waiver could outlive its premise silently. Since task 167 a Permanent waiver on a credited
+        // route fails as REDUNDANT in NoWaiverIsStaleAndEveryWaiverIsWellFormed — this exact case now fails.)
 
         // =========================================================================================
         // TASK 167 (2026-10-03): THE SWEEP — 90 Pending waivers, one per ledger route, owned by its fix task.
@@ -1917,7 +1951,8 @@ public partial class RouteAuthorizationGuardTests
         Pending("POST /api/v1/external-access/close-project", "166", Gap.InsufficientDecision,
             "S-39 (high), Api/ExternalAccess/ExternalAccessEndpoints.cs:158: A caller with Write on ANY project "
             + "that has at least one active grant row (they can create one: own a project, POST /grant a contact "
-            + "to it — the handler returns early at (see the sweep note)",
+            + "to it — the handler returns early at (see the sweep note). ALSO (task 166 amendment (e), owner round "
+            + "12 item 9): RemoveAllExternalMembersAsync strips INTERNAL users' permissions on close.",
             observed: "AddDelegationRuleFilter"),
         Pending("GET /api/memory/records/{entityLogicalName}/{id:guid}", "166", Gap.NoDecision,
             "S-42 (high), Api/Memory/MemoryGovernanceEndpoints.cs:122: Any signed-in user who holds User-level "
@@ -1985,28 +2020,29 @@ public partial class RouteAuthorizationGuardTests
 
         // ---------- P:AnonymousByDesign ----------
         Permanent("GET /healthz", PermanentBasis.AnonymousByDesign, "167",
-            "App Service liveness probe, anonymous by platform contract. Compensating control fixed in source: "
-            + "EndpointMappingExtensions.cs:59-62 registers HealthCheckOptions with a Predicate and NO "
-            + "ResponseWriter, so the response is the aggregate status word and nothing else; no record, no id, "
-            + "no side effect."),
+            "App Service liveness probe, anonymous by platform contract. Mandatory control: "
+            + "RequireRateLimiting(\"anonymous\") at EndpointMappingExtensions.cs:68 (owner round 12 item 1); the "
+            + "HealthCheckOptions (:64-67) have no ResponseWriter, so the body is the aggregate status word only — "
+            + "no record, no id, no side effect."),
         Permanent("GET /healthz/catalog", PermanentBasis.AnonymousByDesign, "167",
-            "FR-P0-04 catalog-reconciliation probe. Compensating control fixed in source: "
-            + "EndpointMappingExtensions.cs:66-69 registers HealthCheckOptions with a Predicate and no "
+            "FR-P0-04 catalog-reconciliation probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
+            + "EndpointMappingExtensions.cs:76 (owner round 12 item 1); the HealthCheckOptions (:72-75) have no "
             + "ResponseWriter, so the body is the aggregate status word only; takes no id and writes nothing."),
         Permanent("GET /healthz/dataverse", PermanentBasis.AnonymousByDesign, "167",
             "Dataverse connectivity probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
-            + "EndpointMappingExtensions.cs:76; the handler (TestDataverseConnectionAsync, :485-502) takes no id "
+            + "EndpointMappingExtensions.cs:83; the handler (TestDataverseConnectionAsync, :493-510) takes no id "
             + "and returns a fixed status message, never ex.Message (task 023)."),
         Permanent("GET /healthz/dataverse/crud", PermanentBasis.AnonymousByDesign, "167",
             "Dataverse CRUD probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
-            + "EndpointMappingExtensions.cs:79; the handler (TestDataverseCrudOperationsAsync, :504-521) takes no "
+            + "EndpointMappingExtensions.cs:86; the handler (TestDataverseCrudOperationsAsync, :512-529) takes no "
             + "id and returns a fixed healthy/failed message with no record content."),
         Permanent("GET /ping", PermanentBasis.AnonymousByDesign, "167",
-            "Warm-up probe. Compensating control fixed in source: EndpointMappingExtensions.cs:115 answers the "
-            + "constant text \"pong\" — no input is read, nothing is looked up, nothing is written."),
+            "Warm-up probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
+            + "EndpointMappingExtensions.cs:124 (owner round 12 item 1); the handler (:122) answers the constant "
+            + "text \"pong\" — no input is read, nothing is looked up, nothing is written."),
         Permanent("GET /status", PermanentBasis.AnonymousByDesign, "167",
             "Service metadata probe. Mandatory control: RequireRateLimiting(\"anonymous\") at "
-            + "EndpointMappingExtensions.cs:130; the body (:120-128) is the constant service name, version and "
+            + "EndpointMappingExtensions.cs:138; the body (:128-136) is the constant service name, version and "
             + "server time — no id, no record."),
         Permanent("GET /api/config/client", PermanentBasis.AnonymousByDesign, "167",
             "MSAL bootstrap config for a page with no token yet. Mandatory control: "
@@ -2124,10 +2160,10 @@ public partial class RouteAuthorizationGuardTests
 
         // ---------- N:166 ----------
         Pending("GET /healthz/dataverse/doc/{id}", "166", Gap.NoDecision,
-            "[high] ANONYMOUS read of any sprk_document by id (EndpointMappingExtensions.cs:81-113): name, file "
+            "[high] ANONYMOUS read of any sprk_document by id (EndpointMappingExtensions.cs:88-120): name, file "
             + "name, parent, matter, project and invoice ids, app-only via IDocumentDataverseService. Rate limit "
-            + "only. Task 166 amendment (a) owns it; consumer .claude/skills/bff-deploy/SKILL.md §9c must move to "
-            + "GET /healthz/dataverse first."),
+            + "only. Task 166 amendment (a) owns it (owner round 12 item 8 keeps it there); consumer "
+            + ".claude/skills/bff-deploy/SKILL.md §9c must move to GET /healthz/dataverse first."),
         Pending("POST /api/compose/documents/{documentSpeId}/save", "166", Gap.NoDecision,
             "[medium] The SPE write is OBO, but the body TenantId and SessionId flow into the first-save rebind "
             + "with no owner check, and DocumentRecordId is read app-only (ComposeSaveEndpoints.cs:26, :81-123). "
@@ -2150,17 +2186,33 @@ public partial class RouteAuthorizationGuardTests
             "[medium] Author/Admin role only, then deletes a report in ANY caller-chosen workspace via the "
             + "service principal (ReportingEndpoints.cs:108). Task 166 amendment (f)."),
 
+        // Owner round 12 item 4: an owner comparison that answers 404 (unknown) vs 403 (not yours) is an existence
+        // oracle, so this route does not meet OwnerComparison yet. Task 166 makes both answers one 404, then — in
+        // that same diff — replaces this waiver with Permanent OwnerComparison citing the fixed line (maintenance
+        // rule 4's sanctioned exception).
+        Pending("DELETE /api/memory/pins/{pinId}", "166", Gap.NoDecision,
+            "[low] Loads ANY pin by caller-chosen id (PinnedMemoryEndpoints.cs:499) and answers 404 'Pin not found' "
+            + "(:503) for an unknown id but 403 'Caller does not own this pin' (:515) for another user's: a pin "
+            + "existence oracle across users. The delete itself (:521) is owner-gated. Owner round 12 item 4."),
+
+        // Owner round 12 item 9: CREDITED routes task 166 must fix. Each passes Rule A by a real filter, so the guard
+        // would otherwise not track it; an InsufficientDecision waiver pins the route's fingerprint until 166 resolves
+        // it (delete the waiver in the fix's diff; a change to the route's mechanisms makes it stale first).
+        Pending("POST /api/v1/external-access/revoke", "166", Gap.InsufficientDecision,
+            "[medium] DelegationRuleFilter decides Write on the PROJECT, but the handler then acts on a "
+            + "client-supplied ContainerId from the body (RevokeExternalAccessEndpoint.cs:350-357). Task 166 "
+            + "amendment (b); owner round 12 item 9.",
+            observed: "AddDelegationRuleFilter"),
+        Pending("POST /api/office/todo", "166", Gap.InsufficientDecision,
+            "[medium] TodoSourceAccessFilter gates the SOURCE record's read, but the to-do row is created with no "
+            + "Create-privilege check for the caller (CreateTodoAsync, OfficeEndpoints.cs:1368, :1409). Task 166 "
+            + "amendment (c); owner round 12 item 9.",
+            observed: "AddTodoSourceAccessFilter"),
+
         // ---------- P:ReferenceData ----------
-        Permanent("GET /api/agent/playbooks", PermanentBasis.ReferenceData, "167",
-            "Lists playbook DEFINITIONS (configuration, not customer records): the caller's own "
-            + "(ListUserPlaybooksAsync keyed by the caller's oid, AgentEndpoints.cs:306-311) plus the public "
-            + "catalog. Takes no id."),
         Permanent("GET /api/ai/capabilities", PermanentBasis.ReferenceData, "167",
             "Catalog of text-projectable Binding rows (CapabilityDiscoveryEndpoints.cs:105-113); the optional "
             + "`surface` query value filters the catalog and selects no record."),
-        Permanent("GET /api/ai/chat/playbooks", PermanentBasis.ReferenceData, "167",
-            "Playbook definitions for the picker: the caller's own (keyed by the caller's oid, "
-            + "ChatEndpoints.cs:1815-1824) plus public ones. Configuration content; takes no record id."),
         Permanent("GET /api/ai/chat/context-mappings", PermanentBasis.ReferenceData, "167",
             "Chat context-mapping configuration for an entity TYPE (ChatContextMappingService.ResolveAsync, "
             + "ChatEndpoints.cs:1914). `entityType` is a table name, not a record id."),
@@ -2185,16 +2237,6 @@ public partial class RouteAuthorizationGuardTests
         Permanent("GET /api/ai/nda-standard/clauses", PermanentBasis.ReferenceData, "167",
             "All NDA-standard clauses from NdaStandardClauseProvider.AllClauses (NdaStandardEndpoints.cs:66). "
             + "Compiled reference text; no id."),
-        Permanent("GET /api/ai/playbooks", PermanentBasis.ReferenceData, "167",
-            "The caller's own playbook definitions: PlaybookService.ListUserPlaybooksAsync filters "
-            + "_ownerid_value by the caller's oid (PlaybookService.cs:318; PlaybookEndpoints.cs:495). "
-            + "Configuration content, no id."),
-        Permanent("GET /api/ai/playbooks/public", PermanentBasis.ReferenceData, "167",
-            "Public playbook definitions only: filter sprk_ispublic eq true (PlaybookService.cs:344). "
-            + "Configuration content that is shared by design; takes no id."),
-        Permanent("GET /api/ai/playbooks/templates", PermanentBasis.ReferenceData, "167",
-            "Returns an empty list today: ListTemplatesAsync is a stub because sprk_istemplate does not exist "
-            + "(PlaybookService.cs:752-770). If it ever reads rows, re-classify."),
         Permanent("GET /api/ai/scopes/skills", PermanentBasis.ReferenceData, "167",
             "Org-wide skill catalog (IScopeResolverService.ListSkillsAsync, ScopeEndpoints.cs:114). "
             + "Configuration rows, paged; takes no record id."),
@@ -2212,7 +2254,7 @@ public partial class RouteAuthorizationGuardTests
         Permanent("GET /api/ai/chat/context-mappings/standalone", PermanentBasis.ReferenceData, "167",
             "Built from an in-memory field catalog (StandaloneChatContextProvider.BuildFromCatalog, "
             + "StandaloneChatContextProvider.cs:226). The entityId query value is only echoed into the cache key; "
-            + "NOTHING is read by it."),
+            + "NOTHING is read by it (owner round 12 item 2: selects nothing by a record id)."),
         Permanent("GET /api/v1/field-mappings/profiles", PermanentBasis.ReferenceData, "167",
             "Field-mapping profile configuration (QueryFieldMappingProfilesAsync, "
             + "FieldMappingEndpoints.cs:153). Configuration rows; takes no record id."),
@@ -2234,7 +2276,8 @@ public partial class RouteAuthorizationGuardTests
             + "recorded in the note.)"),
         Permanent("GET /api/v1/external/api/dataverse/savedquery/{savedQueryId:guid}", PermanentBasis.ReferenceData, "167",
             "A system view definition, refused when its entity has no registered module "
-            + "(ExternalModuleDataEndpoints.cs:449, :474). View FetchXML/LayoutXML, no record data."),
+            + "(ExternalModuleDataEndpoints.cs:449, :474). View FetchXML/LayoutXML, no record data; the saved-query "
+            + "id selects a view, not a record (owner round 12 item 2)."),
         Permanent("GET /api/v1/external/api/dataverse/savedqueries/{entityLogicalName}", PermanentBasis.ReferenceData, "167",
             "System view list for a REGISTERED module entity only, fail-closed otherwise "
             + "(ExternalModuleDataEndpoints.cs:491, :505). View definitions, no record data."),
@@ -2287,9 +2330,6 @@ public partial class RouteAuthorizationGuardTests
             "Finds the caller's own Direct thread with one colleague, or creates one OWNED by the caller and "
             + "shares Read to that colleague (DirectThreadAccessService.cs:62-100). The caller is always a party; "
             + "no other principal's record is read."),
-        Permanent("POST /api/compose/document/{documentId:guid}/heartbeat", PermanentBasis.CallerScopedOnly, "167",
-            "Writes a heartbeat ONLY when the caller holds the checkout lock (CheckedOutById == caller's "
-            + "systemuserid, DocumentCheckoutService.cs:489); every other case returns the same refusal."),
         Permanent("GET /api/v1/external/me", PermanentBasis.CallerScopedOnly, "167",
             "The resolved caller principal's own access context (ExternalUserContextEndpoint.cs:45, :74 — "
             + "caller.ReadableProjects). Takes no id."),
@@ -2313,9 +2353,6 @@ public partial class RouteAuthorizationGuardTests
         Permanent("GET /api/memory/pins", PermanentBasis.CallerScopedOnly, "167",
             "The caller's own pins: GetByUserAsync(tenantId, userId) from the token "
             + "(PinnedMemoryEndpoints.cs:210, :217)."),
-        Permanent("DELETE /api/memory/pins/{pinId}", PermanentBasis.CallerScopedOnly, "167",
-            "Refuses unless the pin's UserId equals the caller (PinnedMemoryEndpoints.cs:509) before the delete "
-            + "(:521), so only the caller's own pins are written."),
         Permanent("POST /api/notifications/negotiate", PermanentBasis.CallerScopedOnly, "167",
             "Issues a SignalR connection scoped to the caller's own oid (NotificationsEndpoints.cs:81, :94). "
             + "Takes no id."),
@@ -2337,6 +2374,39 @@ public partial class RouteAuthorizationGuardTests
             "Health metrics for the caller's own oid (WorkspaceEndpoints.cs:189, :203). Takes no id."),
         Permanent("GET /api/workspace/briefing", PermanentBasis.CallerScopedOnly, "167",
             "Briefing for the caller's own oid (WorkspaceEndpoints.cs:242, :261). Takes no id."),
+
+        // The five playbook LISTS — CallerScopedOnly by owner round 12 item 6 (task 167 had them ReferenceData). Each
+        // takes no id and lists the caller's own definitions and/or the shared ones. The user-list filter compares
+        // _ownerid_value (a systemuserid) with the Entra OID (PlaybookService.cs:318), so the caller's own list is
+        // likely always empty — fail closed, a functional defect whose fix owner round 12 item 6 assigns to task 164
+        // (with PlaybookAuthorizationFilter.cs:125 if it has the same mismatch).
+        Permanent("GET /api/ai/playbooks", PermanentBasis.CallerScopedOnly, "167",
+            "The caller's own playbook definitions: ListUserPlaybooksAsync filters _ownerid_value by the "
+            + "server-derived caller id (PlaybookEndpoints.cs:495; PlaybookService.cs:318). Takes no id. Owner "
+            + "round 12 item 6; the oid-vs-systemuserid filter fix is task 164's."),
+        Permanent("GET /api/ai/playbooks/public", PermanentBasis.CallerScopedOnly, "167",
+            "Public playbook definitions only: sprk_ispublic eq true (PlaybookEndpoints.cs:558; "
+            + "PlaybookService.cs:344). Takes no id; nothing private of another principal is read. Owner round 12 "
+            + "item 6."),
+        Permanent("GET /api/ai/playbooks/templates", PermanentBasis.CallerScopedOnly, "167",
+            "Returns an empty list today: ListTemplatesAsync is a stub because sprk_istemplate does not exist "
+            + "(PlaybookEndpoints.cs:791; PlaybookService.cs:752-770). Takes no id. Owner round 12 item 6; if it "
+            + "ever reads rows, re-classify."),
+        Permanent("GET /api/ai/chat/playbooks", PermanentBasis.CallerScopedOnly, "167",
+            "The picker list: the caller's own playbooks (ListUserPlaybooksAsync with the server-derived caller "
+            + "id, ChatEndpoints.cs:1815-1824) plus public ones. Takes no id. Owner round 12 item 6; the filter fix "
+            + "is task 164's."),
+        Permanent("GET /api/agent/playbooks", PermanentBasis.CallerScopedOnly, "167",
+            "The agent's list: the caller's own playbooks (ListUserPlaybooksAsync with the server-derived caller "
+            + "id, AgentEndpoints.cs:306-311) plus the public catalog. Takes no id. Owner round 12 item 6; the "
+            + "filter fix is task 164's."),
+
+        // ---------- P:OwnerComparison (owner round 12 item 4) ----------
+        Permanent("POST /api/compose/document/{documentId:guid}/heartbeat", PermanentBasis.OwnerComparison, "167",
+            "Loads the caller-chosen document and writes a heartbeat ONLY when the caller holds its checkout lock "
+            + "(CheckedOutById == the caller's server-derived systemuserid, DocumentCheckoutService.cs:489); "
+            + "missing, not checked out and not-yours all collapse to ONE 404 (ComposeCheckoutEndpoints.cs:104-109) "
+            + "— no existence oracle. Was CallerScopedOnly in task 167; re-classified by owner round 12 item 4."),
 
         // ---------- P:CallerSuppliedContentOnly ----------
         Permanent("POST /api/ai/daily-briefing/summarize", PermanentBasis.CallerSuppliedContentOnly, "167",
