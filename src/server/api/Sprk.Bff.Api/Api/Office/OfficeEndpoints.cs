@@ -1320,7 +1320,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — the caller's business-unit default owner team (an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. This endpoint assigns NEITHER a matter number nor a project number: both will be set by a planned separate server-side numbering component that triggers on create. Because sprk_matternumber and sprk_projectnumber are their entities' primary name attributes, records created here show a blank name in lookups and grids until that component exists. Invoice keeps the minimal name-only path. Every record created here is owned by the caller's business-unit default owner team (task 080); when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — the caller's business-unit default owner team (an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. The matter and project numbers (sprk_matternumber, sprk_projectnumber — each entity's primary name attribute) are assigned by Dataverse's platform autonumber on create (MAT-###### / PRJ-######; interim until a numbering function, task 076); the request never carries one. A create the number's alternate key refuses is retried with the next number; after 3 refusals it is refused with 409 record_number_unavailable and no row is written. A record that comes back without a number is still returned, with a warning. Invoice keeps the minimal name-only path. Every record created here is owned by the caller's business-unit default owner team (task 080); when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1330,7 +1330,7 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict) // For idempotency conflicts
+            .ProducesProblem(StatusCodes.Status409Conflict) // Idempotency conflicts; record_number_unavailable (task 076)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
@@ -1621,13 +1621,16 @@ public static class OfficeEndpoints
     /// for sprk_matter per event-source-inventory §3A). Fire-and-forget
     /// per FR-2P2.6 + Q2: publisher never throws; mutation succeeds even
     /// if publish fails (nightly recon job task 085 is the backstop).
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler and observes the owner
+    /// event it publishes (UAC-r2 task 152 verifier round 1, item 7).
     /// </remarks>
-    private static async Task<IResult> QuickCreateAsync(
+    internal static async Task<IResult> QuickCreateAsync(
         string entityType,
         QuickCreateRequest request,
         IOfficeService officeService,
         IMembershipEventPublisher membershipEventPublisher,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        Spaarke.Dataverse.IGenericEntityService genericEntityService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1741,41 +1744,24 @@ public static class OfficeEndpoints
             // R3 task 081 — FR-2P2.6 + Q2 fire-and-forget membership event.
             // Per event-source-inventory.md §3A + §6.3, the QuickCreate
             // matter endpoint is the ONLY BFF-side write path for sprk_matter.
-            // ⚠️ CORRECTED 2026-09-30 (task 080): ownerid is NOT the caller — the create is app-only and the
-            // row is owned by the caller's business-unit default owner TEAM. The event records the caller
-            // as the creator-member (ADR-034's call, flagged to UAC-r2); publish an Added event for it
-            // so the junction-updater (task 084) + nightly recon (task 085)
-            // observe the new association in real time when the topic is
-            // provisioned and the publisher flag is on. When disabled
-            // (default Membership:EventPublisher:Enabled=false), the
-            // NullMembershipEventPublisher peer logs + returns immediately
-            // (ADR-032 P2). Publisher contract guarantees no exceptions
-            // propagate to this site — but discard the Task explicitly to
-            // signal the fire-and-forget semantics + avoid blocking the
-            // 201 Created response on Service Bus latency.
-            if (parsedEntityType == QuickCreateEntityType.Matter
-                && Guid.TryParse(userId, out var callerOid))
+            // UAC-r2 task 152 (ADR-034 A3): the event describes the row's REAL owner — the business-unit default
+            // owner TEAM RecordCreationService wrote (read back here; the service does not return it) — as
+            // PersonIdType=Team, PersonId=teamid: the key MembershipReconciliationJob builds for the same row. Before
+            // task 152 it carried the caller's AAD oid as a User under a comment claiming the junction updater
+            // resolves oid → systemuserid; it never did (it writes PersonId verbatim). When disabled (default
+            // Membership:EventPublisher:Enabled=false), the Null peer logs + returns (ADR-032 P2). Discarded Task =
+            // fire-and-forget; the 201 never waits on Service Bus.
+            if (parsedEntityType == QuickCreateEntityType.Matter)
             {
-                var membershipEvent = new MembershipChangedEvent
-                {
-                    // PersonId here is the AAD oid (object id) of the OBO
-                    // caller — Dataverse exposes this as
-                    // `systemuser.azureactivedirectoryobjectid`. Downstream
-                    // consumers (task 084 MembershipJunctionUpdater)
-                    // resolve oid → systemuserid via Dataverse lookup. The
-                    // PersonIdType is User to flag that resolution path.
-                    PersonId = callerOid,
-                    PersonIdType = PersonIdentityType.User,
-                    EntityLogicalName = "sprk_matter",
-                    EntityRecordId = response.Id,
-                    SourceField = "ownerid",
-                    Role = "owner",
-                    MutationType = MembershipMutationType.Added,
-                    CorrelationId = traceId,
-                    OccurredOnUtc = DateTime.UtcNow,
-                };
-
-                _ = membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
+                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                    membershipEventPublisher,
+                    genericEntityService,
+                    "sprk_matter",
+                    response.Id,
+                    knownOwner: null,
+                    traceId,
+                    logger,
+                    cancellationToken);
             }
 
             // Return 201 Created with location header

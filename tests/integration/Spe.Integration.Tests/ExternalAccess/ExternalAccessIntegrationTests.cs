@@ -395,12 +395,20 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         await AssertIsProblemDetailsAsync(response, "invite with empty Email");
     }
 
+    /// <summary>
+    /// Task 138 (unified-access-control-r2): <c>/invite</c> reads the named record's access policy BEFORE it
+    /// touches a Contact or a CIAM account, and an unreadable policy fails CLOSED with 503 and its own reason code.
+    /// This fixture's Dataverse cannot be reached, so the policy read fails — the outcome pinned here.
+    /// </summary>
+    /// <remarks>
+    /// Replaces <c>InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails</c>. Its premise had gone:
+    /// <c>PowerPages:SecureProjectParticipantWebRoleId</c> is read nowhere in <c>src/</c>, and the 500 it saw came
+    /// from the first Dataverse call failing inside onboarding. Asserting "400 or 500" accepted any fault; this
+    /// asserts the specific fail-closed answer the endpoint documents.
+    /// </remarks>
     [Fact]
-    public async Task InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails()
+    public async Task InviteExternalUser_RecordPolicyUnreadable_Returns503WithReasonCode_BeforeOnboarding()
     {
-        // Arrange — the InviteEndpoint requires PowerPages:SecureProjectParticipantWebRoleId to be configured.
-        // The test fixture does NOT set this configuration key, so the handler returns 500
-        // with a "Configuration Error" detail before creating any Dataverse records.
         var request = new InviteExternalUserRequest(
             Email: "external.user@example.com",
             ProjectId: Guid.NewGuid(),
@@ -412,17 +420,18 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
+        var body = await response.Content.ReadAsStringAsync();
 
-        // Assert — the fixture has no PowerPages:SecureProjectParticipantWebRoleId configured
-        // so the handler returns 500 before calling Dataverse.
-        // (If the handler somehow passes this guard and fails on Dataverse, the test still passes
-        //  because both 400 and 500 prove the endpoint ran.)
-        ((int)response.StatusCode).Should().BeOneOf(
-            new[] { StatusCodes.Status400BadRequest, StatusCodes.Status500InternalServerError },
-            "invite without web role configuration must return 500 (configuration error) " +
-            "or 400 (if validation fires first)");
+        // Assert
+        ((int)response.StatusCode).Should().Be(StatusCodes.Status503ServiceUnavailable,
+            "an unreadable record policy must refuse the invite (fail closed), not onboard; body: " + body);
 
-        await AssertIsProblemDetailsAsync(response, "invite without web role config");
+        var problem = JsonDocument.Parse(body).RootElement;
+        problem.TryGetProperty("reasonCode", out var reasonProp).Should().BeTrue(
+            "the refusal must say WHY, so a client can tell 'try again' from a refusal; body: " + body);
+        reasonProp.GetString().Should().Be(ExternalGrantLifecycle.PolicyUnreadableReasonCode);
+
+        await AssertIsProblemDetailsAsync(response, "invite whose record policy cannot be read");
     }
 
     #endregion

@@ -568,6 +568,157 @@ defaults to `rg-spaarke-dev` (which is not a per-customer shape at all) and docu
 environment, so neither is exempt from the startup failure. What customerId those pre-D-12 stamps should
 carry is an **owner decision** — do not invent one.
 
+#### 6.5.2 Customer workforce tenants (`WorkforceIdentity__CustomerTenantIds__N`) — required per stamp
+
+> Added 2026-10-01 by `unified-access-control-r2` task 141 (owner decision I1 = (b)). Contract:
+> [`141-link-contract.md`](../../projects/unified-access-control-r2/notes/141-link-contract.md).
+
+A customer employee **without a Power Apps licence** ("Type 2") signs in to Teams / the SPA with company SSO.
+On their FIRST sign-in the BFF binds them to a contact by their Entra object id (`oid`): onto the one active,
+unbound contact carrying their email, or — when none does — a new contact keyed by the oid. **Only a MEMBER of
+one of this deployment's customer workforce tenants gets that first-sign-in bind or creation.** The setting
+names those tenants.
+
+| | |
+|---|---|
+| **Setting** | `WorkforceIdentity__CustomerTenantIds__0`, `__1`, … (configuration key `WorkforceIdentity:CustomerTenantIds`, a string array) |
+| **Value** | the customer's Entra **tenant id(s)** (GUIDs) whose employees use this stamp |
+| **Empty / absent** | **DENY** — nobody is ever email-bound or gets a contact created; a Type-2 first sign-in gets `sdap.access.deny.workforce_tenant_list_empty`. Existing oid bindings still resolve. |
+| **Never** | a fallback to `AzureAd:TenantId`, or `TenantRouting:Tenants[]` |
+| **Startup check** | a non-GUID, the all-zero GUID, or the CIAM tenant id **fails startup** (`ValidateOnStart`) |
+| **Written by** | provisioning (`customer-provisioning-orchestration-r1`) — handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+
+🔴 **Model 1 is the case that makes this a separate setting.** In Model 1 the per-customer BFF app registration
+lives in **Spaarke's** tenant (D-13), so `AzureAd:TenantId` is Spaarke's tenant while the customer's employees
+sign in with the **customer's** `tid`. Keying the member test on `AzureAd:TenantId` would refuse every Model-1
+Type-2 employee **and** auto-bind Spaarke's own staff into the customer's environment. Set the CUSTOMER's tenant
+here. In Model 2 the registration lives in the customer's tenant and the two values coincide — list it anyway;
+nothing is inferred.
+
+```bash
+az webapp config appsettings set --resource-group <rg> --name <app-service-name> \
+  --settings WorkforceIdentity__CustomerTenantIds__0=<customer-tenant-guid>
+```
+
+**The member test also needs the `acct` claim** (§7.3): a member is a user token (`CallerIdentity`, never an
+app-only token) whose `tid` is listed here AND whose `acct` claim is `0`. A token with no `acct` claim fails
+closed (`sdap.access.deny.workforce_acct_claim_missing`) — membership is never inferred from an email domain or
+a `#EXT#` UPN.
+
+**The identity-link reconciliation job** (`identity-link-reconciliation`, every 5 minutes) links every licensed
+user to their contact. It runs **report-only** until `IdentityLink__Reconciliation__WritesEnabled=true` — absent,
+empty or unparseable writes nothing. Review one report-only run (App Insights `[ID-LINK-RECON] before-state`
+lines and the run's ResultJson) before enabling writes on a new stamp.
+
+The same switch gates the **inline link** a licensed user would otherwise get at their first Teams/SPA sign-in,
+so between the BFF deploy and the switch nothing links a licensed user to a contact and the report-only run is a
+true preview. Two writes are **not** gated, by design: a Type-2 (unlicensed) member's own first sign-in (bind or
+create, behind the member test) and the link written when the BFF itself creates a systemuser during demo
+provisioning. Do not run demo registrations while the report-only run is under review, or its counts will drift.
+
+**Which environments the job reconciles.** The BFF's own `Dataverse:ServiceUrl` AND every environment it
+provisions users into: `DATAVERSE_URL` (registration's default) and every **active** `sprk_dataverseenvironment`
+row — the only environments the approve endpoint provisions into. Each is reconciled the same way (pass 1 links or
+flags every enabled interactive systemuser; pass 2 re-evaluates and clears resolved flags), through the
+registration service's existing per-environment token path (the BFF's own managed identity — it must be an
+application user in each, which demo provisioning already requires). So **a registration link that does not land
+is retried**: whether it faulted, was refused, lost a race or raised a collision flag, the next run re-decides that
+user and re-evaluates that flag (App Insights: `[ID-BIND] New systemuser … contact link NOT made … re-decides the
+user on its next run`). One environment's failure fails the run (`[ID-LINK-RECON] {environment}: …`, and the
+ResultJson's `provisioningTargets.environments[]`) but never stops the others. Deactivating a registry row stops
+the BFF reconciling that environment — deliberately. (Before 2026-10-01's third fix round the job scanned only its
+own environment and this was a recorded gap.)
+
+**Every one of those environments needs the Dataverse prerequisite below** — an environment without it is
+reported by every run as a failed environment, and registration links there deny `binding_column_missing`.
+
+**Cost of leaving a stamp report-only.** Each run reads every enabled interactive systemuser; a user with no
+verified link costs roughly 2–4 further Dataverse reads per run (every 5 minutes) for as long as writes stay off.
+Fine at dev scale; on a large stamp, enable writes after the review rather than leaving the job report-only.
+
+**Dataverse prerequisite — apply BEFORE deploying a BFF that carries task 141**, in the BFF's own environment and
+in every provisioning target above. The BFF selects the new columns, so without them every binding read fails
+closed (`sdap.access.deny.binding_column_missing`) and CIAM and Type-2 sign-ins are denied.
+
+```powershell
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>]            # dry run: read-only
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Apply
+.\scripts\Set-ContactIdentityBindingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com `
+  -BffApplicationIds <bff-uami-client-id>[,<bff-app-registration-id>] -Verify   # must exit 0 (re-run until the key is Active)
+```
+
+**Uniqueness lives on a mirror column (owner decision, 2026-10-01).** Dataverse refuses an alternate key on a
+field-secured column ([Work with alternate keys](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/define-alternate-keys-entity)),
+and the binding `contact.sprk_externalobjectid` must stay field-secured (only the BFF may write it — it decides
+whose grants a caller inherits). So the script creates an UNSECURED mirror, `contact.sprk_externalobjectidkey`,
+copies every existing binding into it, and puts the alternate key `sprk_ExternalObjectIdUniqueKey` on the mirror.
+The BFF writes the mirror with the same oid, in the same request, as every bind and create; the platform's unique
+index then guarantees **exactly one contact per oid**, including when two first sign-ins race. Every read that
+decides who a contact IS uses the secured binding; nothing resolves by the mirror. A user with Write on contact
+can therefore only **deny service** through the mirror (put someone's oid into it): that person's bind or create is
+refused, the BFF denies `sdap.access.deny.contact_key_conflict`, and the holder is flagged with reason **"Key mirror
+held by another contact"** (§6.5.3) — visible, never a takeover. The script also adds the plane and collision
+columns (backfilling existing bindings as External), the "Contacts with Identity Collisions" view, and the
+field-level security that lets ONLY the BFF write `contact.sprk_externalobjectid` and
+`systemuser.sprk_primarycontact` while every user keeps reading them. It refuses `-Apply` (before any write) if
+an edit ever puts the key and field security on one column again, and reports a mirror value its own binding does
+not carry as `FAIL` without touching it. **A business unit created later needs `-Apply` re-run**, so its default
+team joins the reader profile.
+
+#### 6.5.3 Identity collisions — the operator procedure
+
+A **collision** is any of: an email match on a contact bound to a different oid; an oid carried by more than one
+contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; an invite
+whose email matches a workforce-bound contact or a contact a systemuser links to; or an oid whose unique-index slot
+another contact holds in its `sprk_externalobjectidkey` mirror without the binding. Every collision is refused
+(403 at sign-in, 409 at invite) **and flagged on the contact** — `sprk_identitycollisionon` (when),
+`sprk_identitycollisionoid` + `sprk_identitycollisionplane` (who collided), `sprk_identitycollisionreason` (why),
+for the FIRST identity; `sprk_identitycollisionparties` lists EVERY identity that collided with the contact.
+A repeated collision by the same identity does not write again; a different identity's collision is added.
+
+**Find them**: Contacts → view **"Contacts with Identity Collisions"**.
+
+**Resolve** (System Administrator — the fields are field-secured):
+
+1. Decide which identity owns the contact. One contact carries one sign-in; it is never shared or merged.
+2. **The colliding identity should own it** — clear ALL THREE of `sprk_externalobjectid`,
+   `sprk_externalobjectidkey` and `sprk_identityplane` on the contact (clearing the binding without its marker
+   leaves it UNREADABLE, which denies; clearing it without the mirror leaves the oid's unique-index slot held, which
+   also denies — reason "Key mirror held by another contact"). The other identity's next sign-in or the next
+   reconciliation run binds it correctly.
+   **The existing binding is right** — leave the binding. For an invite, invite a different email; for a
+   licensed user whose `sprk_primarycontact` points at someone else's contact, point it at the user's own contact
+   (or clear it and let the job create one). ⚠️ Changing a licensed user's link changes their Assigned-To access —
+   it is deliberately never done automatically.
+   **Duplicate email** (reason "Email carried by more than one contact") — deactivate or correct the duplicate
+   contact(s); only ACTIVE contacts take part in an email match.
+   **Duplicate oid** (reason "Oid carried by more than one contact") — clear all three binding columns
+   (`sprk_externalobjectid`, `sprk_externalobjectidkey`, `sprk_identityplane`) on every contact that is not that
+   person's. Deactivating is NOT enough here: the oid lookup reads contacts of every state, so an oid left on an
+   inactive duplicate keeps the oid ambiguous. (Once the `sprk_ExternalObjectIdUniqueKey` alternate key exists it
+   can only recur through a binding someone wrote by hand without its mirror; the schema script refuses to create
+   the key while two contacts would share a mirror value.)
+   **Key mirror held** (reason "Key mirror held by another contact") — the flagged contact carries an oid in
+   `sprk_externalobjectidkey` that its binding `sprk_externalobjectid` does not: someone with Write on contact put
+   it there, or a binding was cleared without its mirror. The identity named in the flag cannot be bound or get a
+   contact until the slot is freed. If the flagged contact is NOT that person's, clear its `sprk_externalobjectidkey`;
+   if it IS, ask an administrator holding the identity-link writer profile to restore the binding (or clear the
+   mirror and let that person's next sign-in, or the next reconciliation run, bind them again). Deactivating the
+   contact does NOT free the slot — the unique index counts inactive rows — so the flag stays until the mirror is
+   cleared.
+   Deactivating is how a person is removed: an oid on an inactive contact is denied, and no replacement is
+   created.
+   **Several identities on one contact** — read `sprk_identitycollisionparties` and resolve each party; the
+   summary columns name only the first.
+3. **Do not clear the flag by hand.** The next `identity-link-reconciliation` run re-evaluates every recorded
+   party, drops the ones that no longer collide (the summary columns then name the next one), and clears the flag
+   only once none does. Two exceptions, cleared by hand AFTER resolving every collision on the contact (clear all
+   five `sprk_identitycollision*` columns): a flag listing **20 parties** (a later identity was not recorded), and
+   one whose `sprk_identitycollisionparties` no longer reads as the BFF wrote it (someone edited it). The job never
+   clears either, so that an unrecorded collision cannot vanish.
+
 ---
 
 ## 7. Pipeline Execution Phases (walkthrough)
@@ -614,6 +765,21 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 
 `<addin-host>` is the origin serving the add-in bundle (the Static Web App / CDN host in the manifest `SourceLocation`), so these are **per-host** — every environment (dev / each customer) that serves the add-in from a distinct host needs its own pair. Missing them produces `AADSTS7000471` ("no matching redirect URI") at add-in sign-in. Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts) derives the broker redirect as `brk-multihub://${window.location.hostname}` and the web fallback as `https://<host>/auth-callback.html`.
 
+**The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
+The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
+"member" is read from the `acct` claim (`0` member, `1` guest). Step 1 of the script adds it to a NEW
+registration; an EXISTING one needs it added once:
+
+```powershell
+.\scripts\Register-EntraAppRegistrations.ps1 -TenantId <tenant-of-the-registration> `
+  -AcctClaimOnly -AcctClaimAppId <bff-app-registration-appid>
+```
+
+It is idempotent and keeps every other optional claim. Optional claims on the resource registration apply to
+every access token issued FOR it — Teams SSO included (`webApplicationInfo.id` is this registration) — see
+Microsoft's [optional claims reference](https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference).
+Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct_claim_missing` (fail closed).
+
 **Escalation gate** (per FR-13 / H10): 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` must be completed via `az` enumeration BEFORE first production customer provisioning.
 
 **H4** populates KV secrets from the canonical catalog manifest + PATCHes `keyVaultReferenceIdentity` to UAMI on both slots (**T1 verification**).
@@ -628,6 +794,22 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 - **Tier 3 (parallel)**: CalendarSidePane, DocumentUploadWizard, EventCommands, EventDetailSidePane, EventsPage, LegalWorkspace
 
 **H7** sets the 7 per-customer env-var values (§6.4).
+
+**After H6 — record numbering (interim; required in EVERY environment).** Matters and Projects are numbered by
+Dataverse's platform autonumber (`MAT-######` / `PRJ-######`, `spaarkeai-word-add-in-r1` task 076; interim until the
+numbering function). `SpaarkeCore` carries the column format and the alternate keys, but **the seed is per environment
+and is not carried by a solution import** — without this step the first number is `MAT-001000`, and an environment
+whose format is missing creates **nameless** Matters and Projects (the number is the primary name; the BFF logs
+`record_number_unassigned`). The first `-Apply` also numbers any existing blank rows, oldest first (each write updates
+the row's `modifiedon`). Production: check existing matter numbers are unique first (the script lists duplicates and
+writes nothing for that table). Where the tables are managed, the format and keys must arrive with the `SpaarkeCore`
+import — the script never customises a managed component (ADR-027); it then only seeds and backfills.
+
+```powershell
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com           # dry run: every write it would make
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply
+.\scripts\Set-RecordNumberingSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify   # must exit 0
+```
 
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
@@ -1127,6 +1309,11 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 |---|---|---|
 | 2026-08-17 | Initial consolidation (task 001 of `customer-provisioning-orchestration-r1`) | spec.md Gap 4 + R6 doc-drift carry-over; design.md §2 (3-generation fragmentation) |
 | 2026-08-25 | §12.5 (T1 exit-134 SIGABRT symptom recognition + recovery) + §12.6 (slot-persistence BINDING — `keyVaultReferenceIdentity` not copied by `--configuration-source`) added | task 202 A40 (auth-v4 §10.1 Δ4 + §10.2 CORRECTION; FR-37, T1/T5) |
+| 2026-10-01 | §6.5.2 (customer workforce tenants `WorkforceIdentity__CustomerTenantIds__N`, identity-link job switch, contact identity-binding schema prerequisite) + §6.5.3 (identity-collision operator procedure) + §7.3 (`acct` optional claim, `-AcctClaimOnly`) added | `unified-access-control-r2` task 141 (owner decisions I1 = (b), I2 = (1)); provisioning handoff `projects/unified-access-control-r2/notes/handoffs/INCOMING-141-workforce-tenant-list.md` |
+| 2026-10-01 | §6.5.2: the schema prerequisite is BLOCKED pending an owner decision (alternate key vs field-level security on `contact.sprk_externalobjectid` — Dataverse allows only one); the switch also gates the inline licensed-user link. §6.5.3: a flag records every colliding identity (`sprk_identitycollisionparties`); the two hand-cleared exceptions | `unified-access-control-r2` task 141 verifier fix round (`task/uac-r2-141-f1`) |
+| 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
+| 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
+| 2026-10-02 | §7.4: record numbering after H6 — `scripts/Set-RecordNumberingSchema.ps1` in every environment (the autonumber seed is not carried by a solution import; first run numbers blank rows) | `spaarkeai-word-add-in-r1` task 076 (owner decisions 2026-10-02: platform autonumber, interim until the numbering function) |
 
 ---
 

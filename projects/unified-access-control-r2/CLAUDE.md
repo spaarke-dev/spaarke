@@ -67,6 +67,7 @@ max( dataverse-answer, explicit-grant, derived-member, org-expansion, inherited 
 | **NFR-05** role-depth assertion | No security role may reach the `Secure Projects` BU. A role edit that re-opens secure projects fails the build |
 | **NFR-07** | Characterization suite exists BEFORE Phase 1 changes behaviour — the current baseline is near-zero |
 | **FR-07 → FR-29** | Delegation ("you may grant if you have Write on the record") ships BEFORE the PCF "+ User" button. Otherwise that button is a one-click privilege escalation on a confidential matter |
+| **Integration suites, run in full, before the PR** | `dotnet test` on `tests/integration/Sprk.Bff.Api.IntegrationTests` AND `tests/integration/Spe.Integration.Tests`, not just a build. `Router` does not run them; the legacy Build & Test does, about an hour after the push. Batch 3 (PR #1096) ran the unit and arch suites only, and three integration tests whose fixtures had not followed tasks 138 and 152 surfaced only in CI (fixed in `8531711d6`) |
 
 ## Parallel-safety rules
 

@@ -184,6 +184,18 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var normalizedEntity = entityType.Trim().ToLowerInvariant();
         var effectiveOptions = options ?? new MembershipResolveOptions();
 
+        // ADR-034 A3 (task 152): the people-targeting surface and the authorization surface answer different
+        // questions ("who is this record FOR" vs "who may ACCESS it"). A caller asking for both has a bug; merging
+        // them silently would hand one of the two consumers the other's descriptor set. Rejected before any I/O.
+        if (effectiveOptions.PeopleTargeting && effectiveOptions.AccessConferringOnly)
+        {
+            throw new ArgumentException(
+                "MembershipResolveOptions.PeopleTargeting and AccessConferringOnly are mutually exclusive: the "
+                + "people-targeting surface selects records FOR a person, the access-conferring surface decides "
+                + "ACCESS. Request one or the other.",
+                nameof(options));
+        }
+
         // ── R3 Part 1D — pre-validate includeRelated for >1-hop syntax ─────
         // FR-1D.2 / Q3 (owner 2026-06-20): max chain depth is 1 hop. Reject
         // explicit chain syntax (e.g., "documents.events") at the front door
@@ -252,15 +264,46 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // pre-task-041 behavior (AC pinned by ResolveAsync_AccessConferringOnlyDefaultsFalse_* tests).
         // includePlatformOwnership: true — the SYSTEMUSER plane, the only plane where owning a record is
         // possible (task 043 C-1, owner decision 2026-09-17). See PlatformOwnershipColumns.
-        var candidateFields = effectiveOptions.AccessConferringOnly
-            ? FilterToAccessConferringRoles(normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: true)
-            : discovery.DiscoveredFields;
+        // ADR-034 A3 (task 152): the PEOPLE-TARGETING surface — person terms only (human createdby, user-valued
+        // owner, registry Contact-typed "Assigned *" columns). See FilterToPeopleTargetingTermsAsync.
+        IReadOnlyList<MembershipDescriptor> candidateFields;
+        if (effectiveOptions.AccessConferringOnly)
+        {
+            candidateFields = FilterToAccessConferringRoles(
+                normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: true);
+        }
+        else if (effectiveOptions.PeopleTargeting)
+        {
+            candidateFields = await FilterToPeopleTargetingTermsAsync(
+                normalizedEntity, systemUserId, discovery.DiscoveredFields, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            candidateFields = discovery.DiscoveredFields;
+        }
         var descriptors = FilterDescriptors(candidateFields, effectiveOptions);
 
         // ── c) Identity normalization (started in parallel with discovery
         //     would also be valid, but discovery is typically cache-hot;
         //     sequential keeps the failure-flow simpler).
         var identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
+
+        if (effectiveOptions.PeopleTargeting
+            && identity.ContactId is null
+            && descriptors.Any(d => string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase)))
+        {
+            // ADR-034 A3 / C7: the "Assigned *" term binds ONLY through the caller's linked contact (task 141).
+            // With no link it binds nothing — there is deliberately no email, UPN or name fallback (that is the C7
+            // hijack path). Created By and personal ownership still apply. BuildFetchXml also emits the per-column
+            // member_skipped warning below; this line names the surface so the gap is queryable on its own.
+            _logger.LogWarning(
+                "member_skipped: matter={MatterId} contact={ContactId} role={Role} reason={Reason} field={Field}",
+                normalizedEntity,
+                systemUserId,
+                "assigned*",
+                "people_targeting_no_linked_contact",
+                "*");
+        }
 
         // Empty descriptors → no matching rows (return empty response, NOT error).
         if (descriptors.Count == 0)
@@ -718,6 +761,124 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return result;
     }
 
+    // ── People-targeting surface (ADR-034 Amendment A3 — unified-access-control-r2 task 152) ─────────────────
+    /// <summary>
+    /// The user-valued ownership columns that name exactly ONE person. <c>ownerid</c> is polymorphic: on a
+    /// team-owned row it holds the team's id, so the SystemUser binding (the caller's own id) never matches it — a
+    /// team-owned row is never selected through ownership. <c>owninguser</c> is user-only by construction.
+    /// </summary>
+    private static readonly HashSet<string> PersonOwnershipColumns =
+        new(StringComparer.OrdinalIgnoreCase) { "ownerid", "owninguser" };
+
+    /// <summary>The Created By column admitted on the people-targeting surface for a HUMAN caller only.</summary>
+    internal const string CreatedByAttribute = "createdby";
+
+    /// <summary>Role name the people-targeting surface reports Created By matches under.</summary>
+    internal const string CreatedByRole = "createdBy";
+
+    /// <summary>
+    /// Reduces discovered descriptors to the PERSON terms of the people-targeting surface (owner decisions round 2
+    /// item 9 + Q8; round 3 D1): a record is FOR a person when that person CREATED it (a human <c>createdby</c>), is
+    /// NAMED in one of its registry-listed Contact-typed "Assigned *" columns, or personally OWNS it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything else selects NOTHING here: <c>owningteam</c>, <c>owningbusinessunit</c>, and every Team-,
+    /// BusinessUnit-, Organization- or Account-typed descriptor. A business unit's DEFAULT team contains every user
+    /// in the unit (teammembership carries no <c>isdefault</c> exclusion), so admitting <c>owningteam</c> would put
+    /// every team- or BU-owned matter in every same-BU user's briefing — the defect this surface closes. Team and BU
+    /// ownership keep granting ACCESS on the authorization surface (A1.1, untouched).
+    /// </para>
+    /// <para>
+    /// <c>createdby</c> is globally excluded by discovery (ADR-034 MUST — touch-history, not association) and is
+    /// SYNTHESIZED here, on this surface only (A3, CLAUDE.md §6.5 path B). It binds only when the caller is a human:
+    /// every BFF-created row has the BFF application user as Created By, so binding it for that user would hand it
+    /// the set of everything the BFF ever created. Unknown (the systemuser row is unreadable) is treated as
+    /// not-a-person — the term binds nothing and a warning is logged.
+    /// </para>
+    /// <para>
+    /// Maker-authored SystemUser lookups (e.g. a <c>sprk_reviewer → systemuser</c>) are NOT person terms here: the
+    /// owner named Created By, Assigned To and personal ownership, and nothing else. Adding one is an ADR-034 edit.
+    /// </para>
+    /// </remarks>
+    private async Task<IReadOnlyList<MembershipDescriptor>> FilterToPeopleTargetingTermsAsync(
+        string entityType,
+        Guid systemUserId,
+        IReadOnlyList<MembershipDescriptor> discovered,
+        CancellationToken ct)
+    {
+        // The registry's CONTACT-typed columns for this entity — the "Assigned *" person columns. Org-typed entries
+        // (law firms) are organizations, not people, and are deliberately not admitted.
+        var registry = _options.AccessConferringRoles ?? new AccessConferringRegistry();
+        var contactColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (registry.Entities.TryGetValue(entityType, out var columns) && columns is not null)
+        {
+            foreach (var column in columns)
+            {
+                if (!string.IsNullOrWhiteSpace(column.Field)
+                    && string.Equals(column.IdentityType?.Trim(), "Contact", StringComparison.OrdinalIgnoreCase))
+                {
+                    contactColumns.Add(column.Field.Trim());
+                }
+            }
+        }
+
+        var result = new List<MembershipDescriptor>(discovered.Count + 1);
+        foreach (var d in discovered)
+        {
+            if (string.IsNullOrWhiteSpace(d.Field))
+            {
+                continue;
+            }
+
+            var field = d.Field.Trim();
+
+            if (PersonOwnershipColumns.Contains(field)
+                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(d);
+                continue;
+            }
+
+            if (contactColumns.Contains(field)
+                && string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(d);
+            }
+
+            // Anything else — owningteam, owningbusinessunit, team/BU/org/account-typed lookups, maker-authored
+            // systemuser lookups, a force-included createdby (re-added below under the human rule) — selects nothing.
+        }
+
+        var isApplicationUser = await ApplicationUserCheck
+            .IsApplicationUserAsync(_dataverse, systemUserId, _logger, ct)
+            .ConfigureAwait(false);
+
+        if (isApplicationUser == false)
+        {
+            result.Add(new MembershipDescriptor(
+                Field: CreatedByAttribute,
+                Role: CreatedByRole,
+                IdentityType: "SystemUser",
+                TargetTable: "systemuser",
+                Source: "people-targeting"));
+        }
+        else
+        {
+            _logger.LogWarning(
+                "people_targeting_createdby_skipped: systemUserId={SystemUserId} entity={EntityType} reason={Reason} — "
+                + "Created By binds only for a human systemuser (applicationid null); an application user never receives "
+                + "the set of everything it created (ADR-034 A3).",
+                systemUserId,
+                entityType,
+                isApplicationUser == true ? "application_user" : "systemuser_unreadable");
+        }
+
+        // Stable order (by field) so the emitted FetchXML is deterministic.
+        result.Sort((a, b) => string.CompareOrdinal(a.Field, b.Field));
+        return result;
+    }
+
     // ── Descriptor filtering ───────────────────────────────────────────────
     private static IReadOnlyList<MembershipDescriptor> FilterDescriptors(
         IReadOnlyList<MembershipDescriptor> all,
@@ -873,8 +1034,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
                     else
                     {
                         // R4 spec FR-11 / AC-11: Contact-typed membership descriptor whose
-                        // user has no Contact cross-ref via azureactivedirectoryobjectid
-                        // (per ADR-028 canonical mapping) is silently skipped today. Emit a
+                        // user has no linked contact (systemuser.sprk_primarycontact, or the contact
+                        // bound to the user's oid via contact.sprk_externalobjectid — maintained by
+                        // ContactIdentityBinder + the identity-link reconciliation job, task 141).
+                        // The descriptor is skipped (fail closed). Emit a
                         // structured `member_skipped` warning so Application Insights can
                         // pivot on it (traces | where message contains "member_skipped").
                         //
@@ -1568,7 +1731,8 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// ordering. Covers EVERY option that changes the resolved row set: Roles,
     /// IdentityTypes, IncludeRelated, Limit, ContinuationToken (so paging requests cache
     /// per-page), <see cref="MembershipResolveOptions.AccessConferringOnly"/> and
-    /// <see cref="MembershipResolveOptions.OrganizationIds"/>. First 8 bytes → 16 hex chars;
+    /// <see cref="MembershipResolveOptions.OrganizationIds"/> and (task 152, appended only when set)
+    /// <see cref="MembershipResolveOptions.PeopleTargeting"/>. First 8 bytes → 16 hex chars;
     /// collision risk negligible at this scope.
     /// </summary>
     /// <remarks>
@@ -1609,6 +1773,15 @@ public sealed class MembershipResolverService : IMembershipResolverService
         sb.Append("c:").Append(options.ContinuationToken ?? string.Empty).Append('|');
         sb.Append("a:").Append(options.AccessConferringOnly ? '1' : '0').Append('|');
         sb.Append("o:").Append(HashSortedGuids(options.OrganizationIds));
+
+        // ADR-034 A3 (task 152): the people-targeting surface. Appended ONLY when set, so every pre-existing caller's
+        // key is byte-identical (no orphaned entries, no cold cache on deploy) while a people-targeted call and an
+        // AI-scoping call for the same user + entity can never share an entry — the task-043 disclosure shape in
+        // the opposite direction (an AI-scoping call landing first would hand the briefing every team/BU-owned row).
+        if (options.PeopleTargeting)
+        {
+            sb.Append("|p:1");
+        }
 
         var hashInput = sb.ToString();
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));

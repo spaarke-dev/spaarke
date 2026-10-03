@@ -408,7 +408,34 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
     {
+        var payload = BuildCreateEventPayload(request);
 
+        _logger.LogInformation("Creating event: {Name}", request.Name);
+
+        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
+        if (entityIdHeader != null)
+        {
+            var idString = entityIdHeader.Split('(', ')')[1];
+            var id = Guid.Parse(idString);
+            var createdOn = DateTime.UtcNow;
+
+            _logger.LogInformation("Event created: {Id}", id);
+            return (id, createdOn);
+        }
+
+        throw new InvalidOperationException("Failed to extract entity ID from create response");
+    }
+
+    /// <summary>
+    /// The Web API body <see cref="CreateEventAsync"/> POSTs to <c>sprk_events</c>. Internal (InternalsVisibleTo the
+    /// BFF unit tests) so the payload — including the unified-access-control-r2 task 152 <c>sprk_AssignedTo</c> bind —
+    /// is asserted without intercepting the HTTP transport (ADR-038 bans <c>Mock&lt;HttpMessageHandler&gt;</c>).
+    /// </summary>
+    internal static Dictionary<string, object?> BuildCreateEventPayload(CreateEventRequest request)
+    {
         var payload = new Dictionary<string, object?>
         {
             ["sprk_eventname"] = request.Name,
@@ -430,6 +457,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (request.Priority.HasValue)
             payload["sprk_priority"] = request.Priority.Value;
 
+        // unified-access-control-r2 task 152 (owner S1): the person the event is FOR. PascalCase navigation property,
+        // the same bind the client event wizard uses (CreateEventWizard eventService).
+        if (request.AssignedToContactId is { } assignedTo && assignedTo != Guid.Empty)
+            payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
+
         if (request.RegardingRecordType.HasValue)
         {
             payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
@@ -445,23 +477,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             }
         }
 
-        _logger.LogInformation("Creating event: {Name}", request.Name);
-
-        var response = await SendPostAsJsonAsync("sprk_events", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault();
-        if (entityIdHeader != null)
-        {
-            var idString = entityIdHeader.Split('(', ')')[1];
-            var id = Guid.Parse(idString);
-            var createdOn = DateTime.UtcNow;
-
-            _logger.LogInformation("Event created: {Id}", id);
-            return (id, createdOn);
-        }
-
-        throw new InvalidOperationException("Failed to extract entity ID from create response");
+        return payload;
     }
 
     public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
@@ -1321,7 +1337,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         foreach (var row in rows)
         {
             if (!TryReadGuid(row, "principalid", out var principalId)
-                || !TryReadInt(row, "principaltypecode", out var principalTypeCode))
+                || !TryReadPrincipalKind(row, out var kind))
             {
                 if (strict)
                     throw ShareReadFailed(entityLogicalName, recordId, "a share row has no readable principal");
@@ -1329,7 +1345,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 continue;
             }
 
-            var kind = DataversePrincipalRefExtensions.FromPrincipalTypeCode(principalTypeCode);
             if (kind is null)
                 continue;
 
@@ -1374,6 +1389,36 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return row.TryGetValue(property, out var element)
             && element.ValueKind == JsonValueKind.String
             && Guid.TryParse(element.GetString(), out value);
+    }
+
+    /// <summary>
+    /// Reads a POA row's <c>principaltypecode</c>. <c>false</c> when the value is absent or is neither a number nor a
+    /// string (unreadable); <c>true</c> with a <c>null</c> kind for a principal type this seam does not model.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 139 (verified live on spaarkedev1, 2026-10-02): the Web API returns this
+    /// EntityName column as the logical-name STRING — <c>"principaltypecode":"systemuser"</c> — not as the object type
+    /// code. This method used to accept only a JSON number, so the soft read silently skipped every share and the
+    /// strict read refused every record that had one. Both forms are accepted; the numeric one is kept for any reader
+    /// (or test double) that supplies the code.
+    /// </remarks>
+    private static bool TryReadPrincipalKind(Dictionary<string, JsonElement> row, out DataversePrincipalKind? kind)
+    {
+        kind = null;
+        if (!row.TryGetValue("principaltypecode", out var element))
+            return false;
+
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Number when element.TryGetInt32(out var code):
+                kind = DataversePrincipalRefExtensions.FromPrincipalTypeCode(code);
+                return true;
+            case JsonValueKind.String when !string.IsNullOrWhiteSpace(element.GetString()):
+                kind = DataversePrincipalRefExtensions.FromPrincipalTypeName(element.GetString());
+                return true;
+            default:
+                return false;
+        }
     }
 
     private static bool TryReadInt(Dictionary<string, JsonElement> row, string property, out int value)

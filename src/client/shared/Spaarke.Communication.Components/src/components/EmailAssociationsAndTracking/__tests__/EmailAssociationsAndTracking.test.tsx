@@ -625,32 +625,42 @@ describe('R3-CARD-1: a GUID-only candidate shows type + reason, never the raw GU
 });
 
 describe('EmailTrackingPanel', () => {
-  const ACCESS_OPTIONS = [
-    { value: 100000000, label: 'Standard' },
-    { value: 100000001, label: 'Limited' },
-    { value: 100000002, label: 'Restricted' },
-  ];
-
   function baseTrackingProps(overrides: Partial<EmailTrackingPanelProps> = {}): EmailTrackingPanelProps {
     return {
       monitor: false,
       highPriority: true,
-      accessPermission: 100000001,
-      accessPermissionOptions: ACCESS_OPTIONS,
       onMonitorChange: jest.fn(),
       onHighPriorityChange: jest.fn(),
-      onAccessPermissionChange: jest.fn(),
       ...overrides,
     };
   }
 
-  it('reads current monitor/high-priority/access-permission values from the record', () => {
+  it('reads current monitor/high-priority values from the record', () => {
     renderWithProvider(<EmailTrackingPanel {...baseTrackingProps()} />);
 
     const switches = screen.getAllByRole('switch');
     expect(switches[0]).not.toBeChecked(); // monitor: false
     expect(switches[1]).toBeChecked(); // highPriority: true
-    expect(screen.getByRole('radio', { name: 'Limited' })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  // unified-access-control-r2 task 138 (owner Q6): a communication INHERITS its parent's Access
+  // Permission; its own column is retired, so the panel offers no access-permission control at all.
+  it('renders NO access-permission control — a communication inherits its parent permission (owner Q6)', () => {
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps()} />);
+
+    expect(screen.queryByRole('button', { name: /access/i })).not.toBeInTheDocument();
+    expect(screen.queryByText('Standard')).not.toBeInTheDocument();
+    expect(screen.queryByText('Limited')).not.toBeInTheDocument();
+    expect(screen.queryByText('Restricted')).not.toBeInTheDocument();
+  });
+
+  it('a read-only panel disables both switches (no write affordance)', () => {
+    const onMonitorChange = jest.fn();
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ readOnly: true, onMonitorChange })} />);
+
+    const switches = screen.getAllByRole('switch');
+    expect(switches[0]).toBeDisabled();
+    expect(switches[1]).toBeDisabled();
   });
 
   it('writes back a monitor toggle', () => {
@@ -659,14 +669,6 @@ describe('EmailTrackingPanel', () => {
 
     fireEvent.click(screen.getAllByRole('switch')[0]);
     expect(onMonitorChange).toHaveBeenCalledWith(true);
-  });
-
-  it('writes back an access-permission change', () => {
-    const onAccessPermissionChange = jest.fn();
-    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ onAccessPermissionChange })} />);
-
-    fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
-    expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
   });
 
   it('surfaces an inline error when the write callback rejects', async () => {
@@ -687,15 +689,15 @@ describe('EmailTrackingPanel', () => {
   });
 
   it('compact mode (reading-pane header band placement) hides the "Tracking" label and field captions, but keeps the controls read/write functional', () => {
-    const onAccessPermissionChange = jest.fn();
-    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ compact: true, onAccessPermissionChange })} />);
+    const onHighPriorityChange = jest.fn();
+    renderWithProvider(<EmailTrackingPanel {...baseTrackingProps({ compact: true, onHighPriorityChange })} />);
 
     expect(screen.queryByText('Tracking')).not.toBeInTheDocument();
     expect(screen.queryByText('Monitor')).not.toBeInTheDocument();
     expect(screen.getAllByRole('switch')).toHaveLength(2);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
-    expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
+    fireEvent.click(screen.getAllByRole('switch')[1]);
+    expect(onHighPriorityChange).toHaveBeenCalledWith(false);
   });
 });
 

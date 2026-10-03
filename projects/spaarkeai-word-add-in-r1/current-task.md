@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-01 (075 done and gated; ship its PR, then task 079)
+> **Last Updated**: 2026-10-03 (by context-handoff, before /compact). 076 ✅ · 086 ✅ · 087 ✅ — all pushed (`773cc57a9`); PR #1110 open, CI running
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,14 +18,79 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### 🔄 ACTIVE: ship task 075's PR, then task 079
+### ▶️ NEXT: merge PR #1110 when CI is green
 
 | Field | Value |
 |---|---|
-| **075** | ✅ DONE 2026-10-01 (`notes/075-dead-code.md`). Dead Outlook adapter deleted; one share-link minter; uncalled factory API removed; `OFFICE_INTERNAL` → 500 with no exception text; dead `GenerateDataverseUrl` deleted. Suite 13,072/0/54; ArchTests 337; publish −330 B; office-addins jest 62/817, lint 0, build OK |
-| **Next Action** | 1) Commit 075 and push; open the PR. 2) Merge after `Router` passes and nothing is pending (`gh pr merge N --merge`, **NEVER `--delete-branch`**); sync both checkouts. 3) Portfolio #945 Tasks Completed → 72. 4) Start task **079** via `task-execute` (`tasks/079-record-integrity-reconciliation.poml`: SC-6/SC-8 test citations, the FR-12 ADR-Tensions row, unsupported ✅ claims, POML status drift, 10 unparseable POMLs) |
-| **Queue after 079** | 090 (wrap-up, with the `/test-diet` gate). 076 waits on the owner; 083 waits on UAC-r2's 141 |
-| **For the owner** | (1) #1081 before the next BFF deploy from master. (2) `SystemCacheKeys.JobStatusSequence` architecture review. (3) #1088, #1089, #1090 filed |
+| **Task** | none in progress — 076, 086, 087 all ✅ (88 tasks: 85 closed; 042 🔄 owner UAT; 083 🔲 blocked on UAC-r2 141; 090 🔲 wrap-up after 042) |
+| **PR** | **#1110 OPEN** — https://github.com/spaarke-dev/spaarke/pull/1110 — title/body updated for 087. Carries everything since `5e39f2bea`: 060/068 records, 079, 080 backfill records, 086, 076, **087 (root CLAUDE.md + ADR-002 + plugins.md + CHANGELOG)**, master merge `141ad4c4b`. CI restarted on the `773cc57a9` push (2026-10-03) |
+| **Next Action** | `gh pr checks 1110` → wait until `grep -c pending` = 0. Merge only when **`Router` AND `Build & Test (Debug)`** pass: `gh pr merge 1110 --merge` (**NEVER `--delete-branch`**). Tier 2 "Full Unit Tests" cancelled at its 30-min cap is advisory, not a failure. Known pre-existing flake: `PinnedMemoryEndpointsContractTests.*Pin*EmitsCounter` (metrics tag cross-talk; passes alone). After merge: fast-forward the main checkout (`C:\code_files\spaarke`, `git pull origin master`) and this worktree; record the merge SHA here; portfolio #945 stays 88/85 |
+| **Then** | Nothing executable without the owner: **042** UAT (live Word/Outlook — list in `notes/defer-issues.md` register) → **090** wrap-up with `/test-diet` (binding gate). **083** waits on UAC-r2 141's contract |
+| **Owner, open** | (a) **Production numbering**: check matter numbers are unique, then `scripts/Set-RecordNumberingSchema.ps1 -Apply` (then `-Verify`) in each environment AFTER its SpaarkeCore import (deployment guide §7.4); where tables are managed the script only seeds + backfills. (b) **078 add-in**: owner sees THREE Spaarke groups in Word ("Spaarke (TEST)" + 2 × "Spaarke") — expected if BOTH zips were uploaded (office-js #6938: Word cannot hide the XML add-in); hover *Save to Spaarke*: XML = "…Spaarke DMS", unified = "…Spaarke Document Management System". Tidy-up: remove the TEST app; unassign the Word XML add-in for Word ≥ 2501 users. Record the outcome in `notes/078-manifest-decision.md` once the owner confirms which zips were uploaded |
+| **Live checks pending the next deploy from master** | 086 AC8 (both Word Send Email choices; `main.aspx`+`data=` URL has no shipped precedent; Word-web popup-blocker risk after a slow share-link mint) · 076's BFF retry/warning (platform half verified live) |
+| **Drift checker** | `scripts/check-task-status-drift.ps1` on master is red for a PARSER reason (cannot read this index layout; fix `233ff9341` on customer-provisioning, unmerged). Verified by hand 2026-10-03: **88/88 POML↔index pairs agree** (scratchpad `status_audit.py`) |
+
+### Files modified this session (all committed and pushed)
+`scripts/Set-RecordNumberingSchema.ps1` (new) · `Services/Office/RecordCreationService.cs` · `OfficeService.cs` · `OfficeEndpoints.cs` ·
+`tests/integration/contract/Api/Office/OfficeQuickCreate{,Project}ContractTests.cs` · `tests/unit/.../Services/Office/RecordCreationNumberReadBackTests.cs` (new) ·
+`office-addins` 086 files + `SaveFlow.tsx` comment · `docs/adr/ADR-002-no-heavy-plugins.md` · `.claude/adr/ADR-002-thin-plugins.md` ·
+`.claude/constraints/plugins.md` · root `CLAUDE.md` · `.claude/CHANGELOG.md` · `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` (I-11) ·
+`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.4 · `scripts/README.md` · `projects/INDEX.md` · project `spec.md`, `CLAUDE.md`,
+TASK-INDEX, POMLs 076/086/087, notes 030/031/042/076/086/087/defer-issues · researcher memory (autonumber findings)
+
+### Critical context
+Dev `spaarkedev1` now has the interim numbering live (`MAT-`/`PRJ-{SEQNUM:6}`, keys `sprk_MatterNumber` + `sprk_ProjectNumber`;
+next numbers `MAT-000011`, `PRJ-000010`); `-Verify` PASS. The deployed BFF is still master `5e39f2bea` (numbering works there
+because the PLATFORM assigns it). ADR-002 WP-1 now allows a platform-native declarative owner under (a) metadata/no code,
+(b) every create/update, (c) per-environment `-Verify` — business rules excluded by the owner.
+
+### ✅ Closed 2026-10-03: task 087 (ADR-002 WP-1 amendment, path B) — `notes/087-adr-002-amendment.md`
+
+- Owner approved the wording 2026-10-03: *"approved--but let's not add business rules in this revision"*.
+- Applied to full + concise ADR-002, `plugins.md` (contradiction fixed), root CLAUDE.md row (+ CHANGELOG), write-path doc
+  (L2 box, §5 intro, I-11 row — 076's path-A exception closed), spec ADR Tensions, `projects/INDEX.md` (Skill Directives Y).
+  ArchTests 345/345. Commit `773cc57a9`.
+
+### ✅ Closed 2026-10-03: task 076 (numbering) — `notes/076-record-numbering.md`
+
+- Owner decisions 2026-10-02/03: **Dataverse platform autonumber** `MAT-`/`PRJ-{SEQNUM:6}`, INTERIM ("until we build the
+  numbering function"); backfill blanks on first run; dev apply approved after the dry run; **ADR-002 WP-1 → path A now
+  + path B as task 087**.
+- Dev applied (`sprk_MatterNumber` key created; 7 nameless wizard projects → `PRJ-000001…007`); `-Verify` PASS. Next
+  numbers in dev: `MAT-000011`, `PRJ-000010` (gaps from deleted test rows are normal).
+- Live: 6 concurrent → 6 distinct; To Do lookup shows the number; collision refused `0x80060892`, next attempt
+  succeeds. BFF: retry (3) → 409 `record_number_unavailable`; read-back warning; cancelled read never fails a create.
+- Gates: 78/78 touched; seeds 3/1/2 + W3 2; suite 14,217 / 1 pre-existing flake (PinnedMemory, passes alone) / 54;
+  ArchTests 345; publish +981 B; CVE none. Step 9.5: W1–W4/W6 + most suggestions fixed; notes §9.
+- **Facts measured live (do not re-derive)**: `GetNextAutoNumberValue`/`GetAutoNumberSeed` are POST actions;
+  GetNext returns the RAW number and reads ONE HIGH until the first number is issued after a seed;
+  `SetAutoNumberSeed(X)` → next create gets X; just after the format is set, SetAutoNumberSeed can refuse
+  `0x80060884`; a supplied value is kept, omitted/empty generated; Get-AllPages rows carry `@odata.etag`.
+
+### ✅ Closed 2026-10-02: task 086 (Word Send Email choice + focused record open) — `a6d73bd8c`
+
+- Run as a parallel Sonnet subagent beside 076; reviewed + gates re-run in the main session (two suites 16 → 35;
+  typecheck 68 / 0 prod; lint 0; build 0). Two note claims corrected (no `data=` precedent; test count).
+
+### ✅ Closed 2026-10-02: task 079 (record integrity) — `notes/079-record-integrity.md`
+
+- Validator 10 → 0 errors; drift resolved; tokens on every status cell; 15 claims adjudicated, none reopened; SC-6
+  corrected, SC-8 → FAIL (until 076); `defer-issues.md` register; 040 AC1 reworded; TodoSourceAccessFilter comment.
+- Owner signed every amendment: FR-12, FR-16, FR-15 (A+B in Word → 086), FR-10 (Spaarke in a browser tab,
+  focused → 086), FR-18/SC-12 ("reports"), FR-13 interim format (076). Board: 87 tasks, 82 closed.
+- The drift checker on master still cannot read this index (fix `233ff9341` on customer-provisioning, unmerged).
+
+### ✅ Deployed 2026-10-02: master `5e39f2bea` → `spaarke-bff-dev` (owner: "yes deploy and then restart")
+
+- `Deploy-BffApi.ps1` from a fresh `origin/master` worktree (`C:\wtdep`, removed): 45.46 MB, SHA-256 verified, `/healthz` 200, CORS OK. All changed routes 401 (registered).
+- **#1081 verified live.** The root team "Spaarke" now holds Spaarke Basic User (root copy: Read **Deep** on document/matter/project/invoice/todo, Basic on communication; inheritance "Direct User (Basic) access level and Team privileges"; 171 members). Probe rows owned by it were created and deleted on all six tables; a real unfiled save through the deployed BFF produced a document owned by it.
+- **060** (`notes/060-…md` §11): restart → the job reads Completed with the same document and the stream ends in `job-complete` (**PASS**). Identical re-save → no second document, but the replayed 202 reads `duplicate: false` (wording differs from the ui-test). A graceful restart cannot cut a save; a **hard kill** (`kill -9` over SSH, 0.1 s after the job row appeared) did: client 502; retry inside 2 min → 409 (Redis in-progress lock); after 5 min the job reads Failed/Abandoned and the retry ran as a new job and completed (**PASS**).
+- **068** (`notes/068-…md` §9): 202 + `Location`; profile completes and reads Completed after a restart (**PASS**); double click → two jobs, both completed (**PASS**); **hard kill mid-run** → redelivered (delivery count 2), lock taken back by its owner, completed (**PASS**).
+
+### ✅ Shipped 2026-10-01: #1092 merged as `5e39f2bea` (task 075)
+
+- 37 checks terminal: `Router` pass, Build & Test pass (53m34s), Code Quality, office-addins gates pass; Tier 2 Full Unit Tests cancelled at its cap (advisory). Both checkouts fast-forwarded. Portfolio #945 = 72.
+- Dead Outlook adapter deleted; one share-link minter; uncalled factory API removed; `OFFICE_INTERNAL` → 500, no exception text; dead `GenerateDataverseUrl` deleted. Suite 13,072/0/54; publish −330 B. `notes/075-dead-code.md`.
 
 ### ✅ Shipped 2026-10-01: #1091 merged as `08b70d6cc` (task 068, #1086 / ISS-018)
 

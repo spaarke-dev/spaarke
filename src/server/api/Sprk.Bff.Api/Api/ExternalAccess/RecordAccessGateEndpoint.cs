@@ -46,6 +46,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// pinned by <c>RecordAccessGateTests</c> (<c>tests/integration/auth/UnifiedAccessControl/</c>), whose
 /// negatives each have a positive twin differing only in the caller's rights.</para>
 ///
+/// <para><b>Why this gate ignores Secure and Access Permission — by design (task 138).</b> This route answers
+/// ONE question: may the caller change who can access this record? That is the delegation rule (Write on the
+/// record, owner decision B-14 / C4), and it is the same on a Standard, Limited, Restricted or Secure record —
+/// a Write-holder on a Restricted record may still share it with a colleague (+ User), and may revoke existing
+/// grants. The record's flags govern a DIFFERENT question: WHICH grant types apply. That is enforced at write
+/// time, in the one policy function the grant routes share (<c>ExternalGrantLifecycle.DecideGrantPolicy</c>:
+/// contact and organization grants refused on Restricted, organization-wide grants refused on Secure or
+/// Limited), and the Manage Access dialog hides the options that do not apply. Folding the flags into this
+/// gate would hide the whole dialog on a Restricted record and take "+ User" and revoke with it. Task 139 keeps
+/// this gate a pure delegation answer.</para>
+///
 /// <para>ADR-001 Minimal API · ADR-008 authorization by the group's endpoint filter · ADR-019 refusals are
 /// ProblemDetails with a stable reason code and the trace id.</para>
 /// </remarks>

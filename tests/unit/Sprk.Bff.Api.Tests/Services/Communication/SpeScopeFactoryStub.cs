@@ -70,6 +70,14 @@ internal static class SpeScopeFactoryStub
         securableEntities
             .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_matter" });
+        // Task 155 f4: the communication ITSELF is now the record the resolver classifies (§F.2 — the double answers
+        // the question the real registry is asked; the shared model of the production rule, not a private copy).
+        securableEntities
+            .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(
+                name,
+                new HashSet<string>(StringComparer.Ordinal) { "sprk_matter" },
+                new HashSet<string>(StringComparer.Ordinal) { "sprk_matter", "sprk_communication" }));
 
         var entityService = new Mock<IGenericEntityService>();
         entityService
@@ -83,7 +91,6 @@ internal static class SpeScopeFactoryStub
                 securableEntities.Object,
                 entityService.Object,
                 Mock.Of<ILogger<RecordContainerResolver>>()),
-            entityService.Object,
             securableEntities.Object,
             Mock.Of<ILogger<CommunicationContainerResolver>>());
     }

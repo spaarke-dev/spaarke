@@ -95,6 +95,47 @@ public class DataverseRecordShareWireTests
             "the read must be scoped to this record of this table");
     }
 
+    /// <summary>
+    /// 🔴 Task 139 regression pin — the LIVE wire shape. Read from spaarkedev1 on 2026-10-02 (the body below is that
+    /// response, ids replaced): <c>principaltypecode</c> is an EntityName column and the Web API returns it as the
+    /// logical-name STRING, not the object type code. The reader accepted only a JSON number, so the strict read refused
+    /// every record with a share ("no readable principal") and the soft read silently answered "no shares". The tests
+    /// above feed the numeric form, which is why it went unseen.
+    /// </summary>
+    [Fact]
+    public async Task GetPrincipalAccess_ReadsTheLiveStringPrincipalTypeCode_InBothReads()
+    {
+        var body = $$"""
+            {"@odata.context":"https://test.crm.dynamics.com/api/data/v9.2/$metadata#principalobjectaccessset(objectid,principalid,principaltypecode,accessrightsmask,changedon)",
+             "value":[
+              {"@odata.etag":"W/\"26686396\"","principalid":"{{UserId}}","objectid":"{{MatterId}}","changedon":"2026-10-02T03:51:06Z","principalobjectaccessid":"{{Guid.NewGuid()}}","accessrightsmask":262167,"principaltypecode":"systemuser"},
+              {"principalid":"{{TeamId}}","changedon":"2026-10-02T04:00:00Z","accessrightsmask":1,"principaltypecode":"team"},
+              {"principalid":"{{Guid.NewGuid()}}","changedon":"2026-10-02T04:00:00Z","accessrightsmask":1,"principaltypecode":"account"}
+            ]}
+            """;
+        var expected = new[]
+        {
+            new DataversePrincipalAccess(DataversePrincipalRef.User(UserId), 262167, new DateTimeOffset(2026, 10, 2, 3, 51, 6, TimeSpan.Zero)),
+            new DataversePrincipalAccess(DataversePrincipalRef.Team(TeamId), 1, new DateTimeOffset(2026, 10, 2, 4, 0, 0, TimeSpan.Zero)),
+        };
+
+        (await new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId))
+            .Should().Equal(expected, "an unmodelled principal type is skipped, a modelled one is read — never refused");
+        (await new OfflineService(SharesHandler(body)).GetPrincipalAccessAsync("sprk_matter", MatterId))
+            .Should().Equal(expected, "the soft read must not silently answer 'no shares'");
+    }
+
+    /// <summary>The twin: a principal type that is neither a number nor a string is unreadable, and the strict read refuses.</summary>
+    [Fact]
+    public async Task GetPrincipalAccessOrThrowAsync_WhenThePrincipalTypeIsNeitherNumberNorString_Throws()
+    {
+        var body = $$"""{"value":[{"principalid":"{{UserId}}","principaltypecode":true,"accessrightsmask":1,"changedon":"2026-09-15T10:00:00Z"}]}""";
+
+        var strict = () => new OfflineService(SharesHandler(body)).GetPrincipalAccessOrThrowAsync("sprk_matter", MatterId);
+
+        await strict.Should().ThrowAsync<InvalidOperationException>().WithMessage("*no readable principal*");
+    }
+
     /// <summary>The pair that matters: the same refused read throws from the strict read and is empty from the soft one.</summary>
     [Fact]
     public async Task GetPrincipalAccessOrThrowAsync_WhenDataverseRefusesTheRead_Throws_WhileTheSoftReadStillAnswersEmpty()

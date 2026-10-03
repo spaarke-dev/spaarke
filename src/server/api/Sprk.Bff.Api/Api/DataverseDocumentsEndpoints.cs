@@ -28,117 +28,9 @@ public static class DataverseDocumentsEndpoints
         // ownerid Lookup per event-source-inventory.md §3B + spec FR-2P2.6.
         // Fire-and-forget per Q2: publisher never throws; mutation succeeds even
         // if publish fails (nightly recon task 085 is the backstop).
-        documentsGroup.MapPost("/", async (
-            [FromBody] CreateDocumentRequest request,
-            IDocumentDataverseService dataverseService,
-            IMembershipEventPublisher membershipEventPublisher,
-            Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
-            ILogger<Program> logger,
-            HttpContext context,
-            CancellationToken ct) =>
-        {
-            var traceId = context.TraceIdentifier;
-            var userId = CallerResolution.ResolveObjectId(context.User);
-
-            try
-            {
-                logger.LogInformation("Creating document {DocumentName} in container {ContainerId}",
-                    request.Name, request.ContainerId);
-
-                // Task 080 (write-path invariant I-6): this create is APP-ONLY, so without an explicit owner
-                // Dataverse makes the BFF application user the owner — in the ROOT business unit, where no child-BU
-                // user (the caller included) can read it. The body names no record, so the caller's business-unit
-                // default owner team decides. OwningTeamId and Id are [JsonIgnore]d on the request, so the body can
-                // no longer set either; the owner is decided here, server-side, or the create is refused.
-                var owningTeamId = await ownershipResolver.ResolveOwningTeamAsync(
-                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
-                    {
-                        CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
-                    },
-                    ct);
-
-                if (owningTeamId is null)
-                {
-                    logger.LogWarning(
-                        "Refusing document create for caller {UserId}: no owner team resolved (task 080)", userId);
-                    // The same code every Office create uses for this refusal (ADR-019: one condition, one code).
-                    const string ownerUnresolved = Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.RecordOwnerUnresolved;
-                    return TypedResults.Problem(
-                        statusCode: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetStatusCode(ownerUnresolved),
-                        type: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetTypeUri(ownerUnresolved),
-                        title: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetTitle(ownerUnresolved),
-                        detail: "The document could not be assigned to your business unit's team, so it was not "
-                                + "created. Ask an administrator to check your user record's business unit.",
-                        extensions: new Dictionary<string, object?>
-                        {
-                            ["errorCode"] = ownerUnresolved,
-                            ["traceId"] = traceId
-                        });
-                }
-
-                request.OwningTeamId = owningTeamId;
-
-                var documentId = await dataverseService.CreateDocumentAsync(request);
-
-                var createdDocument = await dataverseService.GetDocumentAsync(documentId);
-
-                logger.LogInformation("Document created successfully with ID: {DocumentId}", documentId);
-
-                // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
-                // ⚠️ CORRECTED 2026-09-30 (task 080): this said ownerid was "defaulted by Dataverse to the OBO
-                // caller". It never was — the create is app-only, so the owner was the BFF application user — and
-                // it is now the caller's business-unit default owner TEAM (set above). The event still records the
-                // CALLER as the creator-member, which is the membership model's own decision (ADR-034); team-owned
-                // rows additionally confer through owningteam (UAC-r2 task 043). Publish Added event so the
-                // junction-updater (task 084) + nightly recon (task 085) observe the new association.
-                // When MembershipEventPublisherOptions.Enabled=false (default),
-                // the NullMembershipEventPublisher peer logs + returns (ADR-032 P2).
-                if (Guid.TryParse(documentId, out var documentGuid)
-                    && Guid.TryParse(userId, out var callerOid))
-                {
-                    var membershipEvent = new MembershipChangedEvent
-                    {
-                        PersonId = callerOid,
-                        PersonIdType = PersonIdentityType.User,
-                        EntityLogicalName = "sprk_document",
-                        EntityRecordId = documentGuid,
-                        SourceField = "ownerid",
-                        Role = "owner",
-                        MutationType = MembershipMutationType.Added,
-                        CorrelationId = traceId,
-                        OccurredOnUtc = DateTime.UtcNow,
-                    };
-
-                    _ = membershipEventPublisher.PublishAsync(membershipEvent, ct);
-                }
-
-                return TypedResults.Created($"/api/v1/documents/{documentId}", new
-                {
-                    data = createdDocument,
-                    metadata = new
-                    {
-                        requestId = traceId,
-                        timestamp = DateTime.UtcNow,
-                        version = "v1"
-                    }
-                });
-            }
-            catch (ArgumentException ex)
-            {
-                logger.LogWarning(ex, "Invalid document creation request");
-                return ProblemDetailsHelper.ValidationError(ex.Message);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Failed to create document");
-                return TypedResults.Problem(
-                    statusCode: 500,
-                    title: "Internal Server Error",
-                    detail: "An unexpected error occurred while creating the document",
-                    extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
-            }
-        })
-        .RequireAuthorization();
+        // The handler is CreateDocumentAsync below (extracted so the test assembly runs the real site).
+        documentsGroup.MapPost("/", CreateDocumentAsync)
+            .RequireAuthorization();
 
         // GET /api/v1/documents/{id} - Get document by ID
         documentsGroup.MapGet("/{id}", async (
@@ -642,5 +534,118 @@ public static class DataverseDocumentsEndpoints
         .RequireAuthorization();
 
         return app;
+    }
+
+    /// <summary>
+    /// POST /api/v1/documents — creates a document row (app-only, owned by the caller's business-unit default owner
+    /// team, task 080) and publishes the owner <see cref="MembershipChangedEvent"/> for it.
+    /// </summary>
+    /// <remarks>
+    /// Internal (not private) so the test assembly (InternalsVisibleTo) runs the real handler and observes the owner
+    /// event it publishes (unified-access-control-r2 task 152 verifier round 1, item 7) — the wiring is pinned by
+    /// executing this site, not by reading its source.
+    /// </remarks>
+    internal static async Task<IResult> CreateDocumentAsync(
+        [FromBody] CreateDocumentRequest request,
+        IDocumentDataverseService dataverseService,
+        IMembershipEventPublisher membershipEventPublisher,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        Spaarke.Dataverse.IGenericEntityService genericEntityService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var traceId = context.TraceIdentifier;
+        var userId = CallerResolution.ResolveObjectId(context.User);
+
+        try
+        {
+            logger.LogInformation("Creating document {DocumentName} in container {ContainerId}",
+                request.Name, request.ContainerId);
+
+            // Task 080 (write-path invariant I-6): this create is APP-ONLY, so without an explicit owner
+            // Dataverse makes the BFF application user the owner — in the ROOT business unit, where no child-BU
+            // user (the caller included) can read it. The body names no record, so the caller's business-unit
+            // default owner team decides. OwningTeamId and Id are [JsonIgnore]d on the request, so the body can
+            // no longer set either; the owner is decided here, server-side, or the create is refused.
+            var owningTeamId = await ownershipResolver.ResolveOwningTeamAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                {
+                    CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                },
+                ct);
+
+            if (owningTeamId is null)
+            {
+                logger.LogWarning(
+                    "Refusing document create for caller {UserId}: no owner team resolved (task 080)", userId);
+                // The same code every Office create uses for this refusal (ADR-019: one condition, one code).
+                const string ownerUnresolved = Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.RecordOwnerUnresolved;
+                return TypedResults.Problem(
+                    statusCode: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetStatusCode(ownerUnresolved),
+                    type: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetTypeUri(ownerUnresolved),
+                    title: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetTitle(ownerUnresolved),
+                    detail: "The document could not be assigned to your business unit's team, so it was not "
+                            + "created. Ask an administrator to check your user record's business unit.",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = ownerUnresolved,
+                        ["traceId"] = traceId
+                    });
+            }
+
+            request.OwningTeamId = owningTeamId;
+
+            var documentId = await dataverseService.CreateDocumentAsync(request);
+
+            var createdDocument = await dataverseService.GetDocumentAsync(documentId);
+
+            logger.LogInformation("Document created successfully with ID: {DocumentId}", documentId);
+
+            // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event, describing the row's REAL owner
+            // (UAC-r2 task 152, ADR-034 A3): the create is app-only and the row is owned by the business-unit
+            // default owner TEAM set above, so the event is PersonIdType=Team, PersonId=that team — the same key
+            // MembershipReconciliationJob builds for this row. (Before task 152 it published the caller's AAD oid
+            // as a User owner — false, and in an identity space reconciliation never writes.)
+            // When MembershipEventPublisherOptions.Enabled=false (default), the NullMembershipEventPublisher peer
+            // logs + returns (ADR-032 P2).
+            if (Guid.TryParse(documentId, out var documentGuid))
+            {
+                _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
+                    membershipEventPublisher,
+                    genericEntityService,
+                    "sprk_document",
+                    documentGuid,
+                    new Microsoft.Xrm.Sdk.EntityReference("team", owningTeamId.Value),
+                    traceId,
+                    logger,
+                    ct);
+            }
+
+            return TypedResults.Created($"/api/v1/documents/{documentId}", new
+            {
+                data = createdDocument,
+                metadata = new
+                {
+                    requestId = traceId,
+                    timestamp = DateTime.UtcNow,
+                    version = "v1"
+                }
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            logger.LogWarning(ex, "Invalid document creation request");
+            return ProblemDetailsHelper.ValidationError(ex.Message);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to create document");
+            return TypedResults.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while creating the document",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
     }
 }

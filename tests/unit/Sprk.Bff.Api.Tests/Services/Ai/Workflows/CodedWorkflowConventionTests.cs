@@ -174,9 +174,18 @@ public sealed class CodedWorkflowConventionTests
         services.AddSingleton(actions.Object);
         services.AddSingleton(llm.Object);
         services.AddSingleton(scrubber.Object);
-        // Collector deps — loose mocks: every Dataverse query degrades failure-soft to empty.
-        services.AddSingleton(Mock.Of<IGenericEntityService>());
-        services.AddSingleton(Mock.Of<IMembershipResolverService>());
+        // Collector deps (UAC-r2 task 152: the collector reads as the caller through the impersonated seam and holds
+        // no app-only client). The resolver answers "nothing is FOR this user", so every channel is empty — not
+        // failed — and no caller-context read is issued.
+        services.AddSingleton(Mock.Of<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>());
+        var resolver = new Mock<IMembershipResolverService>();
+        resolver
+            .Setup(r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid user, string entity, MembershipResolveOptions? _, CancellationToken _) =>
+                new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipResponse(
+                    entity, new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(user), Array.Empty<Guid>(),
+                    new Dictionary<string, IReadOnlyList<Guid>>(), 0, DateTimeOffset.UtcNow.AddMinutes(5)));
+        services.AddSingleton(resolver.Object);
 
         services.AddCodedWorkflowsFromAssembly(typeof(DailyBriefingNarrator).Assembly);
         return services.BuildServiceProvider();
