@@ -24,7 +24,9 @@ assertion (with a read-only live census) carry the platform configuration. Nothi
 | **F3** — removing Secure: Full Access holders + the creator; securing stays open to Write holders | round 3b | `UnsecureProjectEndpoint.RefuseUnlessPermittedToRemoveAsync`: creator (`createdby` / `sprk_createdbyperson`) first, then Dataverse's own rights on the record must include Write AND Delete (Full Access = Collaborate + Delete; an administrator qualifies by role). 403 `sdap.unsecure.not_permitted` otherwise |
 | **F4** — System Administrator stays a residual writer (platform, not narrowable) | consolidated questions (accepted as recommended, round 3) | Documented (guide §7c, schema doc); the lock script and the standing assertion LIST every holder; nobody's role is touched |
 | **F5** superseded → a ribbon button in task 142's shared Access group | round 3b + UX amendment | **STOPPED** — 142 has not merged (§9) |
-| **F6** — the agent drafts copy options, the owner picks before merge | consolidated questions | Option A is implemented and marked DRAFT in code; options in §6. **Merge gate: owner pick** |
+| **F6** — the agent drafts copy options, the owner picks before merge | consolidated questions; **picked in round 10 item 9** (2026-10-03) | **Closed (c1, §15):** option A for rows 1, 3, 4, 5, 6 and the resume-neutral option D for row 2; every DRAFT marker removed, each string pinned verbatim by a test |
+| **Round 10 item 10** — `/provision-project` secures an UNFLAGGED record only for its creator | round 10 (answers §11.6, recommended (b)) | **Closed (c1, §15)** — 403 `sdap.provision.not_record_creator` before any write |
+| **Round 10 item 11** — invoices follow their matter | round 10 (answers §11.4) | **Closed (c1, §15)** — `sprk_invoice` out of the securable registry; its column locked by the same script |
 | **F7** — "secure an existing record" ships with 148 | consolidated questions | No surface added; Make Secure is not in any ribbon (§9). See §11.3 for the API |
 | **ABSENT branch** — backfill NULL → No, then absent fails closed | `droppedAsAnswered` in `raw/session27-owner-questions.json` (the standing fail-closed directive, ADR-003) | §5.3; backfill script §7.1 |
 | **Q1** — one-time NULL cleanup, default No, operator script recording counts + ids | UX note (O1/Q1, 2026-10-01) | `scripts/Repair-SecureFlagNulls.ps1` (dry run executed read-only, §8) |
@@ -135,7 +137,9 @@ Tests: `projectService.test.ts` (+2), `provisioningService.test.ts` (+2, code co
 (an administrator holds Delete, so F3 admits them; no self-service unsecure surface ships until the ribbon). Rewording it
 to "you, or someone with Full Access" belongs with the Remove Secure command (task 142 / this task's ribbon part).
 
-Each string below is **implemented as option A** and marked DRAFT in code:
+**Owner pick (round 10 item 9, 2026-10-03): option A for rows 1, 3, 4, 5 and 6; option D (below) for row 2.** Implemented
+in round c1 (§15); no DRAFT marker remains, and each picked string is pinned verbatim by a test. The table is kept as
+the record of what was offered:
 
 | # | Where | A (implemented) | B | C |
 |---|---|---|---|---|
@@ -225,7 +229,7 @@ authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
 | G-1 | Deploy the BFF carrying task 150 | after task 133's own ordering (its schema gate first) |
 | G-2 | Deploy the client (`@spaarke/ui-components` consumers: Create Project wizard, Summarize Files) and confirm no cached old bundle is served | the old client's create payload names `sprk_issecure` |
 | G-3 | `.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl … -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c -Apply` then `-Verify` | task 133's gate — creates both profiles and their members |
-| G-4 | `.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl … -BffApplicationIds … -ClientNoLongerWritesFlag -Apply` then `-Verify` | record the masked window per table |
+| G-4 | `.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl … -BffApplicationIds … -ClientNoLongerWritesFlag -Apply` then `-Verify` | record the masked window per table — **four tables since c1** (`sprk_invoice` included: round 10 item 11; approved for the main session at integration by round 11) |
 | G-5 | standing assertion live: `$env:SPAARKE_NFR05_DATAVERSE_URL=…; $env:SPAARKE_BFF_APPLICATION_IDS=…; $env:AZURE_TOKEN_CREDENTIALS='AzureCliCredential'; dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SecureFlagFieldSecurity_InTheTargetEnvironment"` | must PASS |
 | G-6 | NEGATIVE: as an existing non-admin test user with Write, `PATCH sprk_projects(<id>) {"sprk_issecure":false}` (and on a matter / work assignment), and a create naming it | refused, or unchanged on read-back. The user must hold no System Administrator, directly or through a team: **not a member of the "Spaarke Demo" team** (it holds System Administrator — #1081 peer report; the lock script's dry run lists it, 2026-10-03). If no such user with Write exists, ask the owner to create one (round 4 item 1) |
 | G-7 | NO MASKING: the same user's `GET …?$select=sprk_issecure` on the secure project returns `true` (present); the client `RecordContainerResolver.ts` resolves it to its own container; the BFF logs no `secure_flag_unreadable` | |
@@ -234,7 +238,7 @@ authored. Acceptance (a)–(f) and the four amendment UI tests are not met.
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
 
 **Merge gates (all three hold before task 150 reaches master):**
-1. **F6:** the owner picks the copy options in §6 (row 2 now has a resume-neutral option D).
+1. ~~**F6:** the owner picks the copy options in §6~~ — **closed** by owner round 10 item 9, implemented in c1 (§15).
 2. **G-0 in dev first** (r1 item 11): `Repair-SecureFlagNulls.ps1 -Apply` then `-Verify` exits 0 in spaarkedev1.
 3. **Task 133 merges first, or together** (r1 item 12): `task/uac-r2-150` is stacked on `task/uac-r2-133-b2-r2`, which
    is not in `work/unified-access-control-r2`. F3 trusts `sprk_createdbyperson`, which is safe only under 133's FLS
@@ -266,10 +270,10 @@ No new Dataverse column (the lock is on an existing one). `sprk_accesspermission
    409 `already_provisioned`; provisioning does not re-flag it. Edge case under F4.
 3. **The provision API accepts an existing non-secure record** (it always did: before, a form edit plus the call did
    it). F7 gates the SURFACE (Make Secure ships with 148); the API itself does not distinguish "just created".
-4. **`sprk_invoice.sprk_issecure` exists and is NOT locked** (default No, not field-secured; the owner's lock covers the three roots). Under the ABSENT refusal its NULLs must be backfilled (the script does); a Write holder can still change it. Setting it true only makes uploads to that invoice fail closed; clearing it leaves the ancestor walk to decide. Whether invoices should carry the flag at all — or be locked too — is an owner question.
+4. **ANSWERED — round 10 item 11, closed in c1 (§15).** *As raised:* **`sprk_invoice.sprk_issecure` exists and is NOT locked** (default No, not field-secured; the owner's lock covers the three roots). Under the ABSENT refusal its NULLs must be backfilled (the script does); a Write holder can still change it. Setting it true only makes uploads to that invoice fail closed; clearing it leaves the ancestor walk to decide. Whether invoices should carry the flag at all — or be locked too — is an owner question.
 5. The client `RecordContainerResolver.ts` and the PCF still treat empty as not secure — covered by the reader profile on
    every default team (G-7/G-8 prove it live).
-6. **OWNER QUESTION (r1 item 13, F7 residual; not answered by rounds 1–9).** After the lock, `/provision-project` is
+6. **ANSWERED — round 10 item 10 chose (b); closed in c1 (§15).** *As raised:* **OWNER QUESTION (r1 item 13, F7 residual; not answered by rounds 1–9).** After the lock, `/provision-project` is
    the single-call way to secure ANY unflagged, unprovisioned record the caller can Write, including a colleague's
    ordinary record reached through BU-depth Write, without task 148's transition (which carries the children). Before
    the lock the same took a flag write plus the call, so the capability is not new, and the POML's rollout constraint

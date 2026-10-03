@@ -193,9 +193,18 @@ describe('CreateProjectWizard — a secure-requested project whose provisioning 
   });
 });
 
-describe('describeHeldBackForSecure (task 150 draft copy)', () => {
+describe('describeHeldBackForSecure (task 150; owner round 10 item 9, F6 row 1, option A)', () => {
   it('is silent when nothing was held back', () => {
     expect(describeHeldBackForSecure([])).toBeUndefined();
+  });
+
+  it('says exactly the copy the owner picked, in the singular and the plural', () => {
+    expect(describeHeldBackForSecure(['the event'])).toBe(
+      'Because securing the project did not finish, this was not added to it, so nothing reached shared storage: the event. Add it once the project is secured.'
+    );
+    expect(describeHeldBackForSecure(['the work assignment', 'the event', 'the files you attached'])).toBe(
+      'Because securing the project did not finish, these were not added to it, so nothing reached shared storage: the work assignment, the event and the files you attached. Add them once the project is secured.'
+    );
   });
 
   it('names one item in the singular and several in a list', () => {

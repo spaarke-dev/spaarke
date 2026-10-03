@@ -561,8 +561,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                 }
               } catch (err) {
                 // `provisionSecureProject` never throws; kept as a belt. Task 150: the project may or may not have
-                // been marked secure (the server's first write), so the copy claims neither. DRAFT copy — owner
-                // decision F6 (options in notes/task-150-issecure-lock.md §6).
+                // been marked secure (the server's first write), so the copy claims neither. Copy: owner round 10
+                // item 9 (F6 row 5, option A — notes/task-150-issecure-lock.md §6).
                 warnings.push(
                   `Securing the project did not finish (${err instanceof Error ? err.message : 'Unknown error'}). ` +
                     'The project was created; an administrator can check how far securing it got and finish it.'
@@ -571,7 +571,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
             } else {
               // Fail LOUDLY rather than silently creating a project the user believes is secure. Task 150: the client
               // no longer writes sprk_issecure, so with no BFF to ask the project is NOT marked secure — the old
-              // "was marked Secure" was replaced. DRAFT copy — owner decision F6 (notes/task-150-issecure-lock.md §6).
+              // "was marked Secure" was replaced. Copy: owner round 10 item 9 (F6 row 4, option A —
+              // notes/task-150-issecure-lock.md §6).
               warnings.push(
                 'The project was created but not secured, because securing it needs a connection to the Spaarke ' +
                   'service that this dialog does not have. An administrator can secure it.'

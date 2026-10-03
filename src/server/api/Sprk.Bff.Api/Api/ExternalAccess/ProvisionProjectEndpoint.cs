@@ -33,7 +33,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      by the team WITHOUT a container → RESUME (below); otherwise continue. Then, still before any mutation: the
 ///      SPE container type is configured; a container ALREADY recorded on the record is classified (a business unit's
 ///      or this BFF's configured shared container is replaced, one another root records is refused, the record's own
-///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI), the record's current owner, and the creator's
+///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI) — and, for a record NOT yet flagged secure, that
+///      the caller created it (owner round 10 item 10, task 150: <c>createdby</c> when a person, else
+///      <c>sprk_createdbyperson</c>; an already-flagged record stays on the Write gate) — the record's current owner, and the creator's
 ///      current share (complete read or nothing — a record that keeps its own container is refused when it cannot be
 ///      read, task 133 r1)
 ///   4.1 Set <c>sprk_issecure = true</c> and read it back (task 150) — the FIRST write; skipped when already true
@@ -278,6 +280,24 @@ public static class ProvisionProjectEndpoint
     /// the writer profile.
     /// </summary>
     internal const string ReasonSecureFlagNotSet = "sdap.provision.secure_flag_not_set";
+
+    /// <summary>
+    /// Task 150 (owner round 10 item 10, 2026-10-03): the record is NOT yet marked secure, and the caller is not the person
+    /// who created it. An unflagged record is secured through this call only for its creator — <c>createdby</c> when that
+    /// is a person, otherwise the server-stamped <c>sprk_createdbyperson</c> (an app-only create). A record already
+    /// flagged (an older client, a row from before task 150) stays on the route's Write gate. Refused before any write
+    /// (403), deterministic for that caller: securing an existing record someone else created, with the content already
+    /// filed under it, is task 148's transition, not this call.
+    /// </summary>
+    internal const string ReasonNotRecordCreator = "sdap.provision.not_record_creator";
+
+    /// <summary>
+    /// Task 150 (owner round 10 item 10): whether the caller created the unflagged record could not be checked — its
+    /// <c>createdby</c> user or its <c>sprk_createdbyperson</c> could not be read. Refused before any write (500); the
+    /// same caller may call again once the read works. A column this environment lacks (<c>sprk_createdbyperson</c>
+    /// before its schema script ran — a 400) records nobody, so it is <see cref="ReasonNotRecordCreator"/>, not this.
+    /// </summary>
+    internal const string ReasonRecordCreatorUnverifiable = "sdap.provision.record_creator_unverifiable";
 
     /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
@@ -1049,6 +1069,19 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, ReasonCreatorUnresolved)));
         }
 
+        // ── Owner round 10 item 10 (task 150): an UNFLAGGED record is secured only for the person who created it ──
+        //
+        // Before any write, like every refusal on this path. A record already flagged true stays on the route's Write
+        // gate (rollout constraint: an older client flags at create time, and rows from before task 150 arrive flagged).
+        if (row.sprk_issecure != true)
+        {
+            var notCreator = await RefuseUnlessRecordCreatorAsync(
+                dataverseClient, root, recordId, row, creatorId, logger, traceId, ct);
+
+            if (notCreator != null)
+                return CreatorShareStep.Failed(notCreator);
+        }
+
         // The owner compensation would restore. Every Dataverse row has one; a row read without it is not one this
         // endpoint can safely move, because the move could not be undone.
         if (row.Owner is not { } preOwner)
@@ -1442,6 +1475,122 @@ public static class ProvisionProjectEndpoint
         ? "It keeps its own container, so a provisioning call answers already_provisioned: an administrator must share " +
           "it to its creator through Manage Access (or Share in the model-driven app)."
         : "An administrator must call provisioning again to resume.";
+
+    /// <summary>
+    /// FORWARD, on a record NOT yet flagged secure (owner round 10 item 10, 2026-10-03; task 150 note §11.6): refuses —
+    /// read-only, before any write — unless the caller is the person who created the record. Returns the refusal to send,
+    /// or <c>null</c> when the caller is that person.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> After the <c>sprk_issecure</c> lock this call is the one way to mark a record secure, and the route
+    /// admits any Write holder — including a colleague who reaches someone else's ordinary record through business-unit
+    /// depth. Securing a record that already holds content, filed by other people, is task 148's transition (it carries the
+    /// children and files); this call secures what its creator just made — the only use the two wizards have of it.</para>
+    ///
+    /// <para><b>The creator</b> (the owner's rule: "<c>createdby</c> when human, else <c>sprk_createdbyperson</c>", the same
+    /// order the resume uses): the caller is admitted when they are <c>createdby</c> (they made the create — a delegated
+    /// caller is a person, so no read is needed); otherwise <c>createdby</c> is read, and when it is a PERSON (enabled or
+    /// not) that person is the creator and the caller is refused; when it is an application user (an app-only create, e.g.
+    /// Office quick-create) or absent, the BFF-stamped <c>sprk_createdbyperson</c> (field-secured, written only by the BFF —
+    /// task 133) names the creator.</para>
+    ///
+    /// <para><b>Fail closed.</b> A read that fails refuses with <see cref="ReasonRecordCreatorUnverifiable"/> (500, the same
+    /// caller may retry) — never folded into "the caller is the creator". A <c>sprk_createdbyperson</c> column this
+    /// environment lacks (400) records nobody, so it admits nobody (<see cref="ReasonNotRecordCreator"/>), as in the
+    /// unsecure endpoint's F3 check.</para>
+    /// </remarks>
+    private static async Task<IResult?> RefuseUnlessRecordCreatorAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        RootRow row,
+        Guid callerId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        var createdBy = row._createdby_value is { } cb && cb != Guid.Empty ? cb : (Guid?)null;
+        if (createdBy == callerId)
+            return null;
+
+        string createdByState;
+        if (createdBy is { } createdById)
+        {
+            string? state;
+            try
+            {
+                state = await UnusablePersonStateAsync(dataverseClient, createdById, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] The creator (createdby {CreatorId}) of unflagged {RecordType} {RecordId} could not be read, " +
+                    "so whether caller {CallerId} created it is unknown. Refusing before any change. TraceId={TraceId}",
+                    createdById, root.WireToken, recordId, callerId, traceId);
+                return RecordCreatorUnverifiable(root, traceId);
+            }
+
+            // A PERSON created it — enabled or not, that person is the creator, and it is not the caller.
+            if (state is null or UnusableDisabled)
+                return NotRecordCreator(root, recordId, callerId, "createdby", logger, traceId);
+
+            createdByState = state;
+        }
+        else
+        {
+            createdByState = UnusableAbsent;
+        }
+
+        // createdby is an application user (an app-only create) or absent: the person the BFF stamped decides.
+        Guid? person;
+        try
+        {
+            person = await ReadCreatorPersonAsync(dataverseClient, root, recordId, ct);
+        }
+        catch (Exception ex) when (IsColumnMissing(ex))
+        {
+            logger.LogInformation(
+                "[PROVISION] {Column} is not in this environment (400); no creator person is recorded on unflagged " +
+                "{RecordType} {RecordId} (createdby is {CreatedByState}).",
+                RecordCreatorPerson.Column, root.WireToken, recordId, createdByState);
+            person = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[PROVISION] The person recorded as creating unflagged {RecordType} {RecordId} ({Column}) could not be " +
+                "read. Refusing before any change. TraceId={TraceId}",
+                root.WireToken, recordId, RecordCreatorPerson.Column, traceId);
+            return RecordCreatorUnverifiable(root, traceId);
+        }
+
+        return person == callerId
+            ? null
+            : NotRecordCreator(root, recordId, callerId, RecordCreatorPerson.Column, logger, traceId);
+    }
+
+    private static IResult NotRecordCreator(
+        SecureRecordRoot root, Guid recordId, Guid callerId, string decidingColumn, ILogger logger, string traceId)
+    {
+        logger.LogWarning(
+            "[PROVISION] Caller {CallerId} did not create unflagged {RecordType} {RecordId} (decided by {Column}). Refusing " +
+            "before any change: an ordinary record is secured through this call only for its creator (owner round 10 " +
+            "item 10). TraceId={TraceId}",
+            callerId, root.WireToken, recordId, decidingColumn, traceId);
+
+        return Problem(StatusCodes.Status403Forbidden, "Forbidden",
+            $"This {root.DisplayLabel.ToLowerInvariant()} is not marked secure yet, and a record is secured this way only by " +
+            "the person who created it. You did not create it, so nothing was changed. Securing an existing record " +
+            "someone else created is a separate action, which also moves the content already filed under it.",
+            traceId, (ReasonKey, ReasonNotRecordCreator), ("creatorColumn", decidingColumn));
+    }
+
+    private static IResult RecordCreatorUnverifiable(SecureRecordRoot root, string traceId) =>
+        Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"Whether you created this {root.DisplayLabel.ToLowerInvariant()} could not be checked, because the person who " +
+            "created it could not be looked up — and a record that is not marked secure yet is secured this way only by " +
+            "its creator. Nothing was changed; the same caller may call again.",
+            traceId, (ReasonKey, ReasonRecordCreatorUnverifiable));
 
     /// <summary>
     /// On RESUME, refuses a request that names colleagues unless its caller IS the record's creator — before any write

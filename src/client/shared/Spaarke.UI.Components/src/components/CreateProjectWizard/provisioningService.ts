@@ -293,12 +293,29 @@ const REASON_STATES: Readonly<
     retryable: true,
   },
   // Task 150: marking the project secure is the server's FIRST write, and it could not be set (or did not read back).
-  // Nothing else changed; the server tells the same caller they may call again. DRAFT copy — owner decision F6: the
-  // agent drafts, the owner picks before merge (options in notes/task-150-issecure-lock.md §6).
+  // Nothing else changed; the server tells the same caller they may call again. Copy: owner round 10 item 9 (F6 row 3,
+  // option A — notes/task-150-issecure-lock.md §6).
   'sdap.provision.secure_flag_not_set': {
     failureKind: 'not-started',
     errorMessage:
       'The project could not be marked secure, so securing it stopped before anything else changed: its ownership, sharing and document storage are as they were.',
+    retryable: true,
+  },
+  // Task 150 (owner round 10 item 10): a record NOT yet marked secure is secured through this call only by the person
+  // who created it, and the caller is not that person. Refused before any change; deterministic for that caller. The
+  // two wizards secure only a record their user has just created, so neither reaches this in normal use.
+  'sdap.provision.not_record_creator': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Securing the project did not start: a project that is not secure yet can be secured this way only by the person who created it. Nothing about the project changed.',
+    retryable: false,
+  },
+  // Task 150 (owner round 10 item 10): whether the caller created the record could not be checked (a read failed).
+  // Refused before any change; the server tells the same caller they may call again.
+  'sdap.provision.record_creator_unverifiable': {
+    failureKind: 'not-started',
+    errorMessage:
+      'Securing the project did not start, because who created it could not be checked. Nothing about the project changed.',
     retryable: true,
   },
   'sdap.provision.creator_share_failed': {
@@ -439,14 +456,14 @@ export function classifyProvisioningFailure(
 } {
   if (reasonCode != null && ENVIRONMENT_REASON_CODES.has(reasonCode)) {
     // Task 150: on a FIRST call every environment refusal comes before the server marks the project secure, so it was
-    // created, is not secured, and nothing about it changed. On a RESUME (a retry after a partial run), or for a row an
-    // older client flagged, the project is already flagged — and on a resume already owned by the secure team — so this
-    // copy overstates "not secured". The response does not say which case applies. DRAFT copy — owner decision F6
-    // (options, including a resume-neutral one, in notes/task-150-issecure-lock.md §6).
+    // created and is not secured. On a RESUME (a retry after a partial run), or for a row an older client flagged, the
+    // project is already flagged — and on a resume already owned by the secure team. The response does not say which
+    // case applies, so the copy claims neither: owner round 10 item 9 chose the resume-neutral option D for this row
+    // (F6 row 2, notes/task-150-issecure-lock.md §6).
     return {
       failureKind: 'environment-not-configured',
       errorMessage:
-        'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created but not secured, and nothing about it changed; an administrator can secure it once the setup is fixed.',
+        'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created, but securing it could not be finished; an administrator can finish securing it once the setup is fixed.',
       retryable: false,
     };
   }
@@ -490,8 +507,8 @@ export function classifyProvisioningFailure(
  * shared storage that cannot be taken back. `items` are short noun phrases in the order the host skipped them
  * ("the files you attached", "the event"); `undefined` when nothing was held back.
  *
- * DRAFT copy — owner decision F6: the agent drafts options, the owner picks before merge
- * (notes/task-150-issecure-lock.md §6). Never advises trying again (the retry is the host's action).
+ * Copy: owner round 10 item 9 (F6 row 1, option A — notes/task-150-issecure-lock.md §6). Never advises trying again
+ * (the retry is the host's action).
  */
 export function describeHeldBackForSecure(items: readonly string[]): string | undefined {
   if (items.length === 0) return undefined;

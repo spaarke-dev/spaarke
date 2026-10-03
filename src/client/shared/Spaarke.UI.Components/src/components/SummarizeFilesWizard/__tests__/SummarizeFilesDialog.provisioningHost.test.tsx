@@ -17,7 +17,13 @@ import type { IWizardShellProps, IWizardSuccessConfig } from '../../Wizard/wizar
 import type { IFollowOnGridProps } from '../../WizardFollowOns';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { SummarizeFilesDialog } from '../SummarizeFilesDialog';
-import { classifyProvisioningFailure } from '../../CreateProjectWizard/provisioningService';
+import { classifyProvisioningFailure, provisionSecureProject } from '../../CreateProjectWizard/provisioningService';
+
+// Provisioning runs for real; the one test of the dialog's never-expected THROW (F6 row 5) overrides it once.
+jest.mock('../../CreateProjectWizard/provisioningService', () => {
+  const actual = jest.requireActual('../../CreateProjectWizard/provisioningService');
+  return { ...actual, provisionSecureProject: jest.fn(actual.provisionSecureProject) };
+});
 
 // The shell renders only the Next Steps step and hands over its props (`onFinish` included).
 const mockShell: { props?: IWizardShellProps } = {};
@@ -109,15 +115,18 @@ const ok = {
   }),
 } as unknown as Response;
 
-/** Opens the dialog, picks Create Project (Secure on), finishes, and renders the success screen it returns. */
-async function finishWithProvisioningFailure(authFetch: jest.Mock): Promise<IWizardSuccessConfig> {
+/**
+ * Opens the dialog, picks Create Project (Secure on), finishes, and renders the success screen it returns. With
+ * `noBff` the dialog has no BFF base URL, so it has no service to ask.
+ */
+async function finishWithProvisioningFailure(authFetch: jest.Mock, noBff = false): Promise<IWizardSuccessConfig> {
   renderWithProviders(
     <SummarizeFilesDialog
       open
       onClose={jest.fn()}
       dataService={{} as IDataService}
       authenticatedFetch={authFetch as never}
-      bffBaseUrl={BFF}
+      bffBaseUrl={noBff ? undefined : BFF}
     />
   );
 
@@ -175,5 +184,26 @@ describe('SummarizeFilesDialog — routes a provisioning failure to the right de
     expect((success.warnings ?? []).some(w => w.includes(message))).toBe(true);
     expect(screen.queryByRole('button', { name: 'Try securing again' })).not.toBeInTheDocument();
     expect(screen.queryByText(/try securing it again/i)).not.toBeInTheDocument();
+  });
+
+  // Task 150, owner round 10 item 9 (F6): the copy the owner picked for this host's two own messages, verbatim.
+  it('with no BFF to ask, says the project was created but not secured (F6 row 4, option A)', async () => {
+    const authFetch = jest.fn();
+    const success = await finishWithProvisioningFailure(authFetch, true);
+
+    expect(authFetch).not.toHaveBeenCalled();
+    expect(success.warnings).toContain(
+      'The project was created but not secured, because securing it needs a connection to the Spaarke service that this dialog does not have. An administrator can secure it.'
+    );
+  });
+
+  it('when securing throws unexpectedly, says it did not finish and names the error (F6 row 5, option A)', async () => {
+    (provisionSecureProject as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+
+    const success = await finishWithProvisioningFailure(jest.fn());
+
+    expect(success.warnings).toContain(
+      'Securing the project did not finish (boom). The project was created; an administrator can check how far securing it got and finish it.'
+    );
   });
 });

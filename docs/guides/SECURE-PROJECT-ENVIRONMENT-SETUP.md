@@ -610,7 +610,8 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 
 ## 7c. Locking `sprk_issecure` — field-level security (task 150, owner round 2 item 2)
 
-`sprk_issecure` on `sprk_project`, `sprk_matter` and `sprk_workassignment` is **field-secured**: only the BFF, inside
+`sprk_issecure` on `sprk_project`, `sprk_matter` and `sprk_workassignment` (and `sprk_invoice` — below) is
+**field-secured**: only the BFF, inside
 the secure (`/provision-project`) and unsecure (`/unsecure-project`) endpoints, sets or clears it. A user with Write can
 no longer clear it on a secure record (which would bypass the unsecure endpoint's ownership move and share sweep and
 route new content to shared storage) or set it on a record that was never provisioned.
@@ -628,8 +629,17 @@ Access Permission pill) map empty to "not secure". So every user must keep Read:
 Who may remove the designation (owner round 3b, **F3**): the unsecure endpoint admits only a **Full Access holder**
 (Write + Delete on the record, as Dataverse reports the caller's rights — an administrator qualifies through their role)
 or **the record's creator** (`createdby`, or `sprk_createdbyperson` for an app-created row). Any other Write holder gets
-403 `sdap.unsecure.not_permitted`. Securing stays open to Write holders. `sprk_accesspermission` is NOT field-secured
-(owner-accepted).
+403 `sdap.unsecure.not_permitted`. Securing stays open to Write holders — for a record already marked secure (an older
+client, a pre-task-150 row). A record NOT yet marked secure is secured through `/provision-project` only by **its
+creator** (owner round 10 item 10: `createdby` when a person, else `sprk_createdbyperson`); anyone else gets 403
+`sdap.provision.not_record_creator` before any write. Securing an existing record someone else created belongs to task
+148's transition. `sprk_accesspermission` is NOT field-secured (owner-accepted).
+
+**`sprk_invoice` carries the column too, and is locked the same way** (owner round 10 item 11: invoices follow their
+matter). Its value is **not a security input** anywhere in the BFF: the securable-entity registry leaves the invoice out
+(`SecurableEntityRegistry.FlagIsNotASecurityInput`), so an invoice is secure exactly when the matter or project it is filed
+under is, decided by the ancestor walk. Nothing writes it; the lock (same profiles, same script, same window) only stops a
+user setting a value that looks meaningful. Its NULL rows are part of step 0.
 
 **Order — every step dry-run first, then `-Apply`, then `-Verify` (each must exit 0):**
 
