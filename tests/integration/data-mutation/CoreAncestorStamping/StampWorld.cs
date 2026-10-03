@@ -94,6 +94,20 @@ internal sealed class StampWorld
                     : throw NotFound(key.Item1);
             });
 
+        // A create stores the row as sent (a fresh id unless the entity carries one) — task 156, owner round 8 item 2: a
+        // TaskActionCore create lands here, so the job then reads exactly what that writer wrote.
+        Service.CreateAsync(Arg.Any<Entity>(), Arg.Any<CancellationToken>())
+            .Returns(call =>
+            {
+                var sent = call.ArgAt<Entity>(0);
+                var id = sent.Id != Guid.Empty ? sent.Id : Guid.NewGuid();
+                var row = new Entity(sent.LogicalName, id);
+                foreach (var attribute in sent.Attributes) row[attribute.Key] = attribute.Value;
+                _rows[(sent.LogicalName, id)] = row;
+                Created.Add(Clone(row));
+                return Task.FromResult(id);
+            });
+
         Service.UpdateAsync(Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<Dictionary<string, object>>(), Arg.Any<CancellationToken>())
             .Returns(call =>
             {
@@ -169,6 +183,15 @@ internal sealed class StampWorld
 
     public CoreAncestorRestamper Restamper { get; }
 
+    /// <summary>The user-OBO AI update tool's one app-only helper, over <see cref="Restamper"/> (owner round 8 item 1).</summary>
+    public CoreAncestorAfterWriteRestamp AfterWriteRestamp => new(Restamper);
+
+    /// <summary>Every row created through <see cref="IGenericEntityService.CreateAsync"/>, as it was stored.</summary>
+    public List<Entity> Created { get; } = [];
+
+    /// <summary>The row stored under <paramref name="entity"/> <paramref name="id"/> (a copy).</summary>
+    public Entity RowOf(string entity, Guid id) => Clone(_rows[(entity, id)]);
+
     /// <summary>A restamper over this world with smaller paging bounds, so the per-intermediate bound is reachable.</summary>
     public CoreAncestorRestamper RestamperWith(int childPageSize, int childrenPerSourceBound) =>
         new(Service, Resolver, NullLogger<CoreAncestorRestamper>.Instance)
@@ -200,6 +223,13 @@ internal sealed class StampWorld
         return this;
     }
 
+    /// <summary>Set a plain (non-lookup) column on an existing row — e.g. the primary name a regarding pair copies.</summary>
+    public StampWorld Set(string entity, Guid id, string column, object value)
+    {
+        _rows[(entity, id)][column] = value;
+        return this;
+    }
+
     /// <summary>A <c>sprk_recordtype_ref</c> row naming <paramref name="logicalName"/>.</summary>
     public StampWorld RecordType(Guid id, string logicalName)
     {
@@ -217,6 +247,7 @@ internal sealed class StampWorld
         _scanFaults.Clear();
         Patches.Clear();
         FetchXml.Clear();
+        Created.Clear();
     }
 
     /// <summary>

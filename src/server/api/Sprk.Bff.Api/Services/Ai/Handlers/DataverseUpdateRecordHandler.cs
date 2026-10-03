@@ -30,23 +30,25 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// task 031) gates by that declared class — NO gating/confirmation logic lives here.
 /// </para>
 /// <para>
-/// <b>User-OBO ONLY (spec MUST rule)</b>: executes through <see cref="IDataverseUserClient"/>
+/// <b>User-OBO (spec MUST rule)</b>: the caller's update executes through <see cref="IDataverseUserClient"/>
 /// under the calling user's exchanged token; privilege-denied updates surface the user's own
-/// access error. No dependency of this class is an app-only Dataverse client (task-012 audit). Since task 156 that holds
-/// by ENCAPSULATION, not by construction: <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue"/>
-/// exposes only its enqueue methods, but it keeps the root <see cref="IServiceProvider"/> privately (to resolve
-/// <c>JobSubmissionService</c> lazily), and an app-only client could be resolved from that provider. Whether to accept
-/// this (section 6.5 path A, optionally made true by construction by narrowing the queue's dependency) or to allow a
-/// narrow write-only facade (path B) is the owner's open decision (unified-access-control-r2 task 156 note).
+/// access error. That is unchanged: no step of the caller's own write runs app-only.
 /// </para>
 /// <para>
-/// <b>Core-ancestor re-stamp (unified-access-control-r2 task 156)</b>: an update can change what a to-do / event /
-/// communication / analysis is filed under, or the matter / project of a record others are filed under, which leaves
-/// copies of that root stale. The re-stamp is a SERVER-owned invariant written app-only, so this class does not run it:
-/// running it here would mean calling an app-only writer from the user-OBO tool. It is ENQUEUED
-/// (<see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue"/>, ADR-004) and runs as the BFF's background job
-/// seconds later; the storage resolver refuses a stale copy in that window (<c>container_ancestor_stale</c>) and the
-/// reconciliation job is the backstop.
+/// <b>The "User-OBO ONLY" rule is AMENDED for ONE helper — owner decisions round 8 item 1 (2026-10-03), CLAUDE.md §6.5
+/// path B</b> (unified-access-control-r2 task 156; the same reasoning as round 7 item 3, which amended the rule for the
+/// two AI CREATE tools). An update can change what a to-do / event / communication / analysis is filed under, or the
+/// matter / project of a record others are filed under, which leaves copies of that root stale. The core-ancestor
+/// re-stamp is a SERVER-owned invariant written app-only (ADR-002 WP-1), and task 156 AC1 requires it IN THE SAME
+/// OPERATION as the re-file. So, once the caller's PATCH has succeeded, this class calls
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp"/> inline. That helper is its ONLY app-only
+/// dependency, and it is narrow by construction: its ONE member re-stamps the copies the write just moved and writes
+/// only stamp columns, with values derived from the data (never a value from the caller). It exposes no Dataverse
+/// client and holds no <see cref="IServiceProvider"/>, so nothing can be resolved through it; the app-only client the
+/// re-stamp writes with stays private to <c>CoreAncestorRestamper</c>. The queued path this tool used before
+/// (an enqueue onto <c>CoreAncestorRestampQueue</c>, run by the background job seconds later) is removed; the queue stays
+/// for the storage resolver's stale refusals. Record: the task 156 note (owner round 8 section) and the task 156 POML
+/// execution block.
 /// </para>
 /// <para>
 /// <b>ADR-015 / NFR-07</b>: telemetry carries table logical name, record id, column COUNT,
@@ -61,16 +63,18 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     private static partial Regex LogicalNameRegex();
 
     private readonly IDataverseUserClient _dataverse;
-    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue _restampQueue;
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp _restamp;
     private readonly ILogger<DataverseUpdateRecordHandler> _logger;
 
     public DataverseUpdateRecordHandler(
         IDataverseUserClient dataverse,
-        Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue restampQueue,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorAfterWriteRestamp restamp,
         ILogger<DataverseUpdateRecordHandler> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
-        _restampQueue = restampQueue ?? throw new ArgumentNullException(nameof(restampQueue));
+        // Owner round 8 item 1: unconditionally registered beside the restamper (AddCoreAncestorResolver, which
+        // AddToolFramework also calls), so this handler's registration gains no asymmetric dependency (§10 F.1).
+        _restamp = restamp ?? throw new ArgumentNullException(nameof(restamp));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -191,13 +195,19 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, response, startedAt), stopwatch);
             }
 
-            // Task 156: a write that moved what a record is filed under, or its root, enqueues the re-stamp of the copies
-            // that depend on it (see the class remarks). Best effort and never thrown; the user's update stands.
-            if (Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.WriteCanMoveAStamp(tablename, mapped.Item!.Columns))
+            // Task 156, owner round 8 item 1 (§6.5 path B — see the class remarks): the copies this write moved are
+            // re-stamped NOW, in the same operation, after the caller's own update succeeded. A write that can move no
+            // stamp reads nothing. Never thrown: a child that fails is logged and the reconciliation job repairs it; the
+            // caller's update stands either way.
+            var restamp = await _restamp
+                .AfterWriteAsync(tablename, recordId, mapped.Item!.Columns)
+                .ConfigureAwait(false);
+            if (!restamp.Complete)
             {
-                await _restampQueue
-                    .EnqueueAfterWriteAsync(tablename, recordId, mapped.Item.Columns, CancellationToken.None)
-                    .ConfigureAwait(false);
+                _logger.LogWarning(
+                    "[dataverse.update_record] the core-ancestor re-stamp after the update of {Entity} {RecordId} did not finish "
+                    + "(failures={Failures} truncated={Truncated}); the reconciliation job completes it within one cycle",
+                    tablename, recordId, restamp.Failures.Count, restamp.Truncated);
             }
 
             var result = ToolResult.Ok(

@@ -43,20 +43,15 @@ public sealed class CoreAncestorRestampJobHandler : IJobHandler
                 TimeProvider.System.GetElapsedTime(started));
         }
 
-        var afterWrite = payload?.WrittenColumns is { Count: > 0 };
         if (payload is null || payload.Id == Guid.Empty || string.IsNullOrWhiteSpace(payload.Entity)
-            || (afterWrite
-                ? !CoreAncestorRestamper.WriteCanMoveAStamp(payload.Entity, payload.WrittenColumns!)
-                : !CoreAncestorResolver.IsStampedChildEntity(payload.Entity)))
+            || !CoreAncestorResolver.IsStampedChildEntity(payload.Entity))
         {
             return JobOutcome.Poisoned(job.JobId, JobType,
-                "CoreAncestorRestamp payload names no record whose stamp, or whose children's stamps, can move.",
+                "CoreAncestorRestamp payload names no record whose stamp can move.",
                 job.Attempt, TimeProvider.System.GetElapsedTime(started));
         }
 
-        var report = afterWrite
-            ? await _restamper.AfterWriteAsync(payload.Entity, payload.Id, payload.WrittenColumns!, ct).ConfigureAwait(false)
-            : await _restamper.RestampChildAsync(payload.Entity, payload.Id, ct).ConfigureAwait(false);
+        var report = await _restamper.RestampChildAsync(payload.Entity, payload.Id, ct).ConfigureAwait(false);
         var elapsed = TimeProvider.System.GetElapsedTime(started);
 
         if (report.Complete)

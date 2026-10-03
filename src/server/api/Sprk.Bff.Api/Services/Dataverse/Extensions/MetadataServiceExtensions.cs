@@ -93,6 +93,12 @@ public static class MetadataServiceExtensions
         services.TryAddSingleton<CoreAncestorRestamper>();
         services.TryAddSingleton<CoreAncestorRestampQueue>();
 
+        // Task 156, owner round 8 item 1 (§6.5 path B): the ONE app-only step the user-OBO AI update tool may take — the
+        // after-write re-stamp, inline (DataverseUpdateRecordHandler). Here, beside the restamper, because AddToolFramework
+        // (which registers that handler by assembly scan) calls this method too: no composition has the handler without it
+        // (§10 F.1). Unconditional (ADR-032).
+        services.TryAddSingleton<CoreAncestorAfterWriteRestamp>();
+
         return services;
     }
 

@@ -20,19 +20,9 @@ internal sealed class RecordingRestampQueue : CoreAncestorRestampQueue
     /// <summary>Each child the resolver enqueued for repair (entity, id).</summary>
     public List<(string Entity, Guid Id)> Children { get; } = [];
 
-    /// <summary>Each after-write cascade a user-OBO-only caller enqueued (entity, id, written columns).</summary>
-    public List<(string Entity, Guid Id, IReadOnlyList<string> Columns)> AfterWrites { get; } = [];
-
     public override Task<bool> EnqueueAsync(string childEntity, Guid childId, CancellationToken ct = default)
     {
         Children.Add((childEntity, childId));
-        return Task.FromResult(true);
-    }
-
-    public override Task<bool> EnqueueAfterWriteAsync(
-        string entity, Guid id, IReadOnlyList<string> writtenColumns, CancellationToken ct = default)
-    {
-        AfterWrites.Add((entity, id, writtenColumns));
         return Task.FromResult(true);
     }
 }

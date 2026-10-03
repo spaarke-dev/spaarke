@@ -140,7 +140,7 @@ public sealed class DataverseToolNameFreezeTests
         // GA: update_record(tablename, recordId, item) — all required.
         var handler = new DataverseUpdateRecordHandler(
             new Moq.Mock<IDataverseUserClient>().Object,
-            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordingRestampQueue(),
+            new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance);
 
         var parameters = handler.Metadata.Parameters;
@@ -174,7 +174,7 @@ public sealed class DataverseToolNameFreezeTests
         IToolHandler[] handlers =
         {
             new DataverseCreateRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseCreateRecordHandler>.Instance, new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com")),
-            new DataverseUpdateRecordHandler(mock, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordingRestampQueue(), Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance),
+            new DataverseUpdateRecordHandler(mock, new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseUpdateRecordHandler>.Instance),
             new DataverseDeleteRecordHandler(mock, Microsoft.Extensions.Logging.Abstractions.NullLogger<DataverseDeleteRecordHandler>.Instance)
         };
 

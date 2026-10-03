@@ -18,8 +18,11 @@ namespace Sprk.Bff.Api.Services.Dataverse;
 /// owns this queue is constructed on every upload, and must not fail to construct where Service Bus is not configured
 /// (the refusal must still happen there).</para>
 /// <para>Duplicate refusals for one child within the same minute collapse to one message (the idempotency key is the
-/// Service Bus MessageId); a later refusal enqueues again. An after-write cascade is never collapsed: each write is its
-/// own message.</para>
+/// Service Bus MessageId); a later refusal enqueues again.</para>
+/// <para><b>Stale refusals only.</b> Until owner decisions round 8 item 1 the user-OBO AI update tool also enqueued its
+/// after-write cascade here. It now re-stamps inline through <see cref="CoreAncestorAfterWriteRestamp"/> (§6.5 path B), so
+/// that message type, its payload field and its job branch are gone: every BFF re-file path re-stamps in the same
+/// operation, and this queue carries only the resolver's stale children.</para>
 /// </remarks>
 public class CoreAncestorRestampQueue
 {
@@ -42,31 +45,15 @@ public class CoreAncestorRestampQueue
     public virtual Task<bool> EnqueueAsync(string childEntity, Guid childId, CancellationToken ct = default)
         => SubmitAsync(new CoreAncestorRestampPayload(childEntity, childId), "its copy disagreed with its intermediate's live root", ct);
 
-    /// <summary>
-    /// Enqueue the cascade for a write that a USER-OBO-only caller made (task 156): the job runs
-    /// <see cref="CoreAncestorRestamper.AfterWriteAsync"/> for <paramref name="writtenColumns"/> on
-    /// <paramref name="entity"/> <paramref name="id"/>. For a caller bound to hold no app-only Dataverse client
-    /// (<c>DataverseUpdateRecordHandler</c>): the re-stamp — a server-owned invariant — runs as the BFF's background job,
-    /// seconds later, and the storage resolver refuses a stale copy in that window.
-    /// </summary>
-    public virtual Task<bool> EnqueueAfterWriteAsync(
-        string entity, Guid id, IReadOnlyList<string> writtenColumns, CancellationToken ct = default)
-        => SubmitAsync(new CoreAncestorRestampPayload(entity, id, writtenColumns), "a write moved what it is filed under or its root", ct);
-
     private async Task<bool> SubmitAsync(CoreAncestorRestampPayload payload, string reason, CancellationToken ct)
     {
         var (childEntity, childId) = (payload.Entity, payload.Id);
         try
         {
             var submitter = _services.GetRequiredService<JobSubmissionService>();
-            var afterWrite = payload.WrittenColumns is { Count: > 0 };
 
-            // A stale refusal is retried by its user, so repeats within a minute collapse to one message. An after-write
-            // cascade is one per WRITE: two re-files of one record in the same minute are two cascades, and collapsing
-            // the second would leave its children on the first one's root until the reconciliation job.
-            var discriminator = afterWrite
-                ? Guid.NewGuid().ToString("N")
-                : _timeProvider.GetUtcNow().ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
+            // A stale refusal is retried by its user, so repeats within a minute collapse to one message.
+            var discriminator = _timeProvider.GetUtcNow().ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
 
             await submitter.SubmitJobAsync(
                 new JobContract
@@ -74,8 +61,7 @@ public class CoreAncestorRestampQueue
                     JobType = CoreAncestorRestampJobHandler.JobTypeName,
                     SubjectId = $"{childEntity}:{childId:D}",
                     CorrelationId = Guid.NewGuid().ToString("D"),
-                    IdempotencyKey =
-                        $"core-ancestor-restamp:{(afterWrite ? "after-write" : "child")}:{childEntity}:{childId:N}:{discriminator}",
+                    IdempotencyKey = $"core-ancestor-restamp:child:{childEntity}:{childId:N}:{discriminator}",
                     Payload = JsonSerializer.SerializeToDocument(payload),
                 },
                 ct).ConfigureAwait(false);
@@ -96,7 +82,6 @@ public class CoreAncestorRestampQueue
 }
 
 /// <summary>
-/// The <c>CoreAncestorRestamp</c> job payload: the record to repair — and, for a cascade enqueued after a write, the columns
-/// that write set (<see langword="null"/> = repair the record itself from its source's current root).
+/// The <c>CoreAncestorRestamp</c> job payload: the stale record to repair from its source's current root.
 /// </summary>
-public sealed record CoreAncestorRestampPayload(string Entity, Guid Id, IReadOnlyList<string>? WrittenColumns = null);
+public sealed record CoreAncestorRestampPayload(string Entity, Guid Id);

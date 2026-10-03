@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using NSubstitute;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -494,6 +495,88 @@ public class CoreAncestorStampReconciliationJobTests
         world.PatchesTo("sprk_todo", onlyDifferenceTodo).Should().BeEmpty();
         world.PatchesTo("sprk_todo", Todo).Should().ContainSingle().Which.Fields.Keys.Should().BeEquivalentTo(["sprk_regardingmatter"]);
         world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterB);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Owner decisions round 8 item 2 (F-051-6): TaskActionCore writes the ADR-024 regarding pair, so a form clear of a task
+    // it created is found by the job. Before, it wrote the typed lookup alone and the cleared copy was undetectable.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The task create seam (the AI / communication "create task" follow-ups) writing into this world: the real
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore"/> over the world's rows and resolver; the record-type
+    /// lookup answers <paramref name="recordTypes"/> (logical name → <c>sprk_recordtype_ref</c> id) and nothing else.
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore TaskCore(
+        StampWorld world, IReadOnlyDictionary<string, Guid>? recordTypes = null)
+    {
+        var lookup = NSubstitute.Substitute.For<ICommunicationDataverseService>();
+        lookup.QueryRecordTypeRefAsync(NSubstitute.Arg.Any<string>(), NSubstitute.Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult<Microsoft.Xrm.Sdk.Entity?>(
+                recordTypes is not null && recordTypes.TryGetValue(call.ArgAt<string>(0), out var refId)
+                    ? new Microsoft.Xrm.Sdk.Entity("sprk_recordtype_ref", refId) { ["sprk_recorddisplayname"] = call.ArgAt<string>(0) }
+                    : null));
+
+        return new Sprk.Bff.Api.Services.Ai.Nodes.TaskActionCore(
+            world.Service,
+            world.Resolver,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            lookup,
+            NullLogger.Instance);
+    }
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2, F-051-6): a task TaskActionCore created under a COMMUNICATION, whose communication a form later clears, is found by its untyped pair and its orphaned copy cleared")]
+    public async Task TaskActionCoreTask_UnderACommunication_FormClear_IsFoundAndClearedByTheJob()
+    {
+        // Live 2026-10-02 (read-only): sprk_recordtype_ref has no row for sprk_communication, so the pair is untyped.
+        var world = new StampWorld()
+            .RecordType(MatterTypeRef, "sprk_matter")
+            .Row("sprk_matter", MatterA, [])
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterA)]);
+
+        var task = await TaskCore(world).CreateAsync(
+            new Sprk.Bff.Api.Services.Ai.Nodes.TaskActionInput("Follow up", null, null, Communication, "sprk_communication", null),
+            CancellationToken.None);
+        task.Should().NotBe(Guid.Empty);
+        world.Lookup("sprk_event", task, "sprk_regardingmatter").Should().Be(MatterA, "the task copies its communication's matter");
+
+        // A native form clears the task's communication: no BFF path runs, and the copy of matter A stays behind.
+        world.OutOfBand("sprk_event", task, "sprk_regardingcommunication", "sprk_communication", null);
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Lookup("sprk_event", task, "sprk_regardingmatter").Should().BeNull(
+            "the task's pair still names the communication, so the job knows the matter was its copy and clears it — the task "
+            + "stops inheriting matter A's access (fail closed). Without the pair the copy reads as a direct link and stays.");
+    }
+
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2, F-051-6): a task TaskActionCore created under an INVOICE carries the TYPED pair (a sprk_recordtype_ref row exists); a later form clear of its invoice is found by the job and the orphaned copy cleared")]
+    public async Task TaskActionCoreTask_UnderAnInvoice_FormClear_IsFoundByTheTypedPair()
+    {
+        var invoice = Guid.Parse("15600000-0000-0000-0000-00000000aa21");
+        var world = new StampWorld()
+            .RecordType(MatterTypeRef, "sprk_matter")
+            .RecordType(InvoiceTypeRef, "sprk_invoice")
+            .Row("sprk_matter", MatterA, [])
+            .Row("sprk_invoice", invoice, [("sprk_matter", "sprk_matter", MatterA)]);
+
+        var task = await TaskCore(world, new Dictionary<string, Guid> { ["sprk_invoice"] = InvoiceTypeRef }).CreateAsync(
+            new Sprk.Bff.Api.Services.Ai.Nodes.TaskActionInput("Chase invoice", null, null, invoice, "sprk_invoice", null),
+            CancellationToken.None);
+        task.Should().NotBe(Guid.Empty);
+        var pairType = world.RowOf("sprk_event", task)
+            .GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(CoreAncestorResolver.RegardingRecordTypeColumn);
+        pairType.Should().NotBeNull("a sprk_recordtype_ref row exists for an invoice, so the pair is typed");
+        pairType!.Id.Should().Be(InvoiceTypeRef);
+
+        world.OutOfBand("sprk_event", task, "sprk_regardinginvoice", "sprk_invoice", null);
+
+        var run = await Job(world).ExecuteAsync(Context(), CancellationToken.None);
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        world.Lookup("sprk_event", task, "sprk_regardingmatter").Should().BeNull(
+            "the typed pair names an invoice the row no longer carries, and the copy equals that invoice's matter");
     }
 
     private static CoreAncestorStampReconciliationJob Job(

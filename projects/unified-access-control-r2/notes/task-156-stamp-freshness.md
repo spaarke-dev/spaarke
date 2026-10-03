@@ -21,9 +21,9 @@ filed under another record (`container_ancestor_unverifiable`). This task replac
 | **The shared topology** | same file | `StampSourceColumns` (the four tables that carry a copy, and the columns that name its source), `PartyRegardingColumns`, and `ClassifyStampSource` — the ONE rule the cascade, the job and the resolver use to decide which record a row's copy comes from (below). |
 | **The cascade** | `Services/Dataverse/CoreAncestorRestamper.cs` (new) | `AfterWriteAsync(entity, id, writtenColumns)`: after a BFF write that changed what a record is filed under (its own source or pair) or its root, re-stamp the record itself and/or every child copying it, transitively (bounded at depth 4; a cycle converges because it recurses only below a copy it just changed), in the same operation. Writes ONLY the stamp columns of the root types the source can carry. A child that fails is reported, never thrown; the caller's own write stands. A write that cannot move a stamp reads nothing (`WriteCanMoveAStamp`). |
 | **The job** | `Services/Dataverse/CoreAncestorStampReconciliationJob.cs` (new) | ADR-036 `IScheduledJob`, every 5 minutes (`*/5 * * * *`), registered with `AddScheduledJob` in `AddDataverseMetadataServices`. Scans each stamped table (FetchXML, paged, bounded — and, since verifier round 1, CONTINUED by the next run when the page bound stops it), classifies every row, and repairs the stale ones through the restamper (which cascades). Also clears copies orphaned by a regarding cleared on a form (F-051-6) — found by the pair's type when it names an intermediate, or by the pair's id when it has no type (communication / agreement); a row written with NO pair cannot be found (verifier round 1 item 5, owner decision below). A failed scan is a FAILED run, never "0 stale". A claim per repair + a completion marker scoped to the run (A1 rule 3; interpretation xix), one heartbeat per attempt (A1 rule 5). Writes on by default; `CoreAncestor:StampReconciliation:WritesEnabled=false` (or an unparseable value) = report-only dry run. |
-| **The enqueue** | `Services/Dataverse/CoreAncestorRestampQueue.cs` + `CoreAncestorRestampJobHandler.cs` (new) | ADR-004 `IJobHandler` (`CoreAncestorRestamp`) on the shared `sdap-jobs` queue (ADR-052: queue work → `IJobHandler`). The resolver enqueues a stale row; the user-OBO AI tool enqueues its after-write cascade. Best effort: a failed enqueue is logged and the job repairs within one cycle. Service Bus is resolved lazily, so composing the resolver never needs Service Bus configuration. |
+| **The enqueue** | `Services/Dataverse/CoreAncestorRestampQueue.cs` + `CoreAncestorRestampJobHandler.cs` (new) | ADR-004 `IJobHandler` (`CoreAncestorRestamp`) on the shared `sdap-jobs` queue (ADR-052: queue work → `IJobHandler`). The resolver enqueues a stale row — since owner round 8 item 1 the ONLY message type (the user-OBO AI update tool re-stamps inline, below). Best effort: a failed enqueue is logged and the job repairs within one cycle. Service Bus is resolved lazily, so composing the resolver never needs Service Bus configuration. |
 | **The live comparison** | `Infrastructure/Dataverse/RecordContainerResolver.cs` | Task 155's held branch is replaced (next section). New reason code **`container_ancestor_stale`** (409). New links entries for analysis, document, agreement, budget and report card (swept live, below). |
-| **Wiring** | the BFF paths in the inventory | Each calls `AfterWriteAsync` (or enqueues it) after its own write succeeded. |
+| **Wiring** | the BFF paths in the inventory | Each calls `AfterWriteAsync` after its own write succeeded — the user-OBO AI update tool through the narrow `CoreAncestorAfterWriteRestamp` (owner round 8 item 1, §6.5 path B). |
 
 ## The rule: which record a row's copy comes from (`ClassifyStampSource`)
 
@@ -36,8 +36,9 @@ with the typed lookup.
 3. The pair names a source column set on the row → **that record is the source**. Other source columns are carriers.
 4. The pair names nothing the row carries (or is not a GUID) → **inconsistent**: nothing is written; the resolver refuses
    (pair rule 4, ambiguous).
-5. No pair (or a pair naming the row's own typed party): one source column → it is the source (`TaskActionCore` and an
-   Ambiguous inbound association write no pair); two or more → **ambiguous**: nothing is written; the resolver refuses.
+5. No pair (or a pair naming the row's own typed party): one source column → it is the source (an Ambiguous inbound
+   association writes no pair, and neither did `TaskActionCore` before owner round 8 item 2); two or more →
+   **ambiguous**: nothing is written; the resolver refuses.
 
 A service request is CORE: a to-do's `sprk_regardingservicerequest` is a root column, not a source, and the resolver still
 HOLDS it (`container_ancestor_unverifiable`) because a service request cannot carry `sprk_issecure`.
@@ -83,7 +84,7 @@ Children exist only for an EXISTING record, so only update paths matter; a creat
 | any (generic) | UpdateRecord playbook node + `ActionSeam` (`UpdateRecordActionCore` → `UpdateRecordFieldsAsync`) | **wired** — resolves the restamper from its scope only when `WriteCanMoveAStamp` | `Services/Ai/Nodes/ActionCore/UpdateRecordActionCore.cs` |
 | any (generic) | playbook output orchestrator (`DataverseUpdateHandler`, both concurrency branches) | **wired** | `Services/Dataverse/DataverseUpdateHandler.cs` |
 | any (generic) | field-mapping push (`POST /api/v1/field-mappings/push`) — a rule can write a lookup on each child | **wired** per child | `Api/FieldMappings/FieldMappingEndpoints.cs` `ApplyMappingsToChildRecordsAsync` |
-| any (generic) | AI tool `dataverse.update_record` (`DataverseUpdateRecordHandler`, user-OBO) | **enqueued** (`CoreAncestorRestampQueue.EnqueueAfterWriteAsync`) — see "Decisions" | `Services/Ai/Handlers/DataverseUpdateRecordHandler.cs` |
+| any (generic) | AI tool `dataverse.update_record` (`DataverseUpdateRecordHandler`, user-OBO) | **wired inline** (owner round 8 item 1, §6.5 path B) — `CoreAncestorAfterWriteRestamp.AfterWriteAsync` after the caller's own user-OBO PATCH succeeded; was enqueued until then (interpretation xvii, superseded) | `Services/Ai/Handlers/DataverseUpdateRecordHandler.cs` |
 | sprk_communication | `IncomingAssociationResolver.ApplyDecisionAsync` | **create-time only — no cascade**: both callers run it on a communication created in the same operation (`IncomingCommunicationProcessor` step 4.5 after `CreateCommunicationRaceProofAsync`; `EmailUploadCaptureService` only when `wasDuplicate` is false), so no child can exist. Its stamp now also derives budget / report card targets (`IsStampSourceEntity`). | `Services/Communication/IncomingCommunicationProcessor.cs` ~345; `EmailUploadCaptureService.cs` ~85-105 |
 | sprk_communication | `POST /api/communications/{id}/suggest-associations` | read-only preview (`EvaluateAsync`) | `Api/CommunicationEndpoints.cs` |
 | sprk_communication | enrichment / triage (`CommunicationEnrichmentService` :601, :1662), delivery merge, cross-path link | no root column written (triage fields, owner, mailbox list, `sprk_relatedcommunication` on a document) | the three files |
@@ -160,7 +161,8 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
 - **(xv) An inconsistent pair is never written from** — the job skips it, the resolver refuses it (ambiguous).
 - **(xvi) F-051-6 orphans are cleared only when the copy still equals the cleared record's current root.** A copy that does
   not match may be a direct choice made after the clear, so it is left alone and the resolver refuses the row (pair rule 4).
-- **(xvii) The user-OBO AI update tool enqueues its cascade** instead of running it: `DataverseUpdateRecordHandler` is bound
+- **(xvii) — SUPERSEDED by owner round 8 item 1 (§6.5 path B; section "Owner round 8" below): the tool now re-stamps
+  inline.** As shipped until then: **the user-OBO AI update tool enqueues its cascade** instead of running it: `DataverseUpdateRecordHandler` is bound
   by its own MUST rule ("no app-only client is reachable from this class"), and the re-stamp is an app-only, server-owned
   write. The enqueue holds no Dataverse client; the job runs seconds later and the resolver refuses a stale copy meanwhile.
   This is the one inventory path not re-stamped "in the same operation" — flagged in the task result for the owner.
@@ -174,7 +176,8 @@ re-stamped (a work assignment's matter is its own filing — task 155 interpreta
   the claim is not. Found in the Step 9.5 review: keyed by row and value alone, a row put back out of band within 30
   minutes of a repair to the same value was reported `alreadyApplied` and left stale until the marker expired — which is
   exactly the manual live gate's second step. A retry of the same run still does not re-apply; the next run repairs.
-- **(xx) An after-write cascade enqueued by the AI update tool is never de-duplicated** (one message per write). A stale
+- **(xx) — moot since owner round 8 item 1: the tool no longer enqueues, and the after-write message type is gone.**
+  As shipped until then: **an after-write cascade enqueued by the AI update tool is never de-duplicated** (one message per write). A stale
   refusal still collapses per child per minute (a user retrying an upload is one repair).
 - **(xxi) The document's links ARE the shared vocabulary** (`Spaarke.Dataverse.DocumentLinkFields`). Found at Step 9.5 by
   the ArchTests `DocumentLinkVocabularyGuardTests`: the first cut hard-coded the document's link columns in
@@ -254,6 +257,8 @@ unwired BFF path). Its findings, and what this round did with each:
   the server's invariant (WP-1), children the user cannot write would stay stale, and a partial OBO cascade is harder to
   reason about than a complete deferred one.
 - **Owner action:** accept A (AC1 is then met by documented exception) or choose B.
+- **RESOLVED — owner round 8 item 1 (2026-10-03): path B.** Implemented in the "Owner round 8" section below; AC1 is
+  met with no exception.
 - **Correction (verifier round 3, item 4).** Path A's premise is weaker than stated above. The handler already holds
   `CoreAncestorRestampQueue`, and the queue holds the root `IServiceProvider` (it resolves `JobSubmissionService` lazily). An
   app-only `IGenericEntityService` can be resolved from that provider, so "no app-only client is reachable from this class"
@@ -281,6 +286,8 @@ unwired BFF path). Its findings, and what this round did with each:
   regarding builder — new rows become detectable; nothing to backfill live. (2) Accept the residual and document it.
   (3) Let the job write the pair id on rule-5 rows it re-stamps — rejected here: the constraint says re-stamping writes ONLY
   stamp columns.
+- **RESOLVED — owner round 8 item 2 (2026-10-03): option (1).** `TaskActionCore` writes the pair (section "Owner
+  round 8" below). New rows only; nothing is backfilled.
 - **Recommendation:** (1). Not done in this round: it changes another writer's data contract (a UI-visible regarding on
   every RI follow-up task), outside the verifier's items.
 
@@ -406,6 +413,10 @@ way `CoreAncestorResolverTests.Taxonomy_MatchesTheTypeScriptSide` parses the tax
      communication and analysis forms. Choosing a root then goes through the RegardingResolver, which writes the pair and
      makes a direct link the restamper never touches. This is a form change (not BFF code). Which forms expose the
      columns has to be checked first.
+- **RESOLVED — owner round 8 item 3 (2026-10-03): options 1 + 3.** The rule as shipped is CONFIRMED (the pair decides; a
+  root column on a filed row is a copy; option (b) stays whole in both directions) — no code change in task 156. The
+  column lock (option 3: the four `sprk_regarding{core}` columns read-only on the to-do, event, communication and analysis
+  forms, after checking which forms expose them) is **task 168**, not task 156.
 - **Recommendation: 1 + 3.** (b) stays whole, misfiled email can be moved out of a secure matter with its follow-ups, and
   the only input that produces the risky shape is closed. Option 2 is the alternative if the owner prefers the server to
   refuse whatever the forms allow.
@@ -584,17 +595,167 @@ On the merged tree (`e59c74033` plus the remark change):
   the merge brought integration tests only.
 - NetArchTest: **345 / 345**.
 
+## Owner round 8 (2026-10-03, branch `task/uac-r2-156-c1`)
+
+The owner answered task 156's three open decisions (owner decisions note on `work/unified-access-control-r2`, round 8;
+each "(Recommended)" option chosen). This round implements items 1 and 2 and records item 3.
+
+**Branch and merge.** `task/uac-r2-156-c1` was created from `task/uac-r2-156-r1-r2b` (`a827ea0dc`), then
+`work/unified-access-control-r2` (`d746422f7`: owner rounds 8-9, the route authorization sweep, task 141's live gates) was
+merged with no conflict. `baseSha` = `02b145cc4`.
+
+### Item 1 — the AI update tool re-stamps INLINE (§6.5 path B). AC1 is met, with no exception.
+
+🔔 **ADR / spec-rule resolution record (CLAUDE.md §6.5 — path B, chosen by the owner).**
+
+- **Rule amended:** `DataverseUpdateRecordHandler`'s "User-OBO ONLY … no app-only client is reachable from this class"
+  (spaarke-ai-architecture-redesign-r1 MUST rule, task-012 audit), **for one helper only**. It is the same reasoning as
+  owner round 7 item 3, which amended the rule for the two AI CREATE tools (task 146).
+- **What runs now:** once the caller's own PATCH has succeeded (still user-OBO, so Dataverse authorizes it), the handler
+  calls `CoreAncestorAfterWriteRestamp.AfterWriteAsync` in the same operation. It re-stamps the record's own copy (when
+  the write changed what it is filed under) and the copies of everything filed under it (when the write changed its
+  root). A child that fails is logged and the tool still answers success, because the caller's update was written; the
+  reconciliation job repairs the child within one cycle. A refused PATCH re-stamps nothing.
+- **The helper** (`Services/Dataverse/CoreAncestorAfterWriteRestamp.cs`, new) is narrow by construction:
+  - one public member, the after-write re-stamp;
+  - it holds only the restamper — no `IServiceProvider`, so nothing can be resolved through it, and no client exposed;
+  - it writes only stamp columns, with values derived from the data (never a value from the caller), so the worst a
+    misuse could do is make a stamp correct;
+  - it takes no cancellation token: an update that landed must not report "cancelled" with its children half
+    re-stamped (the same choice as every other after-write call site).
+- **Removed — the queued path for this handler:** `CoreAncestorRestampQueue.EnqueueAfterWriteAsync`, the payload's
+  `WrittenColumns`, and the job handler's after-write branch. The queue and `CoreAncestorRestampJobHandler` stay, for the
+  storage resolver's stale refusals. Nothing is in flight to strand: task 156 has never been deployed (dev runs
+  `bca0941f6`, batches 1+2).
+- **Concrete class, not a C# interface.** The harness asked for "an interface exposing only the after-write re-stamp".
+  ADR-010 says MUST register concretes and MUST NOT create interfaces without a genuine seam, and there is one
+  implementation. A sealed class whose single public member is that re-stamp exposes exactly the same surface. This is
+  §6.5 path C for that wording (pivot to comply); the owner's own words were "a narrow, write-only re-stamp helper".
+- **Recorded in:** the handler's remarks, this section, and the POML `<execution>` block.
+
+**Not done here, for the merge of task 146 (`task/uac-r2-146-b2-r2`, not merged per the harness):**
+- 146 also edits `DataverseUpdateRecordHandler`: its child re-file assigns the owner through
+  `IRecordOwnershipResolver.ReparentAsync` (146's §6.5 path A, task 146 note §12c). The two edits touch the same
+  constructor, remarks and PATCH block, so they must be merged by hand. Keep 146's `RefileIfFiledAsync`, and call this
+  helper after whichever path wrote the caller's update (`refile.Written` or the plain PATCH).
+- The rule's own text (`projects/spaarke-ai-architecture-redesign-r1/spec.md`, "MUST run user-OBO for all Dataverse tool
+  access", and `notes/user-obo-audit.md`) is **not** edited on this branch. 146 rewrites that same bullet and adds
+  "Amendment A-UAC146", so an edit here is a guaranteed conflict. At 146's merge, add to A-UAC146's "Not user-OBO" list:
+  > **Not user-OBO, owner-approved (round 8 item 1, CLAUDE.md §6.5 path B) — the update tool's core-ancestor re-stamp**
+  > (`dataverse.update_record`, `DataverseUpdateRecordHandler`; unified-access-control-r2 task 156). After the caller's
+  > own PATCH succeeds, `CoreAncestorAfterWriteRestamp.AfterWriteAsync` re-stamps APP-ONLY the `sprk_regarding{core}`
+  > copies that write moved (the record's own and its children's), in the same operation. Narrow by construction: one
+  > member, stamp columns only, values derived from the data. Record: `projects/unified-access-control-r2/notes/task-156-stamp-freshness.md`, "Owner round 8".
+
+### Item 2 — `TaskActionCore` writes the ADR-024 regarding pair (F-051-6)
+
+- **Reuse, not a fork.** The pair-writing half of `TodoRegardingBuilder.ApplyResolverFieldsAsync` (its step 2) is now
+  `TodoRegardingBuilder.ApplyResolverPairAsync(host, …)`. The to-do builder calls it, and `TaskActionCore` calls it for
+  the `sprk_event` task. It writes the id (lowercase "D"), the name (empty when unknown), the relative record url, and the
+  type when a `sprk_recordtype_ref` row exists.
+  - The type comes from `ICommunicationDataverseService.QueryRecordTypeRefAsync`, the lookup every SDK-path builder
+    uses. So `TaskActionCore`, `ActionSeam` and `CreateTaskNodeExecutor` take that interface. It is an existing,
+    unconditional singleton forwarder (`GraphModule`): no new registration and no asymmetric dependency.
+  - The name is the regarding record's primary name, from the shared `RegardingNameFields` map. `sprk_communication` →
+    `sprk_name` was added there (verified live, read-only: `sprk_name` NVARCHAR(850)). It is inert for that map's other
+    two callers, because a communication is never an association candidate (`RegardingFieldMap` does not list it).
+    Report card has no entry, so its name stays empty, which is the builders' convention.
+  - The name is capped at `sprk_event.sprk_regardingrecordname`'s live length, 1000, so an overlong name cannot sink the
+    create (the `InvoiceReviewService` precedent).
+  - The pair is skipped only for a `sprk_recordtype_ref` target, whose typed lookup IS the pair's type column.
+- **Live shape (read-only, spaarkedev1, 2026-10-02/03).** `sprk_event` carries all four pair columns
+  (`sprk_regardingrecordid` 100, `sprk_regardingrecordname` 1000, `sprk_regardingrecordurl` 2000,
+  `sprk_regardingrecordtype` → `sprk_recordtype_ref`). Of the 14 record-type rows, none is for `sprk_communication`, so a
+  task under a communication carries an **untyped** pair. The job's untyped clause finds it by id.
+- **Behaviour.** The classification is unchanged. A task under a root now reads as a direct link (rule 2) instead of
+  "filed under nothing" (rule 1); a task under an intermediate reads as that source (rule 3) instead of rule 5. Both give
+  the same answer. The AI / communication "create task" follow-ups now show the regarding link in the UI.
+- **New rows only; nothing is backfilled.** Live, one older `TaskActionCore` event sits under an intermediate with no
+  pair (`edfef460`, under a communication that names no root), so no copy is orphaned.
+- **For the merge of task 146.** 146 also changes `TaskActionCore`'s constructor (`IRecordOwnershipResolver`) and the same
+  two call sites, which is a mechanical conflict. Its owner resolution `RecordOwnershipContext.ForChild(entity, …)` reads
+  "every parent lookup now on the row". The pair adds `sprk_regardingrecordtype`, an `EntityReference` to
+  `sprk_recordtype_ref`, which is not an ownership parent. Check at the merge that `ForChild` ignores it.
+
+### Item 3 — confirmed as shipped; the column lock is task 168
+
+Owner round 8 item 3 chose options 1 + 3:
+- The rule as shipped is CONFIRMED: the pair decides, a root column on a filed row is a copy, and option (b) stays whole
+  in both directions. Task 156 changes no code for it.
+- The lock is **task 168**, not task 156: the four `sprk_regarding{core}` columns become read-only on the to-do, event,
+  communication and analysis forms, after a check of which forms expose them.
+
+### Also changed
+
+- `DATAVERSE-WRITE-PATH-ARCHITECTURE.md` I-1 row:
+  - L1 now includes the AI update tool;
+  - the two "owner decision pending" gaps are closed;
+  - the remaining gap is the pre-round-8 `TaskActionCore` rows (nothing backfilled);
+  - item 3 is recorded as confirmed, with the lock at task 168.
+- Two exact-field-set seam tests (`CreateTaskNodeExecutorSeamTests`, `ActionSeamTests`) now expect the pair's id, name and
+  url, because the owner's decision changes that contract.
+- `CatalogToolDescriptionParityContractTests`' construction helper builds a no-op delegate for a delegate parameter
+  (`CoreAncestorResolver.EntityColumnProbe`, reached through the new sealed helper). It is the class-wide fix, as
+  compose-r8 task 061 did for optional concretes, and the parity assertion is unchanged.
+- `CoreAncestorRestampJobHandlerTests`:
+  - the after-write cases are gone with the path;
+  - the H2 truncation guard is now pinned with a CHILD payload (a stale event with three to-dos under it, bound 2);
+  - the idempotency test now pins the per-minute collapse and a new key after the minute.
+
+### Seeds (each restored byte-identical from a backup, then touched; SHA-256 re-verified; a failed build reports nothing)
+
+| Seed | Removed guard | Bit |
+|---|---|---|
+| U1 | the handler's inline `_restamp.AfterWriteAsync` call (an empty report instead) | 2 red: `…_UpdateThatMovesAnEventsPair_RestampsTheEventAndItsChildren_InTheSameCall`, `…_RestampOfAChildFails_TheUsersUpdateStands` |
+| U2 | the helper's registration (`TryAddSingleton<CoreAncestorAfterWriteRestamp>`) | 1 red: `DiGraphValidationTests.BffDiGraph_InDevelopment_HasNoCaptiveDependenciesOrUnresolvableServices` (the whole-graph check; no DI-registration test was added — ADR-038). Survived the handler / tool-framework / data-mutation filter first (683 tests), so it is the graph check that pins it |
+| T1 | `TaskActionCore`'s pair write (runtime-false) | 5 red: the pair test, both F-051-6 job tests, both exact-field-set seam tests |
+| T2 | the regarding name read | 1 red: the pair test |
+| T3 | the pair's type in `ApplyResolverPairAsync` | 2 red: `TodoRegardingBuilderTests.ApplyResolverFieldsAsync_TypicalCase_…` and the typed F-051-6 job test. First run: only the builder test, because the job test's type assertion used `?.` (skipped on null); fixed, re-seeded red |
+| J1 | the job handler's "table carries no stamp → dead letter" guard (simplified this round) | 2 red: `PayloadThatCannotMoveAStamp_IsPoisoned` (sprk_matter, sprk_invoice) |
+| H2 | truncated-only → Success (re-pinned with a child payload) | 1 red: `TruncatedOnlyCascade_IsCompleted_NeverRetriedOrPoisoned` |
+
+### Tests this round
+
+New:
+- the AI update tool: 4 (re-stamps in the same call; a failed child leaves the update standing; a refused update
+  re-stamps nothing; a write that can move nothing reads nothing). These replace the 2 enqueue tests.
+- `TaskActionCore`: the pair test (`ServerWriterAncestorStampingTests`) and 2 F-051-6 job tests (untyped under a
+  communication, typed under an invoice).
+
+Changed: 2 exact-field-set seam tests; the job handler tests (the after-write test removed, H2 / round-trip / idempotency
+rewritten); 16 test constructor call sites.
+
+Results:
+- Affected, the round-2 filter: **517 / 517**. That is 513, minus the removed after-write job test, plus 2 net handler
+  tests, plus 2 job tests and the pair test.
+- Affected, item 2 (`TaskActionCore`, the create-task executor and seam, `TodoRegardingBuilder`, `TodoGeneration`,
+  communication follow-ups, the tool framework): **511 passed / 0 failed / 1 skipped (Total 512)**.
+- Full BFF unit suite, once at the end: **Passed 14393 / Failed 0 / Skipped 54 (Total 14447)**.
+  The first full run (made while another agent's full run shared the machine; 28 m 30 s) reported 3 failures: CatalogToolDescriptionParityContractTests.EverySingleRowHandler_MetadataDescription_MatchesAuthoredSeedRow, which was real (its handler-construction helper could not stub the delegate EntityColumnProbe reached through the new sealed helper; the helper now builds a no-op delegate; fixed), and two contention timeouts that pass on an isolated re-run (RelatedRecordCardContractTests.ResolveIdentity_ForAPaneCreatedMatterWithNoNumberYet_ReturnsANullNumber_NotAnError and SpeAdmin.SearchItemsTests.SearchItems_WithToken_ValidConfigIdNotFound_Returns400, 2 m 54 s and 2 m 50 s; isolated: 17 / 17 with the parity class). The final run below is at the committed tree.
+- NetArchTest: **Passed 346 / Failed 0 (Total 346)**.
+- `tests/integration/Sprk.Bff.Api.IntegrationTests`, in full: **Passed 104 / Failed 0 / Skipped 0 (Total 104)**.
+- `tests/integration/Spe.Integration.Tests`, in full: **Passed 403 / Failed 0 / Skipped 25 (Total 428)** (the suite's own 25 skips).
+
+### Still open
+
+- **AC8**, the manual dev live gate: the main session's, after deploy (POML `manual-live-gate`).
+- **Item 13a**, the TypeScript stamp mirror. Owner round 8 files it as work ("156 item 13a"). It is not in this round's
+  items, so it is not done here.
+- **#1098**, the events API. Not task 156's.
+
 ## Placement justification (CLAUDE.md §10 / §11, `bff-extensions.md`)
 
-All four new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
-BFF domain code over BFF-owned tables, BFF identity, low volume (ADR-052 B2/B3). No new interface, endpoint, option class,
-package or plugin; every registration is unconditional (ADR-032: no Null-Object question).
+All five new types live in the BFF, in `Services/Dataverse/` beside the invariant's owner (`CoreAncestorResolver`):
+BFF domain code over BFF-owned tables, BFF identity, low volume (ADR-052 B2/B3). The fifth, `CoreAncestorAfterWriteRestamp`,
+was added by owner round 8 item 1. No new interface, endpoint, option class, package or plugin; every registration is
+unconditional (ADR-032: no Null-Object question).
 
 | New surface | Existing (grep, 2026-10-02) | Why not extend it | Cost of doing nothing |
 |---|---|---|---|
 | `CoreAncestorRestamper` | `CoreAncestorResolver` derives a stamp for ONE row being written; nothing anywhere re-derives a stamp on rows already written (`grep -rn "Restamp\|ReStamp" src/server` → none before this task) | Folding the cascade into the resolver would mix a pure, per-write derivation (used inline by 8 writers) with paged queries and PATCHes of other rows; the restamper REUSES the resolver for every derivation instead of copying it | Re-filing an intermediate leaves every child's copy stale: an access over-grant (task 051 §1) and, without the comparison, the #1038 leak |
 | `CoreAncestorStampReconciliationJob` | `MembershipReconciliationJob`, `ExternalAccessReconciliationJob` reconcile other tables; nothing reconciles stamps | A job per invariant is the ADR-036 shape; neither existing job's scan or rules apply | Writes outside the BFF (forms, flows, imports, the client wizards and the client stamp mirror) and form clears (F-051-6) stay stale forever; the resolver would then refuse those uploads (stale) forever |
-| `CoreAncestorRestampQueue` + `CoreAncestorRestampJobHandler` | `JobSubmissionService` / `IJobHandler` (ADR-004) — reused, not duplicated: the queue is a 20-line typed submitter, the handler a thin adapter onto the restamper | The resolver must not take a Service Bus dependency at construction (it is constructed on every upload); the AI update tool must not hold an app-only client | A stale refusal would wait up to 5 minutes for the job instead of seconds; the AI tool's re-files would wait for the job |
+| `CoreAncestorRestampQueue` + `CoreAncestorRestampJobHandler` | `JobSubmissionService` / `IJobHandler` (ADR-004) — reused, not duplicated: the queue is a 20-line typed submitter, the handler a thin adapter onto the restamper | The resolver must not take a Service Bus dependency at construction (it is constructed on every upload) | A stale refusal would wait up to 5 minutes for the job instead of seconds. (Since owner round 8 item 1 the queue carries stale refusals only.) |
+| `CoreAncestorAfterWriteRestamp` (owner round 8 item 1) | `CoreAncestorRestamper.AfterWriteAsync` (the cascade itself) and `CoreAncestorRestampQueue` (the enqueue the tool used) — grep 2026-10-03: no other narrow re-stamp entry point exists | Injecting `CoreAncestorRestamper` into the user-OBO tool would hand it three app-only entry points (any child, any intermediate) instead of the one the amendment allows; the queue is the deferred path the owner replaced. So a sealed 10-line wrapper exposing only the after-write re-stamp, holding only the restamper (no `IServiceProvider`) | AC1 unmet for the AI update tool (its re-files leave children stale until a queued job runs — the deviation the owner rejected), or the tool holds the whole restamper (wider than the amended rule) |
 | `container_ancestor_stale` (problem code) | `container_ancestor_unverifiable` means "cannot be compared"; `container_ancestor_unresolved` means "unknown / unreadable" | Reusing either would mis-classify the inbound retry (stale is transient — the re-stamp makes the retry succeed; unverifiable / unresolved-409 are permanent skips) | A stale email would be skipped permanently, losing its archive |
 
 **Publish size:** code only — no package, no new assembly reference. Measured in verifier round 1 from fresh short-path
@@ -627,6 +788,10 @@ worktrees: +0.04 MB for the whole task, +0.03 MB vs master (table in that sectio
 - **Verifier round 4** (on the tree merged with `work/unified-access-control-r2` at `ea6484102`): no test added or
   changed (a doc-comment change only). Affected suites **513 / 513**; both integration suites in full (the project's
   hard gate) and the full unit and arch suites: see the verifier round 4 section.
+- **Owner round 8** (on the tree merged with `work/unified-access-control-r2` at `d746422f7`): 7 new test cases (AI update
+  tool 4 replacing 2; `TaskActionCore` pair 1; F-051-6 job 2), the job handler tests reshaped, 2 exact-field-set seam
+  tests updated. Affected **517 / 517** and **511 / 0 / 1 skipped**. Full BFF unit **Passed 14393 / Failed 0 / Skipped 54 (Total 14447)**; NetArchTest
+  **Passed 346 / Failed 0 (Total 346)**; integration **Passed 104 / Failed 0 / Skipped 0 (Total 104)**; SPE **Passed 403 / Failed 0 / Skipped 25 (Total 428)**. 7 seeds, each red (section "Owner round 8").
 - New test homes: `tests/integration/data-mutation/CoreAncestorStamping/` (StampWorld in-memory Dataverse; restamper; job;
   queue + handler; every re-file path; the real document PUT route) and
   `tests/integration/auth/UnifiedAccessControl/` (stamp freshness, topology lock-step). ADR-038: no mocked HTTP handler,

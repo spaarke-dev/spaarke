@@ -115,7 +115,7 @@ public class ServerWriterAncestorStampingTests
         var entityService = EntityServiceCapturingCreates(created);
         var core = new TaskActionCore(
             entityService.Object,
-            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             NullLogger.Instance);
 
         var id = await core.CreateAsync(
@@ -128,13 +128,50 @@ public class ServerWriterAncestorStampingTests
         created[0].GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId);
     }
 
+    [Fact(DisplayName = "Task 156 (owner round 8 item 2): a TaskActionCore task under a communication carries the standard ADR-024 regarding pair — id, name, url (and no type: no sprk_recordtype_ref row exists for a communication) — written by the to-do builder's own pair method")]
+    public async Task CreateTask_WhenRegardingACommunication_WritesTheAdr024RegardingPair()
+    {
+        var created = new List<Entity>();
+        var entityService = EntityServiceCapturingCreates(created);
+        entityService
+            .Setup(s => s.RetrieveAsync("sprk_communication", CommunicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", CommunicationId) { ["sprk_name"] = "Email: Re: filing" });
+        var recordTypes = new Mock<ICommunicationDataverseService>();
+        recordTypes
+            .Setup(r => r.QueryRecordTypeRefAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity?)null);
+
+        var core = new TaskActionCore(
+            entityService.Object,
+            CoreAncestorResolverFixtures.WithAncestors(("sprk_regardingmatter", MatterId)),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            recordTypes.Object,
+            NullLogger.Instance);
+
+        var id = await core.CreateAsync(
+            new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),
+            CancellationToken.None);
+
+        id.Should().NotBe(Guid.Empty);
+        var task = created.Should().ContainSingle().Subject;
+        var cleanId = CommunicationId.ToString("D").ToLowerInvariant();
+        task["sprk_regardingrecordid"].Should().Be(cleanId, "the pair's id is what the reconciliation job finds a form clear by (F-051-6)");
+        task["sprk_regardingrecordname"].Should().Be("Email: Re: filing", "the communication's own primary name");
+        task["sprk_regardingrecordurl"].Should().Be(
+            $"/main.aspx?pagetype=entityrecord&etn=sprk_communication&id={cleanId}", "the same relative record URL every builder writes");
+        task.Contains("sprk_regardingrecordtype").Should().BeFalse("no sprk_recordtype_ref row exists for a communication (live 2026-10-02)");
+        task.GetAttributeValue<EntityReference>("sprk_regardingcommunication")!.Id.Should().Be(CommunicationId);
+        task.GetAttributeValue<EntityReference>("sprk_regardingmatter")!.Id.Should().Be(MatterId, "the stamp is unchanged");
+        recordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_communication", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task CreateTask_WhenAncestorDerivationFails_ReturnsEmptyAndNeverCreatesTheEvent()
     {
         var created = new List<Entity>();
         var entityService = EntityServiceCapturingCreates(created);
         var core = new TaskActionCore(
-            entityService.Object, CoreAncestorResolverFixtures.Failing(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), NullLogger.Instance);
+            entityService.Object, CoreAncestorResolverFixtures.Failing(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(), NullLogger.Instance);
 
         var id = await core.CreateAsync(
             new TaskActionInput("Follow up", null, null, CommunicationId, "sprk_communication", null),

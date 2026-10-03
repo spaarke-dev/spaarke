@@ -16,8 +16,9 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping;
 
 /// <summary>
 /// unified-access-control-r2 task 156 — the <c>CoreAncestorRestamp</c> queue job (ADR-004): a stale row the storage
-/// resolver enqueued is re-stamped from its source's CURRENT root; a cascade enqueued by the user-OBO AI tool runs as
-/// <see cref="CoreAncestorRestamper.AfterWriteAsync"/>; a payload naming nothing that can move a stamp is dead-lettered.
+/// resolver enqueued is re-stamped from its source's CURRENT root; a payload naming nothing whose stamp can move is
+/// dead-lettered. (Since owner decisions round 8 item 1 the user-OBO AI update tool re-stamps inline through
+/// <see cref="CoreAncestorAfterWriteRestamp"/>, so the queue carries no after-write cascade any more.)
 /// </summary>
 public class CoreAncestorRestampJobHandlerTests
 {
@@ -50,20 +51,6 @@ public class CoreAncestorRestampJobHandlerTests
         world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterB);
     }
 
-    [Fact(DisplayName = "Task 156 job: an after-write payload (the user-OBO AI tool's) runs the cascade for the record it re-filed")]
-    public async Task AfterWritePayload_RunsTheCascade()
-    {
-        var world = StaleTodo();
-        var handler = new CoreAncestorRestampJobHandler(world.Restamper, NullLogger<CoreAncestorRestampJobHandler>.Instance);
-
-        var outcome = await handler.ProcessAsync(
-            Job(new CoreAncestorRestampPayload("sprk_communication", Communication, ["sprk_regardingmatter"])),
-            CancellationToken.None);
-
-        outcome.Status.Should().Be(JobStatus.Completed);
-        world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterB);
-    }
-
     [Fact(DisplayName = "Task 156 job: a child PATCH that fails is retried (Failed), then dead-lettered at max attempts — never reported complete")]
     public async Task FailedRepair_IsRetried_ThenPoisoned()
     {
@@ -86,19 +73,25 @@ public class CoreAncestorRestampJobHandlerTests
             Guid.Parse("15600000-0000-0000-0000-000000000112"),
             Guid.Parse("15600000-0000-0000-0000-000000000113"),
         };
+        // A STALE event (its communication moved to matter B; the event still copies A) with three to-dos under it. The
+        // resolver's stale refusal enqueues the event; its re-stamp then cascades to the to-dos.
+        var staleEvent = Guid.Parse("15600000-0000-0000-0000-000000000e11");
         var world = new StampWorld()
-            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)]);
+            .Row("sprk_communication", Communication, [("sprk_regardingmatter", "sprk_matter", MatterB)])
+            .Row("sprk_event", staleEvent,
+                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: Communication.ToString());
         foreach (var todo in todos)
         {
             world.Row("sprk_todo", todo,
-                [("sprk_regardingcommunication", "sprk_communication", Communication), ("sprk_regardingmatter", "sprk_matter", MatterA)],
-                pairId: Communication.ToString());
+                [("sprk_regardingevent", "sprk_event", staleEvent), ("sprk_regardingmatter", "sprk_matter", MatterA)],
+                pairId: staleEvent.ToString());
         }
 
         // One child per page, two per source: the third child is past the bound on every attempt.
         var handler = new CoreAncestorRestampJobHandler(
             world.RestamperWith(childPageSize: 1, childrenPerSourceBound: 2), NullLogger<CoreAncestorRestampJobHandler>.Instance);
-        var job = Job(new CoreAncestorRestampPayload("sprk_communication", Communication, ["sprk_regardingmatter"]));
+        var job = Job(new CoreAncestorRestampPayload("sprk_event", staleEvent));
 
         (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
 
@@ -106,45 +99,43 @@ public class CoreAncestorRestampJobHandlerTests
         (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed,
             "a truncation is not a failure, so it is never dead-lettered");
 
+        world.Lookup("sprk_event", staleEvent, "sprk_regardingmatter").Should().Be(MatterB);
         world.Lookup("sprk_todo", todos[0], "sprk_regardingmatter").Should().Be(MatterB);
         world.Lookup("sprk_todo", todos[1], "sprk_regardingmatter").Should().Be(MatterB);
         world.Lookup("sprk_todo", todos[2], "sprk_regardingmatter").Should().Be(MatterA,
             "past the bound on every attempt — left to the reconciliation job (the resolver refuses it as stale meanwhile)");
     }
 
-    [Fact(DisplayName = "Task 156 queue: what the storage resolver and the AI tool ENQUEUE is what this handler consumes — a stale child and an after-write cascade both round-trip to a re-stamp")]
+    [Fact(DisplayName = "Task 156 queue: what the storage resolver ENQUEUES is what this handler consumes — a stale child round-trips to a re-stamp")]
     public async Task EnqueuedMessages_RoundTripThroughTheHandler()
     {
         var (queue, submitted) = Queue(new FakeTimeProvider());
 
         await queue.EnqueueAsync("sprk_todo", Todo);
-        await queue.EnqueueAfterWriteAsync("sprk_communication", Communication, ["sprk_regardingmatter"]);
 
-        submitted.Should().HaveCount(2).And.OnlyContain(j => j.JobType == CoreAncestorRestampJobHandler.JobTypeName);
-        foreach (var job in submitted)
-        {
-            var world = StaleTodo();
-            var handler = new CoreAncestorRestampJobHandler(world.Restamper, NullLogger<CoreAncestorRestampJobHandler>.Instance);
+        submitted.Should().ContainSingle().Which.JobType.Should().Be(CoreAncestorRestampJobHandler.JobTypeName);
+        var world = StaleTodo();
+        var handler = new CoreAncestorRestampJobHandler(world.Restamper, NullLogger<CoreAncestorRestampJobHandler>.Instance);
 
-            (await handler.ProcessAsync(job, CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
-            world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterB);
-        }
+        (await handler.ProcessAsync(submitted[0], CancellationToken.None)).Status.Should().Be(JobStatus.Completed);
+        world.Lookup("sprk_todo", Todo, "sprk_regardingmatter").Should().Be(MatterB);
     }
 
-    [Fact(DisplayName = "Task 156 queue: repeated stale refusals of one child in a minute collapse to one message; two after-write cascades of one record never do")]
-    public async Task IdempotencyKeys_CollapseRepeatedRefusals_NeverTwoWrites()
+    [Fact(DisplayName = "Task 156 queue: repeated stale refusals of one child in a minute collapse to one message; a refusal in a later minute enqueues again")]
+    public async Task IdempotencyKeys_CollapseRepeatedRefusals_WithinAMinute()
     {
-        var (queue, submitted) = Queue(new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 9, 30, 5, TimeSpan.Zero)));
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 9, 30, 5, TimeSpan.Zero));
+        var (queue, submitted) = Queue(time);
 
         await queue.EnqueueAsync("sprk_todo", Todo);
         await queue.EnqueueAsync("sprk_todo", Todo);
-        await queue.EnqueueAfterWriteAsync("sprk_communication", Communication, ["sprk_regardingmatter"]);
-        await queue.EnqueueAfterWriteAsync("sprk_communication", Communication, ["sprk_regardingmatter"]);
+        time.Advance(TimeSpan.FromMinutes(1));
+        await queue.EnqueueAsync("sprk_todo", Todo);
 
         submitted[0].IdempotencyKey.Should().Be(submitted[1].IdempotencyKey,
             "a user retrying a stale upload is one repair, not one per click");
-        submitted[2].IdempotencyKey.Should().NotBe(submitted[3].IdempotencyKey,
-            "two re-files of one record are two cascades — collapsing the second would leave its children on the first root");
+        submitted[2].IdempotencyKey.Should().NotBe(submitted[0].IdempotencyKey,
+            "a refusal after the minute is a new repair request, not a duplicate");
     }
 
     /// <summary>The real queue over a <see cref="JobSubmissionService"/> that records instead of sending (Service Bus is the boundary).</summary>
@@ -169,16 +160,16 @@ public class CoreAncestorRestampJobHandlerTests
         return (new CoreAncestorRestampQueue(services, time, NullLogger<CoreAncestorRestampQueue>.Instance), submitted);
     }
 
-    [Theory(DisplayName = "Task 156 job: a payload naming nothing whose stamp can move is dead-lettered without a read")]
-    [InlineData("sprk_matter", null)]
-    [InlineData("sprk_communication", "sprk_triagesummary")]
-    public async Task PayloadThatCannotMoveAStamp_IsPoisoned(string entity, string? column)
+    [Theory(DisplayName = "Task 156 job: a payload naming a table that carries no stamp is dead-lettered without a read")]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_invoice")]
+    public async Task PayloadThatCannotMoveAStamp_IsPoisoned(string entity)
     {
         var world = StaleTodo();
         var handler = new CoreAncestorRestampJobHandler(world.Restamper, NullLogger<CoreAncestorRestampJobHandler>.Instance);
 
         var outcome = await handler.ProcessAsync(
-            Job(new CoreAncestorRestampPayload(entity, Guid.NewGuid(), column is null ? null : [column])),
+            Job(new CoreAncestorRestampPayload(entity, Guid.NewGuid())),
             CancellationToken.None);
 
         outcome.Status.Should().Be(JobStatus.Poisoned);
