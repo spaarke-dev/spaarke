@@ -496,30 +496,44 @@ public class OrganizationMembershipReadTests
     }
 
     /// <summary>
-    /// A caller who abandons the request mid-junction-read loses only the org-grant term — never the
-    /// direct grants beside it.
+    /// A caller who abandons the request mid-junction-read gets the cancellation back — not a grant set — and
+    /// nothing is cached, so the contact's direct grants are not lost beyond the abandoned request.
     /// </summary>
     /// <remarks>
-    /// Pins a regression this task would otherwise have introduced (its code-review finding W3). The
-    /// junction query also runs INSIDE the grant-set read, whose catch-all turns any escaping exception into
-    /// an EMPTY grant set — direct grants included — that is then cached. So the query reports the caller's
-    /// cancellation as an unreadable read rather than rethrowing it; only the evaluator's entry rethrows.
+    /// <para>Task 109's code-review finding W3 pinned the OPPOSITE here ("keeps the direct grants"): the grant-set
+    /// read's catch-all used to turn any escaping exception into an EMPTY grant set that was then cached, so the
+    /// junction query reported the caller's cancellation as Failed instead of rethrowing it. Task 132 (C12) made that
+    /// catch rethrow the caller's cancellation and stopped any faulted set from being cached, which removed W3's
+    /// premise — and left a window where a client abort during the junction read RETURNED a faulted set instead of
+    /// propagating (task 132 criterion 3; verifier round r1). The query now rethrows.</para>
+    /// <para>W3's real concern — a client abort must never cache "no access at all" — is what the last two assertions
+    /// keep: no entry is written, and the next request reads the direct grants. The cancel is fired only once the
+    /// junction request is in flight (no timer), so the window under test is exactly the junction read.</para>
     /// </remarks>
     [Fact]
-    public async Task GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants()
+    public async Task GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_PropagatesTheCancellation_AndCachesNothing()
     {
         await using var dataverse = await FakeDataverse.StartAsync();
         SeedWorld(dataverse);
         dataverse.JunctionHangs = true;
-        var participations = RealParticipationService(dataverse);
+        var cache = RealCache();
+        var participations = RealParticipationService(dataverse, cache: cache);
+        using var abandoned = new CancellationTokenSource();
 
-        using var abandoned = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-        var grants = await participations.GetGrantSetAsync(ContactId, abandoned.Token);
+        var call = participations.GetGrantSetAsync(ContactId, abandoned.Token);
+        await dataverse.JunctionRequestSeen.Task; // the junction read is in flight — the grant query already answered
+        abandoned.Cancel();
 
-        grants.Projects.Select(p => p.ProjectId).Should().Contain(DirectProject,
-            "a cancelled membership read must cost the org-grant term only, not the contact's own grants");
-        grants.Projects.Select(p => p.ProjectId).Should().NotContain(CurrentOrgProject,
-            "and the org-grant term contributes nothing — the read was not completed");
+        await call.Invoking(async c => await c).Should().ThrowAsync<OperationCanceledException>(
+            "a client abort is the caller's cancellation — not a grant set, faulted or otherwise");
+        (await cache.GetStringAsync(RequestTenant, ExternalParticipationService.ExternalAccessResource,
+                ContactId.ToString(), ExternalParticipationService.CacheVersion))
+            .Should().BeNull("an abandoned read is never stored as the contact's grant set");
+
+        dataverse.JunctionHangs = false;
+        var next = await participations.GetGrantSetAsync(ContactId, CancellationToken.None);
+        next.Projects.Select(p => p.ProjectId).Should().Contain(DirectProject,
+            "the contact's direct grants are lost to the abandoned request only — the next request reads them");
     }
 
     /// <summary>
@@ -1148,6 +1162,9 @@ public class OrganizationMembershipReadTests
         /// <summary>The junction request never answers, so the client's timeout fires.</summary>
         public bool JunctionHangs { get; set; }
 
+        /// <summary>Completes when a junction request arrives — so a test can act while that read is in flight.</summary>
+        public TaskCompletionSource JunctionRequestSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public IReadOnlyList<SeenRequest> Requests
         {
             get { lock (_gate) { return _requests.ToList(); } }
@@ -1199,6 +1216,7 @@ public class OrganizationMembershipReadTests
                     return;
 
                 case "sprk_contactorganizations":
+                    JunctionRequestSeen.TrySetResult();
                     if (JunctionHangs)
                     {
                         try { await Task.Delay(TimeSpan.FromSeconds(10), context.RequestAborted); }

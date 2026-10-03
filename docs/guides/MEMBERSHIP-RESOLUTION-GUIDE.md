@@ -617,7 +617,7 @@ Authorization: Bearer <SystemAdmin token>
 
 1. Check BFF App Insights for the request duration distribution. Look for outliers.
 2. Check if discovery cache is warm. First request after BFF restart hits Dataverse `EntityDefinitions` (60-min TTL on the cache). Repeat calls should be fast.
-3. Check if per-user identity cache is warm (10-min TTL). First call per user hits Dataverse 4-6 times in parallel for identity normalization.
+3. Check if per-user identity cache is warm (2-min TTL since task 132; 10 before). First call per user hits Dataverse 4-6 times in parallel for identity normalization.
 4. If consistently slow after caches warm, consider enabling Phase 2 — the junction-table-backed read path is faster than the OR-joined FetchXML.
 
 ### `transitive-chain-too-deep` 400 error
@@ -634,11 +634,11 @@ Authorization: Bearer <SystemAdmin token>
 
 | Cadence | What happens |
 |---|---|
-| **On every authenticated request** | User endpoint resolves identity (cached 10 min) → discovery (cached 60 min) → FetchXML against the target entity. Phase 1A: query runs every time (5-min cache on the resolved IDs). Phase 2: query against the junction table. |
+| **On every authenticated request** | User endpoint resolves identity (cached 2 min) → discovery (cached 60 min) → FetchXML against the target entity. Phase 1A: query runs every time (2-min cache on the resolved IDs). Phase 2: query against the junction table. |
 | **Event-driven (Phase 2)** | When a BFF endpoint mutates an identity Lookup, an event is published to `sprk-membership-changes` topic. Subscription consumer updates the junction within seconds. Cache invalidator publishes to Redis channel; subscribers on every BFF instance evict matching entries. End-to-end: ~1-5 seconds. |
 | **Nightly recon (02:00 UTC default)** | Background job re-scans source-of-truth Lookups for every entity in `Reconciliation:EntityTypes`. Self-heals any drift (max 24h staleness). LOAD-BEARING for entities mutated outside the BFF (maker portal, Power Automate, plugins). |
 | **Metadata cache TTL** | 60 minutes. Schema changes propagate automatically within an hour, or immediately via `POST /api/admin/membership/refresh-metadata`. |
-| **Per-user membership cache TTL** | 5 minutes Phase 1A. Auto-invalidated via Redis pub/sub on Phase 2 junction write (typically sub-second across all instances when enabled). |
+| **Per-user membership cache TTL** | 2 minutes (5 before task 132). Evicted directly by the BFF's own team / BU / owner writes (task 132), and auto-invalidated via Redis pub/sub on Phase 2 junction write (typically sub-second across all instances when enabled). |
 | **AAD-oid → systemuserid cache TTL** | 10 minutes. A freshly disabled user continues to look authenticated for at most 10 minutes, at which point the next request re-resolves and surfaces the row's absence as 401. |
 
 ---

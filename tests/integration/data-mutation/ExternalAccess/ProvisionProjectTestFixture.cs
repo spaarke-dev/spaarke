@@ -184,6 +184,21 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool OwnershipPatchIsApplied { get; set; } = true;
 
+    /// <summary>
+    /// When true, the ownership PATCH is APPLIED and then fails as an HttpClient timeout would — Dataverse committed
+    /// it, the caller never heard back (unified-access-control-r2 task 132: an ambiguous re-own). Default false.
+    /// </summary>
+    public bool OwnershipPatchTimesOutAfterApplying { get; set; }
+
+    /// <summary>
+    /// When true, every read of a record whose ownership PATCH was already issued throws — the endpoint's owner
+    /// read-back cannot verify the re-own (task 132: an ambiguous re-own). Reads before the PATCH are unaffected.
+    /// </summary>
+    public bool OwnerReadBackFails { get; set; }
+
+    /// <summary>Records whose ownership PATCH has been issued — what <see cref="OwnerReadBackFails"/> keys on.</summary>
+    private readonly ConcurrentDictionary<Guid, bool> _ownerPatchIssued = new();
+
     private sealed record SeededRecord(
         string EntitySet, Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
         Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null);
@@ -257,6 +272,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         SpeContainerCreationSucceeds = true;
         ContainerStampSucceeds = true;
         OwnershipPatchIsApplied = true;
+        OwnershipPatchTimesOutAfterApplying = false;
+        OwnerReadBackFails = false;
+        _ownerPatchIssued.Clear();
         _updateSequence = 0;
         Grants.Clear();
         Revokes.Clear();
@@ -369,6 +387,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 "Dataverse 400: simulated failure recording sprk_containerid.");
         }
 
+        if (flat.ContainsKey("ownerid@odata.bind"))
+        {
+            _ownerPatchIssued[id] = true;
+        }
+
         if (_records.TryGetValue(id, out var record) && record.EntitySet == entitySet)
         {
             if (flat.TryGetValue("ownerid@odata.bind", out var ownerBind)
@@ -400,6 +423,13 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                 record = _records[id];
                 _records[id] = record with { ContainerId = container };
             }
+        }
+
+        if (OwnershipPatchTimesOutAfterApplying && flat.ContainsKey("ownerid@odata.bind"))
+        {
+            // Applied above; the response never arrives — what an HttpClient timeout looks like to the caller.
+            return Task.FromException(new TaskCanceledException(
+                "Simulated timeout: Dataverse committed the ownership PATCH but the response never arrived."));
         }
 
         return Task.CompletedTask;
@@ -526,6 +556,12 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     r => r.EntitySet == entitySet
                          && filter is not null
                          && filter.Contains(r.Id.ToString(), StringComparison.OrdinalIgnoreCase));
+
+                if (seeded is not null && OwnerReadBackFails && _ownerPatchIssued.ContainsKey(seeded.Id))
+                {
+                    throw new InvalidOperationException(
+                        "Dataverse 503: simulated failure reading the record back after its ownership PATCH.");
+                }
 
                 if (seeded is not null)
                 {

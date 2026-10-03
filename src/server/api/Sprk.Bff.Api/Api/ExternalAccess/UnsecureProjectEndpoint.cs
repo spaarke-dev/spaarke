@@ -207,6 +207,10 @@ public static class UnsecureProjectEndpoint
                 "[UNSECURE] Dataverse refused the ownership assignment of {RecordType} {RecordId} to user " +
                 "{OwnerId}. TraceId={TraceId}", root.WireToken, recordId, newOwnerId, traceId);
 
+            // Task 132 (C12): a PATCH that timed out after Dataverse committed it lands here too — the record may have
+            // been re-owned. Evict (always safe), exactly as on the "could not verify" outcome below.
+            await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
             return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
                 "Ownership could not be reassigned, so the secure designation was left in place.",
                 traceId, (ReasonKey, ReasonOwnerAssignmentFailed));

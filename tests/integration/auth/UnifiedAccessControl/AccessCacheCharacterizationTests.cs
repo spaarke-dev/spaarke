@@ -5,6 +5,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Caching;
@@ -303,6 +304,59 @@ public class AccessCacheCharacterizationTests
         // Assert — resource IS part of the key, so this misses and reaches the inner source.
         snapshot.AccessRights.Should().Be(AccessRights.None);
         inner.TokensReceived.Should().ContainSingle();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ADR-009 path C (task 132) — no tid, no cache.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The tenant segment is the caller's <c>tid</c>, and a request without one is not cached AT ALL — never keyed under
+    /// a sentinel tenant, which would pool every tid-less caller's snapshots in one segment (ADR-009: every key carries
+    /// the tenant). Both calls reach the inner source, and the cache is never even asked (verifier r1, seed S14).
+    /// </summary>
+    [Theory]
+    [InlineData("document", "no-tid-claim")]
+    [InlineData("document", "no-http-context")]
+    [InlineData("record", "no-tid-claim")]
+    [InlineData("record", "no-http-context")]
+    public async Task ARequestWithoutATid_IsNeitherReadFromNorWrittenToTheCache(string path, string request)
+    {
+        var cache = new Mock<ITenantCache>();
+        var inner = new RecordingInnerSource { RightsToReturn = AccessRights.Read };
+        IHttpContextAccessor? accessor = request == "no-http-context"
+            ? null
+            : new FieldHttpContextAccessor
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    // A signed-in caller whose token carries an oid but no tid.
+                    User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("oid", UserId) }, "test")),
+                },
+            };
+        var sut = new CachedAccessDataSource(inner, cache.Object, accessor, NullLogger<CachedAccessDataSource>.Instance);
+
+        for (var call = 0; call < 2; call++)
+        {
+            if (path == "document")
+            {
+                await sut.GetUserAccessAsync(UserId, ResourceId, userAccessToken: "obo-bearer-token");
+            }
+            else
+            {
+                await sut.GetRecordAccessAsync(UserId, "sprk_matters", Guid.Parse("13200000-0000-0000-0000-0000000000f1"), "obo-bearer-token");
+            }
+        }
+
+        (path == "document" ? inner.TokensReceived : inner.RecordAccessTokensReceived)
+            .Should().HaveCount(2, "with no tid every call is answered by the inner source");
+        cache.Invocations.Should().BeEmpty("no tid: nothing is read from or written to the cache — no sentinel tenant");
+    }
+
+    /// <summary>A field-backed accessor (the framework one keeps its context in an AsyncLocal shared by every instance).</summary>
+    private sealed class FieldHttpContextAccessor : IHttpContextAccessor
+    {
+        public HttpContext? HttpContext { get; set; }
     }
 
     [Fact]

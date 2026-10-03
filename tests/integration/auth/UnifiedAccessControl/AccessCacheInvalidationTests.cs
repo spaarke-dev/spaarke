@@ -240,6 +240,55 @@ public sealed class AccessCacheInvalidationTests : IClassFixture<ProvisionProjec
             "the colleague's matter entries stay");
     }
 
+    /// <summary>
+    /// An AMBIGUOUS re-own — the ownership PATCH timed out after Dataverse committed it, or was accepted but could not be
+    /// read back — may have changed the owner, so BOTH endpoints evict before reporting the failure (verifier r1 item 8:
+    /// provisioning did not, unsecuring did on one of the two). The endpoint's existing outcome (500, nothing further
+    /// done) is unchanged; only what is left in the caches changes.
+    /// </summary>
+    [Theory]
+    [InlineData("provision", "patch-timed-out-after-commit")]
+    [InlineData("provision", "read-back-failed")]
+    [InlineData("unsecure", "patch-timed-out-after-commit")]
+    [InlineData("unsecure", "read-back-failed")]
+    public async Task ReOwn_AnAmbiguousOutcome_StillEvicts_AndTheFailureIsReportedAsBefore(string path, string ambiguity)
+    {
+        var world = new AccessCacheWorld();
+        var project = AccessCacheWorld.Project;
+        if (path == "provision")
+        {
+            _fixture.SeedProject(project);
+        }
+        else
+        {
+            _fixture.SeedProject(project, owningTeamId: ProvisionProjectTestFixture.SecureOwnerTeamId);
+        }
+
+        await world.WarmUserAsync(UserV, TenantA);
+        await world.WarmSnapshotAsync(OidV, "sprk_projects", project, TenantA);
+        var queriesBefore = world.MembershipQueries;
+        var rootReadsBefore = world.RootSetReads;
+        _fixture.OwnershipPatchTimesOutAfterApplying = ambiguity == "patch-timed-out-after-commit";
+        _fixture.OwnerReadBackFails = ambiguity == "read-back-failed";
+
+        using var host = HostWith(_fixture, world.Keyspace);
+        var response = await PostAsync(host, path, project);
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError,
+            "an unverified re-own is reported as a failure, exactly as before task 132");
+        _fixture.Updates.Should().Contain(u => u.Payload.ContainsKey("ownerid@odata.bind"),
+            "precondition: the ownership PATCH was sent, so the record may have been re-owned");
+
+        var readers = world.Readers(TenantA);
+        await readers.Membership.ResolveAsync(UserV, AccessCacheWorld.ProjectEntity, AccessCacheWorld.AuthorizationOptions, CancellationToken.None);
+        world.MembershipQueries.Should().Be(queriesBefore + 1, "the colleague's cached project membership was evicted");
+        await readers.RootSets.GetAsync(UserV, AccessCacheWorld.ProjectEntity);
+        world.RootSetReads.Should().Be(rootReadsBefore + 1, "the colleague's cached impersonated root set for projects was evicted");
+        world.Keyspace.Keys.Should().NotContain(k => k.Contains(project.ToString("D"), StringComparison.Ordinal)
+            && k.Contains(CachedAccessDataSource.RecordAccessResource, StringComparison.Ordinal),
+            "every snapshot of the possibly re-owned record was evicted");
+    }
+
     /// <summary>A failed eviction does not fail the re-own: the endpoint's outcome is unchanged and the failure is logged.</summary>
     [Fact]
     public async Task ReOwn_WhenEvictionFails_TheProvisioningOutcomeIsUnchanged_AndTheFailureIsLogged()

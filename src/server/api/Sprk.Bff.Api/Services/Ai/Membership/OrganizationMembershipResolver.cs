@@ -13,9 +13,13 @@
 //   - If set → executes a single FetchXml query filtered by the configured
 //     lookup field equalling the systemuser GUID, capped by
 //     MaxOrganizationsPerUser. Returns the organization GUIDs.
-//   - All failure modes (missing field, query error, permission issue) fail
-//     soft to an empty list + Warning log. Throwing here would cascade-fail
-//     the entire membership pipeline for unrelated reasons.
+//   - Through IOrganizationMembershipResolver, all failure modes (missing
+//     field, query error, permission issue) fail soft to an empty list +
+//     Warning log. Throwing there would cascade-fail the entire membership
+//     pipeline for unrelated reasons. Through the IIdentityOrganizationResolver
+//     seam a QUERY fault propagates instead (unified-access-control-r2 task
+//     132): IdentityNormalizationService merges nothing from it for the request
+//     — the same fail-soft result — and does not cache the identity.
 //
 // Operator alternatives (deferred — not in this implementation):
 //   (a) Dataverse N:N between systemuser and sprk_organization — future swap.

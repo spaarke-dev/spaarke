@@ -22,8 +22,9 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// field discovery (per-entity metadata scan), identity normalization (systemuser
 /// → 6-path PersonIdentity), and a per-user FetchXML query against the target
 /// entity to return matching row ids grouped by role. Results cached in Redis
-/// for 5 minutes (Phase 1A; Phase 2 task 086 extends TTL + adds pub/sub
-/// invalidation per FR-2P2.8).
+/// for 2 minutes (5 before unified-access-control-r2 task 132; a response built
+/// over a faulted read is never cached); evicted by the BFF's own team / BU /
+/// owner writes (task 132) and by the Phase 2 pub/sub invalidation (FR-2P2.8).
 /// </summary>
 public interface IMembershipResolverService
 {

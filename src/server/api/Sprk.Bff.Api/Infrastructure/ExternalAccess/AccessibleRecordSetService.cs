@@ -1346,8 +1346,11 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // the ISS-019 shape on the contact axis, so it gets ISS-019's answer: deny every candidate, exactly as
         // ActiveOrgMemberships.Failed does. A user READ as having no linked contact keeps today's path (no
         // subject, nothing to check) — 7 of 8 dev systemusers are in that state and lose nothing.
+        // Only on a grant-supported root type: elsewhere the contact is never the veto subject (grantContactId stays
+        // null above even when the contact IS known), so an unknown contact cannot change the answer and denying on it
+        // would refuse what a known contact keeps (verifier r1, item 11).
         IReadOnlySet<Guid> deniedIds;
-        if (principal.ContactUnreadable && candidates.Count > 0)
+        if (principal.ContactUnreadable && IsGrantSupported(entityType) && candidates.Count > 0)
         {
             _logger.LogError(
                 "[WF-AUTHZ] Deny-veto subject for systemuser {SystemUserId} on {EntityType} is UNREADABLE (the linked-" +

@@ -494,8 +494,10 @@ public sealed class WorkforcePrincipal
     /// The deny veto (FR-23) uses the linked contact as its subject on the systemuser plane. With the contact
     /// UNKNOWN the veto has no subject and checks nothing, so a No Access entry naming that person stops applying to
     /// their membership-term access — the same "unreadable looks like absent" shape as ISS-019. The evaluator
-    /// therefore denies every candidate when this is set, mirroring <see cref="ActiveOrgMemberships.Failed"/>. A
-    /// successfully read user with no linked contact leaves this false and composes exactly as before.
+    /// therefore denies every candidate when this is set, mirroring <see cref="ActiveOrgMemberships.Failed"/> — on the
+    /// grant-supported root types, the only ones where the contact is the veto subject (elsewhere a known contact is
+    /// not checked either, so an unknown one changes nothing). A successfully read user with no linked contact leaves
+    /// this false and composes exactly as before.
     /// </remarks>
     public bool ContactUnreadable { get; init; }
 

@@ -1,8 +1,9 @@
 # Task 132 (#1056) — C12: access caches stop storing faults, BFF writes evict, TTLs cut to 2 minutes
 
 **Status:** code complete on `task/uac-r2-132` (parent `task/uac-r2-137-b2`, merged with `work/unified-access-control-r2`
-at `3a6b38cb1`). The dev deploy and the manual live gate (criterion 21) are pending manual gates (§12). Rigor FULL,
-Opus 5.5 @ xhigh.
+at `3a6b38cb1`); verifier round **r1** closed on `task/uac-r2-132-r1` (§15). POML status
+**completed-with-escalation**: escalation 7 (§8) is unanswered by owner rounds 1-9, and the dev deploy and the manual
+live gate (criterion 21) are pending manual gates (§12). Rigor FULL, Opus 5.5 @ xhigh.
 
 **Owner sign-off (merge gate, criterion 18):** owner rounds 3 **R3/R4** (2026-09-30, BINDING) — *"Access changes must
 take effect in MINUTES, never hourly … the background job is only a safety net, running at ≤ 5 min"* — relayed by the
@@ -51,6 +52,12 @@ cancellation propagates (`catch (OperationCanceledException) when (ct.IsCancella
 - `QueryGrantSetAsync`: non-2xx / no `value` → `ExternalGrantSet.Unreadable`; catch-all → `Unreadable`; caller
   cancellation rethrown. `QueryOrganizationGrantRowsAsync` now returns `(rows, faulted)`; the set is `Faulted` when the
   org term faulted, with the direct grants kept.
+- **r1 (verifier item 6, criterion 3):** the junction query (`QueryOrganizationMembershipsAsync`) now RETHROWS the
+  caller's cancellation too. Task 109 had it report `Failed` because `QueryGrantSetAsync`'s catch-all used to turn an
+  escaping cancellation into an empty, cached grant set (109's W3); this task made that catch rethrow and gated the
+  write, so the reason was gone and the old behaviour left one window — a client abort DURING the junction read made
+  `GetGrantSetAsync` return a faulted set instead of propagating. The justifying comment (now false) is rewritten, and
+  109's W3 test is rewritten to the corrected contract (§15).
 - `GetGrantSetAsync` (the ONE write path 137 left): a faulted set is logged and not written. Its cache-read catch is
   guarded for caller cancellation.
 - **No `CacheVersion` bump**: `CachedGrantSet` is unchanged (the flag is never cached). A pre-fix fault-derived grant
@@ -287,6 +294,15 @@ attachment filter this task does not touch), took 4 s under a 25-minute concurre
 edit); `Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped
 (428)**. Builds 0 warnings / 0 errors. No package change (no CVE delta); publish size skipped by instruction.
 
+**Publish size + CVE (criterion 20, CLAUDE.md §10 — measured by the r1 verifier, recorded in r1):** both sides built in
+FRESH short-path detached worktrees and zipped with the SAME tool, PowerShell `Compress-Archive` (Optimal):
+`origin/master` @ `818840ac6` = **45.66 MB, 212 files**; this task @ `4ed160714` = **45.67 MB, 212 files**;
+**delta +0.01 MB**, equal file counts, well under the 60 MB ceiling and the +5 MB escalation threshold. (The verifier's
+report does not state the PDB convention; both sides used the same publish, so the delta stands either way.) **CVE:** no
+`.csproj` or package change anywhere in the task (or in r1), so `dotnet list package --vulnerable --include-transitive`
+can report nothing new. r1 adds no package and changes a handful of source lines; its publish size was not re-measured
+(run instruction).
+
 **A test-harness trap worth carrying:** the framework `HttpContextAccessor` keeps the context in an AsyncLocal, which
 does not flow back out of an async world-builder — the first run's "IS cached" assertions failed (no `tid`, so nothing
 cached) while every "is NOT cached" assertion PASSED vacuously. Fixed with a field-backed accessor; the perturbations
@@ -317,6 +333,10 @@ Each seed applied to the production file, BFF + tests rebuilt, the named tests r
 
 After restoring: affected classes 739 / 739 green.
 
+**Count correction (r1, verifier item 13):** the original run's structured report said "17 perturbations"; the record
+above — the authoritative one — lists **15** seeds (P1, P2, P3a, P3b, P4, P5a, P5b, P6a, P6b, P7, P8, P9a, P9b, P10,
+P11). The r1 seeds R1-R8 are in §15.
+
 ## 12. Pending manual gates (no live writes made)
 
 1. **Dev deploy** (bff-deploy skill), then **criterion 21** (manual, existing non-admin test users in their current BU,
@@ -329,7 +349,14 @@ After restoring: affected classes 739 / 739 green.
    - (c) record `ExternalAccess:ImpersonatedRootSets:Enabled` (036 not merged → flag off).
    - Evidence of eviction: App Insights `[ACCESS-EVICT] Evicted {Count} cache entries for sprk_project {id} (owner
      change)`.
-2. **Publish size / CVE** — skipped by run instruction (no package change).
+   - **Deploy-order precondition (r1, verifier item 11):** a systemuser-row read failure now denies the whole
+     systemuser plane on the grant-supported root types (criterion 16), and the identity's systemuser read selects task
+     141's `sprk_primarycontact`. Before deploying this code to ANY environment, confirm the column exists there
+     (read-only): `GET {env}/api/data/v9.2/EntityDefinitions(LogicalName='systemuser')/Attributes(LogicalName='sprk_primarycontact')?$select=LogicalName`
+     → 200. Dev has it (141 G-1). A 404 means deploy 141's schema first, or Teams/SPA shows internal users nothing,
+     logged as `[WF-AUTHZ] Deny-veto subject … UNREADABLE`.
+2. **Publish size / CVE** — ~~skipped by run instruction~~ **CLOSED in r1**: measured by the verifier, recorded in §10
+   (+0.01 MB, 212 / 212 files, no package change).
 
 ## 13. Placement + justification (CLAUDE.md §10 / §11)
 
@@ -393,3 +420,75 @@ path-A handler, no DI/ctor/reflection tests) ✅. **No violation.**
 - `TASK-INDEX.md` → `✅` for 132 (not edited here, per run rules).
 - Escalation trigger 7 (§8) → owner choice (a) / (b).
 - GitHub: none existed for C12 at authoring; #1056 is this task's issue.
+
+## 15. Verifier round r1 (2026-10-03, `task/uac-r2-132-r1` from `task/uac-r2-132` @ `4ed160714`)
+
+Owner decisions re-read from `work/unified-access-control-r2` (rounds 1-9 + the #1081 peer report): none answers
+escalation 7, so it stays a first-class stop (status `completed-with-escalation`, as task 137 carried its open
+escalation). No live write was made.
+
+| # | Verifier item | Outcome |
+|---|---|---|
+| 1, 2, 4, 9, 10, 12 | scope, suite re-runs, the 16 perturbations, verified-correct classifications, the DI defect, 109 residuals | Nothing to change. |
+| 3 / 16 | publish size + CVE not recorded (criterion 20) | **Closed:** the verifier's measurement is in §10 and §12 (+0.01 MB, 212 / 212 files, Compress-Archive, no package change). |
+| 5 | four seeds stayed green (S10, S11, S14, S15) | **Closed:** each now has a test and the seed reddens it — R2, R3, R6, R7 below. |
+| 6 / 15 | caller cancellation during the junction read returned a faulted set (criterion 3) | **Closed:** the junction query rethrows the caller's cancellation (§2 r1); the false comment is rewritten (the catch, the method remarks, `ReadOrganizationMembershipsAsync`'s note). Task 109's W3 test asserted the opposite and is rewritten to the corrected contract (R1). |
+| 7 | comments / docs contradicting the code | **Closed:** `MEMBERSHIP-RESOLUTION-GUIDE.md` :620 / :637 / :641 and `IMembershipResolverService.cs:25` (its claimed "Phase 2 extends TTL" exists nowhere in code and was dropped). The same sweep found and corrected five more this task had made false: `OrganizationMembershipResolver`'s header ("all failure modes fail soft" — not through the identity seam), `ExternalParticipationService`'s contact-state remarks ("10-minute identity cache"), `UserOrgContextReader` ×2 ("mirrors the identity cache's 10-minute TTL" — it stays 10, the identity cache is 2), `SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md:244` ("5-min/user" membership), and the task-109 note's two references to the rewritten W3 test. Not edited: `docs/adr/ADR-034-user-record-membership.md:89` (historical ADR text, criterion 11 keeps `docs/adr/` out of scope). |
+| 8 | ambiguous re-owns evicted inconsistently | **Closed — rule: evict whenever the ownership PATCH may have applied.** `ProvisionProjectEndpoint` now evicts on `OwnerAssignmentOutcome.Failed` (a PATCH that timed out after Dataverse committed, or an accepted PATCH whose read-back failed); `NotApplied` (a read-back that SAW the old owner) evicts nothing. `UnsecureProjectEndpoint` also evicts when its PATCH throws (the same timeout-after-commit case), beside its existing "could not verify" eviction. Responses unchanged (500, same reason codes). |
+| 11 | the unreadable-contact veto denied every candidate on EVERY entity type | **Closed:** the deny-every-candidate branch now applies only on the grant-supported root types (project / matter / work assignment) — the only types where the linked contact IS the veto subject. On any other type `grantContactId` stays null even for a KNOWN contact, so an unknown one cannot change the answer; denying on it refused what a known contact keeps. Fail-closed is unchanged wherever the contact is consulted. The deploy-order dependency (task 141's `sprk_primarycontact`) is now a G-1 precondition with a read-only check (§12). |
+| 13 | bookkeeping | **Closed:** POML status `completed` → `completed-with-escalation` (escalation 7 open; G-1 / G-2 pending manual gates); the "17 perturbations" report vs 15 recorded is corrected in §11. |
+| 14 | smallest fix set + optionals | (a) item 6, (b) item 3, (c) item 7 — all done; optionals done too: S10 / S11 / S14 tests and the provisioning `Failed` eviction (plus S15 and the unsecure PATCH-threw eviction, for consistency). |
+| 17 | criterion 21 (manual live gate) | **Not closable from code** — G-2 after the G-1 dev deploy, unchanged (§12). |
+| 18 | criterion 17 (PR part) | **Due at PR time** — the paragraph below is ready to paste into the PR description; the reviewer's approval is recorded there by the reviewer. |
+
+### 15.1 r1 perturbations — each seeded in the production file, rebuilt, seen red, restored byte-identical (asserted) and touched
+
+| # | Seed | Red |
+|---|---|---|
+| R1 | the junction query reports the caller's cancellation as `Failed` again (item 6) | **1** — `OrganizationMembershipReadTests.GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_PropagatesTheCancellation_AndCachesNothing` |
+| R2 | the identity seam back to `failSoft: true` (S10) | **1** — `Identity_AFaultOnEachSubPath_…(organizations-real-resolver)` |
+| R3 | no eviction on unsecure's "could not verify" path (S11) | **1** — `ReOwn_AnAmbiguousOutcome_…(unsecure, read-back-failed)` |
+| R4 | provisioning evicts on `NotApplied` instead of `Failed` (item 8) | **2** — `ReOwn_AnAmbiguousOutcome_…(provision, read-back-failed)` and `(provision, patch-timed-out-after-commit)` |
+| R5 | no eviction when unsecure's PATCH throws (item 8) | **1** — `ReOwn_AnAmbiguousOutcome_…(unsecure, patch-timed-out-after-commit)` |
+| R6 | a sentinel tenant (`?? "no-tenant"`) when `tid` is missing (S14) | **4** — `AccessCacheCharacterizationTests.ARequestWithoutATid_…` (document / record × no tid claim / no HttpContext) |
+| R7 | an unreadable people-targeting app-user check treated as a non-fault (S15) | **1** — `Membership_PeopleTargeting_…(checkFaulted: True)` |
+| R8 | the unreadable-contact veto on every entity type again (item 11) | **1** — `DenyVeto_SystemUserPlane_…(contact-unreadable, sprk_event)` |
+
+### 15.2 r1 tests (ADR-038 KEEP paths; no transport mock, no DI / ctor / reflection test, no sleep)
+
+- **Rewritten:** `OrganizationMembershipReadTests.GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants`
+  → `…_PropagatesTheCancellation_AndCachesNothing`: cancel fired once the junction request is IN FLIGHT (a
+  `JunctionRequestSeen` signal on the fake, replacing a 300 ms timer that could fire during the grant query and pass
+  for the wrong reason); asserts the OCE, no cache entry, and that the next request reads the direct grants (W3's real
+  concern, kept).
+- **Added cases:** `Identity_AFaultOnEachSubPath_…(organizations-real-resolver)` — the PRODUCTION
+  `OrganizationMembershipResolver` over the substituted Dataverse, its own FetchXml failing;
+  `Membership_PeopleTargeting_CachesOnlyAResponseBuiltOnAReadApplicationUserCheck` ×2 (fault / control);
+  `DenyVeto_…` +2 on `sprk_event` (unreadable and known contact compose alike there);
+  `ReOwn_AnAmbiguousOutcome_StillEvicts_AndTheFailureIsReportedAsBefore` ×4 (provision / unsecure × PATCH timed out
+  after commit / read-back failed) over the real endpoints + production invalidator;
+  `AccessCacheCharacterizationTests.ARequestWithoutATid_IsNeitherReadFromNorWrittenToTheCache` ×4.
+- **Fixture:** `ProvisionProjectTestFixture` gains `OwnershipPatchTimesOutAfterApplying` and `OwnerReadBackFails`
+  (default off, cleared by `Reset`).
+- Beyond the closed set, justified: each added case is the verifier's named gap or the edge of an item-8 / item-11
+  change; no happy-path variant was added.
+
+**r1 results (2026-10-03):** build 0 warnings / 0 errors; affected + adjacent classes **470 / 0 / 0** after the seeds were restored; full BFF unit suite **14,332 passed / 0 failed / 54 skipped (14,386** = 14,373 + 13 new cases; 24 m 39 s, no contention failure this run); NetArchTest **346 / 0 / 0**; `Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**.
+
+### 15.3 PR description paragraph for criterion 17 (paste at PR time)
+
+> **ADR-009 tension (task 132, CLAUDE.md §6.5) — path C, pivot to comply.** `CachedAccessDataSource` used
+> `IDistributedCache` directly with non-tenant `sdap:auth:*` keys and was not allow-listed in `SystemCacheKeys.cs`. Its
+> two keys now go through `ITenantCache` under the caller's `tid`, subject-discriminated:
+> `tenant:{tid}:auth-access:{authMode}:{oid}:{documentId}:v1` and
+> `tenant:{tid}:auth-record-access:{entitySet}:{oid}:{recordId}:v1`. A request with no `tid` is not cached at all (no
+> sentinel tenant, no allow-list entry) — pinned by `ARequestWithoutATid_IsNeitherReadFromNorWrittenToTheCache`.
+> Escalation trigger 3 did not fire: every caller of the decorator runs inside an HTTP request with a validated Entra
+> token (notes §5). `docs/architecture/caching-architecture.md` :64 and :98-99 match the code. Reviewer approval of
+> path C: _(reviewer to record here)_.
+
+### 15.4 r1 placement + justification (CLAUDE.md §10 / §11)
+
+No new service, interface, DI registration, endpoint, option, job, column or package. Source changes are in existing
+methods of existing BFF classes (one catch, two eviction calls on existing failure paths, one condition) plus
+comments; test changes extend existing test classes and the existing fixture.

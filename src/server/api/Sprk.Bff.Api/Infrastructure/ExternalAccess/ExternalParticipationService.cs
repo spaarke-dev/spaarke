@@ -706,8 +706,9 @@ public class ExternalParticipationService
 
     /// <summary>
     /// Whether <paramref name="contactId"/> is an ACTIVE contact, read LIVE — never from the 60-second grant cache
-    /// or the 10-minute identity cache. The evaluator consults it on every composition that could contribute
-    /// contact-sourced access, so a contact deactivated after sign-in loses that access on its next request.
+    /// or the identity cache (2 minutes since task 132; 10 before). The evaluator consults it on every composition
+    /// that could contribute contact-sourced access, so a contact deactivated after sign-in loses that access on its
+    /// next request.
     /// </summary>
     /// <remarks>
     /// <para><b>Fail closed.</b> Anything but a successfully read <c>statecode</c> of 0 is not Active: a missing
@@ -1584,8 +1585,8 @@ public class ExternalParticipationService
         var apiUrl = GetDataverseApiUrl();
         var memberships = await QueryOrganizationMembershipsAsync(contactId, token, apiUrl, ct).ConfigureAwait(false);
 
-        // The query reports the caller's own cancellation as Failed (see its catch); here, on the evaluator's
-        // path, a cancelled request propagates instead of composing a deny-all answer nobody is waiting for.
+        // The query rethrows the caller's cancellation itself (task 132). This check also covers a cancellation that
+        // lands just after the read completed, so a cancelled request never composes an answer nobody is waiting for.
         ct.ThrowIfCancellationRequested();
         return memberships;
     }
@@ -1599,9 +1600,8 @@ public class ExternalParticipationService
     /// <para><b>Reports a fault instead of swallowing it</b> (task 109 · ISS-019): a non-success status, a
     /// timeout or any other exception returns <see cref="ActiveOrgMemberships.Failed"/> — never an empty
     /// "successful" read. An HTTP timeout surfaces as an <see cref="OperationCanceledException"/> whose token
-    /// is not the caller's, and that is a fault. The caller's OWN cancellation is reported as Failed here too
-    /// and rethrown by <see cref="ReadOrganizationMembershipsAsync"/> — see the catch for why it must not
-    /// propagate from this method.</para>
+    /// is not the caller's, and that is a fault. The caller's OWN cancellation propagates (task 132 — see the
+    /// catch for why task 109's "report it as Failed" no longer applies).</para>
     /// <para><b>Schema</b>, live-verified 2026-08-26 (task 020, recorded at
     /// <c>RevokeExternalAccessEndpoint.cs</c>'s <c>ExternalOrganizationMembership</c>) and again 2026-09-30
     /// (task 109): collection <c>sprk_contactorganizations</c>; lookups <c>_sprk_contact_value</c> /
@@ -1659,13 +1659,13 @@ public class ExternalParticipationService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // The CALLER cancelled. Reported as Failed, not rethrown, on purpose: this query also runs inside
-            // QueryGrantSetAsync, whose catch-all would turn a propagated cancellation into an EMPTY grant set
-            // (direct grants included) and cache it — a wider loss than the org-grant term alone. The
-            // evaluator's entry (ReadOrganizationMembershipsAsync) rethrows the cancellation itself.
-            // Since task 132 the Failed outcome also marks that grant set FAULTED, so it is returned (direct grants
-            // kept) and never cached.
-            return ActiveOrgMemberships.Failed;
+            // The CALLER cancelled (a client abort) — propagate, on BOTH paths that run this query (task 132 · C12,
+            // criterion 3). Task 109 reported it as Failed instead, because QueryGrantSetAsync's catch-all then
+            // turned an escaping cancellation into an EMPTY grant set and cached it. Task 132 made that catch rethrow
+            // the caller's cancellation and gated the cache write, so the reason is gone: reporting it as Failed now
+            // only made GetGrantSetAsync RETURN a faulted set to a request nobody is waiting for. An HttpClient
+            // TIMEOUT (the caller's token NOT cancelled) is still a fault, in the catch below.
+            throw;
         }
         catch (Exception ex)
         {

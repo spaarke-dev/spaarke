@@ -113,7 +113,11 @@ public sealed class AccessCacheFaultCachingTests
         world.ContactGrantReads.Should().Be(2);
     }
 
-    /// <summary>Criterion 3 — the CALLER's cancellation propagates out of GetGrantSetAsync, and nothing is cached.</summary>
+    /// <summary>
+    /// Criterion 3 — the CALLER's cancellation propagates out of GetGrantSetAsync, and nothing is cached. The same
+    /// window inside the membership-junction sub-read is pinned by
+    /// <c>OrganizationMembershipReadTests.GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_PropagatesTheCancellation_AndCachesNothing</c>.
+    /// </summary>
     [Fact]
     public async Task GrantSet_CallerCancelsDuringTheGrantQuery_PropagatesOperationCanceled_AndCachesNothing()
     {
@@ -187,7 +191,10 @@ public sealed class AccessCacheFaultCachingTests
     /// <summary>
     /// Criterion 6 — a fault on EACH sub-path produces an identity that is returned (fail soft, as before) but NOT
     /// cached; the next resolve re-reads. One case per path, plus a timeout on the team read (a TaskCanceledException
-    /// with the caller's token NOT cancelled is a fault, not a cancellation — the constraint's rule, on this cache).
+    /// with the caller's token NOT cancelled is a fault, not a cancellation — the constraint's rule, on this cache), plus
+    /// the PRODUCTION organization resolver's own query failing: before task 132 that resolver swallowed the fault
+    /// itself, so the identity layer never saw it and cached "member of no organization" (verifier r1, seed S10 — the
+    /// "organizations" case alone uses a resolver double and cannot see that adapter).
     /// </summary>
     [Theory]
     [InlineData("systemuser-row")]
@@ -195,10 +202,15 @@ public sealed class AccessCacheFaultCachingTests
     [InlineData("contact-binding")]
     [InlineData("account")]
     [InlineData("organizations")]
+    [InlineData("organizations-real-resolver")]
     [InlineData("teams-timeout")]
     public async Task Identity_AFaultOnEachSubPath_IsReturnedButNotCached_AndTheNextResolveReReads(string path)
     {
-        var world = new IdentityWorld { LinkedContact = path != "contact-binding" };
+        var world = new IdentityWorld
+        {
+            LinkedContact = path != "contact-binding",
+            RealOrganizationResolver = path == "organizations-real-resolver",
+        };
         world.Fail(path);
 
         var act = () => world.Service.ResolveAsync(IdentityWorld.UserId, CancellationToken.None);
@@ -281,6 +293,30 @@ public sealed class AccessCacheFaultCachingTests
         world.MembershipQueries.Should().Be(identityFaulted ? 2 : 1, identityFaulted
             ? "a response built over a failed team read is never cached — it hid every team-owned record for 10 + 5 minutes"
             : "a clean identity with zero matches is an answer and is cached");
+    }
+
+    /// <summary>
+    /// Criterion 8 (people-targeting surface) — the human/application-user check that decides whether Created By binds
+    /// is a read too. When it FAILS, the response is built without Created By (fail soft, as before) and is NOT cached;
+    /// when it reads a human, the response is cached (verifier r1, seed S15).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Membership_PeopleTargeting_CachesOnlyAResponseBuiltOnAReadApplicationUserCheck(bool checkFaulted)
+    {
+        var world = new MembershipWorld();
+        if (checkFaulted)
+        {
+            world.Identity.Fail("application-user-check");
+        }
+
+        await world.Resolver.ResolveAsync(IdentityWorld.UserId, MembershipWorld.Project, MembershipResolveOptions.People, CancellationToken.None);
+        await world.Resolver.ResolveAsync(IdentityWorld.UserId, MembershipWorld.Project, MembershipResolveOptions.People, CancellationToken.None);
+
+        world.MembershipQueries.Should().Be(checkFaulted ? 2 : 1, checkFaulted
+            ? "a response built while the human/application-user check could not be read is never cached"
+            : "control: with the check read (a human), the people-targeting response is an answer and is cached");
     }
 
     /// <summary>
@@ -451,12 +487,18 @@ public sealed class AccessCacheFaultCachingTests
     /// that decide it failed): before task 132 the veto had no subject and checked nothing, so R composed — the traced
     /// fail-open. Now every candidate is denied. (c) genuinely unlinked (read, absent): composes exactly as before, R
     /// kept, the deny reader never consulted — 7 of 8 dev systemusers are in this state and lose nothing.
+    /// (d) On an entity type grants do not target (here <c>sprk_event</c>) the contact is never the veto subject — not
+    /// even when it is KNOWN — so an unreadable one composes exactly as a known one does there (verifier r1, item 11:
+    /// the unreadable branch used to deny every candidate on every type).
     /// </summary>
     [Theory]
-    [InlineData("contact-read", false)]
-    [InlineData("contact-unreadable", false)]
-    [InlineData("genuinely-unlinked", true)]
-    public async Task DenyVeto_SystemUserPlane_AnUnreadableContactDenies_AnAbsentOneComposesAsBefore(string state, bool expectComposed)
+    [InlineData("contact-read", AccessibleRecordSetService.ProjectEntity, false)]
+    [InlineData("contact-unreadable", AccessibleRecordSetService.ProjectEntity, false)]
+    [InlineData("genuinely-unlinked", AccessibleRecordSetService.ProjectEntity, true)]
+    [InlineData("contact-read", "sprk_event", true)]
+    [InlineData("contact-unreadable", "sprk_event", true)]
+    public async Task DenyVeto_SystemUserPlane_AnUnreadableContactDenies_AnAbsentOneComposesAsBefore(
+        string state, string entityType, bool expectComposed)
     {
         var record = Guid.Parse("13200000-0000-0000-0000-0000000000e1");
         var denyList = new ContactDenyList(ContactId, record);
@@ -472,12 +514,12 @@ public sealed class AccessCacheFaultCachingTests
             TenantId = Tenant,
         };
 
-        var set = await evaluator.ComposeAsync(principal, AccessibleRecordSetService.ProjectEntity, CancellationToken.None);
+        var set = await evaluator.ComposeAsync(principal, entityType, CancellationToken.None);
 
         set.Contains(record).Should().Be(expectComposed);
-        if (state == "genuinely-unlinked")
+        if (state == "genuinely-unlinked" || entityType != AccessibleRecordSetService.ProjectEntity)
         {
-            denyList.Calls.Should().Be(0, "no subject on either axis — nothing to check, exactly as before task 132");
+            denyList.Calls.Should().Be(0, "no contact subject — nothing to check, exactly as before task 132");
         }
     }
 
@@ -823,6 +865,32 @@ public sealed class AccessCacheFaultCachingTests
                     return Task.FromResult(new EntityCollection());
                 });
 
+            // The PRODUCTION organization resolver's own query (used when RealOrganizationResolver is set). Registered
+            // after the general FetchExpression setup, so it answers the organization fetch only.
+            Dataverse
+                .Setup(d => d.RetrieveMultipleAsync(
+                    It.Is<FetchExpression>(f => f.Query.Contains("<entity name='sprk_organization'>", StringComparison.Ordinal)),
+                    It.IsAny<CancellationToken>()))
+                .Returns(() => Answer("organizations-real-resolver", () =>
+                {
+                    var rows = new EntityCollection();
+                    foreach (var organization in OrganizationIds)
+                    {
+                        rows.Entities.Add(new Entity("sprk_organization", organization));
+                    }
+
+                    return rows;
+                }));
+
+            // The people-targeting surface's human/application-user check (ApplicationUserCheck) — a systemuser read
+            // of the applicationid column alone. Registered after the identity's systemuser-row setup, so it answers
+            // that read only; healthy, it returns no applicationid (a human).
+            Dataverse
+                .Setup(d => d.RetrieveAsync("systemuser", UserId,
+                    It.Is<string[]>(c => c.Length == 1 && c[0] == ApplicationUserCheck.ApplicationIdAttribute),
+                    It.IsAny<CancellationToken>()))
+                .Returns(() => Answer("application-user-check", () => new Entity("systemuser", UserId)));
+
             Organizations
                 .Setup(o => o.ResolveOrganizationsAsync(UserId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .Returns(() => _faults.TryGetValue("organizations", out var ex)
@@ -838,6 +906,13 @@ public sealed class AccessCacheFaultCachingTests
 
         public bool LinkedContact { get; set; } = true;
 
+        /// <summary>
+        /// When set, the identity's organization resolver is the PRODUCTION <see cref="OrganizationMembershipResolver"/>
+        /// (lookup field configured) over the substituted Dataverse, instead of the seam double — so a fault in its
+        /// own query must REACH the identity layer through the production adapter (verifier r1, seed S10).
+        /// </summary>
+        public bool RealOrganizationResolver { get; set; }
+
         public IReadOnlyList<Guid> TeamIds { get; set; } = new[] { Team };
 
         public IReadOnlyList<Guid> OrganizationIds { get; set; } = new[] { Organization };
@@ -852,10 +927,20 @@ public sealed class AccessCacheFaultCachingTests
         public IdentityNormalizationService Service => new(
             Dataverse.Object,
             Cache,
-            new[] { Organizations.Object },
+            new[] { RealOrganizationResolver ? ProductionOrganizationResolver() : Organizations.Object },
             Options.Create(new MembershipOptions()),
             NullLogger<IdentityNormalizationService>.Instance,
             RequestWithTenant());
+
+        private IIdentityOrganizationResolver ProductionOrganizationResolver()
+        {
+            var options = new MembershipOptions();
+            options.OrganizationLookup.UserLookupField = "sprk_owneruser";
+            return new OrganizationMembershipResolver(
+                Dataverse.Object,
+                Mock.Of<IOptionsMonitor<MembershipOptions>>(m => m.CurrentValue == options),
+                NullLogger<OrganizationMembershipResolver>.Instance);
+        }
 
         public void Fail(string path)
             => _faults[path] = path == "teams-timeout"

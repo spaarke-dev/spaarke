@@ -384,6 +384,16 @@ public static class ProvisionProjectEndpoint
 
         if (assignment != OwnerAssignmentOutcome.Assigned)
         {
+            if (assignment == OwnerAssignmentOutcome.Failed)
+            {
+                // Task 132 (C12): "Failed" includes a PATCH that timed out after Dataverse committed it, and a PATCH
+                // that was accepted but whose read-back failed — either may have re-owned the record. Evict (always
+                // safe, never fails the request), as the unsecure endpoint does on its ambiguous outcomes. NotApplied
+                // is a read-back that SAW the old owner: nothing changed, nothing to evict.
+                await accessCacheInvalidator.InvalidateRecordOwnerChangeAsync(
+                    root.LogicalName, root.EntitySet, recordId, traceId, CancellationToken.None);
+            }
+
             var (reason, detail) = assignment switch
             {
                 OwnerAssignmentOutcome.NotApplied => (
