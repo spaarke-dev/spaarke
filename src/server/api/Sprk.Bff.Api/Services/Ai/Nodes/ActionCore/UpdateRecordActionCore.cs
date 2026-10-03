@@ -140,7 +140,29 @@ internal sealed class UpdateRecordActionCore
             cancellationToken,
             input.ImpersonateSystemUserId);
 
+        await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
+
         return updatePayload.Keys.ToArray();
+    }
+
+    /// <summary>
+    /// Task 156 (owner round 4 item 5, option b): an UpdateRecord node can write ANY column — including what a to-do /
+    /// event / communication / analysis is filed under, or the matter / project of a record others are filed under. Such a
+    /// write re-stamps the affected copies in the same operation (<see cref="CoreAncestorRestamper"/>). A write that cannot
+    /// move a stamp resolves nothing. Never thrown: a child that fails is logged and the reconciliation job repairs it;
+    /// this record's own update stands. Runs to completion once the record is written (no caller token).
+    /// </summary>
+    private async Task RestampAfterWriteAsync(string entityLogicalName, Guid recordId, IEnumerable<string> writtenKeys)
+    {
+        if (!CoreAncestorRestamper.WriteCanMoveAStamp(entityLogicalName, writtenKeys))
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<CoreAncestorRestamper>()
+            .AfterWriteAsync(entityLogicalName, recordId, writtenKeys, CancellationToken.None)
+            .ConfigureAwait(false);
     }
 
     // ---------------------------------------------------------------------------

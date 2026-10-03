@@ -37,7 +37,7 @@ public class CreateTaskNodeExecutorSeamTests
         _executor = new CreateTaskNodeExecutor(
             new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             _entityServiceMock.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             NullLogger<CreateTaskNodeExecutor>.Instance);
     }
 
@@ -89,7 +89,10 @@ public class CreateTaskNodeExecutorSeamTests
             // the sprk_event default is Draft(1) and DailyBriefingCollector's task channels filter on
             // statuscode = Open -- so a Draft task is invisible to the briefing meant to surface it.
             "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid",
-            "statuscode"
+            "statuscode",
+            // The ADR-024 regarding pair, added by unified-access-control-r2 task 156 (owner decisions round 8 item 2,
+            // F-051-6): id, name and url (the record type too when a sprk_recordtype_ref row is found; the mock finds none).
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl"
         });
         captured.GetAttributeValue<string>("sprk_eventname").Should().Be("Review contract");
         captured.GetAttributeValue<string>("sprk_description").Should().Be("Please review the uploaded contract.");

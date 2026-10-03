@@ -30,6 +30,10 @@ public static class JobProcessingModule
 
         // Unconditional handlers (no AI dependencies)
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Jobs.Handlers.DocumentProcessingJobHandler>();
+        // Task 156: re-stamps ONE child the storage resolver refused as container_ancestor_stale (ADR-052: queue →
+        // ADR-004 IJobHandler). Its dependency, CoreAncestorRestamper, is registered unconditionally beside
+        // CoreAncestorResolver (MetadataServiceExtensions.AddCoreAncestorResolver).
+        services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampJobHandler>();
         // AI-coupled handlers relocated to Services/Ai/Jobs/ per task 051 (FR-E3); JobType strings unchanged
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.AppOnlyDocumentAnalysisJobHandler>();
         services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.EmailAnalysisJobHandler>();

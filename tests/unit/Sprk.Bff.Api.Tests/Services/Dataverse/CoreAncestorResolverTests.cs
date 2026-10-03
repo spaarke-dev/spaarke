@@ -299,6 +299,138 @@ public class CoreAncestorResolverTests
     }
 
     // ---------------------------------------------------------------------
+    // Task 156 — a child's stamp is the root of WHATEVER it is filed under
+    // ---------------------------------------------------------------------
+
+    [Theory(DisplayName = "Task 156: invoice / budget / document derive their root from their TYPED root columns, not sprk_regarding{core}")]
+    [InlineData("sprk_invoice", "sprk_matter")]
+    [InlineData("sprk_budget", "sprk_matter")]
+    [InlineData("sprk_document", "sprk_matter")]
+    [InlineData("sprk_document", "sprk_relatedmatter")]
+    public async Task TypedRootIntermediates_DeriveTheirRoot(string target, string matterColumn)
+    {
+        // Until task 156 a to-do filed under one of these carried NO stamp (none of them has the four
+        // sprk_regarding{core} columns), so it inherited nothing from the matter above it — and the storage resolver had
+        // nothing to compare. Owner round 4 item 5: the copy must equal the root of whatever the child is filed under.
+        var row = new Entity(target, CommId) { [matterColumn] = new EntityReference("sprk_matter", MatterId) };
+        var columns = CoreAncestorResolver.IntermediateRootColumns[target].Select(c => c.Column).ToArray();
+
+        var result = await Build(EntityServiceReturning(row), Probe(columns)).ResolveStampsAsync(target, CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().ContainSingle()
+            .Which.Should().Be(new CoreAncestorStamp("sprk_matter", "sprk_regardingmatter", MatterId),
+                "the stamp lands on the CHILD's sprk_regardingmatter, whatever the intermediate's own column is called");
+    }
+
+    [Theory(DisplayName = "Task 156: agreement and report card derive from their own sprk_regardingmatter / sprk_regardingproject (they were Unclassified)")]
+    [InlineData("sprk_agreement")]
+    [InlineData("sprk_reportcard")]
+    public async Task AgreementAndReportCard_DeriveTheirRoot(string target)
+    {
+        var row = new Entity(target, CommId) { ["sprk_regardingproject"] = new EntityReference("sprk_project", ProjectId) };
+
+        var result = await Build(EntityServiceReturning(row), Probe("sprk_regardingmatter", "sprk_regardingproject"))
+            .ResolveStampsAsync(target, CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Derived);
+        result.Stamps.Should().ContainSingle()
+            .Which.Should().Be(new CoreAncestorStamp("sprk_project", "sprk_regardingproject", ProjectId));
+        CoreAncestorResolver.IsChildRecordEntity(target).Should().BeFalse(
+            "the ACCESS taxonomy is untouched — only what a child filed under it is stamped with changes");
+    }
+
+    [Fact(DisplayName = "Task 156: a document naming two DIFFERENT matters (sprk_matter and sprk_relatedmatter) is a derivation ERROR — never a guess")]
+    public async Task TwoDifferentRootsOfOneType_FailClosed()
+    {
+        var row = new Entity("sprk_document", CommId)
+        {
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+            ["sprk_relatedmatter"] = new EntityReference("sprk_matter", Guid.NewGuid()),
+        };
+
+        var result = await Build(EntityServiceReturning(row), Probe("sprk_matter", "sprk_relatedmatter"))
+            .ResolveStampsAsync("sprk_document", CommId);
+
+        result.Status.Should().Be(CoreAncestorStatus.Error);
+        result.Stamps.Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Task 156: the stamp-source topology names only tables that carry the stamp, and only intermediates with known root columns")]
+    public void StampSourceTopology_IsClosed()
+    {
+        foreach (var (table, sources) in CoreAncestorResolver.StampSourceColumns)
+        {
+            CoreAncestorResolver.IsChildRecordEntity(table).Should().BeTrue($"{table} carries a stamp, so it is a child");
+            sources.Select(s => s.Intermediate).Should().OnlyContain(i => CoreAncestorResolver.IsStampSourceEntity(i),
+                $"every record {table} can be filed under must have known root columns, or its copy cannot be checked");
+        }
+    }
+
+    // ClassifyStampSource — the ONE rule the cascade, the reconciliation job and the storage resolver share.
+
+    private static readonly Guid EventId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
+    private static readonly Guid ContactId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    private static Entity Todo(string? pairId, params (string Column, string Target, Guid Id)[] lookups)
+    {
+        var row = new Entity("sprk_todo", Guid.NewGuid());
+        foreach (var (column, target, id) in lookups) row[column] = new EntityReference(target, id);
+        if (pairId is not null) row["sprk_regardingrecordid"] = pairId;
+        return row;
+    }
+
+    [Fact(DisplayName = "Task 156 classify: no intermediate set → not filed under one (its root columns are its own)")]
+    public void Classify_NoIntermediate()
+        => CoreAncestorResolver.ClassifyStampSource("sprk_todo", Todo(null, ("sprk_regardingmatter", "sprk_matter", MatterId)))
+            .Kind.Should().Be(StampSourceKind.NotFiledUnderAnIntermediate);
+
+    [Fact(DisplayName = "Task 156 classify: the pair names the intermediate → it is the source")]
+    public void Classify_PairNamesTheIntermediate()
+    {
+        var decision = CoreAncestorResolver.ClassifyStampSource("sprk_todo", Todo(CommId.ToString(),
+            ("sprk_regardingcommunication", "sprk_communication", CommId), ("sprk_regardingmatter", "sprk_matter", MatterId)));
+
+        decision.Kind.Should().Be(StampSourceKind.Source);
+        decision.Source!.Id.Should().Be(CommId);
+    }
+
+    [Fact(DisplayName = "Task 156 classify: the pair names the ROOT → a direct, user-chosen link; the intermediate is a carrier")]
+    public void Classify_PairNamesTheRoot()
+    {
+        var decision = CoreAncestorResolver.ClassifyStampSource("sprk_todo", Todo(MatterId.ToString(),
+            ("sprk_regardingcommunication", "sprk_communication", CommId), ("sprk_regardingmatter", "sprk_matter", MatterId)));
+
+        decision.Kind.Should().Be(StampSourceKind.DirectRootLink);
+        decision.Carriers.Should().ContainSingle().Which.Id.Should().Be(CommId);
+    }
+
+    [Fact(DisplayName = "Task 156 classify: no pair and ONE intermediate → it is the source (TaskActionCore writes no pair)")]
+    public void Classify_NoPairOneIntermediate()
+        => CoreAncestorResolver.ClassifyStampSource("sprk_todo", Todo(null,
+                ("sprk_regardingcommunication", "sprk_communication", CommId), ("sprk_regardingmatter", "sprk_matter", MatterId)))
+            .Kind.Should().Be(StampSourceKind.Source);
+
+    [Fact(DisplayName = "Task 156 classify: no pair and TWO intermediates → ambiguous; a pair naming its own typed party counts as no pair")]
+    public void Classify_NoPairTwoIntermediates()
+    {
+        var row = Todo(ContactId.ToString(),
+            ("sprk_regardingcommunication", "sprk_communication", CommId), ("sprk_regardingevent", "sprk_event", EventId),
+            ("sprk_regardingcontact", "contact", ContactId));
+
+        CoreAncestorResolver.ClassifyStampSource("sprk_todo", row, ["sprk_regardingcontact", "sprk_regardingorganization"])
+            .Kind.Should().Be(StampSourceKind.AmbiguousSource);
+    }
+
+    [Theory(DisplayName = "Task 156 classify: a pair naming nothing on the row, or not a GUID → inconsistent (nothing is written from it)")]
+    [InlineData("4f4f4f4f-0000-0000-0000-000000000000")]
+    [InlineData("not-a-guid")]
+    public void Classify_InconsistentPair(string pair)
+        => CoreAncestorResolver.ClassifyStampSource("sprk_todo", Todo(pair,
+                ("sprk_regardingcommunication", "sprk_communication", CommId)))
+            .Kind.Should().Be(StampSourceKind.InconsistentPair);
+
+    // ---------------------------------------------------------------------
     // ApplyStamps
     // ---------------------------------------------------------------------
 

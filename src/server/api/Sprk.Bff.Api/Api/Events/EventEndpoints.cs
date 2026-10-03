@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
@@ -9,7 +10,6 @@ using ApiRegardingRecordType = Sprk.Bff.Api.Api.Events.Dtos.RegardingRecordType;
 using ApiUpdateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.UpdateEventRequest;
 using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 using DataverseUpdateEventRequest = Spaarke.Dataverse.UpdateEventRequest;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Events;
 
@@ -440,6 +440,10 @@ public static class EventEndpoints
     /// <param name="id">The event ID.</param>
     /// <param name="request">The update event request.</param>
     /// <param name="dataverseService">Dataverse service for updating records.</param>
+    /// <param name="restamper">
+    /// Re-stamps the event (and every record filed under it) when the update changed what the event is filed under
+    /// (unified-access-control-r2 task 156).
+    /// </param>
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>200 OK with updated event on success, 404 if not found, or 400 if validation fails.</returns>
@@ -447,6 +451,7 @@ public static class EventEndpoints
         Guid id,
         [FromBody] ApiUpdateEventRequest request,
         IEventDataverseService dataverseService,
+        [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -516,6 +521,7 @@ public static class EventEndpoints
 
             await UpdateEventInDataverseAsync(
                 dataverseService,
+                restamper,
                 id,
                 request,
                 ct);
@@ -804,6 +810,7 @@ public static class EventEndpoints
     /// </remarks>
     private static async Task UpdateEventInDataverseAsync(
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
         Guid id,
         ApiUpdateEventRequest request,
         CancellationToken ct)
@@ -825,6 +832,16 @@ public static class EventEndpoints
 
         // Update the event record
         await dataverseService.UpdateEventAsync(id, dataverseRequest, ct);
+
+        // Task 156 (verifier round 2 item 8): the update writes the event's regarding pair and nothing else that files
+        // it. On an event that carries two typed sources, a pair change moves which one its copy comes from — so the
+        // event's own copy, and the copies of everything filed under it, are re-stamped in this same request (the pair
+        // columns are an own-source write to CoreAncestorRestamper). A write that does not touch the pair reads
+        // nothing. Never thrown: a record that fails is logged and the reconciliation job repairs it; this update stands.
+        await restamper.AfterWriteAsync(
+            "sprk_event", id,
+            Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper.EventColumnsWritten(dataverseRequest),
+            CancellationToken.None);
 
         // If status changed, create Event Log entry
         if (request.StatusCode.HasValue)

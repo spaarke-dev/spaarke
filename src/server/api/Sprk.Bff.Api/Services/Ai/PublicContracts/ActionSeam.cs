@@ -23,6 +23,7 @@ public sealed class ActionSeam : IActionSeam
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
+    private readonly ICommunicationDataverseService _recordTypes;
     private readonly ILogger<ActionSeam> _logger;
 
     public ActionSeam(
@@ -31,6 +32,7 @@ public sealed class ActionSeam : IActionSeam
         IServiceScopeFactory scopeFactory,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        ICommunicationDataverseService recordTypes,
         ILogger<ActionSeam> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
@@ -38,6 +40,9 @@ public sealed class ActionSeam : IActionSeam
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _identity = identity ?? throw new ArgumentNullException(nameof(identity));
+        // Task 156, owner round 8 item 2: the sprk_recordtype_ref lookup for the task's ADR-024 regarding pair
+        // (TaskActionCore). Unconditionally registered (GraphModule), so no asymmetric registration (§10 F.1).
+        _recordTypes = recordTypes ?? throw new ArgumentNullException(nameof(recordTypes));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -90,7 +95,7 @@ public sealed class ActionSeam : IActionSeam
         if (string.IsNullOrWhiteSpace(request.Subject))
             return new CreateTaskResult(false, Guid.Empty, "subject is required");
 
-        var core = new TaskActionCore(_entityService, _coreAncestors, _identity, _logger);
+        var core = new TaskActionCore(_entityService, _coreAncestors, _identity, _recordTypes, _logger);
         var taskId = await core.CreateAsync(
             new TaskActionInput(
                 Subject: request.Subject,
