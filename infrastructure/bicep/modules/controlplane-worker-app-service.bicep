@@ -192,7 +192,7 @@ param controlPlanePrincipalId string
 // for platform-controlplane.bicep, which imports it -- a template-wide change to
 // a live-what-if-verified deployment for a shape check that
 // SpeContainerOptions.Validate() already does more strictly at Worker startup.
-@description('SPE container types this L2 deployment provisions into, each with its OWNING app and that app\'s certificate (base64 PFX): [{ containerTypeId, ownerAppId, ownerCertKeyVaultName?, ownerCertSecretName? }]. containerTypeId = the SPE container type GUID, matched against the run\'s intake containerTypeId; ownerAppId = the owning app registration\'s client id -- never the customer BFF app (topology section 3A); ownerCertKeyVaultName defaults to keyVaultName, on which platform-controlplane.bicep grants the Worker UAMI Key Vault Secrets User -- any OTHER vault must grant the Worker UAMI Key Vault Secrets User itself, or H0\'s SpeCertBootstrap probe rejects every run for that container type; ownerCertSecretName defaults to SPE-OwnerCert-Pfx. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__* -- read by H0\'s SpeCertBootstrap probe, H8 (container creation) and H13\'s T6 probe. Empty (default) boots the Worker; H0 then rejects every run until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type, an owning app listed twice, or two owning apps sharing one certificate secret.')
+@description('SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run\'s intake containerTypeId; ownerAppId = the owning app registration\'s client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker\'s UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0\'s SpeOwnerCredential probe, H8 (container creation) and H13\'s T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice.')
 param speContainerTypeOwners array = []
 
 @description('Tags for the resource.')
@@ -203,8 +203,6 @@ param tags object = {}
 var speContainerTypeOwnerSettings = flatten(map(range(0, length(speContainerTypeOwners)), i => [
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__ContainerTypeId', value: speContainerTypeOwners[i].containerTypeId }
   { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerAppId', value: speContainerTypeOwners[i].ownerAppId }
-  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerCertKeyVaultName', value: speContainerTypeOwners[i].?ownerCertKeyVaultName ?? keyVaultName }
-  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerCertSecretName', value: speContainerTypeOwners[i].?ownerCertSecretName ?? 'SPE-OwnerCert-Pfx' }
 ]))
 
 // ============================================================================

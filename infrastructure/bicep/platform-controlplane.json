@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "13489058810509134828"
+      "templateHash": "14137870858376761704"
     }
   },
   "parameters": {
@@ -107,7 +107,7 @@
       "type": "array",
       "defaultValue": [],
       "metadata": {
-        "description": "SPE container types this L2 deployment provisions into, with their owning app and certificate secret — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description for the entry shape and the Key Vault grant a non-default certificate vault needs). Task 245b. Empty (default) until the topology runbook has created a container type + owning app."
+        "description": "SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app."
       }
     },
     "customerRunGuardEnabled": {
@@ -1517,7 +1517,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "5852170788431567528"
+              "templateHash": "3051002304773829210"
             }
           },
           "parameters": {
@@ -1693,7 +1693,7 @@
               "type": "array",
               "defaultValue": [],
               "metadata": {
-                "description": "SPE container types this L2 deployment provisions into, each with its OWNING app and that app's certificate (base64 PFX): [{ containerTypeId, ownerAppId, ownerCertKeyVaultName?, ownerCertSecretName? }]. containerTypeId = the SPE container type GUID, matched against the run's intake containerTypeId; ownerAppId = the owning app registration's client id -- never the customer BFF app (topology section 3A); ownerCertKeyVaultName defaults to keyVaultName, on which platform-controlplane.bicep grants the Worker UAMI Key Vault Secrets User -- any OTHER vault must grant the Worker UAMI Key Vault Secrets User itself, or H0's SpeCertBootstrap probe rejects every run for that container type; ownerCertSecretName defaults to SPE-OwnerCert-Pfx. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__* -- read by H0's SpeCertBootstrap probe, H8 (container creation) and H13's T6 probe. Empty (default) boots the Worker; H0 then rejects every run until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type, an owning app listed twice, or two owning apps sharing one certificate secret."
+                "description": "SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run's intake containerTypeId; ownerAppId = the owning app registration's client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker's UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0's SpeOwnerCredential probe, H8 (container creation) and H13's T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice."
               }
             },
             "tags": {
@@ -1733,7 +1733,7 @@
                 "value": "true"
               }
             ],
-            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerCertKeyVaultName', lambdaVariables('i')), 'value', coalesce(tryGet(parameters('speContainerTypeOwners')[lambdaVariables('i')], 'ownerCertKeyVaultName'), parameters('keyVaultName'))), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerCertSecretName', lambdaVariables('i')), 'value', coalesce(tryGet(parameters('speContainerTypeOwners')[lambdaVariables('i')], 'ownerCertSecretName'), 'SPE-OwnerCert-Pfx'))))))]"
+            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]"
           },
           "resources": [
             {

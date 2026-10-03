@@ -8,9 +8,10 @@
 //     Officer on each customer vault (L2's own UAMI, never the stamp's) and H2a
 //     sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps. (The vendor-key platform-vault option went with the
 //     vendor keys — task 225b, owner D18 2026-10-02.)
-//   - SpeContainerOptions.ContainerTypeOwners — the SPE owning-app credential per
-//     container type (app id + the certificate's vault + secret), read by H0's
-//     SpeCertBootstrap probe, H8 and H13's T6 probe.
+//   - SpeContainerOptions.ContainerTypeOwners — the SPE owning app per container
+//     type ({ContainerTypeId, OwnerAppId} — task 248: L2 signs in as it through the
+//     Worker UAMI's federated credential, so no certificate is configured), read by
+//     H0's SpeOwnerCredential probe, H8 and H13's T6 probe.
 // Each factory below boots the REAL Worker composition root with one setting
 // broken; starting the host must throw (ValidateOnStart), naming the setting —
 // the tests never read the options themselves, so removing ValidateOnStart
@@ -46,8 +47,7 @@ public sealed class WorkerL2OwnedOptionsBootTests
     }
 
     [Theory]
-    [InlineData("OwnerCertKeyVaultName")]
-    [InlineData("OwnerCertSecretName")]
+    [InlineData("ContainerTypeId")]
     [InlineData("OwnerAppId")]
     public void IncompleteSpeOwnerEntry_FailsHostStart(string blankSetting)
     {
@@ -72,16 +72,13 @@ public sealed class WorkerL2OwnedOptionsBootTests
 
         options.TryGetOwner("CCCCCCCC-DDDD-EEEE-FFFF-000000000001", out var owner).Should().BeTrue(
             "the container type id is matched as a GUID (case-insensitive), as the intake carries it");
-        owner!.OwnerCertKeyVaultName.Should().Be("l2-test-platform-kv");
-        owner.OwnerCertSecretName.Should().Be("SPE-OwnerCert-Pfx");
+        owner!.OwnerAppId.Should().Be("77777777-8888-9999-aaaa-bbbbbbbbbbbb");
     }
 
     private static void WithCompleteOwner(IWebHostBuilder b)
     {
         b.UseSetting("SpeContainerOptions:ContainerTypeOwners:0:ContainerTypeId", "cccccccc-dddd-eeee-ffff-000000000001");
         b.UseSetting("SpeContainerOptions:ContainerTypeOwners:0:OwnerAppId", "77777777-8888-9999-aaaa-bbbbbbbbbbbb");
-        b.UseSetting("SpeContainerOptions:ContainerTypeOwners:0:OwnerCertKeyVaultName", "l2-test-platform-kv");
-        b.UseSetting("SpeContainerOptions:ContainerTypeOwners:0:OwnerCertSecretName", "SPE-OwnerCert-Pfx");
     }
 
     /// <summary>The secret-free Worker fixture (WorkerSecretFreeBootTests) plus one per-test adjustment.</summary>

@@ -6,8 +6,8 @@
 //
 // H8-B RESPONSIBILITY (per topology doc §6):
 //   Create ONE SPE container per customer inside a PRE-EXISTING container-type
-//   (from spaarke-constants.yaml). Two Graph calls under app-only cert-based
-//   credential: POST /containers + POST /containers/{id}/activate. Then verify
+//   (from spaarke-constants.yaml). Two Graph calls, app-only as the owning app
+//   (MI-FIC, task 248): POST /containers + POST /containers/{id}/activate. Then verify
 //   readability via app-only GET.
 //
 // ADR-038 CATEGORY:
@@ -52,8 +52,8 @@
 //   AC-15 Run not found -> Resumable + RunNotFound.
 //   AC-16 HandlerId mismatch -> throws InvalidOperationException.
 //   AC-17 Provisioner request carries all required inputs (tenant-scoped,
-//         never hardcoded; containerTypeId from run parameters, owning app +
-//         certificate vault/secret from SpeContainerOptions.ContainerTypeOwners).
+//         never hardcoded; containerTypeId from run parameters, owning app
+//         from SpeContainerOptions.ContainerTypeOwners).
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -73,9 +73,7 @@ public sealed class H8SpeContainerHandlerTests
     private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-h8-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
-    private const string KeyVaultName = "sprk-controlplane-dev-kv";   // the Spaarke platform vault holding the owner cert
     private const string OwningAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
-    private const string CertSecretName = "SPE-OwnerCert-Pfx";
     private const string ContainerTypeId = "cccccccc-dddd-eeee-ffff-000000000001";
     private const string ContainerId = "b!aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -167,7 +165,7 @@ public sealed class H8SpeContainerHandlerTests
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-4");
-        var provisioner = FakeProvisioner.Throws(new TimeoutException("KV cert load timed out"));
+        var provisioner = FakeProvisioner.Throws(new TimeoutException("Graph container create timed out"));
         var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
@@ -380,8 +378,9 @@ public sealed class H8SpeContainerHandlerTests
     [Fact]
     public async Task AC14_AuthenticatesAsTheOwningApp_NotTheCustomerBffApp()
     {
-        // The owner certificate is registered on the container type's OWNING app; the customer BFF app
-        // (H3 output) is a separate, secret-free identity (topology §3A) — H8 must never present it.
+        // H8 signs in as the container type's OWNING app (task 248: through the Worker UAMI's federated
+        // credential on it); the customer BFF app (H3 output) is a separate identity (topology §3A) — H8
+        // must never present it.
         var run = BuildRun();
         run.InterStepState.BffAppRegId = "99999999-0000-0000-0000-00000000bf00";
         var repo = new FakeRepository(run, etag: "etag-14");
@@ -394,8 +393,6 @@ public sealed class H8SpeContainerHandlerTests
         provisioner.LastRequest!.OwningAppId.Should().Be(OwningAppId);
         provisioner.LastRequest.OwningAppId.Should().NotBe(run.InterStepState.BffAppRegId);
         verifier.LastRequest!.OwningAppId.Should().Be(OwningAppId);
-        verifier.LastRequest.VaultName.Should().Be(KeyVaultName);
-        verifier.LastRequest.CertSecretName.Should().Be(CertSecretName);
     }
 
     // ---------- AC-15 run not found ----------
@@ -455,8 +452,6 @@ public sealed class H8SpeContainerHandlerTests
             "sourced from run parameters, not hardcoded");
         provisioner.LastRequest.OwningAppId.Should().Be(OwningAppId,
             "the container type's owning app, from SpeContainerOptions.ContainerTypeOwners (task 245b)");
-        provisioner.LastRequest.VaultName.Should().Be(KeyVaultName);
-        provisioner.LastRequest.CertSecretName.Should().Be(CertSecretName);
         provisioner.LastRequest.DisplayName.Should().NotBeNullOrWhiteSpace();
     }
 
@@ -497,8 +492,6 @@ public sealed class H8SpeContainerHandlerTests
             {
                 ContainerTypeId = ContainerTypeId,
                 OwnerAppId = OwningAppId,
-                OwnerCertKeyVaultName = KeyVaultName,
-                OwnerCertSecretName = CertSecretName,
             },
         ],
     };

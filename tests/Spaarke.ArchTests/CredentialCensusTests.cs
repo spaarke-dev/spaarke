@@ -120,13 +120,13 @@ public class CredentialCensusTests
         new CensusEntry(
             FileName: "WorkerDataverseCredentialFactory.cs",
             Sites: 2,
-            Identity: "The shared BFF app registration (SDAP-BFF-SPE-API 1e40baad-...) — the L2 Worker's own Dataverse identity",
+            Identity: "The shared BFF app registration (SDAP-BFF-SPE-API 1e40baad-...) — the L2 Worker's own Dataverse identity; and (MI-FIC site only, task 248) the SPE container type's owning app, via SpeConfidentialClientGraphFactory",
             CredentialSource: "Ordered selection over the CredentialKind switch: (a) `CredentialKind.ManagedIdentityFederated` branch — ClientAssertionCredential over ManagedIdentityCredential — as the DEFAULT secret-free path per ADR-028 A4; (b) `CredentialKind.ClientSecret` branch — ClientSecretCredential — as prong-3 transitional fallback for unmigrated environments (spaarkedev1 only per adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25), sunset 2026-11-23 per §6.5 resolution",
             Reason:
                 "The Worker-side analog of OrderedCredentialClientProvider — L2 Worker's own FR-39 ordered-credential factory "
                 + "authenticating AS the shared BFF app registration for Dataverse operations. Consolidation of what were previously "
                 + "three credential-construction sites in DataverseWebApiEnvVarValuesWriter (H7), DataverseWebApiSolutionImporter (H6), "
-                + "and DataverseWebApiSolutionVerifier (H6) — those three files now consume this factory via IWorkerDataverseCredentialFactory "
+                + "and DataverseWebApiSolutionVerifier (H6) — those three files now consume this factory (WorkerDataverseCredentialFactory, injected concretely) "
                 + "(parallel of the BFF's route through OrderedCredentialClientProvider). Cannot literally use OrderedCredentialClientProvider "
                 + "because L2 Worker is a separate service (Sprk.Provisioning.ControlPlane.Worker) with its own DI container, config sections, "
                 + "and idiom (Azure.Identity direct vs MSAL) — DELIBERATE NARROWING documented in the file header (no probe-before-bind, no "

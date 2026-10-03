@@ -354,11 +354,14 @@ if (-not $containerTypeId) {
   Write-Error "[skill-config] scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.$env.containerTypeId is null. Operator MUST populate before Step 0.5 iteration. See docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 for how to obtain the SPE container-type GUID."
   exit 1
 }
-# Task 245b: the L2 Worker must also carry this container type's OWNING-app credential
-# (SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId / __OwnerCertKeyVaultName /
-# __OwnerCertSecretName — Bicep param speContainerTypeOwners). H0's SpeCertBootstrap check rejects the run
-# otherwise, before anything is created. The skill cannot read Worker settings; if H0 fails with
-# "No SpeContainerOptions:ContainerTypeOwners entry", fix the Worker configuration, not the intake.
+# Task 245b / 248: the L2 Worker must also carry this container type's OWNING app
+# (SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId — Bicep param
+# speContainerTypeOwners). L2 signs in as the owning app through the federated identity credential on it that
+# trusts the Worker UAMI (MI-FIC, owner decision D16) — there is no certificate or secret to bootstrap. H0's
+# SpeOwnerCredential check rejects the run before anything is created with one of three Resumable codes:
+#   spe-owner-not-configured          → add the owner entry to the Worker configuration (not the intake);
+#   spe-owner-token-failed            → the owning app's FIC / consent (SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md);
+#   spe-container-type-not-registered → register the container type as the owning app (same runbook).
 
 $repoRoot = git rev-parse --show-toplevel
 $manifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
@@ -506,8 +509,12 @@ switch ($ctCode) {
     exit 1
   }
   '403' {
-    Write-Error "[skill-config] Step 0.5c HARD STOP: container-type GET returned 403. Operator's delegated identity does NOT have permission to read container-types on this tenant. This is unusual — container-type read permissions typically allow any signed-in tenant member. Investigate before proceeding."
-    exit 1
+    # Observed 2026-10-03 (T248): the Azure CLI's delegated Graph token is NOT consented for container-type reads
+    # (FileStorageContainerType.Manage.All), so this GET returns 403 even for a Global Admin. Not a topology fault.
+    # H0's SpeOwnerCredential check proves the owning app + registration end to end with the real L2 credential,
+    # so the owning-app check (3) is skipped here rather than hard-stopping.
+    Write-Warning "  [SKIP] Container-type GET returned 403 to the operator's Azure CLI token (expected — not consented for container-type reads). Verify '$containerTypeId' in the SharePoint admin center if in doubt; H0's SpeOwnerCredential check verifies the owning app and the registration."
+    $owningAppId = $null
   }
   default {
     Write-Error "[skill-config] Step 0.5c HARD STOP: container-type GET returned unexpected HTTP $ctCode. Body: $ctBody"
@@ -515,13 +522,15 @@ switch ($ctCode) {
   }
 }
 
-# --- (3) Owning app-reg exists in Spaarke tenant ---
-$owningAppCheck = az ad app show --id $owningAppId --query displayName -o tsv 2>&1
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($owningAppCheck)) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP: container-type's owningAppId ($owningAppId) does NOT resolve to a live Entra app-reg. This is a broken topology state — the container-type references a deleted app-reg. Container-type binding is IMMUTABLE per §R1 — the container-type itself is now unusable. Escalate."
-  exit 1
+# --- (3) Owning app-reg exists in Spaarke tenant (skipped when (2) could not read the container type) ---
+if ($owningAppId) {
+  $owningAppCheck = az ad app show --id $owningAppId --query displayName -o tsv 2>&1
+  if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($owningAppCheck)) {
+    Write-Error "[skill-config] Step 0.5c HARD STOP: container-type's owningAppId ($owningAppId) does NOT resolve to a live Entra app-reg. This is a broken topology state — the container-type references a deleted app-reg. Container-type binding is IMMUTABLE per §R1 — the container-type itself is now unusable. Escalate."
+    exit 1
+  }
+  Write-Host "  [PASS] Owning app-reg $owningAppId ($owningAppCheck) exists in Spaarke tenant" -ForegroundColor Green
 }
-Write-Host "  [PASS] Owning app-reg $owningAppId ($owningAppCheck) exists in Spaarke tenant" -ForegroundColor Green
 
 # --- (4) BFF app-reg exists in Spaarke tenant ---
 $bffAppCheck = az ad app show --id $bffAppId --query "{displayName:displayName,signInAudience:signInAudience}" -o json 2>&1
@@ -538,11 +547,14 @@ if ($bffAppJson.signInAudience -ne 'AzureADMyOrg') {
 Write-Host "  [PASS] BFF app-reg $bffAppId ($($bffAppJson.displayName), single-tenant $($bffAppJson.signInAudience)) exists in Spaarke tenant" -ForegroundColor Green
 
 # --- (5) BFF app-reg is granted on the container-type registration (per topology doc §3A "How a BFF gets container access without owning anything") ---
+# ⚠️ STALE until T227 (G2/G9): one shared bffApiAppId predates D-13 (one BFF app registration PER CUSTOMER), and the
+# beta path below is not the v1.0 registration resource (GET /storage/fileStorage/containerTypeRegistrations/{id}).
+# T227 redesigns this check with the per-customer grant; do not "fix" it piecemeal.
 $regResp = curl -sS -H "Authorization: Bearer $graphToken" `
   "https://graph.microsoft.com/beta/storage/fileStorage/containerTypes/$containerTypeId/registrations"
 $grants = ($regResp | ConvertFrom-Json).value.applicationPermissionGrants | Where-Object { $_.appId -eq $bffAppId }
 if (-not $grants -or $grants.Count -eq 0) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP: BFF app-reg $bffAppId is NOT granted on the container-type $containerTypeId registration. Runbook step 6 sub-step: POST to /storage/fileStorage/containerTypeRegistrations/{id}/applicationPermissionGrants with applicationPermissions:[Full] + delegatedPermissions:[Full]. Without this grant, H8 (container creation) fails at dispatch time."
+  Write-Error "[skill-config] Step 0.5c HARD STOP: BFF app-reg $bffAppId is NOT granted on the container-type $containerTypeId registration. Grant it as the owning app with Graph v1.0 PUT /storage/fileStorage/containerTypeRegistrations/{id}/applicationPermissionGrants/{bffAppId} (per-customer BFF grants are T227 — see the topology runbook). Without this grant, H8 (container creation) fails at dispatch time."
   exit 1
 }
 Write-Host "  [PASS] BFF app-reg $bffAppId is granted on container-type $containerTypeId registration (applicationPermissions: $($grants[0].applicationPermissions -join ','), delegatedPermissions: $($grants[0].delegatedPermissions -join ','))" -ForegroundColor Green
@@ -2061,7 +2073,7 @@ Template shape:
 - T3 (UAMI Graph app-role parity, 14/14): ✅
 - T4 (Exchange ApplicationAccessPolicy, 2 entries): ✅
 - T5 (both slot MIs KV RBAC): ✅ (structurally impossible post-Phase C UAMI)
-- T6 (SPE container-type conf-client cert): ✅
+- T6 (SPE owning app, app-only via the Worker UAMI's FIC — the run's container is listed): ✅
 - T7 (both BFF slots carry Customer__Id == customerId): ✅
 
 ## Invariants verified (I1-I5)

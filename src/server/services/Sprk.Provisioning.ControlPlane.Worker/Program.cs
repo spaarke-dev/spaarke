@@ -457,8 +457,7 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // AddCosmosModule (ADR-028 MI-outbound) — NO shared ArmClient DI singleton
 // registration, parity with task 121/123's registration-comment precedent.
 // SecretClientKvWriter additionally takes the raw TokenCredential (SecretClient
-// is constructed per-vault-per-call, matching KeyVaultCertBootstrapProbe's
-// posture from task 120).
+// is constructed per-vault-per-call).
 //
 // spec.md MUST rule (BINDING pre-check per r3 handoff): H4
 // BindingNeverDeleteSecrets = { Dataverse-ClientSecret, BFF-API-ClientSecret };
@@ -757,9 +756,8 @@ builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 // Two collaborator seams:
 //   - ISpeContainerProvisioner -> GraphContainerProvisioner: POST
 //     /storage/fileStorage/containers (CREATE) + POST /storage/fileStorage/
-//     containers/{id}/activate (ACTIVATE) under Microsoft.Graph 6.5.0 +
-//     ClientCertificateCredential (T6 app-only cert-based auth — E-1 exception
-//     per ADR-028 for the owning-app cert; BFF identity remains secret-free).
+//     containers/{id}/activate (ACTIVATE) under Microsoft.Graph 6.5.0, app-only
+//     as the container type's owning app.
 //     Container CREATION is app-only-capable per topology doc §6 (unlike
 //     container-TYPE creation per §R5 which requires delegated).
 //   - ISpeContainerVerifier -> GraphAppOnlyContainerVerifier: single GET
@@ -767,8 +765,10 @@ builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 //     SPE-replication-lag classification (404 -> ReplicationPending ->
 //     handler sets RunStatus.WaitingOnGate, never Resumable/QuarantineRequired
 //     — DS-4 §2 / this project's CLAUDE.md MUST rules).
-// Both collaborators load the T6 cert from KV via SecretClient (see
-// SpeConfidentialClientGraphFactory.cs).
+// Task 248 (G28, owner D16): both collaborators — and H0's SpeOwnerCredentialProbe and H13's T6
+// probe — sign in as the owning app through SpeConfidentialClientGraphFactory: a client assertion
+// minted by the Worker UAMI (WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential)
+// for the owning app's federated identity credential. No certificate, no secret (ADR-028 A4).
 //
 // REMOVED FROM H8-A (pre-214-rewrite):
 //   - GraphContainerTypeProvisioner (container-TYPE creation retired)
@@ -781,9 +781,8 @@ builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 // detection (per task 214.4 Option A). H13's T6SpeConfidentialClientTrapProbe
 // owns the T6 acceptance gate. SpeConfidentialClientGraphFactory.
 // IsDelegatedTokenTrapError is retained ONLY for H13's use.
-// Task 245b: SpeContainerOptions.ContainerTypeOwners — the owning-app credential per SPE container type
-// (app id + the certificate's platform vault + secret), read by H0's SpeCertBootstrap probe, H8 and
-// H13's T6 probe — is validated at startup.
+// Task 245b: SpeContainerOptions.ContainerTypeOwners — {ContainerTypeId, OwnerAppId} per SPE container
+// type (task 248), read by H0's SpeOwnerCredential probe, H8 and H13's T6 probe — is validated at startup.
 builder.Services.AddOptions<SpeContainerOptions>()
     .Bind(builder.Configuration.GetSection(nameof(SpeContainerOptions)))
     .Validate(o =>
@@ -792,6 +791,7 @@ builder.Services.AddOptions<SpeContainerOptions>()
         return true;
     }, "SpeContainerOptions failed validation — see inner exception (Validate throws).")
     .ValidateOnStart();
+builder.Services.AddSingleton<SpeConfidentialClientGraphFactory>();
 builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisioner>();
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
 builder.Services.AddScoped<H8SpeContainerHandler>();

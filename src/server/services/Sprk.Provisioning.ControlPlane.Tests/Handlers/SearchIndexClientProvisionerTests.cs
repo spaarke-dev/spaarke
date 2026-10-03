@@ -3,7 +3,7 @@
 //
 // L2 CONTROL-PLANE unit tests for SearchIndexClientProvisioner (task 124,
 // Wave G-2). Same fake-transport philosophy as ArmSubscriptionReadinessProbeTests
-// / KeyVaultCertBootstrapProbeTests: builds a REAL SearchIndexClient against a
+// (and the retired KeyVaultCertBootstrapProbeTests): builds a REAL SearchIndexClient against a
 // fake HttpClientTransport (reuses the shared FakeArmHttpMessageHandler from
 // ArmSubscriptionReadinessProbeTests.cs — internal, same test assembly) so the
 // SDK's own request construction, URL building, and pipeline auth-header

@@ -9,8 +9,9 @@
 // 403 accessDenied 2026-08-30 — runs/h8-live-test-2026-08-30.md).
 //
 // H8-B RESPONSIBILITY (per topology doc §6 + task 214 POML):
-//   Two Graph calls, both app-only-capable under a ClientCertificateCredential
-//   built from the container-type's owning-app-reg cert:
+//   Two Graph calls, both app-only, as the container type's owning app (task 248:
+//   the Worker UAMI's federated identity credential on the owning app —
+//   SpeConfidentialClientGraphFactory):
 //     (1) POST /storage/fileStorage/containers with { displayName, description,
 //         containerTypeId } — creates the container inside the PRE-EXISTING
 //         container-type (topology doc §R1: containerTypeId is a permanent
@@ -34,22 +35,18 @@
 //   surface (no separate Microsoft.Graph.Beta package). The GA models match
 //   the beta JSON body shape for these two calls.
 //
-// TOKEN AUTH: app-only via ClientCertificateCredential (T6 posture retained for
-// this call — the certificate is registered on the container-type's owning
-// app-reg per topology doc §3A). This is the CONTAINER-CREATION token, which
+// TOKEN AUTH: app-only as the container type's owning app (T6 posture), via the
+// Worker UAMI's federated identity credential on it (task 248 — no certificate,
+// no secret). This is the CONTAINER-CREATION token, which
 // per topology doc §6 IS app-only-capable — unlike CONTAINER-TYPE-CREATION
 // per §R5, which requires delegated. The distinction is critical.
 //
 // NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
 // with the established project precedent (H8SpeContainerHandlerTests.cs
-// substitutes a fake ISpeContainerProvisioner). The T6 cert-path itself IS
-// unit-tested via SpeConfidentialClientGraphFactoryTests.cs against a fake
-// SecretClient transport (Azure.Core.Pipeline.HttpClientTransport fake — NOT
-// Mock&lt;HttpMessageHandler&gt;, per ADR-038).
+// substitutes a fake ISpeContainerProvisioner). The owning-app credential itself
+// IS unit-tested via SpeConfidentialClientGraphFactoryTests.cs.
 // -----------------------------------------------------------------------------
 
-using Azure.Core;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -59,32 +56,20 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 /// <inheritdoc cref="ISpeContainerProvisioner"/>
 public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
 {
-    private readonly TokenCredential _sharedCredential;
-    private readonly SecretClientOptions? _clientOptions;
+    private readonly SpeConfidentialClientGraphFactory _graphFactory;
     private readonly SpeContainerOptions _options;
     private readonly ILogger<GraphContainerProvisioner> _logger;
 
-    /// <summary>Constructs the production provisioner. <paramref name="sharedCredential"/> is L2's own platform UAMI-pinned credential — used ONLY for the T6 cert read from the customer's KV; the Graph calls themselves use a per-request T6 ClientCertificateCredential (see file header).</summary>
+    /// <summary>Constructs the production provisioner over the owning-app Graph client factory (task 248).</summary>
     public GraphContainerProvisioner(
-        TokenCredential sharedCredential,
-        IOptions<SpeContainerOptions> options,
-        ILogger<GraphContainerProvisioner> logger)
-        : this(sharedCredential, clientOptions: null, options, logger)
-    {
-    }
-
-    /// <summary>Test seam constructor — injects a fake-transport <see cref="SecretClientOptions"/> for the KV cert read.</summary>
-    internal GraphContainerProvisioner(
-        TokenCredential sharedCredential,
-        SecretClientOptions? clientOptions,
+        SpeConfidentialClientGraphFactory graphFactory,
         IOptions<SpeContainerOptions> options,
         ILogger<GraphContainerProvisioner> logger)
     {
-        ArgumentNullException.ThrowIfNull(sharedCredential);
+        ArgumentNullException.ThrowIfNull(graphFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
-        _sharedCredential = sharedCredential;
-        _clientOptions = clientOptions;
+        _graphFactory = graphFactory;
         _options = options.Value;
         _logger = logger;
     }
@@ -98,20 +83,14 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerTypeId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.CertSecretName);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.DisplayName);
 
-        // Cert load + Graph client construction happen BEFORE any Graph call —
-        // a failure here (KV unreachable, secret missing, bad PFX) has NO
-        // external SPE side effect. Left uncaught so it propagates to
+        // The owning-app token is acquired on the first Graph call. A failed exchange
+        // (AuthenticationFailedException) happens BEFORE the container exists — no
+        // external SPE side effect — and is left uncaught so it reaches
         // H8SpeContainerHandler's provisioner-infra-fault catch (Resumable).
-        using var cert = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-            _sharedCredential, _clientOptions, request.VaultName, request.CertSecretName,
-            _options.CertLoadTimeout, cancellationToken).ConfigureAwait(false);
-
-        var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(request.TenantId, request.OwningAppId, cert);
+        using var graph = _graphFactory.CreateGraphClient(request.TenantId, request.OwningAppId);
 
         _logger.LogInformation(
             "H8-B Graph SPE container creation starting: customerId={CustomerId} tenantId={TenantId} " +

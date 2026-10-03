@@ -7,6 +7,29 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-03 — provisioning: L2 signs in as the SPE owning app with MI-FIC, not a certificate (T248, D16)
+
+`customer-provisioning-orchestration-r1` T248 (gap G28, owner decision D16).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "SPE owning app — MI-FIC, nothing stored" — L2 acts
+  as a container type's owning app only through the Worker UAMI's federated identity credential; never a certificate,
+  secret or Key Vault read for it; a rejected FIC token is an owner decision (A4's Key Vault certificate), never a
+  secret; Worker config `{ContainerTypeId, OwnerAppId}`; H0's three `spe-*` codes; the registration PUT is
+  create-or-replace; no secret-based `sprk_specontainertypeconfig` for Model 1 until T250; never delete
+  `rg-spaarke-shared-prod` or its Syntex billing account.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 0.5b note names the owner entry and H0's three codes
+  (was: certificate vault/secret + `SpeCertBootstrap`); Step 0.5c treats the container-type GET's 403 to the operator's
+  Azure CLI token as expected (not consented for container-type reads — observed 2026-10-03) and defers to H0 instead
+  of hard-stopping; check (5) flagged stale until T227 (per-customer BFF grants, D-13); T6 report line reworded.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** E-1: informational note — a managed identity can act as a
+  same-tenant owning app via MI-FIC (verified by T248); L2 needs no E-1 secret; the BFF side is T250. No rule change.
+- The mechanism: `SpeConfidentialClientGraphFactory` (now an instance class, credential cached per tenant + owner) gets owning-app tokens from
+  `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential` — the one place the Worker mints the UAMI
+  assertion; `KeyVaultCertBootstrapProbe` and its 24 h gate are replaced by `SpeOwnerCredentialProbe`; H13's T6 lists
+  the run's container app-only as the owner (the old app-only `containerTypes` GET is documented 403). Verified live
+  from the dev Worker identity (FIC token `appidacr` 2; registration + containers GET 200).
+
+---
 ###### 2026-10-03 — ADR-002 WP-1 amended: a platform-native declarative mechanism may own an invariant (spaarkeai-word-add-in-r1 task 087)
 
 Root `CLAUDE.md` (the "Dataverse write path" pointer row), `.claude/adr/ADR-002-thin-plugins.md` and

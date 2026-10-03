@@ -122,7 +122,7 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 - `run.Parameters.NonSecret` holds **intake values only** — the closed set in `Models/IntakeParameterCatalog.cs`; `POST /api/runs` rejects any other key. **NEVER read a value another handler produces from `NonSecret`** — nothing writes it there.
 - An intake value a handler has rules for is validated at `POST /api/runs` with **the same rules** — shared code where the rule is non-trivial (T245c: `UserProvisioningIntake` is called by both H11 and the endpoint), and the handler's own rejection code where it has one (H14a / H14b; an API-owned code otherwise, e.g. the mailbox shape). There is no add-parameter endpoint, so a value the handler would refuse must be refused before the run guard / registry / Cosmos / enqueue — not after H0–H10 have built the stamp. The handler keeps its guard as defence in depth.
 - A value one handler produces for another goes in a typed `InterStepState` property carrying `[ProducedBy(HandlerIds.X)]` (or `[NoProducer(reason)]`), written only by X.
-- A value L2 owns (its own principal, the SPE owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
+- A value L2 owns (its own principal, the SPE owning app per container type) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`), never supplied (T245b).
 - Declare every handler input in `Reconciler/HandlerRunInputs.cs` (Intake / Output / Gap). A REQUIRED Output must come from a strict DAG ancestor of the reader (`DagAdvancer.HandlerDependencies`) — add the DAG edge, don't reorder reads.
 - H4b `per_env_settings` sources are a closed set (`Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`, mirrored in the generator); an unknown source fails the manifest read and `-Verify`.
 - **`run.Parameters.Secrets` has no writer.** No handler may write it; only H4 may read it, and only for the manifest entries pinned as gaps.
@@ -130,6 +130,14 @@ Full mechanic: `.claude/patterns/provisioning/bff-vs-provisioning-boundary.md`.
 - `RunContextContractTests` enforces all of this with a Roslyn source scan (declared inputs = reads, both ways), a DAG check and the manifest check. A failure means the data flow is wrong — fix the flow, never add a Gap to pass. Handler unit tests seeding a value by hand prove nothing about who writes it (that is how ~20 inputs shipped with no producer).
 
 Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence: `projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md`.
+
+## SPE owning app — MI-FIC, nothing stored (BINDING, task 248 / owner D16)
+
+- L2 acts as an SPE container type's **owning app** only through `SpeConfidentialClientGraphFactory`, whose credential is `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential`: the Worker UAMI's token for `api://AzureADTokenExchange` is the client assertion for the owning app's federated identity credential (ADR-028 A4's default). **NEVER** add a certificate, a client secret or a Key Vault read for an owning-app credential, and never add a client secret to an owning app — the SharePoint admin center asks for one when a container type is created; decline it.
+- If Entra, Graph or SPE rejects the FIC-acquired token: **STOP and ask the owner.** A Key Vault certificate is A4's sanctioned alternative and is an owner decision, never an implementation choice; a secret is never the fallback.
+- Worker configuration per container type is `{ContainerTypeId, OwnerAppId}` (`SpeContainerOptions:ContainerTypeOwners`). H0's `SpeOwnerCredential` check signs in as the owner and GETs the Graph v1.0 registration: `spe-owner-not-configured` / `spe-owner-token-failed` / `spe-container-type-not-registered` (all Resumable; no time gate). The registration `PUT` is create-or-replace — any later grant change keeps the owning-app grant.
+- The BFF's `SpeAdminGraphService` still signs in to owning apps with E-1 Key Vault client secrets until T250 — until then, no secret-based `sprk_specontainertypeconfig` row for a Model 1 container type.
+- Never delete `rg-spaarke-shared-prod` or the `Microsoft.Syntex/accounts` billing account in it (`dc4749c2-ca04-4b38-b6c2-e38dc3eec72b`): a standard container type's billing binding is permanent.
 
 ## Handler idempotency + drift-detection
 

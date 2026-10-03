@@ -85,8 +85,8 @@ name_templates:
   # Future r2 evaluation: introduce dedicated registry envs.
   registryDvUrl:
     dev: https://spaarkedev1.crm.dynamics.com
-    demo: https://spaarke-demo.crm.dynamics.com  # placeholder; not yet provisioned
-    prod: https://spaarke-registry-prod.crm.dynamics.com  # placeholder; not yet provisioned
+    demo: https://spaarke-demo.crm.dynamics.com # placeholder; not yet provisioned
+    prod: https://spaarke-registry-prod.crm.dynamics.com # placeholder; not yet provisioned
 
 # --- Per-topology / per-env values (populated by task 213 after SPE topology setup) ---
 # 2026-08-30 SESSION 20 task 212 reconciliation against SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md:
@@ -116,7 +116,12 @@ per_env_constants:
     # delegated flow — SPE Admin app / VS Code extension / SharePoint admin center — NOT via
     # r1 H8 as-currently-written. Populated by task 213 after one-time topology setup.
     # See SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3 + §4 + §R5.
-    containerTypeId: null  # PENDING task 213 topology setup + population
+    # 2026-10-03 (task 248): `Spaarke Model 1` (standard billing, registered in Spaarke's tenant), owned by
+    # `Spaarke SPE Model 1 Owner` (bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e). The dev L2 Worker carries the matching
+    # SpeContainerOptions owner entry (parameters/platform-controlplane-dev.bicepparam speContainerTypeOwners)
+    # and signs in as the owning app via its UAMI's federated credential — no certificate. The trial-era wording
+    # above is stale (shared trial tier retired, D-12); restructuring this file per model is T227 (G2).
+    containerTypeId: fb3817a8-5a55-42ba-8cc9-12cf055168b8
 
     # Shared BFF API app-reg for this env × model. Single-tenant `AzureADMyOrg`
     # (BFFs are always single-tenant per topology doc §3A rows 4-6; Entra-multitenancy
@@ -124,18 +129,18 @@ per_env_constants:
     # For trial1 dispatch: `Spaarke BFF — Trial 1` app-reg (NEW per owner directive 2026-08-30;
     # do NOT reuse existing `spaarke-bff-dev` = SDAP-BFF-SPE-API `1e40baad-...`). Populated
     # by task 213 after Register-EntraAppRegistrations.ps1 extension lands.
-    bffApiAppId: null  # PENDING task 213 topology setup + population; RENAMED from `bffMultiTenantAppId` (Entra-strict-wrong name — see ADR-028 line 239 RESOLVED note)
+    bffApiAppId: null # PENDING task 213 topology setup + population; RENAMED from `bffMultiTenantAppId` (Entra-strict-wrong name — see ADR-028 line 239 RESOLVED note)
 
     # Base URL of the deployed BFF for this env × model. For trial1: `spaarke-bff-trial1`
     # (or agreed alternative — task 213 decides). Used for admin-consent redirect_uri (Model 2 only).
-    bffProdBase: https://spaarke-bff-dev.azurewebsites.net  # placeholder — task 213 replaces per env × model routing
+    bffProdBase: https://spaarke-bff-dev.azurewebsites.net # placeholder — task 213 replaces per env × model routing
 
   demo:
-    containerTypeId: null  # PENDING topology setup — demo tier not yet in scope
-    bffApiAppId: null      # PENDING topology setup — demo tier not yet in scope
+    containerTypeId: null # PENDING topology setup — demo tier not yet in scope
+    bffApiAppId: null # PENDING topology setup — demo tier not yet in scope
     bffProdBase: https://spaarke-bff-demo.azurewebsites.net
 
   prod:
-    containerTypeId: null  # PENDING topology setup — prod tier not yet in scope
-    bffApiAppId: null      # PENDING topology setup — prod tier not yet in scope
+    containerTypeId: null # PENDING topology setup — prod tier not yet in scope
+    bffApiAppId: null # PENDING topology setup — prod tier not yet in scope
     bffProdBase: https://spaarke-bff-prod.azurewebsites.net

@@ -84,8 +84,8 @@ public static class E2EAcceptanceModule
         //                     + IGraphAppRolesRegistry + typed HttpClient)
         //   - task 180 (T4) - ExchangePolicyCountT4Probe (IExchangePolicyReadClient)
         //   - task 172 (T5) - T5SlotMiKvRbacTrapProbe (ArmClient)
-        //   - task 175 (T6) - T6SpeConfidentialClientTrapProbe (TokenCredential
-        //                     + IT6GraphAppOnlyProbe + H13AcceptanceOptions)
+        //   - task 175 (T6) - T6SpeConfidentialClientTrapProbe (IT6GraphAppOnlyProbe
+        //                     + SpeContainerOptions; task 248 — owning app via MI-FIC)
         //   - task 238 (T7) - CustomerIdentityT7Probe (ArmClient)
         //
         // IE2EInvariantVerifier — Wave G-7 Batch G-7A1 composite migration
@@ -138,7 +138,7 @@ public static class E2EAcceptanceModule
         // dispatches per Kind); each probe's own file header documents its
         // dependencies. IT6GraphAppOnlyProbe (registered below) is the
         // T6-specific Graph seam consumed by T6SpeConfidentialClientTrapProbe.
-        // ArmClient (T1 + T5) + TokenCredential (T6) come from the shared
+        // ArmClient (T1 + T5) + SpeConfidentialClientGraphFactory (T6, task 248) come from the shared
         // HandlersModule / Program.cs registrations; IDataverseAppUserVerifier
         // (T2) + IGraphAppRoleParityVerifier + IGraphAppRolesRegistry (T3)
         // come from H10's own module registration (line-parity with H10 wire);
@@ -159,7 +159,7 @@ public static class E2EAcceptanceModule
             sp.GetRequiredService<ILogger<GraphAppRoleParityT3Probe>>()));
         services.AddSingleton<ITrapProbe, ExchangePolicyCountT4Probe>();             // T4 (task 180)
         services.AddSingleton<ITrapProbe, T5SlotMiKvRbacTrapProbe>();                // T5 (task 172)
-        services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainerTypesListAppOnlyProbe>();
+        services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainersListAppOnlyProbe>(); // task 248
         services.AddSingleton<ITrapProbe, T6SpeConfidentialClientTrapProbe>();       // T6 (task 175)
         services.AddSingleton<ITrapProbe, CustomerIdentityT7Probe>();                // T7 (task 238, D-14 — ArmClient)
         // I1 adapter (task 173) — preserves task-170's real packaged-scripts

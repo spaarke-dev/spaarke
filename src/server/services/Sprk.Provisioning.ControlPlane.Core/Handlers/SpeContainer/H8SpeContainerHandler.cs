@@ -14,7 +14,7 @@
 //   most recently 2026-08-30 — runs/h8-live-test-2026-08-30.md).
 //
 // FLOW (per topology doc §6):
-//   1. Read tenantId + containerTypeId + vault/cert params from run parameters
+//   1. Read tenantId + containerTypeId from run parameters; owning app from SpeContainerOptions
 //   2. Idempotency check (spe-{customerId}) — durable no-op if already done
 //   3. Call ISpeContainerProvisioner.ProvisionAsync (CREATE + ACTIVATE)
 //   4. Call ISpeContainerVerifier.VerifyAsync (app-only GET) — 404 signals
@@ -29,9 +29,10 @@
 //   - KV write of SPE-ContainerTypeId per customer (containerTypeId now comes
 //     from constants, not per-customer KV; H4 no longer pre-creates that slot)
 //   - sharePointDomain + subscriptionId + upgradeMode parameter guards (not
-//     needed by container CREATION). The owning-app credential (app id + the
-//     certificate's vault + secret) is SpeContainerOptions.ContainerTypeOwners —
-//     L2 configuration keyed by containerTypeId (task 245b).
+//     needed by container CREATION). The owning app is
+//     SpeContainerOptions.ContainerTypeOwners — L2 configuration keyed by
+//     containerTypeId (task 245b); L2 signs in as it with the Worker UAMI's
+//     federated identity credential (task 248 — no certificate).
 //   - T6 trap detection (task 214.4 Option A — H13 owns T6 acceptance gate)
 //
 // SPEC / DESIGN references:
@@ -42,10 +43,9 @@
 //   - runs/h8-live-test-2026-08-30.md (empirical §R5 verification driving §6.5
 //     Path C pivot-to-comply on H8's scope)
 //   - .claude/adr/ADR-004: single IJobHandler-shaped impl registered in L2 DI.
-//   - .claude/adr/ADR-028: E-1 exception — the T6 cert used to construct the
-//     ClientCertificateCredential (via SpeConfidentialClientGraphFactory) is
-//     the container-type OWNING app-reg's cert, not a BFF identity secret;
-//     ADR-028 A4's secret-free-BFF invariant is UNVIOLATED.
+//   - .claude/adr/ADR-028 A4: the owning-app token is an MI-FIC client
+//     assertion (SpeConfidentialClientGraphFactory, task 248) — A4's default
+//     credential; no certificate or secret is stored for the owning app.
 //
 // ROLLBACK CLASSIFICATION (§4C mapping — declared at code level):
 //   ┌───────────────────────────────────────────┬──────────────────────────┐
@@ -212,19 +212,17 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         }
         // T226: H4 writes the trimmed value to the vault (BuildIntakeValues); Graph gets the same id.
         containerTypeId = containerTypeId.Trim();
-        // (3) Owning-app credential (task 245b) — L2 configuration keyed by the container type: the
-        //     owning app the container type is bound to (topology R1) and the vault + secret holding
-        //     its certificate. Not the customer BFF app: the certificate is registered on the owning
-        //     app, and the BFF app is a separate, secret-free identity (topology §3A).
+        // (3) Owning app (task 245b) — L2 configuration keyed by the container type: the owning app the
+        //     container type is bound to (topology R1). Not the customer BFF app: the BFF app is a
+        //     separate identity (topology §3A). L2 signs in as the owning app via MI-FIC (task 248).
         if (!_options.TryGetOwner(containerTypeId, out var owner))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SpeContainerRejectionCodes.ContainerTypeOwnerNotConfigured,
                 $"No SpeContainerOptions:ContainerTypeOwners entry for container type '{containerTypeId}'. H8 creates " +
-                "containers as the container type's owning app, whose client id and certificate (vault + secret) are " +
-                "Worker configuration — add the entry (controlplane-worker-app-service.bicep speContainerTypeOwners) " +
-                "after the topology runbook (SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created the container type and " +
-                "its owning app, then resume.",
+                "containers as the container type's owning app, whose client id is Worker configuration — add the " +
+                "entry (controlplane-worker-app-service.bicep speContainerTypeOwners) after the topology runbook " +
+                "(SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created the container type and its owning app, then resume.",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -259,8 +257,6 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 CustomerId: envelope.CustomerId,
                 TenantId: tenantId,
                 ContainerTypeId: containerTypeId,
-                VaultName: owner.OwnerCertKeyVaultName,
-                CertSecretName: owner.OwnerCertSecretName,
                 OwningAppId: owner.OwnerAppId,
                 DisplayName: displayName,
                 Description: description);
@@ -315,9 +311,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             var verifyRequest = new SpeContainerVerificationRequest(
                 ContainerId: outputs.ContainerId,
                 OwningAppId: owner.OwnerAppId,
-                TenantId: tenantId,
-                VaultName: owner.OwnerCertKeyVaultName,
-                CertSecretName: owner.OwnerCertSecretName);
+                TenantId: tenantId);
             verifyResult = await _verifier.VerifyAsync(verifyRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

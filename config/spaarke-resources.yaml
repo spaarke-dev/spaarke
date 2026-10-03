@@ -487,7 +487,7 @@ environments:
         _meta:
           status: partial-retirement
           retired: 2026-09-28
-          reason_retained: "H8-B (task 214, 2026-08-30) reads cert from SPE-OwnerCert-Pfx per topology doc §3A E-1. `certificate` + `certificate_password` entries below are the retired pre-H8-B references (soft-deleted in KV; retained here for archival per file's convention). `owning_app_secret` is E-1 (per-customer SpeAdmin container-type secret rotation lifecycle per ADR-028) and remains ACTIVE indefinitely."
+          reason_retained: "Historical: H8-B (task 214, 2026-08-30) read the owner cert from SPE-OwnerCert-Pfx (never created). Since task 248 (2026-10-03) L2 signs in as the owning app through the Worker UAMI's federated credential — no certificate. `certificate` + `certificate_password` entries below are the retired pre-H8-B references (soft-deleted in KV; retained here for archival per file's convention). `owning_app_secret` is E-1 (per-customer SpeAdmin container-type secret rotation lifecycle per ADR-028) and remains ACTIVE indefinitely."
           history:
             - 2026-08-30: cert `spe-app-cert` thumbprint 269691A5A60536050FA76C0163BD4A942ECD724D found NOT registered on any Spaarke app-reg (drift detected during task 213.2 H8 live-test).
             - 2026-09-28: retired `spe-app-cert` + `spe-app-cert-pass` via KV soft-delete (task 215). `spe-owning-app-secret` preserved as E-1 exception per ADR-028.

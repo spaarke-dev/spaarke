@@ -78,10 +78,15 @@ public interface IE2ETrapVerifier
 /// see DataverseAppUserPairT2Probe for the byte-equality contract.
 /// </param>
 /// <param name="ContainerTypeId">
-/// The run's SPE container type (intake <c>containerTypeId</c>). T6 uses it to select the owning-app
-/// credential (<c>SpeContainerOptions.ContainerTypeOwners</c> — app id + the certificate's Spaarke
-/// platform vault and secret), the same entry H0 and H8 use (task 245b). OPTIONAL TRAILING FIELD (same
-/// additive pattern as <paramref name="UamiObjectId"/>); empty or unconfigured → T6 InfraFault.
+/// The run's SPE container type (intake <c>containerTypeId</c>). T6 uses it to select the owning app
+/// (<c>SpeContainerOptions.ContainerTypeOwners</c>), the same entry H0 and H8 use (task 245b), and to
+/// filter the app-only containers listing (task 248). OPTIONAL TRAILING FIELD (same additive pattern as
+/// <paramref name="UamiObjectId"/>); empty or unconfigured → T6 InfraFault.
+/// </param>
+/// <param name="SpeContainerId">
+/// The customer's SPE container (H8 output, <c>InterStepState.SpeContainerId</c>). T6 passes only when the
+/// owning app's app-only listing of <paramref name="ContainerTypeId"/> includes it (task 248). OPTIONAL
+/// TRAILING FIELD (same additive pattern); empty → T6 InfraFault.
 /// </param>
 public sealed record TrapVerificationRequest(
     string CustomerId,
@@ -95,7 +100,8 @@ public sealed record TrapVerificationRequest(
     string AppServiceName,
     string ResourceGroupName,
     string UamiObjectId = "",
-    string ContainerTypeId = "");
+    string ContainerTypeId = "",
+    string SpeContainerId = "");
 
 /// <summary>
 /// The 7 §4B silent-fail traps, enumerated (matches design.md §4B; T7 added by task 238).

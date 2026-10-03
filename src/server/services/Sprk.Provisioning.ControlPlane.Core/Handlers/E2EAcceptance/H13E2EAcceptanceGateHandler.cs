@@ -388,7 +388,9 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     // T6 selects the SPE owning-app credential by the run's container type (task 245b).
                     ContainerTypeId: parameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var containerTypeId)
                         ? containerTypeId?.Trim() ?? string.Empty
-                        : string.Empty),
+                        : string.Empty,
+                    // T6 looks for H8's container in the owning app's app-only listing (task 248).
+                    SpeContainerId: run.InterStepState.SpeContainerId?.Trim() ?? string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

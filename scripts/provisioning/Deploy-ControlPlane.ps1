@@ -872,11 +872,17 @@ function Invoke-ProductionZipDeploy {
         [Parameter(Mandatory)][string]$ZipPath
     )
     $ErrorActionPreference = 'Continue'
+    # --track-status false (task 248, 2026-10-03): the Worker is deployed while STOPPED (stop -> deploy ->
+    # start). With startup tracking on (the az default for Linux), `--async false` waits for a site start
+    # that cannot happen until the caller's finally-block starts the site — the deploy completed in ~30 s
+    # and the CLI then sat polling for 15+ minutes. The deployment itself is still awaited; /healthz after
+    # the start is the startup check.
     $output = az webapp deploy `
         --resource-group $AppServiceRg `
         --name $AppServiceName `
         --src-path $ZipPath `
         --type zip `
+        --track-status false `
         --async false 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'

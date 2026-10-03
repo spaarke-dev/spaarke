@@ -2,9 +2,9 @@
 // H0PreflightHandler.cs
 //
 // The first handler in the provisioning pipeline (task 041, wave C4). Validates
-// run parameters + queries the four quota / readiness sources — Azure OpenAI
-// regional TPM, Dataverse env-creation rate, subscription vCPU, SPE cert-
-// bootstrap — and BLOCKS the run before H1 starts if any headroom is
+// run parameters + queries the quota / readiness sources — Azure OpenAI
+// regional TPM, Dataverse env-creation rate, subscription vCPU, SPE owning-app
+// credential (task 248) — and BLOCKS the run before H1 starts if any headroom is
 // insufficient.
 //
 // SPEC / DESIGN references:
@@ -46,7 +46,7 @@
 //   quota queries. On any failure, the ProvisioningRun transitions to
 //   Status = Failed with a distinct RejectionCode per failing check, but no
 //   quarantine is warranted. Operator addresses the missing precondition
-//   (quota bump / cert bootstrap) then invokes POST /api/runs/{id}/resume,
+//   (quota bump / SPE owner setup) then invokes POST /api/runs/{id}/resume,
 //   which re-dispatches H0 with the same envelope.
 //
 // DOWNSTREAM ENQUEUE (WAVE C4 TEMPORARY BRIDGE):
@@ -366,7 +366,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
                 envelope.RunId, envelope.CustomerId);
             var diagnostic =
                 $"Preflight probe infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "Verify pwsh is on PATH and scripts/preflight/ ships in the L2 publish output (spec.md NFR-05).";
+                "A transient Azure/Graph fault (timeout, 5xx) or a probe defect — check the Worker log for the probe, then resume.";
             await MarkFailedAsync(run, etag, "probe-infrastructure-error", diagnostic, evidence: null, cancellationToken)
                 .ConfigureAwait(false);
             return new HandlerResult.Failure(FailureClass.Resumable, "probe-infrastructure-error", diagnostic);
@@ -376,7 +376,8 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         var failed = results.FirstOrDefault(r => !r.Passed);
         if (failed is not null)
         {
-            var rejectionCode = BuildRejectionCode(failed.CheckName);
+            // A probe that fails for distinct reasons names its own code (task 248); else derive it.
+            var rejectionCode = failed.RejectionCode ?? BuildRejectionCode(failed.CheckName);
             _logger.LogWarning(
                 "H0 preflight failed: runId={RunId} customerId={CustomerId} check={CheckName} rejectionCode={RejectionCode}",
                 envelope.RunId, envelope.CustomerId, failed.CheckName, rejectionCode);
@@ -820,7 +821,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         PreflightCheckNames.AzureOpenAiTpmHeadroom => "quota-openai-tpm",
         PreflightCheckNames.DataverseEnvCreationRate => "quota-dataverse-env-rate",
         PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
-        PreflightCheckNames.SpeCertBootstrap => "spe-cert-bootstrap-missing",
         // HANDLER-03 (pre-dispatch audit 2026-08-27) — F1 verbatim rejection
         // code the punchlist mandates so operators can filter for the
         // specific fast-fail without string-matching the diagnostic.

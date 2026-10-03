@@ -101,5 +101,22 @@ param controlPlaneAppRegClientId = '965a4a01-01e1-442b-97a6-6a98308018b3'
 param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest'
 
 // ============================================================================
+// SPE OWNING APPS (task 245b; task 248 — MI-FIC, owner decision D16)
+// ============================================================================
+// The SPE container types this L2 provisions into and the owning app of each. L2
+// signs in as the owning app through the federated identity credential on it whose
+// subject is sprk-controlplane-dev-uami (FIC `sprk-controlplane-dev-uami-assertion`)
+// — nothing is stored. `Spaarke Model 1` (standard billing, created 2026-10-03,
+// registered in Spaarke's tenant) is owned by `Spaarke SPE Model 1 Owner`. Verified
+// live 2026-10-03 from compute carrying the Worker UAMI (T248 notes). Must match
+// scripts/provisioning-prereqs/spaarke-constants.yaml.
+param speContainerTypeOwners = [
+  {
+    containerTypeId: 'fb3817a8-5a55-42ba-8cc9-12cf055168b8'
+    ownerAppId: 'bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e'
+  }
+]
+
+// ============================================================================
 // TAGS (defaults are fine for dev)
 // ============================================================================

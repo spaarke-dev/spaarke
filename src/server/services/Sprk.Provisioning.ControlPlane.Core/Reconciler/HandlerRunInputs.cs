@@ -92,7 +92,7 @@ public static class HandlerRunInputs
                 RunInput.Intake("currentSolutionVersion", required: false),
                 RunInput.Intake("targetBffVersion", required: false),
                 RunInput.Intake("targetSolutionVersion", required: false),
-                // Selects the SPE owning-app credential the SpeCertBootstrap probe checks (task 245b).
+                // Selects the SPE owning app the SpeOwnerCredential probe signs in as (task 245b / 248).
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
             ],
             [HandlerIds.H05] = [],
@@ -234,6 +234,8 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
+                // T248: T6 looks for H8's container in the owning app's app-only listing (absent → T6 InfraFault).
+                RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
             ],
             [HandlerIds.H14] =
             [

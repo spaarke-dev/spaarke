@@ -32,8 +32,8 @@
 //   T6  Subscription vCPU insufficient: Failure with distinct
 //                                        quota-subscription-vcpu rejection
 //                                        code.
-//   T7  SPE cert missing: Failure with distinct spe-cert-bootstrap-missing
-//                          rejection code.
+//   T7  SPE owner check fails: H0 uses the code the probe names
+//       (SpeOwnerCredentialProbe has three — task 248), not a check-name default.
 //   T8  Run not found in Cosmos partition: Failure(Resumable, run-not-found).
 //   T9  HandlerId mismatch: throws InvalidOperationException (defensive
 //                            dispatch bug detector).
@@ -101,7 +101,7 @@ public sealed class H0PreflightHandlerTests
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
             FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-            FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
         var handler = CreateHandler(repo, enqueuer, probes);
 
@@ -192,7 +192,7 @@ public sealed class H0PreflightHandlerTests
     [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom, "quota-openai-tpm")]
     [InlineData(PreflightCheckNames.DataverseEnvCreationRate, "quota-dataverse-env-rate")]
     [InlineData(PreflightCheckNames.SubscriptionVCpuQuota, "quota-subscription-vcpu")]
-    [InlineData(PreflightCheckNames.SpeCertBootstrap, "spe-cert-bootstrap-missing")]
+    [InlineData(PreflightCheckNames.SpeOwnerCredential, SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)]
     public async Task ProbeFailure_ProducesDistinctRejectionCode_AndMarksCosmosFailed(
         string failingCheck,
         string expectedRejectionCode)
@@ -211,9 +211,10 @@ public sealed class H0PreflightHandlerTests
             failingCheck == PreflightCheckNames.SubscriptionVCpuQuota
                 ? FakeProbe.Fail(PreflightCheckNames.SubscriptionVCpuQuota, "vCPU: 0/8 required standardDv5Family in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-            failingCheck == PreflightCheckNames.SpeCertBootstrap
-                ? FakeProbe.Fail(PreflightCheckNames.SpeCertBootstrap, "SPE cert: secret 'SPE-OwnerCert-Pfx' not found in vault spaarke-platform-kv")
-                : FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            failingCheck == PreflightCheckNames.SpeOwnerCredential
+                ? FakeProbe.Fail(PreflightCheckNames.SpeOwnerCredential, "SPE owner: token exchange failed",
+                    SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)
+                : FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
         var handler = CreateHandler(repo, enqueuer, probes);
 
@@ -455,7 +456,7 @@ public sealed class H0PreflightHandlerTests
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
             FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-            FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             FakeProbe.Fail(
                 PreflightCheckNames.OpenAiPinFreshness,
                 "ADR-020 pinned OpenAI model freshness check FAILED for 1 of 3 pinned deployments in region 'westus3'. " +
@@ -576,7 +577,7 @@ public sealed class H0PreflightHandlerTests
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
             FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-            FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             realPinnedProbe,
         };
         var handler = CreateHandler(repo, enqueuer, probes);
@@ -1011,7 +1012,7 @@ public sealed class H0PreflightHandlerTests
         FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
         FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
         FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-        FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+        FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
     };
 
     private static ProvisioningRun BuildUpgradeRun(bool includeVersions = true)
@@ -1167,18 +1168,21 @@ public sealed class H0PreflightHandlerTests
     {
         private readonly bool _pass;
         private readonly string _diagnostic;
+        private readonly string? _rejectionCode;
         public int CallCount { get; private set; }
         public string CheckName { get; }
 
-        private FakeProbe(string checkName, bool pass, string diagnostic)
+        private FakeProbe(string checkName, bool pass, string diagnostic, string? rejectionCode = null)
         {
             CheckName = checkName;
             _pass = pass;
             _diagnostic = diagnostic;
+            _rejectionCode = rejectionCode;
         }
 
         public static FakeProbe Pass(string checkName) => new(checkName, pass: true, diagnostic: "Pass");
-        public static FakeProbe Fail(string checkName, string diagnostic) => new(checkName, pass: false, diagnostic);
+        public static FakeProbe Fail(string checkName, string diagnostic, string? rejectionCode = null) =>
+            new(checkName, pass: false, diagnostic, rejectionCode);
 
         public Task<PreflightCheckResult> CheckAsync(PreflightProbeInput input, CancellationToken cancellationToken)
         {
@@ -1188,7 +1192,8 @@ public sealed class H0PreflightHandlerTests
                 CheckName: CheckName,
                 Passed: _pass,
                 Headroom: doc.RootElement.Clone(),
-                Diagnostic: _diagnostic));
+                Diagnostic: _diagnostic,
+                RejectionCode: _rejectionCode));
         }
     }
 }

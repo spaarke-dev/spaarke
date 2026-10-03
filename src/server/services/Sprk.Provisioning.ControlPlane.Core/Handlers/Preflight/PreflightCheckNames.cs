@@ -30,8 +30,12 @@ public static class PreflightCheckNames
     /// <summary>Subscription vCPU quota headroom per SKU family per region.</summary>
     public const string SubscriptionVCpuQuota = "SubscriptionVCpuQuota";
 
-    /// <summary>SPE cert-bootstrap secret exists in the platform Key Vault (FR-11 T6).</summary>
-    public const string SpeCertBootstrap = "SpeCertBootstrap";
+    /// <summary>
+    /// The run's SPE container type has an owner entry, L2 can sign in as that owning app (Worker UAMI
+    /// federated credential) and the container type is registered in the tenant (FR-11 T6; task 248
+    /// replaced the retired SpeCertBootstrap check).
+    /// </summary>
+    public const string SpeOwnerCredential = "SpeOwnerCredential";
 
     /// <summary>
     /// HANDLER-03 (pre-dispatch audit 2026-08-27, Wave 2 remediation) — F1

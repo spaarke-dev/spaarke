@@ -123,7 +123,7 @@ public sealed class InterStepState
     public string? AppServiceStagingSlotName { get; set; }
 
     /// <summary>The customer Key Vault name (H2a output — ARM output <c>keyVaultName</c>).</summary>
-    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25). The CUSTOMER vault — not the Spaarke platform vault holding the SPE owner certificate.</remarks>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 245a, G25). The CUSTOMER vault — not the Spaarke platform (L2) vault.</remarks>
     [JsonPropertyName("keyVaultName")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [ProducedBy(HandlerIds.H2a)]

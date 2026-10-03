@@ -161,7 +161,7 @@ Per H0 preflight (§7.1). Items surfaced **up front**, NOT counted as pipeline t
 - **Azure OpenAI regional TPM quota** — `az cognitiveservices` returns per-model per-region quota; lead time 1–3 days for quota bump
 - **Azure subscription vCPU quota** — verify per SKU per region
 - **Dataverse environment-creation rate** — ~4/hour per tenant typical (`pac admin quota`)
-- **SPE container-type replication** — up to 24h (T6); customer prereq checklist item, NOT in-pipeline wait
+- **SPE container type + owning app** — one-time per container type, not per customer: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) (owning app with a federated credential trusting the L2 Worker UAMI — no certificate, no secret; `Spaarke Model 1` exists since 2026-10-03). H0's `SpeOwnerCredential` check refuses the run until it is in place; there is no 24 h wait
 - **Customer admin consent (Model 2)** — one-time customer action captured by H0.5
 
 ### 2.5 Preflight naming collision check
@@ -339,7 +339,7 @@ parameters: `POST /api/runs` rejects them. A missing or malformed value stops th
 |---|---|---|
 | `ControlPlaneIdentity__PrincipalObjectId` | Object id of L2's own UAMI (one setting since task 249; it replaced `KvSecretsPopulationOptions__ControlPlanePrincipalObjectId`). H4 grants it **Key Vault Secrets Officer** on each customer vault before writing it — never the stamp's BFF UAMI, which only reads its vault. H2a sends it as `customer.bicep`'s `controlPlaneUamiPrincipalId` on **Model 1** stamps (Website Contributor on the stamp BFF). **Rollout**: deploy `platform-controlplane` (which sets the new name) FIRST, then the Worker code built from task 249 straight away (`Deploy-ControlPlane.ps1` deploys code only) — each Worker version refuses to start without the name it reads, so the Worker is down between the two steps; queued Service Bus messages wait. (The old name only ever existed on the project branch, since T245b.) | H4, H2a |
 | `KvSecretsPopulationOptions__RequireSecretFreeIdentity` | `true` — every new stamp is secret-free: H4 omits `BFF-API-ClientSecret` and `Dataverse-ClientSecret` (BINDING credential-lifecycle rule; no sentinel). The code default is also `true` (T225b, G21). | H4 |
-| `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId`, `OwnerAppId` (the container type's **owning** app), `OwnerCertKeyVaultName` + `OwnerCertSecretName` (its certificate, base64 PFX — canonical `SPE-OwnerCert-Pfx`). The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run until the topology runbook has created a container type + owning app and its entry is added. | H0 (SpeCertBootstrap), H8, H13 (T6) |
+| `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId` and `OwnerAppId` (the container type's **owning** app) — nothing else. L2 signs in as the owning app through the Worker UAMI's federated identity credential on that app (MI-FIC, task 248 / owner D16): the UAMI's token for `api://AzureADTokenExchange` is the client assertion. No certificate or secret is stored; the former `OwnerCert*` settings and `SPE-OwnerCert-Pfx` no longer exist. The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run (`spe-owner-not-configured`) until the topology runbook has set up a container type + owning app and its entry is added. Dev: `Spaarke Model 1` `fb3817a8-…` → `Spaarke SPE Model 1 Owner` `bfac7f6e-…`. | H0 (SpeOwnerCredential), H8, H13 (T6) |
 | `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
 
 Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`)
@@ -412,7 +412,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 
 | # | Handler | Purpose | Gate | Idempotency key |
 |---|---|---|---|---|
-| **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE cert-bootstrap (the owning-app certificate of the run's container type, from `SpeContainerOptions:ContainerTypeOwners`) | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
+| **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
 | **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12), OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR. Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
@@ -422,7 +422,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
-| **H8** | SPE root container | Creates the customer's container in the pre-existing container type, as that type's **owning app** (confidential-client cert from `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app; **T6** trap — delegated 403s) | Container GET succeeds; container ID persisted | `spe-{customerId}` |
+| **H8** | SPE root container | Creates the customer's container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s) | Container GET succeeds; container ID persisted | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
@@ -735,7 +735,7 @@ Each phase invokes one or more handlers. Post-Phase-D, `/provision-environment` 
 - Azure OpenAI regional TPM headroom sufficient for +1 provision (150+200+30+350 per-model TPM sum)
 - Dataverse env-creation rate quota (`pac admin quota`)
 - Subscription vCPU quota
-- SPE container-type cert bootstrap done
+- SPE owner check (`SpeOwnerCredential`): owner entry configured, owning-app token obtained through the federated credential, container type registered
 
 Failure diagnostic surfaces to operator; run does not start until resolved.
 
@@ -813,11 +813,16 @@ import — the script never customises a managed component (ADR-027); it then on
 
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
-**H8** provisions container-type + root container. **T6 fix**: uses confidential-client (app-only) token with cert bootstrapped from KV — delegated tokens produce `public client not allowed` 403s.
+**H8** creates, activates and verifies the customer's root container inside the pre-existing container type (the
+container type itself is created once by the operator — [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md)).
+**T6 fix**: H8 uses an app-only token as the container type's **owning app**, obtained through the Worker UAMI's
+federated identity credential on that app (task 248) — no certificate or secret is involved. Delegated tokens produce
+`public client not allowed` 403s.
 
 Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId`) AND KV secret (`customer-{customerId}-spe-container-id`) — enables I4 invariant enforcement.
 
-**Lead-time**: container-type replication up to 24h; H0 preflight ensures cert-bootstrap done, so this is not an in-pipeline wait.
+**Lead-time**: none per customer. The container type and its owning app are a one-time setup; H0's `SpeOwnerCredential`
+check confirms the owner entry, the owning-app token and the registration before any resource is created.
 
 ### 7.6 Phase 6 — BFF Deployment (H9)
 
@@ -929,7 +934,7 @@ Seven known-issue guardrails baked into handler post-conditions. Each has been d
 | **T3** | UAMI SP missing Graph app-role → Graph calls fail with 403 | H10 | UAMI SP `appRoleAssignments` includes all 14 IDs from `GraphAppRoles.cs` |
 | **T4** | Missing Exchange `ApplicationAccessPolicy` → Mail.* calls 403 despite Graph permission grant | H14(a) | `Get-ApplicationAccessPolicy` returns 2 entries with both principals |
 | **T5** | Slot MI vs slot MI KV RBAC parity broken → cold-start KV-ref failure after slot swap | H4 (interim); H10 + Phase C UAMI (structural) | Both slot MIs have KV RBAC (interim); **structurally impossible post-Phase-C** |
-| **T6** | SPE container-type creation uses delegated token → 403 "public client not allowed" | H8 | Confidential-client cert bootstrapped from KV; container GET via app-only token succeeds |
+| **T6** | SPE container work uses a delegated token → 403 "public client not allowed" | H8 | H13 lists `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}` app-only as the owning app (through the Worker UAMI's federated credential) and passes only if the run's container (H8 output) is in the list. Container absent or a delegated-token refusal → Failed; other refusals / 404 / errors → InfraFault |
 | **T7** | `Customer__Id` missing, blank or another customer's id on either BFF slot → the BFF runs on the derived-from-resource-group path, or names the wrong customer (§6.5.1) | H4b (writes both slots) | ARM read of both slots' app settings: `Customer__Id` == run customerId (T238) |
 
 H13 acceptance gate verifies all 7 traps cleared with 0-failure status.
@@ -999,7 +1004,7 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
 ### 12.1 Pre-work
 
 1. Complete §2.5 preflight naming collision check
-2. Verify §2.4 external lead-time items (Azure quota, SPE cert-bootstrap, Model 2 admin consent)
+2. Verify §2.4 external lead-time items (Azure quota, SPE container type + owning app set up per the topology runbook, Model 2 admin consent)
 3. Verify §2.2 identity + access role assignments
 4. Confirm the tenancy model with the customer (§3) — Model 1 = Spaarke tenant, Model 2 = customer tenant / stakeholder
 
@@ -1037,10 +1042,12 @@ pac admin create-environment `
 
 .\scripts\Deploy-DataverseSolutions.ps1 -EnvironmentUrl "<dv-org-url>"
 
-# Phase 5 — SPE (confidential-client — T6 fix)
-.\scripts\Create-NewContainerType.ps1 -CustomerId "acme"
-.\scripts\Register-*.ps1                 # per SPE registration ceremony
-.\scripts\New-BusinessUnitContainer.ps1 -CustomerId "acme"
+# Phase 5 — SPE (app-only as the owning app — T6 fix)
+# The container type + owning app are ONE-TIME setup: docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md.
+# Create-NewContainerType.ps1 is deprecated (task 213.3) and throws. The owning app has no certificate or
+# secret (task 248) — only H8, running as the L2 Worker UAMI, can act as it. The customer's container is
+# therefore created by an L2 provisioning run (H8), not from a workstation: New-BusinessUnitContainer.ps1
+# needs a certificate-based (legacy) owning app and cannot act as an MI-FIC owner.
 
 # Phase 6 — BFF deploy
 .\scripts\Deploy-BffApi.ps1 -CustomerId "acme" -Slot production
@@ -1080,8 +1087,9 @@ az ad sp show --id <uami-principal-id> --query "appRoleAssignments"
 # T4 — Exchange ApplicationAccessPolicy (2 entries)
 Get-ApplicationAccessPolicy | Where-Object { $_.AppId -in @($bffAppId, $uamiAppId) }
 
-# T6 — SPE container GET via app-only token
-# (see auth-deployment-setup stub for the exact confidential-client invocation)
+# T6 — the run's container is listed for its container type, app-only as the owning app
+# Performed by H13 (the owning app is reachable only through the L2 Worker UAMI's federated credential);
+# read the T6 result in the run's H13 output rather than reproducing it from a workstation.
 
 # T7 — Customer__Id on BOTH slots == the customerId (§6.5.1)
 az webapp config appsettings list --name spaarke-bff-{customer}-{env} --resource-group rg-spaarke-{customer}-{env} `
@@ -1245,7 +1253,10 @@ Diagnostic:
 > SharePoint admin center.** Treat H8 as unproven. Full analysis:
 > [`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](../architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) §7.
 
-T6 root cause. Handler H8 (or interim `Create-NewContainerType.ps1`) must use confidential-client (app-only) token with cert bootstrapped from KV. If retrofitting an existing env: re-run H8 (or manually invoke updated script) with `-UseConfidentialClient` switch.
+T6 root cause. Container **types** are created once by the operator through a delegated flow (topology runbook).
+Container work (H8 create / activate / verify, H13's T6 check) uses an app-only token as the container type's owning
+app, obtained through the L2 Worker UAMI's federated identity credential on that app (task 248) — no certificate or
+secret. If retrofitting an existing env: re-run H8.
 
 ### 13.4 AI Search returns cross-tenant results
 

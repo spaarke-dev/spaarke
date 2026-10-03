@@ -16,9 +16,9 @@
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   >= 2 implementations exist from day 1:
-//     - Production: GraphContainerProvisioner — Microsoft.Graph 6.5.0 under
-//       ClientCertificateCredential (T6 confidential-client cert-based auth,
-//       app-only). Calls Storage.FileStorage.Containers.PostAsync +
+//     - Production: GraphContainerProvisioner — Microsoft.Graph 6.5.0 as the
+//       container type's owning app, app-only, via the Worker UAMI's federated
+//       identity credential (task 248). Calls Storage.FileStorage.Containers.PostAsync +
 //       Containers[id].Activate.PostAsync per topology doc §6.
 //     - Test: fake ISpeContainerProvisioner returning canned outcomes.
 // -----------------------------------------------------------------------------
@@ -57,12 +57,10 @@ public interface ISpeContainerProvisioner
 /// (populated once by the operator per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
 /// steps 3 + 7). NEVER created per-customer.
 /// </param>
-/// <param name="VaultName">Spaarke platform Key Vault holding the owning app's certificate (<see cref="SpeContainerOptions.ContainerTypeOwners"/>, task 245b).</param>
-/// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert (T6 cert bootstrap).</param>
 /// <param name="OwningAppId">
-/// The container-type's owning app-reg id. Used ONLY to construct the
-/// ClientCertificateCredential (app-only Graph token) for the CREATE + ACTIVATE
-/// calls — NOT registered anywhere. From <see cref="SpeContainerOptions.ContainerTypeOwners"/> for the run's
+/// The container-type's owning app-reg id. Used ONLY to obtain the owning app's
+/// app-only Graph token (Worker UAMI federated credential — task 248) for the
+/// CREATE + ACTIVATE calls — NOT registered anywhere. From <see cref="SpeContainerOptions.ContainerTypeOwners"/> for the run's
 /// container type (task 245b) — never the customer BFF app (InterStepState.BffAppRegId), which is a separate,
 /// secret-free identity (topology §3A).
 /// </param>
@@ -72,8 +70,6 @@ public sealed record SpeContainerProvisionRequest(
     string CustomerId,
     string TenantId,
     string ContainerTypeId,
-    string VaultName,
-    string CertSecretName,
     string OwningAppId,
     string DisplayName,
     string Description);

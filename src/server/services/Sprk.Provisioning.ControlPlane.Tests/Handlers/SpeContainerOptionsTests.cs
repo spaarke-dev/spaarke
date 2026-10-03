@@ -1,12 +1,14 @@
 // -----------------------------------------------------------------------------
 // SpeContainerOptionsTests.cs
 //
-// Task 245b — SpeContainerOptions.ContainerTypeOwners is the SPE owning-app
-// credential per container type (H0 / H8 / T6). Validate() runs at Worker
+// Task 245b — SpeContainerOptions.ContainerTypeOwners names the SPE owning app per
+// container type (H0 / H8 / T6). Task 248 — an entry is {ContainerTypeId,
+// OwnerAppId} only (L2 signs in as the owning app through the Worker UAMI's
+// federated credential; no certificate is configured). Validate() runs at Worker
 // startup; TryGetOwner() selects by the run's containerTypeId. Covers the
-// topology-R1 rules (one owner per container type, one container type per
-// owner, one certificate per owner) and id canonicalisation. Blank-field
-// startup failures are covered end to end by WorkerL2OwnedOptionsBootTests.
+// topology-R1 rules (one owner per container type, one container type per owner)
+// and id canonicalisation. Blank/non-GUID startup failures are covered end to end
+// by WorkerL2OwnedOptionsBootTests.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -22,18 +24,16 @@ public sealed class SpeContainerOptionsTests
     private const string OwnerA = "77777777-8888-9999-aaaa-bbbbbbbbbbb1";
     private const string OwnerB = "77777777-8888-9999-aaaa-bbbbbbbbbbb2";
 
-    private static SpeContainerTypeOwner Owner(string type, string app, string secret = "SPE-OwnerCert-Pfx") => new()
+    private static SpeContainerTypeOwner Owner(string type, string app) => new()
     {
         ContainerTypeId = type,
         OwnerAppId = app,
-        OwnerCertKeyVaultName = "sprk-controlplane-dev-kv",
-        OwnerCertSecretName = secret,
     };
 
     [Fact]
-    public void Validate_TwoContainerTypes_EachWithItsOwnOwnerAndCertificate_Passes()
+    public void Validate_TwoContainerTypes_EachWithItsOwnOwner_Passes()
     {
-        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA, "SPE-OwnerCert-Pfx"), Owner(TypeB, OwnerB, "SPE-Model1-OwnerCert-Pfx")] };
+        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA), Owner(TypeB, OwnerB)] };
 
         options.Invoking(o => o.Validate()).Should().NotThrow();
     }
@@ -41,7 +41,7 @@ public sealed class SpeContainerOptionsTests
     [Fact]
     public void Validate_SameContainerTypeTwice_Throws()
     {
-        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA, "c1"), Owner(TypeA.ToUpperInvariant(), OwnerB, "c2")] };
+        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA), Owner(TypeA.ToUpperInvariant(), OwnerB)] };
 
         options.Invoking(o => o.Validate()).Should().Throw<InvalidOperationException>().WithMessage("*listed more than once*");
     }
@@ -49,17 +49,9 @@ public sealed class SpeContainerOptionsTests
     [Fact]
     public void Validate_OneOwnerForTwoContainerTypes_Throws()
     {
-        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA, "c1"), Owner(TypeB, OwnerA, "c2")] };
+        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA), Owner(TypeB, OwnerA)] };
 
         options.Invoking(o => o.Validate()).Should().Throw<InvalidOperationException>().WithMessage("*owns exactly one container type*");
-    }
-
-    [Fact]
-    public void Validate_TwoOwnersSharingOneCertificateSecret_Throws()
-    {
-        var options = new SpeContainerOptions { ContainerTypeOwners = [Owner(TypeA, OwnerA), Owner(TypeB, OwnerB)] };
-
-        options.Invoking(o => o.Validate()).Should().Throw<InvalidOperationException>().WithMessage("*already the certificate of owning app*");
     }
 
     [Fact]

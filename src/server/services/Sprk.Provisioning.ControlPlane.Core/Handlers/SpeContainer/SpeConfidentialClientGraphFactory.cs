@@ -1,163 +1,122 @@
 // -----------------------------------------------------------------------------
 // SpeConfidentialClientGraphFactory.cs
 //
-// Shared T6 cert-loading + ClientCertificateCredential/GraphServiceClient
-// construction helper for GraphContainerProvisioner + GraphAppOnlyContainerVerifier
-// (H8) and for H13's T6SpeConfidentialClientTrapProbe /
-// GraphContainerTypesListAppOnlyProbe. Extracted per CLAUDE.md §11 (one
-// component that works exceptionally well, not two that partially overlap):
-// all four call sites need the IDENTICAL cert-bootstrap + confidential-client
-// credential recipe.
+// The ONE way L2 acts as an SPE container type's OWNING app: a confidential-client
+// (app-only) Graph client whose credential is the Worker UAMI's federated identity
+// credential (MI-FIC) on the owning app. Consumed by H0's SpeOwnerCredentialProbe,
+// H8's GraphContainerProvisioner + GraphAppOnlyContainerVerifier and H13's T6 probe
+// (GraphContainersListAppOnlyProbe) — all four need the identical credential, so it
+// lives in one component (CLAUDE.md §11).
 //
-// TASK 214 CHANGE (2026-08-30): moved from Handlers/SpeContainerType/ to
-// Handlers/SpeContainer/ + namespace renamed. Logic is unchanged — the KV
-// cert-bootstrap mechanism, EphemeralKeySet posture, ClientCertificateCredential
-// construction, and T6 delegated-token-trap phrase detection are IDENTICAL to
-// the pre-rewrite version. H13's E2EAcceptance probes consume this exactly as
-// before (only their `using` statements needed updating).
+// TASK 248 (G28, owner decision D16, 2026-10-03) — MI-FIC, NOT A CERTIFICATE.
+// Until T248 this class loaded a password-less base64 PFX (`SPE-OwnerCert-Pfx`) from a
+// Spaarke platform Key Vault and built a ClientCertificateCredential. No such secret
+// ever existed, so every run stopped at H0. ADR-028 A4 makes MI-FIC the default
+// credential for confidential clients: the owning app `Spaarke SPE Model 1 Owner`
+// carries a federated identity credential whose subject is the Worker UAMI, and the
+// UAMI's token for `api://AzureADTokenExchange` is the client assertion
+// (WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential — the
+// single place the Worker mints that assertion). Verified live 2026-10-03 from compute
+// carrying the dev Worker UAMI: the exchange returned an owning-app Graph token with
+// `appidacr` = 2 (client-assertion class, the same as a certificate) and both SPE
+// roles, and Graph accepted it for the container-type registration GET and the app-only
+// containers listing (T248 POML notes). There is no certificate path and no fallback:
+// if the exchange fails, the run stops with the error (H0 code
+// `spe-owner-token-failed`).
 //
-// T6 CERT-FROM-KV MECHANISM (ground-truthed against
-// scripts/common/Get-SpeConfidentialClientToken.ps1, the helper both
-// scripts/Create-NewContainerType.ps1 and scripts/Get-SpeContainerMetadata-
-// AppOnly.ps1 already dot-source):
-//   The cert is stored in Key Vault as a SECRET (base64-encoded PFX text),
-//   NOT as a Key Vault Certificate object. Azure.Security.KeyVault.Secrets.
-//   SecretClient.GetSecretAsync is used; .Value is base64-decoded to raw PFX
-//   bytes, then loaded via the .NET 9+/10 recommended
-//   <see cref="X509CertificateLoader.LoadPkcs12(byte[], string?, X509KeyStorageFlags)"/>
-//   (NOT the SYSLIB0057-obsolete X509Certificate2(byte[], string, flags)
-//   constructor) with <see cref="X509KeyStorageFlags.EphemeralKeySet"/> —
-//   parity with the PS helper's private-key-never-persisted-to-disk posture.
-//
-// TENANT SCOPING: Azure.Identity.ClientCertificateCredential is inherently
-// single-tenant, single-app by construction (unlike DefaultAzureCredential).
-// §4D I5 (explicit per-tenant scope) is satisfied by construction, not by a
-// special per-call credential-refresh pattern.
+// TENANT SCOPING + CACHING: one credential per (tenantId, ownerAppId) pair — never
+// DefaultAzureCredential — so §4D I5 (explicit per-tenant scope) holds by construction. The
+// credential is cached for the factory's (singleton) lifetime, keyed by that pair (ADR-028 A4), so
+// H0, H8's provision + verify and T6 reuse the owning app's token instead of re-exchanging per call.
+// Graph clients are cheap wrappers — callers dispose them (`using var graph`).
 // -----------------------------------------------------------------------------
 
-using System.Security.Cryptography.X509Certificates;
+using System.Collections.Concurrent;
 using Azure.Core;
-using Azure.Identity;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
+using Microsoft.Kiota.Authentication.Azure;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 
 /// <summary>
-/// Shared T6 cert-bootstrap + confidential-client Graph client construction
-/// for H8's Graph SDK collaborators AND H13's E2EAcceptance T6 probes.
-/// Internal — consumed only within Sprk.Provisioning.ControlPlane.Core;
-/// <c>InternalsVisibleTo Sprk.Provisioning.ControlPlane.Tests</c> exposes it
-/// to the unit test project for the cert-path tests.
+/// Builds the owning-app (app-only, confidential-client) credential and Graph client L2 uses for SPE,
+/// from the Worker UAMI's federated identity credential on the owning app (task 248). Singleton; performs
+/// no network I/O until a token or Graph call is requested.
 /// </summary>
-internal static class SpeConfidentialClientGraphFactory
+public sealed class SpeConfidentialClientGraphFactory
 {
-    private static readonly string[] GraphDefaultScope = { "https://graph.microsoft.com/.default" };
+    /// <summary>The app-only Graph scope every SPE call L2 makes requests.</summary>
+    public static readonly string[] GraphDefaultScope = { "https://graph.microsoft.com/.default" };
 
     /// <summary>
-    /// T6 regression-detector phrase — parity with the historical PS-script-based
-    /// stdout scan. Under exclusive ClientCertificateCredential usage this
-    /// should never legitimately fire for container CREATE/GET; it exists as a
-    /// defense-in-depth regression signal for H13's T6 acceptance gate.
+    /// T6 regression-detector phrase — parity with the historical PS-script-based stdout scan. Under
+    /// app-only (client-assertion) auth this should never fire; it exists as a defense-in-depth signal
+    /// for H13's T6 acceptance gate.
     /// </summary>
     internal const string DelegatedTokenTrapPhrase = "public client not allowed";
 
-    /// <summary>
-    /// Downloads the T6 cert (base64-PFX Key Vault SECRET — see file header)
-    /// and loads it as an <see cref="X509Certificate2"/> with the private key
-    /// resident only in memory (<see cref="X509KeyStorageFlags.EphemeralKeySet"/>).
-    /// Caller owns disposal.
-    /// </summary>
-    internal static async Task<X509Certificate2> LoadCertificateAsync(
-        TokenCredential sharedCredential,
-        SecretClientOptions? clientOptions,
-        string vaultName,
-        string certSecretName,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
+    private readonly Func<string, string, TokenCredential> _createCredential;
+    private readonly HttpMessageHandler? _graphHandler;
+    private readonly ConcurrentDictionary<(string TenantId, string OwnerAppId), TokenCredential> _credentials = new();
+
+    /// <summary>Production constructor — owning-app credentials come from the Worker UAMI (MI-FIC).</summary>
+    public SpeConfidentialClientGraphFactory(WorkerDataverseCredentialFactory credentials)
+        : this(ResolveFrom(credentials), graphHandler: null)
     {
-        var vaultUri = new Uri($"https://{vaultName}.vault.azure.net/");
-        var client = clientOptions is null
-            ? new SecretClient(vaultUri, sharedCredential)
-            : new SecretClient(vaultUri, sharedCredential, clientOptions);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(timeout);
-
-        Azure.Response<KeyVaultSecret> response;
-        try
-        {
-            response = await client.GetSecretAsync(certSecretName, version: null, timeoutCts.Token)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"T6 cert secret '{certSecretName}' read from vault '{vaultName}' timed out after {timeout}.");
-        }
-
-        var base64Pfx = response.Value.Value;
-        if (string.IsNullOrWhiteSpace(base64Pfx))
-        {
-            throw new InvalidOperationException(
-                $"T6 cert secret '{certSecretName}' on vault '{vaultName}' is present but blank.");
-        }
-
-        byte[] pfxBytes;
-        try
-        {
-            pfxBytes = Convert.FromBase64String(base64Pfx);
-        }
-        catch (FormatException ex)
-        {
-            throw new InvalidOperationException(
-                $"T6 cert secret '{certSecretName}' on vault '{vaultName}' is not valid base64 PFX " +
-                $"(expected contentType application/x-pkcs12, base64-encoded — same shape " +
-                "scripts/common/Get-SpeConfidentialClientToken.ps1 already reads).", ex);
-        }
-
-        // EphemeralKeySet: private key resident in-process memory only — never
-        // written to the machine/user cert store. Parity with the PS helper's
-        // -EphemeralKeySet flag.
-        var cert = X509CertificateLoader.LoadPkcs12(pfxBytes, password: null, X509KeyStorageFlags.EphemeralKeySet);
-        if (!cert.HasPrivateKey)
-        {
-            cert.Dispose();
-            throw new InvalidOperationException(
-                $"T6 cert loaded from vault '{vaultName}' secret '{certSecretName}' has no private key — " +
-                "cannot build a ClientCertificateCredential from it.");
-        }
-
-        return cert;
     }
 
     /// <summary>
-    /// Builds the confidential-client (app-only, T6) credential — NEVER a
-    /// secret-based credential. The certificate's private key is used to sign
-    /// the client assertion (RS256, x5t header) per RFC 7523, identical to the
-    /// PS helper's manual JWT construction, but performed by
-    /// Azure.Identity/MSAL instead of hand-rolled code.
+    /// Test seam: <paramref name="createCredential"/> replaces the MI-FIC credential and
+    /// <paramref name="graphHandler"/> (when set) carries Graph requests to a fake handler.
     /// </summary>
-    internal static ClientCertificateCredential BuildCredential(
-        string tenantId, string clientAppId, X509Certificate2 certificate)
-        => new(tenantId, clientAppId, certificate);
-
-    /// <summary>Builds a Graph client bound to the T6 confidential-client credential.</summary>
-    internal static GraphServiceClient BuildGraphClient(
-        string tenantId, string clientAppId, X509Certificate2 certificate)
-        => new(BuildCredential(tenantId, clientAppId, certificate), GraphDefaultScope);
+    internal SpeConfidentialClientGraphFactory(
+        Func<string, string, TokenCredential> createCredential,
+        HttpMessageHandler? graphHandler)
+    {
+        ArgumentNullException.ThrowIfNull(createCredential);
+        _createCredential = createCredential;
+        _graphHandler = graphHandler;
+    }
 
     /// <summary>
-    /// T6 regression detector — checks a Graph ODataError for the delegated-
-    /// token trap signature (case-insensitive). H13's T6SpeConfidentialClientTrapProbe
-    /// consumes this to classify a probe result as "trap manifested" vs
-    /// "generic error." H8-B does NOT call this (per task 214.4 Option A —
-    /// H8's new shape doesn't participate in T6-trap detection).
+    /// The owning app's app-only credential in <paramref name="tenantId"/>: a client assertion minted by
+    /// the Worker UAMI. Never a certificate, never a secret. Cached per (tenant, owning app).
+    /// </summary>
+    public TokenCredential CreateCredential(string tenantId, string ownerAppId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerAppId);
+        return _credentials.GetOrAdd(
+            (tenantId.Trim().ToLowerInvariant(), ownerAppId.Trim().ToLowerInvariant()),
+            key => _createCredential(key.TenantId, key.OwnerAppId));
+    }
+
+    /// <summary>A Graph client authenticated as the owning app (app-only) in <paramref name="tenantId"/>. Caller disposes it.</summary>
+    public GraphServiceClient CreateGraphClient(string tenantId, string ownerAppId)
+    {
+        var credential = CreateCredential(tenantId, ownerAppId);
+        return _graphHandler is null
+            ? new GraphServiceClient(credential, GraphDefaultScope)
+            : new GraphServiceClient(
+                new HttpClient(_graphHandler, disposeHandler: false),
+                new AzureIdentityAuthenticationProvider(credential, scopes: GraphDefaultScope));
+    }
+
+    /// <summary>
+    /// T6 regression detector — checks a Graph ODataError for the delegated-token trap signature
+    /// (case-insensitive). H13's T6 probe consumes this to classify "trap manifested" vs "generic error".
     /// </summary>
     internal static bool IsDelegatedTokenTrapError(ODataError ex)
     {
         var message = ex.Error?.Message ?? ex.Message ?? string.Empty;
         return message.Contains(DelegatedTokenTrapPhrase, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Func<string, string, TokenCredential> ResolveFrom(WorkerDataverseCredentialFactory credentials)
+    {
+        ArgumentNullException.ThrowIfNull(credentials);
+        return credentials.CreateManagedIdentityFederatedCredential;
     }
 }

@@ -391,6 +391,7 @@ When MI is genuinely unworkable for a specific outbound surface, the **only** sa
 - **Scope**: SpeAdmin endpoints performing per-customer container-type management.
 - **Why**: Per-customer secrets; the BFF MI cannot impersonate per-customer admin identities.
 - **Remediation TODO**: None (architectural). Tracked as a known design exception.
+- **Note (2026-10-03, customer-provisioning-orchestration-r1 T248 — informational, no rule change)**: a managed identity CAN act as a *same-tenant* owning app through a federated identity credential (A4's default). L2 now does so for the `Spaarke Model 1` owning app — verified live (FIC token `appidacr` 2; Graph accepted it for the registration GET and the app-only containers listing) — so L2 needs no E-1 secret. The BFF's `SpeAdminGraphService` still uses E-1 secrets; moving it to MI-FIC is tracked as T250 (that project's plan §7).
 
 ### E-2: Azure OpenAI / AI Services data plane (2026-05-28)
 

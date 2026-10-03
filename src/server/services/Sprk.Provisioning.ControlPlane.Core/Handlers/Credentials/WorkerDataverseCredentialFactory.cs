@@ -155,31 +155,8 @@ public sealed class WorkerDataverseCredentialFactory
             {
                 case CredentialKind.ManagedIdentityFederated:
                 {
-                    // Mirror of DataverseServiceClientImpl.cs:83-84's UAMI
-                    // clientId lookup + fallback; null → system-assigned
-                    // (same "(system-assigned)" convention as master).
                     var miClientId = ResolveManagedIdentityClientId();
-                    var miCredential = new ManagedIdentityCredential(
-                        miClientId is null
-                            ? ManagedIdentityId.SystemAssigned
-                            : ManagedIdentityId.FromUserAssignedClientId(miClientId));
-
-                    // FIC exchange: the UAMI token for api://AzureADTokenExchange
-                    // IS the client assertion. ClientAssertionCredential invokes
-                    // the callback per token request; ManagedIdentityCredential
-                    // caches the underlying MI token until expiry, so this is
-                    // not a per-call IMDS round-trip (parity with the BFF's
-                    // ManagedIdentityClientAssertion caching note).
-                    var credential = new ClientAssertionCredential(
-                        tenantId,
-                        clientId,
-                        async ct =>
-                        {
-                            var assertion = await miCredential.GetTokenAsync(
-                                new TokenRequestContext(new[] { FederatedTokenExchangeScope }), ct)
-                                .ConfigureAwait(false);
-                            return assertion.Token;
-                        });
+                    var credential = CreateManagedIdentityFederatedCredential(tenantId, clientId);
 
                     _logger.LogInformation(
                         "L2 Worker Dataverse credential for {ClientId}: {Kind} (UAMI {UamiClientId}); " +
@@ -233,6 +210,55 @@ public sealed class WorkerDataverseCredentialFactory
             "prong-3 unmigrated environments: populate the ClientSecret KV-reference app setting). " +
             "NEVER unblock by writing a placeholder into the secret slot — a sentinel fails opaquely with " +
             "AADSTS7000215 at first use (auth-v4 §9.1).");
+    }
+
+    /// <summary>
+    /// The Worker's MI-FIC credential for ANY app registration that trusts the Worker UAMI through a
+    /// federated identity credential: the UAMI token for <c>api://AzureADTokenExchange</c> is the client
+    /// assertion for <paramref name="clientId"/> in <paramref name="tenantId"/>. The single place L2 obtains
+    /// that assertion — the FR-39 chain above (BFF app registration) and the SPE owning app (task 248,
+    /// <see cref="SpeContainer.SpeConfidentialClientGraphFactory"/>) both come through here. No certificate,
+    /// no secret (ADR-028 A4). Performs no network I/O until a token is requested.
+    /// </summary>
+    public TokenCredential CreateManagedIdentityFederatedCredential(string tenantId, string clientId)
+        => CreateManagedIdentityFederatedCredential(tenantId, clientId, assertionSource: null, options: null);
+
+    /// <summary>
+    /// Test seam: <paramref name="assertionSource"/> stands in for the UAMI (<c>null</c> = the real
+    /// <see cref="ManagedIdentityCredential"/>) and <paramref name="options"/> carries a fake transport.
+    /// </summary>
+    internal ClientAssertionCredential CreateManagedIdentityFederatedCredential(
+        string tenantId,
+        string clientId,
+        TokenCredential? assertionSource,
+        ClientAssertionCredentialOptions? options)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientId);
+
+        // Mirror of DataverseServiceClientImpl.cs:83-84's UAMI clientId lookup + fallback;
+        // null → system-assigned (same "(system-assigned)" convention as master).
+        var miClientId = ResolveManagedIdentityClientId();
+        var source = assertionSource ?? new ManagedIdentityCredential(
+            miClientId is null
+                ? ManagedIdentityId.SystemAssigned
+                : ManagedIdentityId.FromUserAssignedClientId(miClientId));
+
+        // FIC exchange: the UAMI token for api://AzureADTokenExchange IS the client assertion.
+        // ClientAssertionCredential invokes the callback per token request; ManagedIdentityCredential
+        // caches the underlying MI token until expiry, so this is not a per-call IMDS round-trip
+        // (parity with the BFF's ManagedIdentityClientAssertion caching note).
+        return new ClientAssertionCredential(
+            tenantId,
+            clientId,
+            async ct =>
+            {
+                var assertion = await source.GetTokenAsync(
+                    new TokenRequestContext(new[] { FederatedTokenExchangeScope }), ct)
+                    .ConfigureAwait(false);
+                return assertion.Token;
+            },
+            options);
     }
 
     /// <summary>

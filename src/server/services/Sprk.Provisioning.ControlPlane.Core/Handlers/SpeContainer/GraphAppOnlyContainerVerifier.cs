@@ -29,8 +29,6 @@
 // orchestration + the WaitingOnGate classification logic itself.
 // -----------------------------------------------------------------------------
 
-using Azure.Core;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models.ODataErrors;
 
@@ -39,32 +37,20 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 /// <inheritdoc cref="ISpeContainerVerifier"/>
 public sealed class GraphAppOnlyContainerVerifier : ISpeContainerVerifier
 {
-    private readonly TokenCredential _sharedCredential;
-    private readonly SecretClientOptions? _clientOptions;
+    private readonly SpeConfidentialClientGraphFactory _graphFactory;
     private readonly SpeContainerOptions _options;
     private readonly ILogger<GraphAppOnlyContainerVerifier> _logger;
 
-    /// <summary>Constructs the production verifier. <paramref name="sharedCredential"/> is used ONLY for the T6 cert read from KV; the Graph GET itself uses a per-request T6 ClientCertificateCredential.</summary>
+    /// <summary>Constructs the production verifier over the owning-app Graph client factory (task 248).</summary>
     public GraphAppOnlyContainerVerifier(
-        TokenCredential sharedCredential,
-        IOptions<SpeContainerOptions> options,
-        ILogger<GraphAppOnlyContainerVerifier> logger)
-        : this(sharedCredential, clientOptions: null, options, logger)
-    {
-    }
-
-    /// <summary>Test seam constructor — injects a fake-transport <see cref="SecretClientOptions"/> for the KV cert read.</summary>
-    internal GraphAppOnlyContainerVerifier(
-        TokenCredential sharedCredential,
-        SecretClientOptions? clientOptions,
+        SpeConfidentialClientGraphFactory graphFactory,
         IOptions<SpeContainerOptions> options,
         ILogger<GraphAppOnlyContainerVerifier> logger)
     {
-        ArgumentNullException.ThrowIfNull(sharedCredential);
+        ArgumentNullException.ThrowIfNull(graphFactory);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
-        _sharedCredential = sharedCredential;
-        _clientOptions = clientOptions;
+        _graphFactory = graphFactory;
         _options = options.Value;
         _logger = logger;
     }
@@ -78,14 +64,8 @@ public sealed class GraphAppOnlyContainerVerifier : ISpeContainerVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.CertSecretName);
 
-        using var cert = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-            _sharedCredential, _clientOptions, request.VaultName, request.CertSecretName,
-            _options.CertLoadTimeout, cancellationToken).ConfigureAwait(false);
-
-        var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(request.TenantId, request.OwningAppId, cert);
+        using var graph = _graphFactory.CreateGraphClient(request.TenantId, request.OwningAppId);
 
         _logger.LogInformation(
             "H8-B Graph SPE container app-only verification starting: containerId={ContainerId}",
@@ -102,7 +82,7 @@ public sealed class GraphAppOnlyContainerVerifier : ISpeContainerVerifier
             var status = container?.Status?.ToString() ?? "unknown";
 
             _logger.LogInformation(
-                "H8-B container verified via app-only (confidential-client cert-based) token. " +
+                "H8-B container verified via the owning app's app-only (MI-FIC) token. " +
                 "containerId={ContainerId} status={Status}", request.ContainerId, status);
 
             return new SpeContainerVerificationResult.Verified(status);
