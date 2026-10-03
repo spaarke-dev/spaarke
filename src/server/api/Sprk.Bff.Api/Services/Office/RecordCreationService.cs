@@ -6,9 +6,12 @@
 // existing IGenericEntityService + IFieldMappingDataverseService seams (no new Dataverse client), and it is the
 // one implementation task 031 (Project) and the post-r1 wizard-migration evaluation are meant to call.
 //
-// NUMBERING IS OUT OF SCOPE (owner decision 2026-09-11): sprk_matternumber will be assigned by a planned, separate
-// server-side record-numbering component that triggers on create. Until it exists, matters created here have no
-// number. This service never writes it. See projects/spaarkeai-word-add-in-r1/notes/030-numbering-handoff.md.
+// NUMBERING (task 076, owner decisions 2026-10-02): sprk_matternumber / sprk_projectnumber — each table's PRIMARY NAME —
+// are assigned by Dataverse's platform autonumber (MAT-{SEQNUM:6} / PRJ-{SEQNUM:6}), set up per environment by
+// scripts/Set-RecordNumberingSchema.ps1. It is INTERIM: "the dataverse auto numbering is just an interim solution until
+// we build the numbering function". This service never writes the number (the platform fills it only when the create
+// leaves it empty); it retries a create the number's alternate key refuses, and warns when no number came back.
+// See projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md.
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
@@ -73,7 +76,12 @@ public enum RecordCreationFailureKind
 
     /// <summary>No owner could be determined — the caller has no resolvable Dataverse user, or their business unit
     /// has no single default owner team (task 080) — so nothing was created.</summary>
-    OwnerUnresolved
+    OwnerUnresolved,
+
+    /// <summary>Every create attempt was refused by the number's alternate key: the platform kept issuing numbers that
+    /// rows already hold (typed in ahead of the sequence). Nothing was created; the operator re-seeds with
+    /// <c>scripts/Set-RecordNumberingSchema.ps1 -Apply</c> (task 076).</summary>
+    NumberUnavailable
 }
 
 /// <summary>A structured refusal. <see cref="Code"/> is a stable identifier; <see cref="Detail"/> is user-safe text.</summary>
@@ -112,7 +120,8 @@ public sealed record RecordCreationResult
 /// <b>Matter</b> (task 030) and <b>Project</b> (task 031); Invoice stays on the minimal generic path.
 /// </summary>
 /// <remarks>
-/// <para><b>Matter pipeline</b> (mirrors <c>matterService.createMatter</c>, minus numbering):</para>
+/// <para><b>Matter pipeline</b> (mirrors <c>matterService.createMatter</c>, except that the number comes from the
+/// platform, not the client):</para>
 /// <list type="number">
 ///   <item><description>Name / description; the <c>sprk_mattertype</c> lookup when the supplied type resolves (one
 ///   existence read — an unknown type is dropped with a warning, never rejected).</description></item>
@@ -124,9 +133,11 @@ public sealed record RecordCreationResult
 ///   <item><description>Owner — <c>ownerid</c> = the caller's business-unit DEFAULT OWNER TEAM (task 080, invariant
 ///   I-6); refused when the caller or the team is unresolved.</description></item>
 /// </list>
-/// <para><b><c>sprk_matternumber</c> is never written here</b> (owner decision 2026-09-11) — not directly, and not
-/// through a field-mapping rule of any type (the protected-attribute check is case-insensitive). Numbering is left to
-/// a planned separate on-create component so this path can never pre-empt or collide with it.</para>
+/// <para><b><c>sprk_matternumber</c> is never written here</b> — not directly, and not through a field-mapping rule of
+/// any type (the protected-attribute check is case-insensitive). It is the platform's autonumber (task 076, INTERIM until
+/// the numbering function): Dataverse fills it only when the create leaves it empty, so a value sent here would pre-empt
+/// the sequence. The create is retried when the number's alternate key refuses it (<see cref="CreateNumberedAsync"/>),
+/// and a record that came back without a number is reported (<see cref="WarnIfNumberMissingAsync"/>).</para>
 /// <para><b>Deliberate deviations from the client engine</b> (notes/030 §8): mapping may not touch
 /// <c>sprk_matternumber</c>, <c>ownerid</c> or <c>sprk_containerid</c>; a mapping that blanks the name or writes a
 /// non-matter-type value into <c>sprk_mattertype</c> is reverted with a warning.</para>
@@ -150,9 +161,8 @@ public sealed class RecordCreationService
     internal const string MatterTypeIdAttribute = "sprk_mattertype_refid";
 
     // Project (task 031). sprk_projectnumber is the sprk_project PRIMARY NAME attribute and is NEVER written on this
-    // path — it belongs to the separate server-side numbering project (owner decision 2026-09-17). It is named here
-    // only so it can be PROTECTED from field-mapping rules; see ProjectProtectedAttributes and
-    // projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md §2.
+    // path — the platform's autonumber assigns it (PRJ-{SEQNUM:6}, task 076, interim). It is named here so it can be
+    // PROTECTED from field-mapping rules and read back after the create; see ProjectProtectedAttributes.
     internal const string ProjectEntity = "sprk_project";
     internal const string ProjectNameAttribute = "sprk_projectname";
     internal const string ProjectDescriptionAttribute = "sprk_projectdescription";
@@ -168,17 +178,18 @@ public sealed class RecordCreationService
     internal const string SearchIndexEntity = "sprk_aisearchindex";
 
     /// <summary>
-    /// Attributes a field-mapping rule may not write when creating a MATTER: the number (left to the planned
-    /// numbering component — notes/030-numbering-handoff.md), the load-bearing owner, and the storage container
-    /// (server-derived only — task 076 W1). Case-insensitive, so a mis-cased or padded target is caught too.
+    /// Attributes a field-mapping rule may not write when creating a MATTER: the number (the platform's autonumber
+    /// assigns it only when the create leaves it empty, so a mapped value would pre-empt the sequence — and, copied
+    /// from a parent, would collide on the number's alternate key; task 076), the load-bearing owner, and the storage
+    /// container (server-derived only — unified-access-control-r2 task 076 W1). Case-insensitive, so a mis-cased or
+    /// padded target is caught too.
     /// </summary>
     private static readonly IReadOnlySet<string> MatterProtectedAttributes =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { MatterNumberAttribute, OwnerAttribute, ContainerAttribute };
 
     /// <summary>
     /// The same three protections for a PROJECT, with <see cref="ProjectNumberAttribute"/> in place of the matter
-    /// number. This is what makes "task 031 never writes <c>sprk_projectnumber</c>" actually hold: without it, an
-    /// admin-authored profile rule targeting it would be a back door straight through the owner's decision.
+    /// number — for the same reason: the platform assigns it, and a mapped value would pre-empt the sequence.
     /// </summary>
     /// <remarks>
     /// The sets are deliberately PER ENTITY rather than one merged set. A merged set would newly skip-and-warn a rule
@@ -189,6 +200,14 @@ public sealed class RecordCreationService
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ProjectNumberAttribute, OwnerAttribute, ContainerAttribute };
 
     internal const string TeamEntity = "team";
+
+    /// <summary>
+    /// Create attempts before a number collision is a refusal (task 076). The platform's sequence is unique only
+    /// against itself; a number typed in ahead of it is refused by the alternate key (<c>0x80060892</c>, measured
+    /// live 2026-10-02), and the next attempt draws the next number. One collision is rare; three in a row means a run
+    /// of typed-ahead numbers, which <c>scripts/Set-RecordNumberingSchema.ps1 -Apply</c> clears by moving the seed.
+    /// </summary>
+    internal const int MaxNumberAttempts = 3;
 
     /// <summary>
     /// The core record's internal Assigned-To contact column (matter and project). Owner decision A7 (round 3,
@@ -288,6 +307,94 @@ public sealed class RecordCreationService
             Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.RecordOwnerUnresolved,
             $"The new {entityLabel} could not be assigned to your business unit's team, so it was not created. Ask an "
             + "administrator to check that your user has a business unit and that the unit has its default team."));
+
+    private static RecordCreationResult NumberUnavailable(string entityLabel) =>
+        RecordCreationResult.Failed(new RecordCreationFailure(
+            RecordCreationFailureKind.NumberUnavailable,
+            "record_number_unavailable",
+            $"The new {entityLabel} could not be given a number because the next numbers are already in use, so it was "
+            + "not created. Try again; if it keeps failing, ask an administrator to check record numbering."));
+
+    /// <summary>
+    /// Creates the record, leaving its number to the platform's autonumber, and retries when the number's alternate key
+    /// refuses the create (task 076). Returns <see langword="null"/> — nothing written — after
+    /// <see cref="MaxNumberAttempts"/> refusals.
+    /// </summary>
+    /// <remarks>
+    /// Only the alternate-key duplicate (<c>0x80060892</c>, classified by
+    /// <see cref="DataverseServiceClientImpl.IsAlternateKeyDuplicate"/>, the classifier the race-proof Communication
+    /// create already uses) is retried: Dataverse rejects such a create whole, so a retry cannot double-create, and it
+    /// draws the next number (measured live 2026-10-02: the refused attempt's number is consumed, the next attempt gets
+    /// the one after). Every other fault propagates on the first attempt, as before — a timeout, for one, may have
+    /// created the row, and retrying it could create a second.
+    /// </remarks>
+    private async Task<Guid?> CreateNumberedAsync(Entity entity, string entityLabel, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (DataverseServiceClientImpl.IsAlternateKeyDuplicate(ex))
+            {
+                if (attempt >= MaxNumberAttempts)
+                {
+                    _logger.LogError(ex,
+                        "record_number_unavailable: entity={Entity} attempts={Attempts} — every number the platform issued "
+                        + "was already held by a row; run scripts/Set-RecordNumberingSchema.ps1 -Apply to move the seed past them",
+                        entity.LogicalName, attempt);
+                    return null;
+                }
+
+                _logger.LogWarning(
+                    "[RECORD-CREATE] The {EntityLabel}'s number was already held by another row (attempt {Attempt} of {Max}); "
+                    + "retrying with the next number.", entityLabel, attempt, MaxNumberAttempts);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads the created record's number back and warns when it is blank (task 076): a blank number is a blank NAME in
+    /// every lookup and list, and it means this environment has no autonumber on the column — the schema script was not
+    /// run. The record is kept; the user is told and the condition is logged as <c>record_number_unassigned</c>.
+    /// </summary>
+    /// <remarks>
+    /// Never fails or alarms a create that succeeded: a read that faults is logged and otherwise ignored, since it says
+    /// nothing about the number.
+    /// </remarks>
+    private async Task WarnIfNumberMissingAsync(
+        string entityName, Guid recordId, string numberAttribute, string entityLabel, List<string> warnings, CancellationToken ct)
+    {
+        Entity? created;
+        try
+        {
+            created = await _entities.RetrieveAsync(entityName, recordId, [numberAttribute], ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[RECORD-CREATE] The new {EntityLabel} {RecordId} could not be read back to confirm its number.", entityLabel, recordId);
+            return;
+        }
+
+        if (created is null || !string.IsNullOrWhiteSpace(created.GetAttributeValue<string>(numberAttribute)))
+        {
+            return;
+        }
+
+        _logger.LogError(
+            "record_number_unassigned: entity={Entity} id={RecordId} — created without a number, so it has a blank name; "
+            + "{Column} has no autonumber in this environment (run scripts/Set-RecordNumberingSchema.ps1)",
+            entityName, recordId, numberAttribute);
+        warnings.Add(
+            $"The new {entityLabel} was created without a number, so it shows without a name in lists. Ask an administrator "
+            + "to check record numbering.");
+    }
 
     /// <summary>
     /// Creates the record. Returns a structured <see cref="RecordCreationFailure"/> — never a partial write — when
@@ -393,7 +500,12 @@ public sealed class RecordCreationService
 
         entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
 
-        var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
+        if (await CreateNumberedAsync(entity, "matter", ct).ConfigureAwait(false) is not { } createdId)
+        {
+            return NumberUnavailable("matter");
+        }
+
+        await WarnIfNumberMissingAsync(MatterEntity, createdId, MatterNumberAttribute, "matter", warnings, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "[RECORD-CREATE] Matter {MatterId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
@@ -414,11 +526,10 @@ public sealed class RecordCreationService
     /// </summary>
     /// <remarks>
     /// <para><b><c>sprk_projectnumber</c> is the <c>sprk_project</c> PRIMARY NAME attribute</b>, and this path writes
-    /// NOTHING to it — not a generated token, not a name-derived value (owner decision 2026-09-17: Project numbering
-    /// belongs to the separate server-side numbering project). A pane-created Project therefore shows a BLANK name in
-    /// lookups and grids until that component ships. <b>That is expected, not a defect.</b> Generating a token here
-    /// would write machine text into the Project's display name — a user-visible regression, not a fix. Full
-    /// reasoning: <c>projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md</c>.</para>
+    /// NOTHING to it. Since task 076 the platform's autonumber assigns <c>PRJ-######</c> on create (owner decision
+    /// 2026-10-02, interim until the numbering function), so a pane-created Project is no longer blank. Unlike Matter,
+    /// no client path supplies a project number at all (<c>projectService.ts</c> sends none), so every Project created
+    /// without one — the Create Project wizard's included — gets the platform's number.</para>
     /// <para>Everything else is symmetric with Matter and reuses its implementation unchanged: a <b>load-bearing</b>
     /// owner (an unresolved caller is refused; task 030 left Project best-effort and named task 031 as the decider —
     /// notes/031 §4), business-unit defaults, and the Field Mapping Framework. <c>sprk_containerid</c> is never
@@ -483,7 +594,12 @@ public sealed class RecordCreationService
 
         entity[OwnerAttribute] = new EntityReference(TeamEntity, ownerTeamId);
 
-        var createdId = await _entities.CreateAsync(entity, ct).ConfigureAwait(false);
+        if (await CreateNumberedAsync(entity, "project", ct).ConfigureAwait(false) is not { } createdId)
+        {
+            return NumberUnavailable("project");
+        }
+
+        await WarnIfNumberMissingAsync(ProjectEntity, createdId, ProjectNumberAttribute, "project", warnings, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "[RECORD-CREATE] Project {ProjectId} created for caller {CallerUserId}: owner team={OwnerTeamId}, warnings={WarningCount}",
