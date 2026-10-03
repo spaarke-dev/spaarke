@@ -6,6 +6,9 @@
 > Fix round b2 (branch `task/uac-r2-146-b2`, base = `work/unified-access-control-r2` merged at `c8ede843e`): §13 —
 > the round-2 verifier's open items, owner round 7 items 3 (G5 for the AI create tools, §6.5 path B) and 4 (role
 > 9 → 26 readiness). **G146-1 is a HARD pre-deploy gate** (§13c).
+> Fix round c1 (branch `task/uac-r2-146-c1`, owner rounds 10-11): §16 — moving a child OUT of a secure root needs F3
+> (round 10 item 7), through ONE helper shared with task 150's unsecure endpoint (§16c: the integration step); E1
+> accepted (round 10 item 8); every open escalation re-checked (§16d).
 
 ## 1. Outcome
 
@@ -95,7 +98,7 @@ must call the resolver. Each guard was proven to bite by seeding (§8, §11b).
 | sprk_fileversion | DocumentCheckoutService.cs:968 | Routed | content of the document; 409 on refusal |
 | sprk_todo | OfficeService.cs:1937 | Routed | now `ForChild` over regarding, stamps AND carriers (secure-if-any; was first-target only) |
 | sprk_todo | TodoGenerationService.cs:832 | Routed | owned from the source event; refusal counts the rule failed |
-| sprk_communication | Channels/MessagingIngestor.cs:199 | Waived — Pending (E1) | names no parent at create; filed only by the thread JOIN, which re-files it |
+| sprk_communication | Channels/MessagingIngestor.cs:199 | Waived — ~~Pending (E1)~~ **Permanent (c1: E1 accepted, owner round 10 item 8)** | names no parent at create; filed only by the thread JOIN, which re-files it |
 | sprk_communicationthread | Access/DirectThreadAccessService.cs:82 | Waived — Permanent (E2) | Direct two-party thread, per-participant privacy |
 | sprk_communicationchannelref | Threads/MessagingThreadKeyStrategy.cs:63 | Waived — Permanent | ACS transport key row, no content, app-only reads |
 | sprk_processingjob | DataverseServiceClientImpl.cs:1679 | Waived — Permanent | Office job tracking row, authorized by `sprk_initiatedby`; not a child in live metadata |
@@ -158,8 +161,10 @@ its children. This is the reason this task exists.
   - the per-user master thread (Tier 3), which keys on the message's owning user;
   - Direct-thread privacy, which rests on per-participant shares of the row.
 
-  Filed communications are routed (secure-if-any). **Owner to confirm.** MessagingIngestor is waived as Pending on
-  this decision.
+  Filed communications are routed (secure-if-any). ~~**Owner to confirm.** MessagingIngestor is waived as Pending on
+  this decision.~~ **ACCEPTED by owner round 10 item 8 (2026-10-03)**: "unfiled communications (inbound, chat,
+  outbound naming no record) keep their creator as owner. Filed ones are routed secure-if-any." MessagingIngestor's
+  waiver is now Permanent (c1, §16a).
 - **E2: Direct and master threads stay per-participant or per-user** (constraint "per-user artifacts"). Record
   threads follow S6.
 - **E3: BU default teams cannot own review logs.** The live default teams `Spaarke` and `Spaarke Business Unit 1`
@@ -1378,3 +1383,328 @@ lookups.
   - the tool-description follow-up (item 6 here, item 8 in b2-r1; §13b).
 - **Census limits that remain** are listed in its MAINTENANCE PROCEDURE item 4. Behaviour tests pin every existing
   writer's owner, so these limits bite only on new code.
+
+## 16. Fix round c1 (2026-10-03, branch `task/uac-r2-146-c1`)
+
+**Base.** `task/uac-r2-146-b2-r2` @ `390e9ff29`, with `work/unified-access-control-r2` @ `6b243f092` merged in (merge
+commit `8f3f30f44`, no conflicts). The merge brings owner rounds 10 and 11. On top of it sits the main session's WIP
+snapshot `6cd0c3f28`, which holds two interrupted drafts of this round's F3 helper. This round consolidates them (§16c).
+
+### 16a. The items
+
+| # | Item | Disposition |
+|---|---|---|
+| 1 | Owner round 10 item 7 (BINDING): "moving a CHILD out of a secure root is an un-secure, so F3's limit applies" | **Closed in code** (§16b, §16c). |
+| 2 | Owner round 10 item 8: E1 ACCEPTED | **Closed, no behaviour change.** MessagingIngestor's census waiver goes from Pending to **Permanent**, with the decision as its reason. The resolver's `UnfiledOwnership.KeepCreator` doc and a comment at MessagingIngestor's create now cite the decision. §13f's alternative (unfiled EMAIL owned by the BU team) is **not** adopted: the owner accepted E1 as built. |
+| 3 | Re-check every open escalation against rounds 10-11 | §16d. |
+
+### 16b. Item 1: F3 on a move out of a secure root
+
+**Where it is enforced.** Every BFF re-file goes through `IRecordOwnershipResolver.ReparentAsync`, so the gate sits
+there, after the owner decision and BEFORE `applyChange`. No writer can skip it, and a refusal writes nothing: no
+change, no owner assignment.
+
+**Which roots the row leaves.** The gate compares the secure roots above the row's parents BEFORE the change with those
+above them AFTER it (`SecureRootsAboveAsync`):
+
+- A secure root is one of the three `sprk_issecure` tables, owned in the Secure Record business unit or flagged.
+- A parent that is itself a child is followed through its own filing, up to `MaxLineageDepth` levels, whether it is
+  team-owned or not. A document filed under a secure-team-owned communication is under that communication's matter.
+- A missing row is not a root to leave. A filing still unread at the depth limit refuses (`record_owner_parent_unresolved`).
+- Leaving one secure root for another still leaves the first ("or to a different root"). Full Access on the root it
+  joins does not count.
+- Gaining a parent, staying under the root, or moving INTO a secure record asks nothing.
+- A row held in the Secure Record business unit that would leave isolation, although no secure root above it can be
+  named (a message secured by the record thread it joined), admits **only its creator**.
+
+**Who may.** The one F3 helper decides (§16c):
+
+- **Full Access** (Write + Delete, from RetrievePrincipalAccess AS THE CALLER) on EVERY secure root the row leaves; or
+- the **row's own creator**: `createdby`, or `sprk_createdbyperson` read by its logical name from the row's
+  every-column read. Task 133 stamps the person on the three roots only, so for a child it is `createdby`
+  ("sprk_createdbyperson, else a human createdby"; the caller is WhoAmI on their own credential, so a match is a
+  human).
+
+**The caller each writer passes** (`RecordReparent.SecureExitCaller`):
+
+| Writer | Caller |
+|---|---|
+| `PUT /api/v1/documents/{id}`, `POST /api/ai/document-intelligence/associate-record`, `PUT /api/v1/events/{id}` | `SecureRemovalCaller.ForRequest(CallerRecordAccessProbe, HttpContext)`: the probe task 150's unsecure endpoint asks, on the request's own bearer token. `[FromServices]`; the probe is registered unconditionally (`ExternalAccessModule`). |
+| `dataverse.update_record` (`DataverseUpdateRecordHandler`) | The user client: WhoAmI (already asked for the AppendTo check), and RetrievePrincipalAccess as the caller (`OwnedChildWrite.RightsOnAsync`, extracted from the AppendTo check, so both questions are asked one way). |
+| `DataverseUpdateHandler` (playbook output mapping, a background job), `UpdateRecordActionCore` (playbook node), `IncomingAssociationResolver` (inbound filing), the thread JOIN (`ThreadResolver`, `CommunicationService`), `InvoiceReviewService` | **None.** They act for no person, so a move out of a secure root is refused (`sdap.unsecure.permission_unverifiable`), failing closed. The JOIN and the invoice link only ADD parents, and inbound filing is additive, so in practice they never leave a root. |
+
+**How a refusal is reported.**
+
+- **HTTP.** `ProblemDetailsHelper.RecordOwnerRefused` recognises `RecordOwnerResolution.IsForbidden` and answers with
+  `SecureRemovalDecision.ToProblem`. That is task 150's shape: status 403 (500 when a read FAILED), title `Forbidden`,
+  the move-out message as `detail`, and the extensions `reasonCode` (`sdap.unsecure.not_permitted` /
+  `sdap.unsecure.permission_unverifiable`) and `traceId`. The three routes now pass the trace id.
+- **Chat tool.** `ToolResult.Error` with the reason code and the message.
+- **Background writers.** `RecordOwnerUnresolvedException` with the code, in each writer's existing contract.
+
+**Behaviour change, recorded.** A playbook output mapping (`DataverseUpdateHandler`) can no longer move a child out of
+a secure root: nobody is there to hold F3 rights. Its two move-out tests were flipped to assert the refusal. The
+resolver's four move-out tests now pass a Full Access caller, which keeps what they test (the reparent mechanics). Two
+event re-file tests now grant Full Access on the secure project they leave.
+
+### 16c. ONE F3 check: consolidation, and the integration with task 150
+
+**The F3 check the item says to reuse is not on this branch.** It is task 150's private
+`UnsecureProjectEndpoint.RefuseUnlessPermittedToRemoveAsync`, on `task/uac-r2-150` (`a89f3c8cd`), which is stacked on
+task 133. Neither is on `work/unified-access-control-r2`. The main session was told, and set binding conditions:
+
+1. ONE F3 helper, with 150's substance and reason codes, failing closed.
+2. `sprk_createdbyperson` read by its logical name; a column that is absent is `permission_unverifiable`, never "allowed".
+3. For a child: Full Access on the SECURE ROOT it leaves; "creator" means the CHILD's own creator.
+4. Do not edit `UnsecureProjectEndpoint.cs`. Give the exact replacement here.
+5. The test list (§16e).
+
+**Two drafts existed; one is kept.** A duplicate agent (started by mistake, then stopped) wrote
+`Services/Access/SecureDesignationRemoval.cs` beside this agent's `SecureRemovalPermission.cs`. **`SecureDesignationRemoval`
+is kept, and `SecureRemovalPermission.cs` is deleted.** The kept draft is better on three counts:
+
+- It asks Full Access BEFORE it reads the creator person. A Full Access holder is admitted even where the person cannot
+  be read, just as 150 admits one in an environment without the column.
+- It models an absent column as `permission_unverifiable` (condition 2). It takes several secure roots in one question,
+  and it models the "secure, but no root can be named" case.
+- Its `ToProblem` writes 150's ProblemDetails shape.
+
+The resolver's gate, `RecordOwnerResolution.SecureRemovalRefusal` / `IsForbidden`, `ProblemDetailsHelper` and the update
+tool were all reworked onto it.
+
+**Integration step for the main session: makes 150's private method call the helper.** In 150's
+`UnsecureProjectEndpoint.cs`, replace the body of `RefuseUnlessPermittedToRemoveAsync` (its signature and its
+`(IResult? Refusal, Guid CallerId)` return stay) with:
+
+```csharp
+        var decision = await SecureDesignationRemoval.DecideAsync(
+            new SecureRemovalQuestion
+            {
+                Caller = SecureRemovalCaller.ForRequest(callerAccessProbe, httpContext),
+                SecuredRecords = new[] { new SecuredRecordRef(root.LogicalName, recordId) },
+                CreatedBy = record._createdby_value,
+                ReadCreatedByPersonAsync = async token =>
+                {
+                    try
+                    {
+                        var people = await dataverseClient.QueryAsync<SecurityRow>(
+                            root.EntitySet,
+                            filter: $"{root.IdColumn} eq {recordId}",
+                            select: $"{root.IdColumn},{RecordCreatorPerson.ValueColumn}",
+                            top: 1,
+                            cancellationToken: token);
+                        return CreatorPersonAnswer.Recorded(people.FirstOrDefault()?.CreatedByPerson);
+                    }
+                    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+                    {
+                        return CreatorPersonAnswer.ColumnAbsent; // the column is not in this environment (400)
+                    }
+                },
+            },
+            ct);
+
+        if (decision.IsPermitted)
+        {
+            logger.LogInformation(
+                "[UNSECURE] Caller {CallerId} may remove the secure designation of {RecordType} {RecordId} ({Basis}, F3).",
+                decision.CallerSystemUserId, root.WireToken, recordId, decision.Basis);
+            return (null, decision.CallerSystemUserId);
+        }
+
+        logger.LogWarning(
+            "[UNSECURE] Removing the secure designation of {RecordType} {RecordId} refused: {Outcome} ({Basis}), caller " +
+            "{CallerId}. TraceId={TraceId}",
+            root.WireToken, recordId, decision.Outcome, decision.Basis, decision.CallerSystemUserId, traceId);
+
+        var label = root.DisplayLabel.ToLowerInvariant();
+        var detail = decision.Basis switch
+        {
+            SecureRemovalBasis.CallerUnknown =>
+                "Your account could not be confirmed, so whether you may remove the secure designation could not be " +
+                "checked. Nothing was changed.",
+            SecureRemovalBasis.RightsUnreadable =>
+                $"Whether you may remove the secure designation from this {label} could not be checked, because your " +
+                "access to it could not be read. Nothing was changed.",
+            SecureRemovalBasis.CreatorUnreadable or SecureRemovalBasis.CreatorColumnAbsent =>
+                $"Whether you may remove the secure designation from this {label} could not be checked, because the " +
+                "person who created it could not be looked up. Nothing was changed.",
+            _ =>
+                $"Only someone with Full Access to this {label}, or the person who created it, can remove its secure " +
+                "designation. It is still secure, and nothing was changed.",
+        };
+
+        return (decision.ToProblem(detail, traceId), decision.CallerSystemUserId);
+```
+
+and make its two constants point at the helper's, keeping the names its tests use:
+
+```csharp
+    internal const string ReasonNotPermitted = SecureDesignationRemoval.NotPermittedReasonCode;
+    internal const string ReasonPermissionUnverifiable = SecureDesignationRemoval.PermissionUnverifiableReasonCode;
+```
+
+**Where the integrated behaviour differs from 150's own method.** The main session should accept or reverse each.
+
+| Case | 150's private method | The shared helper |
+|---|---|---|
+| A Full Access holder in an environment without `sprk_createdbyperson` (400) | admitted | admitted (Full Access is asked before the person read) |
+| Neither Full Access nor creator, with the column absent (400) | 403 `not_permitted` | 403 `permission_unverifiable` (condition 2: absent is "could not tell") |
+| The creator person read fails (not a 400) | 500, even for a Full Access holder (read before the probe) | a Full Access holder is admitted; anyone else gets 500 |
+| The caller cannot be established; the probe throws; a definite "no" | 403 / 500 / 403 | the same |
+
+**Task 133's constant.** `RecordOwnershipResolver.CreatedByPersonColumn` reads `"sprk_createdbyperson"` by its logical
+name. At integration with task 133 it becomes `RecordCreatorPerson.Column`.
+
+**Task 133 / round 10 decision for the main session (not this item).** Round 10 records that 146's create-as-the-app
+"writes the stamp in the create payload". `DataverseCreateRecordHandler`'s G5 path cannot stamp `sprk_createdbyperson`
+here: the column's constant and its schema are task 133's, and 133 is not on this branch. At integration, add
+`RecordCreatorPerson.Stamp` (or its field-map form) to the G5 payload for the three roots.
+
+### 16d. Every open escalation against rounds 10 and 11
+
+| Escalation (where it was open) | Answer | State |
+|---|---|---|
+| A child moved OUT of a secure root under F3 (§13f, §14f, §15g) | Round 10 item 7: yes, Full Access holders plus the creator | **Closed**, implemented (§16b). |
+| E1 vs owner round 5 (§13f, §14f, §15g) | Round 10 item 8: E1 accepted, unfiled communications keep their creator | **Closed**, no behaviour change (§16a item 2). |
+| Trigger 3: two secure roots with different sharee sets (§5, §12e, §13f) | Round 11 item 4: the INTERSECTION of the sharee sets; ShareAccess is not mirrored onto children | **Closed for 146.** Task 149 implements it. 146's secure-if-any owner is unchanged. |
+| E3: BU default teams lack Read on `sprk_emailreviewlog` (G146-2) | Round 11 approves "Read on `sprk_emailreviewlog` for the BU default teams (G146-2)" | **Closed** as an escalation. It remains a live gate for the main session. |
+| G146-1: role extension 9 → 26 | Round 7 item 4, re-approved in round 11 | **Approved.** A HARD pre-deploy gate, run by the main session. |
+| G146-4: live check (step 8) | Round 11: probes on TEST records only, and the main session creates the non-admin test user | **Approved.** Run after the deploy with 149. |
+| Ship-together with 149 (constraint) | Round 11 item 3: 146 and 149 may deploy; no record is unsecured in a shared environment until task 148 is deployed | **Refined.** Recorded in the POML and the PR text (§16h). |
+| E2: Direct and master threads stay per-user (§5) | Not addressed by rounds 10-11 | **Open, with task 149** (as recorded since §13f). Backed by the POML constraint "per-user artifacts". It is not an owner question for 146. |
+| G146-3 (hold-alert recipients) and G146-5 (Dev 1 / Test 1 default-team roles) | Round 11 approves "all" live steps of batch 4, but does not name these two | **Main session to confirm** they are covered. |
+| Option: fold the update tool's re-file step into path B (§14c) | Not addressed | **Open option** for the owner, at PR review. It does not block. |
+| Tool-description follow-up (§13b) | Not an owner question | Main session, with a live re-push. |
+| The work assignment's "for" column (§15b) | Information only | Unchanged; reversible. |
+
+### 16e. Tests
+
+**New** (each tests a rule named in the items; no other test was added):
+
+- `tests/unit/domain/Auth/SecureDesignationRemovalTests.cs` (10), the helper directly:
+  - a Full Access holder is permitted; the creator is permitted with no rights probe; the recorded creator person is
+    permitted;
+  - a Write-only (Collaborate) holder is refused `not_permitted` (403);
+  - a probe that throws is `permission_unverifiable` (500); an unknown or absent caller is `permission_unverifiable`
+    (403, Theory ×2);
+  - an absent creator column is `permission_unverifiable`, never permitted (condition 2);
+  - leaving two roots needs Full Access on each;
+  - the refusal renders 150's ProblemDetails shape.
+- `RecordOwnershipResolverTests` (+8), the gate:
+  - a Full Access holder on the root is applied, and asked about THAT root; the child's creator is applied with no
+    probe; the recorded creator person is applied;
+  - a Write-only holder is refused before any write; a writer acting for no person is refused `permission_unverifiable`;
+  - secure root to another secure root asks F3 on the root it leaves; gaining a parent while still under the root
+    asks nothing;
+  - a child of a secure message, leaving it, is asked about the root above.
+- End to end, through the real routes and handlers over the real resolver:
+  - `SecureChildOwnershipDocumentRefileTests` (+3): PUT documents with Full Access (200, re-owned), by the creator
+    (200), and by a Write-only holder (403, 150's shape, nothing written);
+  - `SecureChildOwnershipEndpointTests` (+4): event re-file by a Write-only holder (403, shape) and by the creator
+    (200); associate-record by a Write-only holder (403) and with Full Access (200, re-owned);
+  - `SecureChildOwnershipAiToolTests` (+2): `dataverse.update_record` with Full Access (re-owned) and by a Write-only
+    holder (refused, the caller's PATCH never sent).
+
+**Changed, because the contract changed:**
+
+- The resolver's four move-out tests pass a Full Access caller.
+- The two event re-file tests that leave the secure project grant Full Access on it.
+- `SecureChildOwnershipTests`: the two `DataverseUpdateHandler` move-out tests now assert the refusal (§16b).
+- The test hosts register an F3 probe double: `OwnershipHost.GrantsProbe`, which answers from the same stated grants
+  as the access seam, and the documents fixture's `TokenRightsProbe`, which uses the same `rights=` token convention.
+
+ADR-038: no `Mock<HttpMessageHandler>`, no DI-registration test, no constructor null-check test.
+
+**Counts** (final source, Debug, 2026-10-03). The affected tests ran first: 416 / 416 (the ownership, F3, re-file and
+handler classes), and the census and route guards 41 / 41. Then each suite ran once in full:
+
+| Suite | Result |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests` | 14,389 passed / **14 failed** / 54 skipped (14,457). |
+| `tests/Spaarke.ArchTests` | 372 / 372 |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | 104 / 104 |
+| `tests/integration/Spe.Integration.Tests` | 403 passed / 0 failed / 25 skipped |
+
+**The 14 unit failures were contention.** Each was an HTTP-client `TaskCanceledException` after about 3 minutes, and
+the run took 36 minutes. At least five other agents' `testhost.exe` were running at the same time. None of the 14 is in
+a test file this round changed, and none goes through a re-file. Their 13 test classes were re-run in isolation:
+**135 / 135 passed**.
+
+### 16f. Seed-and-bite (c1)
+
+The runner is `scratchpad/task146c1-seeds.sh`. It uses absolute paths only. Each plant is restored from a byte copy,
+checked byte-identical (`cmp`), then touched.
+
+| Plant | What failed (of the 199 affected tests the runner filters to) |
+|---|---|
+| S1: the gate's refusal ignored in `ReparentAsync` | 10: the resolver's Write-only, no-person, secure-to-secure and secure-message tests; both flipped `DataverseUpdateHandler` tests; the Write-only refusals of the documents PUT, the event re-file, associate-record and `dataverse.update_record` |
+| S2: Full Access = Write alone | 11: the helper's Write-only, two-roots, column-absent and ProblemDetails tests; the resolver's Write-only, secure-to-secure and secure-message tests; the four end-to-end Write-only refusals |
+| S3: the creator never admitted | 6: the helper's two creator tests; the resolver's creator and recorded-person tests; the event and documents creator tests |
+| S4: a rights-probe fault ignored | 1: `WhenTheRightsProbeThrows_ItIsUnverifiable_500_NeverPermitted` |
+| S5: `PUT /api/v1/documents/{id}` passes no caller | 3: all three documents-PUT move-out tests (Full Access and creator refused; the Write-only refusal carries `permission_unverifiable`, not `not_permitted`) |
+| S6: moving to a different secure root not counted as leaving | 1: `Reparent_FromOneSecureRootToAnother_AsksF3OnTheRootItLeaves_NotTheOneItJoins` |
+| S7: an absent creator column ignored | 1: `WhenTheCreatorPersonColumnIsAbsent_ANonFullAccessCallerIsUnverifiable_NeverPermitted` |
+| S8: the fast path answers "no parent removed" for every change | 17: every move-out test, allowed and refused (with nothing to walk, the row in the Secure BU falls to "secure but unidentified", which admits only the creator) |
+
+**The fast path.** Before walking, the gate checks two cheap facts. A change that removes none of the row's parents
+cannot leave a root, and an answer that keeps the row secure or keeps its owner cannot take it out of isolation. With
+both, it returns at once, so the many re-files that leave nothing (a thread JOIN, an invoice link, additive inbound
+filing) cost no extra Dataverse read. S8 proves the check is not vacuous.
+
+**How the runs went.**
+
+- The first full run planted S5 with a replacement starting with `//`. Git Bash rewrote it as a path argument, the
+  build failed, and that S5 result was void.
+- The fast path was then added, and the whole runner (S1-S8, with S5 planting `SecureExitCaller = null,`) was run again
+  on the final source. The table records that run. S1-S7 failed the same tests as in the first run.
+- After the last plant the tree was rebuilt, and `git status` showed only this round's intended edits.
+
+### 16g. Placement and component justification (CLAUDE.md §10 / §11)
+
+- **No new service, endpoint, DI registration, option, job, column or package.**
+- **One new static helper**, `Services/Access/SecureDesignationRemoval.cs`, with its question and answer types. It sits
+  beside `RecordShareLevels`, the share-level vocabulary it reads.
+  - **Existing:** task 150's F3 check, a private method of the unsecure endpoint, on an unmerged branch. Nothing on
+    this branch answers F3.
+  - **Extension:** the same rule, lifted out of the endpoint and generalized (the root whose Full Access counts and the
+    record whose creator counts can differ), so the unsecure endpoint and the re-file path share ONE check (§16c).
+  - **Cost of doing nothing:** any Write + AppendTo holder can move a secure root's child into an ordinary business
+    unit, un-securing it without the rights owner round 10 item 7 requires.
+- **New members on existing types:**
+  - `RecordReparent.SecureExitCaller`;
+  - `RecordOwnerResolution.SecureRemovalRefusal`, `IsForbidden` and `SecureRemovalRefused`;
+  - `RecordOwnershipResolver.SecureRootsAboveAsync`, `RefuseUnlessPermittedToLeaveSecureRootsAsync`, `ChildNoun` and
+    two column constants;
+  - `OwnedChildWrite.RightsOnAsync`, extracted, not new logic.
+- **New handler parameters:** `CallerRecordAccessProbe` (`[FromServices]`) on the three re-file routes. It is
+  registered unconditionally, so this is not an asymmetric registration (§10 F.1).
+- **ADR-002:** no plugin. **ADR-003:** fail closed. An unknown caller, an unread root, a read fault, an absent column
+  or a person-less writer each refuse before any write.
+- **Publish size:** not measured here; the main session measures it.
+
+### 16h. PR description addendum (append to §14e + §15e)
+
+> **c1 (owner rounds 10 and 11):**
+> - **Moving a child OUT of a secure root is an un-secure** (round 10 item 7). `ReparentAsync` asks F3 before any
+>   write: Full Access on every secure root the child leaves, or the child's own creator. The helper is ONE,
+>   `SecureDesignationRemoval`, with task 150's substance and codes (`sdap.unsecure.not_permitted` /
+>   `sdap.unsecure.permission_unverifiable`). HTTP refusals use the unsecure endpoint's 403 ProblemDetails.
+>   Person-less writers (the playbook output mapping, the playbook update node, inbound filing) cannot move a child
+>   out of a secure root.
+> - **Integration with task 150:** its private F3 method becomes a call to `SecureDesignationRemoval.DecideAsync`
+>   (task note §16c gives the exact text and the four behaviour differences).
+> - **E1 is accepted** (round 10 item 8). There is no behaviour change; MessagingIngestor's census waiver is Permanent.
+> - **Deploy (round 11 item 3):** 146 and 149 may deploy together. No record is unsecured in a shared environment until
+>   task 148 is deployed.
+
+### 16i. Not closed (and why)
+
+- **The F3 check's integration with task 150.** The main session applies §16c's replacement when 150 integrates. Until
+  then the integrated tree would carry 150's private copy beside the helper.
+- **E2** (Direct and master threads) stays with task 149. Rounds 10-11 do not address it.
+- **Live gates, all main session:** G146-1 (a HARD pre-deploy gate), G146-2, G146-3, G146-4 (after deploy with 149,
+  on TEST records) and G146-5. Round 11 approves them; for G146-3 and G146-5 the main session should confirm that
+  coverage.
+- **Main session:** publish size and #1034 (AC13); the PR (AC16; text in §14e + §15e + §16h); the tool-description
+  follow-up (§13b); task 133's `sprk_createdbyperson` stamp in the G5 create payload (§16c).
+- **Owner option, not a blocker:** fold the update tool's re-file step into path B (§14c).

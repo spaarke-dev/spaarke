@@ -205,11 +205,12 @@ public class RecordOwnerAssignmentCensusTests
 
         // ── Waived ─────────────────────────────────────────────────────────────────────────────────────────────
         new CensusEntry("MessagingIngestor.cs", "sprk_communication", 1, Disposition.Waived,
-            "An inbound chat message names no parent at create, so it keeps its creator (task 146 escalation E1: unfiled "
-            + "communications stay creator-owned — the per-user master thread keys on the message's owner and Direct-"
-            + "thread privacy rests on per-participant shares). It is filed only by joining a record thread, which "
-            + "re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
-            WaiverKind.Pending),
+            "An inbound chat message names no parent at create, so it keeps its creator: task 146 escalation E1, ACCEPTED "
+            + "by owner round 10 item 8 (2026-10-03) — unfiled communications (inbound, chat, outbound naming no record) "
+            + "keep their creator as owner; filed ones are routed secure-if-any. The per-user master thread keys on the "
+            + "message's owner and Direct-thread privacy rests on per-participant shares. It is filed only by joining a "
+            + "record thread, which re-derives its owner (ThreadResolver JOIN → ReparentAsync).",
+            WaiverKind.Permanent),
         new CensusEntry("DirectThreadAccessService.cs", "sprk_communicationthread", 1, Disposition.Waived,
             "A Direct (two-party) thread has no regarding record and is private by per-participant shares — per-user by "
             + "design (task 146 constraint 'per-user artifacts'; escalation E2).",

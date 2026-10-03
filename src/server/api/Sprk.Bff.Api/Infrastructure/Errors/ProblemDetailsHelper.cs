@@ -209,29 +209,9 @@ public static partial class ProblemDetailsHelper
     /// </remarks>
     public static IResult RecordOwnerRefused(
         Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal, string noun, string? traceId = null) =>
-        refusal.IsForbidden
-            ? SecureRemovalRefused(refusal.ForbiddenStatus!.Value, refusal.RefusalCode!, refusal.Reason, traceId)
+        refusal is { IsForbidden: true, SecureRemovalRefusal: { } decision }
+            ? decision.ToProblem(refusal.Reason ?? decision.MoveOutDetail(noun), traceId)
             : RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
-
-    /// <summary>
-    /// The F3 refusal (task 146 c1): the same ProblemDetails the unsecure endpoint answers with — status, title
-    /// ("Forbidden", or "Internal Server Error" when the permission could not be read), the message as the detail, and
-    /// the <c>reasonCode</c> and <c>traceId</c> extensions.
-    /// </summary>
-    private static IResult SecureRemovalRefused(int statusCode, string reasonCode, string? detail, string? traceId)
-    {
-        var extensions = new Dictionary<string, object?> { ["reasonCode"] = reasonCode };
-        if (!string.IsNullOrWhiteSpace(traceId))
-        {
-            extensions["traceId"] = traceId;
-        }
-
-        return Results.Problem(
-            title: statusCode == StatusCodes.Status403Forbidden ? "Forbidden" : "Internal Server Error",
-            statusCode: statusCode,
-            detail: detail,
-            extensions: extensions);
-    }
 
     private static string GetErrorCode(string? errorCode, int status)
     {

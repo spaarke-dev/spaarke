@@ -4,9 +4,13 @@ using System.Text.Json.Nodes;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
@@ -100,6 +104,54 @@ public sealed class SecureChildOwnershipDocumentRefileTests : IClassFixture<Docu
         body.Should().NotContainEquivalentOf("secure");
         _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty();
     }
+
+    // ---- c1, owner round 10 item 7: moving a document OUT of a secure root is an un-secure (F3) ----
+
+    [Fact]
+    public async Task DocumentPut_MovingOutOfASecureMatter_ByAFullAccessHolderOnIt_IsReownedByTheNewMattersTeam()
+    {
+        var documentId = DocumentRefileOwnershipTestFixture.SecureDocument;
+        using var client = _fixture.CreateClientWithRights(RefileRights + ",DeleteAccess");
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.OrdinaryMatter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.UpdatedDataverseDocumentIds.Should().Contain(documentId.ToString());
+        _fixture.World.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
+    }
+
+    [Fact]
+    public async Task DocumentPut_MovingOutOfASecureMatter_ByTheDocumentsCreator_IsAllowed_WithoutFullAccess()
+    {
+        var documentId = DocumentRefileOwnershipTestFixture.CallersSecureDocument;
+        using var client = _fixture.CreateClientWithRights(RefileRights);
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.OrdinaryMatter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.World.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
+    }
+
+    [Fact]
+    public async Task DocumentPut_MovingOutOfASecureMatter_ByAWriteOnlyHolder_Is403_InTheUnsecureEndpointsShape_AndWritesNothing()
+    {
+        var documentId = DocumentRefileOwnershipTestFixture.SecureDocument;
+        using var client = _fixture.CreateClientWithRights(RefileRights); // Write and AppendTo, not Delete: not Full Access
+
+        var response = await client.PutAsJsonAsync(
+            $"/api/v1/documents/{documentId}", new { matterLookup = DocumentRefileOwnershipTestFixture.OrdinaryMatter });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        problem["title"]!.GetValue<string>().Should().Be("Forbidden");
+        problem["reasonCode"]!.GetValue<string>().Should().Be("sdap.unsecure.not_permitted");
+        problem["traceId"]!.GetValue<string>().Should().NotBeNullOrWhiteSpace();
+        problem["detail"]!.GetValue<string>().Should().Contain("Full Access").And.Contain("document");
+        _fixture.UpdatedDataverseDocumentIds.Should().BeEmpty("refused before any write");
+        _fixture.World.Assignments.Should().BeEmpty();
+    }
 }
 
 /// <summary>The document-route host with the REAL owner resolver over an in-memory directory.</summary>
@@ -109,12 +161,33 @@ public sealed class DocumentRefileOwnershipTestFixture : DocumentDestroyAuthoriz
     public static readonly Guid FlaggedProject = Guid.Parse("b1460000-0000-4000-8000-000000000002");
     public static readonly Guid OrdinaryDocument = Guid.Parse("b1460000-0000-4000-8000-000000000003");
 
+    // c1 (owner round 10 item 7): documents filed under the secure matter, and an ordinary matter to move them to.
+    public static readonly Guid OrdinaryMatter = Guid.Parse("b1460000-0000-4000-8000-000000000004");
+    public static readonly Guid SecureDocument = Guid.Parse("b1460000-0000-4000-8000-000000000005");
+    public static readonly Guid CallersSecureDocument = Guid.Parse("b1460000-0000-4000-8000-000000000006");
+
+    /// <summary>Who WhoAmI answers for every authenticated test caller (the F3 probe below).</summary>
+    public static readonly Guid ProbeCaller = Guid.Parse("b1460000-0000-4000-8000-0000000000ca");
+
     internal Directory World { get; private set; } = NewWorld();
 
     private static Directory NewWorld() => Directory.Standard()
         .WithSecureRoot("sprk_matter", SecureMatter)
+        .WithOrdinaryRoot("sprk_matter", OrdinaryMatter)
         .WithRecord("sprk_project", FlaggedProject, Directory.ChildBu, isSecure: true, owningTeam: Directory.ChildTeam)
-        .WithRecord("sprk_document", OrdinaryDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        .WithRecord("sprk_document", OrdinaryDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam)
+        .WithRecord("sprk_document", SecureDocument, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new()
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter),
+                ["createdby"] = new EntityReference("systemuser", Guid.Parse("b1460000-0000-4000-8000-0000000000ee")),
+            })
+        .WithRecord("sprk_document", CallersSecureDocument, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new()
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter),
+                ["createdby"] = new EntityReference("systemuser", ProbeCaller),
+            });
 
     public new void Reset()
     {
@@ -131,6 +204,29 @@ public sealed class DocumentRefileOwnershipTestFixture : DocumentDestroyAuthoriz
         {
             services.RemoveAll<IRecordOwnershipResolver>();
             services.AddScoped<IRecordOwnershipResolver>(_ => World.Resolver());
+
+            // c1: the caller-scoped probe F3 asks — rights from the same "rights=" bearer-token convention as the access
+            // seam above, for every record; WhoAmI = ProbeCaller.
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new TokenRightsProbe());
         });
+    }
+
+    /// <summary>The F3 probe double: the caller's rights on any record are the ones its bearer token states.</summary>
+    private sealed class TokenRightsProbe : CallerRecordAccessProbe
+    {
+        public TokenRightsProbe()
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+        {
+        }
+
+        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default) =>
+            Task.FromResult<Guid?>(string.IsNullOrWhiteSpace(callerBearerToken) ? null : ProbeCaller);
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default) =>
+            Task.FromResult(callerBearerToken?.StartsWith("rights=", StringComparison.Ordinal) == true
+                ? DataverseAccessRightsMapper.FromAccessRightsString(callerBearerToken["rights=".Length..])
+                : AccessRights.None);
     }
 }

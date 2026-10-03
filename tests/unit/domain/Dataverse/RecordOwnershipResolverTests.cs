@@ -753,6 +753,8 @@ public class RecordOwnershipResolverTests
                 RecordId = documentId,
                 ParentChanges = RecordReparent.ParentChangesWithClearsIn(
                     new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_description"] = null }),
+                // Owner round 10 item 7 (task 146 c1): leaving the secure project is an un-secure — a Full Access holder.
+                SecureExitCaller = CallerHolding(FullAccess),
             },
             _ => Task.CompletedTask,
             CancellationToken.None);
@@ -838,6 +840,7 @@ public class RecordOwnershipResolverTests
                     ["sprk_project"] = null, // cleared
                     ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
                 },
+                SecureExitCaller = CallerHolding(FullAccess), // owner round 10 item 7: an un-secure needs F3 rights
             },
             _ => Task.CompletedTask,
             CancellationToken.None);
@@ -994,7 +997,8 @@ public class RecordOwnershipResolverTests
         directory.AssignmentFault = new TimeoutException("throttled");
 
         var act = () => Build(directory).ReparentAsync(
-            MoveUnder(documentId, "sprk_project", null), Writes(directory, documentId, "sprk_project", null),
+            MoveUnder(documentId, "sprk_project", null) with { SecureExitCaller = CallerHolding(FullAccess) },
+            Writes(directory, documentId, "sprk_project", null),
             CancellationToken.None);
 
         await act.Should().ThrowAsync<TimeoutException>();
@@ -1062,6 +1066,7 @@ public class RecordOwnershipResolverTests
                 EntityLogicalName = "sprk_document",
                 RecordId = documentId,
                 ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_project"] = null, ["sprk_matter"] = ordinaryMatter },
+                SecureExitCaller = CallerHolding(FullAccess), // owner round 10 item 7: an un-secure needs F3 rights
             },
             async ct =>
             {
@@ -1158,6 +1163,253 @@ public class RecordOwnershipResolverTests
         resolution.OwningTeamId.Should().Be(ChildTeam);
         directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
         directory.Row("sprk_document", documentId).GetAttributeValue<EntityReference>("owningteam").Id.Should().Be(ChildTeam);
+    }
+
+    // ---- Reparent OUT of a secure root: F3 (owner round 10 item 7, task 146 c1) ----
+    //
+    // "Moving a CHILD out of a secure root is an un-secure, so F3's limit applies": Full Access on the secure root the
+    // child leaves, or being the child's own creator. Refused before any write otherwise.
+
+    private static readonly Guid OtherSecureMatterId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+    private static readonly Guid SomeoneElse = Guid.Parse("7e7e7e7e-0000-4000-8000-000000000001");
+    private static readonly Guid ApplicationUser = Guid.Parse("7e7e7e7e-0000-4000-8000-0000000000a1");
+
+    /// <summary>Full Access: Collaborate plus Delete (RecordShareLevels).</summary>
+    private const AccessRights FullAccess =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share
+        | AccessRights.Delete;
+
+    /// <summary>Collaborate: Write without Delete — the Write holder F3 does not admit.</summary>
+    private const AccessRights Collaborate =
+        AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Share;
+
+    /// <summary>
+    /// The caller (<see cref="CallerUserId"/>, as WhoAmI answers) with <paramref name="rights"/> on every record, or the
+    /// <paramref name="perRecord"/> rights where stated; each record whose rights were asked is added to
+    /// <paramref name="asked"/>.
+    /// </summary>
+    private static Sprk.Bff.Api.Services.Access.SecureRemovalCaller CallerHolding(
+        AccessRights rights,
+        IReadOnlyDictionary<Guid, AccessRights>? perRecord = null,
+        List<Guid>? asked = null) =>
+        new(_ => Task.FromResult<Guid?>(CallerUserId),
+            (record, _) =>
+            {
+                asked?.Add(record.RecordId);
+                return Task.FromResult(perRecord is not null && perRecord.TryGetValue(record.RecordId, out var stated)
+                    ? stated
+                    : rights);
+            });
+
+    /// <summary>A document filed under the secure project, owned by the named team, created by <paramref name="extra"/>'s person.</summary>
+    private static (FakeDirectory Directory, Guid DocumentId) SecureDocumentWorld(Dictionary<string, object>? extra = null)
+    {
+        var documentId = Guid.NewGuid();
+        var columns = new Dictionary<string, object>
+        {
+            ["sprk_project"] = new EntityReference("sprk_project", SecureProjectId),
+            ["createdby"] = new EntityReference("systemuser", SomeoneElse),
+        };
+        foreach (var (column, value) in extra ?? new())
+            columns[column] = value;
+
+        var directory = Directory()
+            .WithRecord("sprk_project", SecureProjectId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", OtherSecureMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam, extra: columns);
+        return (directory, documentId);
+    }
+
+    /// <summary>Out of the secure project, onto the ordinary matter.</summary>
+    private static RecordReparent MoveToOrdinaryMatter(
+        Guid documentId, Sprk.Bff.Api.Services.Access.SecureRemovalCaller? caller) => new()
+    {
+        EntityLogicalName = "sprk_document",
+        RecordId = documentId,
+        ParentChanges = new Dictionary<string, EntityReference?>
+        {
+            ["sprk_project"] = null,
+            ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+        },
+        SecureExitCaller = caller,
+    };
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_ByAFullAccessHolderOnThatRoot_IsApplied_AndReassigned()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+        var asked = new List<Guid>();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(FullAccess, asked: asked)),
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        applied.Should().BeTrue();
+        asked.Should().Equal(new[] { SecureProjectId }, "Full Access is asked on the secure root the document leaves");
+        directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_ByTheDocumentsCreator_IsApplied_WithoutFullAccess()
+    {
+        var (directory, documentId) = SecureDocumentWorld(new() { ["createdby"] = new EntityReference("systemuser", CallerUserId) });
+        var asked = new List<Guid>();
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate, asked: asked)),
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        asked.Should().BeEmpty("the creator is admitted without a rights probe");
+        directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_ByThePersonRecordedAsCreatingAnAppCreatedRow_IsApplied()
+    {
+        // sprk_createdbyperson, else a human createdby: an app-created row names its person in sprk_createdbyperson.
+        var (directory, documentId) = SecureDocumentWorld(new()
+        {
+            ["createdby"] = new EntityReference("systemuser", ApplicationUser),
+            ["sprk_createdbyperson"] = new EntityReference("systemuser", CallerUserId),
+        });
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate)), _ => Task.CompletedTask, CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        directory.Assignments.Should().Equal(("sprk_document", documentId, ChildTeam));
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_ByAWriteOnlyHolder_IsRefusedNotPermitted_BeforeAnyWrite()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, CallerHolding(Collaborate)),
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeTrue();
+        resolution.IsForbidden.Should().BeTrue("an authorization answer, not an owner refusal");
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        resolution.SecureRemovalRefusal!.StatusCode.Should().Be(403);
+        resolution.Reason.Should().Contain("Full Access").And.Contain("document");
+        applied.Should().BeFalse("refused BEFORE the change is written");
+        directory.Assignments.Should().BeEmpty();
+        directory.FieldUpdates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_OutOfASecureRoot_ByAWriterActingForNoPerson_IsRefusedUnverifiable()
+    {
+        var (directory, documentId) = SecureDocumentWorld();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            MoveToOrdinaryMatter(documentId, caller: null),
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        resolution.IsForbidden.Should().BeTrue();
+        applied.Should().BeFalse();
+        directory.Assignments.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Reparent_FromOneSecureRootToAnother_AsksF3OnTheRootItLeaves_NotTheOneItJoins()
+    {
+        // "or to a different root": Full Access on the NEW secure matter does not license leaving the secure project.
+        var (directory, documentId) = SecureDocumentWorld();
+        var asked = new List<Guid>();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_project"] = null,
+                    ["sprk_matter"] = new EntityReference("sprk_matter", OtherSecureMatterId),
+                },
+                SecureExitCaller = CallerHolding(
+                    Collaborate, new Dictionary<Guid, AccessRights> { [OtherSecureMatterId] = FullAccess }, asked),
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        asked.Should().Equal(new[] { SecureProjectId });
+        applied.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Reparent_GainingAParentWhileStillUnderItsSecureRoot_AsksNothing()
+    {
+        // Not a move OUT: the document stays filed under the secure project, so no F3 question (and no caller) is needed.
+        var (directory, documentId) = SecureDocumentWorld();
+        var applied = false;
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?> { ["sprk_matter"] = new EntityReference("sprk_matter", MatterId) },
+                SecureExitCaller = null,
+            },
+            _ => { applied = true; return Task.CompletedTask; },
+            CancellationToken.None);
+
+        resolution.IsRefused.Should().BeFalse(resolution.Reason);
+        applied.Should().BeTrue();
+        resolution.OwningTeamId.Should().Be(SecureNamedTeam, "secure-if-any: still the named team's");
+    }
+
+    [Fact]
+    public async Task Reparent_OfAChildOfASecureMessage_OutOfTheSecureRootAboveIt_AsksF3OnThatRoot()
+    {
+        // The document is filed under a communication, which is filed under the secure matter: leaving the communication
+        // leaves the secure matter above it (the walk follows team-owned children too).
+        var documentId = Guid.NewGuid();
+        var communicationId = Guid.NewGuid();
+        var directory = Directory()
+            .WithRecord("sprk_matter", OtherSecureMatterId, SecureBu, isSecure: true, owningTeam: SecureNamedTeam)
+            .WithRecord("sprk_matter", MatterId, ChildBu, owningTeam: ChildTeam)
+            .WithRecord("sprk_communication", communicationId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OtherSecureMatterId) })
+            .WithRecord("sprk_document", documentId, SecureBu, owningTeam: SecureNamedTeam,
+                extra: new() { ["sprk_communication"] = new EntityReference("sprk_communication", communicationId) });
+        var asked = new List<Guid>();
+
+        var resolution = await Build(directory).ReparentAsync(
+            new RecordReparent
+            {
+                EntityLogicalName = "sprk_document",
+                RecordId = documentId,
+                ParentChanges = new Dictionary<string, EntityReference?>
+                {
+                    ["sprk_communication"] = null,
+                    ["sprk_matter"] = new EntityReference("sprk_matter", MatterId),
+                },
+                SecureExitCaller = CallerHolding(Collaborate, asked: asked),
+            },
+            _ => Task.CompletedTask,
+            CancellationToken.None);
+
+        resolution.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.NotPermittedReasonCode);
+        asked.Should().Equal(new[] { OtherSecureMatterId });
+        directory.Assignments.Should().BeEmpty();
     }
 
     // ---- Lineage depth limit (task 146 b2, verifier LOW) ----

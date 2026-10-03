@@ -356,7 +356,12 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                     // before anything is written.
                     SecureExitCaller = new Sprk.Bff.Api.Services.Access.SecureRemovalCaller(
                         _ => Task.FromResult<Guid?>(me.SystemUserId),
-                        (entitySet, id, token) => OwnedChildWrite.RightsOnAsync(_dataverse, me.SystemUserId, entitySet, id, token)),
+                        (record, token) => OwnedChildWrite.RightsOnAsync(
+                            _dataverse,
+                            me.SystemUserId,
+                            Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.EntitySetFor(record.EntityLogicalName),
+                            record.RecordId,
+                            token)),
                 },
                 async token =>
                 {

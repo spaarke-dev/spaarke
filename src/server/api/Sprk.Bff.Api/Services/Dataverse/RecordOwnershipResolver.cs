@@ -168,7 +168,9 @@ public enum UnfiledOwnership
     /// <summary>
     /// Leave <c>ownerid</c> unset — the creating identity keeps the row — and answer
     /// <see cref="RecordOwnerOutcome.Unchanged"/>. Used ONLY for unfiled <c>sprk_communication</c> rows (and their
-    /// content rows), pending owner decision E1: inbound mail has no acting user and must never be dropped
+    /// content rows): escalation E1, ACCEPTED by owner round 10 item 8 (2026-10-03, "unfiled communications (inbound,
+    /// chat, outbound naming no record) keep their creator as owner; filed ones are routed secure-if-any"). Why:
+    /// inbound mail has no acting user and must never be dropped
     /// (constraint vs owner contract, escalation trigger 7); <c>ThreadResolver</c>'s per-user master thread is
     /// keyed on the message's OWNING USER; Direct-thread privacy rests on per-participant shares of an
     /// application-owned row. A team owner would break all three. A FILED communication never takes this branch.
@@ -393,11 +395,11 @@ public sealed record RecordReparent
     /// The person making the change, for owner round 10 item 7 (2026-10-03, BINDING): "moving a CHILD out of a secure
     /// root is an un-secure, so F3's limit applies". When the change would take the row out from under a secure root —
     /// to no secure root, or to a different one — <see cref="IRecordOwnershipResolver.ReparentAsync"/> asks
-    /// <see cref="Sprk.Bff.Api.Services.Access.SecureRemovalPermission"/> about THIS caller for every secure root the
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval"/> about THIS caller for every secure root the
     /// row leaves, before anything is written. <c>null</c> means the writer acts for no person (a background job, an
     /// app-only automation): such a move is refused (fail closed, ADR-003). Moves that leave no secure root never ask.
     /// </summary>
-    internal Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller { get; init; }
+    public Sprk.Bff.Api.Services.Access.SecureRemovalCaller? SecureExitCaller { get; init; }
 
     /// <summary>
     /// The parent changes as <see cref="EntityReference"/> values from an update payload: every
@@ -886,7 +888,7 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         // Owner round 10 item 7 (2026-10-03, BINDING): "moving a CHILD out of a secure root is an un-secure, so F3's
         // limit applies". A change that takes the row out from under a secure root — to no secure root, or to a
         // different one — needs the caller's F3 rights on every secure root it leaves, decided BEFORE anything is
-        // written, by the same check the unsecure endpoint makes (SecureRemovalPermission).
+        // written, by the same check the unsecure endpoint makes (SecureDesignationRemoval).
         var exitRefusal = await RefuseUnlessPermittedToLeaveSecureRootsAsync(
             request, current, filedUnderBefore, parents, resolution, ct).ConfigureAwait(false);
         if (exitRefusal is not null)
@@ -963,9 +965,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     private const string CreatedByColumn = "createdby";
 
     /// <summary>
-    /// The server-stamped creator person (task 133's <c>sprk_createdbyperson</c>, <c>RecordCreatorPerson.Column</c>) —
-    /// the F3 creator for a row the BFF created app-only. Read from the row's own columns: a table without it records
-    /// nobody (task 133 stamps the three roots; no child table carries it today).
+    /// The server-stamped creator person, read by its LOGICAL NAME (task 133's <c>sprk_createdbyperson</c>; at integration
+    /// with task 133 this becomes <c>RecordCreatorPerson.Column</c>) — the F3 creator for a row the BFF created app-only.
+    /// Taken from the row's own every-column read: task 133 stamps the three roots only, and no CHILD table carries the
+    /// column, so for a child the creator is its <c>createdby</c> ("sprk_createdbyperson, else a human createdby").
     /// </summary>
     private const string CreatedByPersonColumn = "sprk_createdbyperson";
 
@@ -978,18 +981,29 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
     /// those above its parents AFTER it (<see cref="SecureRootsAboveAsync"/>). Leaving one root for another secure root
     /// still leaves the first ("or to a different root"); adding a parent, or moving between ordinary records, leaves
     /// none and asks nothing.</para>
-    /// <para><b>Who may.</b> For each root left, <see cref="Sprk.Bff.Api.Services.Access.SecureRemovalPermission"/> —
-    /// the unsecure endpoint's F3 check — with Full Access counted on that ROOT and the creator counted on the ROW
+    /// <para><b>Who may.</b> <see cref="Sprk.Bff.Api.Services.Access.SecureDesignationRemoval"/> — the unsecure endpoint's
+    /// F3 check — with Full Access asked on EVERY secure root left and the creator counted on the ROW
     /// (<c>sprk_createdbyperson</c>, else <c>createdby</c>). A writer that acts for no person
     /// (<see cref="RecordReparent.SecureExitCaller"/> null) is refused: there is nobody whose rights could be checked.</para>
     /// <para><b>Fail closed.</b> A row held in the Secure Record business unit that would leave its isolation although no
-    /// secure root above it can be named (its secure parent is not one of its own columns) is refused rather than
-    /// guessed. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as the owner decision does.</para>
+    /// secure root above it can be named (its secure parent is not one of its own columns — a message secured by the
+    /// record thread it joined) admits only its creator. A filing deeper than <see cref="MaxLineageDepth"/> refuses, as
+    /// the owner decision does.</para>
     /// </remarks>
     private async Task<RecordOwnerResolution?> RefuseUnlessPermittedToLeaveSecureRootsAsync(
         RecordReparent request, Entity current, IReadOnlyCollection<RecordOwnershipParent> filedUnderBefore,
         IReadOnlyCollection<RecordOwnershipParent> filedUnderAfter, RecordOwnerResolution resolution, CancellationToken ct)
     {
+        // Two cheap facts first, so the many re-files that leave nothing (a thread JOIN, an invoice link, additive inbound
+        // filing) cost no read: a change that removes none of the row's parents leaves no root (both walks would read the
+        // same parents), and an answer that keeps the row secure or keeps its owner cannot take it out of isolation.
+        var removesAParent = filedUnderBefore.Any(parent => !filedUnderAfter.Contains(parent));
+        var mayLeaveIsolation = !resolution.IsSecureOwner && resolution.Outcome != RecordOwnerOutcome.Unchanged;
+        if (!removesAParent && !mayLeaveIsolation)
+        {
+            return null;
+        }
+
         var secureBu = await ResolveSecureBusinessUnitAsync(ct).ConfigureAwait(false);
         if (secureBu.Ambiguous)
         {
@@ -999,8 +1013,10 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
                 + "cannot be decided");
         }
 
-        var before = await SecureRootsAboveAsync(filedUnderBefore, secureBu.Id, ct).ConfigureAwait(false);
-        var after = await SecureRootsAboveAsync(filedUnderAfter, secureBu.Id, ct).ConfigureAwait(false);
+        (IReadOnlyList<RecordOwnershipParent> Roots, RecordOwnershipParent? TooDeepAt) none =
+            (Array.Empty<RecordOwnershipParent>(), null);
+        var before = removesAParent ? await SecureRootsAboveAsync(filedUnderBefore, secureBu.Id, ct).ConfigureAwait(false) : none;
+        var after = removesAParent ? await SecureRootsAboveAsync(filedUnderAfter, secureBu.Id, ct).ConfigureAwait(false) : none;
         if ((before.TooDeepAt ?? after.TooDeepAt) is { } tooDeep)
         {
             return RecordOwnerResolution.Refused(
@@ -1011,54 +1027,51 @@ public sealed class RecordOwnershipResolver : IRecordOwnershipResolver
         }
 
         var left = before.Roots.Where(root => !after.Roots.Contains(root)).ToList();
-        if (left.Count == 0)
-        {
-            var heldSecure = secureBu.Id is { } secureBuId
-                && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId;
-            if (!heldSecure || resolution.IsSecureOwner || resolution.Outcome == RecordOwnerOutcome.Unchanged)
-            {
-                return null; // no secure root is left, and the row is not taken out of secure isolation
-            }
 
-            return RecordOwnerResolution.Forbidden(
-                StatusCodes.Status403Forbidden,
-                Sprk.Bff.Api.Services.Access.SecureRemovalPermission.ReasonPermissionUnverifiable,
-                "This record is held secure, but the secure record it belongs to could not be identified, so whether you "
-                + "may move it out of it could not be checked. Nothing was changed.");
+        // Held in the Secure Record business unit, about to leave its isolation, yet no secure root above it can be named.
+        var unidentified = left.Count == 0
+            && mayLeaveIsolation
+            && secureBu.Id is { } secureBuId
+            && current.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn)?.Id == secureBuId;
+
+        if (left.Count == 0 && !unidentified)
+        {
+            return null; // no secure root is left, and the row is not taken out of secure isolation
         }
 
-        var createdBy = current.GetAttributeValue<EntityReference>(CreatedByColumn)?.Id;
-        var createdByPerson = current.GetAttributeValue<EntityReference>(CreatedByPersonColumn)?.Id;
-
-        foreach (var root in left)
-        {
-            var removal = new Sprk.Bff.Api.Services.Access.SecureRemoval
+        var decision = await Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.DecideAsync(
+            new Sprk.Bff.Api.Services.Access.SecureRemovalQuestion
             {
-                RootEntityLogicalName = root.EntityLogicalName,
-                RootId = root.RecordId,
-                CreatedBy = createdBy,
-                CreatedByPersonAsync = _ => Task.FromResult(createdByPerson),
-                MovedChildEntityLogicalName = request.EntityLogicalName,
-            };
+                Caller = request.SecureExitCaller,
+                SecuredRecords = left
+                    .Select(root => new Sprk.Bff.Api.Services.Access.SecuredRecordRef(root.EntityLogicalName, root.RecordId))
+                    .ToArray(),
+                IncludesUnidentifiedSecureRecord = unidentified,
+                CreatedBy = current.GetAttributeValue<EntityReference>(CreatedByColumn)?.Id,
+                CreatedByPerson = current.GetAttributeValue<EntityReference>(CreatedByPersonColumn)?.Id,
+            },
+            ct).ConfigureAwait(false);
 
-            if (request.SecureExitCaller is not { } caller)
-            {
-                return RecordOwnerResolution.Forbidden(
-                    StatusCodes.Status403Forbidden,
-                    Sprk.Bff.Api.Services.Access.SecureRemovalPermission.ReasonPermissionUnverifiable,
-                    removal.NoCallerMessage);
-            }
+        _logger.LogInformation(
+            "F3 on re-filing {Entity} {RecordId} out of {Count} secure record(s): {Outcome} ({Basis}), caller {CallerId}.",
+            request.EntityLogicalName, request.RecordId, left.Count, decision.Outcome, decision.Basis,
+            decision.CallerSystemUserId);
 
-            var decision = await Sprk.Bff.Api.Services.Access.SecureRemovalPermission
-                .DecideAsync(caller, removal, _logger, ct).ConfigureAwait(false);
-            if (!decision.Permitted)
-            {
-                return RecordOwnerResolution.Forbidden(decision.StatusCode, decision.ReasonCode!, decision.Detail!);
-            }
-        }
-
-        return null;
+        return decision.IsPermitted
+            ? null
+            : RecordOwnerResolution.SecureRemovalRefused(decision, ChildNoun(request.EntityLogicalName));
     }
+
+    /// <summary>The noun a move-out message names the row by ("document", "event", "to-do", …).</summary>
+    private static string ChildNoun(string entityLogicalName) => entityLogicalName.Trim().ToLowerInvariant() switch
+    {
+        "sprk_todo" => "to-do",
+        "sprk_communication" => "message",
+        "sprk_communicationattachment" => "attachment",
+        "sprk_emailreviewlog" => "review log",
+        var table when table.StartsWith("sprk_", StringComparison.Ordinal) => table[5..],
+        var table => table,
+    };
 
     /// <summary>
     /// The secure ROOTS (the three <c>sprk_issecure</c> tables) that <paramref name="parents"/> sit under: each parent

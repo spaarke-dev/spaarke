@@ -34,8 +34,8 @@ namespace Sprk.Bff.Api.Tests.Integration.DataMutation.RecordOwnership;
 /// team (a decoy that must never be chosen), and the parent rows — through the real writer of each family. The
 /// writer's own Dataverse writes are captured at <see cref="IGenericEntityService"/> /
 /// <see cref="IFieldMappingDataverseService"/>.</para>
-/// <para>Families: a generic re-file (<see cref="DataverseUpdateHandler"/> — documents, both project lookups, in and
-/// out of secure); an AI task create (<see cref="TaskActionCore"/>); a record thread (<see cref="ThreadResolver"/>); a
+/// <para>Families: a generic re-file (<see cref="DataverseUpdateHandler"/> — documents, both project lookups, into
+/// secure; out of secure is refused for this person-less writer, task 146 c1 / owner round 10 item 7); an AI task create (<see cref="TaskActionCore"/>); a record thread (<see cref="ThreadResolver"/>); a
 /// communication's content rows (<see cref="CommunicationParticipantIndexer"/>); the inbound-email hold
 /// (<see cref="IncomingCommunicationJobHandler"/>, owner amendment R3).</para>
 /// </remarks>
@@ -82,19 +82,24 @@ public class SecureChildOwnershipTests
     }
 
     [Fact]
-    public async Task Refile_DocumentMovedOutOfEverySecureParent_IsReassignedToTheNewParentsBusinessUnitTeam()
+    public async Task Refile_DocumentMovedOutOfEverySecureParent_ByThisBackgroundWriter_IsRefused_AndWritesNothing()
     {
+        // c1, owner round 10 item 7: moving a child OUT of a secure root is an un-secure, which only a Full Access holder
+        // on the root or the child's creator may do. This writer (playbook output mapping, a background job) acts for no
+        // person, so there is nobody whose F3 rights could be checked: refused, fail closed. Before c1 it was re-owned.
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
             extra: new() { ["sprk_project"] = new EntityReference("sprk_project", SecureProject) });
         var (handler, writes) = UpdateHandler(world.Resolver());
 
-        await handler.UpdateAsync("sprk_document", documentId,
+        var act = () => handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_project"] = new EntityReference("sprk_project", OrdinaryProject) },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        writes.Should().ContainSingle();
-        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        writes.Should().BeEmpty("refused before the lookup is written");
+        world.Assignments.Should().BeEmpty();
     }
 
     [Fact]
@@ -130,10 +135,11 @@ public class SecureChildOwnershipTests
     }
 
     [Fact]
-    public async Task Refile_ClearingTheOnlySecureLookupWithNull_ReassignsOutOfTheSecureTeam()
+    public async Task Refile_ClearingTheOnlySecureLookupWithNull_IsAMoveOut_RefusedForThisBackgroundWriter()
     {
         // Task 146 r1 (verifier item 8): a generic update that CLEARS the lookup moves the child out of its secure parent
-        // exactly as setting another parent does — it used to keep the Secure team (only EntityReference values counted).
+        // exactly as setting another parent does. c1 (owner round 10 item 7): that move is an un-secure, and this writer acts
+        // for no person whose F3 rights could be checked — so the clear is recognised as a move OUT and refused.
         var documentId = Guid.NewGuid();
         var world = World().WithRecord("sprk_document", documentId, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
             extra: new()
@@ -143,12 +149,14 @@ public class SecureChildOwnershipTests
             });
         var (handler, writes) = UpdateHandler(world.Resolver());
 
-        await handler.UpdateAsync("sprk_document", documentId,
+        var act = () => handler.UpdateAsync("sprk_document", documentId,
             new Dictionary<string, object?> { ["sprk_project"] = null, ["sprk_documentdescription"] = null },
             ConcurrencyMode.None, maxRetries: 1, CancellationToken.None);
 
-        writes.Should().ContainSingle("the clear itself is written");
-        world.Assignments.Should().Equal(("sprk_document", documentId, Directory.ChildTeam));
+        (await act.Should().ThrowAsync<RecordOwnerUnresolvedException>())
+            .Which.RefusalCode.Should().Be(Sprk.Bff.Api.Services.Access.SecureDesignationRemoval.PermissionUnverifiableReasonCode);
+        writes.Should().BeEmpty("refused before the clear is written");
+        world.Assignments.Should().BeEmpty();
     }
 
     [Fact]

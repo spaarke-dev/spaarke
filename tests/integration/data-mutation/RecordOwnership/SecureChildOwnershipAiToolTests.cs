@@ -51,7 +51,16 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         .WithSecureRoot("sprk_matter", SecureMatter)
         .WithOrdinaryRoot("sprk_matter", OrdinaryMatter)
         .WithRecord("sprk_project", FlaggedProject, Directory.ChildBu, isSecure: true, owningTeam: Directory.ChildTeam)
-        .WithRecord("sprk_document", OrdinaryDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        .WithRecord("sprk_document", OrdinaryDocument, Directory.ChildBu, owningTeam: Directory.ChildTeam)
+        // c1 (owner round 10 item 7): a document filed under the secure matter, created by someone else.
+        .WithRecord("sprk_document", SecureDocument, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam,
+            extra: new()
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter),
+                ["createdby"] = new EntityReference("systemuser", Guid.Parse("a2460000-0000-4000-8000-0000000000ee")),
+            });
+
+    private static readonly Guid SecureDocument = Guid.Parse("a2460000-0000-4000-8000-000000000005");
 
     private readonly ScriptedUserClient _user = new(Caller);
     private readonly List<(string Table, Guid Id, Dictionary<string, object?> Fields)> _appCreates = new();
@@ -462,6 +471,32 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         _world.Assignments.Should().BeEmpty();
     }
 
+    // ---- c1, owner round 10 item 7: moving a child OUT of a secure root is an un-secure (F3), asked AS THE CALLER ----
+
+    [Fact]
+    public async Task UpdateRecord_MovingADocumentOutOfASecureMatter_ByAFullAccessHolderOnIt_ReassignsItToTheNewMattersTeam()
+    {
+        _user.FullAccessOn.Add(SecureMatter);
+
+        var result = await UpdateRecord("sprk_document", SecureDocument, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Patches.Should().ContainSingle();
+        _world.Assignments.Should().Equal(("sprk_document", SecureDocument, Directory.ChildTeam));
+    }
+
+    [Fact]
+    public async Task UpdateRecord_MovingADocumentOutOfASecureMatter_ByAWriteOnlyHolder_IsRefusedNotPermitted_AndThePatchIsNeverSent()
+    {
+        var result = await UpdateRecord("sprk_document", SecureDocument, Lookup("sprk_matter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("sdap.unsecure.not_permitted");
+        result.ErrorMessage.Should().Contain("Full Access");
+        _user.Patches.Should().BeEmpty("refused before the caller's PATCH");
+        _world.Assignments.Should().BeEmpty();
+    }
+
     // =====================================================================================
     // Harness
     // =====================================================================================
@@ -572,6 +607,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
+
+        /// <summary>Records the caller holds Full Access on (Delete as well) — F3's question (task 146 c1).</summary>
+        public HashSet<Guid> FullAccessOn { get; } = new();
         public HashSet<string> SecuredColumns { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<Guid> InvisibleRows { get; } = new();
         public int PatchStatus { get; set; } = 204;
@@ -595,7 +633,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
             {
                 var id = Guid.Parse(Target().Match(path).Groups["id"].Value);
-                return Ok(new { AccessRights = NoAppendTo.Contains(id) ? "ReadAccess,WriteAccess" : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess" });
+                var rights = NoAppendTo.Contains(id) ? "ReadAccess,WriteAccess" : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
+                return Ok(new { AccessRights = FullAccessOn.Contains(id) ? rights + ",DeleteAccess" : rights });
             }
 
             if (path.Contains("RetrieveUserSetOfPrivilegesByNames", StringComparison.Ordinal))
