@@ -45,6 +45,7 @@
 
 import * as React from 'react';
 import { tokens } from '@fluentui/react-components';
+import { parseDueDate } from '@spaarke/ui-components';
 import type { IKanbanColumn, IKanbanDataverseService, IKanbanTodoLike, TodoColumn } from '../types/kanban';
 
 // ---------------------------------------------------------------------------
@@ -75,18 +76,21 @@ const CHOICE_TO_COLUMN: Record<number, TodoColumn> = {
 // the hook self-contained (no cross-package dependency on the Code Page's
 // `todoScoreUtils.ts`). The math + weights match the Code Page hook bit-for-bit
 // — verified against `src/solutions/SmartTodo/src/utils/todoScoreUtils.ts`.
+//
+// `parseDueDate` ITSELF is no longer a local copy (spaarke-ontology-platform-r1
+// task 080 / C-10, 2026-10-03): this file's own `new Date(isoString)` parse
+// never received the local-midnight fix that landed in
+// `Spaarke.SmartTodo.Components/src/utils/todoScoring.ts`, so a date-only
+// `sprk_duedate` (e.g. "2026-08-17") was read as the PREVIOUS calendar day in
+// every negative-UTC-offset zone — the Kanban bucket this hook computes
+// disagreed with the score shown in the To Do's own detail view. Now imported
+// from `@spaarke/ui-components` (`utils/dateLocal.ts`), the single canonical
+// copy both packages depend on.
 // ---------------------------------------------------------------------------
 
 const W_PRIORITY = 0.5;
 const W_EFFORT = 0.2;
 const W_URGENCY = 0.3;
-
-/** Parse an ISO date string defensively. */
-function parseDueDate(isoString: string | undefined | null): Date | null {
-  if (!isoString) return null;
-  const d = new Date(isoString);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
 
 /** Convert days-until-due into a 0-100 urgency raw score. */
 function computeDueDateUrgencyRaw(dueDate: Date | null): number {
