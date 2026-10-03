@@ -801,5 +801,75 @@
         the 9 were 3-minute timeouts). Re-run of those 6 classes: 50/50 passed. No BFF source or BFF test changed in
         c2-r1.
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c2-r2" round="fix-c2-r2-owner-round-13" base="802f98d2f">
+      Base: task/uac-r2-157-c2-r1 (802f98d2f). Status stays "completed-with-escalation": the MANUAL live gate
+      (criterion 6) is still open, pending by design. c2-r1's owner item 8 (the unconfirmed waiver of "N green runs
+      before blocking") is answered by owner round 13 item 11 and is closed.
+      ITEM 1 = OWNER ROUND 13 ITEM 11 (BINDING): datagrid-external-host-gate lands ADVISORY and becomes blocking after
+      N green runs on the CI runner.
+      - ci-tier1-blocking.yml: job-level "continue-on-error: true" with an ADVISORY comment (the sdap-ci.yml
+        compose-client-gate construction); "merge-blocking" dropped from the jest step's name; header item 5 and the
+        job comment rewritten (advisory, the reason, the FLIP CONDITION).
+      - N = 3: the repo's standard as compose-client-gate states it (three consecutive green runs on unchanged code on
+        the runner). office-addins-tests.yml names the rule without a number.
+      - Flip procedure (note section 7 "Fix round c2-r2", and the job comment): count three consecutive runs on
+        ubuntu-latest, on diffs that do not change src/components/DataGrid/, whose jest step and assertion step both
+        concluded success (read STEP conclusions; with job-level continue-on-error the run stays green when the job
+        fails), no red such run in between (a red one resets the count); a skipped job does not count. Commands:
+        gh run list --workflow ci-router.yml, then gh run view &lt;id&gt; --json jobs. Then ONE PR deletes the
+        continue-on-error line, sets DataGridGateAdvisory to false in ExternalSpaGridViewSelectorGuardTests, rewrites
+        the job comment and header item 5, updates the INDEX.md disclosure (the flip is a verdict change), and cites
+        the three run ids. The guard refuses either half of the flip alone.
+      ITEM 2 = OWNER ROUND 13 ITEM 12 (BINDING): the router's docs_only skip is NOT changed here.
+      - ci-router.yml restored to its pre-task content (git checkout 381707788 -- .github/workflows/ci-router.yml;
+        diff against 381707788 empty). Removed: c2's ui_components filter, output, summary row, docs_only exclusion and
+        ui_components_changed pass-through; c2-r1's external_spa and arch_tests filters and exclusions.
+      - The gate is now classified inside Tier 1: classify-tier1 (dorny/paths-filter) gains output datagrid_gate from
+        'src/client/shared/Spaarke.UI.Components/**' or '.github/workflows/**' (the same triggers as before). The job
+        has needs: classify-tier1 and if: github.event_name == 'workflow_dispatch' or datagrid_gate != 'false'
+        (fail closed: empty output runs it). The ui_components_changed workflow_call input is removed. classify-tier1
+        always runs; the guard pins that it has no job-level if.
+      - Consequence: a PR that edits DataGrid.tsx, external-spa or the arch guard together with only docs-class files
+        is docs_only again and skips Tier 1 (the pre-task state). Recorded in note section 8 F3, the INDEX.md
+        disclosure and the note to ci-cd-unit-test-remediation-r1.
+      - The GitHub issue to ci-cd-unit-test-remediation-r1 is for the MAIN SESSION to file (round 13 item 12). Not
+        filed from this branch. Suggested title and body: note section 7 "Fix round c2-r2".
+      SELF-PROTECTION: ScanDataGridCiGate reads only ci-tier1-blocking.yml (all router assertions removed:
+      RouterWorkflowFile, DocsOnlyVariables, DocsOnlyExclusions, DocsOnlyStepProblem), so it never constrains the
+      router owner. Fact renamed SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate. New: DataGridGateAdvisory
+      (static readonly bool; while true exactly one job-level continue-on-error: true, once false none); no
+      continue-on-error on any step; pinned needs and if; allowed job keys add needs and continue-on-error;
+      classify-tier1 has no job-level if; datagrid_gate output once and as written; its filter defined once with
+      exactly the two paths. Kept: job present, jest call, verbatim assertion script, "|| true", step-level if rule.
+      Theory 24 rows (31 before: 11 router rows removed, 4 added), each valid in both advisory states, plus the new
+      fact ScanDataGridCiGate_RefusesAnAdvisoryStateTheConstantDoesNotRecord for the state-specific disarming.
+      Proof it bites, on disk (workflow restored hash-matched and touched each time): (a) continue-on-error line
+      deleted with the constant left true: actionlint exit 0, fact red; (b) needs: changed-surface-smoke: actionlint
+      exit 1, fact red; (f) needs: [classify-tier1, changed-surface-smoke]: actionlint 0, fact red; (c) datagrid_gate
+      filter narrowed: actionlint 0, fact red; (d) continue-on-error on the jest step: actionlint 0, fact red; (e)
+      job-level if on classify-tier1: actionlint 0, fact red. The correct flip (line deleted AND constant false):
+      actionlint 0, the class 220/220 green (both files restored hash-matched and touched).
+      Section 10/11: no new service, DI registration, endpoint, option, background job, Dataverse column or package.
+      One new classification output (datagrid_gate in classify-tier1), replacing the router's ui_components output:
+      - Existing: classify-tier1 already classifies Tier-1-only surfaces with dorny/paths-filter (auth, the smoke
+        namespaces); none matches Spaarke.UI.Components.
+      - Extension: this IS the extension of that filter list. The router was the earlier home; round 13 item 12 rules
+        it out.
+      - Cost of doing nothing: with the router reverted, the gate has no classification. Either it runs on every
+        Tier 1 run (an npm install on every BFF PR) or never.
+      Removed: the ui_components_changed workflow_call input (no caller after the router revert).
+      ADR-002: no plugin. ADR-003: fail closed (empty classification runs the gate; the guard refuses a YAML-only
+      flip either way). Live: none. Publish size: skipped (no BFF source change). .claude edits needed: none.
+      Runs (this branch; detail in the note, section 7, "Fix round c2-r2"):
+      - actionlint 1.7.12 (-shellcheck=): exit 0 on both workflow files and on all of .github/workflows.
+      - ExternalSpaGridViewSelectorGuardTests: 220/220 (194 + 1 fact + 24 Theory rows + 1 state fact).
+      - NetArchTest: Passed 566, Failed 0, Total 566 (572 - 31 + 24 + 1).
+      - Integration, Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Total 104.
+      - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m38s).
+      - BFF unit, under heavy machine contention from other agents (about 278 dotnet processes): full run Passed
+        14177, Failed 130, Skipped 54, Total 14361 (47m42s); all 130 TaskCanceledException (host HTTP timeouts) in
+        65 classes. Isolated re-run of the 65 classes: Passed 865, Failed 7, Total 872 (all 7 TaskCanceledException).
+        Re-run of those 7 classes: 90/90 passed. No BFF source or BFF test changed in c2-r2.
+    </outcome>
   </execution>
 </task>

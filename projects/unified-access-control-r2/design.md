@@ -37,7 +37,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 <hot-path-declaration>
   <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints; scheduler lease + admin jobs trigger (task 103) -->
   <spaarke-ai>N</spaarke-ai>
-  <ci-workflows>Y</ci-workflows>       <!-- 2026-10-03 task 157 residual 4 (main-session ruling, owner round 10): ci-tier1-blocking.yml gains the blocking datagrid-external-host-gate job; ci-router.yml classifies Spaarke.UI.Components (and excludes it from docs_only). GATE REPAIR under the shadow-window carve-out. Earlier tier1 touches: tasks 024/074/080 and #969 -->
+  <ci-workflows>Y</ci-workflows>       <!-- 2026-10-03 task 157 residual 4 (owner rounds 10 and 13): ci-tier1-blocking.yml gains the datagrid-external-host-gate job, ADVISORY until three green runs on ubuntu-latest, then blocking (round 13 item 11), classified in classify-tier1. ci-router.yml is NOT changed (round 13 item 12). GATE REPAIR under the shadow-window carve-out. Earlier tier1 touches: tasks 024/074/080 and #969 -->
   <skill-directives>N</skill-directives>
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>

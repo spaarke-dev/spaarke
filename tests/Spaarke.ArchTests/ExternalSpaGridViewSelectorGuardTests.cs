@@ -53,13 +53,16 @@ namespace Spaarke.ArchTests;
 /// The behavioural proof is the jest suite
 /// <c>Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx</c>: under either
 /// switch, with <c>showViewSelector={true}</c> passed directly, no picker renders and the list is never requested.
-/// That suite catches J4. Since fix round c2 (2026-10-03) it runs BLOCKING in CI: Tier 1's
-/// <c>datagrid-external-host-gate</c> job runs the DataGrid jest folder on every change to
-/// <c>Spaarke.UI.Components</c> or to a CI workflow, and
-/// <see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/> refuses the named ways that job could stop
-/// blocking (a text check, each disarming proven by a seeded row; not every conceivable one, see its summary). Since
-/// fix round c2-r1 the router also counts the external SPA and this test project as code, so a PR editing either plus
-/// a task note no longer skips Tier 1 and these facts. The pin stays as a fast first check.
+/// That suite catches J4. Since fix round c2 (2026-10-03) it runs in CI: Tier 1's <c>datagrid-external-host-gate</c>
+/// job runs the DataGrid jest folder on every change to <c>Spaarke.UI.Components</c> or to a CI workflow. Owner round
+/// 13 item 11 (fix round c2-r2): the job is ADVISORY (it reports red, it does not fail <c>CI / Router</c>) until three
+/// consecutive green runs on ubuntu-latest, then blocking (<see cref="DataGridGateAdvisory"/>).
+/// <see cref="SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate"/> refuses the named ways that job could stop
+/// running or stop reporting (a text check, each disarming proven by a seeded row; not every conceivable one, see its
+/// summary). Owner round 13 item 12: <c>ci-router.yml</c> is not changed by this project, so its pre-existing
+/// <c>docs_only</c> skip still applies (a PR that edits the grid, the external SPA or this guard together with only
+/// docs-class files skips Tier 1); that skip is <c>ci-cd-unit-test-remediation-r1</c>'s. The pin stays as a fast first
+/// check.
 /// </para>
 /// <para>
 /// <b>The scan is defence in depth.</b> The rules below stay because each is zero-false-positive on the current
@@ -173,14 +176,17 @@ namespace Spaarke.ArchTests;
 /// </list>
 /// <para>Items 1–3 are reviewed changes outside <c>external-spa/src</c>. In every case the BFF allow-list still refuses
 /// every column the picker's views would need, with a 400; it is the data control.</para>
-/// <para><b>Residual 4, closed by CI in fix round c2 (2026-10-03).</b> An edit to <c>DataGrid.tsx</c> that ignores the
-/// switch WITHOUT touching a pinned statement. The pin refuses removing or rewriting the rule's statements, but not an
-/// added statement that shadows the forced value in a nested scope (review round 8, seed J4:
-/// <c>const showViewSelector = true;</c> in the load effect passed this class 194/194, so the grid would request
-/// <c>/savedqueries/{entity}</c> again on the external host). The jest suite <c>DataGrid.externalHost.test.tsx</c>
-/// catches J4 (5 of 7 red), and it now runs blocking in Tier 1 (<c>datagrid-external-host-gate</c>; seed J4 re-planted
-/// in fix round c2 failed that job's jest step), guarded by
-/// <see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/>. Data impact, had it shipped: nil, because
+/// <para><b>Residual 4, reported by CI since fix round c2 (2026-10-03); blocking after the flip.</b> An edit to
+/// <c>DataGrid.tsx</c> that ignores the switch WITHOUT touching a pinned statement. The pin refuses removing or
+/// rewriting the rule's statements, but not an added statement that shadows the forced value in a nested scope (review
+/// round 8, seed J4: <c>const showViewSelector = true;</c> in the load effect passed this class 194/194, so the grid
+/// would request <c>/savedqueries/{entity}</c> again on the external host). The jest suite
+/// <c>DataGrid.externalHost.test.tsx</c> catches J4 (5 of 7 red), and it runs in Tier 1
+/// (<c>datagrid-external-host-gate</c>; seed J4 re-planted in fix round c2 failed that job's jest step), guarded by
+/// <see cref="SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate"/>. Until the flip (owner round 13 item 11,
+/// <see cref="DataGridGateAdvisory"/>) a red run there is a visible failed job, not a failed <c>CI / Router</c>: J4
+/// would be reported, not refused. Two more gaps stay open until then and after: the router's <c>docs_only</c> skip
+/// (owner round 13 item 12, above), and a PR that edits no classified path. Data impact, had J4 shipped: nil, because
 /// the BFF's external <c>savedqueries</c> / <c>savedquery</c> routes 404 every view no module grid registers (task 157
 /// F1), which today is every view.</para>
 /// <para><b>Closed by the runtime rule, and removed from this list in fix round c1</b> (residuals 3 and 5 through fix
@@ -188,8 +194,8 @@ namespace Spaarke.ArchTests;
 /// (Q8, <c>.props.children</c> / <c>.type</c> by hand, or a fiber walk). Whatever element, tree or module instance
 /// reaches the shared grid, the grid applies the rule itself. V7 (round 7) is closed the same way, and the round-7 scan
 /// rule above stops the remaining scan going blind on it. Residual 4 through b2-r2 (edits to <c>DataGrid.tsx</c>) was
-/// narrowed by the pin in fix round c1-r1 (fix round c1 had listed it as closed too early) and is closed by the
-/// blocking CI run of the jest suite in fix round c2 (above).</para>
+/// narrowed by the pin in fix round c1-r1 (fix round c1 had listed it as closed too early) and is reported by the
+/// CI run of the jest suite since fix round c2, advisory until its flip (above).</para>
 /// <para><b>Crude by design</b> (see <see cref="SourceScan"/>): regex over source, not a TypeScript parse. Each
 /// rule is paired with a negative control proving it fires and a positive control proving it does not fire
 /// on the sanctioned shape. ADR-038 Amendment A1: <c>tests/Spaarke.ArchTests/**</c> is a deletion-protected
@@ -1611,7 +1617,7 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// exactly as many uses of the raw prop, the list call, the picker element and the hook as the rule needs. It
     /// checks statements and counts, not scopes: an ADDED nested-scope shadow of the forced value (seed J4,
     /// <c>const showViewSelector = true;</c> in the load effect) passes it. That is residual 4 in the class remarks,
-    /// closed by the blocking CI run of the jest suite (<see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/>).
+    /// reported by the CI run of the jest suite, advisory until its flip (<see cref="SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate"/>).
     /// </summary>
     internal static IReadOnlyList<string> ScanSharedGridRule(string gridSource, string hostSource)
     {
@@ -1690,17 +1696,42 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     internal const string Tier1WorkflowFile = ".github/workflows/ci-tier1-blocking.yml";
 
-    internal const string RouterWorkflowFile = ".github/workflows/ci-router.yml";
-
     internal const string DataGridGateJob = "datagrid-external-host-gate";
 
     /// <summary>
-    /// The only job-level keys <c>datagrid-external-host-gate</c> may carry. Any other is refused: <c>needs:</c> on a
-    /// job that is itself skipped (e.g. <c>changed-surface-smoke</c>, which runs only when the BFF changed) skips the
-    /// gate on exactly the PRs it exists for; <c>continue-on-error:</c>, <c>strategy:</c>, <c>environment:</c> and the
-    /// rest change whether or when the gate can fail. Adding one is a reviewed change to this list.
+    /// Owner round 13 item 11 (2026-10-03): the gate lands ADVISORY (job-level <c>continue-on-error: true</c>) and
+    /// becomes blocking after three consecutive green runs on ubuntu-latest (the FLIP CONDITION comment on the job in
+    /// <c>ci-tier1-blocking.yml</c>; the procedure is in the task 157 note, section 7, "Fix round c2-r2"). The flip is ONE
+    /// change: delete that line from the job AND set this constant to <c>false</c>. The guard refuses either without
+    /// the other, so the gate cannot be made advisory again by a one-line YAML edit once flipped, and cannot be flipped
+    /// without a reviewed change here.
     /// </summary>
-    internal static readonly string[] DataGridGateJobKeys = ["name", "runs-on", "timeout-minutes", "if", "steps"];
+    internal static readonly bool DataGridGateAdvisory = true; // static readonly, not const: a const makes one branch unreachable (CS0162)
+
+    /// <summary>The job's only <c>needs:</c>. <c>classify-tier1</c> always runs (no job-level <c>if:</c>, pinned below).</summary>
+    internal const string DataGridGateNeeds = "classify-tier1";
+
+    /// <summary>
+    /// The job's <c>if:</c>, pinned. Fail closed: the gate runs unless <c>classify-tier1</c> classified it out with an
+    /// explicit <c>'false'</c> (an empty output runs it), and always on a manual <c>workflow_dispatch</c>.
+    /// </summary>
+    internal const string DataGridGateIf =
+        "${{ github.event_name == 'workflow_dispatch' || needs.classify-tier1.outputs.datagrid_gate != 'false' }}";
+
+    /// <summary>
+    /// The paths <c>classify-tier1</c>'s <c>datagrid_gate</c> filter must hold, exactly: the shared library, and every
+    /// workflow (so an edit to the gate job runs the gate). Classified inside Tier 1 because owner round 13 item 12
+    /// leaves <c>ci-router.yml</c> unchanged by this project.
+    /// </summary>
+    internal static readonly string[] DataGridGateFilterPaths =
+        ["'src/client/shared/Spaarke.UI.Components/**'", "'.github/workflows/**'"];
+
+    /// <summary>
+    /// The only job-level keys <c>datagrid-external-host-gate</c> may carry. Any other is refused: <c>strategy:</c>,
+    /// <c>environment:</c> and the rest change whether or when the gate can fail. <c>needs:</c>, <c>if:</c> and
+    /// <c>continue-on-error:</c> are allowed only with their pinned values. Adding a key is a reviewed change to this list.
+    /// </summary>
+    internal static readonly string[] DataGridGateJobKeys = ["name", "runs-on", "timeout-minutes", "needs", "if", "continue-on-error", "steps"];
 
     internal const string DataGridGateAssertStep = "Assert the external-host suite ran";
 
@@ -1725,19 +1756,6 @@ public class ExternalSpaGridViewSelectorGuardTests
           console.log(suffix + ": " + passed + " of " + n + " passed");
         ' datagrid-jest-results.json src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx 7
         """;
-
-    /// <summary>
-    /// The router's <c>docs_only</c> step variables, in file order. Each must be assigned exactly once, from its own
-    /// paths-filter output: <c>ui_components='false'</c> (or a later reassignment) would silently undo an exclusion.
-    /// </summary>
-    internal static readonly string[] DocsOnlyVariables = ["docs", "bff", "spaarke_ai", "ci_workflows", "ui_components", "external_spa", "arch_tests"];
-
-    /// <summary>
-    /// The surfaces <c>docs_only</c> must exclude. <c>ui_components</c> (the gated grid), <c>external_spa</c> and
-    /// <c>arch_tests</c> (the external-SPA facts of this class, and this class itself, run by Tier 1's arch-tests job)
-    /// are task 157's; the first three were already there and are pinned with them because one forced value undoes any.
-    /// </summary>
-    internal static readonly string[] DocsOnlyExclusions = ["bff", "spaarke_ai", "ci_workflows", "ui_components", "external_spa", "arch_tests"];
 
     /// <summary>Splits a job's code (comment lines removed) into its steps, each re-indented so its keys sit at 8 spaces.</summary>
     private static List<string> SplitSteps(string jobCode)
@@ -1787,41 +1805,70 @@ public class ExternalSpaGridViewSelectorGuardTests
         return result;
     }
 
+    /// <summary>A top-level job of a workflow: its body up to the next job, and that body with comment lines removed.</summary>
+    private static (bool Found, string Code) JobCode(string workflow, string jobName)
+    {
+        var job = Regex.Match(workflow, @"(?m)^  " + Regex.Escape(jobName) + @":[ \t]*\n(?<body>(?:(?:[ \t]*#.*|[ \t]*|    .*)\n)*)");
+        return job.Success
+            ? (true, string.Join("\n", job.Groups["body"].Value.Split('\n').Where(line => !line.TrimStart().StartsWith('#'))))
+            : (false, string.Empty);
+    }
+
+    /// <summary>A job-level <c>key:</c> value with any trailing <c># comment</c> removed; one entry per occurrence.</summary>
+    private static List<string> JobLevelValues(string jobCode, string key) =>
+        Regex.Matches(jobCode, @"(?m)^    " + Regex.Escape(key) + @"\s*:(?<v>.*)$")
+            .Select(m => Regex.Replace(m.Groups["v"].Value, @"\s+#.*$", string.Empty).Trim())
+            .ToList();
+
     /// <summary>
-    /// Residual 4 closed by CI (task 157 fix round c2, hardened in c2-r1): the jest suite
-    /// <c>DataGrid.externalHost.test.tsx</c>, the only check that catches an added nested-scope shadow in
-    /// <c>DataGrid.tsx</c> (seed J4), runs BLOCKING in Tier 1. This reads the two workflow files as text and refuses
-    /// these ways of making that gate stop blocking without a test failing: the job, its <c>jest</c> call or its suite
-    /// assertion removed; the assertion script changed at all (pinned verbatim); <c>continue-on-error</c> or
-    /// <c>|| true</c> added; any job-level key outside <see cref="DataGridGateJobKeys"/> (a <c>needs:</c> on a job
-    /// that is skipped skips the gate); its job-level <c>if:</c> changed; an <c>if:</c> on any step except
-    /// <c>always()</c>, or <c>failure()</c> on the artifact upload; the input's fail-closed default changed; or the
-    /// router no longer classifying <c>Spaarke.UI.Components</c>, the external SPA or the arch tests, its
-    /// <c>docs_only</c> step changed in shape (each variable assigned once from its own filter output, only
-    /// <c>&amp;&amp; != "true"</c> exclusions, one <c>value=true</c> inside the <c>if</c>), or the tier1 call's
-    /// <c>docs_only</c> condition changed. Crude by design: line and regex checks over YAML, not a YAML parse. It
-    /// refuses the disarmings it names, each proven by a row of <see cref="DataGridCiGateSeeds"/>, not every
-    /// conceivable one.
+    /// Residual 4 (task 157 fix round c2, hardened in c2-r1, made advisory-then-blocking in c2-r2 per owner round 13
+    /// items 11 and 12): the jest suite <c>DataGrid.externalHost.test.tsx</c>, the only check that catches an added
+    /// nested-scope shadow in <c>DataGrid.tsx</c> (seed J4), runs in Tier 1. It is ADVISORY until its flip
+    /// (<see cref="DataGridGateAdvisory"/>), then blocking. This reads <c>ci-tier1-blocking.yml</c> as text and refuses
+    /// these ways of making the gate stop running, or stop being able to report a failure, without a test failing: the
+    /// job, its <c>jest</c> call or its suite assertion removed; the assertion script changed at all (pinned verbatim);
+    /// a job-level <c>continue-on-error</c> that disagrees with <see cref="DataGridGateAdvisory"/> (exactly one
+    /// <c>true</c> while advisory, none after the flip); a <c>continue-on-error</c> anywhere else in the job;
+    /// <c>|| true</c>; any job-level key outside <see cref="DataGridGateJobKeys"/>; its <c>needs:</c> or job-level
+    /// <c>if:</c> changed; an <c>if:</c> on any step except <c>always()</c>, or <c>failure()</c> on the artifact upload;
+    /// <c>classify-tier1</c> gaining a job-level <c>if:</c>; or its <c>datagrid_gate</c> output or filter changed. It
+    /// reads nothing in <c>ci-router.yml</c>: owner round 13 item 12 leaves the router (and its pre-existing
+    /// <c>docs_only</c> skip) to <c>ci-cd-unit-test-remediation-r1</c>. Crude by design: line and regex checks over
+    /// YAML, not a YAML parse. It refuses the disarmings it names, each proven by a row of
+    /// <see cref="DataGridCiGateSeeds"/> or by
+    /// <see cref="ScanDataGridCiGate_RefusesAnAdvisoryStateTheConstantDoesNotRecord"/>, not every conceivable one.
     /// </summary>
-    internal static IReadOnlyList<string> ScanDataGridCiGate(string tier1Yaml, string routerYaml)
+    internal static IReadOnlyList<string> ScanDataGridCiGate(string tier1Yaml)
     {
         var violations = new List<string>();
         var tier1 = tier1Yaml.Replace("\r\n", "\n");
-        var router = routerYaml.Replace("\r\n", "\n");
 
-        var job = Regex.Match(tier1, @"(?m)^  " + Regex.Escape(DataGridGateJob) + @":[ \t]*\n(?<body>(?:(?:[ \t]*#.*|[ \t]*|    .*)\n)*)");
-        if (!job.Success)
+        var (found, code) = JobCode(tier1, DataGridGateJob);
+        if (!found)
         {
-            violations.Add($"{Tier1WorkflowFile}: the job `{DataGridGateJob}` is missing. It is the blocking CI run of the "
-                           + "shared DataGrid's external-host jest suite (task 157 residual 4).");
+            violations.Add($"{Tier1WorkflowFile}: the job `{DataGridGateJob}` is missing. It is the CI run of the shared "
+                           + "DataGrid's external-host jest suite (task 157 residual 4).");
             return violations;
         }
 
-        var body = job.Groups["body"].Value;
-        var code = string.Join("\n", body.Split('\n').Where(line => !line.TrimStart().StartsWith('#')));
-        if (Regex.IsMatch(code, @"(?m)^\s*continue-on-error\s*:"))
+        // continue-on-error: exactly one job-level `true` while advisory, none once flipped, never anywhere else.
+        var jobLevelCoe = JobLevelValues(code, "continue-on-error");
+        if (DataGridGateAdvisory && (jobLevelCoe.Count != 1 || jobLevelCoe[0] != "true"))
         {
-            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` carries continue-on-error; the gate must be able to fail the build.");
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` must carry exactly one job-level `continue-on-error: true` "
+                           + "while DataGridGateAdvisory is true (owner round 13 item 11). To make the gate blocking, delete that "
+                           + "line AND set DataGridGateAdvisory to false in the same change (the job's FLIP CONDITION).");
+        }
+        else if (!DataGridGateAdvisory && jobLevelCoe.Count != 0)
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` carries continue-on-error, but DataGridGateAdvisory is false: "
+                           + "the gate was flipped to blocking and must be able to fail the build.");
+        }
+
+        if (Regex.Matches(code, @"(?m)^\s*(?:-\s+)?continue-on-error\s*:").Count != jobLevelCoe.Count)
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` carries a step-level continue-on-error; a step's failure "
+                           + "would then never reach the job's result.");
         }
 
         if (Regex.IsMatch(code, @"\|\|\s*(?:true\b|exit\s+0\b|:(?=\s|$))", RegexOptions.Multiline))
@@ -1834,15 +1881,22 @@ public class ExternalSpaGridViewSelectorGuardTests
             if (!DataGridGateJobKeys.Contains(key.Groups["key"].Value, StringComparer.Ordinal))
             {
                 violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` carries the job-level key `{key.Groups["key"].Value}:`; only "
-                               + string.Join(", ", DataGridGateJobKeys) + " are allowed (a `needs:` on a skipped job skips the gate).");
+                               + string.Join(", ", DataGridGateJobKeys) + " are allowed.");
             }
         }
 
-        var ifLines = Regex.Matches(code, @"(?m)^    if\s*:\s*(?<cond>.*)$");
-        if (ifLines.Count != 1 || ifLines[0].Groups["cond"].Value.Trim() != "${{ inputs.ui_components_changed != 'false' }}")
+        var needs = JobLevelValues(code, "needs");
+        if (needs.Count != 1 || needs[0] != DataGridGateNeeds)
         {
-            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` must carry exactly `if: ${{{{ inputs.ui_components_changed != 'false' }}}}` "
-                           + "(fail closed: an empty or omitted input runs the gate).");
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` must carry exactly `needs: {DataGridGateNeeds}` (a `needs:` on a "
+                           + "job that is skipped, e.g. changed-surface-smoke, skips the gate).");
+        }
+
+        var ifs = JobLevelValues(code, "if");
+        if (ifs.Count != 1 || ifs[0] != DataGridGateIf)
+        {
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` must carry exactly `if: {DataGridGateIf}` "
+                           + "(fail closed: an empty classification runs the gate).");
         }
 
         var steps = SplitSteps(code);
@@ -1877,185 +1931,121 @@ public class ExternalSpaGridViewSelectorGuardTests
                            + "A weakened assertion lets a renamed, deleted or skipped suite pass.");
         }
 
-        var input = Regex.Match(tier1, @"(?m)^      ui_components_changed:[ \t]*\n(?<body>(?:        .*\n|[ \t]*\n)*)");
-        if (!input.Success || !Regex.IsMatch(input.Groups["body"].Value, @"(?m)^\s*default:\s*'true'\s*$"))
+        // The classification the job's `if:` reads. classify-tier1 always runs; an `if:` on it would skip the gate.
+        var (classifyFound, classify) = JobCode(tier1, DataGridGateNeeds);
+        if (!classifyFound || JobLevelValues(classify, "if").Count != 0)
         {
-            violations.Add($"{Tier1WorkflowFile}: the workflow_call input `ui_components_changed` must default to 'true' (fail closed).");
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateNeeds}` must exist and carry no job-level `if:`; when it is skipped, "
+                           + $"`{DataGridGateJob}` is skipped too.");
         }
 
-        if (!Regex.IsMatch(router, @"(?m)^      ui_components: \$\{\{ steps\.filter\.outputs\.ui_components \}\}\s*$"))
+        if (Regex.Matches(classify, @"(?m)^      datagrid_gate:[^\n]*$").Count != 1
+            || !Regex.IsMatch(classify, @"(?m)^      datagrid_gate: \$\{\{ steps\.filter\.outputs\.datagrid_gate \}\}\s*$"))
         {
-            violations.Add($"{RouterWorkflowFile}: the classify job no longer outputs `ui_components`.");
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateNeeds}` must output `datagrid_gate: ${{{{ steps.filter.outputs.datagrid_gate }}}}`, once.");
         }
 
-        if (!Regex.IsMatch(router, @"(?m)^      docs_only: \$\{\{ steps\.docs-only-flag\.outputs\.value \}\}\s*$"))
+        var filters = Regex.Matches(classify, @"(?m)^            datagrid_gate:[ \t]*\n(?<items>(?:              [^\n]*\n)*)");
+        var items = filters.Count == 1
+            ? filters[0].Groups["items"].Value.Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0).ToList()
+            : new List<string>();
+        var expectedItems = DataGridGateFilterPaths.Select(path => "- " + path).ToList();
+        if (filters.Count != 1 || !items.SequenceEqual(expectedItems, StringComparer.Ordinal))
         {
-            violations.Add($"{RouterWorkflowFile}: the classify job's `docs_only` output must come from the docs-only-flag step.");
-        }
-
-        foreach (var (filter, pattern) in new[]
-                 {
-                     ("ui_components", "src/client/shared/Spaarke.UI.Components/**"),
-                     ("external_spa", "src/client/external-spa/**"),
-                     ("arch_tests", "tests/Spaarke.ArchTests/**"),
-                 })
-        {
-            if (!Regex.IsMatch(router, @"(?m)^            " + filter + @":\s*\n              - '" + Regex.Escape(pattern) + @"'\s*$"))
-            {
-                violations.Add($"{RouterWorkflowFile}: the paths filter `{filter}` must classify '{pattern}'.");
-            }
-        }
-
-        var docsOnlyStep = Regex.Match(router, @"(?m)^      - name: Derive docs_only flag[ \t]*\n(?<body>(?:(?:        .*|[ \t]*)\n)*)");
-        var docsOnlyLines = docsOnlyStep.Success ? RunBlockLines(docsOnlyStep.Groups["body"].Value) : null;
-        var docsOnlyProblem = DocsOnlyStepProblem(docsOnlyLines);
-        if (docsOnlyProblem is not null)
-        {
-            violations.Add($"{RouterWorkflowFile}: the docs_only step {docsOnlyProblem}. Otherwise a PR touching the shared grid, the "
-                           + "external SPA or the arch tests plus any *.md file or task note is docs_only and skips Tier 1, gate included.");
-        }
-
-        var tier1Call = Regex.Match(router, @"(?m)^  tier1:[ \t]*\n(?<body>(?:(?:[ \t]*#.*|[ \t]*|    .*)\n)*)");
-        var tier1CallIfs = tier1Call.Success ? Regex.Matches(tier1Call.Groups["body"].Value, @"(?m)^    if\s*:\s*(?<cond>.*)$") : null;
-        if (tier1CallIfs is null || tier1CallIfs.Count != 1 || tier1CallIfs[0].Groups["cond"].Value.Trim() != "needs.classify.outputs.docs_only != 'true'")
-        {
-            violations.Add($"{RouterWorkflowFile}: the tier1 call must carry exactly `if: needs.classify.outputs.docs_only != 'true'`.");
-        }
-
-        if (!Regex.IsMatch(router, @"(?m)^      ui_components_changed: \$\{\{ \(needs\.classify\.outputs\.ui_components == 'true' \|\| needs\.classify\.outputs\.ci_workflows == 'true'\) && 'true' \|\| 'false' \}\}\s*$"))
-        {
-            violations.Add($"{RouterWorkflowFile}: the tier1 call must pass `ui_components_changed` from the ui_components and "
-                           + "ci_workflows classification.");
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateNeeds}`'s paths filter `datagrid_gate` must be defined once and hold exactly "
+                           + string.Join(" and ", DataGridGateFilterPaths) + ".");
         }
 
         return violations;
     }
 
-    /// <summary>
-    /// The docs_only run block, shape-pinned: each of <see cref="DocsOnlyVariables"/> assigned once, in order, from its
-    /// own filter output; then an <c>if [[ "$docs" == "true" &amp;&amp; … ]]</c> made only of <c>&amp;&amp; "$x" != "true"</c>
-    /// terms and naming every <see cref="DocsOnlyExclusions"/>; <c>value=true</c> and a plain notice in the then-branch;
-    /// <c>value=false</c> in the else-branch; nothing else. Returns the problem, or null.
-    /// </summary>
-    private static string? DocsOnlyStepProblem(List<string>? lines)
-    {
-        if (lines is null)
-        {
-            return "(`Derive docs_only flag`, a `run: |` block) is missing";
-        }
-
-        var expectedCount = DocsOnlyVariables.Length + 6;
-        if (lines.Count != expectedCount)
-        {
-            return $"must be exactly {expectedCount} lines (assignments, if, value=true, notice, else, value=false, fi); it has {lines.Count}";
-        }
-
-        for (var i = 0; i < DocsOnlyVariables.Length; i++)
-        {
-            var expected = $"{DocsOnlyVariables[i]}='${{{{ steps.filter.outputs.{DocsOnlyVariables[i]} }}}}'";
-            if (!string.Equals(lines[i], expected, StringComparison.Ordinal))
-            {
-                return $"line {i + 1} must be `{expected}`, not `{lines[i]}`";
-            }
-        }
-
-        var ifLine = lines[DocsOnlyVariables.Length];
-        var ifMatch = Regex.Match(ifLine, @"^if \[\[ ""\$docs"" == ""true""(?<terms>(?: && ""\$[a-z_]+"" != ""true"")+) \]\]; then$");
-        if (!ifMatch.Success)
-        {
-            return $"condition must be `if [[ \"$docs\" == \"true\"` followed only by `&& \"$x\" != \"true\"` terms, not `{ifLine}`";
-        }
-
-        foreach (var exclusion in DocsOnlyExclusions)
-        {
-            if (!ifMatch.Groups["terms"].Value.Contains($" && \"${exclusion}\" != \"true\"", StringComparison.Ordinal))
-            {
-                return $"condition must exclude `{exclusion}`";
-            }
-        }
-
-        var rest = lines.Skip(DocsOnlyVariables.Length + 1).ToList();
-        if (rest[0] != "echo \"value=true\" >> \"$GITHUB_OUTPUT\""
-            || !Regex.IsMatch(rest[1], @"^echo ""::notice::[^""$`]*""$")
-            || rest[2] != "else"
-            || rest[3] != "echo \"value=false\" >> \"$GITHUB_OUTPUT\""
-            || rest[4] != "fi")
-        {
-            return "must write value=true only inside the if, value=false only in the else, and nothing else";
-        }
-
-        return null;
-    }
-
-    [Fact(DisplayName = "The shared DataGrid's external-host jest suite runs as a blocking Tier 1 gate (task 157 residual 4)")]
-    public void SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate()
+    [Fact(DisplayName = "The shared DataGrid's external-host jest suite runs as a Tier 1 gate, advisory until its flip (task 157 residual 4)")]
+    public void SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate()
     {
         var tier1 = Path.Combine(SourceScan.RepoRoot, Tier1WorkflowFile.Replace('/', Path.DirectorySeparatorChar));
-        var router = Path.Combine(SourceScan.RepoRoot, RouterWorkflowFile.Replace('/', Path.DirectorySeparatorChar));
         Assert.True(File.Exists(tier1), $"the Tier 1 workflow must exist at {Tier1WorkflowFile}");
-        Assert.True(File.Exists(router), $"the CI router must exist at {RouterWorkflowFile}");
         var suite = Path.Combine(SourceScan.RepoRoot, "src", "client", "shared", "Spaarke.UI.Components", "src", "components",
             "DataGrid", "__tests__", "DataGrid.externalHost.test.tsx");
         Assert.True(File.Exists(suite), "the gated jest suite must exist at …/DataGrid/__tests__/DataGrid.externalHost.test.tsx");
 
-        var violations = ScanDataGridCiGate(File.ReadAllText(tier1), File.ReadAllText(router));
+        var violations = ScanDataGridCiGate(File.ReadAllText(tier1));
 
         Assert.True(violations.Count == 0, string.Join(Environment.NewLine, violations));
     }
 
+    private static string RealTier1Text() =>
+        File.ReadAllText(Path.Combine(SourceScan.RepoRoot, Tier1WorkflowFile.Replace('/', Path.DirectorySeparatorChar))).Replace("\r\n", "\n");
+
+    private const string GateIfLine = "    if: " + DataGridGateIf + "\n";
+
     public static TheoryData<string, string, string> DataGridCiGateSeeds() => new()
     {
-        // (name, find, replace) applied to the REAL tier1 or router text; each must produce a violation. The fact above
-        // proves the real text scans clean, so any violation here is the seed's.
-        { "tier1:job-renamed", "  datagrid-external-host-gate:\n", "  datagrid-gate-renamed:\n" },
-        { "tier1:continue-on-error", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    continue-on-error: true\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
-        { "tier1:or-true", "src/components/DataGrid/\n", "src/components/DataGrid/ || true\n" },
-        { "tier1:if-false", "    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    if: ${{ false }}\n" },
-        { "tier1:jest-narrowed", "--outputFile=datagrid-jest-results.json src/components/DataGrid/\n", "--outputFile=datagrid-jest-results.json src/components/DataGrid/chips/\n" },
-        { "tier1:assert-dropped", "DataGrid.externalHost.test.tsx 7", "DataGrid.externalHost.test.tsx 0" },
-        { "tier1:input-default", "        type: string\n        default: 'true'\n  workflow_dispatch:", "        type: string\n        default: 'false'\n  workflow_dispatch:" },
-        // Fix round c2-r1: the four disarmings review c2 seeded past the c2 guard, plus their near variants.
-        { "tier1:needs-skipped-job", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    needs: changed-surface-smoke\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
-        { "tier1:environment-added", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    environment: manual-approval\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
-        { "tier1:step-if-jest", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n        if: github.event_name == 'never'\n" },
-        { "tier1:step-if-assert", "      - name: Assert the external-host suite ran\n", "      - name: Assert the external-host suite ran\n        if: github.event_name == 'never'\n" },
-        { "tier1:step-if-install", "      - name: Install Spaarke.UI.Components deps\n", "      - name: Install Spaarke.UI.Components deps\n        if: github.event_name == 'never'\n" },
-        { "tier1:step-if-on-dash-line", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n", "      - if: github.event_name == 'never'\n        name: DataGrid jest folder (external-host rule, merge-blocking)\n" },
-        { "tier1:failure-on-jest", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n        if: failure()\n" },
-        { "tier1:assert-condition", "if (n < Number(min) || passed !== n) {", "if (false) {" },
-        { "tier1:assert-exit-zero", "\" did not run\"); process.exit(1); }", "\" did not run\"); process.exit(0); }" },
-        { "tier1:assert-line-added", "            const n = s.assertionResults.length;\n", "            process.exit(0);\n            const n = s.assertionResults.length;\n" },
-        { "router:filter-dropped", "              - 'src/client/shared/Spaarke.UI.Components/**'\n", "              - 'src/client/shared/Spaarke.UI.Components/README.md'\n" },
-        { "router:docs-only", " && \"$ui_components\" != \"true\"", "" },
-        { "router:not-passed", "      ui_components_changed: ${{ (needs.classify.outputs.ui_components == 'true' || needs.classify.outputs.ci_workflows == 'true') && 'true' || 'false' }}\n", "      ui_components_changed: 'false'\n" },
-        { "router:docs-only-forced", "          ui_components='${{ steps.filter.outputs.ui_components }}'\n", "          ui_components='false'\n" },
-        { "router:docs-only-reassigned", "          arch_tests='${{ steps.filter.outputs.arch_tests }}'\n", "          arch_tests='${{ steps.filter.outputs.arch_tests }}'\n          ui_components=false\n" },
-        { "router:docs-only-or", "&& \"$arch_tests\" != \"true\" ]]; then", "&& \"$arch_tests\" != \"true\" || \"$docs\" == \"true\" ]]; then" },
-        { "router:value-true-unconditional", "            echo \"value=false\" >> \"$GITHUB_OUTPUT\"\n          fi\n", "            echo \"value=false\" >> \"$GITHUB_OUTPUT\"\n          fi\n          echo \"value=true\" >> \"$GITHUB_OUTPUT\"\n" },
-        { "router:docs-only-output", "      docs_only: ${{ steps.docs-only-flag.outputs.value }}\n", "      docs_only: 'true'\n" },
-        { "router:tier1-call-if", "    if: needs.classify.outputs.docs_only != 'true'\n    uses: ./.github/workflows/ci-tier1-blocking.yml\n", "    if: false\n    uses: ./.github/workflows/ci-tier1-blocking.yml\n" },
-        // Fix round c2-r1, review item 6: the external SPA and the arch tests are classified, and docs_only excludes them.
-        { "router:external-spa-filter-dropped", "              - 'src/client/external-spa/**'\n", "              - 'src/client/external-spa/README.md'\n" },
-        { "router:arch-tests-filter-dropped", "              - 'tests/Spaarke.ArchTests/**'\n", "              - 'tests/Spaarke.ArchTests/README.md'\n" },
-        { "router:external-spa-docs-only", " && \"$external_spa\" != \"true\"", "" },
-        { "router:arch-tests-docs-only", " && \"$arch_tests\" != \"true\"", "" },
-        { "router:external-spa-forced", "          external_spa='${{ steps.filter.outputs.external_spa }}'\n", "          external_spa='false'\n" },
+        // (name, find, replace) applied to the REAL tier1 text; each must produce a violation. The fact above proves the
+        // real text scans clean, so any violation here is the seed's. Every row holds in both states of
+        // DataGridGateAdvisory; the state-specific disarming is the fact below.
+        { "job-renamed", "  datagrid-external-host-gate:\n", "  datagrid-gate-renamed:\n" },
+        { "job-continue-on-error-duplicated", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    continue-on-error: true\n" },
+        { "step-continue-on-error", "      - name: DataGrid jest folder (external-host rule)\n", "      - name: DataGrid jest folder (external-host rule)\n        continue-on-error: true\n" },
+        { "or-true", "src/components/DataGrid/\n", "src/components/DataGrid/ || true\n" },
+        { "if-false", GateIfLine, "    if: ${{ false }}\n" },
+        { "if-fails-open-to-skip", GateIfLine, GateIfLine.Replace("!= 'false'", "== 'true'", StringComparison.Ordinal) },
+        { "if-duplicated", GateIfLine, GateIfLine + "    if: ${{ false }}\n" },
+        // `needs: classify-tier1` alone is not unique (changed-surface-smoke and auth-smoke carry it), so the gate's own
+        // `if:` line anchors these two rows to the gate job.
+        { "needs-skipped-job", "    needs: classify-tier1\n" + GateIfLine, "    needs: changed-surface-smoke\n" + GateIfLine },
+        { "needs-second-job", "    needs: classify-tier1\n" + GateIfLine, "    needs: [classify-tier1, changed-surface-smoke]\n" + GateIfLine },
+        { "environment-added", "    timeout-minutes: 15\n", "    timeout-minutes: 15\n    environment: manual-approval\n" },
+        { "jest-narrowed", "--outputFile=datagrid-jest-results.json src/components/DataGrid/\n", "--outputFile=datagrid-jest-results.json src/components/DataGrid/chips/\n" },
+        { "assert-dropped", "DataGrid.externalHost.test.tsx 7", "DataGrid.externalHost.test.tsx 0" },
+        { "step-if-jest", "      - name: DataGrid jest folder (external-host rule)\n", "      - name: DataGrid jest folder (external-host rule)\n        if: github.event_name == 'never'\n" },
+        { "step-if-assert", "      - name: Assert the external-host suite ran\n", "      - name: Assert the external-host suite ran\n        if: github.event_name == 'never'\n" },
+        { "step-if-install", "      - name: Install Spaarke.UI.Components deps\n", "      - name: Install Spaarke.UI.Components deps\n        if: github.event_name == 'never'\n" },
+        { "step-if-on-dash-line", "      - name: DataGrid jest folder (external-host rule)\n", "      - if: github.event_name == 'never'\n        name: DataGrid jest folder (external-host rule)\n" },
+        { "failure-on-jest", "      - name: DataGrid jest folder (external-host rule)\n", "      - name: DataGrid jest folder (external-host rule)\n        if: failure()\n" },
+        { "assert-condition", "if (n < Number(min) || passed !== n) {", "if (false) {" },
+        { "assert-exit-zero", "\" did not run\"); process.exit(1); }", "\" did not run\"); process.exit(0); }" },
+        { "assert-line-added", "            const n = s.assertionResults.length;\n", "            process.exit(0);\n            const n = s.assertionResults.length;\n" },
+        // Fix round c2-r2: the classification moved from ci-router.yml into classify-tier1 (owner round 13 item 12).
+        { "classify-output-forced", "      datagrid_gate: ${{ steps.filter.outputs.datagrid_gate }}\n", "      datagrid_gate: 'false'\n" },
+        { "classify-filter-narrowed", "              - 'src/client/shared/Spaarke.UI.Components/**'\n", "              - 'src/client/shared/Spaarke.UI.Components/README.md'\n" },
+        { "classify-filter-workflows-dropped", "              - '.github/workflows/**'\n", string.Empty },
+        { "classify-job-if", "  classify-tier1:\n    name: Classify Tier 1 Surfaces\n", "  classify-tier1:\n    name: Classify Tier 1 Surfaces\n    if: ${{ false }}\n" },
     };
 
     [Theory(DisplayName = "Negative control: each way of disarming the DataGrid CI gate is refused")]
     [MemberData(nameof(DataGridCiGateSeeds))]
     public void ScanDataGridCiGate_RefusesEachDisarming(string name, string find, string replace)
     {
-        var tier1 = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, Tier1WorkflowFile.Replace('/', Path.DirectorySeparatorChar))).Replace("\r\n", "\n");
-        var router = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, RouterWorkflowFile.Replace('/', Path.DirectorySeparatorChar))).Replace("\r\n", "\n");
-        var inTier1 = name.StartsWith("tier1:", StringComparison.Ordinal);
-        var target = inTier1 ? tier1 : router;
-        Assert.True(target.Contains(find, StringComparison.Ordinal), $"seed {name}: the text to perturb must exist in the real workflow");
+        var tier1 = RealTier1Text();
+        Assert.True(tier1.Contains(find, StringComparison.Ordinal), $"seed {name}: the text to perturb must exist in the real workflow");
 
-        var seeded = target.Replace(find, replace, StringComparison.Ordinal);
-        var violations = inTier1 ? ScanDataGridCiGate(seeded, router) : ScanDataGridCiGate(tier1, seeded);
+        var violations = ScanDataGridCiGate(tier1.Replace(find, replace, StringComparison.Ordinal));
 
         Assert.NotEmpty(violations);
+    }
+
+    [Fact(DisplayName = "Negative control: a gate whose advisory state disagrees with DataGridGateAdvisory is refused")]
+    public void ScanDataGridCiGate_RefusesAnAdvisoryStateTheConstantDoesNotRecord()
+    {
+        var tier1 = RealTier1Text();
+        string seeded;
+        if (DataGridGateAdvisory)
+        {
+            // Flipped in the YAML only: the job's line deleted, the constant left true.
+            var job = tier1.IndexOf("  " + DataGridGateJob + ":\n", StringComparison.Ordinal);
+            Assert.True(job >= 0, "the gate job must exist");
+            var line = new Regex(@"(?m)^    continue-on-error: true[^\n]*\n").Match(tier1, job);
+            Assert.True(line.Success, "the advisory gate must carry its job-level continue-on-error line");
+            seeded = tier1.Remove(line.Index, line.Length);
+        }
+        else
+        {
+            // Made advisory again in the YAML only.
+            Assert.Contains("    timeout-minutes: 15\n", tier1, StringComparison.Ordinal);
+            seeded = tier1.Replace("    timeout-minutes: 15\n", "    timeout-minutes: 15\n    continue-on-error: true\n", StringComparison.Ordinal);
+        }
+
+        Assert.NotEmpty(ScanDataGridCiGate(seeded));
     }
 
     [Fact(DisplayName = "No external-SPA file reaches the shared DataGrid except ExternalDataGrid.tsx, whose mount passes showViewSelector={false}")]
