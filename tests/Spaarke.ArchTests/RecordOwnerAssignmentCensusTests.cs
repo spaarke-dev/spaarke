@@ -18,9 +18,11 @@ namespace Spaarke.ArchTests;
 /// not re-owned, with a reason and a kind — <c>Pending</c> (an open owner decision, named) or <c>Permanent</c>.</para>
 /// <para><b>What the scanner sees, and what it does not.</b> It counts the create shapes that name a table literally
 /// or through a <c>const</c>: <c>new Entity("t")</c> / <c>new DataverseEntity(T)</c> (single argument — a two-argument
-/// construction is an update or a keyed upsert target, unless its id is fresh), <c>new Entity { LogicalName = "t" }</c>
-/// and <c>e.LogicalName = "t"</c> after <c>new Entity()</c> (b2-r1; unless given an existing id), a create-by-upsert of a
-/// fresh id, and a Web API POST to a literal entity set. The shapes it does not see are listed under "KNOWN LIMITS" in
+/// construction is an update or a keyed upsert target, unless its id is fresh or the row is handed to a create),
+/// <c>new Entity { LogicalName = "t" }</c> and <c>e.LogicalName = "t"</c> after <c>new Entity()</c> (b2-r1; unless given
+/// an existing id that is not handed to a create), a create-by-upsert of a fresh id, and a Web API POST to a literal
+/// entity set. b2-r2: a row given a caller-chosen id and handed to <c>Create</c> / <c>Create…Async</c> /
+/// <c>new CreateRequest { Target = … }</c> is a create (Dataverse creates with a supplied id). The shapes it does not see are listed under "KNOWN LIMITS" in
 /// the maintenance procedure. Writers whose
 /// create it cannot see — a create-by-upsert PATCH, a keyed <c>UpsertRequest</c>, a POST to a computed URL, a
 /// caller of a seam, a REPARENT (an update that files a child under a new parent) — are listed in
@@ -88,14 +90,28 @@ public class RecordOwnerAssignmentCensusTests
     //      non-child junction). A writer that needs one must list itself in UnscannedWriters (which must call the
     //      resolver) or extend the scanner with a negative control, never rely on the gap:
     //        - creates: a table name that is neither a literal nor a const (a variable / a computed entity set), a keyed
-    //          construction (`new Entity(t, keyName, keyValue)` / a KeyAttributeCollection), an UpsertRequest /
-    //          CreateRequest / ExecuteMultiple built elsewhere, a POST to a computed URL, string-embedded JSON;
+    //          construction (`new Entity(t, keyName, keyValue)` / a KeyAttributeCollection), a target-typed construction
+    //          (`Entity row = new("t")`), an UpsertRequest / CreateRequest / ExecuteMultiple built elsewhere, a POST to a
+    //          computed URL, string-embedded JSON;
+    //        - creates with a CALLER-CHOSEN id (b2-r2, verifier b2-r1 item 5 seed 4): a row given a non-fresh id is
+    //          counted only when the same member hands it to `Create(…)` / `Create…Async(…)` / `new CreateRequest
+    //          { Target = … }`. Such a row UPSERTED (`UpsertAsync`, `UpsertRequest`), or handed to a create in another
+    //          member or file, is not counted — and Dataverse creates on an upsert of an absent id, so a deterministic or
+    //          idempotency id there evades the count (a `Guid.NewGuid()` / `Generate…Id(…)` id IS counted, see IsFreshId);
     //        - owner writes: `new KeyValuePair<string, object>("ownerid", …)`, `AddRange`, a DTO property serialized as
-    //          `[JsonPropertyName("ownerid@odata.bind")]`, an owner key held in a non-const field or built at runtime,
-    //          an AssignRequest;
+    //          `[JsonPropertyName("ownerid@odata.bind")]`, an owner key held in a non-const field or built at runtime
+    //          (an interpolation WITH holes, `$"owner{x}"`, or a concatenation), an AssignRequest. A hole-free
+    //          interpolated or verbatim key — `$"ownerid"`, `@"ownerid"`, `$@"ownerid@odata.bind"` — IS seen (b2-r2,
+    //          verifier b2-r1 item 5 seed 1);
     //        - the value check follows a builder's arguments only within its own FILE (calls from another file are not
-    //          seen), and its taint is name-based (a variable assigned from ANY call to a member that reaches the resolver
-    //          counts as a resolution).
+    //          seen), and its taint is name-based: a variable assigned from ANY call to a member that reaches the resolver
+    //          counts as a resolution, and a later reassignment of that name from something else (`team =
+    //          request.MatterId;`) does not clear it (verifier b2-r1 item 5 seed 3); an owner value is accepted when it
+    //          MENTIONS one resolved name, so a conditional or coalesce whose other branch is not a resolution (`c ? other
+    //          : team`, `other ?? team`) passes (seed 2 — b2-r2 refuses a value that parses a GUID from text,
+    //          `Guid.TryParse` included, but not every such branch).
+    //      Behaviour tests (SecureChildOwnership*Tests, InvoiceReviewWritePathTests, TodoGenerationAssignedToTests) pin
+    //      each EXISTING writer's owner; these limits bite only on new code.
     // =============================================================================================
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
@@ -425,9 +441,17 @@ public class RecordOwnerAssignmentCensusTests
     /// <summary>The gate an <see cref="OwnerWriteKind.UnfiledOnly"/> member must call before its owner write.</summary>
     private const string UnfiledGate = "IsFiledOrUnreadableAsync";
 
-    /// <summary>A const whose value is the owner key — <c>"ownerid"</c> or <c>"ownerid@odata.bind"</c>.</summary>
+    /// <summary>
+    /// The owner key as a literal: <c>"ownerid"</c> or <c>"ownerid@odata.bind"</c>, plain, verbatim (<c>@"…"</c>) or
+    /// interpolated with no holes (<c>$"…"</c>, <c>$@"…"</c>, <c>@$"…"</c>) — b2-r2, verifier b2-r1 item 5 seed 1: the
+    /// prefixed forms are the same key and were unseen. An interpolation WITH holes is a key built at runtime (KNOWN LIMITS).
+    /// </summary>
+    private const string OwnerKeyLiteral = @"(?:\$@|@\$|\$|@)?""ownerid(?:@odata\.bind)?""";
+
+    /// <summary>A const whose value is the owner key — <c>"ownerid"</c> or <c>"ownerid@odata.bind"</c> (any
+    /// <see cref="OwnerKeyLiteral"/> spelling).</summary>
     private static readonly Regex OwnerKeyConst = new(
-        @"const\s+string\s+(?<name>\w+)\s*=\s*""ownerid(?:@odata\.bind)?""\s*;", RegexOptions.Compiled);
+        @"const\s+string\s+(?<name>\w+)\s*=\s*" + OwnerKeyLiteral + @"\s*;", RegexOptions.Compiled);
 
     [Fact(DisplayName = "Task 146 r2: every owner write in the server is censused, by member, with its kind")]
     public void EveryOwnerWriteIsCensused()
@@ -563,7 +587,7 @@ public class RecordOwnerAssignmentCensusTests
         var keys = string.Join("|", OwnerKeyConst.Matches(code).Select(m => Regex.Escape(m.Groups["name"].Value))
             .Concat(globalKeys.Select(Regex.Escape))
             .Distinct()
-            .Prepend(@"""ownerid(?:@odata\.bind)?"""));
+            .Prepend(OwnerKeyLiteral));
 
         foreach (Match m in new Regex(@"\[\s*(?:" + keys + @")\s*\]\s*=(?![=>])").Matches(code))
             yield return (m.Index, m.Index + m.Length);
@@ -703,9 +727,11 @@ public class RecordOwnerAssignmentCensusTests
         }
     }
 
-    /// <summary>A GUID literal or a GUID parsed from text — never a resolver's answer.</summary>
+    /// <summary>A GUID literal or a GUID parsed from text — never a resolver's answer. b2-r2 (verifier b2-r1 item 5 seed 2):
+    /// <c>Guid.TryParse</c> / <c>ParseExact</c> too, so a conditional that parses its owner from text is refused even when
+    /// its other branch is the resolution.</summary>
     private static readonly Regex HardCodedId = new(
-        @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\bGuid\.Parse\s*\(|\bnew\s+Guid\s*\(",
+        @"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\bGuid\.(?:Try)?Parse(?:Exact)?\s*\(|\bnew\s+Guid\s*\(",
         RegexOptions.Compiled);
 
     private static Regex ResolverOrReachingCall(IReadOnlySet<string> reaching) => new(
@@ -1058,6 +1084,46 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "FindOrCreateOwnedAsync", keys));       // its own resolution
         Assert.Single(RoutedValueProblems(code, "Seeded.cs", "BuildHandedFields", keys));           // a resolving caller, another value
         Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "BuildNamedFields", keys));             // fed by name
+    }
+
+    [Fact(DisplayName = "Task 146 b2-r2: negative control — a prefixed owner key is checked; an owner parsed from text in a branch fails")]
+    public void RoutedValueCheck_NegativeControl_PrefixedKeyAndParsedBranch()
+    {
+        // The verifier's b2-r1 item 5 seeds 1 and 2: `x[$"ownerid"] =` / `x[@"ownerid"] =` were not owner writes to the
+        // census, and `c && Guid.TryParse(key, out var k) ? k : team` passed because it MENTIONS the resolved name.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private async Task<Guid> PrefixedKeyAsync(Guid id, CancellationToken ct)",
+            "    {",
+            "        var ownerTeamId = await _ownership.ResolveOwningTeamAsync(Context(id), ct);",
+            "        var thread = new Entity(\"sprk_communicationthread\");",
+            "        thread[@\"ownerid\"] = new EntityReference(\"team\", ownerTeamId!.Value);",
+            "        return await _svc.CreateAsync(thread, ct);",
+            "    }",
+            "    private async Task<Guid> InterpolatedKeyOtherTeamAsync(Guid id, CancellationToken ct)",
+            "    {",
+            "        var ownerTeamId = await _ownership.ResolveOwningTeamAsync(Context(id), ct);",
+            "        var thread = new Entity(\"sprk_communicationthread\");",
+            "        thread[$\"ownerid\"] = new EntityReference(\"team\", Guid.NewGuid());",
+            "        return await _svc.CreateAsync(thread, ct);",
+            "    }",
+            "    private async Task<Guid> ParsedBranchAsync(string keyId, Guid id, CancellationToken ct)",
+            "    {",
+            "        var ownerTeamId = await _ownership.ResolveOwningTeamAsync(Context(id), ct) ?? Guid.Empty;",
+            "        var thread = new Entity(\"sprk_communicationthread\");",
+            "        thread[\"ownerid\"] = new EntityReference(\"team\", ownerTeamId != Guid.Empty && Guid.TryParse(keyId, out var k) ? k : ownerTeamId);",
+            "        return await _svc.CreateAsync(thread, ct);",
+            "    }",
+            "}",
+        });
+        var keys = new HashSet<string>();
+
+        // Seen AND accepted: an unseen write would report "censused as Routed but writes no owner".
+        Assert.Empty(RoutedValueProblems(code, "Seeded.cs", "PrefixedKeyAsync", keys));
+        Assert.Contains("is not a resolution", Assert.Single(RoutedValueProblems(code, "Seeded.cs", "InterpolatedKeyOtherTeamAsync", keys)));
+        Assert.Contains("hard-coded owner", Assert.Single(RoutedValueProblems(code, "Seeded.cs", "ParsedBranchAsync", keys)));
     }
 
     /// <summary>
@@ -1421,6 +1487,43 @@ public class RecordOwnerAssignmentCensusTests
         Assert.DoesNotContain(problems, p => p.Contains("Seeded.cs:12", StringComparison.Ordinal));
     }
 
+    [Fact(DisplayName = "Task 146 b2-r2: negative control — a row given a caller-chosen id and handed to a create is a create; an update is not")]
+    public void Detector_NegativeControl_CallerChosenIdCreates()
+    {
+        // The verifier's b2-r1 item 5 seed 4: `new Entity(EntityTodo, seededId)` / `new Entity { LogicalName = EntityTodo,
+        // Id = seededId }` passed to CreateAsync were read as updates — but Dataverse creates with a supplied id.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private const string TodoEntity = \"sprk_todo\";",
+            "    private async Task A(Guid seeded) { var row = new Entity(TodoEntity, seeded); row[\"sprk_name\"] = \"x\"; await _s.CreateAsync(row, ct); }",
+            "    private async Task B(Guid seeded) { await _s.CreateAsync(new Entity { LogicalName = TodoEntity, Id = seeded }, ct); }",
+            "    private async Task C(Guid seeded) { var row = new Entity(); row.LogicalName = \"sprk_todo\"; row.Id = seeded; await _s.CreateAsync(row, ct); }",
+            "    private async Task D(Guid seeded) { await _svc.ExecuteAsync(new CreateRequest { Target = new Entity(\"sprk_todo\", seeded) }, ct); }",
+            "    private void E(Guid seeded) { var row = new Entity(\"sprk_todo\", seeded); _svc.Create(row); }",
+            "    private async Task F(Guid existing) { var row = new Entity(\"sprk_todo\", existing); await _s.UpdateAsync(row, ct); }",
+            "    private async Task G(Guid existing) { var row = new Entity { LogicalName = \"sprk_todo\", Id = existing }; await _s.UpsertAsync(row, ct); }",
+            "    private async Task H(Guid existing) { var update = new Entity(\"sprk_todo\", existing); await _s.UpdateAsync(update, ct); var other = new Entity(\"sprk_memo\"); await _s.CreateAsync(other, ct); }",
+            "    private async Task I(Guid seeded, RecordOwnerResolution owner) { var row = new Entity(TodoEntity, seeded); owner.ApplyTo(row); await _s.CreateAsync(row, ct); }",
+            "    private async Task J(Request request) { var row = new Entity(TodoEntity, request!.RecordId); await _s.CreateAsync(row, ct); }",
+            "}",
+        });
+        var files = new Dictionary<string, string> { ["Seeded.cs"] = code };
+
+        var sites = ScanSites(files);
+
+        // A-E, I and J (a member-access id); never the update F, the upsert G (KNOWN LIMITS) or H's update beside another
+        // row's create.
+        Assert.Equal(new[] { 4, 5, 6, 7, 8, 12, 13 }, sites[("Seeded.cs", "sprk_todo")].OrderBy(l => l));
+        Assert.Equal(new[] { 11 }, sites[("Seeded.cs", "sprk_memo")]);
+
+        // As Routed sites: A-E and J write no owner on their row; I (ApplyTo) does.
+        var problems = SiteOwnerProblems(code, "Seeded.cs", "sprk_todo", ScanSiteIndexes(files)[("Seeded.cs", "sprk_todo")]).ToList();
+        Assert.Equal(6, problems.Count);
+        Assert.DoesNotContain(problems, p => p.Contains("Seeded.cs:12", StringComparison.Ordinal));
+    }
+
     [Fact(DisplayName = "Task 146 b2: negative control — Add(...) and initializer owner writes are found; a list of column names is not")]
     public void OwnerWriteDetector_NegativeControl_AddAndInitializerForms()
     {
@@ -1447,6 +1550,32 @@ public class RecordOwnerAssignmentCensusTests
         Assert.Contains(("Seeded.cs", "DictionaryAdd"), sites.Keys);
         Assert.Contains(("Seeded.cs", "Initializer"), sites.Keys);
         Assert.Contains(("Seeded.cs", "SetOwner"), sites.Keys);
+    }
+
+    [Fact(DisplayName = "Task 146 b2-r2: negative control — an interpolated or verbatim owner key is an owner write; another column is not")]
+    public void OwnerWriteDetector_NegativeControl_PrefixedKeyLiterals()
+    {
+        // The verifier's b2-r1 item 5 seed 1: `entity[$"ownerid"] = …` and `entity[@"ownerid"] = …` passed every census test.
+        var code = SourceScan.CodeText(new[]
+        {
+            "internal sealed class Seeded",
+            "{",
+            "    private const string VerbatimKey = @\"ownerid\";",
+            "    private void Interpolated(Entity row, Guid t) { row[$\"ownerid\"] = new EntityReference(\"team\", t); }",
+            "    private void Verbatim(Entity row, Guid t) { row[@\"ownerid\"] = new EntityReference(\"team\", t); }",
+            "    private void VerbatimInterpolatedBind(Dictionary<string, object> f, Guid t) { f.Add($@\"ownerid@odata.bind\", $\"/teams({t})\"); }",
+            "    private void ThroughVerbatimConst(Entity row, Guid t) { row.SetAttributeValue(VerbatimKey, new EntityReference(\"team\", t)); }",
+            "    private void OtherColumns(Entity row, string v) { row[$\"owneridname\"] = v; row[@\"sprk_name\"] = v; }",
+            "}",
+        });
+
+        var sites = ScanOwnerWrites(new Dictionary<string, string> { ["Seeded.cs"] = code });
+
+        Assert.Equal(4, sites.Count);
+        Assert.Contains(("Seeded.cs", "Interpolated"), sites.Keys);
+        Assert.Contains(("Seeded.cs", "Verbatim"), sites.Keys);
+        Assert.Contains(("Seeded.cs", "VerbatimInterpolatedBind"), sites.Keys);
+        Assert.Contains(("Seeded.cs", "ThroughVerbatimConst"), sites.Keys);
     }
 
     [Fact(DisplayName = "Task 146 b2: negative control — the per-site check needs an owner on an upsert's field map")]
@@ -1623,7 +1752,7 @@ public class RecordOwnerAssignmentCensusTests
         var ownerKey = string.Join("|", OwnerKeyConst.Matches(code)
             .Select(m => Regex.Escape(m.Groups["name"].Value))
             .Distinct()
-            .Prepend(@"""ownerid(?:@odata\.bind)?"""));
+            .Prepend(OwnerKeyLiteral));
 
         // Members of this file that write an owner onto their FIRST parameter — a create helper the row is handed to
         // (CommunicationEnrichmentService.CreateReviewLogAsync(entity, …) resolves and applies the owner itself).
@@ -1806,9 +1935,10 @@ public class RecordOwnerAssignmentCensusTests
                     Add(Resolve(m), m.Index);
             }
 
+            // b2-r2 (verifier b2-r1 item 5 seed 4): a construction with a CALLER-CHOSEN id handed to a create is a create.
             foreach (Match m in FreshEntityCreate.Matches(code))
             {
-                if (IsFreshId(code, members, m.Index, m.Groups["rid"].Value))
+                if (IsFreshId(code, members, m.Index, m.Groups["rid"].Value) || HandedToACreate(code, members, m.Index))
                     Add(Resolve(m), m.Index);
             }
 
@@ -1825,7 +1955,8 @@ public class RecordOwnerAssignmentCensusTests
                     continue;
 
                 var id = InitializerId.Match(initializer);
-                if (!id.Success || IsFreshId(code, members, m.Index, id.Groups["rid"].Value))
+                if (!id.Success || IsFreshId(code, members, m.Index, id.Groups["rid"].Value)
+                    || HandedToACreate(code, members, m.Index))
                     Add(Resolve(named), m.Index);
             }
 
@@ -1842,7 +1973,8 @@ public class RecordOwnerAssignmentCensusTests
                     continue;
 
                 var id = Regex.Match(member, $@"\b{v}\s*\.\s*Id\s*=\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.]*)");
-                if (!id.Success || IsFreshId(code, members, m.Index, id.Groups["rid"].Value))
+                if (!id.Success || IsFreshId(code, members, m.Index, id.Groups["rid"].Value)
+                    || HandedToACreate(code, members, m.Index, row: m.Groups["v"].Value))
                     Add(Resolve(m), m.Index);
             }
         }
@@ -1905,9 +2037,11 @@ public class RecordOwnerAssignmentCensusTests
         @"UpdateRecordFieldsAsync\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_]\w*)",
         RegexOptions.Compiled);
 
-    /// <summary>A two-argument construction — a create (or upsert target) when the id is fresh.</summary>
+    /// <summary>A two-argument construction — a create (or upsert target) when the id is fresh, or when the row is handed
+    /// to a create. b2-r2: the id may be a member access (<c>request.RecordId</c>, <c>anchor!.Id</c>), so such a row
+    /// handed to a create is seen too.</summary>
     private static readonly Regex FreshEntityCreate = new(
-        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_]\w*)\s*\)",
+        @"new\s+(?:Microsoft\.Xrm\.Sdk\.)?(?:DataverseEntity|Entity)\s*\(\s*(?:""(?<lit>[a-z_]+)""|(?<id>[A-Za-z_][\w\.]*))\s*,\s*(?<rid>Guid\.NewGuid\(\)|[A-Za-z_][\w\.!]*)\s*\)",
         RegexOptions.Compiled);
 
     /// <summary>True when <paramref name="id"/> is <c>Guid.NewGuid()</c>, or a variable the same member assigns from
@@ -1921,6 +2055,41 @@ public class RecordOwnerAssignmentCensusTests
         var region = code[start..index];
         return Regex.IsMatch(region,
             @"\b" + Regex.Escape(id) + @"\s*=\s*(?:Guid\.NewGuid\s*\(\s*\)|[\w\.]*Generate\w*Id\s*\()");
+    }
+
+    /// <summary>A create call left open just before a construction: <c>CreateAsync(</c> / <c>Create(</c> /
+    /// <c>CreateReviewLogAsync(</c>, or <c>new CreateRequest { … Target =</c>.</summary>
+    private static readonly Regex CreateCallOpen = new(
+        @"(?:\b(?:Create|Create\w*Async)\s*\(|\bnew\s+CreateRequest\b[^;]*?\bTarget\s*=)\s*$",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// b2-r2 (verifier b2-r1 item 5 seed 4): true when the row constructed at <paramref name="index"/> — or the row variable
+    /// <paramref name="row"/> — is handed to a CREATE in the same member: inline (<c>CreateAsync(new Entity(T, id), ct)</c>,
+    /// <c>new CreateRequest { Target = new Entity(T, id) }</c>) or through the variable it is assigned to. Dataverse creates
+    /// with a supplied id, so a caller-chosen id does not make such a row an update. An UPSERT of a caller-chosen id is not
+    /// seen (KNOWN LIMITS).
+    /// </summary>
+    private static bool HandedToACreate(string code, IReadOnlyList<int> members, int index, string? row = null)
+    {
+        var start = members.LastOrDefault(i => i <= index);
+        var end = members.FirstOrDefault(i => i > index);
+        var member = code[start..(end > index ? end : code.Length)];
+        if (row is null)
+        {
+            var lead = code[start..index];
+            if (CreateCallOpen.IsMatch(lead))
+                return true;
+
+            var assigned = Regex.Match(lead, @"\b(?<v>[A-Za-z_]\w*)\s*=\s*$");
+            if (!assigned.Success)
+                return false;
+            row = assigned.Groups["v"].Value;
+        }
+
+        var v = Regex.Escape(row);
+        return Regex.IsMatch(member,
+            $@"\b(?:Create|Create\w*Async)\s*\(\s*{v}\s*[,)]|\bnew\s+CreateRequest\b[^;]*?\bTarget\s*=\s*{v}\b");
     }
 
     private static string? TableOfEntitySet(string? entitySet)

@@ -720,7 +720,7 @@ so no AppendTo is asked of the caller's own contact.
 | `sprk_todo`, `sprk_event` | `sprk_assignedto` (contact) | the caller's LINKED contact (task 141); none → blank + `assigned_unset` log | task 152, #1044 |
 | `sprk_matter`, `sprk_project` | `sprk_assignedtointernal` (contact) | same | owner A7 (Office quick-create) |
 | `sprk_communication` | `sprk_sentby` (systemuser) | the caller | S1 (the email draft) |
-| `sprk_workassignment` | — | not defaulted | it carries both `sprk_assignedto` and `sprk_assignedtointernal` with no shipped precedent; the model may still supply either |
+| `sprk_workassignment` | ~~— not defaulted~~ **b2-r2: `sprk_assignedtointernal` (contact)** | same as matter/project | **Superseded by §15b.** b2 left it out ("no shipped precedent"); the b2-r1 verifier showed the matter/project precedent applies (owner A7, and task 152 already reads this column as a work assignment's responsible person). Its separate `sprk_assignedto` stays model-supplied. |
 
 This supersedes §12c's "for" table for the tools.
 
@@ -1175,3 +1175,206 @@ scanner reads source at run time). Each was then restored from a byte copy and t
   - the tool-description follow-up (item 8, §13b).
 - **The #1081 relay (owner, 2026-10-02) changes nothing in 146's code or census.** That census grades OWNER writes,
   not role reach. Its only bearing is on reading G146-1 step 5, which §13c now explains.
+
+## 15. Fix round b2-r2 (2026-10-02, branch `task/uac-r2-146-b2-r2`)
+
+**Base.** `task/uac-r2-146-b2-r1` @ `02e79b879`. The work tip was not merged this round. The b2-r1 verifier merged
+`62ea6a8ee` with `--no-commit` and reported it clean, with ArchTests 369/369.
+
+### 15a. The b2-r1 verifier's items
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | Independent re-run: unit 14,373 / 0 / 54, ArchTests 368, both integration suites green; the work-tip merge is clean | Informational. |
+| 2 | The verifier's own process disclosure: relative-path seeds briefly wrote three lines into the MAIN worktree. The verifier restored them and nothing was committed. | Informational. Nothing on this branch changed. This round's seed runner uses absolute paths only and writes only inside this worktree. Each plant is restored from a byte copy, checked byte-identical, then touched (§15c). |
+| 3 | Prior items (a)–(f) and item 7 re-checked | Informational. Confirmed closed. |
+| 4, 9 | Owner round 7 item 3 ("record the person in the table's Assigned-To / 'for' column where one exists") is not applied to `sprk_workassignment`, and this is not raised as an owner question | **Closed in code** (§15b). `sprk_workassignment` → `sprk_assignedtointernal`, the matter/project precedent. Two tests added; seed S6 bites. |
+| 5, 10 | Census seeds (1)–(4) pass all 23 census tests | **Closed** (§15c). (1) Prefixed owner keys and (4) creates with a caller-chosen id are now DETECTED. (2) The verifier's exact seed (`Guid.TryParse` in a conditional) is refused; the general shape (a conditional whose other branch is not a resolution) is written into KNOWN LIMITS. (3) is written into KNOWN LIMITS. Seeds S1–S5 bite. |
+| 6 | The model-facing `create_record` description is still false for owned creates | **Deferred to the main session, unchanged.** It needs live re-pushes (§13b). |
+| 7 | The #1081 relay | Informational. Handled in b2-r1 (§13c, §14f). |
+| 8 | No owner decision contradicted beyond item 4 | Informational. |
+| 11 | AC11 | **Not closed.** G146-4 is a live gate, run after deploy together with task 149. |
+| 12 | AC13 | **Partly closed.** The unit and arch suites are green (§15d), and no package changed. Publish size and #1034 belong to the main session. |
+| 13 | AC14 | **Not closed.** G146-1 is a hard pre-deploy gate for the main session. The 17 evidence entries stay `VERBATIM REFUSAL PENDING`. |
+| 14 | AC16 | **Not closed.** This session may not open a PR. The text is §14e plus the §15e addendum. |
+| 15 | AC1, S6 b | **Task 158** (owner round 6). Not implemented here. The chat tool still refuses a work assignment filed under a secure record (`CreateRecord_AWorkAssignmentFiledToASecureMatter_IsRefused_…`). |
+
+### 15b. Item 4: the work assignment's "for" column
+
+**Change.** `OwnedChildWrite.ForPersonColumns` gains `["sprk_workassignment"] = ("sprk_assignedtointernal", "contact")`.
+Nothing else in the handler changed. The existing `WithForPersonAsync` path does the rest:
+- a value the request supplies is never overwritten;
+- a caller with no linked contact (task 141) leaves the column blank and logs `assigned_unset … caller_has_no_linked_contact`;
+- if the table's metadata does not map the column as a contact lookup, the row is created without it and
+  `assigned_unset … column_not_mapped` is logged.
+
+**Why this column and not `sprk_assignedto`.** `sprk_workassignment` carries both. Read-only check of live metadata
+(spaarkedev1, 2026-10-02): both are contact lookups. The choice follows two shipped precedents:
+- **Owner A7.** The other two roots, `sprk_matter` and `sprk_project`, name their maker in `sprk_assignedtointernal`.
+  The work assignment carries the same Assigned To (Internal) / (External) pair (`TrackingFieldTrio`: "Project / Matter
+  / Work Assignment carry the SAME `sprk_assigned*` lookups").
+- **Task 152.** `AssignedToDefaults.ResponsibleContactColumns` already reads a work assignment's
+  `sprk_assignedtointernal` (then `sprk_assignedattorney1`) as its responsible internal person. That is the person a
+  to-do filed under the work assignment defaults to.
+
+`sprk_assignedto` is in neither precedent, so it stays model-supplied. One table gets one "for" column.
+
+**Effect.** A chat-created work assignment under an ORDINARY parent, or under none, is:
+- created by the application;
+- owned by the resolver's team (the parent's business-unit team, or the caller's when unfiled);
+- for the caller, through their linked contact.
+
+Under a SECURE parent it is still refused (task 158).
+
+**Consequence, the same one A7 accepted for matter/project.** `sprk_assignedtointernal` is an access-conferring
+column (`MembershipOptions.CanonicalAccessConferringRegistry` lists it for all three roots). Task 142's Assigned-To
+auto-grant (Collaborate) therefore applies to the caller's own contact, exactly as for a matter or project.
+
+**Not raised as an owner question.** Round 7 item 3 is explicit ("where one exists"), and the column follows two shipped
+precedents. Reversing it means deleting one dictionary entry. It is listed for the owner's information in §15e.
+
+**Tests** (`SecureChildOwnershipAiToolTests`, real handler + real resolver):
+- `CreateRecord_AWorkAssignmentFiledToAnOrdinaryMatter_IsOwnedByThatMattersTeam_AndNamesTheCallerAsAssignedToInternal`
+  checks three things: owner = the matter's BU team; `sprk_AssignedToInternal` = the caller's contact; no
+  `sprk_AssignedTo` bind.
+- `CreateRecord_AWorkAssignmentWithASuppliedAssignedToInternal_KeepsIt`: an unfiled work assignment is owned by the
+  caller's BU team, and a supplied value is kept.
+
+The scripted metadata now gives `sprk_workassignment` its live `sprk_assignedto` and `sprk_assignedtointernal` lookups.
+
+### 15c. Item 5: census (`tests/Spaarke.ArchTests/RecordOwnerAssignmentCensusTests.cs`)
+
+**(1) Prefixed owner keys: detected.**
+- New `OwnerKeyLiteral` matches `"ownerid"` / `"ownerid@odata.bind"` plain, verbatim (`@"…"`) or interpolated with no
+  holes (`$"…"`, `$@"…"`, `@$"…"`).
+- It is used in three places, so every check that recognises the key accepts the same spellings:
+  - `OwnerWritesIn`: the owner-write census, the value check and the filing gate;
+  - `SiteOwnerProblems`: the per-site check;
+  - `OwnerKeyConst`: a const holding a prefixed key.
+- An interpolation WITH holes is a key built at runtime. It stays in KNOWN LIMITS, now spelled out.
+
+**(2) A conditional owner value.**
+- `HardCodedId` now also refuses `Guid.TryParse` / `ParseExact`. The verifier's exact seed is therefore refused even
+  though its other branch is the resolution.
+- The general shape (`c ? other : team`, `other ?? team`) is written into KNOWN LIMITS: an owner value is accepted when
+  it MENTIONS one resolved name.
+
+**(3) Reassigning a tainted name.** Written into KNOWN LIMITS: a later `team = request.MatterId;` does not clear the
+taint.
+
+**(4) Creates with a caller-chosen id: detected.**
+- New `HandedToACreate`: a row given a non-fresh id counts as a create when the same member hands it to
+  `Create(…)`, `Create…Async(…)` or `new CreateRequest { Target = … }`. It can be handed inline or through the
+  variable it is assigned to.
+- It applies to all three construction shapes:
+  - `new Entity(T, id)`;
+  - `new Entity { LogicalName = T, Id = id }`;
+  - `e.LogicalName = T; e.Id = id;`.
+- `FreshEntityCreate` now accepts a member-access id (`request!.RecordId`). Before, such a construction was not
+  matched at all.
+- An UPSERT of a caller-chosen id is not counted, nor a create in another member or file. Both are written into KNOWN
+  LIMITS. Dataverse creates on an upsert of an absent id.
+- Also noted while reading, and written into KNOWN LIMITS: a target-typed construction (`Entity row = new("t")`).
+  Grep finds none in `src/server`.
+
+**The real tree is unchanged by the new detection.** The census passes with the same counts:
+- no server create hands a caller-chosen id to a create;
+- no server code spells the owner key with a prefix (Grep `[$@]+"ownerid` in `src/server`: no matches).
+
+**New negative controls** (census 23 → 26):
+- `OwnerWriteDetector_NegativeControl_PrefixedKeyLiterals`: `$"ownerid"`, `@"ownerid"`, `$@"ownerid@odata.bind"` and a
+  `@"ownerid"` const are found; `$"owneridname"` and `@"sprk_name"` are not.
+- `RoutedValueCheck_NegativeControl_PrefixedKeyAndParsedBranch`:
+  - a `@"ownerid"` write of the member's own resolution is seen AND accepted (an unseen write would report "writes no
+    owner");
+  - a `$"ownerid"` write of `Guid.NewGuid()` is flagged;
+  - the `Guid.TryParse` conditional is flagged as hard-coded.
+- `Detector_NegativeControl_CallerChosenIdCreates`:
+  - 7 creates are found: the two-argument form, the initializer, the `LogicalName` assignment, `CreateRequest`,
+    `Create(row)`, a member-access id, and an owned one;
+  - an update, an upsert (KNOWN LIMITS), and an update beside another row's create are not;
+  - as Routed sites, the 6 owner-less creates are flagged and the `ApplyTo`-owned one is not.
+
+**Seed-and-bite (b2-r2).**
+- The runner script sits in the session scratchpad and uses absolute paths only.
+- Census plants are checked with a `--no-build` run, because the scanner reads source at run time. S6 rebuilds the unit
+  project.
+- After each plant, the file is restored from a byte copy, asserted byte-identical, and touched. `git status` afterwards
+  showed only this round's intended edits.
+
+| Plant | Item | What failed |
+|---|---|---|
+| S1: `entity[$"ownerid"] = new EntityReference("team", Guid.NewGuid());` in `TodoGenerationService.CreateTodoAsync` (the verifier's seed 1) | 5 | `EveryOwnerWriteIsCensused` (count 1 → 2) and `EveryRoutedOwnerWriteTakesItsValueFromAResolution` |
+| S2: the same with `@"ownerid"` | 5 | the same two |
+| S3: `ThreadResolver.FindOrCreateDefaultThreadAsync` writes `ownerTeamId != Guid.Empty && Guid.TryParse(keyId, out var k) ? k : ownerTeamId` (the verifier's seed 2) | 5 | `EveryRoutedOwnerWriteTakesItsValueFromAResolution` |
+| S4: `var seeded = new Entity(EntityTodo, seededId); await _dataverse!.CreateAsync(seeded, ct);` in `TodoGenerationService` (the verifier's seed 4) | 5 | `EveryChildCreateSiteIsCensused` (count 1 → 2) and `EveryRoutedCreateSiteWritesItsOwnRowsOwner` |
+| S5: `await _dataverse!.CreateAsync(new Entity { LogicalName = EntityTodo, Id = entity.Id }, ct);` (seed 4, initializer form) | 5 | the same two |
+| S6: the `sprk_workassignment` entry removed from `OwnedChildWrite.ForPersonColumns` | 4 | `CreateRecord_AWorkAssignmentFiledToAnOrdinaryMatter_…_AndNamesTheCallerAsAssignedToInternal` |
+
+The verifier's seed (3), the reassigned tainted local, is a documented limit and was not re-planted.
+
+### 15d. Tests
+
+**Counts on this branch** (`02e79b879` plus this round's changes, Debug, 2026-10-02). Each suite was run once in full
+after the seed-and-bite runs had restored every plant.
+
+| Suite | Result |
+|---|---|
+| `tests/unit/Sprk.Bff.Api.Tests` | 14,375 passed / 0 failed / 54 skipped (14,429). That is +2, the two work-assignment tests. |
+| `tests/Spaarke.ArchTests` | 371 / 371. That is +3; the census now has 26 tests. |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` | 104 / 104 |
+| `tests/integration/Spe.Integration.Tests` | 403 passed / 0 failed / 25 skipped |
+
+No failure needed a re-run, so there was no contention to report. One change landed after the unit run: the section
+reference in `OwnedChildWrite`'s XML doc comment, §15a → §15b. It is comment-only, and the ArchTests and both
+integration runs rebuilt over it.
+
+**Affected tests, run first:**
+- the census filter: 26 / 26;
+- `SecureChildOwnershipAiToolTests`, `DataverseCreateRecordHandler*` and `EmailDraftToolHandler*`: 93 / 93.
+
+**New tests:**
+- `SecureChildOwnershipAiToolTests` +2;
+- `RecordOwnerAssignmentCensusTests` +3: `OwnerWriteDetector_NegativeControl_PrefixedKeyLiterals`,
+  `RoutedValueCheck_NegativeControl_PrefixedKeyAndParsedBranch` and `Detector_NegativeControl_CallerChosenIdCreates`.
+
+No existing test changed. The only fixture edit gives the scripted `sprk_workassignment` metadata its two live contact
+lookups.
+
+**ADR-038.** No `Mock<HttpMessageHandler>`, no DI-registration test, no constructor null-check test.
+
+### 15e. PR description addendum (append to §14e)
+
+> **b2-r2:**
+> - A chat-created work assignment names the caller in `sprk_assignedtointernal`. This is the matter/project
+>   precedent (owner A7), and task 152 already reads that column as a work assignment's responsible person. It is one
+>   dictionary entry, and the owner may reverse it.
+> - The census also sees owner keys spelled `$"ownerid"` / `@"ownerid"`, and creates of a row given a caller-chosen id.
+>   Its remaining blind spots are listed in its maintenance procedure.
+
+### 15f. Placement and component justification (CLAUDE.md §10 / §11)
+
+- No new service, endpoint, DI registration, option, job, column or package.
+- One new entry in an existing static dictionary (`OwnedChildWrite.ForPersonColumns`). It writes an EXISTING column
+  through the existing `WithForPersonAsync` path.
+- The census changes are test-only.
+- Publish size is not measured here; the main session measures it.
+
+### 15g. Not closed (and why)
+
+- **Owner questions, unchanged from §13f / §14f:**
+  - must F3's limit govern moving a CHILD out of a secure root;
+  - the E1 vs owner round 5 reconciliation.
+- **For the owner's information (no question):** the work assignment's "for" column choice (§15b), which is reversible.
+- **S6 b is task 158** (owner round 6).
+- **Live gates, all main session:**
+  - G146-1 (AC14), a hard pre-deploy gate;
+  - G146-2, G146-3 and G146-5;
+  - G146-4 (AC11), after deploy with task 149. G146-4 can also confirm one chat-created work assignment: owned by the
+    BU team, Assigned To (Internal) = the maker's contact.
+- **Main session:**
+  - publish size and #1034 (AC13);
+  - the PR (AC16, text in §14e + §15e);
+  - the tool-description follow-up (item 6 here, item 8 in b2-r1; §13b).
+- **Census limits that remain** are listed in its MAINTENANCE PROCEDURE item 4. Behaviour tests pin every existing
+  writer's owner, so these limits bite only on new code.

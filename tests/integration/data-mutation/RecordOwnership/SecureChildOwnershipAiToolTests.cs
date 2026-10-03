@@ -226,6 +226,38 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
     }
 
     [Fact]
+    public async Task CreateRecord_AWorkAssignmentFiledToAnOrdinaryMatter_IsOwnedByThatMattersTeam_AndNamesTheCallerAsAssignedToInternal()
+    {
+        // Owner round 7 item 3 ("record the person in the table's Assigned-To / 'for' column where one exists"), b2-r2
+        // (verifier b2-r1 item 4): the third root follows the matter/project precedent (A7), the column task 152 reads as
+        // a work assignment's responsible internal person. Its separate sprk_assignedto is not defaulted.
+        var result = await CreateRecord("sprk_workassignment", Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.Posts.Should().BeEmpty("never owned by the individual");
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_workassignment").Subject.Fields;
+        Owner(fields).Should().Be(Directory.ChildTeam, "record-first: the parent matter's business-unit team");
+        Bind(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({CallerContact:D})");
+        fields.Keys.Should().NotContain("sprk_AssignedTo@odata.bind", "one 'for' column per table");
+    }
+
+    [Fact]
+    public async Task CreateRecord_AWorkAssignmentWithASuppliedAssignedToInternal_KeepsIt()
+    {
+        var colleague = Guid.NewGuid();
+
+        var result = await CreateRecord("sprk_workassignment",
+            ("sprk_name", JsonSerializer.SerializeToElement("Review lease")),
+            Lookup("sprk_assignedtointernal", "contact", colleague));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var fields = _appCreates.Should().ContainSingle(c => c.Table == "sprk_workassignment").Subject.Fields;
+        Owner(fields).Should().Be(Directory.ChildTeam, "unfiled: the caller's business-unit default team");
+        Bind(fields, "sprk_AssignedToInternal@odata.bind").Should().Be($"/contacts({colleague:D})",
+            "a supplied value is never overwritten");
+    }
+
+    [Fact]
     public async Task CreateRecord_AWorkAssignmentFiledToASecureMatter_IsRefused_ItMustBeSecuredByProvisioning_Task158()
     {
         // Owner round 6: a work assignment under a secure root is itself secure — through provisioning (task 158), never
@@ -513,7 +545,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("ownerid", "systemuser", "ownerid"),
             },
             ["sprk_matter"] = new[] { ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal") },
-            ["sprk_workassignment"] = new[] { ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter") },
+            ["sprk_workassignment"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_assignedto", "contact", "sprk_AssignedTo"),
+                ("sprk_assignedtointernal", "contact", "sprk_AssignedToInternal"),
+            },
             ["sprk_communication"] = new[]
             {
                 ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),

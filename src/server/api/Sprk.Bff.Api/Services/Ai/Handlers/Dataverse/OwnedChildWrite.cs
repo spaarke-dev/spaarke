@@ -130,10 +130,14 @@ internal static class OwnedChildWrite
     /// Owner round 7 item 3: "record the person in the table's Assigned-To / 'for' column where one exists". Each entry
     /// follows the precedent already shipped for that table, so one table never has two "for" columns:
     /// <c>sprk_todo</c> / <c>sprk_event</c> → <c>sprk_assignedto</c> (contact; task 152, #1044);
-    /// <c>sprk_matter</c> / <c>sprk_project</c> → <c>sprk_assignedtointernal</c> (contact; owner A7, Office quick-create);
-    /// <c>sprk_communication</c> → <c>sprk_sentby</c> (systemuser; S1, the email draft). <c>sprk_workassignment</c> carries
-    /// both <c>sprk_assignedto</c> and <c>sprk_assignedtointernal</c> with no shipped precedent for either, so it is not
-    /// defaulted (task note §13). A table not listed has no "for" column.
+    /// <c>sprk_matter</c> / <c>sprk_project</c> / <c>sprk_workassignment</c> → <c>sprk_assignedtointernal</c> (contact;
+    /// owner A7, Office quick-create);
+    /// <c>sprk_communication</c> → <c>sprk_sentby</c> (systemuser; S1, the email draft). <c>sprk_workassignment</c> is the
+    /// third root and carries the same Assigned To (Internal) / (External) pair as the other two (live metadata,
+    /// 2026-10-02). Task 152 (<see cref="AssignedToDefaults.ResponsibleContactColumns"/>) already reads its
+    /// <c>sprk_assignedtointernal</c> as the work assignment's responsible internal person, so that column follows the
+    /// matter/project precedent. Its extra <c>sprk_assignedto</c> is left to the model (b2-r2, verifier b2-r1 item 4; task
+    /// note §15b). A table not listed has no "for" column.
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, ForPersonColumn> ForPersonColumns =
         new Dictionary<string, ForPersonColumn>(StringComparer.OrdinalIgnoreCase)
@@ -142,6 +146,7 @@ internal static class OwnedChildWrite
             ["sprk_event"] = new(AssignedToDefaults.AssignedToAttribute, "contact"),
             ["sprk_matter"] = new("sprk_assignedtointernal", "contact"),
             ["sprk_project"] = new("sprk_assignedtointernal", "contact"),
+            ["sprk_workassignment"] = new("sprk_assignedtointernal", "contact"),
             ["sprk_communication"] = new("sprk_sentby", "systemuser"),
         };
 
