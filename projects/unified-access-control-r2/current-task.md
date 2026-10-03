@@ -1,5 +1,32 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-03 (checkpoint #4). **This block supersedes every block below it.**
+>
+> ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #4
+>
+> | Field | Value |
+> |---|---|
+> | **Master / dev BFF** | Master = dev BFF = `818840ac6` (#1096 + #1097). Work branch `4751fcdc9` = master + docs + tasks 159-170. |
+> | **Owner rounds 8-11** | All recorded in `notes/session27-owner-decisions-and-research.md`. **R11 APPROVED every dev live step needed to integrate batch 4** (schema / FLS / roles / null repair / test-record probes / BFF + SPA deploys). |
+> | **Test user** | `uac.child.user@demo.spaarke.com` in Spaarke Business Unit 1 (Core + Basic User; no rights on secure project 65a3fab2). The password went to the owner; it is not stored. |
+> | **New tasks** | 159-170 (#1098-#1109): the route-sweep fixes per surface (H wave), the 167 every-route guard, 168 form lock, 169 TS stamp mirror, 170 filter rename (after integration). |
+>
+> ### Running workflows (do NOT re-launch; read the journals)
+> | Workflow | Run | What |
+> |---|---|---|
+> | **batch 4c** | `wf_c4f2e9b0-1dd` | Fix lanes: 133 (R10 item 4 snapshot/restore), 146 (R10 item 7 F3 on child move-out), 150 (R10 items 9-11), 157 (blocking CI jest gate), 142 r3 (A4 accepted), 149 r3 (merges 143, wires the guard). Then: 148 (on 149 + 133) → 147; 140 (on 142); 158 (on 148 + 156-c1-r2). |
+> | **sweep 159-169** | `wf_f922c982-555` | Pool of 4: 167, 159, 160, 161, 162, 163, 164, 165, 166, 168, 169. Each is verified, with up to 2 fix rounds. |
+>
+> ### Ready-to-merge branches (verified)
+> 132 `task/uac-r2-132-r1` · 137 `task/uac-r2-137-b2` · 143 `task/uac-r2-143-r2` · 156 `task/uac-r2-156-c1-r2` (plus 133 / 146 / 150 / 157, being re-done in 4c).
+>
+> ### NEXT ACTIONS
+> 1. When 4c ends: integrate on an integ branch (merge order: 133-c1, 143-r2, 150-c1, 137-b2 → 132-r1, 146-c1, 149-r3, 148, 147, 142-r3, 140, 156-c1-r2, 158, 157-c2). Then run BOTH integration suites in full plus unit + arch; measure publish size; open the PR (cite 143's §6.5 path A, 142's ADR-034 A4 (+ the main session's `.claude/adr` edit), and 146+149 shipped together).
+> 2. Live, before deploying that build (R11-approved): 133 schema; 143 G-1 + O2; 150 G-0 null repair + FLS (invoice included); 146 G146-1 (role 9→26) + G146-2; 142 ledger schema + ribbon. After the deploy: each task's live gates with `uac.child.user`.
+> 3. When the sweep ends: integrate 159-169 (reconcile 167's ledger from each task's "Route authorization ledger input"), then 170.
+> 4. Peer coordination: #1044 (083) has the measured 9/11. 166 records the bff-deploy skill §9c edit for the main session.
+>
+
 > **Last Updated**: 2026-10-03 ~03:00Z (checkpoint #3). **This block supersedes every block below it.**
 >
 > ## ⚡ QUICK RECOVERY — SESSION 27 CHECKPOINT #3 (READ FIRST)
