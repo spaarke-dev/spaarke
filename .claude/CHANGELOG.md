@@ -7,6 +7,19 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-03 — root `CLAUDE.md` Calendar row corrected; `CalendarFilterPane` exported from the components barrel
+
+Root `CLAUDE.md`'s "Calendar shared components" row described `CalendarSection` and `CalendarFilterPane` as two
+intentional variants without saying that the side pane (`src/solutions/CalendarSidePane/src/App.tsx`) actually
+renders **`CalendarSection` + `CalendarFilterOutput`**, not `CalendarFilterPane`. That migration was never finished.
+Two files in the same solution (`utils/parseParams.ts`, `utils/postMessage.ts`) imported the type
+`CalendarFilterPaneOutput` from `@spaarke/events-components`, which the package's barrels never exported, so the import
+could not resolve. **The side pane is not currently in use** (owner, 2026-10-03). It may return, so the import is
+fixed rather than the solution deleted: `Spaarke.Events.Components/src/components/index.ts` now re-exports
+`CalendarFilterPane` and its types. `IEventDateInfo` is deliberately left out, because `CalendarSection` already
+exports a different type under that name from the same barrel. Found by the `spaarke-ontology-platform-r1` reuse
+audit (finding X19) and split out of that project's PR because it is unrelated to ontology work.
+
 ###### 2026-10-03 — ADR-002 WP-1 amended: a platform-native declarative mechanism may own an invariant (spaarkeai-word-add-in-r1 task 087)
 
 Root `CLAUDE.md` (the "Dataverse write path" pointer row), `.claude/adr/ADR-002-thin-plugins.md` and
