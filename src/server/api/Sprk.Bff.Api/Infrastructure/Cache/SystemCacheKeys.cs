@@ -17,7 +17,8 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
 /// 15 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
-/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068, its justification in its own remarks; see
+/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068 and approved by the owner on review 2026-10-02, its
+/// justification in its own remarks; see
 /// <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c> for the earlier per-exception
 /// three-question justification).
 /// </para>
@@ -97,6 +98,7 @@ public static class SystemCacheKeys
     /// independently on each instance and after every restart; (2) a tenant key would not help — the job's GUID is the
     /// unit, and every instance publishing for that job must share one counter; (3) without it a <c>Last-Event-ID</c>
     /// reconnect skips or repeats events.
+    /// Architecture review: approved by the owner, 2026-10-02.
     /// </summary>
     public const string JobStatusSequence = "job-status-sequence";
 

@@ -19,7 +19,7 @@
  * record state + a live `IResolverWriteContext`.
  */
 import type { FiledAssociation, IResolverWriteContext } from '../../logic/connections';
-import type { IAccessPermissionOption, RecordTypeCatalogEntry, IPolymorphicPickerWebApi } from '@spaarke/ui-components';
+import type { RecordTypeCatalogEntry, IPolymorphicPickerWebApi } from '@spaarke/ui-components';
 
 /**
  * A record the host created via the Quick Start / Create*Wizard surface-launch
@@ -121,15 +121,13 @@ export interface EmailConnectionsReviewProps {
 export interface EmailTrackingPanelProps {
   monitor: boolean;
   highPriority: boolean;
-  accessPermission: number | null;
-  /** Injected access-permission segments (value + label + optional color) — entity-agnostic (task 023, FR-14). Caller supplies its `sprk_communication` OptionSet metadata. */
-  accessPermissionOptions: IAccessPermissionOption[];
+  // No access-permission props (unified-access-control-r2 task 138, owner Q6): a communication
+  // INHERITS its parent's Access Permission; its own column is retired, so this panel neither shows
+  // nor writes one. The parent record's pill is the one place to change it.
   onMonitorChange: (value: boolean) => void | Promise<void>;
   onHighPriorityChange: (value: boolean) => void | Promise<void>;
-  onAccessPermissionChange: (value: number) => void | Promise<void>;
   monitorLabel?: string;
   highPriorityLabel?: string;
-  accessPermissionLabel?: string;
   /** Disables the controls (visual + pointer-events) — no write affordance. */
   readOnly?: boolean;
   /**

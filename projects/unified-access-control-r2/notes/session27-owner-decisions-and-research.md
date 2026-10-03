@@ -133,6 +133,48 @@ These answer the seven questions raised after batch 2 (tasks 141, 144, 145, 155,
      - a secure parent → the named "Secure Record Owners" team (C10 part 2).
      - With one customer BU per environment, "the creating user's BU" and "the parent's BU" are the same unit.
 
+## Owner answers, round 6 (2026-10-02). BINDING.
+
+1. **A work assignment (or project) filed under a SECURE matter or project is itself secure: "yes".** This is task 158. Such a record becomes a real secure root: `sprk_issecure`, the named-team owner, its own container and the creator share. The parent's sharees can see it. This supersedes task 155's interpretation (iii) for these records.
+2. **Record-first ownership:** explained to the owner. The new record's owner is the parent's business-unit team; the creator's (or BFF app user's) unit team is used only when there is no parent; a secure parent's records go to the named team. With one customer BU per environment, it gives the same result as creator-first. It is kept as implemented, and the owner had no objection.
+4. **Parent unsecured → its secured work assignments and projects STAY secure: "yes"** (asked 2026-10-02 with the recommendation "stay secure"). There is no unsecure cascade. Unsecuring a child is an explicit act by the people F3 allows. This is now a task 158 constraint.
+   - **Clarification (same day): "but user can unsecure any related records."**
+     - The parent's unsecure response lists the related records that stayed secure.
+     - The same action can optionally unsecure any of them where the caller holds F3 rights.
+     - Each can also be unsecured on its own later.
+     - Interpretation (owner-reversible): a related record whose parent is still secure cannot be unsecured; it is refused with a message, because the round-6 rule would secure it again.
+3. **Customer BU seeding:** the owner believes customer-provisioning-orchestration-r1 seeds the customer's business unit as a prerequisite. Verified in that project's design: §9.3 places both Dataverse application users in the **Root** BU, and no step creates a customer BU. #1094 stands as a design change for that project; its 2026-10-02 comment cites §9.3. The dev root-BU placement is a dev artifact (round 5).
+
+## Owner answers, round 7 (2026-10-02). BINDING: "follow recommended" on 1-3, "yes apply" on 4.
+
+1. **Task 137, external-access reconciliation job posture:**
+   - Enable the schedule in **report-only** mode now. Enable writes only after the owner has reviewed one report.
+   - Inactive contacts and inactive roots stay READ guards only, so reactivating one restores access with no data repair.
+2. **Task 133, the persisted human creator for app-created secure rows** (Office quick-create, created by the BFF app identity), option (a):
+   - A NEW server-stamped column records the actual person who made the record. Resume-provisioning shares to that person.
+   - The column is written only by the BFF, as the persisted creator for that purpose.
+   - The schema change runs as part of 133's live gate (approved by this decision).
+3. **Task 146, AI tool handlers that create records as the user** (DataverseCreateRecordHandler, EmailDraftToolHandler): apply the **G5 pattern**.
+   - Check the caller's rights AS THE USER (CallerRecordAccessProbe / RetrievePrincipalAccess pre-check).
+   - Create AS THE APP, owned by the team (the named secure team under a secure parent; otherwise the RecordOwnershipResolver team).
+   - Record the person in the table's Assigned-To / "for" column where one exists.
+   - This supersedes those handlers' "User-OBO ONLY" rule (owner-approved §6.5 path B for that spec rule; cite it in the PR).
+4. **Task 146, live role extension: yes, apply.**
+   - The "Secure Record Owner" role goes from 9 to **26** tables, all Read at Basic, per 146's `config/secure-record-owner-role.json`.
+   - Use 145's procedure: negative control → verbatim refusals → dry run → -Apply → §5.4 strip → -Verify → probes.
+   - Apply it BEFORE deploying 146's code, because Dataverse refuses team ownership without Read.
+5. **Owner follow-up question: do the child records of a secure record inherit the parent's user and contact access?** Confirmed by design:
+   - **Internal users:** task 149. Each child's principals and rights equal the root's POA share set, kept in sync on create, on share/unshare (BFF and out-of-the-box MDA sharing) and on secure/unsecure, and never wider than the root's. Task 147 does the same for client writers.
+   - **Contacts:** the external data plane scopes child rows through their root's accessible set. A contact's rights on a secure root, which come from direct named grants only (FR-22), extend to that root's children and no further. Task 136 makes the gate rights-based, and task 156 keeps the child→root link fresh.
+   - Task 149 has not run yet; it is blocked on 146.
+
+## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
+
+- **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
+- **For the census:** at the root, Basic User's read reaches the whole org, Secure Record included, for every root-team member (171 members per the peer's note). Under round 5 this is an accepted dev finding, not a production exposure. The census keeps reporting it; no exception is coded.
+- **Also observed by the peer:** the "Spaarke Demo" BU's team holds **System Administrator**, so every member of that team bypasses all record security, secure isolation included. This is another dev artifact under round 5. No action is taken in dev; the census must flag any team holding System Administrator in production.
+- **Dev BFF state, checked 2026-10-02 (Kudu deployment list):** the peer deployed master `5e39f2bea` at 03:35Z. Our `bca0941f6` (batches 1+2) followed at 03:41Z and is the active deployment. `bca0941f6` contains `5e39f2bea`, so neither deploy undid the other. The peer's 12:23Z work was restarts, not a deploy.
+
 ## Live facts verified this session
 
 - `sprk_accesspermission` is **Standard 100000000 / Limited 100000001 / Restricted 100000002** on sprk_project, and identical on sprk_matter and sprk_workassignment.

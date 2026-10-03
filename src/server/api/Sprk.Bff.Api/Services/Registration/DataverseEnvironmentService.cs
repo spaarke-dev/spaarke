@@ -115,7 +115,12 @@ public class DataverseEnvironmentService : IDisposable
     /// Retrieves all active environment records.
     /// NFR-01: Fresh read from Dataverse (no caching).
     /// </summary>
-    public async Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
+    /// <remarks>
+    /// Virtual so a test can stand in for the registry at this boundary without an HTTP double (ADR-038 B1) — the
+    /// <c>ExternalParticipationService</c> convention. The identity-link reconciliation job reads it to reconcile
+    /// every environment this BFF provisions users into (unified-access-control-r2 task 141).
+    /// </remarks>
+    public virtual async Task<List<DataverseEnvironmentRecord>> GetActiveEnvironmentsAsync(CancellationToken ct = default)
     {
         var select = string.Join(",", DataverseEnvironmentRecord.AllColumns);
         var url = $"{EntitySetName}?$filter=sprk_isactive eq true&$select={select}&$orderby=sprk_name asc";

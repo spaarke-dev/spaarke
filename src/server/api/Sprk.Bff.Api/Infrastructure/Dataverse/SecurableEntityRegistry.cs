@@ -77,6 +77,9 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
     private readonly IDistributedCache _cache;
     private readonly ILogger<SecurableEntityRegistry> _logger;
 
+    /// <summary>The valid catalog already obtained in this scope, if any. See <see cref="GetCatalogAsync"/>.</summary>
+    private EntityCatalog? _scopeCatalog;
+
     public SecurableEntityRegistry(
         IDataverseService dataverseService,
         IDistributedCache cache,
@@ -148,9 +151,20 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
     /// </summary>
     private async Task<EntityCatalog> GetCatalogAsync(CancellationToken ct)
     {
+        // SCOPE MEMO (task 155). Registered Scoped, so this lives for one request / one job scope. A child record's
+        // resolution asks a SECOND question (is its root's entity securable?) after the record's own
+        // classification; without the memo that second question is another full-org metadata round trip whenever
+        // the distributed cache is down — the very cost the task 151 review removed. Only a VALID catalog is
+        // memoized (the same rule as the distributed cache), so an empty answer still re-queries on the next call.
+        if (_scopeCatalog is not null)
+        {
+            return _scopeCatalog;
+        }
+
         var cached = await TryGetFromCacheAsync(ct).ConfigureAwait(false);
         if (cached is not null)
         {
+            _scopeCatalog = cached;
             return cached;
         }
 
@@ -190,6 +204,7 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
 
         await TrySetInCacheAsync(catalog, ct).ConfigureAwait(false);
 
+        _scopeCatalog = catalog;
         return catalog;
     }
 

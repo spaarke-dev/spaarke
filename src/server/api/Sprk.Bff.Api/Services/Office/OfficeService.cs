@@ -129,6 +129,38 @@ public class OfficeService : IOfficeService
         _logger = logger;
     }
 
+    /// <summary>
+    /// The Office save's owner-event publish (POST /office/save; R3 task 082, UAC-r2 task 152 / ADR-034 A3): the saved
+    /// <c>sprk_document</c> is owned by the business-unit default owner TEAM the save resolved (task 080), so the event
+    /// names that team — <c>PersonIdType = Team</c>, <c>PersonId = owningTeamId</c>, the key
+    /// <c>MembershipReconciliationJob</c> builds for the same row — never the caller's AAD oid. Should the save ever
+    /// hold no team, the owner is read back from the row. Fire-and-forget (ADR-034 Q2): never throws.
+    /// </summary>
+    /// <remarks>
+    /// Extracted from <see cref="SaveAsync"/> (task 152 verifier round 1, item 7) so the site's own decisions — which
+    /// table, which owner, the read-back fallback — run in a test. <see cref="SaveAsync"/> depends on a dozen concrete
+    /// collaborators (SPE upload, job store, persistence) and has no unit harness; it passes exactly
+    /// (<c>documentId</c>, <c>owningTeamId</c>) here.
+    /// </remarks>
+    internal static Task<MembershipChangedEvent?> PublishSavedDocumentOwnerAsync(
+        IMembershipEventPublisher publisher,
+        IGenericEntityService dataverse,
+        Guid documentId,
+        Guid? owningTeamId,
+        string correlationId,
+        ILogger logger,
+        CancellationToken cancellationToken)
+        => MembershipOwnerEvents.PublishOwnerAddedAsync(
+            publisher,
+            dataverse,
+            "sprk_document",
+            documentId,
+            // The team this save resolved; should it ever be absent, the owner is read back from the row.
+            owningTeamId is { } savedTeamId ? new Microsoft.Xrm.Sdk.EntityReference("team", savedTeamId) : null,
+            correlationId,
+            logger,
+            cancellationToken);
+
     /// <inheritdoc />
     public Task<GenerateProfileResult> GenerateProfileAsync(
         Guid documentId,
@@ -960,34 +992,20 @@ public class OfficeService : IOfficeService
                 }
 
                 // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
-                // Per event-source-inventory §3B (line 64), POST /office/save
-                // creates a sprk_document. ⚠️ CORRECTED 2026-09-30 (task 080): its ownerid is NOT the caller —
-                // the row is owned by a business-unit default owner TEAM (RECORD OWNERSHIP above); the event
-                // records the caller as the creator-member (ADR-034's call, flagged to UAC-r2). Publish Added
-                // event so the junction-updater
-                // (task 084) + nightly recon (task 085) observe the new
-                // association. When MembershipEventPublisherOptions.Enabled=false
-                // (default), the NullMembershipEventPublisher peer logs + returns
-                // (ADR-032 P2). The Task is discarded explicitly to signal
-                // fire-and-forget semantics — publisher contract guarantees no
-                // exceptions propagate to this site.
-                if (Guid.TryParse(userId, out var callerOid))
-                {
-                    var membershipEvent = new MembershipChangedEvent
-                    {
-                        PersonId = callerOid,
-                        PersonIdType = PersonIdentityType.User,
-                        EntityLogicalName = "sprk_document",
-                        EntityRecordId = documentId,
-                        SourceField = "ownerid",
-                        Role = "owner",
-                        MutationType = MembershipMutationType.Added,
-                        CorrelationId = correlationId,
-                        OccurredOnUtc = DateTime.UtcNow,
-                    };
-
-                    _ = _membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
-                }
+                // Per event-source-inventory §3B (line 64), POST /office/save creates a sprk_document owned by the
+                // business-unit default owner TEAM resolved above (RECORD OWNERSHIP). UAC-r2 task 152 (ADR-034 A3):
+                // the event states that real owner — PersonIdType=Team, PersonId=owningTeamId — the same key
+                // MembershipReconciliationJob builds for this row, instead of the caller's AAD oid as a User.
+                // When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns
+                // (ADR-032 P2). The Task is discarded explicitly: fire-and-forget, never throws.
+                _ = PublishSavedDocumentOwnerAsync(
+                    _membershipEventPublisher,
+                    _genericEntityService,
+                    documentId,
+                    owningTeamId,
+                    correlationId,
+                    _logger,
+                    cancellationToken);
 
                 // Update job status to records created
                 jobRecord = jobRecord with
@@ -1045,6 +1063,42 @@ public class OfficeService : IOfficeService
                 JobId = jobId,
                 StatusUrl = $"/api/office/jobs/{jobId}",
                 StreamUrl = $"/api/office/jobs/{jobId}/stream"
+            };
+        }
+        catch (SdapProblemException refusal)
+        {
+            // A DELIBERATE refusal, not a server fault (unified-access-control-r2 task 155, merged with task 075):
+            // RecordContainerResolver refuses with a stable reason code when it cannot show where this save's bytes may
+            // go — container_record_not_found, container_ancestor_unverifiable, secure_record_container_missing, … —
+            // and nothing has been uploaded. Task 075's catch-all below turns UNEXPECTED exceptions into a generic 500;
+            // a refusal must instead reach the pane with its own code and its client-facing text (SdapProblemException
+            // carries RFC 7807 Title/Detail, never server internals), in the save's pre-existing refusal shape.
+            _logger.LogWarning(
+                "Save for {ContentType} by user {UserId} was refused ({Code}, HTTP {Status}); nothing was uploaded",
+                request.ContentType, userId, refusal.Code, refusal.StatusCode);
+
+            if (jobId != Guid.Empty && jobRecord is not null)
+            {
+                await _jobs.RecordAsync(
+                    jobRecord with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "Failed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    },
+                    refusal.Code,
+                    CancellationToken.None);
+            }
+
+            return new SaveResponse
+            {
+                Success = false,
+                Error = new SaveError
+                {
+                    Code = refusal.Code,
+                    Message = refusal.Detail ?? refusal.Title,
+                    Retryable = refusal.StatusCode >= 500
+                }
             };
         }
         catch (Exception ex)
@@ -1891,6 +1945,8 @@ public class OfficeService : IOfficeService
     {
         RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
         RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
+        // Task 076: the platform's next numbers were all held by rows; a retry later (or a re-seed) succeeds.
+        RecordCreationFailureKind.NumberUnavailable => StatusCodes.Status409Conflict,
         _ => StatusCodes.Status500InternalServerError
     };
 

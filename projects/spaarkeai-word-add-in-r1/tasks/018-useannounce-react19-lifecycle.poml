@@ -65,6 +65,13 @@
     <criterion testable="true">No test deleted or newly skipped (ADR-038).</criterion>
   </acceptance-criteria>
 
+  <steps mode="directional">
+    <!-- Added 2026-10-02 by task 079 (record integrity) so this file validates. The task was authored WITHOUT a
+         steps element and was executed against its goal, constraints and acceptance criteria, which remain the
+         record of what was asked. This element is not a claim about how the work was done; see notes. -->
+    <step>Work to the goal, constraints and acceptance criteria above. (Authored without steps; see the notes for what was done.)</step>
+  </steps>
+
   <outputs>
     <output type="code">src/client/office-addins/shared/taskpane/hooks/useAnnounce.ts</output>
     <output type="test">src/client/office-addins/shared/taskpane/hooks/__tests__/useAnnounce.test.ts</output>
@@ -88,7 +95,7 @@
       passed with it removed.
 
       FIX SHAPE CHOSEN: "regions rendered directly in the tree" (no portal) -- `useAnnounce()` now returns
-      `liveRegion: ReactElement` (both `<div>`s built via `createElement`, refs preserved for imperative
+      `liveRegion: ReactElement` (both `&lt;div&gt;`s built via `createElement`, refs preserved for imperative
       `textContent` writes) that the CALLING component must render. `useAnnounceOnChange()`'s return type
       changed `void` -> `ReactElement` for the same reason. The one production consumer, `SaveFlow.tsx`,
       was updated to render `{liveRegion}` (2-line change: destructure + render). No portal was needed --

@@ -1082,6 +1082,23 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Safety model:** dry-run default (`-WhatIf` forces a preview even with `-Apply`); a **write-ahead reversal manifest** records each row's previous owner before its write, so `-RevertManifest` undoes a run; every assignment is **read back** (Dataverse silently ignores an unrecognised `@odata.bind`); only application-user-owned rows are candidates; an ambiguous or missing default team is reported `Unresolvable`, never guessed. Detail: [`projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md`](../projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md) §6.9.
 
+### `Retire-CommunicationAccessPermission.ps1`
+**Purpose:** Retires the dead `sprk_communication.sprk_accesspermission` column (owner decision Q6: a communication inherits its parent's Access Permission). Removes form, view and Copilot form-fill (`aiskillconfig`) references first, re-checks `RetrieveDependenciesForDelete`, then deletes the column and publishes. Refuses (exit 2) on any managed reference, any workflow/business rule, or a view that FILTERS on the column.
+**Usage:** 🔴 One-time (per environment); idempotent — a second run reports "nothing to do".
+**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 138)
+**Dependencies:** Azure CLI (`az login`) with customizer rights in the environment, PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-02 — **dry run only** against `spaarkedev1` (plan: delete 1 unmanaged FormFillFieldOptOut `aiskillconfig`, then the column; no form/view/workflow references). **No `-Apply` has been run** — that is the operator's manual gate (task 138 criterion 16e).
+
+**Command:**
+```powershell
+# Dry run (default) — zero writes; prints the plan.
+.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Perform the retirement (operator only).
+.\Retire-CommunicationAccessPermission.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+```
+
 ### `Set-SecureRecordOwnerRolePrivileges.ps1`
 **Purpose:** Gives the `Secure Record Owner` role `Read` at User (Basic) depth on every table in [`config/secure-record-owner-role.json`](../config/secure-record-owner-role.json). Without it, Dataverse refuses the Secure Record team as the OWNER of a row ("Read Privilege Check For Owner failed … missing prvRead…"). Write-path invariant I-6 assigns a secure record's children (documents, To Dos, …) to that team, so the role must cover child tables as well as the three `sprk_issecure` roots. The JSON file is the ONE list, also read by the setup guide and by `unified-access-control-r2`'s NFR-05 census.
 **Usage:** 🟡 Per environment, at secure-record setup and whenever the JSON gains a table; `-Verify` any time.
@@ -1111,6 +1128,33 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 - Dataverse caches principal privileges, so re-probe an assignment until it is stable across 3 polls (setup guide §7).
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md).
+
+### `Set-RecordNumberingSchema.ps1`
+**Purpose:** The INTERIM record numbering (owner decisions 2026-10-02, "until we build the numbering function"): Matters get `MAT-######`, Projects `PRJ-######`, sequential, from Dataverse's platform autonumber. `sprk_matternumber` / `sprk_projectnumber` are their tables' PRIMARY NAME, so a record without a number is nameless everywhere (write-path invariant **I-11**). Sets the `AutoNumberFormat`, seeds the sequence from the data (above the highest existing `MAT-`/`PRJ-` value), numbers blank rows oldest first, creates the alternate keys, and confirms `SpaarkeCore` carries the tables.
+**Usage:** 🔴 Per environment, after every solution import into a NEW environment (the seed is not carried by an import); `-Verify` any time. Idempotent.
+**Lifecycle:** ✅ Maintained — interim (added 2026-10-02 by `spaarkeai-word-add-in-r1` task 076). Retire when the numbering function ships: clear both formats; keep the keys.
+**Dependencies:** Azure CLI (`az login`) with System Administrator in the environment, PowerShell 7+
+**Owner:** `spaarkeai-word-add-in-r1`
+**Last Used:** 2026-10-02, `-Apply` against `spaarkedev1` (owner-approved after the dry run): matter format + key `sprk_MatterNumber`; project format (key pre-existed); 7 nameless wizard-made projects → `PRJ-000001…007`; `-Verify` PASS; a re-run proposes nothing.
+
+**Command:**
+```powershell
+# Dry run (default): every write it WOULD make, numbers included. Zero writes.
+.\Set-RecordNumberingSchema.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Format, seed, backfill, keys, publish.
+.\Set-RecordNumberingSchema.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+
+# Check: exit 0 = formats set, keys Active, no blank or duplicate numbers, the next number free.
+.\Set-RecordNumberingSchema.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify
+```
+
+**Safety model:**
+- Never renumbers a row that has a number; never overwrites a DIFFERENT format (the numbering function may own it).
+- Refuses the key while two rows share a value (production: the owner checks first).
+- Platform facts measured live and encoded: `GetNextAutoNumberValue` / `GetAutoNumberSeed` are POST actions; GetNext reads one high until a number is issued after a seed (the script reads the seed in that state); `SetAutoNumberSeed` can refuse `0x80060884` just after the format is set (retried).
+
+Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md).
 
 ### `Migrate-SecureRecordsToNamedOwnerTeam.ps1`
 **Purpose:** One-time move of every secure project, matter and work assignment off the Secure Record business unit's DEFAULT owner team and onto its NAMED, non-default, memberless owner team (`Secure Record Owners`). Secure rows outside the business unit are reported as NOT ISOLATED and never touched.
@@ -1599,4 +1643,5 @@ Most scripts require:
 - **2026-04-04:** Added Release & Deployment Orchestration section with three new scripts: Deploy-Release.ps1 (master release orchestrator), Build-AllClientComponents.ps1 (dependency-ordered client build), Deploy-AllWebResources.ps1 (all web resources to Dataverse) — Task PRPR-032.
 - **2026-09-04:** Added new "Data Backfill Scripts" section with Backfill-CoreAncestorStamps.ps1 — one-time FR-26 core-ancestor stamp backfill for existing child records (`unified-access-control-r2` task 053). Discovers ancestor-stamp + child-of-child lookup columns from live Dataverse metadata every run rather than a hard-coded list, after a live-metadata check during authoring found the project's own prior notes stale on which columns `sprk_todo` carries, and found `sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema (filed for owner decision, not fixed by this script).
 - **2026-10-01:** Added Migrate-SecureRecordsToNamedOwnerTeam.ps1. It moves secure roots off the Secure Record business unit's default team onto its named, memberless owner team, with a dry run by default, read-back, share-count comparison and a `-Verify` gate (`unified-access-control-r2` task 144, #967).
+- **2026-10-02:** Added Set-RecordNumberingSchema.ps1 — interim `MAT-`/`PRJ-` platform autonumber on the matter/project primary-name columns, data-derived seed, blank-row backfill, alternate keys, `-Verify` (`spaarkeai-word-add-in-r1` task 076, write-path invariant I-11).
 - **2026-09-30:** Added Backfill-RecordOwnership.ps1 — re-owns existing app-owned `sprk_document`/`sprk_todo` rows to a business unit default owner team, record-first, with a write-ahead reversal manifest (`spaarkeai-word-add-in-r1` task 080, write-path invariant I-6).

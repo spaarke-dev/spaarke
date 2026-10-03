@@ -230,6 +230,14 @@ shared/taskpane/services/__tests__/shareLinkService.test.ts
 shared/taskpane/components/__tests__/RelatedToPicker.filingAccess.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.filingAccess.test.tsx
 outlook/commands/__tests__/commands.test.ts
+# --- Word Send Email choice + focused record open (task 086, FR-15/FR-10 amended 2026-10-02) -------
+# Pins: buildSpaarkeComposeUrl/buildOutlookWebComposeUrl encoding (incl. a round-trip through the
+# REAL CommunicationPage parseParams.ts decode algorithm, reproduced inline), associatedTo omitted
+# with no related record (email still opens), ORG_URL unset degrades the Spaarke option only, the
+# gating decision (Outlook unchanged / Word gets the choice / neither capability -> no affordance),
+# and openRecordLauncher's URL now carrying navbar=off without cmdbar=false.
+# (openRecordLauncher.test.ts and sendEmailService.test.ts already existed from task 027/036 and are
+# listed above; this section exists so the diff is traceable to task 086.)
 # --- the final 10 (task 071, 2026-09-21) — repaired and gated in one change --
 # Every one of these was a stale test or a harness gap, never a shipped code
 # bug (full diagnosis table: notes/071-jest-repair.md). Representative causes:

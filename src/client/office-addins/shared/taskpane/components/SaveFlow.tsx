@@ -1004,8 +1004,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // creates the sprk_matter/sprk_project under the caller's ownership and returns it; the picker
   // auto-selects the created record as the Related-to. Matter (task 038): the request always carries
   // `matterTypeId` — a bare lowercase GUID (ADR-044) — and any server warning (e.g. an unresolvable
-  // type, or numbering not existing yet) is surfaced, never swallowed. The pane never sends or
-  // constructs a matter number; that is a separate server-side numbering project.
+  // type, or a record that came back without a number) is surfaced, never swallowed. The pane never
+  // sends or constructs a number: Dataverse's autonumber assigns MAT-/PRJ-###### (task 076, interim).
   //
   // Task 053: task 031 made Project owner resolution load-bearing — an unresolvable caller now gets a
   // 403 `owner_unresolved` with an actionable `detail` and NO row created. This used to be discarded

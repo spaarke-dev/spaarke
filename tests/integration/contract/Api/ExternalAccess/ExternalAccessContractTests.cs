@@ -57,6 +57,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
 
@@ -407,10 +408,10 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     [Fact]
     public async Task InviteAndGrant_WhenContactAlreadyHasOid_ReturnsAlreadyProvisioned_AndCreatesNoSecondCiamAccount()
     {
-        // The Contact lookup returns an existing Contact whose oid is already bound.
+        // The Contact lookup returns an existing Contact already bound on the CIAM plane.
         var boundContactId = Guid.Parse("44444444-4444-4444-4444-444444444444");
-        _fixture.Dataverse.ContactQueryResult =
-            $$"""[{"contactid":"{{boundContactId}}","sprk_externalobjectid":"existing-oid-abc"}]""";
+        _fixture.IdentityStore.AddContact(boundContactId, email: "attorney@firm.example",
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
 
         using var client = _fixture.CreateAdminClient();
 
@@ -434,6 +435,7 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
             "the early return.");
         _fixture.Dataverse.ContactUpdates.Should().BeEmpty(
             "the idempotent path must not re-bind the oid (no contacts UpdateAsync)");
+        _fixture.IdentityStore.Writes.Should().BeEmpty("nor through the identity store");
     }
 
     // ================================================================================
@@ -444,8 +446,8 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
     public async Task InviteAndGrant_WhenGranting_WritesExternalRecordAccess_InvalidatesCache_AndGrantsNoSyntheticSpePermission()
     {
         var boundContactId = Guid.Parse("55555555-5555-5555-5555-555555555555");
-        _fixture.Dataverse.ContactQueryResult =
-            $$"""[{"contactid":"{{boundContactId}}","sprk_externalobjectid":"existing-oid-xyz"}]""";
+        _fixture.IdentityStore.AddContact(boundContactId, email: "counsel@firm.example",
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
 
         using var client = _fixture.CreateAdminClient();
 
@@ -517,8 +519,8 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
             .Should().ContainSingle(c => c.EntitySet == "sprk_externalrecordaccesses").Which.Payload;
 
     private void GivenAnAlreadyProvisionedContact() =>
-        _fixture.Dataverse.ContactQueryResult =
-            $$"""[{"contactid":"{{GranteeContactId}}","sprk_externalobjectid":"existing-oid-exp"}]""";
+        _fixture.IdentityStore.AddContact(GranteeContactId, email: "expiry@firm.example",
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
 
     private static async Task<string?> ReasonCode(HttpResponseMessage response)
     {
@@ -657,6 +659,143 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await ReasonCode(response)).Should().Be(reasonCode);
     }
+
+    // ================================================================================
+    // ===== (9) Invite identity collisions — task 141 (defect C7 item 7) =============
+    // ================================================================================
+    // One contact carries one sign-in. An invite whose email resolves to a contact the WORKFORCE plane owns, or
+    // one an internal user links to, used to come back "AlreadyProvisioned" — no CIAM account, nobody told, and
+    // the external person could never sign in. Now: HTTP 409, a ProblemDetails message, a distinct reason code,
+    // a durable flag on the contact — and on /invite-and-grant, NO grant. If the CIAM provisioner HAD been
+    // reached it would attempt live MSAL/Key Vault and the request would 500, so a 409 also proves no CIAM
+    // account was created. The literals are the wire contract.
+
+    private static object InviteBody(string email) => new { email, projectId = ProjectA, accessLevel = (int)ExternalAccessLevel.ViewOnly };
+
+    [Theory]
+    [InlineData("/api/v1/external-access/invite")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task Invite_WhenTheEmailBelongsToAWorkforceBoundContact_Returns409_FlagsIt_AndWritesNoGrant(string route)
+    {
+        var employeeContact = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        _fixture.IdentityStore.AddContact(employeeContact, email: "employee@customer.example",
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.Workforce);
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(route, InviteBody("employee@customer.example"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonCode(response)).Should().Be("sdap.access.invite.workforce_bound_contact");
+        using (var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            doc.RootElement.GetProperty("detail").GetString().Should().NotBeNullOrWhiteSpace("a refusal carries a message");
+            doc.RootElement.TryGetProperty("onboardStatus", out _).Should().BeFalse("never 'AlreadyProvisioned'");
+        }
+
+        _fixture.IdentityStore.Contacts[employeeContact].Flag!.Reason
+            .Should().Be(IdentityCollisionReason.InviteMatchesWorkforceContact);
+        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("no Contact and no sprk_externalrecordaccess grant");
+        _fixture.IdentityStore.Writes.Should().NotContain(w => w.Op == "bind", "no CIAM oid is bound");
+    }
+
+    [Theory]
+    [InlineData("/api/v1/external-access/invite")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task Invite_WhenAnInternalUserLinksTheContact_Returns409_EvenThoughItIsCiamBound(string route)
+    {
+        // Ralph's dev shape: a CIAM-bound contact that a systemuser's sprk_primarycontact points at.
+        var linkedContact = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        _fixture.IdentityStore.AddContact(linkedContact, email: "internal@firm.example",
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+        _fixture.IdentityStore.AddSystemUser(Guid.NewGuid(), Guid.NewGuid(), "internal@firm.example", primaryContactId: linkedContact);
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(route, InviteBody("internal@firm.example"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonCode(response)).Should().Be("sdap.access.invite.contact_linked_to_internal_user");
+        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Invite_WhenTwoActiveContactsCarryTheEmail_Returns409WithItsOwnReasonCode()
+    {
+        _fixture.IdentityStore.AddContact(Guid.NewGuid(), email: "dup@firm.example");
+        _fixture.IdentityStore.AddContact(Guid.NewGuid(), email: "dup@firm.example");
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/external-access/invite", InviteBody("dup@firm.example"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReasonCode(response)).Should().Be("sdap.access.invite.email_ambiguous");
+    }
+
+    // Verifier finding 5: an unreadable lookup used to be thrown into the generic catch — a 500 "Failed to onboard
+    // the external user" — so the decision's reason code and its message never reached the client. It is now its
+    // own answer on BOTH routes: 503, reasonCode sdap.access.invite.contact_lookup_failed, the decision's message,
+    // and nothing created, bound, flagged or granted. (Had the CIAM provisioner been reached it would attempt live
+    // MSAL/Key Vault and 500, so a 503 also proves no CIAM account was created.)
+    [Theory]
+    [InlineData("/api/v1/external-access/invite")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task Invite_WhenTheContactLookupCannotBeRead_Returns503_WithItsOwnReasonCodeAndMessage(string route)
+    {
+        _fixture.IdentityStore.EmailLookupStatus = LookupStatus.Failed;
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(route, InviteBody("anyone@firm.example"));
+
+        await ShouldBeTheLookupFailure(response);
+    }
+
+    [Theory]
+    [InlineData("/api/v1/external-access/invite")]
+    [InlineData("/api/v1/external-access/invite-and-grant")]
+    public async Task Invite_WhenTheSystemUserReferenceLookupCannotBeRead_Returns503_AndWritesNothing(string route)
+    {
+        // The second read of the invite decision: is the one matching contact some internal user's contact?
+        // Not knowing is not "no" — it fails the invite exactly like an unreadable email lookup.
+        _fixture.IdentityStore.AddContact(Guid.NewGuid(), email: "unbound@firm.example");
+        _fixture.IdentityStore.FailReferences = true;
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync(route, InviteBody("unbound@firm.example"));
+
+        await ShouldBeTheLookupFailure(response);
+    }
+
+    private async Task ShouldBeTheLookupFailure(HttpResponseMessage response)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        (await ReasonCode(response)).Should().Be("sdap.access.invite.contact_lookup_failed");
+        using (var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync()))
+        {
+            // Pinned to the DECISION's message (ContactIdentityBinder.InviteMessage), which the endpoint's last-resort
+            // fallback deliberately does not share — so this cannot pass on the fallback (third fix round).
+            doc.RootElement.GetProperty("detail").GetString().Should().Be(
+                ContactIdentityBinder.InviteMessage(ContactBindingDecision.InviteContactLookupFailed),
+                "the decision's own message reaches the client");
+            doc.RootElement.TryGetProperty("onboardStatus", out _).Should().BeFalse();
+        }
+
+        _fixture.Dataverse.CreatedEntitySets.Should().BeEmpty("no Contact and no sprk_externalrecordaccess grant");
+        _fixture.IdentityStore.Writes.Should().BeEmpty("nothing is bound and nothing is flagged on an unreadable lookup");
+    }
+
+    [Fact]
+    public async Task Invite_ACiamBoundContact_KeepsTodaysIdempotentResponse()
+    {
+        _fixture.IdentityStore.AddContact(Guid.NewGuid(), email: "outside@firm.example",
+            oid: Guid.NewGuid().ToString("D"), plane: IdentityPlaneMarker.External);
+        using var client = _fixture.CreateAdminClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/external-access/invite", InviteBody("outside@firm.example"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("status").GetString().Should().Be("AlreadyProvisioned");
+    }
 }
 
 // ================================================================================
@@ -678,6 +817,12 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Mock<ITenantCache> TenantCacheMock { get; } = new(MockBehavior.Loose);
     public StubDataverseWebApiClient Dataverse { get; } = new();
 
+    /// <summary>
+    /// The identity-binding row store (task 141). CIAM contact resolution and the invite path read it; a CIAM
+    /// caller's contact is header-driven on top of it (<see cref="HeaderDrivenIdentityStore"/>).
+    /// </summary>
+    public InMemoryContactIdentityStore IdentityStore { get; } = new();
+
     /// <summary>The POA share table behind task 063's system-user share routes (in memory; see its remarks).</summary>
     public Sprk.Bff.Api.Tests.AccessControl.FakeRecordShareTable RecordShares { get; } = new();
 
@@ -697,6 +842,7 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
         SpeFileOperationsMock.Reset();
         TenantCacheMock.Reset();
         Dataverse.Reset();
+        IdentityStore.Reset();
         RecordShares.Reset();
         DataReads.Clear();
     }
@@ -878,6 +1024,11 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.AddScoped<ExternalDataService>(sp =>
                 new StubExternalDataService(sp.GetRequiredService<IHttpContextAccessor>(), DataReads));
 
+            // Task 141: contact resolution (CIAM) and the invite's collision checks read the identity store.
+            services.RemoveAll<IContactIdentityStore>();
+            services.AddSingleton<IContactIdentityStore>(sp =>
+                new HeaderDrivenIdentityStore(IdentityStore, sp.GetRequiredService<IHttpContextAccessor>()));
+
             // Task 135 (C1): CIAM callers now pass the deny-list veto. Offline, the real reader fails CLOSED
             // and would deny every record; these contract tests assert an entitled caller's contract, so the
             // reader at its module boundary denies nothing. Veto behaviour is owned by UnifiedEvaluatorSeamTests.
@@ -1035,27 +1186,34 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
     private string? Header(string name) =>
         _accessor.HttpContext?.Request.Headers.TryGetValue(name, out var v) == true ? v.ToString() : null;
 
-    public override Task<Guid?> ResolveExternalContactAsync(string? oid, string? email, CancellationToken ct = default)
+    // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
+    // and fails CLOSED — every record would read as secure AND restricted and this double would
+    // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
+    // Task 136: X-Test-SecureProjects flags the named ids sprk_issecure.
+    // Task 138: X-Test-RestrictedProjects / X-Test-LimitedProjects set sprk_accesspermission for the named ids
+    // (combinable with Secure). X-Test-RootFlags: "unreadable" answers RootRecordFlags.Unreadable for every
+    // id (a failed read); "absent" leaves every id OUT of the map (the non-flag-bearing-type shape).
+    public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
+        string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
     {
-        var contact = Header("X-Test-Contact");
-        if (string.Equals(contact, "none", StringComparison.OrdinalIgnoreCase))
-            return Task.FromResult<Guid?>(null);
-        return Task.FromResult<Guid?>(Guid.TryParse(contact, out var id) ? id : Guid.NewGuid());
-    }
+        var mode = Header("X-Test-RootFlags");
+        if (string.Equals(mode, "absent", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(new Dictionary<Guid, RootRecordFlags>());
 
-        // Task 037: without this override the base implementation runs, hits `credential: null!`, throws,
-        // and fails CLOSED — every record would read as secure AND restricted and this double would
-        // compose to nothing. Unflagged is the right default for a test that predates the vetoes.
-        // Task 136: X-Test-SecureProjects flags the named ids sprk_issecure (never Restricted).
-        public override Task<IReadOnlyDictionary<Guid, RootRecordFlags>> GetRootRecordFlagsAsync(
-            string entityType, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
-        {
-            var secure = ParseGuidHeader("X-Test-SecureProjects");
-            return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
-                recordIds.Distinct().ToDictionary(
-                    id => id,
-                    id => secure.Contains(id) ? new RootRecordFlags(IsSecure: true, IsRestricted: false) : RootRecordFlags.None));
-        }
+        var unreadable = string.Equals(mode, "unreadable", StringComparison.OrdinalIgnoreCase);
+        var secure = ParseGuidHeader("X-Test-SecureProjects");
+        var restricted = ParseGuidHeader("X-Test-RestrictedProjects");
+        var limited = ParseGuidHeader("X-Test-LimitedProjects");
+        return Task.FromResult<IReadOnlyDictionary<Guid, RootRecordFlags>>(
+            recordIds.Distinct().ToDictionary(
+                id => id,
+                id => unreadable
+                    ? RootRecordFlags.Unreadable
+                    : new RootRecordFlags(
+                        IsSecure: secure.Contains(id),
+                        IsRestricted: restricted.Contains(id),
+                        IsLimited: limited.Contains(id))));
+    }
 
     // Task 135 (C1): a CIAM caller is now composed by the unified evaluator, which also reads the contact's
     // organization memberships (the deny-veto subject) and each candidate's referenced organizations. Without
@@ -1111,13 +1269,15 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
             // converts at Collaborate — the level a bare id effectively resolved to before levels existed.
             MatterGrants = matters.Select(id => new ExternalRootGrant
             {
-                RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
+                RecordId = id,
+                AccessLevel = ExternalAccessLevel.Collaborate
             })
             .Concat(nullLevelMatters.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = null }))
             .ToList(),
             WorkAssignmentGrants = was.Select(id => new ExternalRootGrant
             {
-                RecordId = id, AccessLevel = ExternalAccessLevel.Collaborate
+                RecordId = id,
+                AccessLevel = ExternalAccessLevel.Collaborate
             })
             .Concat(nullLevelWas.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = null }))
             .ToList(),
@@ -1295,9 +1455,11 @@ public sealed class EntitledCallerRecordAccessProbe : CallerRecordAccessProbe
         // Write is all the delegation gate needs. The rest matter since task 063 made a share the INTERSECTION of the
         // requested level with the caller's OWN rights (owner 2026-09-16): an entitled caller must hold a full working
         // set, or these contract tests would silently be exercising the narrowing path instead of the contract. The
-        // narrowing itself is owned by InternalUserShareTests.
+        // narrowing itself is owned by InternalUserShareTests. Share joined the working set with task 139 (Collaborate and
+        // Full Access carry it), so without it every Collaborate share here would be narrowed.
         => Task.FromResult(
-            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete);
+            AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
+            | AccessRights.Share);
 }
 
 /// <summary>
@@ -1345,6 +1507,9 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
     public List<string> CreatedEntitySets { get; } = new();
     public List<string> ContactUpdates { get; } = new();
 
+    /// <summary>Every entity set queried (task 138: a refused invite must not even look the Contact up).</summary>
+    public List<string> QueriedEntitySets { get; } = new();
+
     /// <summary>Every CREATE with its payload, so a test can read what was written (task 097: the expiry).</summary>
     public List<(string EntitySet, object Payload)> Creates { get; } = new();
 
@@ -1353,12 +1518,16 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
         ContactQueryResult = "[]";
         CreatedEntitySets.Clear();
         ContactUpdates.Clear();
+        QueriedEntitySets.Clear();
         Creates.Clear();
     }
 
     public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
         int? top = null, int? skip = null, CancellationToken cancellationToken = default)
-        => Task.FromResult(JsonSerializer.Deserialize<List<T>>(ContactQueryResult) ?? new List<T>());
+    {
+        QueriedEntitySets.Add(entitySetName);
+        return Task.FromResult(JsonSerializer.Deserialize<List<T>>(ContactQueryResult) ?? new List<T>());
+    }
 
     public override Task<Guid> CreateAsync(string entitySetName, object entity, CancellationToken cancellationToken = default)
     {
@@ -1372,4 +1541,56 @@ public sealed class StubDataverseWebApiClient : DataverseWebApiClient
         if (entitySetName == "contacts") ContactUpdates.Add(id.ToString());
         return Task.CompletedTask;
     }
+}
+
+/// <summary>
+/// The identity store as the CIAM contract tests need it (task 141): a CIAM caller's contact is driven by the
+/// <c>X-Test-Contact</c> header — "none" ⇒ no contact bound to the caller's oid; a GUID ⇒ that contact, active
+/// and bound to the caller's oid on the External plane; absent ⇒ a fresh contact. Everything else (the invite
+/// path's email lookup, references, flags) is the shared in-memory store.
+/// </summary>
+internal sealed class HeaderDrivenIdentityStore : IContactIdentityStore
+{
+    private readonly InMemoryContactIdentityStore _inner;
+    private readonly IHttpContextAccessor _accessor;
+
+    public HeaderDrivenIdentityStore(InMemoryContactIdentityStore inner, IHttpContextAccessor accessor)
+    {
+        _inner = inner;
+        _accessor = accessor;
+    }
+
+    public Task<ContactLookup> FindContactsByOidAsync(Guid oid, CancellationToken ct)
+    {
+        var header = _accessor.HttpContext?.Request.Headers.TryGetValue("X-Test-Contact", out var v) == true
+            ? v.ToString()
+            : null;
+        if (header is null)
+        {
+            return _inner.FindContactsByOidAsync(oid, ct);
+        }
+
+        if (string.Equals(header, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(ContactLookup.Of());
+        }
+
+        var id = Guid.TryParse(header, out var g) ? g : Guid.NewGuid();
+        return Task.FromResult(ContactLookup.Of(
+            new ContactBindingRow(id, 0, oid.ToString("D"), (int)IdentityPlaneMarker.External)));
+    }
+
+    public Task<ContactLookup> FindContactsByKeyMirrorAsync(Guid oid, CancellationToken ct) => _inner.FindContactsByKeyMirrorAsync(oid, ct);
+    public Task<ContactLookup> FindActiveContactsByEmailAsync(string email, CancellationToken ct) => _inner.FindActiveContactsByEmailAsync(email, ct);
+    public Task<ContactLookup> GetContactAsync(Guid contactId, CancellationToken ct) => _inner.GetContactAsync(contactId, ct);
+    public Task<ReferenceLookup> FindSystemUsersLinkingAsync(IReadOnlyCollection<Guid> contactIds, CancellationToken ct) => _inner.FindSystemUsersLinkingAsync(contactIds, ct);
+    public Task<SystemUserLookup> GetSystemUserAsync(Guid systemUserId, CancellationToken ct) => _inner.GetSystemUserAsync(systemUserId, ct);
+    public Task<BindingReadability> ProbeBindingReadabilityAsync(CancellationToken ct) => _inner.ProbeBindingReadabilityAsync(ct);
+    public Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct) => _inner.BindOidAsync(contactId, etag, oid, plane, ct);
+    public Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct) => _inner.CreateContactForOidAsync(oid, plane, details, ct);
+    public Task<StoreWriteResult> SetPrimaryContactAsync(Guid systemUserId, string? etag, Guid contactId, CancellationToken ct) => _inner.SetPrimaryContactAsync(systemUserId, etag, contactId, ct);
+    public Task<StoreWriteResult> WriteCollisionFlagAsync(Guid contactId, CollisionFlag flag, string? etag, CancellationToken ct) => _inner.WriteCollisionFlagAsync(contactId, flag, etag, ct);
+    public Task<StoreWriteResult> ClearCollisionFlagAsync(Guid contactId, string? etag, CancellationToken ct) => _inner.ClearCollisionFlagAsync(contactId, etag, ct);
+    public Task<StorePage<SystemUserIdentityRow>> ScanInteractiveSystemUsersAsync(string? continuation, CancellationToken ct) => _inner.ScanInteractiveSystemUsersAsync(continuation, ct);
+    public Task<StorePage<ContactBindingRow>> ScanFlaggedContactsAsync(string? continuation, CancellationToken ct) => _inner.ScanFlaggedContactsAsync(continuation, ct);
 }

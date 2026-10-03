@@ -4,7 +4,8 @@
     <title>FR-02: server-side custom XML part GUID stamp (forward-only)</title>
     <phase>1 Foundation</phase>
     <gate>012 complete — the identity resolver must exist so the stamp has a fallback to complement, not replace. (Task 019 pre-flight: CLEARED 2026-09-09 — premise CONFIRMED + manifest fixed; see the 019 dependency below for the 4 conditions this task inherits.)</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by 713710a39 (docs: close 014). -->
     <rigor>FULL</rigor>
     <rigor-reason>New BFF surface modifying .cs in `Sprk.Bff.Api`, on the save path, writing into .docx bytes. Tags include bff-api. Code-review plus adr-check run at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>

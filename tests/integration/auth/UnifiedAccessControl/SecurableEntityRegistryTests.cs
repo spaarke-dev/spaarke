@@ -96,6 +96,13 @@ public class SecurableEntityRegistryTests
                 ["sprk_issecure"] = true,
                 ["sprk_containerid"] = "b!own-container-00000000000000000"
             }));
+        // Task 155: an invoice is a CHILD record, so its row is now read for its root links. A row with none —
+        // the resolve completes on the fallback; what is under test is still only the metadata cost.
+        records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)));
+        // Task 155 f3: the same for a contact — its own sprk_invoice lookup (live sweep) means its row is read too.
+        records.RetrieveAsync("contact", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("contact", RecordId)));
 
         var resolver = new RecordContainerResolver(
             harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
@@ -112,6 +119,43 @@ public class SecurableEntityRegistryTests
         harness.FetchCount.Should().Be(1,
             "one resolve asks the registry ONE question; a second catalog lookup doubles the full-org metadata "
             + "cost of every upload whenever the cache is unavailable");
+    }
+
+    [Fact(DisplayName = "Task 155: a CHILD under a secure root asks the registry TWICE in one resolve, yet costs ONE metadata round trip with the cache DOWN")]
+    public async Task ChildUnderASecureRoot_WithTheCacheDown_FetchesMetadataExactlyOnce()
+    {
+        // The child's own classification AND its root's ("can a project be secure?") are both catalog lookups.
+        // The registry is Scoped, and it memoizes the catalog for its scope, so the second question is free —
+        // without that memo it is a second full-org metadata query on every child upload while Redis is down,
+        // the cost the task 151 review removed.
+        var harness = new Harness(
+            new DownDistributedCache(),
+            throws: null,
+            Meta("sprk_project", secure: true),
+            Meta("sprk_todo", secure: false),
+            Meta("businessunit", secure: false));
+
+        var projectId = Guid.Parse("45454545-4545-4545-4545-454545454545");
+        var records = Substitute.For<IGenericEntityService>();
+        records.RetrieveAsync("sprk_todo", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_todo", RecordId)
+            {
+                ["sprk_regardingproject"] = new EntityReference("sprk_project", projectId)
+            }));
+        records.RetrieveAsync("sprk_project", projectId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_project", projectId)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = "b!secure-project-container-00000000"
+            }));
+
+        var resolver = new RecordContainerResolver(
+            harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+
+        var decision = await resolver.ResolveForRecordAsync("sprk_todo", RecordId);
+
+        decision.ContainerId.Should().Be("b!secure-project-container-00000000");
+        harness.FetchCount.Should().Be(1, "both questions are answered from the scope's one catalog");
     }
 
     // ============================================================================================
