@@ -311,22 +311,7 @@ public class NoAccessEnforcementStore
     /// <param name="prefer">An optional <c>Prefer</c> header (the scan's page size).</param>
     private async Task<JsonDocument> GetAsync(string relativeUrl, CancellationToken ct, string? prefer = null)
     {
-        var apiUrl = GetDataverseApiUrl();
-        string url;
-        if (Uri.TryCreate(relativeUrl, UriKind.Absolute, out _))
-        {
-            if (!relativeUrl.StartsWith(apiUrl + "/", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new InvalidOperationException("A Dataverse next-page link pointed outside the Web API root; not followed.");
-            }
-
-            url = relativeUrl;
-        }
-        else
-        {
-            url = $"{apiUrl}/{relativeUrl}";
-        }
-
+        var url = ResolveRequestUrl(GetDataverseApiUrl(), relativeUrl);
         var token = await GetAppOnlyTokenAsync(ct).ConfigureAwait(false);
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -349,6 +334,30 @@ public class NoAccessEnforcementStore
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The URL one read is sent to (task 143 r2: extracted so the origin rule is tested on its own). A relative path goes
+    /// under <paramref name="apiUrl"/>. An absolute URL — an <c>@odata.nextLink</c> — is followed only when it is under
+    /// <paramref name="apiUrl"/> itself (same scheme, host and Web API version, then a <c>/</c>): the app token is never
+    /// sent anywhere else. Anything else THROWS, so the read fails closed; for the active-entry scan that fails the whole
+    /// run (the job records <c>error</c> and names it), never a silent prefix of the entries.
+    /// </summary>
+    /// <param name="apiUrl">The Web API root, e.g. <c>https://org.crm.dynamics.com/api/data/v9.2</c>.</param>
+    /// <param name="relativeOrNextLink">A path under the root, or an absolute next-page link.</param>
+    internal static string ResolveRequestUrl(string apiUrl, string relativeOrNextLink)
+    {
+        if (!Uri.TryCreate(relativeOrNextLink, UriKind.Absolute, out _))
+        {
+            return $"{apiUrl}/{relativeOrNextLink}";
+        }
+
+        if (!relativeOrNextLink.StartsWith(apiUrl + "/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("A Dataverse next-page link pointed outside the Web API root; not followed.");
+        }
+
+        return relativeOrNextLink;
     }
 
     private static IEnumerable<JsonElement> Values(JsonDocument doc)

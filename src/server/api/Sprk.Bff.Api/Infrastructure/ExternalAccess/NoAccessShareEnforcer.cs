@@ -123,8 +123,8 @@ public sealed record NoAccessEnforcementReport(
 /// <para><b>Never the last person</b> (owner S5). A secure record keeps at least one enabled person with a share that can
 /// read it: a removal that would leave none is refused and reported
 /// (<see cref="NoAccessEnforcementReason.LastPersonOnSecureRecord"/>), naming the record. The read, the check and the
-/// revoke run under a per-record lease (task 143 r1), so concurrent enforcements cannot each remove "the other" last
-/// reader.</para>
+/// revoke run under a per-record lease (task 143 r1): the shares are re-read under it, and it is renewed immediately
+/// before the revoke (r2), so concurrent enforcements cannot each remove "the other" last reader.</para>
 ///
 /// <para><b>Removal is not reversible by design.</b> Deactivating the entry lifts the veto but re-creates no share; access
 /// comes back only through a deliberate re-grant. A task-142 auto share removed here is task 142's to record as
@@ -160,7 +160,10 @@ public sealed class NoAccessShareEnforcer
     /// <param name="recordShare">The one POA share seam.</param>
     /// <param name="cache">The tenant cache (root-set invalidation).</param>
     /// <param name="recordLock">The atomic lease (task 143 r1) that serializes removals per record, so owner S5 holds
-    /// across concurrent enforcements. The scheduler's own lease store — reused, keyed per record.</param>
+    /// across concurrent enforcements. The scheduler's lease store, reused as a keyed mutex under its own key family
+    /// (<c>no-access-enforce:{table}:{id}</c>) — never a job's dispatch key. Reusing it from a service that a scheduled
+    /// job resolves is the ADR-036 A1-7 / ADR-052 §5 tension recorded as a project-scoped §6.5 path-A exception in
+    /// <c>projects/unified-access-control-r2/design.md</c> §9 (task 143 r2).</param>
     /// <param name="logger">Logger.</param>
     public NoAccessShareEnforcer(
         NoAccessEnforcementStore store,
@@ -642,11 +645,17 @@ public sealed class NoAccessShareEnforcer
     /// shares are READ AGAIN, and the S5 check, the revoke and the read-back are decided from that fresh read.
     /// </summary>
     /// <remarks>
-    /// The lease is the existing atomic primitive (<see cref="IScheduledJobLease"/>: Redis <c>SET NX PX</c> across every
-    /// instance and slot, or process-local when Redis is off), keyed per record. It fails CLOSED: a record whose lease is
-    /// held by another enforcement, or a lease store that cannot be reached, removes nothing and records a failure (the
-    /// caller is told to try again; the job retries within 5 minutes). It serializes the enforcer with itself only —
-    /// a user's own unshare (task 139) and the model-driven app's Share dialog do not take it.
+    /// <para>The lease is the existing atomic primitive (<see cref="IScheduledJobLease"/>: Redis <c>SET NX PX</c> across
+    /// every instance and slot, or process-local when Redis is off), keyed per record. It fails CLOSED: a record whose
+    /// lease is held by another enforcement, or a lease store that cannot be reached, removes nothing and records a
+    /// failure (the caller is told to try again; the job retries within 5 minutes). It serializes the enforcer with
+    /// itself only — a user's own unshare (task 139) and the model-driven app's Share dialog do not take it.</para>
+    /// <para><b>The lease is proven held at the revoke</b> (task 143 r2). The reads before the revoke — the re-read, the
+    /// other readers' person state — can be slowed by throttling past any fixed duration, and a lease that expired in
+    /// between would let a second enforcement take it, read this user's share as "someone else keeps access", and remove
+    /// its own. So the lease is RENEWED immediately before the revoke: a renewal that fails (the lease expired, or
+    /// another holder has it) or cannot be made removes nothing and records a failure. A successful renewal proves the
+    /// lease was never lost since it was taken, and gives the revoke a full <see cref="RecordLockDuration"/>.</para>
     /// </remarks>
     private async Task<(bool Removed, IReadOnlyList<DataversePrincipalAccess> SharesAfter)?> RemoveUnderRecordLockAsync(
         string logicalName,
@@ -702,7 +711,8 @@ public sealed class NoAccessShareEnforcer
                 return (true, shares); // gone meanwhile (another enforcement or an unshare): nothing left to remove
             }
 
-            return await RemoveDirectShareAsync(logicalName, entitySet, recordId, userId, direct, shares, cacheTenants, run, ct)
+            return await RemoveDirectShareAsync(
+                    logicalName, entitySet, recordId, userId, direct, shares, (lockId, grant.Token), cacheTenants, run, ct)
                 .ConfigureAwait(false);
         }
         finally
@@ -723,12 +733,17 @@ public sealed class NoAccessShareEnforcer
     /// <summary>The per-record removal lock id (task 143 r1, S5).</summary>
     internal static string RecordLockId(string logicalName, Guid recordId) => $"no-access-enforce:{logicalName}:{recordId:D}";
 
-    /// <summary>How long a removal lock lives if its holder dies: longer than a read, a revoke and a read-back.</summary>
-    internal static readonly TimeSpan RecordLockDuration = TimeSpan.FromMinutes(2);
+    /// <summary>
+    /// How long a removal lock lives from its last take or renewal (task 143 r2: was 2 minutes). It must outlast the ONE
+    /// call made after the renewal that matters — the revoke, bounded by the Dataverse Web API client's 100-second
+    /// timeout plus its up-to-30-second token-refresh wait — with margin. The cost: a holder that dies leaves the record's
+    /// removals refused ("record-busy") for up to this long, which the 5-minute job absorbs.
+    /// </summary>
+    internal static readonly TimeSpan RecordLockDuration = TimeSpan.FromMinutes(5);
 
     /// <summary>
-    /// S5 check, revoke, read-back, cache clear. <c>null</c> when a failure was recorded; otherwise whether the share was
-    /// removed (false = S5 kept it) and the shares as read back.
+    /// S5 check, lease renewal, revoke, read-back, cache clear. <c>null</c> when a failure was recorded; otherwise whether
+    /// the share was removed (false = S5 kept it) and the shares as read back.
     /// </summary>
     private async Task<(bool Removed, IReadOnlyList<DataversePrincipalAccess> SharesAfter)?> RemoveDirectShareAsync(
         string logicalName,
@@ -737,6 +752,7 @@ public sealed class NoAccessShareEnforcer
         Guid userId,
         int direct,
         IReadOnlyList<DataversePrincipalAccess> shares,
+        (string Id, string Token) recordLock,
         IReadOnlyCollection<string> cacheTenants,
         Run run,
         CancellationToken ct)
@@ -779,6 +795,12 @@ public sealed class NoAccessShareEnforcer
             }
         }
 
+        // ── The lease must still be ours at the revoke (task 143 r2) ──
+        if (!await RenewRecordLockAsync(recordLock, logicalName, recordId, userId, run, ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+
         // ── Revoke, then read back ──
         IReadOnlyList<DataversePrincipalAccess>? after = null;
         Exception? failure = null;
@@ -815,6 +837,42 @@ public sealed class NoAccessShareEnforcer
 
         run.Removed.Add(new NoAccessRemovedShare(userId, logicalName, recordId, direct));
         return (true, after!);
+    }
+
+    /// <summary>
+    /// Renews the removal lease immediately before a revoke (task 143 r2). <c>false</c> — with a failure recorded and
+    /// nothing removed — when the lease is no longer this enforcement's (it expired; another may hold it) or the store
+    /// cannot be reached.
+    /// </summary>
+    private async Task<bool> RenewRecordLockAsync(
+        (string Id, string Token) recordLock, string logicalName, Guid recordId, Guid userId, Run run, CancellationToken ct)
+    {
+        bool held;
+        try
+        {
+            held = await _recordLock.RenewAsync(recordLock.Id, recordLock.Token, RecordLockDuration, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[NO-ACCESS-ENFORCE] The removal lock for {Type} {RecordId} could not be renewed.",
+                logicalName, recordId);
+            run.Fail(logicalName, recordId, userId, "record-lock-unavailable",
+                $"User {userId}'s share was not removed: the lock that keeps a secure record from losing its last reader " +
+                "could not be confirmed before the removal. Try again.");
+            return false;
+        }
+
+        if (!held)
+        {
+            _logger.LogWarning(
+                "[NO-ACCESS-ENFORCE] Entry {EntryId}: the removal lock for {Type} {RecordId} expired before {UserId}'s share " +
+                "was removed; nothing was removed.", run.EntryId, logicalName, recordId, userId);
+            run.Fail(logicalName, recordId, userId, "record-lock-lost",
+                $"User {userId}'s share was not removed: this enforcement took too long and its hold on the record expired, " +
+                "so another change may be under way. Try again; the 5-minute safety net retries too.");
+        }
+
+        return held;
     }
 
     /// <summary>

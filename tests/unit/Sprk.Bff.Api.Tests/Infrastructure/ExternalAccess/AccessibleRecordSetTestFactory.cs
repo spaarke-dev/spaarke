@@ -50,13 +50,6 @@ internal static class AccessibleRecordSetTestFactory
     public static IReadOnlyList<ExternalRootGrant> NoRootGrants { get; } = Array.Empty<ExternalRootGrant>();
 
     /// <summary>
-    /// An <see cref="INoAccessListReader"/> that never denies anything (task 039) — the honest default
-    /// for every test authored BEFORE the deny-list veto existed. Centralized here (rather than one Moq
-    /// setup per test file) so the three call sites that directly construct
-    /// <see cref="AccessibleRecordSetService"/> share ONE definition of "inert reader" instead of three
-    /// that could silently drift.
-    /// </summary>
-    /// <summary>
     /// An <see cref="IContactIdentityStore"/> that reads every systemuser as linked to NO contact and bound to no oid
     /// (task 143 r1) — the honest default for tests authored before the systemuser-plane veto resolved a secure record's
     /// subjects through the link reads. The veto still adds the principal's derived contact, so those tests keep the
@@ -72,6 +65,13 @@ internal static class AccessibleRecordSetTestFactory
         return store.Object;
     }
 
+    /// <summary>
+    /// An <see cref="INoAccessListReader"/> that never denies anything (task 039) — the honest default
+    /// for every test authored BEFORE the deny-list veto existed. Centralized here (rather than one Moq
+    /// setup per test file) so the three call sites that directly construct
+    /// <see cref="AccessibleRecordSetService"/> share ONE definition of "inert reader" instead of three
+    /// that could silently drift.
+    /// </summary>
     public static INoAccessListReader NeverDeniesReader()
     {
         var reader = new Mock<INoAccessListReader>();

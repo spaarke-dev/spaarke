@@ -106,6 +106,40 @@ public class NoAccessEnforcementStoreTests
         truncated.Should().BeTrue();
     }
 
+    // ── Where a read is sent: the next-page origin rule (task 143 r2, verifier finding 4) ───────────────────────
+
+    private const string ApiRoot = "https://org.crm.dynamics.com/api/data/v9.2";
+
+    [Fact]
+    public void ARelativePath_IsSentUnderTheWebApiRoot()
+    {
+        NoAccessEnforcementStore.ResolveRequestUrl(ApiRoot, NoAccessEnforcementStore.ActiveEntryScanPath)
+            .Should().Be($"{ApiRoot}/{NoAccessEnforcementStore.ActiveEntryScanPath}");
+    }
+
+    [Theory]
+    [InlineData("https://org.crm.dynamics.com/api/data/v9.2/sprk_noaccessentries?$skiptoken=abc")]
+    [InlineData("HTTPS://ORG.CRM.DYNAMICS.COM/api/data/v9.2/sprk_noaccessentries?$skiptoken=abc")]
+    public void ANextLinkUnderTheWebApiRoot_IsFollowedAsIs(string nextLink)
+    {
+        NoAccessEnforcementStore.ResolveRequestUrl(ApiRoot, nextLink).Should().Be(nextLink);
+    }
+
+    [Theory]
+    [InlineData("https://evil.example.com/api/data/v9.2/sprk_noaccessentries?$skiptoken=abc")] // another host
+    [InlineData("https://org.crm.dynamics.com.evil.example.com/api/data/v9.2/sprk_noaccessentries")] // a look-alike host
+    [InlineData("https://org.crm.dynamics.com/api/data/v9.1/sprk_noaccessentries?$skiptoken=abc")] // another version
+    [InlineData("https://org.crm.dynamics.com/api/data/v9.2.evil/sprk_noaccessentries")] // the root as a mere prefix
+    [InlineData("http://org.crm.dynamics.com/api/data/v9.2/sprk_noaccessentries?$skiptoken=abc")] // downgraded scheme
+    public void ANextLinkOutsideTheWebApiRoot_IsNeverFollowed_TheReadFailsClosed(string nextLink)
+    {
+        // The app token rides on every read; a link elsewhere is refused, and the scan that met it fails (the job then
+        // records "error" — the entries already read are NOT enforced as a silent prefix).
+        var act = () => NoAccessEnforcementStore.ResolveRequestUrl(ApiRoot, nextLink);
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*outside the Web API root*");
+    }
+
     /// <summary>The PRODUCTION store with only its two wire queries answered from memory.</summary>
     private sealed class RecordingStore : NoAccessEnforcementStore
     {

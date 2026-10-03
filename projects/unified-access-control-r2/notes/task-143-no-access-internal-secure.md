@@ -100,6 +100,15 @@ own tests; restored and touched.
 - ~~The read-time veto takes the linked contact from `IIdentityNormalizationService` (a faulted link read is "no contact"
   there — task 141's contract), while the guard reads the link status-first; the systemuser subject is unaffected.~~
   Withdrawn in r1 (§7 item 2): on secure records the veto now reads the link status-first through the guard's resolver.
+- **S5 lock, server side (r2, §8 item 3).** The removal lease is renewed just before the revoke and lives 5 minutes,
+  longer than the client's own bound on the revoke (100 s HTTP timeout + up to 30 s token wait). Dataverse may still
+  apply a revoke the client gave up on; if it lands more than 5 minutes after the renewal, a second enforcement could
+  judge S5 from a share about to disappear. Not closable without fencing, which Dataverse does not offer.
+- **A dead lock holder** blocks that record's removals (`record-busy`) for up to 5 minutes (r2: was 2); the job retries.
+- **A next-page link outside the configured Web API root** (another host or version than `Dataverse:ServiceUrl`)
+  is never followed; the scan fails and the run records `error`. With more than 500 active entries, no entry is
+  enforced by that run (deliberate: never a silent prefix). The save-time endpoint and Update Access are unaffected.
+- **The lease store is the scheduler's** (r2, §8 item 2): a PROPOSED §6.5 path-A exception, awaiting the reviewer.
 
 ## 7. Round r1 (2026-10-03) — adversarial-verifier findings closed
 
@@ -160,3 +169,41 @@ restored and touched; every seed reddened its own new test(s) and nothing else:
 **Verification (r1).** BFF build 0 errors / 0 warnings. Full BFF unit suite **14423 passed, 0 failed, 54 skipped, 14477
 total** (20m48s — the verifier's 14405 plus the 18 new). `Spaarke.ArchTests` **346/346**. Publish size not measured here
 (the main session measures; r1 adds no package, no csproj change).
+
+## 8. Round r2 (2026-10-03) — adversarial-verifier findings closed
+
+Branch `task/uac-r2-143-r2` (from `task/uac-r2-143-r1` @ `a4ade61a8`). Live writes: none.
+
+| # | Finding | Disposition |
+|---|---|---|
+| 1 | MEDIUM: the S5 re-read under the per-record lease was never proven to bite. Seeding "lock taken, stale pre-lock shares used" passed all 345 task tests; the r1 interleaving test proves only the `record-busy` refusal, and the r1 bite row L1 (removal without the lock) proves the LOCK, not the re-read | **CLOSED.** New `AnEnforcementWhoseFirstShareReadPredatesAnotherEnforcementsRemoval_ReReadsUnderTheLock_AndKeepsTheLastReader`: B reads {Walled, walledToo}, A then runs start to finish (takes the lock, removes Walled, releases), and only then does B take the now-free lock. B must report no failure (the lock did not decide), remove nothing, and report `last-person-on-secure-record` for walledToo, whose share stays. The verifier's exact seed (bite row L3 below) reddens this test and only this test. The r1 bite table's L1 row is corrected below: it covers the lock, L3 covers the re-read. |
+| 2 | LOW-MEDIUM: the enforcer uses `IScheduledJobLease` (the scheduler's dispatch-lease store) as a per-record mutex; `NoAccessShareReconciliationJob` reaches it transitively, against ADR-036 A1-7 / ADR-052 §5, and the tension was not surfaced (§6.5); the keys land in the `{prefix}scheduler:lease:` family, catalogued as `SchedulerLease` only | **SURFACED as a §6.5 path-A exception, PROPOSED, NOT YET ACCEPTED.** Recorded in `design.md` §9 (new row "ADR-036 A1-7 / ADR-052 §5"). Why not C: the only other cross-instance lock in the BFF, `IIdempotencyService.TryAcquireProcessingLockAsync`, is check-then-set (not atomic) and fails OPEN on a cache fault, so it cannot protect S5; complying means a new lock type with Redis and process-local implementations that duplicates `RedisScheduledJobLease` (§11). Why not B: the rule's intent (a job never touches the host's dispatch of ITSELF) holds; only the letter (the type) is crossed. Bounded and catalogued: the keys appear as the second site of `SystemCacheKeys.SchedulerLease`, with raw key `{InstanceName}scheduler:lease:no-access-enforce:{table}:{recordId}`. No job id starts with `no-access-enforce:`. `occurrenceUtc` is always null. Every lock problem fails closed. The enforcer's ctor doc names the exception. **🔔 The reviewer must accept or decline it explicitly** (§6.5: "code-review approves explicitly"); the task-143 PR must cite the §9 row. If declined, path C is a new lock type independent of `Spaarke.Scheduling`. |
+| 3 | LOW: the 2-minute lease is never renewed; slow reads (throttling) could outlive it, and a second enforcement could take it mid-removal; undocumented | **FIXED + residual stated.** The lease is RENEWED right before the revoke (`RenewRecordLockAsync`). A renewal answering false (the lease expired, or someone else holds it) removes nothing and reports `record-lock-lost`. A renewal that cannot be made removes nothing and reports `record-lock-unavailable`. A successful renewal proves the lease was held throughout, because Redis `LockExtend` compares the token and fails on an expired key. `RecordLockDuration` 2 → **5 min**, so after the renewal it outlasts the revoke: the Dataverse Web API client's default 100 s timeout, plus its token-refresh wait of up to 30 s. The cost: a holder that dies blocks that record's removals (`record-busy`) for up to 5 min, which the 5-minute job absorbs. **Residual (§6):** Dataverse may still apply a revoke after the client has given up on it. If that happens later than 5 min after the renewal, a second enforcement could judge S5 from a share that is about to disappear. The window is server-side processing of one request; it is not closable without fencing, which Dataverse has no form of. |
+| 4 | LOW: the absolute-URL branch of `NoAccessEnforcementStore.GetAsync` (origin check) was never exercised; a foreign next link fails the whole scan | **CLOSED.** The URL choice is extracted unchanged into `internal static ResolveRequestUrl(apiUrl, relativeOrNextLink)`, which `GetAsync` calls. Eight new cases: a relative path, a link under the root (as written, and upper-case host), and five that are refused (another host, a look-alike host, another version, the root as a bare prefix `v9.2.evil`, an `http` downgrade). The scan-level consequence is unchanged and deliberate: the refused link throws, the job records `error` and names the problem (`ARun_WhoseScanFaults_RecordsSuccessFalse_NeverNothingToReconcile`), and the entries already read are NOT enforced as a silent prefix. Stated in the method's doc and in §6. |
+| 5 | TRIVIAL: `NeverDeniesReader`'s `<summary>` sat above `UnlinkedIdentityStore` | **FIXED.** The summary moved back to its method. |
+| 6–8 | Verified OK | Accepted. |
+| 9 | Observation: no completion markers in the job | Accepted as reasoned. No change. |
+| 10 | Observation: a row carrying both contact and organization subjects is malformed | Accepted. Criterion 1 mandates it. No change. |
+| 11/12 | Criterion 13 not met (S5 re-read; publish size) | **Test half met** (item 1). Publish size remains the main session's. |
+| 13 | Criterion 1: live gate G-1 | **NOT CLOSABLE HERE** (read-only). Unchanged: `pwsh scripts/Set-NoAccessSystemUserSubjectSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply`, then `-Verify` (exit 0) and `describe('tables/sprk_noaccessentry')`, BEFORE any BFF deploy of this branch. |
+| 14 | Criterion 14: manual live gate | **NOT CLOSABLE HERE.** It needs G-1, G-2 (the BFF deploy), task 154's form registration (`bff_auth.js` before `noaccessentry_postsave.js`) and O2 applied. Per #1081 and round 5, it uses **child-BU users**, never root-BU or "Spaarke Demo" team members: their secure-record access is `role-or-business-unit` in dev, reported, never revoked. |
+
+### r2 tests
+
+New: 11 tests. The enforcer gains 3: the stale-first-read interleaving, the lease lost before the revoke, and the renewal unreachable. The store gains 8 cases in 3 methods. `InterleavingShares` gains a one-shot `AfterFirstRead` hook. The lease double `ExpiringLease` is a module-boundary double over `ProcessLocalScheduledJobLease`. No new double of production internals. The task-related set: **356/356**.
+
+**Bite proof (r2).** Five violations were seeded one at a time. Each was followed by a build and the 356 task-related tests, then restored from a backup copy and touched:
+
+| Seed | Failed |
+|---|---|
+| L3 the lock is taken, but the STALE pre-lock shares decide (the verifier's seed) | 1 (the new stale-first-read test) |
+| R1 no renewal before the revoke | 2 (lease lost; renewal unreachable) |
+| R2 a failed renewal is treated as held | 1 (lease lost) |
+| U1 the origin check is dropped | 5 (every refused link) |
+| U2 the check has no trailing `/` (a bare prefix) | 1 (`v9.2.evil`) |
+
+Correction to the r1 bite table: **L1** ("removal without the per-record lock") proves the lock. It does not prove the re-read, which only L3 proves.
+
+**Verification (r2).** BFF unit-test build 0 errors / 0 warnings. Full BFF unit suite **14434 passed, 0 failed, 54
+skipped, 14488 total** (19m47s — r1's 14423 plus the 11 new). `Spaarke.ArchTests` **346/346**. Publish size not measured here
+(the main session measures; r2 adds no package and no csproj change).

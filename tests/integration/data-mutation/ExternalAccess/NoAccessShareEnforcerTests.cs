@@ -450,6 +450,93 @@ public class NoAccessShareEnforcerTests
             "the second enforcement waits its turn; the job retries it within 5 minutes");
     }
 
+    [Fact]
+    public async Task AnEnforcementWhoseFirstShareReadPredatesAnotherEnforcementsRemoval_ReReadsUnderTheLock_AndKeepsTheLastReader()
+    {
+        // Task 143 r2 (verifier finding 1): enforcement B reads the shares {Walled, walledToo} BEFORE enforcement A takes
+        // the record's lock; A then removes Walled and RELEASES the lock; only then does B take it. The lock is free, so
+        // only the re-read under it stands between B and the stale "Walled still keeps access" — on the stale read B would
+        // remove walledToo too, and the secure record would have no reader left (owner S5).
+        var walledToo = Guid.NewGuid();
+        _h.Store.Person(walledToo);
+        _h.Shares.Reset(); // only the two walled users can read the record
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Shares.Seed(Project, SecureProject, User(walledToo), CollaborateMask);
+        var entryA = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+        var entryB = _h.Store.AddEntry(subjectUser: walledToo, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        NoAccessEnforcementReport? reportA = null;
+        var staleFirstRead = new InterleavingShares(_h.Shares)
+        {
+            AfterFirstRead = async () => reportA = await _h.Enforcer.EnforceEntryAsync(entryA, new[] { Tenant }, CancellationToken.None),
+        };
+        var enforcerB = new NoAccessShareEnforcer(_h.Store, _h.Participations, _h.Identities, staleFirstRead, _h.Cache.Mock.Object,
+            _h.Lease, Microsoft.Extensions.Logging.Abstractions.NullLogger<NoAccessShareEnforcer>.Instance);
+
+        var reportB = await enforcerB.EnforceEntryAsync(entryB, new[] { Tenant }, CancellationToken.None);
+
+        reportA.Should().NotBeNull("A ran, start to finish, between B's first share read and B's lock");
+        reportA!.Removed.Should().ContainSingle(r => r.SystemUserId == Walled);
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().BeNull();
+        reportB.Failures.Should().BeEmpty("the lock was free when B asked for it — the re-read, not the lock, decides here");
+        reportB.Removed.Should().BeEmpty("on the fresh read under the lock walledToo is the last reader");
+        reportB.NotEnforced.Should().ContainSingle().Which.Should().Be(
+            new NoAccessNotEnforced(Project, SecureProject, walledToo, NoAccessEnforcementReason.LastPersonOnSecureRecord));
+        _h.Shares.MaskOf(Project, SecureProject, User(walledToo)).Should().Be(CollaborateMask,
+            "a secure record always keeps at least one person who can open it (owner S5)");
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheRemovalLockExpiredBeforeTheRevoke_RemovesNothing_AndSaysTryAgain()
+    {
+        // Task 143 r2 (verifier finding 3): reads slowed past the lease (throttling) would let a second enforcement take
+        // the lock and judge S5 from shares this one is about to change. The lease is renewed just before the revoke; a
+        // lease that is no longer ours removes nothing.
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Lease = new ExpiringLease(renewThrows: false);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Removed.Should().BeEmpty();
+        report.Failures.Should().ContainSingle(f => f.Kind == "record-lock-lost" && f.SystemUserId == Walled);
+        _h.Shares.Writes.Should().BeEmpty("a lease that expired before the revoke no longer protects owner S5");
+        _h.Shares.MaskOf(Project, SecureProject, User(Walled)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task Enforce_WhenTheRemovalLockCannotBeRenewedBeforeTheRevoke_RemovesNothing()
+    {
+        _h.Shares.Seed(Project, SecureProject, User(Walled), CollaborateMask);
+        _h.Lease = new ExpiringLease(renewThrows: true);
+        var entry = _h.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
+
+        var report = await Enforce(entry);
+
+        report.Failures.Should().ContainSingle(f => f.Kind == "record-lock-unavailable");
+        _h.Shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>A lease that is granted, then found expired (or unreachable) when renewed.</summary>
+    private sealed class ExpiringLease(bool renewThrows) : Spaarke.Scheduling.IScheduledJobLease
+    {
+        private readonly Spaarke.Scheduling.ProcessLocalScheduledJobLease _inner = new();
+
+        public bool IsDistributed => true;
+
+        public Task<Spaarke.Scheduling.ScheduledJobLeaseGrant> TryAcquireAsync(
+            string jobId, DateTimeOffset? occurrenceUtc, TimeSpan duration, CancellationToken cancellationToken)
+            => _inner.TryAcquireAsync(jobId, occurrenceUtc, duration, cancellationToken);
+
+        public Task<bool> RenewAsync(string jobId, string token, TimeSpan duration, CancellationToken cancellationToken)
+            => renewThrows
+                ? throw new Spaarke.Scheduling.ScheduledJobLeaseUnavailableException("Simulated: Redis is not connected.")
+                : Task.FromResult(false);
+
+        public Task ReleaseAsync(string jobId, string token, CancellationToken cancellationToken)
+            => _inner.ReleaseAsync(jobId, token, cancellationToken);
+    }
+
     /// <summary>A lease store that cannot be reached (Redis down).</summary>
     private sealed class UnavailableLease : Spaarke.Scheduling.IScheduledJobLease
     {
@@ -466,10 +553,15 @@ public class NoAccessShareEnforcerTests
             => throw new Spaarke.Scheduling.ScheduledJobLeaseUnavailableException("Simulated.");
     }
 
-    /// <summary>The strict share table, with a hook that runs ONCE just before the first revoke reaches it.</summary>
+    /// <summary>
+    /// The strict share table, with two one-shot hooks: one runs just before the first revoke reaches it; the other runs
+    /// just after the first share read was taken, and that read's (now stale) answer is what the caller gets.
+    /// </summary>
     private sealed class InterleavingShares(FakeRecordShareTable inner) : Sprk.Bff.Api.Services.Access.IDataverseRecordShareService
     {
         public Func<Task>? BeforeFirstRevoke { get; set; }
+
+        public Func<Task>? AfterFirstRead { get; set; }
 
         public Task GrantAccessAsync(string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
             CancellationToken ct = default) => inner.GrantAccessAsync(entitySetName, recordId, principal, accessRightsCsv, ct);
@@ -492,7 +584,17 @@ public class NoAccessShareEnforcerTests
         public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(string entityLogicalName, Guid recordId,
             CancellationToken ct = default) => inner.GetPrincipalAccessAsync(entityLogicalName, recordId, ct);
 
-        public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName,
-            Guid recordId, CancellationToken ct = default) => inner.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+        public async Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessOrThrowAsync(string entityLogicalName,
+            Guid recordId, CancellationToken ct = default)
+        {
+            var shares = await inner.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+            if (AfterFirstRead is { } hook)
+            {
+                AfterFirstRead = null;
+                await hook();
+            }
+
+            return shares;
+        }
     }
 }
