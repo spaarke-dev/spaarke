@@ -2120,7 +2120,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,
@@ -2133,6 +2133,26 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     {
         // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
         throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
+    }
+
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        Guid? ownerUserId = null,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        // unified-access-control-r2 task 159: a silent-empty stub here would read as "the caller may see nothing".
+        throw new NotImplementedException("QueryEventsAsCallerAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)

@@ -6,9 +6,48 @@ namespace Spaarke.Dataverse;
 /// </summary>
 public interface IEventDataverseService
 {
+    /// <summary>
+    /// APP-ONLY event query — for background callers that legitimately act as the application
+    /// (<c>TodoGenerationService</c>). An HTTP endpoint answering a caller MUST use
+    /// <see cref="QueryEventsAsCallerAsync"/> instead (unified-access-control-r2 task 159): this method has no
+    /// caller, so Dataverse row security never applies to its result.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="regardingRecordType"/> narrows a <paramref name="regardingRecordId"/> filter to that type's
+    /// typed lookup; on its own it needs the type's <c>sprk_recordtype_ref</c> row, which only the caller-scoped
+    /// overload takes, so a type without an id is refused here.
+    /// </remarks>
     Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        Guid? ownerUserId = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// The event query run AS the caller (<c>MSCRMCallerID</c> impersonation), so Dataverse applies ownership, role
+    /// depth, business unit, teams, sharing and hierarchy inside the query and the count covers only the rows the
+    /// caller may read (unified-access-control-r2 task 159, #1098 — the trimmed <c>GET /api/v1/events</c>).
+    /// </summary>
+    /// <param name="callerSystemUserId">
+    /// The caller's Dataverse <c>systemuserid</c>. REQUIRED and non-nullable on purpose: an endpoint cannot reach the
+    /// app-only query by omitting it. <see cref="Guid.Empty"/> is refused before anything is sent.
+    /// </param>
+    /// <param name="regardingRecordTypeRefId">
+    /// The <c>sprk_recordtype_ref</c> row of <paramref name="regardingRecordType"/>, required when the type is given
+    /// without a <paramref name="regardingRecordId"/> (the type filter is a lookup, not an option set).
+    /// </param>
+    Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,

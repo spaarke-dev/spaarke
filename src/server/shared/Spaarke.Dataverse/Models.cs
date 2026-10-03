@@ -943,14 +943,34 @@ public class CreateEventRequest
     /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Regarding record type</summary>
+    // ── The ADR-024 regarding write set (unified-access-control-r2 task 159, #1098). Every value is RESOLVED BY
+    //    THE BFF (this library cannot reach CoreAncestorResolver or the record-type catalog) and passed here as
+    //    plain values; DataverseWebApiService.BuildCreateEventPayload only shapes them. Set all of them together
+    //    with RegardingRecordType/RegardingRecordId, or none.
+
+    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>; names the typed lookup).</summary>
     public int? RegardingRecordType { get; set; }
 
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record ID.</summary>
+    public Guid? RegardingRecordId { get; set; }
 
-    /// <summary>Regarding record name</summary>
+    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>The regarding record's entity SET, from live metadata — the same set the caller's AppendTo was asked of.</summary>
+    public string? RegardingEntitySetName { get; set; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for the regarding type, or null when the environment has none.</summary>
+    public Guid? RegardingRecordTypeRefId { get; set; }
+
+    /// <summary><c>sprk_regardingrecordurl</c> — the relative model-driven record URL.</summary>
+    public string? RegardingRecordUrl { get; set; }
+
+    /// <summary><c>sprk_regardingrecordnumber</c> — the business-key number (matter/project), or null.</summary>
+    public string? RegardingRecordNumber { get; set; }
+
+    /// <summary>The FR-26 core-ancestor stamps to bind besides the target's own lookup (lookup attribute, entity set, id).</summary>
+    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
 
     /// <summary>
     /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
@@ -983,17 +1003,36 @@ public class UpdateEventRequest
     /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Status code</summary>
+    /// <summary>Status code (a live <c>sprk_event.statuscode</c> value; the matching statecode is written with it).</summary>
     public int? StatusCode { get; set; }
 
-    /// <summary>Regarding record type</summary>
+    // ── A RE-PARENT (task 159, #1098): the same resolved regarding write set as CreateEventRequest. When
+    //    RegardingRecordType is set, DataverseWebApiService.BuildUpdateEventPayload binds the new target, its
+    //    record type, id/name/url/number and the core stamps, and CLEARS every other typed regarding lookup.
+
+    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>).</summary>
     public int? RegardingRecordType { get; set; }
 
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record ID.</summary>
+    public Guid? RegardingRecordId { get; set; }
 
-    /// <summary>Regarding record name</summary>
+    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>The new regarding record's entity SET, from live metadata.</summary>
+    public string? RegardingEntitySetName { get; set; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for the new regarding type, or null when the environment has none.</summary>
+    public Guid? RegardingRecordTypeRefId { get; set; }
+
+    /// <summary><c>sprk_regardingrecordurl</c> for the new regarding record.</summary>
+    public string? RegardingRecordUrl { get; set; }
+
+    /// <summary><c>sprk_regardingrecordnumber</c> for the new regarding record, or null (written as null on a re-parent).</summary>
+    public string? RegardingRecordNumber { get; set; }
+
+    /// <summary>The FR-26 core-ancestor stamps of the new regarding record (lookup attribute, entity set, id).</summary>
+    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
 }
 
 /// <summary>
@@ -1240,6 +1279,63 @@ public static class RegardingRecordType
         WorkAssignment => "sprk_regardingworkassignment",
         Budget => "sprk_regardingbudget",
         _ => null
+    };
+
+    // ── sprk_event's Web API write names (unified-access-control-r2 task 159, #1098) ──
+    // Read from live metadata (spaarkedev1 EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships,
+    // 2026-10-03; projects/unified-access-control-r2/notes/task-159-events-authorization.md §0.2) and pinned by
+    // EventRegardingPayloadTests. A lookup is WRITTEN only as "{navigationProperty}@odata.bind" — never as the
+    // logical name (the Web API rejects it) and never as a "_x_value" key. Every navigation property here is
+    // PascalCase; none equals its logical name.
+
+    /// <summary>The navigation property of <c>sprk_event.sprk_regardingrecordtype</c> (lookup → <c>sprk_recordtype_ref</c>).</summary>
+    public const string EventRecordTypeNavigationProperty = "sprk_RegardingRecordType";
+
+    /// <summary><c>sprk_recordtype_ref</c>'s entity SET (live metadata), the target of <see cref="EventRecordTypeNavigationProperty"/>.</summary>
+    public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
+
+    /// <summary>
+    /// The full typed-regarding lookup FAMILY on <c>sprk_event</c> (14 lookups, live 2026-10-03), excluding
+    /// <c>sprk_regardingrecordtype</c>. A re-parent clears every member except the new target's lookup and the
+    /// core-ancestor stamps it writes (ADR-024: clear the previous lookup).
+    /// </summary>
+    public static IReadOnlyList<string> EventRegardingLookups { get; } =
+    [
+        "sprk_regardingaccount",
+        "sprk_regardingagreement",
+        "sprk_regardinganalysis",
+        "sprk_regardingbudget",
+        "sprk_regardingcommunication",
+        "sprk_regardingcontact",
+        "sprk_regardingevent",
+        "sprk_regardinginvoice",
+        "sprk_regardingmatter",
+        "sprk_regardingorganization",
+        "sprk_regardingproject",
+        "sprk_regardingreportcard",
+        "sprk_regardingservicerequest",
+        "sprk_regardingworkassignment",
+    ];
+
+    /// <summary>The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown.</summary>
+    public static string? GetEventNavigationProperty(string lookupAttribute) => lookupAttribute switch
+    {
+        "sprk_regardingaccount" => "sprk_RegardingAccount",
+        "sprk_regardingagreement" => "sprk_RegardingAgreement",
+        "sprk_regardinganalysis" => "sprk_RegardingAnalysis",
+        "sprk_regardingbudget" => "sprk_RegardingBudget",
+        "sprk_regardingcommunication" => "sprk_RegardingCommunication",
+        "sprk_regardingcontact" => "sprk_RegardingContact",
+        "sprk_regardingevent" => "sprk_RegardingEvent",
+        "sprk_regardinginvoice" => "sprk_RegardingInvoice",
+        "sprk_regardingmatter" => "sprk_RegardingMatter",
+        "sprk_regardingorganization" => "sprk_RegardingOrganization",
+        "sprk_regardingproject" => "sprk_RegardingProject",
+        "sprk_regardingreportcard" => "sprk_RegardingReportCard",
+        "sprk_regardingservicerequest" => "sprk_RegardingServiceRequest",
+        "sprk_regardingworkassignment" => "sprk_RegardingWorkAssignment",
+        "sprk_regardingrecordtype" => EventRecordTypeNavigationProperty,
+        _ => null,
     };
 
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──

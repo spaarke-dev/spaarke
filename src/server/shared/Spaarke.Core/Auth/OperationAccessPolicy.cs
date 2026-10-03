@@ -212,6 +212,24 @@ public static class OperationAccessPolicy
         // Recorded as an explicit obligation on task 005.
         ["entity.associate_document"] = AccessRights.AppendTo,
 
+        // "event.attach_regarding" — AppendTo on the REGARDING record an sprk_event is filed under: the body
+        // RegardingRecordType/RegardingRecordId of POST /api/v1/events, and the NEW regarding of a PUT
+        // /api/v1/events/{id} re-parent. Added by unified-access-control-r2 task 159 (#1098). The event HOLDS the
+        // typed lookup; the record it points AT is the one being attached to, and Dataverse asks AppendTo of that
+        // record ("other records can be attached to this record") — the "finance.attach_invoice" reasoning. Not
+        // Write: filing an event under a matter does not modify the matter. A separate key rather than
+        // "entity.associate_document" (which names an Office DOCUMENT being filed) or "finance.attach_invoice"
+        // (which names an invoice): reusing either would misdescribe the act in every deny log. Resource = the
+        // regarding record, in the entity set Dataverse's own metadata names for the regarding type.
+        ["event.attach_regarding"] = AccessRights.AppendTo,
+
+        // "event.reparent" — Write AND Append on the sprk_event a PUT /api/v1/events/{id} re-parents (its body
+        // carries RegardingRecordType/RegardingRecordId). Added by task 159 (#1098). The event is the record that
+        // HOLDS the lookup, so Dataverse asks Append of it ("this record can be attached to another") — the
+        // "finance.link_invoice" reasoning — and Write for the column update itself. Append is not implied by
+        // Write. Resource = the event named by the route; the new regarding target costs "event.attach_regarding".
+        ["event.reparent"] = AccessRights.Write | AccessRights.Append,
+
         // ========================================================================
         // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)
         // ========================================================================
