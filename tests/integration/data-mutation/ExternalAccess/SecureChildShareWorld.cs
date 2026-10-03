@@ -42,6 +42,7 @@ internal sealed class SecureChildShareWorld
 
     private readonly Dictionary<(string Table, Guid Id), Entity> _rows = new();
     private readonly HashSet<string> _failingTables = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<(string Table, Guid Id)> _failingRowReads = new();
 
     /// <summary>Every table queried, in order.</summary>
     public List<string> QueriedTables { get; } = new();
@@ -110,6 +111,16 @@ internal sealed class SecureChildShareWorld
         return this;
     }
 
+    /// <summary>
+    /// Makes every read of ONE row by its id throw (task 149 r1: a lineage fault on one record — the walk's single-row
+    /// reads of a root or an intermediate). Queries that do not name the row by id still answer.
+    /// </summary>
+    public SecureChildShareWorld FailingRowReadsOf(string table, Guid id)
+    {
+        _failingRowReads.Add((table, id));
+        return this;
+    }
+
     public SecureChildShareWorld Add(string table, Guid id, params (string Column, object Value)[] columns)
     {
         var row = new Entity(table, id);
@@ -130,21 +141,25 @@ internal sealed class SecureChildShareWorld
     /// </summary>
     public static SecureChildShareSynchronizer SynchronizerOver(
         Func<SecureChildShareWorld> current, IDataverseRecordShareService shares)
+        => new(EntitiesOver(current).Object, shares, Configuration(), NullLogger<SecureChildShareSynchronizer>.Instance);
+
+    /// <summary>A strict <see cref="IGenericEntityService"/> whose queries this world answers; callers add other setups.</summary>
+    public static Mock<IGenericEntityService> EntitiesOver(Func<SecureChildShareWorld> current)
     {
         var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
         entities
             .Setup(e => e.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
             .Returns((QueryExpression query, CancellationToken _) => Task.FromResult(current().Answer(query)));
+        return entities;
+    }
 
-        var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    /// <summary>The two Secure Record names this world uses, as configuration.</summary>
+    public static IConfiguration Configuration() =>
+        new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         {
             ["SecureRecord:BusinessUnitName"] = SecureBuName,
             ["SecureRecord:OwnerTeamName"] = SecureOwnerTeamName,
         }).Build();
-
-        return new SecureChildShareSynchronizer(
-            entities.Object, shares, configuration, NullLogger<SecureChildShareSynchronizer>.Instance);
-    }
 
     // ── Query evaluation ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -153,6 +168,10 @@ internal sealed class SecureChildShareWorld
         QueriedTables.Add(query.EntityName);
         if (_failingTables.Contains(query.EntityName))
             throw new InvalidOperationException($"Test: {query.EntityName} cannot be read.");
+        if (query.Criteria.Conditions.Any(c =>
+                c.AttributeName == query.EntityName + "id" && c.Operator == ConditionOperator.Equal
+                && c.Values.Single() is Guid id && _failingRowReads.Contains((query.EntityName, id))))
+            throw new InvalidOperationException($"Test: this {query.EntityName} row cannot be read.");
 
         var matched = _rows.Values
             .Where(r => r.LogicalName == query.EntityName && Matches(r, query.Criteria))

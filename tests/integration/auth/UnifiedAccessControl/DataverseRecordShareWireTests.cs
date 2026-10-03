@@ -295,6 +295,21 @@ public class DataverseRecordShareWireTests
         await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*another page*");
     }
 
+    /// <summary>
+    /// Task 149 r1 (F6): the batched read is STRICT per row, like the single one. An unreadable mask read softly is 0 —
+    /// which the synchronizer treats as "no direct share" — so a principal holding a real share would never be revoked.
+    /// </summary>
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_WhenARowHasNoReadableMask_Throws()
+    {
+        var body = $$"""{"value":[{"objectid":"{{MatterId}}","principalid":"{{UserId}}","principaltypecode":8,"changedon":"2026-10-02T04:00:00Z"}]}""";
+
+        var read = () => new OfflineService(SharesHandler(body))
+            .GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", new[] { MatterId });
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*rights mask*");
+    }
+
     [Fact]
     public async Task GetPrincipalAccessForRecordsOrThrowAsync_ReadsInBatches()
     {

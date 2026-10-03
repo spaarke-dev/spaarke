@@ -12,6 +12,9 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Membership;
+using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Tests.AccessControl;
 using Xunit;
 
@@ -736,6 +739,324 @@ public class SecureChildShareMirrorTests
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(409);
         _shares.WriteLog.Should().HaveCount(writes);
         _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(CollaborateOnChild);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 149 r1 — failure outcomes at the endpoints (AC9: never a silent 200)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>F1: the synchronizer could not read the children at all (Failed) — the share stands, the caller is told.</summary>
+    [Fact]
+    public async Task ShareUser_WhenTheChildrenCannotBeReadAtAll_Is500ChildrenIncomplete_Failed_NotASilent200()
+    {
+        var result = await Share(World().FailingQueriesOf("sprk_todo"), UserB, ExternalAccessLevel.ViewOnly);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        problem.ProblemDetails.Extensions["childrenStatus"].Should().Be(nameof(SecureChildShareSyncStatus.Failed));
+        problem.ProblemDetails.Detail.Should().Contain("could not be read");
+        _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().Be(ViewOnly, "the root share stands");
+        _shares.WriteLog.Should().OnlyContain(w => w.RecordId == ProjectR, "nothing is written below an unread root");
+    }
+
+    /// <summary>
+    /// F1: an UNSHARE whose fan-out could not read anything (here: the root's own row) — a silent 200 here would be an
+    /// over-share nobody is told about, because the removed user keeps every child.
+    /// </summary>
+    [Fact]
+    public async Task UnshareUser_WhenTheChildrenCannotBeReadAtAll_Is500ChildrenIncomplete_Failed_AndTheRootUnshareStands()
+    {
+        var world = World();
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        await Share(world, UserB, ExternalAccessLevel.Collaborate);
+        world.FailingRowReadsOf("sprk_project", ProjectR);
+
+        var result = await Unshare(world, UserB);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        problem.ProblemDetails.Extensions["childrenStatus"].Should().Be(nameof(SecureChildShareSyncStatus.Failed));
+        problem.ProblemDetails.Extensions["removed"].Should().Be(true);
+        problem.ProblemDetails.Detail.Should().Contain("may still open them");
+        _shares.MaskOf("sprk_project", ProjectR, User(UserB)).Should().BeNull("removing access is never rolled back");
+    }
+
+    /// <summary>
+    /// F2: a child whose FILING cannot be read (here its second root's row) is not decided — nothing is written on it — and
+    /// the unshare says so; it is never skipped silently while it still carries the removed user. The count is honest: it
+    /// is one of the root's related records (found below it), so N of M has N ≤ M.
+    /// </summary>
+    [Fact]
+    public async Task UnshareUser_WhenAChildsFilingCannotBeRead_Is500_NamingItInTheCounts_AndNothingIsWrittenOnIt()
+    {
+        var both = Guid.Parse("d0c00000-0000-4000-8000-0000000000b0");
+        var world = World()
+            .SecureChild("sprk_document", both,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", ProjectR2));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), Collaborate);
+        _shares.Seed("sprk_project", ProjectR, User(UserB), ViewOnly);
+        _shares.Seed("sprk_project", ProjectR2, User(UserB), ViewOnly);
+        _shares.Seed("sprk_document", both, User(UserB), ViewOnly);
+        world.FailingRowReadsOf("sprk_project", ProjectR2);
+
+        var result = await Unshare(world, UserB);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(500);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        problem.ProblemDetails.Extensions["childrenNotUpdated"].Should().Be(1);
+        problem.ProblemDetails.Extensions["childrenInScope"].Should().Be(ChildrenOfR.Length + 1);
+        problem.ProblemDetails.Detail.Should().Contain($"1 of its {ChildrenOfR.Length + 1} related records");
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == both, "an undecided child is never written");
+        _shares.MaskOf("sprk_document", both, User(UserB)).Should().Be(ViewOnly, "honestly reported, not hidden");
+    }
+
+    /// <summary>F2 (the reconcile): the same fault ends the run Incomplete, never Completed.</summary>
+    [Fact]
+    public async Task Reconcile_WhenAChildsFilingCannotBeRead_IsIncomplete_AndThatChildIsNotWritten()
+    {
+        _shares.Seed("sprk_project", ProjectR2, User(UserB), ViewOnly);
+        _shares.Seed("sprk_document", DocR2, User(UserC), ViewOnly); // would be revoked if DocR2's filing were readable
+
+        var result = await World().FailingRowReadsOf("sprk_project", ProjectR2).Synchronizer(_shares)
+            .ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Incomplete);
+        result.ChildrenNotUpdated.Should().Be(1);
+        result.ChildrenNotUpdated.Should().BeLessThanOrEqualTo(result.ChildrenInScope);
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == DocR2);
+        _shares.MaskOf("sprk_document", DocR2, User(UserC)).Should().Be(ViewOnly);
+    }
+
+    // ── F4 / F9: a scoped fan-out reads only the root's own related records ───────────────────────────────────────────
+
+    /// <summary>
+    /// F4/F9: a fault on an UNRELATED secure record (R2's row) does not touch a share on R — the scoped fan-out walks down
+    /// from R and never reads R2's children, so neither their volume nor their faults reach this request.
+    /// </summary>
+    [Fact]
+    public async Task ShareUser_IsNotAffectedByAFaultOnAnUnrelatedSecureRecord()
+    {
+        var world = World().FailingRowReadsOf("sprk_project", ProjectR2);
+
+        var result = await Share(world, UserB, ExternalAccessLevel.ViewOnly);
+
+        result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>();
+        foreach (var (table, id) in ChildrenOfR)
+            _shares.MaskOf(table, id, User(UserB)).Should().Be(ViewOnly);
+        world.QueriedTables.Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task SyncRoot_ReachesAGrandchildThroughAUserOwnedRow_ButNotThroughAnOrdinaryTeamOwnedOne()
+    {
+        var userComm = Guid.Parse("c0c00000-0000-4000-8000-0000000000a1");
+        var viaUser = Guid.Parse("a7a00000-0000-4000-8000-0000000000a1");
+        var ordinaryComm = Guid.Parse("c0c00000-0000-4000-8000-0000000000a2");
+        var viaOrdinary = Guid.Parse("a7a00000-0000-4000-8000-0000000000a2");
+        var world = World()
+            .UserOwnedChild("sprk_communication", userComm, ("sprk_regardingproject", "sprk_project", ProjectR))
+            .SecureChild("sprk_communicationattachment", viaUser, ("sprk_communication", "sprk_communication", userComm))
+            .OrdinaryChild("sprk_communication", ordinaryComm, ("sprk_regardingproject", "sprk_project", ProjectR))
+            .SecureChild("sprk_communicationattachment", viaOrdinary, ("sprk_communication", "sprk_communication", ordinaryComm));
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+
+        await world.Synchronizer(_shares).SyncRootAsync("sprk_project", ProjectR, CancellationToken.None);
+
+        _shares.MaskOf("sprk_communicationattachment", viaUser, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_communicationattachment", viaOrdinary, User(UserA)).Should().BeNull();
+        _shares.WriteLog.Should().NotContain(w => w.RecordId == userComm || w.RecordId == ordinaryComm);
+    }
+
+    /// <summary>A child found below R that is ALSO under R2 still gets the intersection: the upward walk decides its roots.</summary>
+    [Fact]
+    public async Task ShareUser_OnAChildAlsoFiledUnderASecondSecureRoot_GivesOnlyTheIntersection()
+    {
+        var both = Guid.Parse("d0c00000-0000-4000-8000-0000000000b0");
+        var world = World()
+            .SecureChild("sprk_document", both,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", ProjectR2));
+
+        var result = await Share(world, UserB, ExternalAccessLevel.ViewOnly);
+
+        result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>();
+        _shares.MaskOf("sprk_document", DocR, User(UserB)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_document", both, User(UserB)).Should().BeNull("B is not shared on R2, the child's other root");
+    }
+
+    // ── F7: an ordinary record is answered from its own row ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// F7: on an ORDINARY record, a Secure Record setup that cannot be resolved (two business units carry the name) is
+    /// irrelevant — the record's own owner team proves it is not secure, so the share answers 200 as before task 149.
+    /// </summary>
+    [Fact]
+    public async Task ShareUser_OnAnOrdinaryRecord_IsNotRefused_WhenTheSecureRecordTeamCannotBeResolved()
+    {
+        var world = SecureChildShareWorld.Standard()
+            .OrdinaryRoot("sprk_project", ProjectR)
+            .Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName));
+
+        var result = await Share(world, UserB, ExternalAccessLevel.ViewOnly);
+
+        result.Should().BeOfType<Ok<ShareRecordWithUserResponse>>();
+        world.QueriedTables.Should().NotContain("businessunit", "an ordinary record never needs the Secure Record setup");
+    }
+
+    /// <summary>F7's twin: on a SECURE record the same ambiguity is still a refusal (fail closed), named to the caller.</summary>
+    [Fact]
+    public async Task ShareUser_OnASecureRecord_WhenTheSecureRecordTeamCannotBeResolved_Is500ChildrenIncomplete_Failed()
+    {
+        var world = World().Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName));
+
+        var result = await Share(world, UserB, ExternalAccessLevel.ViewOnly);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        problem.ProblemDetails.Extensions["childrenStatus"].Should().Be(nameof(SecureChildShareSyncStatus.Failed));
+        _shares.WriteLog.Should().OnlyContain(w => w.RecordId == ProjectR);
+    }
+
+    // ── F5: the fresh re-check intersects EVERY root ───────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// F5: a child under TWO secure roots; an unshare of B on EITHER root lands mid-run, after both roots' shares were
+    /// read. The fresh re-check before a grant must intersect both roots, whichever one changed.
+    /// </summary>
+    [Theory]
+    [InlineData("R")]
+    [InlineData("R2")]
+    public async Task ARootUnshareMidRun_OnEitherOfTwoRoots_IsNotUndoneByAStaleGrant(string changedRoot)
+    {
+        var first = Guid.Parse("d0c00000-0000-4000-8000-0000000000f1");  // granted first: fires the race
+        var second = Guid.Parse("d0c00000-0000-4000-8000-0000000000f2"); // written after the race, from stale reads
+        var world = SecureChildShareWorld.Standard()
+            .SecureRoot("sprk_project", ProjectR)
+            .SecureRoot("sprk_project", ProjectR2)
+            .SecureChild("sprk_document", first,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", ProjectR2))
+            .SecureChild("sprk_document", second,
+                ("sprk_project", "sprk_project", ProjectR), ("sprk_relatedproject", "sprk_project", ProjectR2));
+        _shares.Seed("sprk_project", ProjectR, User(UserB), ViewOnly);
+        _shares.Seed("sprk_project", ProjectR2, User(UserB), ViewOnly);
+        var racing = new UnshareOnFirstChildGrant(_shares, changedRoot == "R" ? ProjectR : ProjectR2, User(UserB));
+
+        await SecureChildShareWorld.SynchronizerOver(() => world, racing).ReconcileAllAsync(CancellationToken.None);
+
+        racing.Fired.Should().BeTrue();
+        _shares.MaskOf("sprk_document", second, User(UserB)).Should().BeNull(
+            $"B left {changedRoot} before the second child was written; the fresh re-check must see it on every root");
+    }
+
+    // ── F6: inherited-only rows ────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// F6: a POA row with no DIRECT rights (mask 0 — inherited access only) is not a share: it is never revoked (it is
+    /// not this synchronizer's), and a sharee holding only such a row is GRANTED (never ModifyAccess on a non-share).
+    /// </summary>
+    [Fact]
+    public async Task Reconcile_IgnoresInheritedOnlyRows_NeitherRevokingThemNorModifyingThem()
+    {
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+        _shares.Seed("sprk_document", DocR, User(UserC), 0); // inherited only, not on R
+        _shares.Seed("sprk_document", DocR, User(UserA), 0); // inherited only, A IS on R
+
+        var result = await World().Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        result.Status.Should().Be(SecureChildShareSyncStatus.Completed);
+        var write = _shares.WriteLog.Where(w => w.RecordId == DocR).Should().ContainSingle().Subject;
+        write.Action.Should().Be("GrantAccess", "a principal holding no DIRECT share is granted, never modified");
+        write.Principal.Should().Be(User(UserA));
+        write.Rights.Should().Be(ViewCsv);
+        _shares.MaskOf("sprk_document", DocR, User(UserC)).Should().Be(0, "an inherited-only row is not revoked");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 149 r1 — F3: thread participants are never granted a SECURE message (DirectThreadAccessService)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private DirectThreadAccessService MessageAccess(SecureChildShareWorld world, params Guid[] participants)
+    {
+        var entities = SecureChildShareWorld.EntitiesOver(() => world);
+        entities
+            .Setup(e => e.RetrieveAsync("sprk_communicationthread", ThreadId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_communicationthread")
+            {
+                Id = ThreadId,
+                ["sprk_threadtype"] = new Microsoft.Xrm.Sdk.OptionSetValue(100000000), // record-anchored
+                ["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", UserA),
+            });
+
+        var derivation = new Mock<IThreadMembershipDerivationService>();
+        derivation
+            .Setup(d => d.DeriveAuthorizedSetAsync(ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ThreadAuthorizedSet
+            {
+                ThreadId = ThreadId,
+                Participants = participants
+                    .Select(p => new AuthorizedParticipant
+                    {
+                        Participant = ParticipantReference.SystemUser(p),
+                        Reason = AuthorizationReason.RecordMembership,
+                    })
+                    .ToList(),
+            });
+
+        return new DirectThreadAccessService(
+            entities.Object, _shares, new Lazy<IThreadMembershipDerivationService>(() => derivation.Object),
+            SecureChildShareWorld.Configuration(), NullLogger<DirectThreadAccessService>.Instance);
+    }
+
+    private static readonly Guid ThreadId = Guid.Parse("7e7e0000-0000-4000-8000-000000000001");
+
+    /// <summary>
+    /// F3: a message on a SECURE record's thread. Its participants come from the record's membership lookups (here A, a
+    /// sharee, and C, who is not shared on R): granting them would show C the message until the next reconcile, and the
+    /// two writers would fight on every message. Nothing is granted; the reconcile then gives exactly R's sharees.
+    /// </summary>
+    [Fact]
+    public async Task MessageAccess_OnASecureRecordsMessage_GrantsNoParticipant_AndTheReconcileGivesOnlyTheSharees()
+    {
+        var world = World();
+        _shares.Seed("sprk_project", ProjectR, User(UserA), ViewOnly);
+
+        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(CommR, ThreadId);
+
+        _shares.WriteLog.Should().BeEmpty("a secure message's shares are the secure-child synchronizer's alone");
+
+        await world.Synchronizer(_shares).ReconcileAllAsync(CancellationToken.None);
+
+        _shares.MaskOf("sprk_communication", CommR, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_communication", CommR, User(UserC)).Should().BeNull();
+        _shares.WriteLog.Should().NotContain(w => w.Principal == User(UserC), "C was never granted, so nothing had to be revoked");
+    }
+
+    /// <summary>F3's twin: an ORDINARY (team-owned, not the Secure team) message keeps its participant grants.</summary>
+    [Fact]
+    public async Task MessageAccess_OnAnOrdinaryTeamOwnedMessage_StillGrantsEveryParticipant()
+    {
+        var ordinaryComm = Guid.Parse("c0c00000-0000-4000-8000-0000000000a3");
+        var world = World().OrdinaryChild("sprk_communication", ordinaryComm,
+            ("sprk_regardingproject", "sprk_project", OrdinaryProject));
+
+        await MessageAccess(world, UserA, UserC).GrantMessageAccessAsync(ordinaryComm, ThreadId);
+
+        _shares.MaskOf("sprk_communication", ordinaryComm, User(UserA)).Should().Be(ViewOnly);
+        _shares.MaskOf("sprk_communication", ordinaryComm, User(UserC)).Should().Be(ViewOnly);
+    }
+
+    /// <summary>F3, fail closed: when it cannot be told whether the message is secure, nobody is granted.</summary>
+    [Fact]
+    public async Task MessageAccess_WhenTheSecureRecordTeamIsAmbiguous_OrTheMessageIsMissing_GrantsNothing()
+    {
+        var ambiguous = World().Add("businessunit", Guid.NewGuid(), ("name", SecureChildShareWorld.SecureBuName));
+        await MessageAccess(ambiguous, UserA, UserC).GrantMessageAccessAsync(CommR, ThreadId);
+
+        await MessageAccess(World(), UserA, UserC).GrantMessageAccessAsync(Guid.NewGuid(), ThreadId);
+
+        _shares.WriteLog.Should().BeEmpty();
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════

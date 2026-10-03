@@ -440,14 +440,19 @@ const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.would_lower_existing',
   'sdap.access.grant.grantee_denied',
   'sdap.access.user_share.caller_cannot_grant',
-  // Task 149: the share on the record WAS written, but some of a secure record's related records (documents, events,
-  // to-dos, communications) could not be updated yet. The server's sentence names how many and says they complete
-  // automatically; a generic "failed, try again" would wrongly say nothing was shared.
-  'sdap.access.user_share.children_incomplete',
 ]);
 
-/** Task 149: `/unshare-user` removed the share on the record, but not yet from every related record of a secure one. */
+/** Task 149: `/share-user` or `/unshare-user` changed the share on the record itself, but not yet on every related
+ * record of a secure one. NOT a refusal: the share WAS written (or removed), so it counts as done and the server's
+ * sentence (how many related records, and that they complete automatically) is shown as a warning. */
 const USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE = 'sdap.access.user_share.children_incomplete';
+
+/** The server's sentence when `/share-user` wrote the share but some related records of a secure record are not yet
+ * updated (task 149), or `null` for any other outcome. */
+function childrenIncompleteDetail(err: unknown): string | null {
+  if (!(err instanceof AccessGrantModalApiError)) return null;
+  return err.reasonCode === USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE ? err.detail : null;
+}
 
 /** Task 139 (owner round 3, S5): `/unshare-user` refuses to remove the last
  * person who can open a secure record. Its `detail` says what to do instead. */
@@ -508,21 +513,28 @@ interface IGrantBatchOutcome {
   /** The server's `detail` for each grant the record's access policy refused
    * (task 138) — shown verbatim, never replaced by a generic "try again". */
   policyRefusals?: string[];
+  /** Task 149: the server's `detail` for each share that WAS written while some related records of the secure record
+   * are not updated yet. Those shares are counted in `granted`; this only adds the server's sentence. */
+  relatedRecordsPending?: string[];
 }
 
-/** Builds the post-batch notice for `Add (N)` — six distinct shapes ordered by
- * priority (a denial or a failure dominates a narrowed/notify-pending
- * success). Denial and failure are reported separately because they call for
+/** Builds the post-batch notice for `Add (N)` — seven distinct shapes ordered by
+ * priority (a denial or a failure dominates a related-records-pending,
+ * narrowed or notify-pending success). Denial and failure are reported separately because they call for
  * different next actions: a failure invites retry; a denial does not (retrying
  * without Write on the record fails the same way). */
 function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
   const { granted, selectedCount, failures, denied, anyNotifyPending, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
+  // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
+  // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
+  const relatedPending = Array.from(new Set(outcome.relatedRecordsPending ?? [])).join(' ');
+  const relatedSuffix = relatedPending ? ` ${relatedPending}` : '';
 
   if (denied) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.`,
+      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.${relatedSuffix}`,
     };
   }
   if (policyRefusals.length > 0) {
@@ -533,14 +545,20 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount}. ${reasons}${others}`,
+      text: `Granted access to ${granted} of ${selectedCount}. ${reasons}${others}${relatedSuffix}`,
     };
   }
   if (failures > 0) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.`,
+      text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.${relatedSuffix}`,
     };
+  }
+  if (relatedPending) {
+    const narrowedNote = anyNarrowed
+      ? ' Some were narrowed to your own access level on this record (you can only grant what you hold).'
+      : '';
+    return { intent: 'warning', text: `Granted access to ${granted} item(s).${narrowedNote}${relatedSuffix}` };
   }
   if (anyNotifyPending && anyNarrowed) {
     return {
@@ -1023,6 +1041,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let anyNarrowed = false;
     let denied = false;
     const policyRefusals: string[] = [];
+    const relatedRecordsPending: string[] = [];
     for (const it of selected) {
       const level = rowLevels[it.id];
       try {
@@ -1049,6 +1068,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           setAccessDenyState(deny);
           denied = true;
           break;
+        }
+        // Task 149: the share on the record WAS written; only some related records of the secure record are not yet
+        // updated. Counted as granted, with the server's sentence kept for the notice.
+        const pendingDetail = childrenIncompleteDetail(err);
+        if (pendingDetail) {
+          granted += 1;
+          relatedRecordsPending.push(pendingDetail);
+          continue;
         }
         // Task 138: a refusal by the record's access policy carries the
         // server's own explanation — kept, and shown instead of a generic error.
@@ -1078,12 +1105,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         anyNotifyPending,
         anyNarrowed,
         policyRefusals,
+        relatedRecordsPending,
       })
     );
     // Success (for Save's close decision) iff nothing failed, nothing was refused
     // and access was not denied partway — a notify-pending or narrowed grant still
-    // succeeded (the access row/share was written).
-    return !denied && failures === 0 && policyRefusals.length === 0;
+    // succeeded (the access row/share was written). A share whose related records are
+    // still pending (task 149) also succeeded, but Save keeps the modal open once so the
+    // warning is read: it can name related records an administrator must repair. Nothing
+    // is staged any more, so the next Save closes it.
+    return !denied && failures === 0 && policyRefusals.length === 0 && relatedRecordsPending.length === 0;
   }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, shareUser, loadData]);
 
   // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT

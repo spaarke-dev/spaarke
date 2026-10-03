@@ -525,6 +525,9 @@ root→child relationship has Share, Unshare, Reparent and Assign set to **NoCas
 - **Held children.** A child whose secure roots cannot be determined from the data (a missing parent, a root marked
   secure whose provisioning did not complete, a filing chain deeper than six levels) is only ever narrowed — nobody is
   added to it — and is reported as `held` until the data is fixed.
+- **Messages on a secure record.** A conversation message filed under a secure record is a child like any other: its
+  readers are the record's sharees. Thread participants who are not shared on the record are NOT granted it (the
+  messaging grant skips Secure-team-owned messages); share the record to give someone its conversation.
 - **Not this mechanism.** Contacts (SPA/Teams) reach children through the external data plane's root scoping, not POA
   shares. A record that has been made ordinary again keeps its children's shares until task 148 moves the children.
 

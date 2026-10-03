@@ -332,7 +332,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/share-user') && !url.includes('/unshare-user')
-          ? jsonResponse({ title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE }, false, 500)
+          ? jsonResponse(
+              { title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE },
+              false,
+              500
+            )
           : null
       );
       const props = makeProps({
@@ -347,8 +351,46 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       await pickLevelFor('Uma Userton', 'View Only');
       fireEvent.click(addButton());
 
-      expect(await screen.findByText(/1 of its 6 related records/)).toBeInTheDocument();
+      // The share WAS written: counted as granted, shown as a warning ("Notice"), never "0 of 1" or an error.
+      expect(
+        await screen.findByText(/Granted access to 1 item\(s\)\. The record was shared, but 1 of its 6 related records/)
+      ).toBeInTheDocument();
+      expect(screen.getByText('Notice')).toBeInTheDocument();
+      expect(screen.queryByText('Error')).not.toBeInTheDocument();
+      expect(screen.queryByText(/0 of 1/)).not.toBeInTheDocument();
       expect(screen.queryByText(/1 failed/)).not.toBeInTheDocument();
+    });
+
+    it('Save with a staged /share-user that answers children_incomplete stays open once to show the warning, then closes', async () => {
+      const detail =
+        'The record was shared, but 1 of its 6 related records (documents, events, to-dos and communications) could not be updated yet. They are updated automatically within a few minutes, or you can try again.';
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/share-user') && !url.includes('/unshare-user')
+          ? jsonResponse(
+              { title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        pickUser,
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Gene Gatekeeper');
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await screen.findByText('Uma Userton');
+      await pickLevelFor('Uma Userton', 'View Only');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByText(/Granted access to 1 item\(s\)\./)).toBeInTheDocument();
+      expect(props.onClose).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));
     });
 
     it('/unshare-user children_incomplete reloads the list and shows the server’s sentence, not "Failed to revoke"', async () => {
@@ -373,7 +415,11 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
         }
         if (url.includes('/unshare-user')) {
           removed = true;
-          return jsonResponse({ title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE }, false, 500);
+          return jsonResponse(
+            { title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE },
+            false,
+            500
+          );
         }
         return null;
       });
