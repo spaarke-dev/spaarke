@@ -29,16 +29,18 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      by the team WITHOUT a container → RESUME (below); otherwise continue. Then, still before any mutation: the
 ///      SPE container type is configured; a container ALREADY recorded on the record is classified (a business unit's
 ///      or this BFF's configured shared container is replaced, one another root records is refused, the record's own
-///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI), the record's current owner, and the creator's
-///      current share (complete read or nothing — a record that keeps its own container is refused when it cannot be
-///      read, task 133 r1)
+///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI), the record's current owner, the OWN owner of each
+///      row the owner move cascades to (<see cref="AssignCascadeChildOwners"/> — complete or refused, task 133 c1), and
+///      the creator's current share (complete read or nothing — a record that keeps its own container is refused when it
+///      cannot be read, task 133 r1)
 ///   4.2 A replaced SHARED container is unlinked from the record (task 133 r1), so the team never owns a record that
 ///      records shared storage
 ///   4.5 SHARE-FIRST: give the creator their share while the record is still where it was created
 ///   5. Assign the record's owner to that team, and verify the assignment by reading it back
 ///   5.5 Prove the creator holds exactly <see cref="CreatorAccessRights"/> now that the team owns it (re-issue if the
 ///       move dropped it). If that cannot be proven, COMPENSATE: move the record back to its pre-call owner, read it
-///       back, and put the creator's share back to what it was. Then share any named colleagues.
+///       back, put each row the move cascaded to back on its OWN owner (task 133 c1, owner round 10 item 4), and put the
+///       creator's share back to what it was. Then share any named colleagues.
 ///   6. Create the record's own SPE container — unless it already has its own (kept)
 ///   7. Record the container on the record — and FAIL if that record cannot be written
 ///
@@ -72,7 +74,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// owner-decided contract without the owner).</para>
 ///
 /// <para><b>Rollback is for ownership and shares only.</b> Steps 4.5–5.5 are undone on failure, because the undo
-/// restores the access state every earlier refusal already leaves (the creator's own). Step 4.2 is not: a shared
+/// restores the access state every earlier refusal already leaves (the creator's own). Ownership means the record's AND
+/// that of the rows its owner move cascades to (SharePoint document locations and documents on a project or matter):
+/// the move back cascades like the move out, so each of those is put back on the owner it had before the call — a
+/// child that cannot be is named, with the call that puts it back (task 133 c1). Step 4.2 is not: a shared
 /// container stays unlinked from a secure-flagged record, which refuses uploads until it has its own (fail closed —
 /// before it, the record's uploads went to shared storage). Steps 6 and 7 are NOT undone:
 /// moving a record OUT of the Secure Record business unit because storage failed would turn a storage failure into a
@@ -262,6 +267,25 @@ public static class ProvisionProjectEndpoint
     /// can never be finished — whose uploads meanwhile go to shared storage.
     /// </summary>
     internal const string ReasonSharedContainerNotCleared = "sdap.provision.shared_container_not_cleared";
+
+    /// <summary>
+    /// The rows an owner move of the record cascades to (<see cref="AssignCascadeChildOwners"/>: SharePoint document
+    /// locations and documents) could not be read completely before any write, so the move could not be undone child by
+    /// child if a later step failed — refused before any mutation (task 133, owner round 10 item 4). The
+    /// <c>cascadeChildState</c> extension says which: <c>unreadable</c> (a read failed; the same caller may call again)
+    /// or <c>refused</c> (Dataverse refused the read, or it came back incomplete — deterministic: an administrator
+    /// looks at the <c>childTable</c> rows first). <c>childTable</c> names the table.
+    /// </summary>
+    internal const string ReasonCascadeChildrenUnreadable = "sdap.provision.cascade_children_unreadable";
+
+    /// <summary>
+    /// The creator's share failed and the move WAS undone (the record is back with its pre-call owner, read back), but
+    /// rows the owner move cascaded to could not all be put back on their OWN owners (task 133, owner round 10 item 4).
+    /// <c>childOwnersNotRestored</c> names each, with its own owner and the call that puts it back; the same is logged
+    /// CRITICAL. An administrator makes those calls BEFORE provisioning is called again: another run would snapshot the
+    /// wrong owner for them. Not a self-service retry.
+    /// </summary>
+    internal const string ReasonCascadeChildrenNotRestored = "sdap.provision.cascade_children_not_restored";
 
     /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
@@ -970,6 +994,16 @@ public static class ProvisionProjectEndpoint
     /// earlier refusal already leaves. No COMPENSATED branch gives anyone access they lacked before the call: a share
     /// this call issued is removed when the move is undone (ADR-003 path C, recorded in the task 133 note).</para>
     ///
+    /// <para><b>The rows the move cascades to</b> (task 133 c1, owner round 10 item 4). An owner move of a project or a
+    /// matter re-owns its SharePoint document locations and documents too (Assign cascade; accepted for the move OUT by
+    /// owner round 4 item 3). The move BACK does the same, to the RECORD's pre-call owner — not each child's own. So each
+    /// child's own owner is snapshotted before any write (<see cref="AssignCascadeChildOwners"/>; a snapshot that cannot
+    /// be taken refuses the run, nothing written), and after a VERIFIED move back each child that does not read as its own
+    /// owner is assigned back and read back. A child that cannot be is named in the response
+    /// (<c>cascade_children_not_restored</c>) and a CRITICAL log line, with the call that puts it back. After an
+    /// UNVERIFIED move back nothing is restored (whether the record moved is unknown); the children it would have left on
+    /// the wrong owner are named instead. On success the children stay with the team, as the owner accepted.</para>
+    ///
     /// <para><b>The one residual widening — the UNVERIFIED owner move.</b> When the owner cannot be read back, the
     /// creator's share (<see cref="CreatorAccessRights"/>, which carries <c>ShareAccess</c>) is kept or issued and NOT
     /// undone, because whether the move landed is unknown and removing the share risks a record nobody can open (S5).
@@ -1044,6 +1078,14 @@ public static class ProvisionProjectEndpoint
                 "the record's owner in Dataverse first.",
                 traceId, (ReasonKey, ReasonRecordOwnerUnreadable)));
         }
+
+        // The rows the owner move cascades to, each with its OWN owner (task 133, owner round 10 item 4). The move to the
+        // team re-owns them — accepted (owner round 4 item 3) — and an undo re-owns them again, to the RECORD's pre-call
+        // owner, which is not each child's own when they differed. Read before any write so compensation can put each
+        // back. Fail closed: a move whose cascade could not be undone child by child is not attempted.
+        var cascade = await AssignCascadeChildOwners.SnapshotAsync(dataverseClient, root.LogicalName, recordId, ct);
+        if (cascade.Snapshot is not { } cascadeSnapshot)
+            return CreatorShareStep.Failed(CascadeChildrenUnreadable(root, recordId, cascade, logger, traceId));
 
         // The creator's share BEFORE the call — complete, or not at all. An unreadable list is never "no share"
         // (ADR-003): without it, share-first is not used, and compensation's only safe target is "no share".
@@ -1305,6 +1347,10 @@ public static class ProvisionProjectEndpoint
         var back = await MoveOwnerAsync(dataverseClient, root, recordId, preOwner, logger, ct);
         if (back.Outcome == OwnerMoveOutcome.Moved)
         {
+            // The move back cascaded like the move out, giving every child the RECORD's pre-call owner: each is put back
+            // on its own (owner round 10 item 4), read back child by child.
+            var children = await AssignCascadeChildOwners.RestoreAsync(dataverseClient, cascadeSnapshot, logger, ct);
+
             var restored = !wroteCreatorShare
                            || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, logger, ct);
 
@@ -1338,14 +1384,23 @@ public static class ProvisionProjectEndpoint
                 sharesText = "The creator's share is as it was before the call (read back). ";
             }
 
-            return CreatorShareStep.Failed(Problem(
-                StatusCodes.Status500InternalServerError, "Internal Server Error",
+            var undoneText =
                 "The record could not be shared to its creator once it was owned by the Secure Record owner team, so " +
                 "the move was undone: its owner is back to the owner it had before the call (read back). " + sharesText +
-                unlinkedNote + "The same caller may retry.",
+                unlinkedNote;
+
+            if (!children.AllRestored)
+            {
+                return CreatorShareStep.Failed(CascadeChildrenNotRestored(
+                    root, recordId, children, undoneText, sharesRestored, creatorShareRemoved, logger, traceId));
+            }
+
+            return CreatorShareStep.Failed(Problem(
+                StatusCodes.Status500InternalServerError, "Internal Server Error",
+                undoneText + "The same caller may retry.",
                 traceId, (ReasonKey, ReasonCreatorShareFailed),
                 ("ownershipRestored", true), ("sharesRestored", sharesRestored),
-                ("creatorShareRemoved", creatorShareRemoved)));
+                ("creatorShareRemoved", creatorShareRemoved), ("childOwnersRestored", true)));
         }
 
         // The undo did not land, or could not be verified (ADR-003: an unverifiable compensation is a failure, never
@@ -1375,6 +1430,41 @@ public static class ProvisionProjectEndpoint
             : "While the team owns it, an administrator (who holds Write on it) calls provisioning again: it resumes and " +
               "shares the record to the person who created it. ";
 
+        // If an UNVERIFIED move back did land, it cascaded like the move out: every child now has the record's pre-call
+        // owner, and those whose own owner differed are on the wrong one (owner round 10 item 4). They are named, with the
+        // call that puts each back, but not restored here: whether the record moved is unknown, and putting a child on its
+        // own owner while the team may still own the record would take it out of the team the move out put it in. A move
+        // back that did NOT take effect (read back) left the record and its children with the team, as the move out did.
+        var childrenAtRisk = undoUnverified ? cascadeSnapshot.NotOwnedBy(preOwner) : Array.Empty<CascadeChild>();
+        if (childrenAtRisk.Count > 0)
+        {
+            logger.LogCritical(
+                "[PROVISION] {RecordType} {RecordId}: if the unverified move back to {OwnerKind} {OwnerId} took effect, it " +
+                "also gave {Count} related record(s) that owner, which is not their own. An administrator puts each back " +
+                "BEFORE provisioning is called again: {Calls} TraceId={TraceId}",
+                root.WireToken, recordId, preOwner.Kind, preOwner.Id, childrenAtRisk.Count,
+                string.Join(" ; ", childrenAtRisk.Select(c => c.RestoreCall)), traceId);
+        }
+
+        var moveBackText = !undoUnverified
+            ? string.Empty
+            : childrenAtRisk.Count == 0
+                ? "If the move back did take effect, the record is where it was before the call and its creator calls " +
+                  "provisioning again."
+                : "If the move back did take effect, the record is where it was before the call, and Dataverse moved " +
+                  $"{childrenAtRisk.Count} related record(s) with it onto its previous owner, which is not their own: " +
+                  DescribeChildren(childrenAtRisk) + ". An administrator puts each back on the owner named " +
+                  "(childOwnersAtRisk names the call) and then its creator calls provisioning again.";
+
+        var extensions = new List<(string Key, object? Value)>
+        {
+            (ReasonKey, ReasonCreatorShareFailedResumable),
+            ("ownerTeamId", ownerTeamId), ("ownershipRestored", false), ("ownershipVerified", !undoUnverified),
+            ("containerKept", keepsOwnContainer)
+        };
+        if (childrenAtRisk.Count > 0)
+            extensions.Add(("childOwnersAtRisk", childrenAtRisk.Select(c => ChildPayload(c)).ToList()));
+
         return CreatorShareStep.Failed(Problem(
             StatusCodes.Status500InternalServerError, "Internal Server Error",
             ("The record could not be shared to its creator once it was owned by the Secure Record owner team, and " +
@@ -1383,15 +1473,95 @@ public static class ProvisionProjectEndpoint
                    "still be owned by that memberless team without a confirmed creator share. "
                  : "the move back to its previous owner did not take effect (read back). It is owned by that memberless " +
                    "team without a confirmed creator share. ") +
-             unlinkedNote + creatorText + recoveryText +
-             (undoUnverified
-                 ? "If the move back did take effect, the record is where it was before the call and its creator calls " +
-                   "provisioning again."
-                 : string.Empty)).TrimEnd(),
-            traceId, (ReasonKey, ReasonCreatorShareFailedResumable),
-            ("ownerTeamId", ownerTeamId), ("ownershipRestored", false), ("ownershipVerified", !undoUnverified),
-            ("containerKept", keepsOwnContainer)));
+             unlinkedNote + creatorText + recoveryText + moveBackText).TrimEnd(),
+            traceId, extensions.ToArray()));
     }
+
+    /// <summary>
+    /// Refusal before any write: the rows the owner move cascades to could not be snapshotted (task 133, owner round 10
+    /// item 4), so a failure after the move could not put each back on its own owner.
+    /// </summary>
+    private static IResult CascadeChildrenUnreadable(
+        SecureRecordRoot root, Guid recordId, CascadeSnapshotResult cascade, ILogger logger, string traceId)
+    {
+        var table = cascade.FailedTable!.LogicalName;
+        var deterministic = cascade.Failure == CascadeReadFailure.Refused;
+
+        logger.LogError(cascade.Fault,
+            "[PROVISION] The {Table} rows an owner move of {RecordType} {RecordId} cascades to could not be read " +
+            "completely ({State}). Refusing before any change. TraceId={TraceId}",
+            table, root.WireToken, recordId, deterministic ? CascadeChildRefused : CascadeChildUnreadable, traceId);
+
+        return Problem(
+            StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"Moving the {root.DisplayLabel.ToLowerInvariant()} to the Secure Record owner team also moves the related " +
+            $"{table} rows Dataverse re-owns with it, so provisioning records each one's own owner first, to put it back " +
+            "if a later step fails. " + (deterministic
+                ? $"Dataverse refused the read of those rows (or answered it incompletely), so provisioning stopped " +
+                  "BEFORE changing anything: the record's ownership and shares are as they were. Calling again repeats " +
+                  $"this refusal: an administrator looks at the record's {table} rows first."
+                : "Those rows could not be read, so provisioning stopped BEFORE changing anything: the record's ownership " +
+                  "and shares are as they were. The same caller may retry once Dataverse is reachable."),
+            traceId, (ReasonKey, ReasonCascadeChildrenUnreadable), ("childTable", table),
+            ("cascadeChildState", deterministic ? CascadeChildRefused : CascadeChildUnreadable));
+    }
+
+    /// <summary>
+    /// The move was undone (read back) but cascaded rows are not all back on their own owners (task 133, owner round 10
+    /// item 4): each is named in the response and in a CRITICAL log line, with the call that puts it back.
+    /// </summary>
+    private static IResult CascadeChildrenNotRestored(
+        SecureRecordRoot root,
+        Guid recordId,
+        CascadeRestoreReport children,
+        string undoneText,
+        bool sharesRestored,
+        bool creatorShareRemoved,
+        ILogger logger,
+        string traceId)
+    {
+        var failed = children.NotRestored;
+
+        logger.LogCritical(
+            "[PROVISION] {RecordType} {RecordId}: the move was undone, but {Count} related record(s) Dataverse moved with " +
+            "it could not be put back on their own owners: {Children}. An administrator puts each back BEFORE provisioning " +
+            "is called again (another run would record the wrong owner for them): {Calls} TraceId={TraceId}",
+            root.WireToken, recordId, failed.Count,
+            string.Join(" ; ", failed.Select(f => $"{f.Child.LogicalName} {f.Child.Id} ({f.Outcome})")),
+            string.Join(" ; ", failed.Select(f => f.Child.RestoreCall)), traceId);
+
+        return Problem(
+            StatusCodes.Status500InternalServerError, "Internal Server Error",
+            undoneText +
+            $"Dataverse moves related records together with it, and {failed.Count} of them could not be put back on their " +
+            "own owners: " + DescribeChildren(failed.Select(f => f.Child)) + ". An administrator puts each back on the " +
+            "owner named (childOwnersNotRestored names the call) before provisioning is called again: another run would " +
+            "record the owner they have now as their own.",
+            traceId, (ReasonKey, ReasonCascadeChildrenNotRestored),
+            ("ownershipRestored", true), ("sharesRestored", sharesRestored),
+            ("creatorShareRemoved", creatorShareRemoved), ("childOwnersRestored", false),
+            ("childOwnersNotRestored", failed.Select(f => ChildPayload(f.Child, f)).ToList()));
+    }
+
+    /// <summary>"sharepointdocumentlocation {id} (own owner systemuser {id})", comma-separated.</summary>
+    private static string DescribeChildren(IEnumerable<CascadeChild> children) =>
+        string.Join(", ", children.Select(c =>
+            $"{c.LogicalName} {c.Id} (own owner {c.Owner.Kind.ToEntitySet().TrimEnd('s')} {c.Owner.Id})"));
+
+    /// <summary>One cascaded child as a ProblemDetails extension entry: what it is, its own owner, the call that restores it.</summary>
+    private static object ChildPayload(CascadeChild child, CascadeChildRestore? restore = null) => new
+    {
+        table = child.LogicalName,
+        id = child.Id,
+        ownerType = child.Owner.Kind.ToEntitySet().TrimEnd('s'),
+        ownerId = child.Owner.Id,
+        outcome = restore?.Outcome.ToString(),
+        nextCall = child.RestoreCall
+    };
+
+    // The cascadeChildState values (task 133 c1): the client tells a retry from an administrator's job on them.
+    private const string CascadeChildUnreadable = "unreadable";
+    private const string CascadeChildRefused = "refused";
 
     /// <summary>
     /// The recovery for a record that KEEPS its own container when a failure after its move may have left it with no

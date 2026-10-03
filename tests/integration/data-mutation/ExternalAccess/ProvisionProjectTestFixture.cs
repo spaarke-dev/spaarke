@@ -321,6 +321,53 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool OwnershipPatchIsApplied { get; set; } = true;
 
+    // ── Task 133 c1 (owner round 10 item 4): the rows an owner move of a root cascades to ──
+
+    /// <summary>
+    /// The rows a root's Assign cascades to, by child id. Live metadata (2026-10-03): a project or matter cascades Assign
+    /// to <c>sharepointdocumentlocation</c> and <c>sharepointdocument</c> on <c>regardingobjectid</c> (and to the
+    /// business-owned <c>team</c>, which has no owner); a work assignment to nothing. <see cref="ApplyUpdate"/> applies the
+    /// cascade the way Dataverse does — every child of the moved root takes the root's new owner.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, CascadeChildRow> _cascadeChildren = new();
+
+    private sealed record CascadeChildRow(string EntitySet, string IdColumn, Guid Id, Guid RootId, DataversePrincipalRef Owner);
+
+    /// <summary>
+    /// Seeds a row a root's Assign cascades to: <c>sharepointdocumentlocation</c> or <c>sharepointdocument</c>, regarding
+    /// <paramref name="rootId"/>, owned by <paramref name="owner"/>.
+    /// </summary>
+    public void SeedCascadeChild(Guid rootId, string table, Guid childId, DataversePrincipalRef owner)
+        => _cascadeChildren[childId] = table switch
+        {
+            "sharepointdocumentlocation" => new("sharepointdocumentlocations", "sharepointdocumentlocationid", childId, rootId, owner),
+            "sharepointdocument" => new("sharepointdocuments", "sharepointdocumentid", childId, rootId, owner),
+            _ => throw new ArgumentOutOfRangeException(nameof(table), table, "Not a table a root's Assign cascades to.")
+        };
+
+    /// <summary>The current owner of a seeded cascade child.</summary>
+    public DataversePrincipalRef? OwnerOfCascadeChild(Guid childId)
+        => _cascadeChildren.TryGetValue(childId, out var child) ? child.Owner : null;
+
+    /// <summary>
+    /// Dataverse's live answer in dev (2026-10-03): a read of <c>sharepointdocuments</c> is refused 400 — 0x80071017
+    /// "SharePoint S2S and MSTeams integration is not enabled for this org". Default true, as in dev; false models an
+    /// org with that integration on.
+    /// </summary>
+    public bool SharePointDocumentReadRefused { get; set; } = true;
+
+    /// <summary>
+    /// When set, the snapshot's read of a root's <c>sharepointdocumentlocations</c> (by <c>regardingobjectid</c>) fails
+    /// with this status, in the real client's shape (<see cref="HttpRequestException"/> carrying it).
+    /// </summary>
+    public System.Net.HttpStatusCode? CascadeChildSnapshotReadFailsWith { get; set; }
+
+    /// <summary>An <c>ownerid</c> PATCH on THIS cascade child throws (recorded first) — a child that cannot be put back.</summary>
+    public Guid? FailChildOwnerBindFor { get; set; }
+
+    /// <summary>Every query the endpoints issued (entity set, filter) — so a test can prove a table was never read.</summary>
+    public ConcurrentBag<(string EntitySet, string? Filter)> Queries { get; } = new();
+
     private sealed record SeededRecord(
         string EntitySet, Guid Id, Guid? OwningTeamId, string? ContainerId, Guid? LegacySecurityBuId, bool IsSecure,
         Guid? OwningUserId = null, Guid? OwningBusinessUnitId = null, Guid? CreatedBy = null, Guid? CreatedByPerson = null);
@@ -437,6 +484,11 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         if (_containerTypeChanged)
             SetContainerTypeId(ConfiguredContainerTypeId);
         _containerTypeChanged = false;
+        _cascadeChildren.Clear();
+        SharePointDocumentReadRefused = true;
+        CascadeChildSnapshotReadFailsWith = null;
+        FailChildOwnerBindFor = null;
+        Queries.Clear();
         CallerSystemUserIdResolves = true;
         CallerHoldsWrite = true;
         FailShareForPrincipal = null;
@@ -496,6 +548,7 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
                     var top = invocation.Arguments[3] as int?;
 
+                    Queries.Add((entitySet, filter));
                     var json = RowsJsonFor(entitySet, filter, select, top);
                     var listType = typeof(List<>).MakeGenericType(rowType);
                     var rows = JsonSerializer.Deserialize(json, listType)
@@ -573,6 +626,28 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             }
         }
 
+        // Task 133 c1: putting a cascaded child back on its own owner — its own owner bind, as the endpoint sends it.
+        if (_cascadeChildren.TryGetValue(id, out var cascadeChild)
+            && cascadeChild.EntitySet == entitySet
+            && flat.TryGetValue("ownerid@odata.bind", out var childBind)
+            && childBind is not null)
+        {
+            if (FailChildOwnerBindFor == id)
+                throw new InvalidOperationException("Dataverse 403: simulated refusal of a child row's ownership assignment.");
+
+            if (ParseIdFromBind(childBind) is { } childOwnerId)
+            {
+                _cascadeChildren[id] = cascadeChild with
+                {
+                    Owner = childBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
+                        ? DataversePrincipalRef.User(childOwnerId)
+                        : DataversePrincipalRef.Team(childOwnerId)
+                };
+            }
+
+            return Task.CompletedTask;
+        }
+
         if (_records.TryGetValue(id, out var record) && record.EntitySet == entitySet)
         {
             if (flat.TryGetValue("ownerid@odata.bind", out var ownerBind)
@@ -591,6 +666,17 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
                     // Live gate (b) disproved: the reassignment drops this principal's share.
                     if (AssignDropsShareOf is { } dropped)
                         _shares.TryRemove((id, DataversePrincipalRef.User(dropped)), out _);
+
+                    // Task 133 c1: the Assign cascade (live metadata) — every child of a moved project or matter takes
+                    // the root's new owner; a work assignment cascades nothing.
+                    if (entitySet is ProjectEntitySet or MatterEntitySet)
+                    {
+                        var newOwner = ownerBind.Contains("/systemusers(", StringComparison.OrdinalIgnoreCase)
+                            ? DataversePrincipalRef.User(parsed)
+                            : DataversePrincipalRef.Team(parsed);
+                        foreach (var child in _cascadeChildren.Values.Where(c => c.RootId == id).ToList())
+                            _cascadeChildren[child.Id] = child with { Owner = newOwner };
+                    }
                 }
             }
 
@@ -836,6 +922,40 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
 
                     payload.Add(row);
                 }
+                break;
+
+            case "sharepointdocumentlocations":
+            case "sharepointdocuments":
+                // Task 133 c1: the rows a root's Assign cascades to, by regardingobjectid (the snapshot) or by id (a
+                // restore's read and read-back).
+                if (entitySet == "sharepointdocuments" && SharePointDocumentReadRefused)
+                {
+                    throw new HttpRequestException(
+                        "Dataverse 400: 0x80071017 SharePoint S2S and MSTeams integration is not enabled for this org.",
+                        inner: null,
+                        statusCode: System.Net.HttpStatusCode.BadRequest);
+                }
+
+                var regardingRoot = filter is null ? null : ExtractGuidAfter(filter, "_regardingobjectid_value eq ");
+                if (regardingRoot is not null && entitySet == "sharepointdocumentlocations"
+                    && CascadeChildSnapshotReadFailsWith is { } snapshotStatus)
+                {
+                    throw new HttpRequestException(
+                        $"Dataverse {(int)snapshotStatus}: simulated failure reading the document locations.",
+                        inner: null,
+                        statusCode: snapshotStatus);
+                }
+
+                payload.AddRange(_cascadeChildren.Values
+                    .Where(c => c.EntitySet == entitySet
+                                && (regardingRoot is { } rootId
+                                    ? c.RootId == rootId
+                                    : filter is not null && filter.Contains(c.Id.ToString(), StringComparison.OrdinalIgnoreCase)))
+                    .Select(c => new Dictionary<string, object?>
+                    {
+                        [c.IdColumn] = c.Id,
+                        [c.Owner.Kind == DataversePrincipalKind.SystemUser ? "_owninguser_value" : "_owningteam_value"] = c.Owner.Id
+                    }));
                 break;
 
             case "businessunits" when filter is not null && ExtractQuoted(filter, "sprk_containerid eq ") is { } buContainer:

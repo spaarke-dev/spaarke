@@ -72,7 +72,7 @@ share read / `RetrievePrincipalAccess` for the creator), or use a test user outs
 | `sharetopreviousowneronassign` true | **Did not fire** (False) |
 | App-created provisionable roots (`createdby` = application user) | **Fires literally** (1 app-created matter; Office quick-create creates matters/projects app-only). **Answered by owner decision F8** (round 3, accepted as recommended): ship the interim default — `createdby` for human-created rows, refusal with its own code (`resume_creator_unavailable`, `creatorState: application-user`) for app-created rows, never share to whoever calls. **Verified live as F8 asked**: `createdonbehalfby` is EMPTY on the app-created matter, so option (b) is unusable and **(a) a new server-stamped creator column is the remaining option** — 🔔 an open owner decision, recommended before app-created rows are routinely made secure (task 150's ribbon will let a user secure an Office-created matter; its resume then needs an administrator) |
 | Team-owned row with a non-provisioning container, or a create-time `sprk_containerid` writer | **Did not fire** (0 team-owned rows; 0 rules; no code writer) |
-| Assign cascade on a root | **Fires literally** (6 platform-managed relationships). **Treated as answered by owner round 4 item 3**: the cascade to `team`, `sharepointdocumentlocation` and `sharepointdocument` is accepted for secure-root assignments; compensation is the same assign in reverse. Residual, stated: a child of one of those three types whose own owner differed from the root's before the forward move ends with the root's pre-call owner after compensation. 0 such rows exist for secure roots in dev; work assignments have no cascade. 🔔 **OPEN owner confirmation (verifier round 1)**: round 4 item 3 accepted the cascade for task 144's migration and assignment; it did not say it covers COMPENSATION, which can re-own a child whose prior owner differed from the root's to the root's pre-call owner. The POML trigger said STOP and present (a) snapshot+restore each re-owned child / (b) no compensation for cascading roots (resume only) / (c) coordinate with task 148. The shipped code compensates (the executor's reading); the owner must confirm that extension explicitly or pick (a)/(b)/(c). No code changed for this in round 1 |
+| Assign cascade on a root | **Fires literally** (6 platform-managed relationships). **Treated as answered by owner round 4 item 3**: the cascade to `team`, `sharepointdocumentlocation` and `sharepointdocument` is accepted for secure-root assignments; compensation is the same assign in reverse. Residual, stated: a child of one of those three types whose own owner differed from the root's before the forward move ends with the root's pre-call owner after compensation. 0 such rows exist for secure roots in dev; work assignments have no cascade. 🔔 **OPEN owner confirmation (verifier round 1)**: round 4 item 3 accepted the cascade for task 144's migration and assignment; it did not say it covers COMPENSATION, which can re-own a child whose prior owner differed from the root's to the root's pre-call owner. The POML trigger said STOP and present (a) snapshot+restore each re-owned child / (b) no compensation for cascading roots (resume only) / (c) coordinate with task 148. The shipped code compensates (the executor's reading); the owner must confirm that extension explicitly or pick (a)/(b)/(c). No code changed for this in round 1. **✅ ANSWERED 2026-10-03 — owner round 10 item 4: (c) then (a). Implemented in round c1 (§16): one primitive, `AssignCascadeChildOwners`, snapshots each cascaded child's own owner before any write and restores it after a verified undo** |
 | Neither share-first nor post-move can be made reliable | **Not evaluable** without live writes — the live gate decides; the code does not depend on either (§1) |
 
 ---
@@ -563,7 +563,11 @@ registration, §10 F.1).
 | `SharedContainerConfigKeys` (internal constant list, not an option) | the four existing config keys | Reads existing configuration | A record carrying a configured shared container would be "kept" as its own — secure files into shared storage |
 | Fixture switches (`CreatorPersonColumnExists`, `BusinessUnitContainers`, `ContainerOwnershipReadFails`, `RevokeNotAppliedFor`, `FailOwnerReadBackAfterBindTo`, `SystemUserReadFailsFor`) | the fixture's existing switches | Extends the fixture | Seeds S19 / S22b / K* / P3 could not be made to bite |
 
-### 13.6 🔔 STOP — Assign cascade under COMPENSATION (still unanswered)
+### 13.6 🔔 STOP — Assign cascade under COMPENSATION (✅ answered 2026-10-03, owner round 10 item 4 — implemented in §16)
+
+> **Answer (BINDING):** "coordinate with task 148's child-ownership logic, then snapshot and restore each re-owned
+> child's own owner (options (c) then (a))". Implemented in round c1 as ONE reusable primitive for task 148 — §16.1–16.3.
+> The text below is the question as it stood.
 
 Owner round 4 item 3 accepted the Assign cascade (team, sharepointdocumentlocation, sharepointdocument) for task 144's
 migration and forward assignment. Rounds 5–7 and the #1081 peer report do not mention compensation. The compensating move
@@ -591,6 +595,14 @@ Recommendation: (c) then (a). Exposure today: 0 such rows in dev; work assignmen
 - **Task 146** (G5 for the AI create handlers): when `dataverse.create_record` creates AS THE APP, stamp
   `sprk_createdbyperson` in that create's payload with the OBO caller and drop this round's follow-up update; keep the
   refusal of an item naming the column. Expect a merge conflict in `DataverseCreateRecordHandler` (constructor + execute).
+  **Recorded 2026-10-03 (owner-decisions note, round 10, "decided by the main session under existing decisions;
+  reversible"):** 133's interim app-only stamp is superseded AT INTEGRATION by 146's create-as-the-app (owner round 7
+  item 3), which writes the stamp in the create payload. Under create-as-the-app the row's `createdby` is the BFF
+  application user, so the value 146 stamps is the OBO caller's own systemuserid (WhoAmI on the caller's token) — never
+  the row's `createdby`, which is what the interim update copies today. 133 does not pre-empt 146: round c1 leaves the
+  handler untouched (its class remarks already say "replaced by task 146, which creates as the app and stamps the column
+  in that payload"). Whichever of 133/146 merges second resolves the conflict to 146's shape. Until 146 lands, the interim
+  update is what runs, under the §6.5 path-B citation in §14.7.
 - **Task 150** (lock `sprk_issecure`): add it to "Spaarke BFF-Managed Field Readers/Writers" (same script pattern).
 - **Task 143** (No Access): the resume now shares to `sprk_createdbyperson` too — the No Access check before that share
   covers whichever person `ResolveResumeCreatorAsync` returns.
@@ -697,6 +709,9 @@ provisioning call.
 | 16 | Pending live gate | **Not closed** — no live writes allowed; §14.8 |
 
 ### 14.3 🔔 OWNER QUESTION — should a record that keeps its own container be resumable after a failure after its move?
+
+> **✅ DECIDED 2026-10-03 — owner round 10 item 5 (BINDING): (C), as shipped.** "A kept-container record failing after its
+> move: as shipped. No automatic resume; the response names the Manage Access recovery." No code change (round c1, §16.4).
 
 Today (shipped): no. Once the secure owner team owns a record with a container recorded, every call answers
 `already_provisioned`; a failed run on a kept-container record names the administrator's Manage Access share instead.
@@ -951,3 +966,233 @@ DelegationRule*) **251/251** (r1 244 + 7); Spaarke.UI.Components jest CreateProj
 **103/103 (8 suites)** (r1 96 + 7); package production build (`tsc`) clean; prettier + eslint clean on the changed TS;
 `dotnet build` 0 warnings; `dotnet format whitespace --verify-no-changes` clean on the changed C#. No package changed.
 Publish size: not measured (main session).
+
+---
+
+## 16. Round c1 (2026-10-03, branch `task/uac-r2-133-c1`) — owner round 10 items 4 and 5; round 7 item 3 handoff
+
+Base: `task/uac-r2-133-b2-r2` (`5a8b66c15`) with `work/unified-access-control-r2` merged in (owner rounds 8–11, the
+route-authorization sweep tasks 159–170, `ContactIdentityStore` and the ADR-052 drift-walk fixes). The merge had **no
+conflicts** and touched none of this task's files. **baseSha `bb0e989ab`** (HEAD right after that merge).
+
+| Item | Source (owner-decisions note) | Disposition |
+|---|---|---|
+| 1 | Round 10 item 4 — compensation's reverse Assign cascade: (c) then (a) | **Built**: ONE primitive, `AssignCascadeChildOwners` (§16.2), wired into provisioning (§16.3); tests + seeds (§16.7) |
+| 2 | Round 10 item 5 — the kept-container resume stays as shipped | **Recorded** (§16.4, §14.3, POML); no code change |
+| 3 | Round 10 "decided by the main session" + round 7 item 3 — the interim `sprk_createdbyperson` stamp is superseded at integration by 146 | **Handoff kept accurate** (§13.8); handler untouched — 146 not pre-empted |
+| 4 | Escalation trigger 4 answered | POML `<status>`, status note and outcome updated; §3, §13.6 marked answered |
+
+### 16.1 Live facts (READ-ONLY, spaarkedev1, 2026-10-03)
+
+Scripts: session scratchpad `task133/cascade-children.ps1`, `cascade-children-query.ps1`, `location-attrs.ps1` (GET only,
+operator `az` token, explicit URL).
+
+| Check | Result |
+|---|---|
+| Assign-cascading 1:N of each root | `sprk_project_Teams` → `team.regardingobjectid`, `sprk_project_SharePointDocumentLocations` → `sharepointdocumentlocation.regardingobjectid`, `sprk_project_SharePointDocuments` → `sharepointdocument.regardingobjectid` — Assign, Share, Unshare and Reparent all `Cascade`. Matter: the same three. **Work assignment: none** (unchanged from §2) |
+| `team` | **`BusinessOwned`** — attributes `administratorid`, `businessunitid`, `regardingobjectid`; **no `ownerid` / `owninguser` / `owningteam`**. An Assign cannot re-own a team: there is no owner to snapshot or restore. 0 teams with any regarding in dev |
+| `sharepointdocumentlocation` | `UserOwned`, stored (`ownerid`, `owninguser`, `owningteam`). **0 rows** with any regarding in dev. A create needs only `name` (`ownerid`/`servicetype` default) |
+| `sharepointdocument` | `UserOwned`, `TableType` Standard, but listed from SharePoint, not stored. A plain read returns 0 rows; **a read filtered `_regardingobjectid_value eq <a project or matter id>` is REFUSED: 400, `0x80071017` "SharePoint S2S and MSTeams integration is not enabled for this org"** |
+
+**Consequence (found before building, not after):** a fail-closed snapshot that read `sharepointdocuments` on every call
+would have refused every project and matter provisioning in dev. So the documents are read only under a document
+location (§16.2): with no location there is no SharePoint folder for a document to come from — the shape of every
+record in dev, where documents live in SharePoint Embedded. Under a location, a refused read refuses the run.
+
+### 16.2 The primitive — `AssignCascadeChildOwners` (task 148: reuse it, do not fork it)
+
+`src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/AssignCascadeChildOwners.cs` — a static helper beside
+`SecureRecordOwnerTeam` (no DI registration, no interface), keyed by the root's LOGICAL NAME so `Services/Access` code (148's
+`SecureChildReconciler`) calls it without depending on the `Api` layer.
+
+| Member | Contract |
+|---|---|
+| `TablesFor(rootLogicalName)` | The cascade tables per root (live metadata above): project / matter → `team` (`NoOwner`, never read), `sharepointdocumentlocation` (`Always`), `sharepointdocument` (`UnderDocumentLocations`); work assignment → none; any other table throws (an empty list would read as "no cascade"). A new cascading relationship is added HERE, once |
+| `SnapshotAsync(client, rootLogicalName, rootId, ct)` → `CascadeSnapshotResult` | Read-only. Every owner-bearing child, `_regardingobjectid_value eq {root}`, with its own owner — or a failure naming the table: `Unreadable` (any failure but a 400 — the next call may pass) or `Refused` (a 400; a FULL page of 5,000 rows, because `QueryAsync` reads one page; a row without an id or an owner — all deterministic). Never a partial snapshot |
+| `RestoreAsync(client, snapshot, logger, ct)` → `CascadeRestoreReport` | Keyed on observed state, child by child: read → already on its own owner = `AlreadyOwned` (nothing written); gone = `Gone`; otherwise `ownerid@odata.bind` PATCH (its own operation) then read back = `Restored`, or `Refused` / `NotApplied` / `Unverified` / `Unreadable`. Never throws for one child. `AllRestored`, `NotRestored` |
+| `CascadeChildSnapshot.NotOwnedBy(owner)` | The children whose own owner is not `owner` — those a cascading move to `owner` leaves on the wrong one |
+| `CascadeChild.RestoreCall` | The exact Web API call that puts the child back by hand: `PATCH /api/data/v9.2/{set}({id}) {"ownerid@odata.bind":"/systemusers(…)"}` (or `/teams(…)`) — what a failed restore names |
+
+**How task 148 uses it (record for 148's executor — the main session may copy this into 148's POML; this task does not
+edit another task's POML):**
+
+- Around EVERY owner move of a root in 148's transitions (unsecure's Step 3, and any undo of a failed transition):
+  `SnapshotAsync` BEFORE the move; refuse the move when it fails (the same fail-closed rule as here — a move whose cascade
+  cannot be undone child by child is not attempted). The snapshot is also the "previous owner recorded in the run report
+  before the write" 148's every-assign constraint asks for, for the cascade tables.
+- After the move: call `RestoreAsync` when the cascade must NOT decide the children's owners (an undo; or a transition
+  whose reconciler places them deliberately); do not call it when following the cascade is intended (the forward move into
+  the secure owner team — owner round 4 item 3). Report `NotRestored` child by child with `RestoreCall`, fail closed.
+- 🔔 **Open design point for 148, not decided here:** where unsecure's cascade sends these rows (the new root owner, as
+  the cascade does, or the owner the task-146 rule gives a non-secure child). The owners they had before PROVISIONING are
+  not stored anywhere once the forward move succeeds — the snapshot here lives for one provisioning call only.
+- `sprk_*` child tables (documents, events, to-dos, communications …) are NOT cascade tables: 148's reconciler re-owns those
+  through `IRecordOwnershipResolver`; this primitive covers only what Dataverse's own Assign cascade moves.
+
+### 16.3 Wiring in provisioning (`ProvisionProjectEndpoint.MoveWithCreatorShareAsync`)
+
+| Point | Behaviour |
+|---|---|
+| Before any write (after the owner read, before the pre-call share read, the Step 4.2 unlink and share-first) | `SnapshotAsync`. Failure → **`sdap.provision.cascade_children_unreadable`** (500, nothing written; `childTable`, `cascadeChildState: unreadable \| refused`) |
+| Forward success | Nothing restored — the children stay with the team (round 4 item 3) |
+| Compensation, move back VERIFIED | `RestoreAsync`. All back → the existing `creator_share_failed` (+ `childOwnersRestored: true`). Any not back → **`sdap.provision.cascade_children_not_restored`** (500): ownership restored, the share text as before, each child named in the detail and in `childOwnersNotRestored` (`table`, `id`, `ownerType`, `ownerId`, `outcome`, `nextCall`), a CRITICAL line naming each child and call, and "before provisioning is called again" (another run would snapshot the wrong owner) — never "retry" |
+| Compensation, move back UNVERIFIED | Not restored (whether the record moved is unknown; putting a child on its own owner while the team may own the record would pull it out of the team). The children `NotOwnedBy(preOwner)` are named — `childOwnersAtRisk` + the detail's "If the move back did take effect …" sentence + a CRITICAL line with each call. None → text unchanged |
+| Compensation, move back NOT applied (read back) | Unchanged: the record and its children stay with the team, as the move out left them |
+| Resume; work assignment | No owner move → no snapshot; a work assignment has no cascade tables → no read |
+
+Comments rewritten to the new contract: the class summary (step 4's reads, step 5.5's compensation, "Rollback is for
+ownership and shares only" now says whose ownership), `MoveWithCreatorShareAsync`'s remarks (new paragraph). The guide
+§7a gains the cascaded-children paragraph and both codes' rows; `creator_share_failed` and
+`creator_share_failed_resumable` rows name `childOwnersRestored` / `childOwnersAtRisk`.
+
+### 16.4 Item 2 — the kept-container resume stays as shipped (owner round 10 item 5)
+
+Decided: **(C)** of §14.3 — no automatic resume for a record that keeps its own container; the response names the Manage
+Access recovery. **No code change.** Recorded in §14.3, the POML and the guide §7a, whose sentence "is an open owner
+question" was the one statement the decision made false. The code comments ("an owner question recorded in the task 133
+note §14", "an owner decision (task 133 note §14)") stay true and are unchanged.
+
+### 16.5 Item 3 — the interim `sprk_createdbyperson` stamp (round 7 item 3; round 10 main-session record)
+
+Unchanged code. §13.8's 146 handoff now carries round 10's record and states precisely what 146 stamps (the OBO caller's
+own systemuserid by WhoAmI — under create-as-the-app the row's `createdby` is the application user). The §14.7 path-B
+citation remains the authority while the interim shape is the one running (until 146 integrates).
+
+### 16.6 Placement and component justification (CLAUDE.md §10 / §11)
+
+Placement: one new static helper in `Infrastructure/Dataverse` (beside `SecureRecordOwnerTeam`); everything else in the
+existing endpoint. **No new endpoint, service registration, interface, option, job, package or Dataverse column.**
+
+| New surface | Existing (grep) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `AssignCascadeChildOwners` (+ its records/enums: `CascadeChildTable`, `CascadeChild`, `CascadeChildSnapshot`, `CascadeSnapshotResult`, `CascadeRestoreReport`, `CascadeChildRestore`, `CascadeChildRead`, `CascadeReadFailure`, `CascadeChildRestoreOutcome`) | grep `_regardingobjectid_value`, `sharepointdocumentlocation`, `Cascade` in `src/server`: no code reads or restores cascade children; `ProvisionProjectEndpoint.MoveOwnerAsync` moves ONE root row (private, root-shaped `RootRow`); `RecordOwnershipResolver` decides owners, it does not snapshot them; `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` only *accepts* the cascade list | Not an extension of `MoveOwnerAsync` (private to one endpoint, root DTO) — the owner asked for ONE reusable primitive that task 148 reuses for transitions; a private helper would be forked by 148 | Compensation silently re-owns every child whose own owner differed from the record's to the record's pre-call owner (round 10 item 4) |
+| Reason code `cascade_children_unreadable` | the `sdap.provision.*` set; `record_owner_unreadable` is deterministic and about the ROOT | Extends the set; no code means "the cascaded rows could not be read, nothing written" | A move whose cascade could not be undone child by child would run anyway — or a generic error for a state the same caller can retry |
+| Reason code `cascade_children_not_restored` | `creator_share_failed` (means "retry"); `creator_share_failed_resumable` (means the record itself is stranded) | Neither fits: the record is back, the children are not, and a retry would record the wrong owners | The client would offer a retry that destroys the evidence of each child's own owner |
+| ProblemDetails extensions `childTable`, `cascadeChildState`, `childOwnersRestored`, `childOwnersNotRestored`, `childOwnersAtRisk` | `creatorState`, `sharesRestored`, `containerKept` (same convention) | Additive members | The owner's "named in the response … with the next call to make" is not met; the client cannot tell a retry from an administrator's job |
+| Client: `cascadeChildState` on `IProvisioningFailureExtensions`, two `REASON_STATES` entries, one copy constant | `creatorState` / `containerKept` on the same interface and reader | Extends both | The wizard would show the generic error copy for both codes, and offer "Try securing again" on a deterministic refusal |
+| Fixture: cascade children + the Assign cascade, `SharePointDocumentReadRefused` (default true — dev's live answer), `CascadeChildSnapshotReadFailsWith`, `FailChildOwnerBindFor`, `Queries` | the fixture's switches | Extends the fixture | Seeds C1–C16 could not bite |
+
+Publish size: not measured (main session, by instruction). No package changed → no CVE delta.
+
+### 16.7 Tests
+
+**New class `ProvisionAssignCascadeChildOwnerTests` (8 methods, 12 cases):**
+
+| Test | Pins |
+|---|---|
+| `Compensation_PutsEveryCascadedChildBackOnItsOwnPreCallOwner` (project, matter) | **THE owner-mandated test**: a location sharing the record's owner, a location and a document with owners of their own; after the compensated call each is on its OWN pre-call owner (read back), the shared-owner one never written, and exactly two child binds sent |
+| `Compensation_WhenAChildCannotBePutBack_NamesItWithTheCallThatPutsItBack` | Fail closed and report: `cascade_children_not_restored`, the child + own owner + exact `nextCall` in the body, CRITICAL with the call, no "retry", the others still restored; after the administrator's call the creator's next call is 200 |
+| `Provisioning_WhenTheCascadedRowsCannotBeRead_RefusesBeforeAnyWrite` (503, 429 → `unreadable`; 400 → `refused`) | Refused before any write; the transient ones' retry succeeds |
+| `Provisioning_WhenTheCascadedRowsAreReadIncompletely_RefusesBeforeAnyWrite` (full page, owner-less row) | The two deterministic incompleteness rules |
+| `Provisioning_UnderADocumentLocation_WhenSharePointDocumentsAreRefused_RefusesBeforeAnyWrite` | Dev's live 400 under a location → `refused`, `childTable: sharepointdocument` |
+| `Provisioning_WithNoDocumentLocation_NeverReadsSharePointDocuments` | *Beyond the closed set — justification:* pins §16.1's live finding; without the gate every project/matter provisioning in dev is refused |
+| `Provisioning_WhenItSucceeds_LeavesTheCascadedRowsWithTheTeam` | *Beyond the closed set — justification:* a restore that also ran on success would undo the owner-accepted forward cascade (round 4 item 3) |
+| `Compensation_WhenTheMoveBackCannotBeVerified_NamesTheRowsItWouldLeaveOnTheWrongOwner` | Unverified undo: nothing written to children, only the differing-owner child named (`childOwnersAtRisk`, detail, CRITICAL) |
+
+No existing test changed (all 251 of the verifier's provisioning set pass unmodified; the fixture's cascade is a no-op
+for them — they seed no children). **Client** (`provisioningService.test.ts`, +5): the two codes in the emitted-code
+table (26 → 28) and `cascadeChildState` read from the body (`unreadable` / absent → retryable, `refused` → not, the
+administrator copy).
+
+**Perturbation sweep (round c1)** — seed, build, run the provisioning classes (154 tests) or the client file, restore the
+original bytes + touch (`Environment.TickCount64` where a constant would be unreachable code under warnings-as-errors):
+
+| # | Seeded violation | Result |
+|---|---|---|
+| **C1** | **restore skipped** (`RestoreAsync` replaced by an empty report — the owner-mandated seed) | **BITES (3)** |
+| C2 | snapshot failure ignored (empty snapshot) | BITES (6) |
+| C3 | documents read without a location (ungated) | BITES (69 — every project/matter provisioning, dev's 400) |
+| C4 | documents never read | BITES (3) |
+| C5 | a 400 read as transient | BITES (2) |
+| C6 | restore failures not reported | BITES (1) |
+| C7 | the child read-back trusted | BITES (1) |
+| C8 | a child already on its owner written anyway | BITES (2) |
+| C9 | unverified undo: children at risk not named | BITES (1) |
+| C10 | `NotOwnedBy` names every child | BITES (1) |
+| C11 | a full page read as complete | BITES (1) |
+| C12 | an owner-less row accepted | BITES (1) |
+| C13 | the not-restored line not CRITICAL | BITES (1) |
+| C14 | restore also run on success | BITES (1) |
+| C15 | matter not described as cascading | BITES (1) |
+| C16 | the restore bind names the wrong owner | BITES (4) |
+| CL1 | client: `cascadeChildState: refused` not swapped | BITES (1) |
+| CL2 | client: `cascadeChildState` not read from the body | BITES (1) |
+| CL3 | client: `cascade_children_not_restored` offered as a retry | BITES (1) |
+| CL4 | client: `cascade_children_unreadable` not offered as a retry | BITES (3) |
+
+**20/20 bite.** Scripts: scratchpad `task133/perturb_c1.py`, `perturb_c1_js.py`; sources verified restored (`git status`, no
+`TickCount64` left).
+
+### 16.8 Pending manual gates (main session; nothing here was written live)
+
+Unchanged from §15.5 (schema before master; live gate (a)–(i) after a deploy; the (e) replay acceptance; publish size).
+Two notes on the gates for this round:
+
+- **(e) compensating reassignment** now also runs the child snapshot and restore. In dev every root has 0 document
+  locations, so (e) proves the no-children path (the snapshot reads `sharepointdocumentlocations`, finds none, and never
+  reads `sharepointdocuments`); the restore of a real child cannot be proven in dev without SharePoint integration.
+- **NEW (j), optional — the dev refusal shape on a TEST record (round 11 approves probes on test records):** on a
+  throwaway secure project `<P>` that is not yet provisioned, create one location
+  `POST {Api}/sharepointdocumentlocations` `{"name":"probe-133c1","absoluteurl":"https://probe.invalid/133c1","regardingobjectid_sprk_project@odata.bind":"/sprk_projects(<P>)"}`;
+  call provisioning for `<P>` → expect 500 `sdap.provision.cascade_children_unreadable`, `childTable: sharepointdocument`,
+  `cascadeChildState: refused`, and `<P>`'s owner and `modifiedon` unchanged; then `DELETE {Api}/sharepointdocumentlocations(<id>)`
+  and delete `<P>`, recording both deletions.
+
+**Observation for tasks 145 / 146 / 148 (not this round's scope; unproven; no code changed for it):** the codified
+"Secure Record Owner" role (`config/secure-record-owner-role.json`) holds no privilege on `sharepointdocumentlocation`
+(the "SharePoint four" were stripped by §5.4 on 2026-10-01). If Dataverse checks the assignee's Read on each table an
+Assign CASCADES to — as it does for the assigned row itself ("refuses team ownership without Read") — then the FORWARD
+move of a project or matter that has a document location is refused. That is the existing, fail-closed
+`owner_assignment_failed` (owner read back unchanged, nothing moved), not a new hole; dev has 0 such roots, so it cannot
+be observed there without a probe like (j) extended past the snapshot (which (j) never reaches).
+
+### 16.9 Quality gates (round c1 — FULL rigor, and TEST-MODIFYING, so code-review + adr-check run)
+
+**code-review** (all severities):
+
+| Finding | Severity | Disposition |
+|---|---|---|
+| `ProvisionProjectEndpoint.cs` grows to ~2,590 lines | Warning (size) | Accepted per COMPONENT-COMPLEXITY (as §13.9/§14.9): one reason to change. The new mechanism went into its own file (`AssignCascadeChildOwners`, 400 lines) — the seam named in earlier rounds, taken for the part with a second consumer (148) |
+| Nine public types in one Infrastructure file | Suggestion | Kept together (one concept) and top-level so 148's `Services/Access` code names them directly; no name collides (grep) |
+| Restore is per child (read, PATCH, read) | Suggestion | Compensation is rare and a root's document locations are few; a full page refuses before any write, so N ≤ 4,999 |
+| A 400 is classified `refused` from the status alone | Suggestion | `DataverseWebApiClient` surfaces only the status (the `IsColumnMissing` precedent); for these by-regarding / by-id reads a 400 has no transient cause, and either way it is deterministic — the property that decides retryability |
+| Child ids and owners returned to the caller | — | Owner-mandated ("named in the response"); the caller holds Write on the record these rows hang off |
+| The unverified-undo branch names children but does not restore | — | Intended (§16.3): restoring while the team may still own the record would pull children out of it |
+| AI-smell scan: no new interface, no catch-log-rethrow, no null-check on a non-nullable, no swallowed failure (each child outcome is reported), exhaustive table switch with a throwing default | — | Clean |
+
+**adr-check**: ADR-001 (no new endpoint), ADR-002 (no plugin; the restore is server-side in the BFF), ADR-003 (an
+unreadable or incomplete snapshot refuses before any write; an unverifiable child restore is a failure, never "restored";
+`Gone` is not a failure because nothing is left to restore), ADR-008 (the delegation filter unchanged), ADR-010 (no
+interface, no registration), ADR-019 (ProblemDetails + stable `reasonCode`; extensions follow the existing convention),
+ADR-038 (no `Mock<HttpMessageHandler>`, no DI-registration or ctor-null tests; the fixture models Dataverse's cascade and
+its 400 in the real client's exception shape), ADR-052 (no background work): **compliant, 0 violations**. §6.5: no new
+exception; the §14.7 path-B item is unchanged (§16.5).
+
+### 16.10 PR description — addition to §14.7 / §15.7
+
+> **Round c1 (owner round 10 items 4–5).** Compensation's reverse Assign cascade: ONE primitive,
+> `Infrastructure/Dataverse/AssignCascadeChildOwners` (snapshot each cascaded child's own owner before any write; restore
+> after a verified undo; fail closed and name each child with the call that puts it back) — task 148 reuses it. Two reason
+> codes (`cascade_children_unreadable`, `cascade_children_not_restored`), client-classified. Live (read-only) finding: dev
+> refuses `sharepointdocuments` reads (S2S integration off), so documents are read only under a document location. The
+> kept-container resume stays as shipped (round 10 item 5). 20/20 perturbation seeds bite.
+
+### 16.11 Runs (round c1)
+
+Full BFF unit suite, once, on the final code: **14,338 passed / 1 failed / 54 skipped (14,393)**, 25 m 35 s with four
+other agents' test hosts running. The one failure,
+`OfficeVersionSaveRevertTests.EmailSave_ResentWithNoClientKey_IsStillAnsweredDuplicate_AndReadsNoFile`, is unrelated (its
+own host and world, the Office email-save duplicate path; no file this round touches) and **passed on an isolated re-run
+(the class 9/9)** — contention; both results reported. NetArchTest **346/346**. **Hard gate**, both in full on this
+branch: `Sprk.Bff.Api.IntegrationTests` **104/104**, `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**.
+The verifier's provisioning class set (ProvisionProject*, SecureProjectShare, ProvisionRecordedContainer,
+ProvisionResumeCreatorPerson, SecureNamedOwnerTeam*, CreatorPerson*, DataverseCreateRecordHandler, RecordShareRightsMask,
+DelegationRule*, ProvisionAssignCascadeChildOwner) **263/263** (r2 251 + 12). Spaarke.UI.Components jest
+CreateProjectWizard + SummarizeFilesWizard **108/108 (8 suites)** (r2 103 + 5); package build (`tsc`) clean; prettier +
+eslint clean on the changed TS. `dotnet build` 0 warnings / 0 errors; `dotnet format whitespace --verify-no-changes` clean
+on the four changed C# files. No package changed (no CVE delta). Publish size: not measured (main session).
+
+Fresh-worktree note for whoever re-runs the client tests: `@spaarke/sdap-client` and `@spaarke/auth` are `file:` packages
+whose `dist/` is not committed; build each (`npm install --legacy-peer-deps --no-audit --no-fund` + `npm run build` in
+`src/client/shared/Spaarke.SdapClient` and `Spaarke.Auth`) before the component package's jest or `tsc`, or four suites
+fail to resolve them.

@@ -244,6 +244,36 @@ describe('provisionSecureProject — failure classification', () => {
     }
   );
 
+  // Task 133 c1 (owner round 10 item 4): `cascade_children_unreadable` follows the server's `cascadeChildState`.
+  // `unreadable` (or absent) is a failed read — the same caller may call again; `refused` is Dataverse refusing the read
+  // (or answering it incompletely), deterministic — a "Try securing again" would fail every time.
+  it.each([
+    ['unreadable', true],
+    [undefined, true],
+    ['refused', false],
+  ])('reads cascadeChildState=%s from the problem body for cascade_children_unreadable', async (state, retryable) => {
+    const authFetch = jest.fn().mockResolvedValue(
+      problemResponse(500, {
+        detail: 'operator text',
+        reasonCode: 'sdap.provision.cascade_children_unreadable',
+        childTable: 'sharepointdocumentlocation',
+        ...(state === undefined ? {} : { cascadeChildState: state }),
+      })
+    );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF);
+
+    expect(result.failureKind).toBe('not-started');
+    expect(result.retryable).toBe(retryable);
+    expect(result.errorMessage).toMatch(/Nothing about the project changed/);
+    expect(result.errorMessage).not.toMatch(/try (securing )?(it )?again|retry/i);
+    if (retryable) {
+      expect(result.errorMessage).not.toMatch(/administrator/i);
+    } else {
+      expect(result.errorMessage).toMatch(/administrator needs to look at those records/i);
+    }
+  });
+
   it('keeps the confirmed-share copy for a kept container whose share was read back', () => {
     const result = classifyProvisioningFailure('sdap.provision.owner_assignment_unverified', {
       containerKept: true,
@@ -308,6 +338,11 @@ describe('provisionSecureProject — failure classification', () => {
     // Task 133 r1: a SHARED container is unlinked before the move; that failed, so nothing moved and the same caller may
     // call again.
     ['sdap.provision.shared_container_not_cleared', 'not-started', true],
+    // Task 133 c1: the records that move with the project could not be read before any change. Without the extension
+    // (or with `cascadeChildState: unreadable`) a read failed — the same caller may call again; `refused` is pinned below.
+    ['sdap.provision.cascade_children_unreadable', 'not-started', true],
+    // Task 133 c1: undone, but records that moved with it are not back on their own owners — an administrator first.
+    ['sdap.provision.cascade_children_not_restored', 'needs-administrator', false],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -354,7 +389,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(26);
+    expect(EMITTED).toHaveLength(28);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

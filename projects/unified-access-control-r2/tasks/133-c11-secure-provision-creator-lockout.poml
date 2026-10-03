@@ -4,7 +4,8 @@
     <title>C11 — secure provisioning can no longer lock the creator out: share before the owner move, verify the share survived, compensate on failure, and make a partially-provisioned record resumable instead of 409 — while a genuinely provisioned record still gets 409 already_provisioned</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C11)</phase>
     <gate>after-144 (task 144 rewrites Step 3 of the same endpoint to a named non-default owner team and generalizes provisioning to sprk_matter and sprk_workassignment; this task's fix must cover every root type provisioning handles once 144 lands)</gate>
-    <status>completed-with-escalation</status>
+    <status>completed</status>
+    <status-note>**Round c1, 2026-10-03.** Escalation trigger 4 (Assign cascade under compensation) is ANSWERED by owner round 10 item 4 ((c) then (a)) and implemented: ONE reusable primitive, AssignCascadeChildOwners, snapshots each cascaded child's own owner before any write and restores it after a verified undo (task 148 reuses it). Owner round 10 item 5 decided the kept-container question (note 14.3): as shipped. No escalation trigger is open. NOT closed by this executor (main session): the manual live gate (a)-(j) and the sprk_createdbyperson schema apply before master (both approved by owner round 11 for the main session at integration); publish size; and whether round 11's blanket approval of the batch-4 live steps covers REPLAY as the (e) method (raised verifier round 1 item 9) - if the main session reads it as not covered, it asks the owner before running (e). Full record: notes/task-133-provision-creator-lockout.md section 16.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-boundary .cs change (tags bff-api, auth, security) that reorders mutations on the secure-record isolation path and changes the idempotency contract of a live endpoint.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -153,7 +154,7 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
     <trigger>`organization.sharetopreviousowneronassign` is true in dev: STOP. Every assign (including compensation) would then add a platform-issued share, and the post-move read-back would see a share this code did not grant. Present the setting and its effect per CLAUDE.md §6 (task 144 carries the same stop).</trigger>
     <trigger>Any creation path of a provisionable root (wizard host, SummarizeFilesDialog, or a BFF/Office/Assistant server-side create after task 144 widens provisioning to matters and work assignments) creates the row through an application identity (so `createdby` is an application user): `createdby` cannot be the persisted creator for those rows. STOP and bring the choice (a new server-stamped creator column with a CLAUDE.md §11 justification, `createdonbehalfby`, or another existing column) to the owner, with a recommendation, rather than sharing on resume to whoever calls. Recommendation to carry: the existing `createdby` for human-created rows plus refusal (own reasonCode) for app-created rows, until the owner decides.</trigger>
     <trigger>The live census finds a secure-team-owned row whose `sprk_containerid` is non-empty but is NOT a container provisioning created (e.g. a pre-task-076 business-unit cascade value), OR finds any create-time writer of `sprk_containerid` on a provisionable root (e.g. an active field-mapping rule): the "team-owned + container recorded = provisioned" marker would 409 such a row forever. STOP and list the rows/rules; do not widen the resume condition on a guess.</trigger>
-    <trigger>Any provisionable root's 1:N relationship cascades Assign (background (d)): the forward move and the compensating move would re-own children, and compensation cannot restore each child's own previous owner. STOP and present per CLAUDE.md §6 — options: (a) snapshot and restore each re-owned child's owner in compensation; (b) no compensation for that root type (resume only); (c) coordinate with task 148, which owns child ownership at provisioning. Recommendation: (c) then (a).</trigger>
+    <trigger>Any provisionable root's 1:N relationship cascades Assign (background (d)): the forward move and the compensating move would re-own children, and compensation cannot restore each child's own previous owner. STOP and present per CLAUDE.md §6 — options: (a) snapshot and restore each re-owned child's owner in compensation; (b) no compensation for that root type (resume only); (c) coordinate with task 148, which owns child ownership at provisioning. Recommendation: (c) then (a). ANSWERED 2026-10-03 (owner round 10 item 4, BINDING): "coordinate with task 148's child-ownership logic, then snapshot and restore each re-owned child's own owner (options (c) then (a))" - implemented in round c1 (note section 16).</trigger>
     <trigger>The live proof shows neither share-first nor an immediate post-move grant can be made reliable (e.g. GrantAccess on a team-owned secure record is refused for the app user): the design premise fails — STOP and escalate with the evidence.</trigger>
   </escalation>
 
@@ -527,8 +528,69 @@ INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
       proofs that do not rely on a root-team member (#1081). (5) Owner acceptance of the (e) replay method. (6) Publish
       size (main session).
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1" round="c1 (owner round 10 items 4 and 5)" baseSha="bb0e989ab">
+      COMPLETED: owner round 10 item 4 implemented, item 5 recorded, the round-10 record on the interim stamp kept accurate,
+      escalation trigger 4 marked answered. Full record: notes/task-133-provision-creator-lockout.md section 16.
+
+      BASE. task/uac-r2-133-b2-r2 (5a8b66c15) + work/unified-access-control-r2 merged, no conflicts, none of this task's
+      files touched; baseSha bb0e989ab.
+
+      (1) OWNER ROUND 10 ITEM 4 ((c) then (a)). ONE reusable primitive, Infrastructure/Dataverse/AssignCascadeChildOwners
+          (static, no registration, keyed by the root's logical name so task 148's Services/Access code reuses it):
+          SnapshotAsync reads every owner-bearing child an Assign of the root cascades to, with its OWN owner, complete or
+          refused (Unreadable = transient; Refused = a 400, a full 5,000-row page, or a row without id/owner); RestoreAsync
+          puts each back keyed on observed state (already on its owner = nothing written; else ownerid bind, its own
+          operation, then read back; Gone is not a failure). Live metadata (read-only, 2026-10-03): project and matter
+          cascade Assign to team, sharepointdocumentlocation, sharepointdocument; work assignment to nothing. team is
+          BusinessOwned (no ownerid/owninguser/owningteam): an Assign cannot re-own it, nothing to snapshot, never read.
+          LIVE FINDING: dev REFUSES a filtered sharepointdocuments read (400 0x80071017, SharePoint S2S integration off), so
+          documents are read only under a document location - otherwise the fail-closed snapshot would have refused every
+          project and matter provisioning in dev. Provisioning: snapshot before any write (refused:
+          sdap.provision.cascade_children_unreadable, childTable, cascadeChildState unreadable|refused); verified undo
+          restores (childOwnersRestored true; a child that cannot be put back = sdap.provision.cascade_children_not_restored,
+          named in the response - table, id, ownerType, ownerId, outcome, nextCall - and in a CRITICAL line, "before
+          provisioning is called again", never retry); unverified undo restores nothing and names the children it would
+          leave on the wrong owner (childOwnersAtRisk + detail + CRITICAL); undo not applied, success, resume: unchanged (on
+          success the children stay with the team - owner round 4 item 3). Client classifies both codes, reads
+          cascadeChildState. Guide 7a: paragraph + two rows. For 148: note 16.2 (how to reuse; one open design point for
+          148 named, not decided here).
+      (2) OWNER ROUND 10 ITEM 5: the kept-container resume stays AS SHIPPED (note 14.3 option C). No code change; recorded
+          in the note, here (amendment R10) and the guide 7a sentence that had called it an open question.
+      (3) Interim app-only sprk_createdbyperson stamp in DataverseCreateRecordHandler: superseded at integration by task
+          146's create-as-the-app (round 7 item 3; round 10 main-session record). Handler untouched (146 not pre-empted);
+          note 13.8 now states round 10's record and that 146 stamps the OBO caller's own systemuserid (WhoAmI).
+      (4) Escalation trigger 4 annotated ANSWERED; status completed with a status-note; amendment R10.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 16.6). New: AssignCascadeChildOwners and its result
+      records/enums (static helper beside SecureRecordOwnerTeam - no code reads or restores cascaded children today;
+      MoveOwnerAsync is private and root-shaped; the owner asked for ONE primitive 148 reuses; without it compensation
+      silently re-owns every child whose own owner differed); reason codes cascade_children_unreadable and
+      cascade_children_not_restored (each a distinct recovery the client must tell apart); ProblemDetails extensions
+      childTable, cascadeChildState, childOwnersRestored, childOwnersNotRestored, childOwnersAtRisk (the owner's "named in
+      the response with the next call"); client: one optional extension member, two state entries, one copy constant;
+      fixture switches. No new endpoint, DI registration, interface, option, job, package or Dataverse column.
+
+      TESTS. New ProvisionAssignCascadeChildOwnerTests, 8 methods / 12 cases, incl. the owner-mandated one (every child
+      back on its own pre-call owner, incl. one whose owner differed from the root's; seed C1 "restore skipped" fails it).
+      Client +5 (EMITTED 26 to 28; cascadeChildState x3). No existing test changed. Perturbation sweep 20/20 bite
+      (C1-C16 server, CL1-CL4 client). Full BFF unit suite 14,338 passed / 1 failed / 54 skipped (14,393) - the one failure
+      (OfficeVersionSaveRevertTests.EmailSave_ResentWithNoClientKey_IsStillAnsweredDuplicate_AndReadsNoFile, unrelated)
+      passed on an isolated re-run (class 9/9): contention. NetArchTest 346/346. HARD GATE, both in full on this branch:
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 0 failed / 25 skipped (428). Provisioning
+      class set 263/263. Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 108/108 (8 suites); package
+      build (tsc) clean; prettier + eslint clean on changed TS; dotnet build 0 warnings; dotnet format whitespace clean on
+      changed C#. No package changed (no CVE delta).
+
+      NOT CLOSED (main session): manual live gate (a)-(i) plus NEW optional (j) (a document-location probe on a TEST record
+      proves the dev refusal shape; command in note 16.8) and the schema apply before master - approved by owner round
+      11 for the main session at integration; whether round 11 covers REPLAY as the (e) method (verifier round 1 item 9);
+      publish size. Observation routed to 145/146/148 (note 16.8): the secure owner role holds no sharepointdocumentlocation
+      privilege, so a forward move of a root that HAS a document location may be refused (existing fail-closed
+      owner_assignment_failed; 0 such roots in dev; unproven).
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>
+    <amendment n="R10" date="2026-10-03" source="owner round 10 items 4 and 5 (session27 note) — BINDING">(Item 4) Compensation's reverse Assign cascade: snapshot each child the Assign cascade re-owns (team, sharepointdocumentlocation, sharepointdocument) with its own current owner before the forward move, and after a compensating reverse move restore each child to its snapshotted owner; fail closed and report — a child whose restore fails is named in the response and in a CRITICAL log, with the next call to make; ONE reusable primitive that task 148 reuses for transitions (implemented as AssignCascadeChildOwners, round c1). Acceptance added: the restore after compensation puts every child back on its own pre-call owner, including a child whose owner differed from the root's; a seed that skips the restore fails. (Item 5) A record that keeps its own container and fails after its move stays AS SHIPPED: no automatic resume; the response names the Manage Access recovery (note 14.3, option C).</amendment>
   </amendments>
 </task>
