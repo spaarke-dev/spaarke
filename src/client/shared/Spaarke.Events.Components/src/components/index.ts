@@ -18,6 +18,29 @@ export type {
   CalendarDrawerProps,
 } from './CalendarSection';
 
+// CalendarFilterPane — the SECOND intentional Calendar variant (side-pane filter
+// builder; coexists deliberately with CalendarSection above — see that folder's
+// own header comment). Promoted to the public barrel here (spaarke-ontology-platform-r1
+// task 080 / C-23, 2026-10-03): two LIVE files already imported its
+// `CalendarFilterPaneOutput` type from the bare `@spaarke/events-components`
+// package specifier (`src/solutions/CalendarSidePane/src/utils/parseParams.ts`,
+// `.../postMessage.ts`) even though neither this barrel nor the root barrel ever
+// surfaced it — a type that could not actually resolve. `IEventDateInfo` is
+// deliberately NOT re-exported here: `CalendarSection` above already exports a
+// same-named type, and `export *`/named re-export of the identical identifier
+// from two source modules is a name collision; nothing external needs
+// CalendarFilterPane's copy today (import it via the component's own subpath if
+// that changes).
+export { CalendarFilterPane, toIsoDateString } from './CalendarFilterPane';
+export type {
+  CalendarFilterPaneProps,
+  CalendarFilterPaneOutput,
+  CalendarFilterPaneSingle,
+  CalendarFilterPaneRange,
+  CalendarFilterPaneClear,
+  CalendarFilterPaneFilterType,
+} from './CalendarFilterPane';
+
 // AssignedToFilter, RecordTypeFilter, StatusFilter — RETIRED in task 032
 // (2026-06-03). The new framework's auto-derived filter chips supersede the
 // hand-rolled filter components, and the EventsPage host (rewritten in

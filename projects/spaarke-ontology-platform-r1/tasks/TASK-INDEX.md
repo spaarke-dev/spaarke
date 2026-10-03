@@ -21,7 +21,7 @@
 | ✅ 001 | [Schema: the four missing columns](001-schema-complete-missing-columns.poml) | FULL | sonnet/high | — | — | **Unblocks everything.** Two columns block a path outright |
 | 🔄 002 | [Privilege re-verify](002-privilege-reverify-after-column-adds.poml) | STANDARD | sonnet/medium | 001 | — | 🔴 **ESCALATED** — criteria 1-3 verified; the writer principal holds sysadmin. `notes/002-escalation-append-only-writer-principal.md` |
 | ✅ 003 | [ADR-040 amendment + ADR-039 exception](003-adr-040-amendment-and-039-exception.poml) | FULL | **opus/xhigh** | — | — | ⚠️ `.claude/` → **main session only**. Must merge before/alongside 031 |
-| 🔲 004 | [Seed Policy + taxonomy rows](004-seed-policy-and-taxonomy-rows.poml) | STANDARD | sonnet/medium | 001 | — | Policy stays `enabled = No` until reviewed |
+| ✅ 004 | [Seed Policy + taxonomy rows](004-seed-policy-and-taxonomy-rows.poml) | STANDARD | sonnet/medium | 001 | — | Policy stays `enabled = No` until reviewed. `sprk_policy` GUID `4d204810-61bf-f111-aaaf-0022482913fc`; `sprk_policyversion` GUID `42b3e716-61bf-f111-aaaf-0022482913fc`. Taxonomy rows already enabled (no-op) |
 | 🔲 005 | [Seed dev data + 2 negative controls](005-seed-dev-data-and-negative-controls.poml) | STANDARD | sonnet/medium | 004 | — | Criterion 2 needs the controls, not just the triple |
 
 ### Phase 1 — Cleanup that gates the row
@@ -36,7 +36,7 @@
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 020 | [`Existence` rule type + JSON Schema](020-existence-rule-type.poml) | FULL | sonnet/high | 003 | **B** | Without it the capability is unsavable |
+| ✅ 020 | [`Existence` rule type + JSON Schema](020-existence-rule-type.poml) | FULL | sonnet/high | 003 | **B** | Without it the capability is unsavable |
 | 🔲 021 | [**The predicate compiler**](021-predicate-compiler-exists-notexists.poml) | FULL | **opus/xhigh** | 020, 005 | — | 🔴 **THE RISK ITEM.** Serial. `notExists` has no in-repo template |
 | 🔲 022 | [Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | Immutability makes this the only control point |
 | ✅ 023 | [Scope semantics + policy defaults](023-scope-semantics-and-policy-defaults.poml) | FULL | sonnet/high | 003 | **B** | Copy `CommunicationRuleGate` verbatim; fail closed |
@@ -95,9 +95,9 @@
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | C-10 is a **live bug**; C-5 already lost data |
+| ⚠️ 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | 5 of 6 fixed. **C-21 escalated** (privacy shim → [#1112](https://github.com/spaarke-dev/spaarke/issues/1112)); C-19 residual → [#1113](https://github.com/spaarke-dev/spaarke/issues/1113) |
 | 🔲 081 | [Duplication cleanup](081-duplication-cleanup.poml) | STANDARD | sonnet/medium | — | **H** | `cleanGuid` ×~50, frame-walk ×7 |
-| 🔲 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
+| ✅ 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
 | ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
 
 ### Phase 9 — Wrap-up

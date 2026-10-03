@@ -10,6 +10,12 @@
  *   - Dark mode: inherits token values automatically
  *
  * Standards: ADR-012 (shared component library), ADR-021 (Fluent v9, dark mode)
+ *
+ * ⚠️ **This is the clickable count-filter card** — the one FR-27 requires the worklist row
+ * to extend, used with `MetricCardRow`. It is unrelated to `VisualMetricCard` in
+ * `Spaarke.Visuals/src/components/MetricCard.tsx` (serves the `VisualHost` PCF's charts/report
+ * cards). The two were both named `MetricCard` until the Visuals one was renamed 2026-10-03
+ * (item C-3) to remove the collision — this file's name/export did not change.
  */
 
 import * as React from 'react';

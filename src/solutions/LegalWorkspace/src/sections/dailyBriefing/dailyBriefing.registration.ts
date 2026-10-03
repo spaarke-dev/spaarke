@@ -45,7 +45,10 @@ import { trackEvent } from "../../services/telemetry";
 // narrative-only DailyBriefingSection. The options surface is preserved
 // verbatim for backward compat with this shim and the Option D registry
 // chain; they are no-ops in the new factory because DailyBriefingApp
-// self-resolves Xrm + webApi and fetches via useBriefingNotifications.
+// self-resolves Xrm + webApi and fetches via useBriefingRender, which calls
+// fetchBriefingLive (behind USE_LIVE_RENDER in briefingService.ts) — not via
+// appnotification read-state (ontology-platform-r1 task 010 / C-1, 2026-10-03:
+// corrected from a stale reference to the now-deleted useBriefingNotifications).
 // SectionRegistration type itself still comes from @spaarke/ui-components.
 
 /**

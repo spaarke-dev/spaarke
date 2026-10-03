@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-02 (by `context-handoff`)
+> **Last Updated**: 2026-10-03 (task 004 completion)
 > **Recovery**: read "Quick Recovery" first. Everything needed to continue is in this file.
 > *(Supersedes the 2026-09-30 checkpoint entirely — that one named rev 3, a now-dead branch, and the D-1 spike
 > as the next action. All three are obsolete.)*
@@ -12,9 +12,9 @@
 | Field | Value |
 |---|---|
 | **Phase** | **PIPELINE COMPLETE — ready to implement.** `design.md` rev 11 · `spec.md` (44 FRs) · `plan.md` (10 phases) · **42 task POMLs**, all passing `Validate-TaskPoml.ps1` with 0 errors / 0 warnings |
-| **Active task** | **none** — nothing started yet |
-| **Dataverse** | ✅ Five tables CREATED in `spaarkedev1` · roles assigned and **verified by query** · auditing on all five **and at org level** · ⬜ **four columns still missing → task 001** |
-| **NEXT ACTION** | **`task-execute` on [`tasks/001-schema-complete-missing-columns.poml`](tasks/001-schema-complete-missing-columns.poml)** — or just say **"continue"**, which reads `tasks/TASK-INDEX.md` and picks the first 🔲. **Task 003 (the ADR-040 amendment) can start in parallel** and is main-session-only |
+| **Active task** | **004 complete** (✅, STANDARD) — first `sprk_policy`/`sprk_policyversion` seeded. Several other tasks (010/011/012/020/023/082/083 etc.) are running concurrently in this worktree — re-read this file before trusting "none" |
+| **Dataverse** | ✅ Five tables CREATED in `spaarkedev1` · roles assigned and **verified by query** · auditing on all five **and at org level** · ✅ task 001's four columns done · ✅ task 004 seeded `sprk_policy` POL-COMMIT-BUDGET = `4d204810-61bf-f111-aaaf-0022482913fc` (disabled) + `sprk_policyversion` v1 = `42b3e716-61bf-f111-aaaf-0022482913fc` — see `notes/004-seed-policy-rows.md` |
+| **NEXT ACTION** | **`task-execute` on [`tasks/005-seed-dev-data-and-negative-controls.poml`](tasks/005-seed-dev-data-and-negative-controls.poml)** (deps: 004, now satisfied) — or just say **"continue"**, which reads `tasks/TASK-INDEX.md` and picks the first 🔲. Task 002 is 🔄 escalated (see its row); task 003 is ✅ |
 | **Branch** | `docs/ontology-platform-design` — ⚠️ **NOT** `docs/ontology-platform-phase0` (squash-merged, dead) |
 | **Git** | 4 ahead / **44 behind** `origin/master`. Clean, all pushed. **Merge master before any deploy** |
 | **PR #1032** | ✅ **MERGED** to master as `93634db58` |

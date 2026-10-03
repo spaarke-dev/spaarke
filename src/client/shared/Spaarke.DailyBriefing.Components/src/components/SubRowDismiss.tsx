@@ -5,9 +5,13 @@
  * slot of each indented sub-row. Implemented in task 023 (Wave 9).
  *
  * Behavior (FR-14):
- *   - On click, invokes `onDismiss(item.id)` -- the parent wires this to
- *     `useBriefingActions.markAsRead(item.id)` which marks ONLY the specific
- *     underlying `appnotification` row as read.
+ *   - On click, invokes `onDismiss(item.id)` -- the parent wires this to a
+ *     mark-as-read action for the specific underlying `appnotification` row.
+ *     (The original `useBriefingActions.markAsRead` wiring this referenced
+ *     was deleted as dead code by ontology-platform-r1 task 010 / C-1,
+ *     2026-10-03; this component itself is unreachable from the live
+ *     `/render` path per the same audit — see project
+ *     notes/reuse-verification-2026-10-02.md §4 "SubRow* family".)
  *   - Optimistic UI: the sub-row fades immediately on click (the button hides;
  *     parent listens to the consumer's refetch loop to remove the row entirely
  *     on the next render cycle).
@@ -66,8 +70,8 @@ export interface SubRowDismissProps {
   item: NotificationItem;
   /**
    * Callback invoked with the underlying notification ID when the user clicks
-   * Dismiss. The parent typically wires this to
-   * `useBriefingActions.markAsRead(item.id)`.
+   * Dismiss. The parent typically wires this to a mark-as-read action for
+   * the item.
    *
    * Should return a Promise<boolean>: `true` on success, `false` on failure.
    * When `false` (or the Promise rejects), the optimistic fade is reverted so

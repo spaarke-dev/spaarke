@@ -4,14 +4,13 @@ module.exports = {
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   collectCoverageFrom: [
-    'src/services/EntityConfigurationService.ts',
-    'src/services/CustomCommandFactory.ts',
-    'src/services/CommandRegistry.ts',
+    // EntityConfigurationService.ts / CustomCommandFactory.ts / CommandRegistry.ts /
+    // Toolbar/CommandToolbar.tsx DELETED here — spaarke-ontology-platform-r1 task 080 / C-19,
+    // 2026-10-03 (dead infra from the deleted UniversalDatasetGrid PCF).
     'src/services/CommandExecutor.ts',
     'src/hooks/useKeyboardShortcuts.ts',
     'src/hooks/useForceSimulation.ts',
     'src/utils/themeDetection.ts',
-    'src/components/Toolbar/CommandToolbar.tsx',
     'src/components/DatasetGrid/GridView.tsx',
     'src/components/SprkChat/SprkChat.tsx',
     'src/components/SprkChat/SprkChatMessage.tsx',

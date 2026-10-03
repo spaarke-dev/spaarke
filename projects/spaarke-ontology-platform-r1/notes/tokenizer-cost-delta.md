@@ -29,34 +29,65 @@ Required the alpha prefix *immediately* adjacent to the `-`/`.` separator — no
 
 **After** (`IdentifierReverseLookupRung.cs`):
 ```
+\b(?:[A-Za-z]{3,}[ \t][A-Za-z]|[A-Za-z]{2,})[ \t]*[-.][ \t]*(?=[A-Za-z0-9]*\d)[A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9]\b
+```
+Three deliberate, narrow changes:
+
+1. **Whitespace tolerance around the separator.** The `-`/`.` separator may now have optional whitespace on
+   both sides.
+2. **A one-letter second prefix word, ONLY when it is exactly one letter.** This is what makes the live
+   matter number `"Form D - 2023"` (prefix words `Form` + `D`) tokenize: `Form` (3+ letters) + a single space
+   + the single letter `D`. The restriction to *exactly one letter* is load-bearing, not cosmetic — see §3.1,
+   "the bug this caught," below.
+3. **Digit-in-body requirement.** The text following the separator must contain at least one digit. Every
+   real record number in this catalog is numeric-bodied (`123`, `002`, `10001.01`, `441482`, …); this is also
+   what keeps ordinary hyphenated English compounds out even though the separator now tolerates whitespace.
+
+Without change (3), whitespace tolerance alone would admit ordinary prose like `"regroup - the plan"` —
+exactly what the negative acceptance criterion forbids. Change (3) is not optional scope creep; it is
+required to hold that criterion while shipping changes (1)–(2).
+
+### 3.1 The bug this caught — a first draft of (2) was ambiguous
+
+The first draft allowed the second prefix word to be **any length**, not just one letter:
+```
 \b[A-Za-z]{2,}(?:[ \t]+[A-Za-z]+)?[ \t]*[-.][ \t]*(?=[A-Za-z0-9]*\d)[A-Za-z0-9][A-Za-z0-9.\-]*[A-Za-z0-9]\b
 ```
-Two deliberate, narrow changes:
+Running the full `tests/unit/Sprk.Bff.Api.Tests` suite with this draft **failed a pre-existing passing test**
+(`IdentifierReverseLookupRungTests.Fr12_NewRecordFraming_ReferencedIdentifier_CappedSubThreshold_NotAutoFiledAlone`).
+The subject `"This is a new litigation matter related to MAT-123"` tokenized as `"to MAT-123"` instead of
+`"MAT-123"`: regex matching scans left-to-right and commits to the first position where a match is possible,
+so the connector word `"to"` was accepted as prefix-word-1 and the *real* 3-letter prefix `"MAT"` was absorbed
+as prefix-word-2 — producing a token value that no longer equals the stored field value `"MAT-123"`, so the
+exact-match reverse lookup silently resolved to nothing.
 
-1. **Whitespace tolerance**: the alpha prefix may now be followed by exactly **one** more
-   space-separated alpha word (capped — not open-ended), and whitespace is tolerated on both sides of the
-   separator. This is what makes the live matter number `"Form D - 2023"` (prefix words `Form` + `D`, then
-   `" - "`, then `2023`) tokenize.
-2. **Digit-in-body requirement** (new, added to satisfy "without admitting arbitrary prose"): the text
-   following the separator must contain at least one digit. Every real record number in this catalog is
-   numeric-bodied (`123`, `002`, `10001.01`, `441482`, …); this is also what keeps ordinary hyphenated
-   English compounds out even though they now have whitespace tolerance available to them.
+**The fix**: restrict the second word to *exactly one letter*. A single letter can never stand alone as a
+prefix word (the existing `{2,}` floor on a standalone prefix exists for precisely that reason), so it can
+only ever be the genuine second half of a compound name like `"Form D"` — it can never be "stolen" by an
+unrelated connector the way a 2+ letter word (`"MAT"`, `"Co"`, …) can. Re-running the full suite after the
+fix: no regressions, plus the regression case is now pinned permanently as its own corpus row (see §3 below)
+and its own assertion in `IdentifierReverseLookupRungTests.cs`.
 
-Without change (2), whitespace tolerance alone would admit ordinary prose like `"regroup - the plan"` —
-exactly what the negative acceptance criterion forbids. Change (2) is not optional scope creep; it is required
-to hold that criterion while shipping change (1).
+This is reported here because catching it is itself part of the measurement discipline the task calls for —
+a first draft that LOOKED like a safe characterization of "Form D" silently broke an existing deterministic
+match on a build-and-test cycle. Shipping without running the full suite would have missed it.
 
 ## 3. Methodology
 
-A 34-message representative corpus of communication subjects was constructed spanning:
+A 35-message representative corpus of communication subjects was constructed spanning:
 
 - **Controls** (8) — subjects that already tokenized under the old pattern (`MAT-123`, `INV-002`,
   `PRJT.10001.01`, `WRK-55`, `BDGT-9012`, `SVCR-77`, `RPTC-3001`, and the `REAL-2026-123456.02` P1
   substring-guard regression case) — must remain unaffected.
-- **Repair target** (3) — the task's repro (`"Form D - 2023"` and a close variant, `"Smith Co - 2024
-  renewal"`).
+- **Repair target** (3) — the task's repro (`"Form D - 2023"`, a subject-line variant, and a second
+  same-shape example `"Case A - 4521 pending"`).
+- **Regression guard** (1) — `"This is a new litigation matter related to MAT-123"`, the exact subject that
+  caught the ambiguity bug in §3.1. Already matched before this task (tight `MAT-123`, no spaces); pinned here
+  so the ambiguity class cannot silently return.
 - **Genuinely new matches** (3) — shapes the whitespace tolerance admits beyond the repro itself
-  (`"Acme Corp - 88 invoice"`, `"Team sync - 2pm start"`, `"Standup - 9am tomorrow"`).
+  (`"Acme Corp - 88 invoice"`, `"Team sync - 2pm start"`, `"Standup - 9am tomorrow"` — each resolves via its
+  SECOND word directly against the separator, e.g. `"Corp - 88"`, since the first word doesn't qualify for
+  either prefix form).
 - **Ordinary hyphenated English compounds** (7) — `"Follow-up"`, `"state-of-the-art"`, `"Well-known"`,
   `"catch-up"`, `"Good-to-go"`, `"Sign-off"`, `"Up-to-date"` — all **already matched the OLD pattern** (which
   had no digit requirement at all), and are now correctly excluded.
@@ -72,18 +103,18 @@ absorbed by a well-formed match)`.
 
 The same corpus is executed as a durable xUnit theory through the rung's public surface —
 `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/WellFormedTokenPatternCostDeltaTests.cs` — asserting the
-exact AFTER query count (0 or 7) per message, plus an aggregate pin (126) so a future uncoordinated change to
+exact AFTER query count (0 or 7) per message, plus an aggregate pin (133) so a future uncoordinated change to
 this pattern is caught rather than silently drifting ADR-045's cost profile. The BEFORE state cannot be
 re-executed from this codebase (the fix is already applied), so it is recorded here rather than as a
 permanent test.
 
 ## 4. Measured result
 
-| | Messages triggering ≥1 query | Total Dataverse queries (× 7) | Avg queries / message (n = 34) |
+| | Messages triggering ≥1 query | Total Dataverse queries (× 7) | Avg queries / message (n = 35) |
 |---|---|---|---|
-| **BEFORE** (original pattern) | 22 / 34 | 154 | 4.529 |
-| **AFTER** (task 082 pattern) | 18 / 34 | 126 | 3.706 |
-| **Delta** | **−4 messages** | **−28 queries** | **−0.824** |
+| **BEFORE** (original pattern) | 23 / 35 | 161 | 4.600 |
+| **AFTER** (task 082 pattern) | 19 / 35 | 133 | 3.800 |
+| **Delta** | **−4 messages** | **−28 queries** | **−0.800** |
 
 **The cost profile improved, not regressed.** This is below the escalation trigger ("more than doubling")
 by a wide margin — no escalation required.
@@ -95,7 +126,9 @@ via the unrelated bare-numeric fallback matching the trailing year `"2023"` (4+ 
 resolved to no matter, because an exact-match lookup for `"2023"` never equals the stored field value
 `"Form D - 2023"`. This matches the original diagnosis in `notes/mvp-technical-spec.md` §17.5(a): *"the
 bare-numeric fallback … extracts `"2023"`, which reverse-looks-up to no matter."* After this fix, the SAME
-query is now productive — `ExplicitReference` fires — rather than being a new cost.
+query is now productive — `ExplicitReference` fires — rather than being a new cost. The regression-guard row
+(`"… related to MAT-123"`) is query-count neutral for the same reason it existed before this task at all: the
+tight `MAT-123` substring already matched under the OLD pattern.
 
 The real movement:
 
@@ -124,9 +157,11 @@ this pattern is required to re-measure rather than assume, per ADR-045.
 
 ## 6. Scope not taken
 
-- Did not generalize the prefix beyond **one** extra space-separated word. A 3+-word matter name with
-  embedded spaces (not seen in the task's repro or the current data model's examples) is out of scope; adding
-  it would further widen the false-positive surface without a demonstrated need.
+- Did not generalize the second prefix word beyond **exactly one letter**. A second word of 2+ letters (e.g.
+  a hypothetical `"Smith Co - 2024"`) reintroduces the §3.1 ambiguity class (an unrelated connector word
+  swallowing a real standalone prefix) and is out of scope; the task's repro only needs the one-letter case.
+- Did not generalize the prefix beyond **one** extra word at all. A 3+-word matter name with embedded spaces
+  (not seen in the task's repro or the current data model's examples) is out of scope.
 - Did not touch `AutoFileGate` or the 0.85 auto-file threshold, nor the `WellFormedConfidence` (0.90) /
   `BareNumericConfidence` (0.65) constants — this task changes only the tokenizer's acceptance shape, never
   the confidence ladder (project constraint: auto-file stays deterministic, never reachable by the AI rung

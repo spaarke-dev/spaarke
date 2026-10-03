@@ -4,7 +4,7 @@
     <title>Resolve the six cleanup hazards</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Each hazard is a live correctness or privacy risk in shipped code, one of which already lost data.</rigor-reason>
     <model-tier>sonnet</model-tier>

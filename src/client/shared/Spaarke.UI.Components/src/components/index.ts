@@ -11,8 +11,9 @@ export * from './SprkButton';
 // Only ViewSelector remains; the new DataGrid framework lives under './DataGrid'.
 export * from './DatasetGrid/ViewSelector';
 
-// Toolbar components
-export * from './Toolbar';
+// (Toolbar/CommandToolbar DELETED here — spaarke-ontology-platform-r1 task 080 / C-19, 2026-10-03 —
+// dead infra from the deleted UniversalDatasetGrid PCF, zero consumers besides its own test. See
+// services/index.ts's note on the same cluster.)
 
 // Page Chrome components (OOB parity)
 export * from './PageChrome';
@@ -286,6 +287,11 @@ export type {
   ChooserCreatedRecordRef,
   ChooserFileArgs,
 } from './GetStartedCards/CreateRecordChooserModal';
+
+// StatusBadge - generic status/severity badge (label + tone), no domain
+// vocabulary. The ONE legitimately-new UI primitive added by
+// spaarke-ontology-platform-r1 task 012 (C-4, spec FR-28/FR-41).
+export * from './StatusBadge';
 
 // AccessGrantModal - the person-icon access-grant modal opened from
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built

@@ -4,7 +4,7 @@
     <title>Repair the space-bearing matter-number tokenizer</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the association engine precision and cost profile, which ADR-045 governs.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,7 +87,16 @@
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-43.</notes>
+  <notes>spec.md FR-43. Completed: WellFormedTokenPattern repaired to tolerate whitespace around the
+  separator and a single-letter second prefix word (e.g. "Form D"), with a digit-in-body requirement added
+  to hold the no-arbitrary-prose criterion. Measured query-count delta per ADR-045: BEFORE 161 queries / 23
+  of 35 representative messages trigger the roster; AFTER 133 queries / 19 of 35 — a net DECREASE of 28
+  queries (not an increase), well inside the escalation threshold. Full methodology + numbers in
+  projects/spaarke-ontology-platform-r1/notes/tokenizer-cost-delta.md. A first draft of the regex was
+  ambiguous (admitted ANY second prefix word, not just one letter) and broke the pre-existing
+  Fr12_NewRecordFraming_... regression test by mis-tokenizing "... related to MAT-123" as "to MAT-123";
+  caught by running the full test file before completion, fixed by restricting the second word to exactly
+  one letter, and pinned permanently as a new corpus row. code-review + adr-check both clean.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

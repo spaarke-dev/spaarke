@@ -5,19 +5,21 @@
  * context-agnostic — dependencies are injected via the hook's arguments.
  *
  * Populated by R2 task 013 (Wave 3 hoist, FR-05):
- *  - `useBriefingNarration` — TL;DR + per-channel narrative bullets via BFF `/narrate`.
  *  - `useInlineTodoCreate` — `sprk_todo` creation with multi-entity regarding
  *    resolution per ADR-024 (TODO_REGARDING_CATALOG + applyResolverFields
  *    preserved verbatim from the original location).
  *
  * Populated by R2 task 014 (FR-06 split of `useNotificationData`):
- *  - `useBriefingNotifications` — fetches + groups appnotification records.
  *  - `useBriefingPreferences` — fetches + persists Daily Digest user preferences.
- *  - `useBriefingActions` — mark-as-read / mark-all-as-read / dismiss-all / refresh.
  *
- * Cross-hook coordination (e.g., "refetch notifications when preferences change")
- * happens at the CONSUMER layer via effects (Option A per FR-06 / design.md).
- * The three hooks intentionally share NO internal state, NO singleton, NO context.
+ * ontology-platform-r1 task 010 / C-1 (2026-10-03): the appnotification-driven
+ * `useBriefingNotifications` / `useBriefingNarration` / `useBriefingActions`
+ * hooks (and the `notificationService.ts` module that backed them) were
+ * deleted as dead code — they had no live call site and their only
+ * importers were their own now-deleted unit tests. The current data path is
+ * `useBriefingRender`, which fires `POST /api/ai/daily-briefing/render`
+ * (behind `USE_LIVE_RENDER` in `briefingService.ts`) unconditionally on
+ * mount; it does not gate on an `appnotification` load.
  */
 
 export { useInlineTodoCreate } from './useInlineTodoCreate';
@@ -28,15 +30,3 @@ export type { UseBriefingRenderResult, BriefingRenderStatus } from './useBriefin
 
 export { useBriefingPreferences } from './useBriefingPreferences';
 export type { UseBriefingPreferencesResult } from './useBriefingPreferences';
-
-// Legacy appnotification-driven hooks — retained for back-compat with consumers
-// that still import them directly (e.g., tests). The widget data path now flows
-// through useBriefingRender (R7 Wave 12 cutover, 2026-06-30).
-export { useBriefingNarration } from './useBriefingNarration';
-export type { UseBriefingNarrationResult } from './useBriefingNarration';
-
-export { useBriefingNotifications } from './useBriefingNotifications';
-export type { UseBriefingNotificationsResult } from './useBriefingNotifications';
-
-export { useBriefingActions } from './useBriefingActions';
-export type { UseBriefingActionsResult, BriefingActionOptions } from './useBriefingActions';

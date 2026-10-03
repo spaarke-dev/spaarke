@@ -23,8 +23,10 @@ export * from './sprkAnalysis';
 export { PrivilegeService } from '../services/PrivilegeService';
 export { FieldSecurityService } from '../services/FieldSecurityService';
 export { ColumnRendererService } from '../services/ColumnRendererService';
-export { EntityConfigurationService } from '../services/EntityConfigurationService';
-export { CustomCommandFactory } from '../services/CustomCommandFactory';
+// (EntityConfigurationService + CustomCommandFactory DELETED here — spaarke-ontology-platform-r1
+// task 080 / C-19, 2026-10-03 — dead infra from the deleted UniversalDatasetGrid PCF, consumed only
+// by the also-deleted CommandRegistry. Zero other consumers found across src/. The live, generic
+// command builder is CommandExecutor, in the services barrel, untouched.)
 // (FieldMappingService class removed in task 010 — the engine is now the
 // `applyFieldMappings` function exported from the services barrel. Field-mapping
 // TYPES are exported above via `export * from './FieldMappingTypes'`.)

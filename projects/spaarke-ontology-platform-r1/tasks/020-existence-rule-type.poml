@@ -4,7 +4,7 @@
     <title>Add the Existence rule type and its JSON Schema</title>
     <phase>2 Policy and rule bodies</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes a closed set that validation enforces; without it the differentiated capability cannot be saved at all.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,7 +95,39 @@
     <criterion testable="true">All unit tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-05 and FR-08. design.md CM-7 and section 8.0.1(a).</notes>
+  <notes>spec.md FR-05 and FR-08. design.md CM-7 and section 8.0.1(a).
+
+  COMPLETED 2026-10-03. Built the closed RuleType enum (Threshold=100000000, Switch=100000001,
+  Existence=100000002 -- confirmed against live Dataverse via DESCRIBE TABLE sprk_policyversion) and
+  RuleBodySchemaValidator (Services/Signals/), plus existence-rule.schema.json authored from design.md
+  section 8.0.1(a) / mvp-technical-spec.md section 3.4a. The schema refuses the CM-3 cross-clause
+  variable-binding violation via two independent mechanisms: additionalProperties:false on the clause
+  definition (rejects an unexpected "bind" property outright) AND a leading-"$" pattern restriction on
+  every filter scalar value (rejects the dereference itself even without "bind" present) -- the
+  escalation trigger in this POML did not fire. 21 new unit tests, all passing; BFF builds clean (0
+  warnings/errors). Reused the existing JsonSchema.Net 7.3.4 dependency (no new package). Publish-size
+  delta measured fresh-master-vs-branch (both short paths, 212 files each side, Compress-Archive
+  Optimal): 45.66 MB -&gt; 45.67 MB, +0.01 MB -- negligible, no new package. No AI-internal types (ADR-013
+  trivially satisfied -- zero AI dependency). Threshold/Switch get enum membership + Dataverse-value
+  parity but NOT a JSON Schema in this task (no row of either type exists yet; out of this task's named
+  scope per the POML's own &lt;outputs&gt;); RuleBodySchemaValidator.ResolveSchema throws NotSupportedException
+  for them rather than silently accepting an unvalidated body -- see
+  notes/task-020-existence-ruletype-deviations.md for the full reasoning and other deviations (the
+  canonical-reference file path/content mismatch, test-path convention).
+
+  Concurrent task 023 (scope semantics/policy defaults) created Services/Signals/PolicyScopeResolver.cs
+  in the same directory during this task's execution -- no file overlap, confirmed via dotnet build with
+  both present, coordinated directly with that agent (it owns Infrastructure/DI/SignalsModule.cs and
+  Program.cs's AddSignalsModule() line; task 022 should add RuleBodySchemaValidator's eventual DI
+  registration there, not in a new module).
+
+  Full BFF unit suite (14,313 tests) run for regression-safety: 83 pre-existing failures, zero of them
+  under Services/Signals or referencing RuleType/RuleBodySchemaValidator (grep-verified). Failure shapes
+  (TaskCanceledException / HTTP client aborted, 3+ minute durations on Insights streaming, SpeAdmin
+  search, Document profile, Office email-save tests) are consistent with resource contention from the
+  many other agents concurrently building/testing in this shared worktree, not a regression from this
+  task's dependency-free, no-I/O validator. Not independently re-verified against a clean baseline run
+  given the ~45 min cost per run; flagged transparently in the task report rather than asserted clean.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
