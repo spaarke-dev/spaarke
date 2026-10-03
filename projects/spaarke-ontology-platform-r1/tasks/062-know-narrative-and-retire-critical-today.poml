@@ -25,7 +25,7 @@
     <background>New or updated matters, projects, documents and monitored-record activity FAIL row-contract requirement 4: there is nothing to do that changes anything. They stay as awareness, where awareness belongs. sprk_highpriority becomes a rank INPUT and sprk_monitor becomes a SUBSCRIPTION to Know; neither is a reason in the ontology sense, because a flag says someone cares, not what is wrong.</background>
     <relevant-files>
       <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Briefing/DailyBriefingCollector.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
     </relevant-files>
   </context>
 
@@ -110,7 +110,7 @@
 
   <outputs>
     <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Briefing/DailyBriefingCollector.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
   </outputs>
 
   <acceptance-criteria>

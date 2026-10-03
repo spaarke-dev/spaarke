@@ -26,7 +26,7 @@
     <background>Path B window is relative to now, so the predicate truth value changes even when nobody writes anything. Of four state transitions, TWO have no event to hook: death by time (the communication ages out) and birth by time (an old budget revision ages out, re-truthing the notExists half). So the nightly pass cannot be closure-only, and event-driven evaluation alone would never fire ConditionCleared.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/SecureRecordIsolationCensusJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/SecureRecordIsolationCensusJob.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</file>
     </relevant-files>
   </context>
@@ -57,7 +57,7 @@
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
     <patterns>
-      <pattern name="Scheduled census job" location="src/server/api/Sprk.Bff.Api/Services/Jobs/SecureRecordIsolationCensusJob.cs">The nearest shape in the repo: a scheduled pass over many rows producing a reconciliation outcome. Copy its registration and lease handling.</pattern>
+      <pattern name="Scheduled census job" location="src/server/api/Sprk.Bff.Api/Services/ExternalAccess/SecureRecordIsolationCensusJob.cs">The nearest shape in the repo: a scheduled pass over many rows producing a reconciliation outcome. Copy its registration and lease handling.</pattern>
     </patterns>
   </knowledge>
 

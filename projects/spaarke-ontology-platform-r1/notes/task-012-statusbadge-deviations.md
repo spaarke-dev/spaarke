@@ -43,7 +43,42 @@ this reason. I placed the test at
 `src/components/StatusBadge/__tests__/StatusBadge.test.tsx` and did not create a flat copy, to match
 convention and to actually get test execution.
 
-## 3. No other deviations
+## 3. An extra file the POML didn't list — `StatusBadge/index.ts`
+
+Every other folder-based component in `src/components/` (`PaneHeader`, `AccessGrantModal`,
+`RelationshipCountCard`, ...) has its own `index.ts` re-exporting the named symbols from the implementation
+file — `export * from './StatusBadge'` in the parent barrel resolves to that folder-local `index.ts`, not
+directly to `StatusBadge.tsx`. This wasn't in the POML's `<outputs>` list. Omitting it is NOT cosmetic: a
+full `tsc` build (`npx tsc --noEmit`) failed with `TS2307: Cannot find module './StatusBadge'` at
+`components/index.ts:293` until I added
+`src/components/StatusBadge/index.ts` with:
+
+```ts
+export { StatusBadge } from './StatusBadge';
+export type { StatusBadgeProps, StatusBadgeTone } from './StatusBadge';
+```
+
+After adding it, `npx tsc --noEmit` no longer reports any StatusBadge-related error (see Verification below
+for the full remaining-error list, all pre-existing and unrelated).
+
+## 4. No other deviations
 
 Component API, tone set, fallback behavior, barrel export *intent*, and the test coverage (one test per
 tone, the two fallback cases, the dark-mode smoke test, accessibility) all follow the POML as written.
+
+## Verification performed
+
+- `npx jest src/components/StatusBadge --no-coverage` — **9/9 passed** (tones × 4, fallback × 2,
+  accessibility × 2, dark-mode smoke × 1).
+- `npx eslint src/components/StatusBadge/StatusBadge.tsx src/components/StatusBadge/index.ts
+  src/components/StatusBadge/__tests__/StatusBadge.test.tsx src/components/index.ts` — clean, no errors
+  (only an unrelated Node ESM/CommonJS warning about the eslint config file itself).
+- `npx tsc --noEmit` — no error on any StatusBadge file or on `components/index.ts`. Nine pre-existing
+  errors remain, all in files this task did not touch and all caused by sibling workspace packages
+  (`@spaarke/auth`, `@spaarke/sdap-client`) not having a built `dist/` in this fresh worktree
+  (`AccessGrantModal/types.ts`, `FileUploadService.ts` ×5, `services/document-upload/types.ts`,
+  `EntityCreationService.ts`, `useWizardPageBootstrap.ts`). Confirmed pre-existing by checking those two
+  sibling packages have no `dist/` folder at all yet — this is a workspace-build-order gap, not something
+  introduced by StatusBadge.
+- Grep for `#[0-9a-fA-F]{3,8}|rgb(|rgba(|hsl(` over `StatusBadge.tsx` — no matches (satisfies the
+  no-hex/rgb-literal acceptance criterion).

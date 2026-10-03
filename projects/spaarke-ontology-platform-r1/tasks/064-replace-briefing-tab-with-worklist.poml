@@ -25,8 +25,8 @@
   <context>
     <background>BR-4: replace the tab ONCE Decide and Do lanes BOTH exist; keep the old widget until then. Replacing earlier would remove working awareness before the replacement covers it.</background>
     <relevant-files>
-      <file role="modify">src/solutions/SpaarkeAi/src/widgets</file>
-      <file role="modify">src/solutions/LegalWorkspace/src/widgets/dailyBriefing.registration.ts</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/workspace</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
     </relevant-files>
   </context>
 
@@ -101,7 +101,7 @@
   </tools>
 
   <outputs>
-    <output type="code">src/solutions/SpaarkeAi/src/widgets</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace</output>
     <output type="doc">projects/spaarke-ontology-platform-r1/notes/briefing-cutover.md</output>
   </outputs>
 

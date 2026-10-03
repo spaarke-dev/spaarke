@@ -4,7 +4,7 @@
     <title>Repair the false association reason string</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One interpolation fix plus a test; small but it is runtime-generated prose asserting something false.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -73,7 +73,20 @@
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-44. AP-12 in runtime-generated prose; the same error class as section 0.3.</notes>
+  <notes>spec.md FR-44. AP-12 in runtime-generated prose; the same error class as section 0.3.
+
+  Completed. The bug lives in src/server/api/Sprk.Bff.Api/Services/Communication/Engine/AssociationStatusMapper.cs
+  (NOT Services/RecordMatching, which the POML's relevant-files/outputs named incorrectly — see
+  notes/task-083-reason-string-deviations.md). BuildSuggestedReason's generic fallback asserted
+  "Reinforced confidence {topFull} in [SuggestFloor, Threshold)" whenever topDet &lt; Threshold, but topFull can
+  independently clear Threshold (e.g. C-1-narrowed rung 2/3, or a surface-only rung) while aiInvolved is false,
+  so the band claim was false exactly when FR-44 describes. Fix adds the missing branch for
+  topDet &lt; threshold &amp;&amp; topFull &gt;= threshold &amp;&amp; !aiInvolved, reporting "&gt;= threshold" (what was
+  actually tested) instead of a false band claim; the band was NOT widened. 8 new test cases added to
+  tests/unit/Sprk.Bff.Api.Tests/Services/Communication/AssociationStatusMapperTests.cs (3 theory + 4 theory + 1
+  fact) proving band containment across several inputs and proving the old false-band text never reappears.
+  43/43 tests pass in that file; BFF builds clean. code-review + adr-check run per the TEST-MODIFYING override
+  (root CLAUDE.md §8) despite STANDARD rigor: 0 Critical, 0 blocking Warnings.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

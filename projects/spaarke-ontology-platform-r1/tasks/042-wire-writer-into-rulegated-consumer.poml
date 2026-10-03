@@ -17,14 +17,14 @@
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
 
-  <prompt>Insert the Decision Record write into RuleGatedAssessedConsumer so every authorize AND every deny persists, without touching the gate.</prompt>
+  <prompt>Insert the Decision Record write into RuleGatedAssessedConsumer so every authorize AND every deny persists, without touching the gate. NOTE (verified 2026-10-03): RuleGatedAssessedConsumer is declared at src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs:222 - the SAME FILE as CommunicationRuleGate. So "without touching the gate" means do not change the CommunicationRuleGate class or its decision logic; it does NOT mean avoid that file. You will be editing it.</prompt>
   <role>SPAARKE backend developer. One line before the branch.</role>
   <goal>Both the authorize and the deny path write a Decision Record, and the deny path is queryable per matter.</goal>
 
   <context>
     <background>CommunicationRuleDecision already carries the full decision on BOTH paths and is currently written to ILogger and lost. The consumer already holds the object, so the write is a line before the branch. The gate itself is not modified.</background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
     </relevant-files>
   </context>
@@ -72,7 +72,7 @@
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Communications</output>
   </outputs>
 

@@ -26,7 +26,7 @@
     <background>BR-1 was REVERSED. The earlier rule (Do-lane completions write no record) was drawn at the wrong granularity: resolving a Do item is rarely a bare mark-complete, it also sends email, creates follow-ons and closes records, and one of those is outward-facing. The lane is not a safe proxy for whether a judgement occurred. The fix is write everything, type it, filter on read.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/DecisionRecordWriter.cs</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
     </relevant-files>
   </context>
 

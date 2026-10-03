@@ -25,7 +25,7 @@
   <context>
     <background>The framing that keeps this small: the collector query SHAPE (entities, columns, joins) is reused verbatim; only its hardcoded predicates move into policy rows. Those are the task-type GUID (:101), statuscode Open (:104), the TaskOverdueDaysPast = 5 C# constant (:116), and highpriority OR monitor (:500-502).</background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Briefing/DailyBriefingCollector.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
       <file role="new">Dataverse: three sprk_policy plus sprk_policyversion rows</file>
     </relevant-files>
   </context>
@@ -56,7 +56,7 @@
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
     <patterns>
-      <pattern name="Collector query shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Briefing/DailyBriefingCollector.cs">Reuse entities, columns and joins verbatim; replace only the hardcoded predicate values with policy-driven ones.</pattern>
+      <pattern name="Collector query shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs">Reuse entities, columns and joins verbatim; replace only the hardcoded predicate values with policy-driven ones.</pattern>
     </patterns>
   </knowledge>
 
@@ -87,7 +87,7 @@
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Briefing/DailyBriefingCollector.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</output>
     <output type="data">Dataverse: three Do-lane policy and version rows</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Briefing</output>
   </outputs>

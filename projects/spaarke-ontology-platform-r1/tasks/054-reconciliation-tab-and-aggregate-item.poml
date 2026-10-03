@@ -24,8 +24,8 @@
   <context>
     <background>The surface is ALREADY BUILT: ReconciliationGrid plus four grid configuration rows, ReconciliationBrowseShell, ReconcileTabs, EmailConnectionsReview, and its own code page. What is missing is only the mount: there is no SectionRegistration and nothing in WorkspaceWidgetRegistry references it.</background>
     <relevant-files>
-      <file role="new">src/solutions/SpaarkeAi/src/widgets/reconciliation.registration.ts</file>
-      <file role="canonical-reference">src/solutions/LegalWorkspace/src/widgets/dailyBriefing.registration.ts</file>
+      <file role="new">src/solutions/SpaarkeAi/src/components/workspace/reconciliation.registration.ts</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
     </relevant-files>
   </context>
 
@@ -49,7 +49,7 @@
       <file>projects/spaarke-ontology-platform-r1/design.md</file>
     </files>
     <patterns>
-      <pattern name="Widget registration" location="src/solutions/LegalWorkspace/src/widgets/dailyBriefing.registration.ts">The template; one registry entry mounts an existing surface.</pattern>
+      <pattern name="Widget registration" location="src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts">The template; one registry entry mounts an existing surface.</pattern>
     </patterns>
   </knowledge>
 
@@ -98,7 +98,7 @@
   </tools>
 
   <outputs>
-    <output type="code">src/solutions/SpaarkeAi/src/widgets/reconciliation.registration.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/reconciliation.registration.ts</output>
   </outputs>
 
   <acceptance-criteria>

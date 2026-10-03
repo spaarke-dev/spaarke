@@ -26,7 +26,7 @@
     <background>Two of the four state transitions DO have events. Hooking them is what makes the Decide lane feel live, and the budget-revision hook is not an optimization: without it a Work Item keeps asserting no budget revision was recorded for up to 24 hours after one was, which is a sentence that is no longer true in the surface the product credibility rests on.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationTriggerHandler.cs</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
     </relevant-files>
   </context>
@@ -86,7 +86,7 @@
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationTriggerHandler.cs</output>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communications/RuleGatedAssessedConsumer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals</output>
   </outputs>
 

@@ -24,7 +24,7 @@
   <context>
     <background>LookupChoicesResolver resolves sprk_name only, so the ten authored sprk_classifierguidance rows are inert and the model still sees bare labels. It cannot tell Fee or rate change from Invoice or Billing.</background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Resolvers/LookupChoicesResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/LookupChoicesResolver.cs</file>
     </relevant-files>
   </context>
 
@@ -72,7 +72,7 @@
   </tools>
 
   <outputs>
-    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Resolvers/LookupChoicesResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/LookupChoicesResolver.cs</output>
     <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Resolvers</output>
   </outputs>
 

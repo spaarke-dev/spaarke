@@ -28,9 +28,9 @@
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 010 | [C-1 dead briefing hooks + 2 stale comments](010-c1-remove-dead-briefing-hooks.poml) | FULL | sonnet/high | — | **A** | The misdirection hazard. Gates the row |
-| 🔲 011 | [C-3 disambiguate MetricCard](011-c3-disambiguate-metriccard.poml) | STANDARD | sonnet/medium | — | **A** | Two unrelated components share the name |
-| 🔲 012 | [C-4 generic status badge](012-c4-generic-status-badge.poml) | FULL | sonnet/high | — | **A** | The one legitimately-new UI primitive |
+| ✅ 010 | [C-1 dead briefing hooks + 2 stale comments](010-c1-remove-dead-briefing-hooks.poml) | FULL | sonnet/high | — | **A** | The misdirection hazard. Gates the row |
+| ✅ 011 | [C-3 disambiguate MetricCard](011-c3-disambiguate-metriccard.poml) | STANDARD | sonnet/medium | — | **A** | Two unrelated components share the name |
+| ✅ 012 | [C-4 generic status badge](012-c4-generic-status-badge.poml) | FULL | sonnet/high | — | **A** | The one legitimately-new UI primitive |
 
 ### Phase 2 — Policy and rule bodies
 
@@ -39,7 +39,7 @@
 | 🔲 020 | [`Existence` rule type + JSON Schema](020-existence-rule-type.poml) | FULL | sonnet/high | 003 | **B** | Without it the capability is unsavable |
 | 🔲 021 | [**The predicate compiler**](021-predicate-compiler-exists-notexists.poml) | FULL | **opus/xhigh** | 020, 005 | — | 🔴 **THE RISK ITEM.** Serial. `notExists` has no in-repo template |
 | 🔲 022 | [Rule-body validation refusal](022-rule-body-validation-refusal.poml) | FULL | sonnet/high | 020 | — | Immutability makes this the only control point |
-| 🔲 023 | [Scope semantics + policy defaults](023-scope-semantics-and-policy-defaults.poml) | FULL | sonnet/high | 003 | **B** | Copy `CommunicationRuleGate` verbatim; fail closed |
+| ✅ 023 | [Scope semantics + policy defaults](023-scope-semantics-and-policy-defaults.poml) | FULL | sonnet/high | 003 | **B** | Copy `CommunicationRuleGate` verbatim; fail closed |
 
 ### Phase 3 — The evaluator and Signal lifecycle
 
@@ -98,7 +98,7 @@
 | 🔲 080 | [The six hazards](080-six-hazards-cleanup.poml) | FULL | sonnet/high | — | **H** | C-10 is a **live bug**; C-5 already lost data |
 | 🔲 081 | [Duplication cleanup](081-duplication-cleanup.poml) | STANDARD | sonnet/medium | — | **H** | `cleanGuid` ×~50, frame-walk ×7 |
 | 🔲 082 | [Tokenizer repair](082-matter-number-tokenizer-repair.poml) | FULL | sonnet/high | — | **H** | Ship with a **measured** query-count delta |
-| 🔲 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
+| ✅ 083 | [Association `reason` string](083-association-reason-string-repair.poml) | STANDARD | sonnet/medium | — | **H** | AP-12 in runtime prose |
 
 ### Phase 9 — Wrap-up
 

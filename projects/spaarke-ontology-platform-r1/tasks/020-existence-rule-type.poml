@@ -26,7 +26,7 @@
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/Schemas/existence-rule.schema.json</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communications/CommunicationRuleGate.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
     </relevant-files>
   </context>
 

@@ -4,7 +4,7 @@
     <title>C-4: add the generic status and severity badge</title>
     <phase>1 Cleanup that gates the row</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared-library component; needs the section 11 justification and dark-mode verification.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -112,7 +112,18 @@
     <criterion testable="true">Unit tests pass and the package builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-28 and FR-41 (C-4). This is the ONLY genuinely new UI primitive the row needs; everything else extends something named in FR-27.</notes>
+  <notes>spec.md FR-28 and FR-41 (C-4). This is the ONLY genuinely new UI primitive the row needs; everything else extends something named in FR-27.
+
+Completed 2026-10-03. StatusBadge added at
+src/client/shared/Spaarke.UI.Components/src/components/StatusBadge/{StatusBadge.tsx,index.ts,__tests__/StatusBadge.test.tsx}.
+Exported from src/components/index.ts (not the top-level src/index.ts — see deviation note). 9/9 unit
+tests pass; eslint clean; `npx tsc --noEmit` clean for all StatusBadge-related files (9 pre-existing,
+unrelated errors remain elsewhere from unbuilt sibling workspace packages). code-review + adr-check both
+clean (0 Critical/Warning). Three deviations from the POML's literal file list, all recorded in
+projects/spaarke-ontology-platform-r1/notes/task-012-statusbadge-deviations.md: (1) barrel export lands in
+src/components/index.ts per existing convention, not the top-level src/index.ts; (2) test file lives under
+a __tests__/ subfolder (required for Jest discovery per jest.config.js testMatch); (3) an additional
+StatusBadge/index.ts was required for the folder-based component to resolve at all under tsc.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

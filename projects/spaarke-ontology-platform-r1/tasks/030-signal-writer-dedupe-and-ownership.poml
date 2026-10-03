@@ -26,14 +26,14 @@
     <background>D-3 settled that the worklist reads Signals and groups them by matter, so the shape needs a polymorphic subject PLUS an always-populated matter lookup derived from it. FR-14 is one line in the writer and free now; retrofitting means re-owning every row.</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/PolymorphicResolverService.cs</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</file>
     </relevant-files>
   </context>
 
   <constraints>
     <constraint source="project">Scope: SET THE OWNER (or owning business unit) FROM THE GROUPING MATTER AT CREATION. A Signal is secured by its OWN owner, not by the matter it points at, while sprk_sentence can carry matter detail. A service-owned Signal at depth-4 read could expose a matter the reader cannot open, with the matter lookup rendering BLANK while the sentence tells them anyway. Live across 6 business units. Spaarke Ontology Service already holds Assign, so no privilege change is needed.</constraint>
-    <constraint source="ADR-024">Scope: use PolymorphicResolverService.applyResolverFields, which writes the typed sprk_regarding lookup AND the denormalized trio in ONE call. They are not alternatives.</constraint>
+    <constraint source="ADR-024">Scope: write the typed sprk_regarding lookup AND the denormalized resolver fields in ONE call. They are not alternatives. CORRECTED 2026-10-03: the canonical PolymorphicResolverService.applyResolverFields is CLIENT-SIDE TYPESCRIPT (src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts) and a C# writer CANNOT call it. The server-side mirror of the same ADR-024 semantics is Services/Workspace/TodoRegardingBuilder.cs (smart-todo-decoupling-r3), which does exactly this job for sprk_todo. Mirror TodoRegardingBuilder; treat the TypeScript service as the semantic specification, not as a callable dependency. Do NOT invent a third implementation.</constraint>
     <constraint source="project">Scope: store record ids LOWERCASE with braces stripped. The audit found two divergent regexes in circulation (section 8.3 U1).</constraint>
     <constraint source="project">Scope: sprk_dedupekey is policycode plus regardingrecordtype plus regardingrecordid. There is NO sprk_subjecttype column on sprk_signal (only on sprk_policy). The alternate key is Active, so the platform enforces uniqueness.</constraint>
     <constraint source="project">Scope: sprk_matter is ALWAYS populated, derived from the subject. sprk_regardingmatter means the subject IS this matter; sprk_matter is the grouping key. Both are needed and conflating them breaks the worklist grouping.</constraint>
@@ -61,15 +61,15 @@
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
     <patterns>
-      <pattern name="Polymorphic subject write" location="src/server/api/Sprk.Bff.Api/Services/Dataverse/PolymorphicResolverService.cs">applyResolverFields sets the typed lookup and the trio together. The audit found this utility genuinely canonical with ZERO reimplementations, so reusing it is the default.</pattern>
-      <pattern name="Idempotent signal upsert" location="src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluationService.cs">Lines 241-258 show the OLD key (matter plus type) which does NOT survive a polymorphic subject. Read it to understand what is being replaced, not to copy it.</pattern>
+      <pattern name="Polymorphic subject write" location="src/server/api/Sprk.Bff.Api/Services/Workspace/TodoRegardingBuilder.cs">The SERVER-SIDE ADR-024 implementation: sets the typed regarding lookup and the denormalized resolver fields together for sprk_todo. Mirror its shape for sprk_signal. The client-side counterpart it names in its own header, PolymorphicResolverService.applyResolverFields, is TypeScript - it is the semantics to match, not code this writer can call.</pattern>
+      <pattern name="Idempotent signal upsert" location="src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs">Lines 241-258 show the OLD key (matter plus type) which does NOT survive a polymorphic subject. Read it to understand what is being replaced, not to copy it.</pattern>
     </patterns>
   </knowledge>
 
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
     <step order="1">Implement the writer taking a policy, a policy version, a subject reference and a fact snapshot.</step>
-    <step order="2">Call PolymorphicResolverService.applyResolverFields for the subject so the typed lookup and the denormalized trio are both written.</step>
+    <step order="2">Write the typed sprk_regarding lookup AND the denormalized resolver fields for the subject in one call, mirroring Services/Workspace/TodoRegardingBuilder.cs (the server-side ADR-024 implementation). The TypeScript PolymorphicResolverService is the semantic spec and is NOT callable from C# - read it to match behavior, then follow TodoRegardingBuilder for the server-side shape.</step>
     <step order="3">Derive the grouping matter from the subject and populate sprk_matter unconditionally. If it cannot be derived, do not write a Signal with a null grouping matter.</step>
     <step order="4">Set the owner or owning business unit from the grouping matter.</step>
     <step order="5">Compose sprk_dedupekey and upsert on it, so re-evaluation updates rather than duplicating.</step>

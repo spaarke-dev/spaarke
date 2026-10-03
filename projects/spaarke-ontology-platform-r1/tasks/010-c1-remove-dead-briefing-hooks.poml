@@ -4,7 +4,7 @@
     <title>C-1: delete the dead briefing hooks and fix two stale comments</title>
     <phase>1 Cleanup that gates the row</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shipped client code and removes a misdirection hazard that would otherwise be designed against.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -24,7 +24,7 @@
   <context>
     <background>useBriefingNotifications, useBriefingNarration and useBriefingActions (backed by notificationService.ts appnotification writes) are dead. The live path is fetchBriefingLive behind USE_LIVE_RENDER=true (briefingService.ts:397). They are NOT barrel-exported, so the hazard is misdirection rather than a compile path. Two live files still describe them as the mechanism.</background>
     <relevant-files>
-      <file role="modify">src/solutions/LegalWorkspace/src/widgets/dailyBriefing.registration.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
       <file role="modify">src/solutions/SpaarkeAi/src/main.tsx</file>
       <file role="modify">src/client/shared/Spaarke.DailyBriefing.Components/src</file>
       <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md</file>
@@ -88,7 +88,7 @@
 
   <outputs>
     <output type="code">src/client/shared/Spaarke.DailyBriefing.Components/src</output>
-    <output type="code">src/solutions/LegalWorkspace/src/widgets/dailyBriefing.registration.ts</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</output>
     <output type="code">src/solutions/SpaarkeAi/src/main.tsx</output>
   </outputs>
 
@@ -100,7 +100,27 @@
     <criterion testable="true">The Daily Briefing widget still renders with no console errors.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-41 (C-1). Sized XS but it GATES the worklist row, which is why it is in Phase 1.</notes>
+  <notes>spec.md FR-41 (C-1). Sized XS but it GATES the worklist row, which is why it is in Phase 1.
+
+  Completed 2026-10-03. Verified via repo-wide grep that none of the three hooks had a live
+  call site (escalation trigger did not fire) before deleting. Deleted the three hooks, the
+  three matching unit tests, and the ENTIRE notificationService.ts module (not just the 3
+  write helpers named in the background) once verification showed every one of its exports
+  — fetchNotifications/fetchAndGroupNotifications/groupByCategory/computeTimeWindowIso/
+  filterByDueWithinDays/buildDisabledChannelsFilter/markAllBriefingsChecked, plus the 3 named
+  writes — had zero production callers once the two hooks that used them were gone. Also
+  deleted two already-`describe.skip`'d smoke test suites that mocked the now-deleted module
+  and would otherwise fail ts-jest module resolution. Fixed the two named comments plus
+  further misdirection-class comments in files within the Spaarke.DailyBriefing.Components
+  output dir, and two live docs (SPAARKEAI-COMPONENT-MODEL.md, BUILD-A-NEW-NARRATIVE-OUTPUT-
+  CONSUMER.md). Left untouched (documented in notes/task-010-remove-dead-briefing-hooks-
+  deviations.md): one dated historical doc entry, a BFF comment + its test (out of BFF-
+  hygiene scope for a comment fix), and ~65 files of OTHER completed projects' historical
+  task/spec/notes records. `npm run build` (tsc --noEmit) clean; `npm test` 130/131 passing,
+  1 failing + 2 suites failing to compile — all three verified pre-existing/unrelated to
+  this change (none touch files this task modified). Full deviation record in
+  projects/spaarke-ontology-platform-r1/notes/task-010-remove-dead-briefing-hooks-deviations.md.
+  </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

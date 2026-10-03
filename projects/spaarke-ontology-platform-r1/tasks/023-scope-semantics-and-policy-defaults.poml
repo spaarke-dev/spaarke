@@ -4,7 +4,7 @@
     <title>Copy scope semantics verbatim and apply policy authoring defaults</title>
     <phase>2 Policy and rule bodies</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-adjacent: fail-closed behavior and scope matching decide which matters a rule touches.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -25,7 +25,7 @@
     <background>CommunicationRuleGate already settled these semantics and they are tested. Re-deriving them is how they drift. The specific line references are known.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals</file>
-      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communications/CommunicationRuleGate.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs</file>
     </relevant-files>
   </context>
 
@@ -52,7 +52,7 @@
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
     <patterns>
-      <pattern name="Scope match, ordering, fail-closed" location="src/server/api/Sprk.Bff.Api/Services/Communications/CommunicationRuleGate.cs">Lines 108-188 carry all four behaviors. Copy, do not reinterpret.</pattern>
+      <pattern name="Scope match, ordering, fail-closed" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationRuleGate.cs">Lines 108-188 carry all four behaviors. Copy, do not reinterpret.</pattern>
     </patterns>
   </knowledge>
 
@@ -90,7 +90,17 @@
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-09, FR-10 and NFR-03.</notes>
+  <notes>spec.md FR-09, FR-10 and NFR-03.
+
+  Completed 2026-10-03. Implemented PolicyScopeResolver (src/server/api/Sprk.Bff.Api/Services/Signals/PolicyScopeResolver.cs)
+  copying CommunicationRuleGate.cs:108-188 scope-match/ordering/fail-closed semantics verbatim, plus
+  SignalsModule.cs DI registration and 7 seam tests (tests/integration/seam/Signals/PolicyScopeResolverSeamTests.cs),
+  all passing. Verified sprk_policy schema empirically against spaarkedev1 (sprk_enabled defaults No at the
+  Dataverse level; sprk_priority has NO Dataverse default, confirming the ?? 500 fallback belongs in code).
+  Publish-size delta +0.01 MB (45.67 MB branch vs 45.66 MB fresh master, 212 files both sides, PowerShell
+  Compress-Archive). Deviations (test placed under tests/integration/seam/ per ADR-038 seam-KEEP precedent
+  rather than tests/unit/; resolver returns an ordered list, not a single winner) recorded in
+  notes/023-scope-semantics-deviations.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
