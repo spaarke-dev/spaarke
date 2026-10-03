@@ -4,7 +4,7 @@
     <title>Lock sprk_issecure — field-level security so ONLY the BFF (through the secure/unsecure endpoints) changes it on project, matter and work assignment; every other writer removed; readers never masked</title>
     <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 2)</phase>
     <gate>after 144 (the endpoints this task routes every secure/unsecure change through are generalized to matter and work assignment there) and 151 (both edit Infrastructure/Dataverse/RecordContainerResolver.cs). Not concurrently with 133 or 148 (all edit ProvisionProjectEndpoint.cs / UnsecureProjectEndpoint.cs — whichever lands second rebases).</gate>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse field-level security on an isolation flag, plus .cs and .ts/.tsx changes to the secure-create flow and a new client surface; tags bff-api, auth, security, frontend.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -219,6 +219,28 @@ NO UNSECURE SURFACE EXISTS. `SecureProjectSection.test.tsx:113` records that no 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Step 6 is prescriptive; the BFF and client ship together (the client stops writing the flag in the same release the server starts setting it).</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-150" result="partial">
+      <summary>Code, scripts, tests and docs complete; no live write performed (every live step is a pending manual gate, in order G-0 to G-10, notes/task-150-issecure-lock.md section 9). Step 5 ribbon STOPPED: task 142's Access group has not merged (UX amendment sequencing trigger). Merge gate: owner picks the F6 draft copy (note section 6).</summary>
+      <done>
+        - Server: ProvisionProjectEndpoint sets sprk_issecure as its FIRST write (read back; new reason sdap.provision.secure_flag_not_set), accepts unflagged and already-flagged records identically, keeps the 409; UnsecureProjectEndpoint enforces F3 (Full Access = Write + Delete, or the creator via createdby / sprk_createdbyperson; 403 sdap.unsecure.not_permitted) and refuses an EMPTY flag; RecordContainerResolver refuses an ABSENT flag on the record and on every root above it (secure_flag_unreadable 503) - the owner's ABSENT-branch decision.
+        - Client: projectService never writes the flag; CreateProjectWizard provisions FIRST and adds no file, document record, work assignment, event or email to a secure-requested project whose provisioning did not succeed; copy updated (DRAFT, F6).
+        - Scripts (dry-run default, -Apply, -Verify; only dry runs executed, read-only): scripts/Repair-SecureFlagNulls.ps1 (Q1; covers every carrier of the column, incl. sprk_invoice found in review), scripts/Set-SecureFlagFieldSecurity.ps1 (reuses task 133's two profiles; refuses -Apply without them, every default team, exact writer membership, NULL cleanup and -ClientNoLongerWritesFlag).
+        - Standing assertion SecureFlagFieldSecurityAssertion (tests/integration/auth/UnifiedAccessControl) with 14 perturbations, script-agreement pins and an opt-in live census (run read-only against dev: FAIL 5 = correct pre-lock verdict).
+        - Docs: guide section 7c (+ table row, section 8 rows, related), schema doc corrected (no business rule exists live), 145 handoff extended (S10-S15), scripts/README.md.
+      </done>
+      <live-inventory>No form, view, business rule, classic workflow, cloud flow or Spaarke plugin references sprk_issecure (escalation trigger 2 did not fire). Reader-profile-on-every-default-team mechanism proven live by task 141's profile (6 of 6) - escalation trigger 1 did not fire. NULL rows: 9 projects, 18 matters, 11 work assignments, 4 invoices; all root NULLs predate the column.</live-inventory>
+      <owner-rulings>F3, F4, F6, F7, ABSENT branch, Q1, R5, R6 applied as recorded in the note section 2; none newly asked.</owner-rulings>
+      <placement>Extends two existing endpoints and one existing resolver: no new endpoint, service, DI registration, option, job, package or column (bff-extensions.md: modification of existing surface). FLS is platform configuration, no plugin (ADR-002).</placement>
+      <justification-new-items>
+        - Reason codes (4 new): existing reasonCode contracts, extended; without them the client cannot tell "could not mark secure" / "not allowed to unsecure" / "masked flag" apart.
+        - Repair-SecureFlagNulls.ps1: no NULL backfill exists (grep scripts/); without it the ABSENT refusal refuses every upload to the 42 pre-column rows.
+        - Set-SecureFlagFieldSecurity.ps1: Set-RecordCreatorPersonSchema.ps1 owns the profiles and is reused, not forked; without the lock every Write holder can change the flag (the defect).
+        - SecureFlagFieldSecurityAssertion: SecureBuRoleDepthAssertion checks roles, not field permissions, and no FLS check exists (grep tests/ for fieldpermission); without it the BFF's FLS Read stays an unchecked operator step (the standing-grant precedent).
+        - describeHeldBackForSecure (client helper): none exists; without it the user is not told why the files and children they asked for are missing.
+      </justification-new-items>
+      <stops>Ribbon Make Secure / Remove Secure (amendment acceptance a-f and its UI tests) - waits for task 142's group; Make Secure additionally waits for 148 (F7) and owner-authored confirmation copy.</stops>
+      <residuals>Other app-only readers (ExternalParticipationService FR-22 suppression, ExternalDataService, InternalShareEndpoints, ExternalGrantLifecycle, SubjectStandingGrantReader, RecordOwnershipResolver) still map an EMPTY flag to not secure - unmasked by the writer membership, guarded by the assertion; sprk_invoice.sprk_issecure exists and is not locked (owner question); the provision API accepts an existing non-secure record (unchanged capability; F7 gates the surface).</residuals>
+    </outcome>
   </execution>
   <amendments>
     <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: F3 = removing Secure is limited to Full Access holders plus the creator, enforced server-side in the unsecure endpoint (securing stays open to Write-holders). F5 superseded: securing an existing standard record is a RIBBON BUTTON on project/matter/work-assignment forms (enabled with 148, per F7). NEW owner UX requirement (assignment pending research): a red notification banner on secure records, linking to Share/Manage Access where possible.</amendment>

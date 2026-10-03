@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Access;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -17,7 +18,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// nice-to-have.
 ///
 /// Sequence:
-///   1. Read the record; a record that is not secure returns 200 having changed nothing (idempotent)
+///   1. Read the record; a record that is not secure returns 200 having changed nothing (idempotent); one whose flag
+///      comes back EMPTY is refused — empty is "could not tell", never "not secure" (task 150)
+///   1.5 Who may remove it (task 150, owner round 3b F3): a Full Access holder or the record's creator — any other Write
+///      holder is refused 403 before any write
 ///   2. Resolve the new owner — request, else configuration, else the calling user
 ///   3. Assign ownership to that user, and verify by read-back
 ///   4. Revoke every POA share on the record
@@ -69,6 +73,27 @@ public static class UnsecureProjectEndpoint
     internal const string ReasonOwnerAssignmentFailed = "sdap.unsecure.owner_assignment_failed";
     internal const string ReasonOwnerAssignmentNotApplied = "sdap.unsecure.owner_assignment_not_applied";
     internal const string ReasonFlagNotCleared = "sdap.unsecure.flag_not_cleared";
+
+    /// <summary>
+    /// Task 150 (owner round 3b, F3): the caller holds Write — the route group's delegation filter — but is neither a
+    /// Full Access holder on the record (Delete on it, as Dataverse reports the caller's rights) nor the person who
+    /// created it. Refused before any write (403); the record stays secure.
+    /// </summary>
+    internal const string ReasonNotPermitted = "sdap.unsecure.not_permitted";
+
+    /// <summary>
+    /// Task 150: who may remove the designation could not be established — the caller's identity, or the record's
+    /// recorded creator person, could not be read. Refused before any write; the same caller may retry.
+    /// </summary>
+    internal const string ReasonPermissionUnverifiable = "sdap.unsecure.permission_unverifiable";
+
+    /// <summary>
+    /// Task 150: <c>sprk_issecure</c> came back EMPTY. Every row reads <c>true</c> or <c>false</c> once the one-time
+    /// backfill has run (<c>scripts/Repair-SecureFlagNulls.ps1</c>) and the column defaults to No, so an empty value
+    /// means this service cannot read the field-secured column. Refused before any write: reporting "already not
+    /// secure" would claim a state nobody observed.
+    /// </summary>
+    internal const string ReasonSecureFlagUnreadable = "sdap.unsecure.secure_flag_unreadable";
 
     public static RouteGroupBuilder MapUnsecureProjectEndpoint(this RouteGroupBuilder group)
     {
@@ -127,7 +152,7 @@ public static class UnsecureProjectEndpoint
             var rows = await dataverseClient.QueryAsync<SecurityRow>(
                 root.EntitySet,
                 filter: $"{root.IdColumn} eq {recordId}",
-                select: $"{root.IdColumn},sprk_issecure",
+                select: $"{root.IdColumn},sprk_issecure,_createdby_value",
                 top: 1,
                 cancellationToken: ct);
 
@@ -146,6 +171,23 @@ public static class UnsecureProjectEndpoint
         if (record is null)
             return Problem(StatusCodes.Status404NotFound, "Not Found",
                 $"{root.DisplayLabel} {recordId} was not found.", traceId, (ReasonKey, ReasonProjectNotFound));
+
+        // Task 150: EMPTY is not FALSE. A field-secured column this identity cannot read comes back empty, not refused,
+        // and after the one-time backfill no row legitimately holds NULL — so this is "could not tell", never
+        // "already not secure".
+        if (record.sprk_issecure is null)
+        {
+            logger.LogError(
+                "[UNSECURE] sprk_issecure came back EMPTY on {RecordType} {RecordId}. Refusing: this service has likely " +
+                "lost its field-level-security Read on the column (scripts/Set-SecureFlagFieldSecurity.ps1 -Verify), or " +
+                "the row predates the backfill (scripts/Repair-SecureFlagNulls.ps1). TraceId={TraceId}",
+                root.WireToken, recordId, traceId);
+
+            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"Whether this {root.DisplayLabel.ToLowerInvariant()} is secure could not be read, so its secure " +
+                "designation was not changed. An administrator needs to check the secure-record setup.",
+                traceId, (ReasonKey, ReasonSecureFlagUnreadable));
+        }
 
         // Idempotency: nothing to undo. Returning 200 rather than 409 because the caller's intent
         // ("this record should not be secure") is already satisfied — a repeat is not a conflict.
@@ -169,9 +211,15 @@ public static class UnsecureProjectEndpoint
                 RecordId: recordId));
         }
 
+        // ── Step 1.5: who may remove it (task 150, owner round 3b F3) ─────────
+        var permission = await RefuseUnlessPermittedToRemoveAsync(
+            record, dataverseClient, callerAccessProbe, httpContext, root, recordId, logger, traceId, ct);
+
+        if (permission.Refusal != null)
+            return permission.Refusal;
+
         // ── Step 2: Resolve the new owner ────────────────────────────────────
-        var newOwnerId = await ResolveNewOwnerAsync(
-            request, configuration, callerAccessProbe, httpContext, ct);
+        var newOwnerId = ResolveNewOwner(request, configuration, permission.CallerId);
 
         if (newOwnerId is null || newOwnerId == Guid.Empty)
         {
@@ -305,15 +353,128 @@ public static class UnsecureProjectEndpoint
     }
 
     /// <summary>
-    /// The owner an un-secured record lands on: the request's nomination, else configuration, else
-    /// the calling user.
+    /// Owner round 3b, F3 (task 150): only a <b>Full Access holder</b> on the record, or <b>the person who created
+    /// it</b>, may remove its secure designation. Securing stays open to any Write holder; removing it does not, because
+    /// it ends the isolation of everything stored against the record. Returns the refusal to send, or <c>null</c>.
     /// </summary>
-    private static async Task<Guid?> ResolveNewOwnerAsync(
-        UnsecureProjectRequest request,
-        IConfiguration configuration,
+    /// <remarks>
+    /// <para><b>The creator</b> is <c>createdby</c>, or — for a record the BFF created app-only, whose <c>createdby</c>
+    /// is the application user — the server-stamped <c>sprk_createdbyperson</c> (task 133). The caller's identity is
+    /// <c>WhoAmI</c> on their own token, never the request. Checked first, because it needs no rights probe.</para>
+    ///
+    /// <para><b>Full Access</b> is read as Dataverse's own answer about the caller (<c>RetrievePrincipalAccess</c>,
+    /// OBO): Write AND Delete on the record. The Full Access share level is Collaborate plus Delete
+    /// (<see cref="RecordShareLevels.FullAccessRights"/>), and a secure record is owned by a memberless team in a
+    /// user-free business unit, so Delete on it comes from a Full Access share — or from an administrator's
+    /// role, which is the "an administrator can remove the secure designation" the wizard promises.</para>
+    ///
+    /// <para><b>Fail closed.</b> An identity that cannot be established, or a recorded creator person that cannot be
+    /// read, refuses (500, retryable) rather than guessing either way. A column this environment lacks
+    /// (<c>sprk_createdbyperson</c> before its schema script ran — Dataverse answers 400) records nobody, so it simply
+    /// does not admit anyone. The refusal message is shown to the user as is (the ribbon command renders the endpoint's
+    /// ProblemDetails), so it names who CAN do it.</para>
+    /// </remarks>
+    private static async Task<(IResult? Refusal, Guid CallerId)> RefuseUnlessPermittedToRemoveAsync(
+        SecurityRow record,
+        DataverseWebApiClient dataverseClient,
         CallerRecordAccessProbe callerAccessProbe,
         HttpContext httpContext,
+        SecureRecordRoot root,
+        Guid recordId,
+        ILogger logger,
+        string traceId,
         CancellationToken ct)
+    {
+        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+        var callerId = await callerAccessProbe.GetCallerSystemUserIdAsync(callerToken, ct);
+        if (callerId is not { } caller || caller == Guid.Empty)
+        {
+            logger.LogWarning(
+                "[UNSECURE] The caller's systemuserid could not be established for {RecordType} {RecordId}; refusing " +
+                "before any change. TraceId={TraceId}", root.WireToken, recordId, traceId);
+
+            return (Problem(StatusCodes.Status403Forbidden, "Forbidden",
+                "Your account could not be confirmed, so whether you may remove the secure designation could not be " +
+                "checked. Nothing was changed.",
+                traceId, (ReasonKey, ReasonPermissionUnverifiable)), Guid.Empty);
+        }
+
+        if (record._createdby_value == caller)
+        {
+            logger.LogInformation(
+                "[UNSECURE] Caller {CallerId} created {RecordType} {RecordId} (createdby): permitted to remove the " +
+                "secure designation (F3).", caller, root.WireToken, recordId);
+            return (null, caller);
+        }
+
+        // The recorded creator PERSON, in its own query: an environment without the column still un-secures for a
+        // Full Access holder (the provisioning-resume precedent, RecordCreatorPerson remarks).
+        try
+        {
+            var people = await dataverseClient.QueryAsync<SecurityRow>(
+                root.EntitySet,
+                filter: $"{root.IdColumn} eq {recordId}",
+                select: $"{root.IdColumn},{RecordCreatorPerson.ValueColumn}",
+                top: 1,
+                cancellationToken: ct);
+
+            if (people.FirstOrDefault()?.CreatedByPerson == caller)
+            {
+                logger.LogInformation(
+                    "[UNSECURE] Caller {CallerId} is the person recorded as creating {RecordType} {RecordId} " +
+                    "({Column}): permitted to remove the secure designation (F3).",
+                    caller, root.WireToken, recordId, RecordCreatorPerson.Column);
+                return (null, caller);
+            }
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.BadRequest)
+        {
+            logger.LogInformation(
+                "[UNSECURE] {Column} is not in this environment (400); no creator person is recorded on {RecordType} " +
+                "{RecordId}.", RecordCreatorPerson.Column, root.WireToken, recordId);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "[UNSECURE] The person recorded as creating {RecordType} {RecordId} could not be read; refusing before " +
+                "any change. TraceId={TraceId}", root.WireToken, recordId, traceId);
+
+            return (Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"Whether you may remove the secure designation from this {root.DisplayLabel.ToLowerInvariant()} could " +
+                "not be checked, because the person who created it could not be looked up. Nothing was changed.",
+                traceId, (ReasonKey, ReasonPermissionUnverifiable)), caller);
+        }
+
+        var rights = await callerAccessProbe.GetCallerRightsAsync(callerToken, root.EntitySet, recordId, ct);
+        const AccessRights fullAccess = AccessRights.Write | AccessRights.Delete;
+        if ((rights & fullAccess) == fullAccess)
+        {
+            logger.LogInformation(
+                "[UNSECURE] Caller {CallerId} holds Full Access (Write + Delete) on {RecordType} {RecordId}: permitted to " +
+                "remove the secure designation (F3).", caller, root.WireToken, recordId);
+            return (null, caller);
+        }
+
+        logger.LogWarning(
+            "[UNSECURE] Caller {CallerId} holds {Rights} on {RecordType} {RecordId} and did not create it: not permitted to " +
+            "remove the secure designation (F3: Full Access holders and the creator only). TraceId={TraceId}",
+            caller, rights, root.WireToken, recordId, traceId);
+
+        return (Problem(StatusCodes.Status403Forbidden, "Forbidden",
+            $"Only someone with Full Access to this {root.DisplayLabel.ToLowerInvariant()}, or the person who created it, " +
+            "can remove its secure designation. It is still secure, and nothing was changed.",
+            traceId, (ReasonKey, ReasonNotPermitted)), caller);
+    }
+
+    /// <summary>
+    /// The owner an un-secured record lands on: the request's nomination, else configuration, else
+    /// the calling user — whose identity the F3 check already established by <c>WhoAmI</c> (task 150), so it is not
+    /// asked for a second time.
+    /// </summary>
+    private static Guid? ResolveNewOwner(
+        UnsecureProjectRequest request,
+        IConfiguration configuration,
+        Guid callerSystemUserId)
     {
         if (request.ReassignToSystemUserId is { } requested && requested != Guid.Empty)
             return requested;
@@ -324,9 +485,7 @@ public static class UnsecureProjectEndpoint
             return configured;
         }
 
-        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
-
-        return await callerAccessProbe.GetCallerSystemUserIdAsync(callerToken, ct);
+        return callerSystemUserId == Guid.Empty ? null : callerSystemUserId;
     }
 
     /// <summary>
@@ -494,5 +653,13 @@ public static class UnsecureProjectEndpoint
 
         [JsonPropertyName("_owninguser_value")]
         public Guid? _owninguser_value { get; set; }
+
+        /// <summary>Who sent the create — the F3 creator check (task 150).</summary>
+        [JsonPropertyName("_createdby_value")]
+        public Guid? _createdby_value { get; set; }
+
+        /// <summary>The server-stamped creator person (task 133) — the F3 creator for an app-created record.</summary>
+        [JsonPropertyName(RecordCreatorPerson.ValueColumn)]
+        public Guid? CreatedByPerson { get; set; }
     }
 }

@@ -15,13 +15,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// POST /api/v1/external-access/provision-project
 ///
-/// Provisions the infrastructure a secure record needs — a <c>sprk_project</c>, <c>sprk_matter</c> or
-/// <c>sprk_workassignment</c> carrying <c>sprk_issecure = true</c> (task 144 widened it from projects only). Called by
-/// the Create Project wizard immediately after creating the project with the Secure toggle on, and by a Write holder
-/// for any secure root.
+/// Makes a <c>sprk_project</c>, <c>sprk_matter</c> or <c>sprk_workassignment</c> secure and provisions what a secure
+/// record needs (task 144 widened it from projects only). Called by the Create Project wizard immediately after
+/// creating the project with the Secure toggle on, and by a Write holder for any root.
+///
+/// <para><b>Task 150: this endpoint is the only writer of <c>sprk_issecure = true</c>.</b> The column is field-secured
+/// (only the BFF application user may create or update it — <c>scripts/Set-SecureFlagFieldSecurity.ps1</c>), the client
+/// no longer writes it, and Step 4.1 sets it as the first write, read back. A record already flagged (an older client,
+/// or a row created before task 150) is provisioned exactly like an unflagged one.</para>
 ///
 /// Provisioning sequence (task 133 reordered the share around the owner move — C11):
-///   1. Confirm the record exists and carries <c>sprk_issecure = true</c>
+///   1. Confirm the record exists (flagged or not — task 150)
 ///   2. Resolve the ONE canonical Secure Record business unit, BY NAME, from configuration
 ///   3. Resolve that BU's NAMED, non-default owner team (<c>SecureRecord:OwnerTeamName</c>), and prove it has ZERO
 ///      members and that ZERO systemusers sit in the BU — before any mutation (<see cref="SecureRecordOwnerTeam"/>)
@@ -32,6 +36,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      is KEPT — never orphaned); the caller's systemuserid (WhoAmI), the record's current owner, and the creator's
 ///      current share (complete read or nothing — a record that keeps its own container is refused when it cannot be
 ///      read, task 133 r1)
+///   4.1 Set <c>sprk_issecure = true</c> and read it back (task 150) — the FIRST write; skipped when already true
 ///   4.2 A replaced SHARED container is unlinked from the record (task 133 r1), so the team never owns a record that
 ///      records shared storage
 ///   4.5 SHARE-FIRST: give the creator their share while the record is still where it was created
@@ -78,8 +83,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// moving a record OUT of the Secure Record business unit because storage failed would turn a storage failure into a
 /// disclosure. A container failure leaves a secured, shared record that the next call resumes; the only artifact a
 /// failed run can strand is an empty SPE container, which its error body names (ADR-003). <c>sprk_issecure</c> is
-/// never written here, on any path: a secure-requested record that failed provisioning stays flagged, so uploads to
-/// it fail closed (<c>RecordContainerResolver</c>).</para>
+/// written once, at Step 4.1, and never cleared here on any path: a record that failed provisioning after that write
+/// stays flagged, so uploads to it fail closed (<c>RecordContainerResolver</c>); one refused before it was never
+/// flagged, and the client uploads nothing to a secure-requested record whose provisioning did not succeed.</para>
 ///
 /// Authentication: Azure AD JWT (RequireAuthorization via the adminGroup).
 /// ADR-001: Minimal API — no controllers.
@@ -264,6 +270,16 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonSharedContainerNotCleared = "sdap.provision.shared_container_not_cleared";
 
     /// <summary>
+    /// Task 150: <c>sprk_issecure</c> could not be set true — the write failed, or the read-back did not show
+    /// <c>true</c>. It is the FIRST write, so nothing else was changed (the flag itself may or may not be set). The same
+    /// caller may call again. A read-back that comes back without the value usually means this service lost its
+    /// field-level-security Read on the column, which an administrator restores
+    /// (<c>scripts/Set-SecureFlagFieldSecurity.ps1 -Verify</c>); a refused write, that its application user is not in
+    /// the writer profile.
+    /// </summary>
+    internal const string ReasonSecureFlagNotSet = "sdap.provision.secure_flag_not_set";
+
+    /// <summary>
     /// The configuration keys naming containers this BFF uses for MANY records — the communication archive, the
     /// email-processing default, and the AI staging container (task 133). A record whose <c>sprk_containerid</c> holds
     /// one of these is pointing at shared storage, not at a container of its own, so provisioning gives it its own
@@ -419,12 +435,11 @@ public static class ProvisionProjectEndpoint
                 $"{root.DisplayLabel} {recordId} not found.", traceId);
         }
 
-        if (row.sprk_issecure != true)
-        {
-            return ProblemDetailsHelper.ValidationError(
-                $"{root.DisplayLabel} {recordId} is not secure (sprk_issecure is false or null). " +
-                "Mark it secure before provisioning.");
-        }
+        // Task 150: the record no longer has to arrive flagged. sprk_issecure is field-secured and ONLY this endpoint
+        // sets it (EnsureSecureFlagAsync, the first write, after every pre-mutation refusal below), so a record from the
+        // new client arrives unflagged. One from the old client, or created before task 150, arrives flagged and not
+        // provisioned; both take exactly the same path from here (rollout constraint), the flagged one skipping the write.
+        var alreadyFlagged = row.sprk_issecure == true;
 
         var recordName = row.NameFrom(root.NameColumn) ?? request.ProjectRef ?? recordId.ToString();
 
@@ -636,6 +651,13 @@ public static class ProvisionProjectEndpoint
 
             if (colleagueRefusal != null)
                 return colleagueRefusal;
+
+            // ── RESUME: the flag is the first write here too (task 150) ──
+            var resumeFlag = await EnsureSecureFlagAsync(
+                dataverseClient, root, recordId, alreadyFlagged, logger, traceId, ct);
+
+            if (resumeFlag != null)
+                return resumeFlag;
 
             // ── RESUME: ensure that person's share ──
             var resumed = await EnsureResumeCreatorShareAsync(
@@ -1083,6 +1105,18 @@ public static class ProvisionProjectEndpoint
                 traceId, (ReasonKey, ReasonCreatorShareFailed),
                 ("ownershipRestored", true), ("sharesRestored", true), ("containerKept", true)));
         }
+
+        // ── Step 4.1: the secure flag — the FIRST write of the forward path (task 150) ──
+        //
+        // After every read and every refusal above, so each of those still leaves "nothing changed" true — and before
+        // anything else is written, so from here on every failure leaves a record that is FLAGGED: its uploads are
+        // refused (RecordContainerResolver fails closed on a secure record with no container of its own), which is the
+        // state a secure-requested record must be in whenever provisioning did not finish.
+        var flagRefusal = await EnsureSecureFlagAsync(
+            dataverseClient, root, recordId, row.sprk_issecure == true, logger, traceId, ct);
+
+        if (flagRefusal != null)
+            return CreatorShareStep.Failed(flagRefusal);
 
         // ── Step 4.2: unlink a SHARED container before the owner move (task 133 r1) ──
         var unlinkedNote = string.Empty;
@@ -2137,6 +2171,97 @@ public static class ProvisionProjectEndpoint
             $"creator, but its own SPE container could not be created ({failure}). Nothing needs undoing: calling " +
             "provisioning again (the same caller may) resumes from here.",
             traceId, (ReasonKey, ReasonContainerCreationFailed), ("ownerTeamId", ownerTeamId)));
+    }
+
+    /// <summary>
+    /// Sets <c>sprk_issecure = true</c> and proves it by reading it back — or, when the record already reads
+    /// <c>true</c>, writes nothing (task 150). Returns the refusal to send, or <c>null</c> when the flag is proven set.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the server sets it.</b> The column is field-secured: only this service's application user (the
+    /// "Spaarke BFF-Managed Field Writers" profile) may create or update it, so a client can no longer mark a record
+    /// secure without provisioning it, nor clear the flag on a secure one. The client asks for a secure record by
+    /// calling this endpoint.</para>
+    ///
+    /// <para><b>Why FIRST, and why it is never undone.</b> Every refusal before it changes nothing, so the record is
+    /// still not flagged and the client — which skips every upload and child create for a secure-requested record whose
+    /// provisioning did not succeed — has put nothing in shared storage. From this write on, every failure leaves the
+    /// record FLAGGED with no container of its own, whose uploads are refused (fail closed). Compensation restores
+    /// ownership and shares, never the flag: un-flagging a record the user asked to secure would route its next upload
+    /// to shared storage, which cannot be retracted.</para>
+    ///
+    /// <para><b>The read-back is the proof</b> (ADR-003): an accepted PATCH is not evidence the value is stored, and a
+    /// read that comes back without the value — a field-secured column this identity cannot read is returned EMPTY,
+    /// not refused — must not be taken for success.</para>
+    /// </remarks>
+    private static async Task<IResult?> EnsureSecureFlagAsync(
+        DataverseWebApiClient dataverseClient,
+        SecureRecordRoot root,
+        Guid recordId,
+        bool alreadyFlagged,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        if (alreadyFlagged)
+        {
+            logger.LogInformation(
+                "[PROVISION] {RecordType} {RecordId} already reads sprk_issecure = true (created before task 150, or by an " +
+                "older client); the flag is not written again.", root.WireToken, recordId);
+            return null;
+        }
+
+        string failure;
+        try
+        {
+            await dataverseClient.UpdateAsync(
+                root.EntitySet,
+                recordId,
+                new Dictionary<string, object?> { ["sprk_issecure"] = true },
+                ct);
+
+            var reread = (await dataverseClient.QueryAsync<RootRow>(
+                root.EntitySet,
+                filter: $"{root.IdColumn} eq {recordId}",
+                select: $"{root.IdColumn},sprk_issecure",
+                top: 1,
+                cancellationToken: ct)).FirstOrDefault();
+
+            if (reread?.sprk_issecure == true)
+            {
+                logger.LogInformation(
+                    "[PROVISION] Set sprk_issecure = true on {RecordType} {RecordId} (read back).", root.WireToken, recordId);
+                return null;
+            }
+
+            failure = reread is null
+                ? "the record could not be read back"
+                : "the value read back was not true — if it came back empty, this service has likely lost its " +
+                  "field-level-security Read on sprk_issecure";
+
+            logger.LogError(
+                "[PROVISION] sprk_issecure on {RecordType} {RecordId} did not read back true after the write " +
+                "(read back: {Value}). Stopped: nothing else was written. TraceId={TraceId}",
+                root.WireToken, recordId, reread?.sprk_issecure?.ToString() ?? "(empty)", traceId);
+        }
+        catch (Exception ex)
+        {
+            failure = "the write or its read-back failed — if Dataverse refused the write, this service's application " +
+                      "user is not in the field security profile that may update sprk_issecure";
+
+            logger.LogError(ex,
+                "[PROVISION] Could not set sprk_issecure on {RecordType} {RecordId}. Stopped: nothing else was written. " +
+                "TraceId={TraceId}", root.WireToken, recordId, traceId);
+        }
+
+        return Problem(
+            StatusCodes.Status500InternalServerError, "Internal Server Error",
+            $"The {root.DisplayLabel.ToLowerInvariant()} could not be marked secure ({failure}). That is the first change " +
+            "provisioning makes, so nothing else was changed: its ownership, shares and storage are as they were (the " +
+            "secure flag itself may or may not be set — while it is set, uploads to the record are refused). The same " +
+            "caller may retry; an administrator checks the field security setup with " +
+            "scripts/Set-SecureFlagFieldSecurity.ps1 -Verify.",
+            traceId, (ReasonKey, ReasonSecureFlagNotSet));
     }
 
     /// <summary>

@@ -548,8 +548,12 @@ Manage Access. And when neither `createdby` nor `sprk_createdbyperson` names a u
 application user — or one of them cannot be read), the resume is refused — no share, no container — whoever else may hold
 a share; the row below names the recoveries that work.
 
-`sprk_issecure` is never written by provisioning. A secure-requested record that failed stays flagged, so uploads to it
-are refused until it has its own container (fail closed).
+**`sprk_issecure` is written by provisioning, once, as its FIRST write** (task 150 — the column is field-secured and
+the client no longer writes it; §7c). Every refusal before that write leaves the record **not flagged**, and the
+wizard then adds nothing to it — no file, child record or email — so nothing reaches shared storage. Every failure
+after it leaves the record **flagged**: uploads to it are refused until it has its own container (fail closed). It
+is never cleared on any provisioning path, compensation included. A record already flagged (an older client, or a
+row created before task 150) is provisioned exactly like an unflagged one.
 
 | `reasonCode` (`sdap.provision.*`) | State the record is left in | Who recovers, and how |
 |---|---|---|
@@ -558,6 +562,7 @@ are refused until it has its own container (fail closed).
 | `already_provisioned` | Provisioned: owned by the team, container recorded. Nothing written | Nothing to provision. Who can open it is managed through Manage Access: an administrator shares it to anyone who should hold it but cannot open it (this is also the recovery for a record that kept its own container — `containerKept: true` below) |
 | `owned_by_other_secure_team` | Owned by the retired default team | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) |
 | `creator_unresolved` | Unchanged — refused before any write | **The same caller** calls again (the wizard's "Try securing again") |
+| `secure_flag_not_set` (task 150, HTTP 500) | Nothing else changed — the flag write is the first write. The flag itself may or may not be set (the write failed, or did not read back `true`) | **The same caller** calls again. If it repeats: an administrator runs `scripts/Set-SecureFlagFieldSecurity.ps1 -Verify` (§7c) — a refused write means the BFF application user is not in the writer profile; a read-back that comes back EMPTY means the BFF lost its field-level Read |
 | `record_owner_unreadable` | Unchanged — refused before any write. The row was read with no owning user or team, which is deterministic for that row | **An administrator** checks the record's owner in Dataverse; calling again before that repeats the refusal (not offered as a retry) |
 | `resume_colleagues_not_permitted` | Unchanged — refused before any write. A resume request named colleagues (`sharePrincipalIds`) and its caller is not the record's creator | The caller calls again **without** `sharePrincipalIds` (the resume then completes, sharing only to the creator), and adds people through Manage Access |
 | `container_shared_with_another_record` (HTTP 409; `otherRecordType` — the other record's id is in the `[PROVISION]` log line under the response's `traceId`, not in the response) | Unchanged — refused before any write. The container already recorded on the record is also recorded on another project, matter or work assignment, and is not shared storage | **An administrator** finds the other record (the log line, or a query on `sprk_containerid`), decides which record the container belongs to and clears `sprk_containerid` on the other one; then provisioning is called again (it keeps the container for this record). Calling again before that repeats the refusal |
@@ -603,6 +608,63 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 
 ---
 
+## 7c. Locking `sprk_issecure` — field-level security (task 150, owner round 2 item 2)
+
+`sprk_issecure` on `sprk_project`, `sprk_matter` and `sprk_workassignment` is **field-secured**: only the BFF, inside
+the secure (`/provision-project`) and unsecure (`/unsecure-project`) endpoints, sets or clears it. A user with Write can
+no longer clear it on a secure record (which would bypass the unsecure endpoint's ownership move and share sweep and
+route new content to shared storage) or set it on a record that was never provisioned.
+
+**The design is "readers never masked", not "writers locked".** A field-secured column a caller has no Read on comes
+back EMPTY — no error. Most readers (the external plane's Secure suppression, the client container resolver, the
+Access Permission pill) map empty to "not secure". So every user must keep Read:
+
+| Profile (task 133's — reused, never forked) | Field permission on `sprk_issecure` | Members |
+|---|---|---|
+| `Spaarke BFF-Managed Field Readers` | Read | **every business unit's default team** — every current and future user of an existing BU is covered automatically |
+| `Spaarke BFF-Managed Field Writers` | Read, Create, Update | **the BFF application user(s) only**, associated explicitly (never relying on System Administrator — a production app user may not hold it) |
+| `System Administrator` (platform) | Read, Create, Update — created by the platform, cannot be narrowed | every holder of the System Administrator role. **Owner decision F4: accepted** as the administrator boundary (an administrator can already reassign, share or delete any secure record); the standing assertion LISTS every holder |
+
+Who may remove the designation (owner round 3b, **F3**): the unsecure endpoint admits only a **Full Access holder**
+(Write + Delete on the record, as Dataverse reports the caller's rights — an administrator qualifies through their role)
+or **the record's creator** (`createdby`, or `sprk_createdbyperson` for an app-created row). Any other Write holder gets
+403 `sdap.unsecure.not_permitted`. Securing stays open to Write holders. `sprk_accesspermission` is NOT field-secured
+(owner-accepted).
+
+**Order — every step dry-run first, then `-Apply`, then `-Verify` (each must exit 0):**
+
+```powershell
+# 0. One-time NULL cleanup (owner decision Q1). BEFORE the BFF: task 150's BFF refuses an EMPTY flag.
+.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com                # dry run: ids + counts
+.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply         # writes a JSON report
+.\scripts\Repair-SecureFlagNulls.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify
+# 1. Deploy the BFF (task 150). 2. Deploy the client (no create payload names sprk_issecure) and confirm no cached old
+#    bundle is served — securing the column first would refuse EVERY secure project create made by a user.
+# 3. The two profiles and their members (§7b's script — the ONE mechanism for every BFF-managed column).
+.\scripts\Set-RecordCreatorPersonSchema.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -BffApplicationIds <ids> -Apply
+# 4. The lock. It REFUSES -Apply unless the profiles, every default team, the writer membership and the NULL cleanup are
+#    in place, and -ClientNoLongerWritesFlag confirms step 2.
+.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -BffApplicationIds <ids>   # dry run
+.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -BffApplicationIds <ids> `
+  -ClientNoLongerWritesFlag -Apply
+.\scripts\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -BffApplicationIds <ids> -Verify
+# 5. The standing assertion, by hand (read-only):
+$env:SPAARKE_NFR05_DATAVERSE_URL = 'https://<org>.crm.dynamics.com'; $env:SPAARKE_BFF_APPLICATION_IDS = '<ids>'
+$env:AZURE_TOKEN_CREDENTIALS = 'AzureCliCredential'
+dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~SecureFlagFieldSecurity_InTheTargetEnvironment"
+```
+
+**The masked window.** The Web API cannot create a field permission on a column that is not yet secured, so between
+securing each column and granting the reader profile there are a few seconds in which non-administrators read the
+flag EMPTY. The lock script grants immediately after securing, and prints the measured window per table. With the
+task 150 BFF deployed, the BFF refuses during it (`secure_flag_unreadable`, `secure_flag_not_set`) — it never
+mis-routes.
+
+**A new business unit** needs its default team added to the reader profile — re-run step 3 (`-Apply` adds every
+default team), then step 4's `-Verify` and step 5. The standing assertion fails on any default team without it.
+
+---
+
 ## 8. What must NOT be done
 
 | ❌ | Why |
@@ -618,6 +680,9 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 | Create one BU per project | Retired mechanism. No `SP-*` BUs should exist |
 | Set `sprk_containerid` on the secure BU | That is the *shared* cascade container. A secure project uses its own |
 | Use `pac` without checking the active profile | `pac auth list` may be pointed at production. Mint a token against an explicit URL instead |
+| Secure `sprk_issecure` before every business unit's default team is on the reader profile, or before the client that stops writing it is live | A reader without Read sees the flag EMPTY and treats a secure record as an ordinary one; an old client's create naming the column is refused for every user (§7c) |
+| Add a person or a team to the `Spaarke BFF-Managed Field Writers` profile | Its membership IS the lock: a member can set or clear `sprk_issecure` (and name anyone as a record's creator) outside the endpoints |
+| Strip System Administrator from anyone to "close" the residual writer | Owner decision F4 accepts it; the BFF application users hold `prvActOnBehalfOfAnotherUser` through it |
 
 ---
 
@@ -632,5 +697,6 @@ A business unit created later needs `-Apply` re-run (its default team joins the 
 | Container isolation (separate, unresolved) | design §5.1c → project `spaarke-secure-project-r1` |
 | NFR-05 assertion wording | `projects/unified-access-control-r2/spec.md` |
 | Provisioning code | `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs` (projects, matters, work assignments; `recordType` + `recordId`) |
+| `sprk_issecure` lock (task 150) | [`scripts/Repair-SecureFlagNulls.ps1`](../../scripts/Repair-SecureFlagNulls.ps1), [`scripts/Set-SecureFlagFieldSecurity.ps1`](../../scripts/Set-SecureFlagFieldSecurity.ps1); standing assertion `tests/integration/auth/UnifiedAccessControl/SecureFlagFieldSecurityAssertion.cs`; schema doc `src/solutions/SpaarkeCore/entities/sprk_project/secure-project-fields-schema.md`; note `projects/unified-access-control-r2/notes/task-150-issecure-lock.md` |
 | Named owner team + the two invariants | `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecureRecordOwnerTeam.cs`; census job `Services/ExternalAccess/SecureRecordIsolationCensusJob.cs`; evaluator `Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs` |
 | One-time migration off the default team | [`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1`](../../scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1); record `projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md` |

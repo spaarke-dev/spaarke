@@ -118,6 +118,40 @@ public class RecordContainerResolverTests
             .Which.Code.Should().Be("secure_record_container_missing");
     }
 
+    /// <summary>
+    /// Task 150 — the owner's ABSENT-branch decision (fail closed, after the NULL backfill). <c>sprk_issecure</c> is
+    /// field-secured; a column this identity cannot read comes back ABSENT, not refused. Before task 150 that read as
+    /// "not secure" and resolved the shared fallback supplied right here — the one outcome SPE cannot take back.
+    /// </summary>
+    [Theory(DisplayName = "Task 150: a securable record whose sprk_issecure is ABSENT is refused, never resolved to the fallback")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_workassignment")]
+    public async Task SecurableRecord_WithAbsentFlag_IsRefused(string entity)
+    {
+        var row = new Entity(entity, RecordId) { ["sprk_containerid"] = OwnContainer };
+        var resolver = Build(securable: SecurableRoots, record: row);
+
+        var act = async () => await resolver.ResolveForRecordAsync(
+            entity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        var refusal = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        refusal.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        refusal.StatusCode.Should().Be(503);
+    }
+
+    [Fact(DisplayName = "Task 150: an explicit FALSE still resolves the fallback — only ABSENT refuses")]
+    public async Task SecurableRecord_WithExplicitFalse_StillResolvesTheFallback()
+    {
+        var resolver = Build(securable: SecurableRoots, record: Row(isSecure: false, containerId: null));
+
+        var decision = await resolver.ResolveForRecordAsync(
+            SecureProjectEntity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        decision.ContainerId.Should().Be(SharedBuContainer);
+    }
+
     [Fact(DisplayName = "Task 075: a NON-secure record still resolves through the BU cascade, unchanged")]
     public async Task NonSecureRecord_ResolvesThroughTheBusinessUnitCascade()
     {

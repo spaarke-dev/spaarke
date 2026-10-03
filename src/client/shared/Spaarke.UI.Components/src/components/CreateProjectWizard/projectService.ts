@@ -277,12 +277,10 @@ export class ProjectService {
       entity['sprk_projectdescription'] = formValues.description.trim();
     }
 
-    // Set sprk_issecure when the user has designated this as a Secure Project.
-    // This flag is intentionally only set to true — once a project is secure,
-    // the designation is irreversible (enforced by domain logic in the BFF).
-    if (formValues.isSecure === true) {
-      entity['sprk_issecure'] = true;
-    }
+    // `sprk_issecure` is NEVER written here (unified-access-control-r2 task 150). The column is field-secured: only the
+    // BFF application user may create or update it, so a create payload naming it is REFUSED for every user. A secure
+    // project is asked for by calling provisioning (`provisionSecureProject`), which marks it secure as its first
+    // write. `formValues.isSecure` therefore drives the CALLER's provisioning call, not this payload.
 
     // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_searchindexname` from the current
     // user's owning Business Unit (INV-5: an explicit value is preserved). Not

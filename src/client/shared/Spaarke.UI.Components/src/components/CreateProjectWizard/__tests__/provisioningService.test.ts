@@ -308,6 +308,9 @@ describe('provisionSecureProject — failure classification', () => {
     // Task 133 r1: a SHARED container is unlinked before the move; that failed, so nothing moved and the same caller may
     // call again.
     ['sdap.provision.shared_container_not_cleared', 'not-started', true],
+    // Task 150: marking the project secure is the server's FIRST write; it failed, nothing else changed, the same caller
+    // may call again.
+    ['sdap.provision.secure_flag_not_set', 'not-started', true],
     // Task 133: the share failed and the move was undone (or never made), read back.
     ['sdap.provision.creator_share_failed', 'share-failed', true],
     // Read back unchanged: nothing moved — but retrying a refused or ignored assignment repeats it.
@@ -340,10 +343,18 @@ describe('provisionSecureProject — failure classification', () => {
   });
 
   it('never calls a secure-requested project a normal project', () => {
-    // `sprk_issecure` is set before provisioning and never cleared on a refusal (task 133 never writes it).
+    // Task 150: `sprk_issecure` is the server's first write and never cleared; whether the project ends secure is open.
     for (const code of [...EMITTED.map(([c]) => c), undefined]) {
       expect(classifyProvisioningFailure(code).errorMessage).not.toMatch(/normal project/i);
     }
+  });
+
+  it('says an environment refusal left the project NOT secured — it comes before the server marks it secure (task 150)', () => {
+    // Before task 150 the CLIENT wrote sprk_issecure at create time, so this copy said "created and marked secure".
+    // The server now marks it as its first write, after every environment check — so the project is not marked.
+    const { errorMessage } = classifyProvisioningFailure('sdap.provision.secure_bu_not_found');
+    expect(errorMessage).toMatch(/created but not secured/i);
+    expect(errorMessage).not.toMatch(/marked secure/i);
   });
 
   it('classifies every reason code ProvisionProjectEndpoint can emit', () => {
@@ -354,7 +365,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of EMITTED) {
       expect(classifyProvisioningFailure(code).failureKind).not.toBe('error');
     }
-    expect(EMITTED).toHaveLength(26);
+    expect(EMITTED).toHaveLength(27);
   });
 
   it('falls back to a generic error for an unknown or absent reason code', () => {

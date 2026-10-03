@@ -47,7 +47,10 @@
 // ---------------------------------------------------------------------------
 
 export interface IProvisionProjectRequest {
-  /** The sprk_project GUID that has just been created with sprk_issecure = true. */
+  /**
+   * The sprk_project GUID that has just been created. It arrives NOT flagged secure (task 150): `sprk_issecure` is
+   * field-secured, and this call is what marks it secure — the server's first write.
+   */
   projectId: string;
   /**
    * Optional. Short project reference code (e.g. "P-2024-0042"), used only as a fallback for the
@@ -213,8 +216,10 @@ const ENVIRONMENT_REASON_CODES: ReadonlySet<string> = new Set([
  *
  * Copy rules, both learned from what FR-31 had to repair:
  *  - **Never assert a state the client cannot observe.** Each message says only what the endpoint's response for that
- *    code establishes. `sprk_issecure` is written `true` before provisioning and never cleared on refusal, so no
- *    message calls the project "a normal project".
+ *    code establishes. Since task 150 `sprk_issecure` is the server's FIRST write (the client never writes it): a
+ *    refusal before it leaves the project not marked secure ("did not start … nothing changed"), and one after it
+ *    leaves it marked secure with uploads refused ("not secured … documents cannot be added"). No message calls the
+ *    project "a normal project" — whether it later becomes secure is still open.
  *  - **Never advise trying again in the message.** A retry is offered by the host that renders the action, keyed on
  *    `retryable` — so the advice and the button cannot come apart.
  */
@@ -285,6 +290,15 @@ const REASON_STATES: Readonly<
     failureKind: 'not-started',
     errorMessage:
       'Securing the project stopped before it was moved: the shared document container linked to it could not be unlinked first. Its ownership did not change.',
+    retryable: true,
+  },
+  // Task 150: marking the project secure is the server's FIRST write, and it could not be set (or did not read back).
+  // Nothing else changed; the server tells the same caller they may call again. DRAFT copy — owner decision F6: the
+  // agent drafts, the owner picks before merge (options in notes/task-150-issecure-lock.md §6).
+  'sdap.provision.secure_flag_not_set': {
+    failureKind: 'not-started',
+    errorMessage:
+      'The project could not be marked secure, so securing it stopped before anything else changed: its ownership, sharing and document storage are as they were.',
     retryable: true,
   },
   'sdap.provision.creator_share_failed': {
@@ -424,10 +438,13 @@ export function classifyProvisioningFailure(
   retryable: boolean;
 } {
   if (reasonCode != null && ENVIRONMENT_REASON_CODES.has(reasonCode)) {
+    // Task 150: every environment refusal comes BEFORE the server marks the project secure, so the project is no
+    // longer "created and marked secure" — it was created and is not secured, and nothing about it changed. DRAFT copy —
+    // owner decision F6 (options in notes/task-150-issecure-lock.md §6).
     return {
       failureKind: 'environment-not-configured',
       errorMessage:
-        'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created and marked secure, but nothing about its ownership changed and documents cannot be added to it until it is secured; an administrator can secure it once the setup is fixed.',
+        'Secure projects cannot be set up in this environment right now — its Secure Record business unit, owner team or document storage is missing or not in a safe state. The project was created but not secured, and nothing about it changed; an administrator can secure it once the setup is fixed.',
       retryable: false,
     };
   }
@@ -462,6 +479,28 @@ export function classifyProvisioningFailure(
       'The project was created, but securing it did not finish. Its current state needs checking — an administrator can see how far it got and finish securing it.',
     retryable: false,
   };
+}
+
+/**
+ * Task 150: the line a host shows when it HELD BACK what the user asked to add to a secure-requested record, because
+ * securing it did not finish. Since the server — not the client — marks a record secure, a record whose provisioning
+ * stopped before that write is an ordinary record, and a file, child record or email added to it now would land in
+ * shared storage that cannot be taken back. `items` are short noun phrases in the order the host skipped them
+ * ("the files you attached", "the event"); `undefined` when nothing was held back.
+ *
+ * DRAFT copy — owner decision F6: the agent drafts options, the owner picks before merge
+ * (notes/task-150-issecure-lock.md §6). Never advises trying again (the retry is the host's action).
+ */
+export function describeHeldBackForSecure(items: readonly string[]): string | undefined {
+  if (items.length === 0) return undefined;
+
+  const list = items.length === 1 ? items[0] : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+
+  const one = items.length === 1;
+  return (
+    `Because securing the project did not finish, ${one ? 'this was' : 'these were'} not added to it, so nothing ` +
+    `reached shared storage: ${list}. Add ${one ? 'it' : 'them'} once the project is secured.`
+  );
 }
 
 // ---------------------------------------------------------------------------

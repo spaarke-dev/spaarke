@@ -1037,8 +1037,14 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         (await ReasonCodeOf(response)).Should().Be(UnsecureProjectEndpoint.ReasonProjectNotFound);
     }
 
+    /// <remarks>
+    /// Task 150 moved this refusal EARLIER: the caller's identity is now established first, by the F3 check (only a
+    /// Full Access holder or the creator may remove the designation), and an unestablished caller is refused there —
+    /// with nothing torn down, as before. The owner fallback then reuses that identity, so <c>owner_unresolved</c> is
+    /// a defensive branch only.
+    /// </remarks>
     [Fact]
-    public async Task Unsecure_WhenNoOwnerCanBeResolved_RefusesRatherThanStrandingTheRecord()
+    public async Task Unsecure_WhenTheCallerCannotBeIdentified_RefusesRatherThanStrandingTheRecord()
     {
         var projectId = Guid.NewGuid();
         _fixture.SeedProject(projectId);
@@ -1048,8 +1054,9 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
         var response = await client.PostAsJsonAsync(UnsecureRoute, new { projectId });
 
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
-        (await ReasonCodeOf(response)).Should().Be(UnsecureProjectEndpoint.ReasonOwnerUnresolved);
+        (await ReasonCodeOf(response)).Should().Be(UnsecureProjectEndpoint.ReasonPermissionUnverifiable);
         _fixture.Revokes.Should().BeEmpty("nothing is torn down until a destination owner exists");
+        _fixture.Updates.Should().BeEmpty();
     }
 
     [Fact]

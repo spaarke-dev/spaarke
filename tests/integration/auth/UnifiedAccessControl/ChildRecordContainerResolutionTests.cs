@@ -108,6 +108,28 @@ public class ChildRecordContainerResolutionTests
         decision.ContainerId.Should().Be(RootContainer);
     }
 
+    /// <summary>
+    /// Task 150 — the owner's ABSENT-branch decision on the ANCESTOR path. Before it, a root above the record whose flag
+    /// came back absent was read as not secure and the walk fell through to the business-unit container: exactly where
+    /// a secure project's to-do would land if this service lost its field-level Read on <c>sprk_issecure</c>.
+    /// </summary>
+    [Fact(DisplayName = "Task 150: a to-do under a project whose sprk_issecure comes back ABSENT is refused — the business unit is never read")]
+    public async Task Todo_UnderAProjectWhoseFlagIsAbsent_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: null, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var refusal = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        refusal.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        refusal.StatusCode.Should().Be(503);
+        refusal.Detail.Should().NotContain(ProjectId.ToString(), "another record's id is never returned to the caller");
+        world.Reads("businessunit").Should().Be(0, "no shared container may be in scope on an unknown answer");
+    }
+
     [Fact(DisplayName = "Task 155: a to-do under a NON-secure project resolves its OWN business-unit container — no 409")]
     public async Task Todo_UnderANonSecureProject_ResolvesItsOwnBusinessUnitContainer()
     {
@@ -497,8 +519,10 @@ public class ChildRecordContainerResolutionTests
     {
         // The stamp says "non-secure project". Nothing re-stamps this record when its communication is re-filed
         // under a SECURE matter, so trusting the stamp would put a secure root's content in a shared container.
+        // A work assignment is itself a securable root: post-backfill it reads No (task 150), never absent.
         var world = new World()
-            .WithChild(entity, regardingProject: ProjectId, intermediate: (intermediateColumn, CommunicationId))
+            .WithChild(entity, regardingProject: ProjectId, intermediate: (intermediateColumn, CommunicationId),
+                isSecure: entity == "sprk_workassignment" ? false : null)
             .WithRoot("sprk_project", ProjectId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
 
@@ -1179,11 +1203,17 @@ public class ChildRecordContainerResolutionTests
         world.RootReads().Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155 f3: a work assignment with a NULL flag under a NON-secure matter resolves its BU container (live: most rows)")]
-    public async Task WorkAssignment_NullFlag_UnderANonSecureMatter_ResolvesItsBusinessUnit()
+    /// <remarks>
+    /// CONVERTED by task 150. This was "a work assignment with a NULL flag … resolves its BU container (live: most
+    /// rows)". The owner's ABSENT-branch decision backfills every NULL <c>sprk_issecure</c> to No
+    /// (<c>scripts/Repair-SecureFlagNulls.ps1</c>; the column already defaults to No, and every live NULL row predates
+    /// the column), so the live shape is now an explicit FALSE — pinned here — and a NULL refuses (next test).
+    /// </remarks>
+    [Fact(DisplayName = "Task 155 f3 / 150: a work assignment flagged No under a NON-secure matter resolves its BU container")]
+    public async Task WorkAssignment_FlaggedNo_UnderANonSecureMatter_ResolvesItsBusinessUnit()
     {
         var world = new World()
-            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithChild("sprk_workassignment", regardingMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
 
@@ -1191,6 +1221,21 @@ public class ChildRecordContainerResolutionTests
 
         decision.ContainerId.Should().Be(BusinessUnitContainer);
         world.Reads("sprk_matter").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 150: a work assignment whose OWN sprk_issecure is ABSENT is refused before its matter is read")]
+    public async Task WorkAssignment_AbsentFlag_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 155 f3: a NON-secure project whose polymorphic pair names a SECURE matter resolves the matter's container (live: 0 projects carry the pair)")]
@@ -2090,7 +2135,7 @@ public class ChildRecordContainerResolutionTests
         public World WithRoot(
             string entity,
             Guid id,
-            bool isSecure,
+            bool? isSecure,
             string? containerId,
             Guid? regardingProject = null,
             Guid? regardingMatter = null,
@@ -2098,7 +2143,9 @@ public class ChildRecordContainerResolutionTests
             Guid? pairType = null,
             (string Column, Guid Id)? intermediate = null)
         {
-            var row = new Entity(entity, id) { ["sprk_issecure"] = isSecure };
+            // isSecure null = the attribute ABSENT on the row (task 150: a field-secured value masked from the reader).
+            var row = new Entity(entity, id);
+            if (isSecure is { } flag) row["sprk_issecure"] = flag;
             if (containerId is not null) row["sprk_containerid"] = containerId;
             if (regardingProject is { } p) row["sprk_regardingproject"] = new EntityReference("sprk_project", p);
             if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
