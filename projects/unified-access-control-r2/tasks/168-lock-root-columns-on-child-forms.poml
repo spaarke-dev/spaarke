@@ -1,0 +1,271 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="168" project="unified-access-control-r2">
+  <metadata>
+    <title>Lock the four sprk_regarding{core} root columns on the to-do, event, communication and analysis forms (owner round 8 item 3), so a filing picker that writes the ADR-024 pair is the only form input that sets a root</title>
+    <phase>Session 27 — UAC defect remediation (owner round 8, 2026-10-03)</phase>
+    <gate>startable after 156 is merged into work/unified-access-control-r2 (this task edits the I-1 registry row and the task 156 note in the form 156 left them, and it closes 156's verifier round 2 item 9)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The four columns are the access edge for child records (the core-ancestor stamp, FR-26), and they decide which container a child's files go to (tasks 155 and 156). The task changes live form definitions on four tables and the CREATE-mode staging web resource that writes those columns. It also modifies tests (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Form configuration plus a two-call change to an existing web resource, fully specified here: exact files, two reference scripts to copy, a closed fixture set and closed acceptance criteria. No server code changes. Every judgment boundary found at authoring is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>(1) Edits the I-1 row of docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md, which task 156 rewrote and which the follow-ups for owner round 8 items 1 and 2 (the AI update tool's inline re-stamp, the TaskActionCore pair) and task 158 also edit. (2) Edits src/client/webresources/js/sprk_todo_regarding_presave.js and its jest test; task 147 works in the same RegardingResolver area. (3) Its live -Apply rewrites whole formxml documents on sprk_communication, sprk_event, sprk_analysis and sprk_todo forms. Three other operator scripts also rewrite whole formxml documents on these tables: task 138's scripts/Retire-CommunicationAccessPermission.ps1 -Apply (sprk_communication, written and not yet run), and scripts/Deploy-TodoSubgridsToElevenParentForms.ps1 (adds To Do subgrids to the event, communication and analysis main forms, among others). No two of these live runs may interleave, because each reads the form XML and then writes the whole document back. It touches no file under Api/ExternalAccess/** or Infrastructure/ExternalAccess/**.</parallel-reason>
+    <deps>156</deps>
+    <tags>dataverse, forms, security, webresource, testing</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+    <origin>Task 156 verifier round 2 item 9 (notes/task-156-stamp-freshness.md, section "Owner decision — a root set directly on a row filed under another record", on branch task/uac-r2-156-r1-r2b until 156 merges). Owner round 8 item 3 (2026-10-03, binding; notes/session27-owner-decisions-and-research.md): "keep the rule AND lock the columns (option 1 + 3). The pair decides, and the root columns on a filed row are a copy ... Make the four sprk_regarding{core} columns read-only on the to-do, event, communication and analysis forms, so the RegardingResolver picker is the only way to set a root. This is a form change; check first which forms expose the columns."</origin>
+  </metadata>
+
+  <prompt>On every form of sprk_todo, sprk_event, sprk_communication and sprk_analysis that a user can edit, make every control bound to sprk_regardingproject, sprk_regardingmatter, sprk_regardingworkassignment or sprk_regardingservicerequest read-only. First find out, read-only, which forms carry these controls and what else on those forms writes or unlocks them. The repo holds no source for these forms, so deliver the change as a checked-in, idempotent operator script with a dry run, an offline self-test, a verify mode, a snapshot-before-write apply and a guarded restore. Make sure a record created on a locked form still saves its root and its stamps.</prompt>
+
+  <amendments source="main session, 2026-10-03, owner rounds 9-10" binding="true">
+    <!-- Read these before step 0. Each overrides anything below that contradicts it. -->
+    <amendment>Owner decisions now run to round 10: re-read notes/session27-owner-decisions-and-research.md rounds 9 and 10 on work/unified-access-control-r2 before step 0. They are newer than this POML.</amendment>
+    <amendment>Owner round 10 item 2 (BINDING): ADD the RegardingResolver picker to the sprk_analysis form, then lock its root columns, the same as the other three forms. Escalation trigger 1 is answered.</amendment>
+    <amendment>The repo holds no form source for these four tables, so delivering a live-edit script whose -Apply is a manual gate for the main session is ACCEPTED (main session, 2026-10-03).</amendment>
+  </amendments>
+
+  <role>SPAARKE platform developer: Dataverse model-driven form XML, form web resources, PowerShell operator scripts over the Dataverse Web API, and jest tests for form scripts.</role>
+
+  <goal>After this task:
+(1) On every Main (type 2), Quick Create (type 7) and Main - Interactive experience (type 12) form of sprk_todo, sprk_event, sprk_communication and sprk_analysis, every control whose datafieldname is one of the four root columns carries disabled="true". This includes hidden controls and header controls, and covers only the columns that exist on that table. No control is removed.
+(2) A user can set a root on these forms only through a filing PCF that writes the ADR-024 pair: the RegardingResolver (and, on communication forms, CommunicationConnections, which files through the same applyResolverFields path). Picking a root writes the pair naming that root, which is a direct link (rule 2 of CoreAncestorResolver.ClassifyStampSource) and is never re-stamped. Picking an intermediate makes the four columns derived copies.
+(3) A record CREATED on a locked form still saves its chosen lookup and its core-ancestor stamps. The presave bridge sets the submit mode of every lookup it stages or clears to "always", so a disabled control cannot drop a staged value from the INSERT.
+(4) Task 156's server rule is unchanged: the pair decides, and a root column on a filed row is a copy. A raw write made outside the forms (Web API, import, flow) is still treated as a copy and repaired by CoreAncestorStampReconciliationJob. The owner accepted this in round 8 item 3.
+(5) The lock can be checked at any time with a read-only -Verify run. That run fails if a later form edit re-opens any of the controls, or adds a business rule or form library that unlocks one.</goal>
+
+  <context>
+    <background>THE COLUMN SET (task 156; read it on your base after 156 merges). `CoreAncestorResolver.CoreAncestorLookups` (src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs:107-113 on branch task/uac-r2-156-r1-r2b) names the four core-ancestor lookups: sprk_regardingproject → sprk_project, sprk_regardingmatter → sprk_matter, sprk_regardingworkassignment → sprk_workassignment, sprk_regardingservicerequest → sprk_servicerequest. `IntermediateRootColumns` (:154) gives sprk_communication, sprk_event, sprk_todo and sprk_analysis exactly these four as their root columns (StandardRootColumns). `StampSourceColumns` (:191) names the same four tables as the only tables that carry a stamp copy. The remarks at :99-106 say that a column's presence on a table is resolved from live metadata, never assumed. sprk_todo and sprk_event carry all four (live, 2026-10-01). Presence on sprk_communication and sprk_analysis is read live in step 1.
+
+WHY THE LOCK (156 note, "Owner decision" section). When a row's pair names an intermediate (rule 3), or it has no pair and exactly one intermediate (rule 5), every root column the source can carry is treated as a copy. A root that a person types DIRECTLY onto such a row is reverted by the cascade or the job within one cycle. During that window the resolver refuses with 409 container_ancestor_stale; it never misfiles. After the repair, the row has left the secure root the person placed it under. Live exposure on 2026-10-02 was zero: all 14 to-dos filed under an intermediate carried a pair naming that source. The shape needs a raw edit of a stamp column, and the forms are the ordinary place to make one. The owner kept the rule and chose to remove that input.
+
+NO FORM SOURCE EXISTS IN THE REPO FOR THESE FOUR TABLES (verified at authoring, 2026-10-02, case-insensitive search of every .xml file in the repo):
+- The only XML files that name any of the four columns are two Matter/Project tab fragments (src/solutions/SpaarkeCore/entities/sprk_matter/FormXml/analyses/matter-analyses-tab.xml and src/solutions/SpaarkeCore/entities/sprk_project/FormXml/analyses/project-analyses-tab.xml). They are subgrids on the PARENT forms and are out of scope.
+- src/solutions/SpaarkeCore/entities/sprk_todo/ holds only entity-schema.md. There is no sprk_event, sprk_communication or sprk_analysis folder there.
+- src/solutions/SpaarkeCore/customizations.xml (5.9 KB) contains no form.
+- src/dataverse/solutions/** (unpacked solutions) holds forms for sprk_Container only. src/dataverse/forms/** holds Matter form patches only.
+- infrastructure/dataverse/ribbon/AnalysisRibbons and CommunicationRibbons hold ribbon customizations only, with no form XML.
+The repo's established convention for a live form edit is a Web API systemforms PATCH plus PublishXml, recorded by a checked-in script or fragment:
+- matter-analyses-tab.xml's header says it was "Applied directly to the live Matter main form ... via Dataverse Web API (systemforms PATCH + PublishXml)" and that the checked-in file is the durable record of the change.
+- Task 138's scripts/Retire-CommunicationAccessPermission.ps1 edits sprk_communication forms the same way.
+This task therefore delivers a script, not a solution import. The live -Apply is the main session's manual gate, in place of "import the solution to dev". Customer environments receive the change through the SpaarkeMaster solution exported from dev (scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1 exports it managed for provisioning; it maps systemforms to entities at :211-218). Whether these forms are components of SpaarkeMaster is checked in step 1 (escalation trigger 8).
+
+THE REFERENCE SCRIPTS TO COPY.
+- scripts/Retire-CommunicationAccessPermission.ps1 (task 138), for structure and the form edit:
+  - comment-based help with .SYNOPSIS, .DESCRIPTION, .PARAMETER, .EXAMPLE and .NOTES, including the exit codes 0 / 2 / 1 (:1-62);
+  - Get-DataverseToken through az (:87-95); Invoke-Dv with -AllowNotFound (:97-128); Write-Step / Write-Plan / Write-Done / Write-Info (:130-133); Stop-Refused, which exits 2 (:135-140);
+  - the transform is a PURE string function, so a dry run shows exactly what -Apply would write (:142-155, Remove-FormReferences);
+  - the workflow and business-rule scan (:189-197) and the form scan that refuses managed forms and unrecognised shapes (:199-213);
+  - every write sits after the `if (-not $Apply)` exit (:297-301);
+  - writes are a systemforms PATCH of formxml, then PublishXml for the table (:307-323).
+- scripts/Set-SecureRecordOwnerRolePrivileges.ps1, for the -Verify mode convention: `[switch]$Verify` (:73); "-Apply and -Verify are separate modes" thrown when both are passed (:80); the mode banner (:120); a VERIFY PASS that exits 0 and a VERIFY FAIL that names each gap and exits 1 (:183-191).
+
+THE CREATE-MODE PATHS THAT A DISABLED CONTROL COULD BREAK.
+- The RegardingResolver PCF is bound to sprk_regardingrecordtype, NOT to any of the four columns (src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml:3, :7). Its description names sprk_todo, sprk_event, sprk_invoice, sprk_communication and sprk_kpiassessment as host forms. sprk_analysis is NOT named (escalation trigger 1).
+- The CommunicationConnections PCF (src/client/pcf/CommunicationConnections/CommunicationConnections/ControlManifest.Input.xml) is bound to sprk_associationprovenance and sprk_associationstatus and files the chosen regarding records through the shared applyResolverFields path (ResolverWriteHandler). It writes through the Web API, not through the four controls.
+- UPDATE mode: the RegardingResolver writes through webApi.updateRecord (handlers/ResolverWriteHandler.ts:412, :532). That bypasses form controls, so a disabled control does not affect it.
+- CREATE mode, user pick: the PCF publishes the payload on the `window.__sprk_regarding_pending__` bridge, and the presave stages it onto FORM ATTRIBUTES at OnSave (src/client/webresources/js/sprk_todo_regarding_presave.js, ns.onSave :196-345). It clears lookups first (step 2), then sets the chosen lookup (step 3), then sets each ancestor stamp (step 4), through setLookupIfPresent (:423-460) and clearLookupIfPresent (:467-488).
+- CREATE mode, subgrid "+ New" auto-detect: the PCF stages the derived stamps itself with Xrm.Page.getAttribute(name).setValue (RegardingResolverApp.tsx: setFormLookupValue :789-806, setFormTextValue :809-821, the stamp loop :1250-1265) and then republishes the same stamps on the bridge so the presave re-stages them at OnSave (:1300-1318).
+- CREATE mode, platform pre-fill: a "+ New" from a parent's subgrid pre-fills the parent lookup by relationship mapping (for example sprk_analysis.sprk_regardingmatter from the Matter Analyses tab, per matter-analyses-tab.xml's header). The SmartTodo "New task" launcher pre-fills sprk_regardingmatter and its siblings through form `defaultValues` parameters (src/solutions/SmartTodo/src/services/newTaskLauncher.ts:30-63, which says all catalog lookups are on the To Do main form as hidden cells). Neither path runs script on the control, and both are checked in the live gate.
+- The presave's own header (:79-89) says every core-ancestor lookup must be ON the create form, hidden if need be, because getAttribute returns null for a column that is not on the form. The columns must therefore stay on the forms. This task disables the controls; it never removes them.
+- The presave never calls setSubmitMode today. Whether the platform submits a value that script set on a DISABLED control is a platform detail this task does not rely on. Setting the submit mode to "always" on each lookup the presave stages makes the INSERT carry the value either way.
+- The presave's jest suite drives the real script through module.exports (src/client/pcf/RegardingResolver/__tests__/regardingPresave.test.ts:19). makeFormContext (:38-55) builds attributes that record setValue in call order. The test at :94-96 pins ns.VERSION to "1.3.0".
+- The web resource is documented as deployed under the name sprk_/scripts/smarttodo_regarding_presave.js and registered as the form OnLoad handler Spaarke.SmartTodo.RegardingPreSave.onLoad (projects/smart-todo-r4/notes/d-form-bind-instructions.md:85, :100-104). Read the live name and registration in step 1 before relying on them.
+
+OTHER CLIENT SURFACES THAT WRITE THE COLUMNS (found at authoring by a search of src/client and src/solutions). The shared builders (PolymorphicResolverService.buildRegardingSelectionPayload / applyResolverFields, TodoRegardingUpdateBuilder used by TodoDetail, the Create*Wizard services) write the pair together with the typed lookup. That is the direct-link shape, which the restamper never touches, so they are not the risky input. The risky input is a surface that writes a root column onto an EXISTING row without writing the pair (escalation trigger 5).
+
+NOT A ROUTE TASK. No BFF route is in scope. RouteAuthorizationGuardTests (tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, task 074) is not touched. Task 167 has not been authored on this branch at the time of writing; whenever it lands, this task neither adds nor deletes any of its Pending waivers, because it fixes no route. ADR-003's "unknown and denied ids answer the same" has no route to apply to here; the fail-closed rules are the script's refusals and -Verify's treatment of read faults.</background>
+    <relevant-files>
+      <file role="create">scripts/Lock-CoreAncestorStampColumnsOnForms.ps1</file>
+      <file role="create">tests/fixtures/form-lock-core-ancestor/ (the -SelfTest fixture pairs; the case list is in the constraints)</file>
+      <file role="modify">src/client/webresources/js/sprk_todo_regarding_presave.js (setLookupIfPresent, clearLookupIfPresent, ns.VERSION to "1.4.0", one version-history line; nothing else)</file>
+      <file role="modify">src/client/pcf/RegardingResolver/__tests__/regardingPresave.test.ts</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (the I-1 registry row only, and in that row only the "root typed directly onto a filed row" clause)</file>
+      <file role="modify">projects/unified-access-control-r2/notes/task-156-stamp-freshness.md (one "Resolved" line under the owner-decision heading; nothing else)</file>
+      <file role="create">projects/unified-access-control-r2/notes/task-168-lock-root-columns-on-forms.md</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/TASK-INDEX.md (this task's status cell only)</file>
+      <file role="canonical-reference">scripts/Retire-CommunicationAccessPermission.ps1 (structure, helpers, pure transform, dry-run-first, refusals, PATCH + PublishXml)</file>
+      <file role="canonical-reference">scripts/Set-SecureRecordOwnerRolePrivileges.ps1 (the -Verify mode convention and exit codes)</file>
+      <file role="read">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+      <file role="read">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx (:789-821, and the CREATE-mode auto-detect at :943-1330)</file>
+      <file role="read">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file role="read">src/client/pcf/CommunicationConnections/CommunicationConnections/ControlManifest.Input.xml</file>
+      <file role="read">src/solutions/SmartTodo/src/services/newTaskLauncher.ts</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (after 156 merges: CoreAncestorLookups, IntermediateRootColumns, StampSourceColumns, ClassifyStampSource)</file>
+      <file role="read">scripts/Deploy-TodoSubgridsToElevenParentForms.ps1 (how it selects each table's main form, a lead for step 1; and a writer of the same forms, see parallel-reason)</file>
+      <file role="read">projects/smart-todo-r4/notes/d-form-bind-instructions.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="156" status="completed-with-escalation">Ships the restamper, the reconciliation job and the rule this lock complements, and rewrote the I-1 row this task edits. Its verifier round 2 item 9 (owner decision) is answered by owner round 8 item 3 and closed by this task. Its other open items (the AI update tool's cascade, the TaskActionCore pair, the TypeScript stamp mirror) are separate tasks and not in scope here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner round 8 item 3">Scope: the server rule. Do NOT change CoreAncestorResolver, CoreAncestorRestamper, CoreAncestorStampReconciliationJob or RecordContainerResolver. The owner kept the rule as shipped: the pair decides, and a root column on a filed row is a copy. Option 2 of the 156 note (the server refuses a hand-placed secure root) was NOT chosen. No file under src/server/** changes in this task.</constraint>
+    <constraint source="owner round 8 item 3">Scope: which controls. Lock (disabled="true") every control whose datafieldname is one of the four columns, compared case-insensitively and as a whole value (FormXml can spell it sprk_RegardingMatter; sprk_regardingmatterstatus is NOT a match). This includes hidden controls (visible="false") and header controls (id prefixed "header_"). Do NOT remove any control: the presave and the PCF stage values onto these attributes on CREATE (presave header :79-89). Do NOT touch any other control. In particular, never touch the control bound to sprk_regardingrecordtype: it hosts the RegardingResolver, and disabling it disables the picker.</constraint>
+    <constraint source="project">Scope: which forms. Every systemform of sprk_todo, sprk_event, sprk_communication and sprk_analysis with type 2 (Main), 7 (Quick Create) or 12 (Main - Interactive experience), whatever its formactivationstate (an inactive form can be re-activated). Report, without editing, any form of another type (for example Quick View 6 or Card 11) that has a control bound to one of the four columns. Read each table's attributes live, and lock only the columns that exist on that table. A column absent on a table is reported, not treated as an error.</constraint>
+    <constraint source="project">Scope: the transform. A PURE function over the formxml string, as Remove-FormReferences is. It edits the text of each targeted &lt;control&gt; start tag only: it adds disabled="true", or rewrites an existing disabled="false" (any case) to disabled="true", and leaves an existing disabled="true" untouched. It never re-serializes the document (no XmlDocument.Save or OuterXml round-trip), so every byte outside the targeted start tags is unchanged. After transforming, parse the result as XML: it must be well-formed, and a parsed comparison must show that no attribute changed except disabled on the targeted controls.</constraint>
+    <constraint source="ADR-003">Scope: the script's refusals. Fail closed. Each case below REFUSES with exit 2, names the form or component, and writes nothing:
+- a managed form that has a control bound to a locked column;
+- a control bound to a locked column that hosts a custom control (a controlDescription whose forControl names that control's uniqueid; confirm these attribute names against a real form read in step 1 before coding them);
+- a custom control anywhere on the form that names a locked column as a bound parameter value (a PCF that could write the column through another control);
+- a business rule (workflow category 2) or business process flow (category 4) on the table whose xaml or clientdata references a locked column;
+- a form library whose web resource content contains a locked column name (case-insensitive) AND the token setDisabled;
+- a transform result in which a control bound to a locked column is still not disabled, or that fails the parse check above;
+- in -Apply, a form whose formxml changed between the scan and its PATCH (re-read it immediately before the PATCH).
+In -Verify, any fault while reading forms, attributes, workflows or web resources is a FAILED check (exit 1), never "0 unlocked controls". A table that returns zero systemforms of type 2 is also a FAILED check (exit 1): a scan that sees no main form proves nothing.</constraint>
+    <constraint source="project">Scope: the script's modes. Copy the structure of Retire-CommunicationAccessPermission.ps1 and the mode convention of Set-SecureRecordOwnerRolePrivileges.ps1. Parameters: -EnvironmentUrl (default https://spaarkedev1.crm.dynamics.com), -Apply, -Verify, -RestoreFrom path, -SelfTest, -SnapshotPath. Passing more than one of -Apply, -Verify, -RestoreFrom and -SelfTest throws before any read.
+- No mode switch: a read-only dry run that prints, per form, the controls it would lock, and every refusal reason it finds.
+- -Apply: run every check first. Then write the snapshot to -SnapshotPath (default: form-lock-snapshot-yyyyMMddHHmmss.json in the current directory), read the file back and parse it, and print its path. Refuse (exit 2, nothing written) if the snapshot cannot be written or read back. The snapshot records the environment URL, a UTC timestamp, and per changed form its formid, table, name, the formxml before, the formxml the script will write, and the SHA-256 of each. Then PATCH systemforms(formid) formxml, and run PublishXml once per changed table.
+- -Verify: read-only. Exit 0 only when every control bound to an existing locked column on every in-scope form is disabled AND no refusal case above is present. Otherwise exit 1, naming each control or component.
+- -RestoreFrom path: refuse (exit 2, nothing written) if the snapshot's environment URL differs from -EnvironmentUrl, or if any form's CURRENT formxml hash differs from the snapshot's "written" hash (the form was changed after the apply, for example by task 138's retirement script, and restoring would undo that change). Otherwise PATCH each form's "before" formxml back and publish each table.
+- -SelfTest: offline, with no token and no network call. Run the pure transform and the pure refusal checks over every fixture under tests/fixtures/form-lock-core-ancestor/, print one line per case, and exit 1 on any mismatch.
+- A second -Apply after a successful one reports "nothing to do" and exits 0 (idempotent).
+Every Invoke-Dv call with -Method PATCH, POST or DELETE sits inside the -Apply or -RestoreFrom branch, after all checks.</constraint>
+    <constraint source="project">Scope: -SelfTest fixtures. Closed set, one input file and one expected-output file (or one expected-refusal file naming the refusal) per case:
+(1) a visible, editable sprk_regardingmatter control gets disabled="true", and every other byte of the document is unchanged;
+(2) a hidden (visible="false") sprk_regardingproject control gets disabled="true";
+(3) a form with sprk_regardingworkassignment in the body AND in the header (id "header_sprk_regardingworkassignment"): both controls get disabled="true";
+(4) datafieldname="sprk_RegardingServiceRequest" (mixed case) gets disabled="true";
+(5) an already-disabled control is unchanged, and running the transform on the output of case 1 gives identical bytes;
+(6) a control with disabled="false" becomes disabled="true", with no duplicate disabled attribute;
+(7) a locked-column control that hosts a custom control is REFUSED;
+(8) a custom control on another control that names sprk_regardingmatter as a bound parameter is REFUSED;
+(9) NEGATIVE: controls bound to sprk_regardingrecordtype, sprk_regardingcommunication and sprk_regardingrecordname, and to a column whose name only STARTS with a locked name (a fixture-only sprk_regardingmatterstatus), are unchanged;
+(10) a form with none of the four columns is unchanged and reported as nothing to do.</constraint>
+    <constraint source="project">Scope: the presave web resource. In setLookupIfPresent and clearLookupIfPresent, after a successful setValue, call attr.setSubmitMode("always") when typeof attr.setSubmitMode is "function". Wrap that call in its own try/catch: a throw from it logs a console.warn and does NOT change the function's return value, because the value was already staged (otherwise a stamp would be logged as "not an attribute on this form", which is false). Change nothing else in their logic. Keep these unchanged: clears run before sets; the console.error on a stamp that cannot be staged; the CREATE-only gate (formType 1); the read-only skip (3 and 4); "never block the save". Do not change setAttributeIfPresent: the text fields are not in the locked set. Bump ns.VERSION to "1.4.0" and add one v1.4.0 line to the header's version history naming task 168 and the reason.</constraint>
+    <constraint source="ADR-006">Scope: client code. Create no new web resource and no new form script. The only client change is the existing presave. Do not change the RegardingResolver or CommunicationConnections PCF source. If step 1 shows that a CREATE-capable form hosting the RegardingResolver does not register the presave OnLoad handler, the PCF's own setValue would be the only CREATE staging path onto a disabled control for a user pick. That is escalation trigger 3, not a silent PCF or form-library edit.</constraint>
+    <constraint source="ADR-002 / D-1">Scope: whole task. No Dataverse plugin, no plugin step, no business rule added. The lock is form configuration. The submit-mode change is in an existing form web resource.</constraint>
+    <constraint source="ADR-038">Scope: tests added. Jest tests drive the real presave script through module.exports, as the existing suite does. No Mock&lt;HttpMessageHandler&gt;, no DI-registration tests, no constructor null-check tests. Every new guard is proven to bite by seeding: remove it, watch a named test or fixture go red, restore it byte-identical (compare SHA-256 before and after), and record the result in the task note.</constraint>
+    <constraint source="project hard gate">Scope: before the PR. Run, in full, and record the counts in the note: the RegardingResolver jest suite (npm test in src/client/pcf/RegardingResolver), the full BFF unit suite (tests/unit/Sprk.Bff.Api.Tests), NetArchTest (tests/Spaarke.ArchTests), tests/integration/Sprk.Bff.Api.IntegrationTests and tests/integration/Spe.Integration.Tests, plus the script's -SelfTest. No Dataverse in CI.</constraint>
+    <constraint source="project">Scope: live Dataverse during development. Read-only only: metadata reads, systemform, workflow, web resource and solution-component reads, and the script's dry run and -Verify. The executor never runs -Apply or -RestoreFrom and never deploys the web resource. Those are the main session's manual gate, in the order given in step 7.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: BFF hygiene. Not applicable: this task changes no file under src/server/**, so the publish-size and CVE checks do not apply and there is no Placement Justification to write. If the executor comes to believe a BFF change is needed, that is escalation trigger 6.</constraint>
+    <constraint source="owner 2026-09-30 (binding)">Scope: whole task. No scope cuts and nothing deferred; scope discovered during execution is added to this task or raised as an escalation, not pushed off. The live gate uses existing non-admin test users in their current business unit; if a gate needs a user at a specific access level, ask the owner to create one (owner round 4 item 1).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (the I-1 row)</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md (round 8)</file>
+      <file>projects/unified-access-control-r2/notes/task-156-stamp-freshness.md (sections "The rule: which record a row's copy comes from", "Owner decision — a root set directly on a row filed under another record")</file>
+    </files>
+    <patterns>
+      <pattern name="dry-run-first live form edit with refusals" location="scripts/Retire-CommunicationAccessPermission.ps1:142-323">Pure string transform, then scan workflows and forms (refuse managed and unknown shapes), print the plan, exit before any write unless -Apply, then PATCH systemforms formxml and PublishXml.</pattern>
+      <pattern name="read-only verify mode with named gaps" location="scripts/Set-SecureRecordOwnerRolePrivileges.ps1:73-80, :183-191">Separate -Apply and -Verify modes; VERIFY PASS exits 0; VERIFY FAIL names each gap and exits 1.</pattern>
+      <pattern name="driving the real presave script in jest" location="src/client/pcf/RegardingResolver/__tests__/regardingPresave.test.ts:19-60">Require the script through module.exports, then build a formContext whose attributes record calls in order.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm that 156 is merged into your base (CoreAncestorRestamper.cs exists and the I-1 row names task 156). If it is not, STOP (escalation trigger 9). Re-verify every line anchor in the background against current source (they drift).</step>
+    <step order="1">Read-only live inventory (spaarkedev1). For each of the four tables:
+- which of the four columns exist (EntityDefinitions Attributes);
+- every systemform (formid, name, type, formactivationstate, ismanaged, formxml);
+- for each control bound to one of the columns: control id, hidden or visible, disabled now, and whether it hosts a custom control (and which);
+- whether the form hosts the RegardingResolver or CommunicationConnections (a customControl named Spaarke.Controls.RegardingResolver or Spaarke.Controls.CommunicationConnections), and whether any other custom control names a locked column as a parameter;
+- whether the form registers Spaarke.SmartTodo.RegardingPreSave.onLoad, and the live web-resource name of that library;
+- every form library whose content references the four columns, and whether it calls setDisabled on them;
+- every business rule (workflow category 2) and business process flow (category 4) for the table that references the four columns.
+Also check, and record:
+- whether any editable grid exposes the columns: the entity-level grid customization of each table, and subgrid controls on ANY table's forms that target one of the four tables with an editable-grid custom control;
+- whether each in-scope form is a component of the SpaarkeMaster solution, either as a systemform component (componenttype 60) or through its table's entity component with all subcomponents included;
+- for the text fields the bridge already stages (sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber), whether any of their controls is already disabled on a CREATE-capable form, as evidence of how the platform treats script-set values on disabled controls today.
+Record all of it in notes/task-168-lock-root-columns-on-forms.md, with ids shortened to their first 8 characters, and include the "no form source in the repo" evidence from the background. Stop at any escalation trigger the inventory fires.</step>
+    <step order="2">Write scripts/Lock-CoreAncestorStampColumnsOnForms.ps1 by copying the reference scripts' structure. Write the pure transform and the pure refusal checks first, then the fixtures under tests/fixtures/form-lock-core-ancestor/, then -SelfTest. Make -SelfTest pass.</step>
+    <step order="3">Add the dry run, -Apply (with the snapshot written and read back before any write, and the re-read before each PATCH), -Verify and -RestoreFrom (with its two refusals). Run the dry run and -Verify against spaarkedev1 (both read-only). Record their output in the note. -Verify is expected to exit 1 before the apply, and it must name each unlocked control the inventory found.</step>
+    <step order="4">Presave: add the guarded setSubmitMode("always") calls and bump the version. Extend regardingPresave.test.ts: the mock attribute gets a setSubmitMode spy (and a variant whose setSubmitMode throws). Update the version test to "1.4.0". Add tests per the acceptance criteria.</step>
+    <step order="5">Seed each new guard (the list is in the acceptance criteria), confirm it goes red, restore it byte-identical, and record the results.</step>
+    <step order="6">Docs:
+- In the I-1 row of DATAVERSE-WRITE-PATH-ARCHITECTURE.md, replace only the clause "a root typed directly onto a filed row's stamp column ... (refuses meanwhile; owner decision pending, task 156 note verifier round 2 item 9)" with: the rule was confirmed by owner round 8 item 3; the four columns are read-only on the to-do, event, communication and analysis forms (task 168, checked by Lock-CoreAncestorStampColumnsOnForms.ps1 -Verify); a raw write made outside the forms is still treated as a copy and repaired by the job, which the owner accepted. Leave the row's other clauses (the AI update tool, TaskActionCore, the TS mirror, the backfill) unchanged.
+- Add one "Resolved by owner round 8 item 3 (option 1 + 3) and task 168" line under the 156 note's owner-decision heading.
+Then run the full test set from the hard-gate constraint.</step>
+    <step order="7" mode="prescriptive">MANUAL LIVE GATE, run by the main session, in this order:
+(a) confirm no other formxml-writing script (task 138's retirement script, Deploy-TodoSubgridsToElevenParentForms.ps1) is running against dev;
+(b) deploy the presave web resource v1.4.0 and publish (dataverse-deploy skill), then confirm in the browser console of a to-do CREATE form that the onLoad log line names v1.4.0;
+(c) run the script's dry run and review it;
+(d) run -Apply and keep the snapshot path;
+(e) run -Verify, which must exit 0;
+(f) run the live checks in the last acceptance criterion;
+(g) if any check in (f) fails, run -RestoreFrom with the snapshot, run -Verify (it should exit 1 again), and STOP (escalation trigger 7).
+Step (b) comes before (d) so that no create is ever made against a disabled control with the old presave.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status cell. Use ✅ only after the live gate passes. Before that, use the project's completed-with-escalation convention with the live gate named as pending, and set the POML's metadata status and a status-note to match.</step>
+  </steps>
+
+  <escalation>
+    <trigger>1. A form a user can create or edit from (type 2, 7 or 12) exposes one of the four columns as a VISIBLE, EDITABLE control, and the form hosts neither the RegardingResolver nor CommunicationConnections. Locking that form would remove the only form input that files a record under a root. sprk_analysis is the likely case, because the RegardingResolver manifest does not name it. STOP and report the form. The owner chooses: add the RegardingResolver to that form (a separate form change), or lock it anyway.</trigger>
+    <trigger>2. A control bound to one of the four columns hosts a custom control, or a custom control elsewhere on a form names one of the four columns as a bound parameter. An example is a retired PCF (such as the AssociationResolver, whose source is no longer in the repo) still placed on a live event form. Disabling the control would make that PCF read-only too, and leaving it would keep an input that writes a root. STOP and report the form, the control and the PCF.</trigger>
+    <trigger>3. A CREATE-capable form that hosts the RegardingResolver does not register Spaarke.SmartTodo.RegardingPreSave.onLoad. On that form, a user pick on CREATE would have no staging path that sets the submit mode. STOP. The owner chooses: register the presave there (a form-library change), or change the PCF (version bump, rebuild, deploy).</trigger>
+    <trigger>4. A form in scope is managed, or a business rule, business process flow or form library references or unlocks one of the four columns. STOP and report it. A managed layer is changed in its owning solution. An unlocking rule is product behaviour, so do not delete or edit it silently.</trigger>
+    <trigger>5. A surface other than these forms lets a user write a root column onto an EXISTING row of these tables without writing the ADR-024 pair in the same write: an editable grid exposing the columns, a business process flow step, or a code page or PCF that writes them from user input outside the shared pair builders. Record every such surface in the note, then STOP. The owner's decision names the forms only, so widening the lock is the owner's call. A surface that writes the pair with the typed lookup (the shared builders named in the background) produces a direct link and does not fire this trigger.</trigger>
+    <trigger>6. Any step appears to need a change under src/server/** (for example, refusing a hand-placed root on the server). That is option 2 of the 156 note, which the owner did not choose. STOP.</trigger>
+    <trigger>7. The live gate shows that a CREATE on a locked form saves WITHOUT its root column or stamps: through the RegardingResolver, a "+ New" from a parent's subgrid, or the SmartTodo "New task" launcher. That is a silent under-grant (the child becomes invisible to the root's principals). The main session restores from the snapshot and STOPs. Do not ship the lock until the cause is fixed.</trigger>
+    <trigger>8. The in-scope forms are not components of SpaarkeMaster (neither as systemform components nor through their table's entity component with all subcomponents). The lock would then exist in dev only. STOP and report, so the main session decides how the forms reach customers.</trigger>
+    <trigger>9. Task 156 is not merged into your base. Do not branch from 156's unmerged task branch, which may still change. STOP and report.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>scripts/Retire-CommunicationAccessPermission.ps1 (task 138) edits sprk_communication forms, but it REMOVES controls for a column it then deletes. scripts/Deploy-TodoSubgridsToElevenParentForms.ps1 ADDS subgrids to parent forms. scripts/Fix-DocumentFormParams.ps1, Fix-DocumentFormParams2.ps1 and Fix-AllStaleForms.ps1 repair PCF parameters. scripts/Set-SecureRecordOwnerRolePrivileges.ps1 verifies a role, not a form. No script or form source in the repo sets disabled on form controls, and none verifies a lock (a search of scripts/ for "disabled=" and "setDisabled" at authoring found one hit, Migrate-SecureRecordsToNamedOwnerTeam.ps1, which prints a user's isdisabled flag). No web resource in src/client/webresources or src/solutions/webresources calls setDisabled. The presave bridge already exists and is extended, not duplicated.</existing>
+    <extension>The presave is extended in place (two guarded calls and a version bump). The lock script is new because no existing script has this purpose: extending the retirement script would mix a one-off column deletion with a standing, re-runnable lock, verify and restore. The new script copies the two reference scripts' helpers and mode conventions instead of inventing new ones. The fixture folder exists only so that -SelfTest can show the transform, its refusals and its idempotence offline.</extension>
+    <cost-of-doing-nothing>A user who edits a filed to-do's Matter (or Project, or Work Assignment) lookup on the form, beside its communication regarding, places it under that root, and the job silently reverts it within 5 minutes. The child then leaves a secure root its author put it under (156 verifier round 2 item 9). Without -Verify, a later form-designer edit that re-adds or re-enables one of these controls re-opens the shape with no signal. Without the submit-mode change, a disabled control could drop a staged stamp from a CREATE, which is an under-grant. Without the guarded -RestoreFrom, a rollback after task 138's retirement run would put back a control bound to a deleted column.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">scripts/Lock-CoreAncestorStampColumnsOnForms.ps1</output>
+    <output type="test">tests/fixtures/form-lock-core-ancestor/</output>
+    <output type="code">src/client/webresources/js/sprk_todo_regarding_presave.js</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/regardingPresave.test.ts</output>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (I-1 row)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-156-stamp-freshness.md (one line)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-168-lock-root-columns-on-forms.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The task note holds the step-1 inventory: per table, which of the four columns exist; per in-scope form, its first-8 id, name, type, activation state and managed flag; each control bound to a locked column (id, hidden or visible, disabled now, custom-control host yes or no); whether the form hosts the RegardingResolver or CommunicationConnections and registers the presave; every business rule, business process flow and form library that references the columns; the editable-grid check; the SpaarkeMaster membership check; and the text-field evidence. It also states that the repo holds no form source for these tables, with the evidence.</criterion>
+    <criterion testable="true">The script's default run makes no write. Every Invoke-Dv call with -Method PATCH, POST or DELETE is inside the -Apply or -RestoreFrom branch, after all checks; the note lists those calls' line numbers. The dry run prints each control it would lock, per form. Passing two modes together throws before any read.</criterion>
+    <criterion testable="true">-SelfTest exits 0, offline (no token, no network), over the ten fixture cases in the constraints. Each case behaves exactly as stated, including the refusals (7) and (8) and the NEGATIVE case (9): sprk_regardingrecordtype, sprk_regardingcommunication, sprk_regardingrecordname and the near-miss sprk_regardingmatterstatus are unchanged.</criterion>
+    <criterion testable="true">Seeds, each one red and then restored byte-identical (SHA-256 recorded): (S1) case-sensitive matching makes fixture 4 fail; (S2) removing the custom-control-host refusal makes fixture 7 fail; (S3) removing the bound-parameter refusal makes fixture 8 fail; (S4) prefix matching (any column starting with a locked name) makes fixture 9 fail; (S5) always rewriting the disabled attribute (dropping idempotence) makes fixture 5 fail; (S6) re-serializing the document instead of editing the start tag makes fixture 1 fail; (S7) removing setSubmitMode from setLookupIfPresent makes the chosen-lookup and stamp jest tests fail; (S8) removing it from clearLookupIfPresent makes the clear jest test fail; (S9) letting a setSubmitMode throw change the return value makes the throwing-variant jest test fail; (S10) making -Verify return 0 on a read fault: run against an unreachable environment URL, it then exits 0 instead of 1; (S11) making -Verify accept a table with zero main forms: run with a deliberately wrong table filter, it then exits 0 instead of 1. Record both runs of S10 and S11 in the note.</criterion>
+    <criterion testable="true">-Verify is read-only. It exits 0 only when every control bound to an existing locked column on every in-scope form is disabled and no refusal case is present. It exits 1 naming each control or component that is not, exits 1 on any read fault, and exits 1 when a table returns zero main forms. Against spaarkedev1 before the apply, it exits 1 and names the controls the inventory found (output recorded in the note).</criterion>
+    <criterion testable="true">-Apply writes the snapshot, reads it back and parses it before its first PATCH, and refuses with exit 2, writing nothing, if it cannot. It re-reads each form immediately before its PATCH and refuses with exit 2 if the formxml changed since the scan. It refuses with exit 2, writing nothing, on a managed form, a custom-control-hosted locked control, a custom control bound to a locked column, a business rule or business process flow referencing a locked column, a form library that unlocks one, or a transform result that leaves a locked control enabled or fails the parse check. A second -Apply reports nothing to do and exits 0. (Proven offline by -SelfTest for the pure checks, and by code reading recorded in the note for the ordering; the live proof is the gate.)</criterion>
+    <criterion testable="true">-RestoreFrom refuses with exit 2, writing nothing, when the snapshot's environment URL differs from -EnvironmentUrl, and when any form's current formxml hash differs from the snapshot's written hash. Otherwise it puts each snapshot's "before" formxml back and publishes each table.</criterion>
+    <criterion testable="true">Presave jest, on a CREATE form (formType 1): setSubmitMode("always") is called on the chosen lookup, on each ancestor stamp it staged, and on each lookup it cleared, each AFTER that attribute's setValue. NEGATIVE: setSubmitMode is not called for an attribute that is not on the form (getAttribute returns null); nothing is staged and setSubmitMode is never called on an UPDATE form (formType 2) or a read-only or disabled form (3, 4); the text fields in TEXT_FIELDS get no setSubmitMode call; an attribute without a setSubmitMode function is still staged and returns true; an attribute whose setSubmitMode throws is still staged, the stamp is counted as staged, and no "not an attribute on this form" console.error is logged for it. ns.VERSION is "1.4.0".</criterion>
+    <criterion testable="true">The existing presave tests pass unchanged, except the version test, which now expects "1.4.0". This includes the tests that pin clears before sets and the console.error for a stamp whose column is not on the form.</criterion>
+    <criterion testable="true">Scope check, by git diff against the base: no file under src/server/** changed; the RegardingResolver and CommunicationConnections PCF sources are unchanged; no new web resource exists; RouteAuthorizationGuardTests.cs is unchanged and no waiver was added or removed; no plugin was added (ADR002_PluginTests green).</criterion>
+    <criterion testable="true">The I-1 row of DATAVERSE-WRITE-PATH-ARCHITECTURE.md no longer says "owner decision pending" for the typed-root shape. It names owner round 8 item 3, task 168, the -Verify check, and the accepted residual (a raw write outside the forms is repaired by the job). The row's other clauses are byte-identical to the base. The 156 note carries one "Resolved" line and is otherwise unchanged.</criterion>
+    <criterion testable="true">Full runs, with counts recorded in the note: the RegardingResolver jest suite, the BFF unit suite, NetArchTest, tests/integration/Sprk.Bff.Api.IntegrationTests and tests/integration/Spe.Integration.Tests, all green, plus -SelfTest exit 0.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev, main session, in the step-7 order), with results and first-8 ids in the task note:
+(a) -Verify exits 0 after the apply.
+(b) NEGATIVE: an existing non-admin test user opens each locked form type found in step 1 (Main and Quick Create for each table that has them) and cannot edit any of the four controls; each shows as locked.
+(c) That user creates a to-do and picks a matter through the RegardingResolver. On read-back, the row carries sprk_regardingmatter and a pair naming the matter.
+(d) That user creates a to-do and picks a communication filed under a matter. On read-back, the row carries the derived sprk_regardingmatter stamp and a pair naming the communication.
+(e) A "+ New" to-do from a Matter form's To Dos subgrid saves with sprk_regardingmatter set.
+(f) A "+ New" to-do from a Communication form's To Dos subgrid, where the communication is filed under a matter, saves with the derived sprk_regardingmatter stamp (the auto-detect path).
+(g) The SmartTodo "New task" launched from a matter saves with sprk_regardingmatter set (the defaultValues path).
+(h) Re-filing an existing to-do through the RegardingResolver (UPDATE mode) still writes the new pair and stamps.
+(i) The same checks (c) and (h) on an event form, and on a communication form where step 1 found it CREATE-capable.
+(j) A "+ New" analysis from a Matter form's Analyses tab, if step 1 found that path in use, saves with sprk_regardingmatter set.
+If any check fails: -RestoreFrom, then escalation trigger 7.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner round 8 item 3 (2026-10-03) closes task 156's verifier round 2 item 9 as "option 1 + 3". Option 2 (the server refuses a hand-placed secure root) was considered and not chosen; see the first constraint.
+
+The orchestrating brief said to change "the form definitions in source" and import the solution. At authoring, no source for these forms exists in the repo (see the background). The task follows the repo's convention for live form edits instead: a checked-in, idempotent, verifiable script, with the live -Apply as the manual gate. If the main session prefers to export these forms into source, that is a separate decision; this script's -Verify still applies afterwards.
+
+The owner's wording names "the RegardingResolver picker". On communication forms the filing input may be CommunicationConnections, which writes the pair through the same shared path; it is treated as equivalent here (goal point 2). If the owner disagrees, that is a change to escalation trigger 1.
+
+Not a route task. Task 167's waivers and RouteAuthorizationGuardTests are untouched.
+
+The TypeScript stamp mirror (156 item 13a), the AI update tool's inline re-stamp (owner round 8 item 1) and the TaskActionCore pair (owner round 8 item 2) are separate tasks and are not in this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL, and TEST-MODIFYING).</protocol>
+  </execution>
+</task>
