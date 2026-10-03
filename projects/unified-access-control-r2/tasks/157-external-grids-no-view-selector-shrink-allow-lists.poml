@@ -729,5 +729,77 @@
           capture on an unrelated surface); isolated re-run of the class 3/3, then the full suite 104/104. Contention.
         - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m31s).
     </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c2-r1" round="fix-c2-r1" base="0f719645f">
+      Base: task/uac-r2-157-c2 (0f719645f). Status stays "completed-with-escalation". The MANUAL live gate
+      (criterion 6) is still open, pending by design. One owner item is also open: item 8, the waiver of "N green
+      runs before blocking", which is not owner-confirmed.
+      Review c2 items 1 to 4: verified by the reviewer; no change.
+      ITEMS 5 and 12 (MEDIUM, self-protection overclaimed). Four actionlint-clean disarmings left the c2 fact green:
+      (a) needs: changed-surface-smoke; (b) a non-constant false step-level if on the jest and assert steps;
+      (c) ui_components='false' in the docs_only step; (d) "if (false)" in the assertion. ScanDataGridCiGate now
+      refuses:
+      - any job-level key outside name, runs-on, timeout-minutes, if, steps (DataGridGateJobKeys);
+      - any step-level if (including the "- if:" dash-line form) except always(), or failure() on the
+        actions/upload-artifact step that has no run;
+      - any change to the assertion script, which is pinned verbatim (DataGridGateAssertScript);
+      - any change to the shape of the router's docs_only run block: each of the 7 variables assigned once, in order,
+        from its own filter output; an if made only of "&amp;&amp; x != true" terms naming all 6 exclusions; value=true
+        only in the then-branch; nothing else;
+      - a change to the classify job's docs_only output source, or to the tier1 call's docs_only if.
+      The Theory grew from 10 to 31 rows (the four review seeds plus near variants). The job header comment, the
+      fact's summary and the class remarks now say: a text check that refuses the disarmings it names.
+      ITEM 6 (MEDIUM). ci-router.yml has new paths-filters external_spa ('src/client/external-spa/**') and arch_tests
+      ('tests/Spaarke.ArchTests/**'). They are used only in docs_only (assignments, exclusion terms, summary rows).
+      A PR editing external-spa or the guard file plus a task note now runs Tier 1, and with it the arch-tests job.
+      The guard pins both filters and both exclusions. The general fail-open of docs_only for other unclassified
+      paths is pre-existing and wider than this task, so it is not changed. It is recorded as note section 8 F3 and in
+      the note to ci-cd-unit-test-remediation-r1, with a fail-closed design (predicate-quantifier: 'every').
+      ITEM 7 (LOW). The INDEX.md disclosure now separates the two verdict impacts. The second is the docs_only
+      reclassification: PRs touching Spaarke.UI.Components, external-spa or the arch tests plus only docs-class files
+      now run ALL of Tier 1 and Tier 2, where before both were skipped. The record also states the 31-row
+      self-protection precisely.
+      ITEM 8 (LOW). NARROWED, NOT CLOSED. The job ran on Node 20.20.2 (the pinned major) on Windows, in a clean
+      short-path worktree (C:\wvd157r1, removed afterwards). npm install left the lockfile unchanged. Jest: 8/8 suites,
+      75/75 tests, exit 0. The assertion step printed "7 of 7 passed", exit 0. Seed J4: jest exit 1 (5 failed, 70
+      passed); restored and hash-matched. ubuntu-latest still needs a push, which is not allowed here. The waiver of
+      "N green runs before blocking" is a main-session ruling; owner round 10 records it for the owner, and the owner
+      has not confirmed it. Stated as open in INDEX.md, in the note and in the ci-cd note.
+      ITEM 9 (LOW). The root .gitignore ignores src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
+      (git check-ignore -v confirms it).
+      ITEM 10 (INFO). #1110 (word-add-in-r1, touched projects/INDEX.md) is MERGED (62277d50a). git merge-tree of
+      c2 against origin/master is clean. No open PR touches either tier file, .gitignore or the guard file. #935
+      touches INDEX.md; #909 and #894 touch ci-tier2-advisory.yml only.
+      ITEM 11 (INFO). The banner's "disclose in a note to ci-cd-unit-test-remediation-r1" is done:
+      projects/ci-cd-unit-test-remediation-r1/notes/gate-repair-disclosure-2026-10-03-uac-r2-157.md. It points to
+      the INDEX.md record, which stays the authoritative one.
+      Proof it bites, on disk (each workflow restored hash-matched and touched; actionlint exit 0 on every seed):
+      (a), (b), (c), (d), the external_spa exclusion removed, and the arch_tests filter narrowed. Each turns
+      SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate red with its own message. All 31 Theory rows produce a
+      violation.
+      Section 10/11: no new service, DI registration, endpoint, option, background job, Dataverse column or package.
+      The two router paths-filters are new classification outputs:
+      - Existing: the bff, spaarke_ai, ci_workflows and ui_components filters; none matches either path.
+      - Extension: this IS the extension, the same filter list and docs_only exclusion that c2 extended. No new job
+        or tier input.
+      - Cost of doing nothing: a PR editing external-spa App.tsx or vite.config.ts, or the guard file, plus any
+        task note is docs_only. Tier 1 is skipped and the guard's facts never run.
+      Live: none. Publish size: not applicable (no BFF or product source change). ADR-002: no plugin. ADR-003: the
+      guard fails closed (whitelists, verbatim pins), and so does the classification (more paths count as code).
+      .claude edits needed: none.
+      Runs (this branch; detail in the note, section 7, "Fix round c2-r1"):
+      - actionlint 1.7.12: exit 0 (both edited files, all of .github/workflows, and each of the six on-disk seeds).
+      - jest on Node 20.20.2: 8/8 suites, 75/75 tests; assertion "7 of 7 passed"; seed J4 exit 1 (5 failed).
+      - ExternalSpaGridViewSelectorGuardTests: 226/226 (205 + 21 new Theory rows).
+      - NetArchTest: Passed 572, Failed 0, Total 572 (551 + 21).
+      - Integration, Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Total 104.
+      - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m41s).
+      - BFF unit, under heavy machine contention from other agents (about 216 dotnet test processes, about 87% CPU):
+        full run 1 Passed 14218, Failed 89, Skipped 54, Total 14361 (45m); full run 2 Passed 14128, Failed 179,
+        Skipped 54, Total 14361 (1h03m). Of the 179, 178 were TaskCanceledException (host HTTP timeouts of 3 to 15
+        minutes) and 1 was ComposeFidelityGateHarnessTests (alternate-content-duplicate-paraid.docx). Isolated
+        re-run of the 66 failing classes: Passed 597, Failed 9, Skipped 10, Total 616 (the fidelity case passed;
+        the 9 were 3-minute timeouts). Re-run of those 6 classes: 50/50 passed. No BFF source or BFF test changed in
+        c2-r1.
+    </outcome>
   </execution>
 </task>

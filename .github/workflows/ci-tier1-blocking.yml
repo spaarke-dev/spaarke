@@ -804,9 +804,15 @@ jobs:
   #
   # SELF-PROTECTION: ExternalSpaGridViewSelectorGuardTests
   # .SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate (run blocking by
-  # arch-tests above) fails if this job, its jest call or its suite assertion,
-  # the router's classification, or the docs_only exclusion is removed, or if
-  # continue-on-error is added.
+  # arch-tests above) fails if this job, its jest call or its suite assertion
+  # (pinned verbatim) is removed or changed; if continue-on-error, `|| true`, a
+  # `needs:` or any other job-level key is added; if its job-level `if:` changes;
+  # if any step other than the report (`always()`) or the upload (`failure()`)
+  # gains an `if:`; if the input's fail-closed default changes; or if the
+  # router's classification, its docs_only variable assignments, exclusions or
+  # value=true line, or the tier1 call's docs_only condition change. It is a text
+  # check over the two files, not a YAML parse: it refuses the disarmings it
+  # names, each proven by a seeded negative control, not every conceivable one.
   # ──────────────────────────────────────────────────────────────────────────
   datagrid-external-host-gate:
     name: DataGrid External-Host Gate (jest)

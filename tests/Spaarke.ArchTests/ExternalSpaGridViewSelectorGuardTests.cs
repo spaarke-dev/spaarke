@@ -56,8 +56,10 @@ namespace Spaarke.ArchTests;
 /// That suite catches J4. Since fix round c2 (2026-10-03) it runs BLOCKING in CI: Tier 1's
 /// <c>datagrid-external-host-gate</c> job runs the DataGrid jest folder on every change to
 /// <c>Spaarke.UI.Components</c> or to a CI workflow, and
-/// <see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/> refuses the ways that job could stop
-/// blocking. The pin stays as a fast first check.
+/// <see cref="SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate"/> refuses the named ways that job could stop
+/// blocking (a text check, each disarming proven by a seeded row; not every conceivable one, see its summary). Since
+/// fix round c2-r1 the router also counts the external SPA and this test project as code, so a PR editing either plus
+/// a task note no longer skips Tier 1 and these facts. The pin stays as a fast first check.
 /// </para>
 /// <para>
 /// <b>The scan is defence in depth.</b> The rules below stay because each is zero-false-positive on the current
@@ -1693,13 +1695,113 @@ public class ExternalSpaGridViewSelectorGuardTests
     internal const string DataGridGateJob = "datagrid-external-host-gate";
 
     /// <summary>
-    /// Residual 4 closed by CI (task 157 fix round c2): the jest suite <c>DataGrid.externalHost.test.tsx</c>, the only
-    /// check that catches an added nested-scope shadow in <c>DataGrid.tsx</c> (seed J4), runs BLOCKING in Tier 1. This
-    /// reads the two workflow files as text and refuses the ways that gate could stop blocking without a test failing:
-    /// the job or its <c>jest</c> call or its suite assertion removed, <c>continue-on-error</c> or <c>|| true</c>
-    /// added, its <c>if:</c> changed, the input's fail-closed default changed, or the router no longer classifying
-    /// <c>Spaarke.UI.Components</c> (including the <c>docs_only</c> exclusion, without which a PR touching the grid plus
-    /// any <c>*.md</c> file skips Tier 1). Crude by design: line and regex checks over YAML, not a YAML parse.
+    /// The only job-level keys <c>datagrid-external-host-gate</c> may carry. Any other is refused: <c>needs:</c> on a
+    /// job that is itself skipped (e.g. <c>changed-surface-smoke</c>, which runs only when the BFF changed) skips the
+    /// gate on exactly the PRs it exists for; <c>continue-on-error:</c>, <c>strategy:</c>, <c>environment:</c> and the
+    /// rest change whether or when the gate can fail. Adding one is a reviewed change to this list.
+    /// </summary>
+    internal static readonly string[] DataGridGateJobKeys = ["name", "runs-on", "timeout-minutes", "if", "steps"];
+
+    internal const string DataGridGateAssertStep = "Assert the external-host suite ran";
+
+    /// <summary>
+    /// The suite-assertion step's script, pinned verbatim (each line compared trimmed, blank lines ignored). Any edit,
+    /// e.g. its condition rewritten to <c>if (false)</c> or an exit code changed, is refused, because a weakened
+    /// assertion lets a renamed, deleted or <c>it.skip</c>'d external-host suite pass again. Changing it is a reviewed
+    /// change to this constant.
+    /// </summary>
+    internal const string DataGridGateAssertScript = """
+        node -e '
+          const [file, suffix, min] = process.argv.slice(1);
+          const r = require(require("path").resolve(file));
+          const s = r.testResults.find(t => t.name.split(String.fromCharCode(92)).join("/").endsWith(suffix));
+          if (!s) { console.log("::error::" + suffix + " did not run"); process.exit(1); }
+          const n = s.assertionResults.length;
+          const passed = s.assertionResults.filter(a => a.status === "passed").length;
+          if (n < Number(min) || passed !== n) {
+            console.log("::error::" + suffix + ": " + passed + " of " + n + " passed (at least " + min + ", all passing, required)");
+            process.exit(1);
+          }
+          console.log(suffix + ": " + passed + " of " + n + " passed");
+        ' datagrid-jest-results.json src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx 7
+        """;
+
+    /// <summary>
+    /// The router's <c>docs_only</c> step variables, in file order. Each must be assigned exactly once, from its own
+    /// paths-filter output: <c>ui_components='false'</c> (or a later reassignment) would silently undo an exclusion.
+    /// </summary>
+    internal static readonly string[] DocsOnlyVariables = ["docs", "bff", "spaarke_ai", "ci_workflows", "ui_components", "external_spa", "arch_tests"];
+
+    /// <summary>
+    /// The surfaces <c>docs_only</c> must exclude. <c>ui_components</c> (the gated grid), <c>external_spa</c> and
+    /// <c>arch_tests</c> (the external-SPA facts of this class, and this class itself, run by Tier 1's arch-tests job)
+    /// are task 157's; the first three were already there and are pinned with them because one forced value undoes any.
+    /// </summary>
+    internal static readonly string[] DocsOnlyExclusions = ["bff", "spaarke_ai", "ci_workflows", "ui_components", "external_spa", "arch_tests"];
+
+    /// <summary>Splits a job's code (comment lines removed) into its steps, each re-indented so its keys sit at 8 spaces.</summary>
+    private static List<string> SplitSteps(string jobCode)
+    {
+        var steps = new List<string>();
+        var at = Regex.Match(jobCode, @"(?m)^    steps:[ \t]*$");
+        if (!at.Success)
+        {
+            return steps;
+        }
+
+        foreach (var chunk in Regex.Split(jobCode[(at.Index + at.Length)..], @"(?m)^      - ").Skip(1))
+        {
+            steps.Add("        " + chunk);
+        }
+
+        return steps;
+    }
+
+    /// <summary>The trimmed, non-blank lines of a <c>run: |</c> block whose key sits at 8 spaces; null when absent.</summary>
+    private static List<string>? RunBlockLines(string stepText)
+    {
+        var lines = stepText.Split('\n');
+        var start = Array.FindIndex(lines, line => Regex.IsMatch(line, @"^        run:\s*\|\s*$"));
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var result = new List<string>();
+        for (var i = start + 1; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (line.Trim().Length == 0)
+            {
+                continue;
+            }
+
+            if (line.Length - line.TrimStart().Length <= 8)
+            {
+                break;
+            }
+
+            result.Add(line.Trim());
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Residual 4 closed by CI (task 157 fix round c2, hardened in c2-r1): the jest suite
+    /// <c>DataGrid.externalHost.test.tsx</c>, the only check that catches an added nested-scope shadow in
+    /// <c>DataGrid.tsx</c> (seed J4), runs BLOCKING in Tier 1. This reads the two workflow files as text and refuses
+    /// these ways of making that gate stop blocking without a test failing: the job, its <c>jest</c> call or its suite
+    /// assertion removed; the assertion script changed at all (pinned verbatim); <c>continue-on-error</c> or
+    /// <c>|| true</c> added; any job-level key outside <see cref="DataGridGateJobKeys"/> (a <c>needs:</c> on a job
+    /// that is skipped skips the gate); its job-level <c>if:</c> changed; an <c>if:</c> on any step except
+    /// <c>always()</c>, or <c>failure()</c> on the artifact upload; the input's fail-closed default changed; or the
+    /// router no longer classifying <c>Spaarke.UI.Components</c>, the external SPA or the arch tests, its
+    /// <c>docs_only</c> step changed in shape (each variable assigned once from its own filter output, only
+    /// <c>&amp;&amp; != "true"</c> exclusions, one <c>value=true</c> inside the <c>if</c>), or the tier1 call's
+    /// <c>docs_only</c> condition changed. Crude by design: line and regex checks over YAML, not a YAML parse. It
+    /// refuses the disarmings it names, each proven by a row of <see cref="DataGridCiGateSeeds"/>, not every
+    /// conceivable one.
     /// </summary>
     internal static IReadOnlyList<string> ScanDataGridCiGate(string tier1Yaml, string routerYaml)
     {
@@ -1727,11 +1829,36 @@ public class ExternalSpaGridViewSelectorGuardTests
             violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` swallows a failure with `|| true` (or similar).");
         }
 
+        foreach (Match key in Regex.Matches(code, @"(?m)^    (?<key>[^\s:#][^:\n]*?)\s*:"))
+        {
+            if (!DataGridGateJobKeys.Contains(key.Groups["key"].Value, StringComparer.Ordinal))
+            {
+                violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` carries the job-level key `{key.Groups["key"].Value}:`; only "
+                               + string.Join(", ", DataGridGateJobKeys) + " are allowed (a `needs:` on a skipped job skips the gate).");
+            }
+        }
+
         var ifLines = Regex.Matches(code, @"(?m)^    if\s*:\s*(?<cond>.*)$");
         if (ifLines.Count != 1 || ifLines[0].Groups["cond"].Value.Trim() != "${{ inputs.ui_components_changed != 'false' }}")
         {
             violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` must carry exactly `if: ${{{{ inputs.ui_components_changed != 'false' }}}}` "
                            + "(fail closed: an empty or omitted input runs the gate).");
+        }
+
+        var steps = SplitSteps(code);
+        foreach (var step in steps)
+        {
+            var stepName = Regex.Match(step, @"(?m)^        name:\s*(?<n>.*?)\s*$").Groups["n"].Value;
+            foreach (Match stepIf in Regex.Matches(step, @"(?m)^        if\s*:\s*(?<cond>.*)$"))
+            {
+                var cond = Regex.Replace(stepIf.Groups["cond"].Value, @"\s+#.*$", string.Empty).Trim();
+                var isUpload = Regex.IsMatch(step, @"(?m)^        uses:\s*actions/upload-artifact@") && !Regex.IsMatch(step, @"(?m)^        run\s*:");
+                if (cond != "always()" && !(cond == "failure()" && isUpload))
+                {
+                    violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` step `{stepName}` carries `if: {cond}`; a step may carry only "
+                                   + "`always()`, or `failure()` on the artifact upload, or a false condition skips the gate's work while the job stays green.");
+                }
+            }
         }
 
         if (!Regex.IsMatch(code, @"(?m)^\s*working-directory:\s*src/client/shared/Spaarke\.UI\.Components\s*\n\s*run:\s*npx jest --ci\b[^\n]*\ssrc/components/DataGrid/(?:\s|$)"))
@@ -1740,11 +1867,14 @@ public class ExternalSpaGridViewSelectorGuardTests
                            + "src/client/shared/Spaarke.UI.Components.");
         }
 
-        if (!code.Contains("src/components/DataGrid/__tests__/DataGrid.externalHost.test.tsx 7", StringComparison.Ordinal)
-            || !code.Contains("process.exit(1)", StringComparison.Ordinal))
+        var assertStep = steps.FirstOrDefault(step => Regex.IsMatch(step, @"(?m)^        name:\s*" + Regex.Escape(DataGridGateAssertStep) + @"\s*$"));
+        var assertLines = assertStep is null ? null : RunBlockLines(assertStep);
+        var expectedAssert = DataGridGateAssertScript.Replace("\r\n", "\n").Split('\n').Select(line => line.Trim()).Where(line => line.Length > 0).ToList();
+        if (assertLines is null || !assertLines.SequenceEqual(expectedAssert, StringComparer.Ordinal))
         {
-            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` no longer asserts that DataGrid.externalHost.test.tsx ran with "
-                           + "at least 7 tests, all passing (a rename or deletion of the suite would leave the folder green).");
+            violations.Add($"{Tier1WorkflowFile}: `{DataGridGateJob}` step `{DataGridGateAssertStep}` must run the pinned assertion script "
+                           + "verbatim (DataGridGateAssertScript): DataGrid.externalHost.test.tsx ran, with at least 7 tests, all passing. "
+                           + "A weakened assertion lets a renamed, deleted or skipped suite pass.");
         }
 
         var input = Regex.Match(tier1, @"(?m)^      ui_components_changed:[ \t]*\n(?<body>(?:        .*\n|[ \t]*\n)*)");
@@ -1758,15 +1888,38 @@ public class ExternalSpaGridViewSelectorGuardTests
             violations.Add($"{RouterWorkflowFile}: the classify job no longer outputs `ui_components`.");
         }
 
-        if (!Regex.IsMatch(router, @"(?m)^            ui_components:\s*\n              - 'src/client/shared/Spaarke\.UI\.Components/\*\*'\s*$"))
+        if (!Regex.IsMatch(router, @"(?m)^      docs_only: \$\{\{ steps\.docs-only-flag\.outputs\.value \}\}\s*$"))
         {
-            violations.Add($"{RouterWorkflowFile}: the paths filter `ui_components` must classify 'src/client/shared/Spaarke.UI.Components/**'.");
+            violations.Add($"{RouterWorkflowFile}: the classify job's `docs_only` output must come from the docs-only-flag step.");
         }
 
-        if (!Regex.IsMatch(router, @"(?m)^\s*if \[\[ ""\$docs"" == ""true"" &&[^\n]*&& ""\$ui_components"" != ""true"" \]\]; then\s*$"))
+        foreach (var (filter, pattern) in new[]
+                 {
+                     ("ui_components", "src/client/shared/Spaarke.UI.Components/**"),
+                     ("external_spa", "src/client/external-spa/**"),
+                     ("arch_tests", "tests/Spaarke.ArchTests/**"),
+                 })
         {
-            violations.Add($"{RouterWorkflowFile}: docs_only must exclude ui_components; otherwise a PR touching the shared grid plus "
-                           + "any *.md file is docs_only and skips Tier 1, gate included.");
+            if (!Regex.IsMatch(router, @"(?m)^            " + filter + @":\s*\n              - '" + Regex.Escape(pattern) + @"'\s*$"))
+            {
+                violations.Add($"{RouterWorkflowFile}: the paths filter `{filter}` must classify '{pattern}'.");
+            }
+        }
+
+        var docsOnlyStep = Regex.Match(router, @"(?m)^      - name: Derive docs_only flag[ \t]*\n(?<body>(?:(?:        .*|[ \t]*)\n)*)");
+        var docsOnlyLines = docsOnlyStep.Success ? RunBlockLines(docsOnlyStep.Groups["body"].Value) : null;
+        var docsOnlyProblem = DocsOnlyStepProblem(docsOnlyLines);
+        if (docsOnlyProblem is not null)
+        {
+            violations.Add($"{RouterWorkflowFile}: the docs_only step {docsOnlyProblem}. Otherwise a PR touching the shared grid, the "
+                           + "external SPA or the arch tests plus any *.md file or task note is docs_only and skips Tier 1, gate included.");
+        }
+
+        var tier1Call = Regex.Match(router, @"(?m)^  tier1:[ \t]*\n(?<body>(?:(?:[ \t]*#.*|[ \t]*|    .*)\n)*)");
+        var tier1CallIfs = tier1Call.Success ? Regex.Matches(tier1Call.Groups["body"].Value, @"(?m)^    if\s*:\s*(?<cond>.*)$") : null;
+        if (tier1CallIfs is null || tier1CallIfs.Count != 1 || tier1CallIfs[0].Groups["cond"].Value.Trim() != "needs.classify.outputs.docs_only != 'true'")
+        {
+            violations.Add($"{RouterWorkflowFile}: the tier1 call must carry exactly `if: needs.classify.outputs.docs_only != 'true'`.");
         }
 
         if (!Regex.IsMatch(router, @"(?m)^      ui_components_changed: \$\{\{ \(needs\.classify\.outputs\.ui_components == 'true' \|\| needs\.classify\.outputs\.ci_workflows == 'true'\) && 'true' \|\| 'false' \}\}\s*$"))
@@ -1776,6 +1929,62 @@ public class ExternalSpaGridViewSelectorGuardTests
         }
 
         return violations;
+    }
+
+    /// <summary>
+    /// The docs_only run block, shape-pinned: each of <see cref="DocsOnlyVariables"/> assigned once, in order, from its
+    /// own filter output; then an <c>if [[ "$docs" == "true" &amp;&amp; … ]]</c> made only of <c>&amp;&amp; "$x" != "true"</c>
+    /// terms and naming every <see cref="DocsOnlyExclusions"/>; <c>value=true</c> and a plain notice in the then-branch;
+    /// <c>value=false</c> in the else-branch; nothing else. Returns the problem, or null.
+    /// </summary>
+    private static string? DocsOnlyStepProblem(List<string>? lines)
+    {
+        if (lines is null)
+        {
+            return "(`Derive docs_only flag`, a `run: |` block) is missing";
+        }
+
+        var expectedCount = DocsOnlyVariables.Length + 6;
+        if (lines.Count != expectedCount)
+        {
+            return $"must be exactly {expectedCount} lines (assignments, if, value=true, notice, else, value=false, fi); it has {lines.Count}";
+        }
+
+        for (var i = 0; i < DocsOnlyVariables.Length; i++)
+        {
+            var expected = $"{DocsOnlyVariables[i]}='${{{{ steps.filter.outputs.{DocsOnlyVariables[i]} }}}}'";
+            if (!string.Equals(lines[i], expected, StringComparison.Ordinal))
+            {
+                return $"line {i + 1} must be `{expected}`, not `{lines[i]}`";
+            }
+        }
+
+        var ifLine = lines[DocsOnlyVariables.Length];
+        var ifMatch = Regex.Match(ifLine, @"^if \[\[ ""\$docs"" == ""true""(?<terms>(?: && ""\$[a-z_]+"" != ""true"")+) \]\]; then$");
+        if (!ifMatch.Success)
+        {
+            return $"condition must be `if [[ \"$docs\" == \"true\"` followed only by `&& \"$x\" != \"true\"` terms, not `{ifLine}`";
+        }
+
+        foreach (var exclusion in DocsOnlyExclusions)
+        {
+            if (!ifMatch.Groups["terms"].Value.Contains($" && \"${exclusion}\" != \"true\"", StringComparison.Ordinal))
+            {
+                return $"condition must exclude `{exclusion}`";
+            }
+        }
+
+        var rest = lines.Skip(DocsOnlyVariables.Length + 1).ToList();
+        if (rest[0] != "echo \"value=true\" >> \"$GITHUB_OUTPUT\""
+            || !Regex.IsMatch(rest[1], @"^echo ""::notice::[^""$`]*""$")
+            || rest[2] != "else"
+            || rest[3] != "echo \"value=false\" >> \"$GITHUB_OUTPUT\""
+            || rest[4] != "fi")
+        {
+            return "must write value=true only inside the if, value=false only in the else, and nothing else";
+        }
+
+        return null;
     }
 
     [Fact(DisplayName = "The shared DataGrid's external-host jest suite runs as a blocking Tier 1 gate (task 157 residual 4)")]
@@ -1796,7 +2005,8 @@ public class ExternalSpaGridViewSelectorGuardTests
 
     public static TheoryData<string, string, string> DataGridCiGateSeeds() => new()
     {
-        // (name, find, replace) applied to the REAL tier1 or router text; each must produce a violation.
+        // (name, find, replace) applied to the REAL tier1 or router text; each must produce a violation. The fact above
+        // proves the real text scans clean, so any violation here is the seed's.
         { "tier1:job-renamed", "  datagrid-external-host-gate:\n", "  datagrid-gate-renamed:\n" },
         { "tier1:continue-on-error", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    continue-on-error: true\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
         { "tier1:or-true", "src/components/DataGrid/\n", "src/components/DataGrid/ || true\n" },
@@ -1804,9 +2014,32 @@ public class ExternalSpaGridViewSelectorGuardTests
         { "tier1:jest-narrowed", "--outputFile=datagrid-jest-results.json src/components/DataGrid/\n", "--outputFile=datagrid-jest-results.json src/components/DataGrid/chips/\n" },
         { "tier1:assert-dropped", "DataGrid.externalHost.test.tsx 7", "DataGrid.externalHost.test.tsx 0" },
         { "tier1:input-default", "        type: string\n        default: 'true'\n  workflow_dispatch:", "        type: string\n        default: 'false'\n  workflow_dispatch:" },
+        // Fix round c2-r1: the four disarmings review c2 seeded past the c2 guard, plus their near variants.
+        { "tier1:needs-skipped-job", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    needs: changed-surface-smoke\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
+        { "tier1:environment-added", "    timeout-minutes: 15\n    if: ${{ inputs.ui_components_changed != 'false' }}\n", "    timeout-minutes: 15\n    environment: manual-approval\n    if: ${{ inputs.ui_components_changed != 'false' }}\n" },
+        { "tier1:step-if-jest", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n        if: github.event_name == 'never'\n" },
+        { "tier1:step-if-assert", "      - name: Assert the external-host suite ran\n", "      - name: Assert the external-host suite ran\n        if: github.event_name == 'never'\n" },
+        { "tier1:step-if-install", "      - name: Install Spaarke.UI.Components deps\n", "      - name: Install Spaarke.UI.Components deps\n        if: github.event_name == 'never'\n" },
+        { "tier1:step-if-on-dash-line", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n", "      - if: github.event_name == 'never'\n        name: DataGrid jest folder (external-host rule, merge-blocking)\n" },
+        { "tier1:failure-on-jest", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n", "      - name: DataGrid jest folder (external-host rule, merge-blocking)\n        if: failure()\n" },
+        { "tier1:assert-condition", "if (n < Number(min) || passed !== n) {", "if (false) {" },
+        { "tier1:assert-exit-zero", "\" did not run\"); process.exit(1); }", "\" did not run\"); process.exit(0); }" },
+        { "tier1:assert-line-added", "            const n = s.assertionResults.length;\n", "            process.exit(0);\n            const n = s.assertionResults.length;\n" },
         { "router:filter-dropped", "              - 'src/client/shared/Spaarke.UI.Components/**'\n", "              - 'src/client/shared/Spaarke.UI.Components/README.md'\n" },
-        { "router:docs-only", " && \"$ui_components\" != \"true\" ]]", " ]]" },
+        { "router:docs-only", " && \"$ui_components\" != \"true\"", "" },
         { "router:not-passed", "      ui_components_changed: ${{ (needs.classify.outputs.ui_components == 'true' || needs.classify.outputs.ci_workflows == 'true') && 'true' || 'false' }}\n", "      ui_components_changed: 'false'\n" },
+        { "router:docs-only-forced", "          ui_components='${{ steps.filter.outputs.ui_components }}'\n", "          ui_components='false'\n" },
+        { "router:docs-only-reassigned", "          arch_tests='${{ steps.filter.outputs.arch_tests }}'\n", "          arch_tests='${{ steps.filter.outputs.arch_tests }}'\n          ui_components=false\n" },
+        { "router:docs-only-or", "&& \"$arch_tests\" != \"true\" ]]; then", "&& \"$arch_tests\" != \"true\" || \"$docs\" == \"true\" ]]; then" },
+        { "router:value-true-unconditional", "            echo \"value=false\" >> \"$GITHUB_OUTPUT\"\n          fi\n", "            echo \"value=false\" >> \"$GITHUB_OUTPUT\"\n          fi\n          echo \"value=true\" >> \"$GITHUB_OUTPUT\"\n" },
+        { "router:docs-only-output", "      docs_only: ${{ steps.docs-only-flag.outputs.value }}\n", "      docs_only: 'true'\n" },
+        { "router:tier1-call-if", "    if: needs.classify.outputs.docs_only != 'true'\n    uses: ./.github/workflows/ci-tier1-blocking.yml\n", "    if: false\n    uses: ./.github/workflows/ci-tier1-blocking.yml\n" },
+        // Fix round c2-r1, review item 6: the external SPA and the arch tests are classified, and docs_only excludes them.
+        { "router:external-spa-filter-dropped", "              - 'src/client/external-spa/**'\n", "              - 'src/client/external-spa/README.md'\n" },
+        { "router:arch-tests-filter-dropped", "              - 'tests/Spaarke.ArchTests/**'\n", "              - 'tests/Spaarke.ArchTests/README.md'\n" },
+        { "router:external-spa-docs-only", " && \"$external_spa\" != \"true\"", "" },
+        { "router:arch-tests-docs-only", " && \"$arch_tests\" != \"true\"", "" },
+        { "router:external-spa-forced", "          external_spa='${{ steps.filter.outputs.external_spa }}'\n", "          external_spa='false'\n" },
     };
 
     [Theory(DisplayName = "Negative control: each way of disarming the DataGrid CI gate is refused")]

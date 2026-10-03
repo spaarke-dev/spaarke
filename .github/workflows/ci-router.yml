@@ -171,15 +171,29 @@ jobs:
             # in docs_only below.
             ui_components:
               - 'src/client/shared/Spaarke.UI.Components/**'
+            # Added 2026-10-03 by unified-access-control-r2 task 157 fix round c2-r1
+            # (same GATE REPAIR): code that Tier 1's blocking arch-tests job guards.
+            # The external SPA's grid mounts / provider / define are pinned by
+            # ExternalSpaGridViewSelectorGuardTests, and tests/Spaarke.ArchTests IS
+            # that guard. Neither was a classified surface, so a PR editing one plus
+            # any task note read as docs_only and skipped Tier 1. Used only by
+            # docs_only below.
+            external_spa:
+              - 'src/client/external-spa/**'
+            arch_tests:
+              - 'tests/Spaarke.ArchTests/**'
 
       - name: Derive docs_only flag
         id: docs-only-flag
         # docs_only = true iff docs changed AND no production-code surface
-        # changed (no BFF, no SpaarkeAi, no CI workflows, no Spaarke.UI.Components).
+        # changed (no BFF, no SpaarkeAi, no CI workflows, no Spaarke.UI.Components,
+        # no external SPA, no arch tests).
         # This is the only classification that allows the entire Tier 1/2 stack
         # to be skipped. ui_components joined the list 2026-10-03 (task 157):
         # without it, a PR editing DataGrid.tsx plus any `*.md` file read as
-        # docs_only and skipped Tier 1's DataGrid gate.
+        # docs_only and skipped Tier 1's DataGrid gate. external_spa and
+        # arch_tests joined the same day (fix round c2-r1) for the same reason:
+        # their guard is Tier 1's arch-tests job.
         shell: bash
         run: |
           docs='${{ steps.filter.outputs.docs }}'
@@ -187,7 +201,9 @@ jobs:
           spaarke_ai='${{ steps.filter.outputs.spaarke_ai }}'
           ci_workflows='${{ steps.filter.outputs.ci_workflows }}'
           ui_components='${{ steps.filter.outputs.ui_components }}'
-          if [[ "$docs" == "true" && "$bff" != "true" && "$spaarke_ai" != "true" && "$ci_workflows" != "true" && "$ui_components" != "true" ]]; then
+          external_spa='${{ steps.filter.outputs.external_spa }}'
+          arch_tests='${{ steps.filter.outputs.arch_tests }}'
+          if [[ "$docs" == "true" && "$bff" != "true" && "$spaarke_ai" != "true" && "$ci_workflows" != "true" && "$ui_components" != "true" && "$external_spa" != "true" && "$arch_tests" != "true" ]]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Docs-only change detected — Tier 1 and Tier 2 will be skipped; router-result will still pass."
           else
@@ -207,6 +223,8 @@ jobs:
             echo "| Docs (docs/, .claude/, *.md, etc.) | ${{ steps.filter.outputs.docs }} |"
             echo "| CI workflows (.github/workflows/) | ${{ steps.filter.outputs.ci_workflows }} |"
             echo "| UI components (shared/Spaarke.UI.Components) | ${{ steps.filter.outputs.ui_components }} |"
+            echo "| External SPA (client/external-spa) | ${{ steps.filter.outputs.external_spa }} |"
+            echo "| Arch tests (tests/Spaarke.ArchTests) | ${{ steps.filter.outputs.arch_tests }} |"
             echo ""
             echo "**docs_only**: ${{ steps.docs-only-flag.outputs.value }}"
           } >> "$GITHUB_STEP_SUMMARY"
