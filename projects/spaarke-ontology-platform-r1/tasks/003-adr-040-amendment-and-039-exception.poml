@@ -4,7 +4,7 @@
     <title>ADR-040 amendment and ADR-039 exception (D-9)</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architectural decision record change; CLAUDE.md section 6.5 forbids silent compliance and this unblocks the evaluator.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -86,6 +86,7 @@
     <criterion testable="true">The amendment is merged before or alongside task 031 (the evaluator). Confirm the sequencing is reflected in TASK-INDEX.md.</criterion>
   </acceptance-criteria>
 
+  <completion date="2026-10-03">Amendment applied to both ADR-040 copies (sibling table, the named link sprk_decisionrecord.sprk_gatesessionid, 2 new MUSTs, 2 new MUST NOTs, explicit does-NOT-do list); .claude/CHANGELOG.md entry added; ADR-039 NOT amended (exception stands in spec.md section 6). Escalation trigger evaluated and did not fire: SessionGate has no authority/policy-version/evidence/confirmer field, and sprk_emailreviewlog already ships as a durable per-decision authority record, so no consumer depended on SessionGate being the only record of a decision. Deviation: step 5 found the ADR-039 precedent citation pointed at a nonexistent path and corrected it to projects/spaarke-notification-spine-r1/notes/041-rule-store-decision.md in spec.md and design.md. Record: notes/003-adr-040-amendment.md</completion>
   <notes>spec.md section 6 and section 9 (D-9). design.md section 8.0c. This task is parallel-safe false because sub-agents cannot write .claude/ paths; that boundary is working correctly, not a bug.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>

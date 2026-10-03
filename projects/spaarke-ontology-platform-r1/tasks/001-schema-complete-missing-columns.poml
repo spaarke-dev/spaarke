@@ -4,7 +4,7 @@
     <title>Create the four missing Dataverse columns</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse schema change; logical names are immutable, so an error here is delete-and-recreate after code references exist.</rigor-reason>
     <model-tier>sonnet</model-tier>

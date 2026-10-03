@@ -338,3 +338,78 @@ one person means the first Policy authored exercises the real role.
 
 All five are **`UserOwned`**, so the depth-4 scoping in §3 is meaningful — an organization-owned table would
 make it inert. All five have **`IsValidForAdvancedFind = true`**. Both alternate keys remain **Active**.
+
+---
+
+## 8. Task 002 re-verification after the column adds (2026-10-03) — **ESCALATION**
+
+Re-run after task 001 added `sprk_action` / `sprk_actioncode` to `sprk_decisionrecord` and
+`sprk_direction` / `sprk_disposition` / `sprk_responseduedate` to `sprk_servicerequest`.
+**72 Spaarke role records across 6 business units** enumerated; per-BU-copy shape is the normal
+inherited-shell artifact recorded in section 7.3 (root-BU copy carries the privileges, the five child
+copies report 0) and the `Spaarke Core User` control reproduces it exactly (744 on root, 0 on children).
+
+### 8.1 The three ontology roles — as designed ✅
+
+| Role | Ontology privileges on the root-BU copy |
+|---|---|
+| `Spaarke Console User` | 14 — Read on all five, `Write`/`Append`/`AppendTo` on `sprk_signal`, `Create` on `sprk_decisionrecord`. **No** Create on Signal, **no** Write or Delete on `sprk_decisionrecord`, **no** Write on `sprk_policyversion` |
+| `Spaarke Ontology Administrator` | 25 — Create/Write/Delete across Policy, PolicyVersion, BudgetRevision; Delete + Assign on Signal. **No** Create on Signal, **no** Write or Delete on `sprk_decisionrecord`, **no** Write on `sprk_policyversion` |
+| `Spaarke Ontology Service` | 15 — `prvCreatesprk_Signal` ✅, `prvCreatesprk_DecisionRecord` ✅, `prvAssignsprk_Signal` ✅ (the three task 030 needs), Read on all five, Write on Signal only |
+
+So the **four guarantee-bearing privileges behave as designed at the role level**:
+`prvCreatesprk_Signal` appears only on the Service role; `prvWritesprk_DecisionRecord`,
+`prvDeletesprk_DecisionRecord` and `prvWritesprk_PolicyVersion` appear on **none** of the three.
+
+`prvAssignsprk_Signal` is present on the Service role, confirming the **FR-14 owner-from-matter
+requirement in task 030 needs no privilege change** — as section 7.4 predicted.
+
+### 8.2 The union check — and the finding it surfaced 🔴
+
+Every role in the environment holding any of the four:
+
+| Privilege | Holders (all root BU) |
+|---|---|
+| `prvWritesprk_DecisionRecord` | `Service Writer`, `System Administrator`, `System Customizer` |
+| `prvDeletesprk_DecisionRecord` | `Service Deleter`, `System Administrator`, `System Customizer` |
+| `prvWritesprk_PolicyVersion` | `Service Writer`, `System Administrator`, `System Customizer` |
+| `prvCreatesprk_Signal` | `Service Writer`, `System Administrator`, `System Customizer`, **`Spaarke Ontology Service`** |
+
+No *human-facing Spaarke* role holds Write or Delete on either ledger. `Service Writer` (14 members) and
+`Service Deleter` (8 members) are **exclusively Microsoft first-party application identities** —
+Power Pages managed identities, AI Builder, `DV-MetadataService`, `AppDeploymentOrchestration`,
+`PowerApps Checker` — verified by listing membership, and **not to be stripped** (section 7.5, and the
+standing constraint: stripping them breaks Power Pages, AI Builder and solution deployment).
+
+**But `System Administrator` is not only held by humans.** Its 17 members include **14 application
+users**, among them **`SDAP-BFF-SPE-API`, `# mi-bff-api-dev` and `# spaarke-bff-api-prod`** — Spaarke's
+own BFF identities. And:
+
+> **`Spaarke Ontology Service` is assigned to exactly one principal: `SDAP-BFF-SPE-API` — which is
+> itself a `System Administrator`.**
+
+Dataverse privileges are **additive across roles with maximum depth and there is no deny**. So the
+principal that will write Signals and Decision Records holds `prvWritesprk_DecisionRecord` and
+`prvDeletesprk_DecisionRecord` **through its sysadmin membership**, and the Create-only shape of
+`Spaarke Ontology Service` constrains nothing about it. The role is, for this principal, decorative.
+
+**What is and is not true after this check:**
+
+- ✅ **True**: no human using the Console or Administrator roles can update or delete a Decision Record.
+- ✅ **True**: `sprk_policyversion` has no Write privilege on any Spaarke role.
+- 🔴 **NOT true**: *"append-only is enforced by privilege"* for the **writer**. For `SDAP-BFF-SPE-API` the
+  only thing preventing an update is that the code does not issue one. That is a code-discipline
+  guarantee, not a platform guarantee — and ADR-002 forbids the plugin that would otherwise enforce it.
+
+This matters because the defensibility claim rests on it: *"the Decision Record is append-only"* is a
+statement about what the **system** cannot do, and §0.3 binds this project to testing what its message
+claims. Owner decision required — see `notes/002-escalation-append-only-writer-principal.md`.
+
+### 8.3 Criterion 4 (the negative test) — not yet executable
+
+The POML requires attempting an update as a non-admin holding only the Spaarke roles and confirming
+refusal. Not executable today: `sprk_decisionrecord` has **0 rows**, and the only non-admin principals
+hold `Spaarke Console User`, which has no Write privilege to exercise against a row that does not exist.
+**Task 041 already owns this test** (*"Test as a real non-admin"*), after task 004/005 seed data. Recorded
+here rather than filed as a new defer item, because an existing task covers it.
+

@@ -4,7 +4,7 @@
     <title>Re-verify privileges after the column adds</title>
     <phase>0 Foundations</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Verification task over a security guarantee; no code, but the guarantee is what everything else rests on.</rigor-reason>
     <model-tier>sonnet</model-tier>
