@@ -250,3 +250,21 @@ The first run in write mode (23:47:11, correlation `a1621aa3cad941dab0e7dc73eef1
 - **Next:** ship the fix, deploy, then re-run G-6 (run, run again, a third run changes nothing). Writes stay enabled
   meanwhile: each 5-minute run re-fails the same seven creates harmlessly and writes nothing else.
 
+## G-6 — re-run after the fix: PASS (2026-10-03 02:26Z)
+
+#1097 merged as `818840ac6` and was deployed from a fresh worktree (`C:\wt3f`; its tree is identical to the merge
+commit). Package 45.66 MB, SHA-256 verified, `/healthz` 200. Writes were still enabled.
+
+| Run | Trigger | Heartbeat |
+|---|---|---|
+| 1 | ManualAdmin 02:26:03 | `status=ok mode=write verified=1 createdAndLinked=7 flagAlreadyPresent=3 failed=0` (testuser1 now verified; 7 contacts created and linked) |
+| 2 | ManualAdmin 02:26:45 | `status=ok mode=write verified=8 createdAndLinked=0 flagAlreadyPresent=3 failed=0`: **changes nothing** |
+| 3 | Scheduled 02:30:01 | identical to run 2: **changes nothing** |
+
+**Read back (Dataverse, read-only):** 9 of 11 interactive systemusers now carry `sprk_primarycontact`, exactly the
+§6 forecast. The two without a contact are the flagged collisions (eyal.iffergan, and the hotmail guest), which wait
+for an operator. Ralph's existing link is kept and flagged. The three flags sit on the view "Contacts with Identity
+Collisions". `IdentityLink__Reconciliation__WritesEnabled=true` stays set (owner-approved, round 4 item 6).
+
+**Remaining for 141:** G-7/G-8 (manual, `test.user@demo.spaarke.com` and a non-admin dev user).
+
