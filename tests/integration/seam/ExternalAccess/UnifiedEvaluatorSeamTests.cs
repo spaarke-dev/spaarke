@@ -1724,8 +1724,32 @@ public sealed class UnifiedEvaluatorSeamTests
         {
         }
 
+        /// <summary>
+        /// Adds an active entry. Its SUBJECT column is set from <paramref name="requiredSubjectSubstring"/>
+        /// (<c>"sprk_subjectcontact eq {id}"</c> / <c>"sprk_subjectorganization eq {id}"</c>) — a real row carries the
+        /// subject the query matched it on, and since task 143 the reader treats a row with no subject as malformed.
+        /// </summary>
         public void AddEntry(string requiredSubjectSubstring, NoAccessEntryRow row)
-            => _entries.Add(new ActiveEntry(requiredSubjectSubstring, row));
+        {
+            var parts = requiredSubjectSubstring.Split(" eq ", 2);
+            if (parts.Length == 2 && Guid.TryParse(parts[1], out var subjectId))
+            {
+                switch (parts[0])
+                {
+                    case "sprk_subjectcontact":
+                        row._sprk_subjectcontact_value ??= subjectId;
+                        break;
+                    case "sprk_subjectorganization":
+                        row._sprk_subjectorganization_value ??= subjectId;
+                        break;
+                    case "sprk_subjectsystemuser":
+                        row._sprk_subjectsystemuser_value ??= subjectId;
+                        break;
+                }
+            }
+
+            _entries.Add(new ActiveEntry(requiredSubjectSubstring, row));
+        }
 
         internal override Task<List<NoAccessEntryRow>?> QueryChunkAsync(
             string subjectFilter, string objectFilter, CancellationToken ct)

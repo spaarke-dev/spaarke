@@ -512,6 +512,12 @@ public sealed class GrantCacheRoundTripSeamTests
                     It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
                     It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(NoAccessListResult.Empty);
+            // Task 143: the systemuser plane asks through the three-subject overload; nobody is walled here either.
+            denyList
+                .Setup(d => d.GetDeniedRecordsAsync(
+                    It.IsAny<NoAccessSubjects>(),
+                    It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(NoAccessListResult.Empty);
 
             Composer = new AccessibleRecordSetService(
                 membership.Object, Participations, standing.Object, denyList.Object,

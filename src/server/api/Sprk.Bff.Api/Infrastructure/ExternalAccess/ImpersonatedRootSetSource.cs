@@ -217,14 +217,40 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests wrote
     /// under; when they do not, the removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
     /// </remarks>
-    internal static async Task InvalidateAsync(
+    internal static Task InvalidateAsync(
         ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType, ILogger logger)
+        => InvalidateForTenantAsync(cache, CacheTenantFor(caller), systemUserId, entityType, logger);
+
+    /// <summary>
+    /// The tenant namespace a systemuser's OWN reads write their set under, when there is no caller to take it from
+    /// (task 143: the No Access reconciliation job). Systemusers sign in through the deployment's workforce tenant, so
+    /// that is <c>AzureAd:TenantId</c> (legacy <c>TENANT_ID</c>) — the value <see cref="CacheTenantFor"/> reads from
+    /// their tokens' <c>tid</c>. <c>null</c> when neither is configured: a caller must then NOT fall back to
+    /// <see cref="CacheTenantFor"/>(<c>null</c>) = "anonymous", a key no user's read ever wrote.
+    /// </summary>
+    internal static string? DeploymentCacheTenant(IConfiguration configuration)
+    {
+        var tenant = configuration["AzureAd:TenantId"];
+        if (string.IsNullOrWhiteSpace(tenant))
+        {
+            tenant = configuration["TENANT_ID"];
+        }
+
+        return string.IsNullOrWhiteSpace(tenant) ? null : tenant.Trim();
+    }
+
+    /// <summary>
+    /// <see cref="InvalidateAsync"/> with the tenant namespace named explicitly (task 143: the job, which has no
+    /// caller). Same non-fatal contract.
+    /// </summary>
+    internal static async Task InvalidateForTenantAsync(
+        ITenantCache cache, string tenantId, Guid systemUserId, string entityType, ILogger logger)
     {
         var cacheId = CacheId(systemUserId, entityType);
         try
         {
             await cache.RemoveAsync(
-                CacheTenantFor(caller), CacheResource, cacheId, CacheVersion, ct: CancellationToken.None).ConfigureAwait(false);
+                tenantId, CacheResource, cacheId, CacheVersion, ct: CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

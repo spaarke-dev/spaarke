@@ -734,6 +734,23 @@ public class OrganizationMembershipReadTests
                 DenyingEntryIds = denied.ToDictionary(id => id, _ => (IReadOnlyList<Guid>)Array.Empty<Guid>()),
             });
         }
+
+        /// <summary>
+        /// Task 143: the three-subject overload the systemuser plane calls. The entries here are organization-subject,
+        /// so a denial is reported with that subject kind — what the systemuser plane splits on (owner N3).
+        /// </summary>
+        public async Task<NoAccessListResult> GetDeniedRecordsAsync(
+            NoAccessSubjects subjects, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ct = default)
+        {
+            var result = await GetDeniedRecordsAsync(
+                subjects.ContactIds.FirstOrDefault(), subjects.OrganizationIds, candidates, ct);
+            return new NoAccessListResult
+            {
+                DeniedRecordIds = result.DeniedRecordIds,
+                DenyingEntryIds = result.DenyingEntryIds,
+                DenyingSubjectKinds = result.DeniedRecordIds.ToDictionary(id => id, _ => NoAccessSubjectKinds.Organization),
+            };
+        }
     }
 
     private sealed class StaticTokenCredential : TokenCredential

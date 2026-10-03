@@ -185,7 +185,21 @@ public class ExternalParticipationService
     /// disjunction is explicit.</para>
     /// </remarks>
     internal static string BuildOrganizationMembershipFilter(Guid contactId)
-        => $"_sprk_contact_value eq {contactId} and (statecode eq 0 or statecode eq null)";
+        => $"_sprk_contact_value eq {contactId} and {WallMembershipStateClause}";
+
+    /// <summary>
+    /// The SAME wall-set predicate keyed the other way — every ACTIVE membership OF an organization (task 143: the
+    /// enforcer expands an organization-subject No Access entry to its members). It shares
+    /// <see cref="WallMembershipStateClause"/>, so the wall can never be bounded differently in the two directions.
+    /// </summary>
+    internal static string BuildOrganizationMembershipFilterForOrganization(Guid organizationId)
+        => $"_sprk_organization_value eq {organizationId} and {WallMembershipStateClause}";
+
+    /// <summary>
+    /// The ONLY bound on a WALL membership: its own <c>statecode</c> (owner D-2 part 2 / D-10) — never a date. Shared by
+    /// both junction filters.
+    /// </summary>
+    internal const string WallMembershipStateClause = "(statecode eq 0 or statecode eq null)";
 
     /// <summary>
     /// Columns of the junction read: the organization, BOTH date bounds (task 109 / D-2 + D-10), and the
@@ -808,6 +822,95 @@ public class ExternalParticipationService
         }
 
         return result;
+    }
+
+    // ── Reverse reads for the No Access enforcer (task 143) ──────────────────────────────────────
+
+    /// <summary>
+    /// The SECURE root records of <paramref name="entityType"/> that reference <paramref name="organizationId"/> in
+    /// ANY org-typed lookup — the record side of an organization-object No Access entry, read in reverse (task 143).
+    /// </summary>
+    /// <remarks>
+    /// <para>The same column registry as <see cref="GetReferencedOrganizationIdsAsync"/> (ANY reference, the B-10
+    /// over-match), so "which records does this wall cover" and "which walls cover this record" cannot disagree.</para>
+    /// <para><b>Throws on any fault</b> — the enforcer records a failed run, never "nothing covered". At most
+    /// <paramref name="maxRows"/> ids; one more row than that reports <c>Truncated</c>, never a silent prefix.</para>
+    /// <para>An entity type with no org-typed lookups covers nothing: a static schema fact, not a fault.</para>
+    /// </remarks>
+    public virtual async Task<(IReadOnlyList<Guid> RecordIds, bool Truncated)> FindSecureRootsReferencingOrganizationAsync(
+        string entityType, Guid organizationId, int maxRows, CancellationToken ct = default)
+    {
+        if (organizationId == Guid.Empty ||
+            !RootFlagSources.TryGetValue(entityType ?? string.Empty, out var source) ||
+            !OrganizationLookupAttributes.TryGetValue(entityType ?? string.Empty, out var orgAttributes) ||
+            orgAttributes.Count == 0)
+        {
+            return (Array.Empty<Guid>(), false);
+        }
+
+        var token = await GetAppOnlyTokenAsync(ct);
+        var apiUrl = GetDataverseApiUrl();
+        var orgFilter = string.Join(" or ", orgAttributes.Select(a => $"_{a}_value eq {organizationId}"));
+        var query = $"{apiUrl}/{source.Collection}" +
+                    $"?$filter=sprk_issecure eq true and ({orgFilter})" +
+                    $"&$select={source.IdAttribute}&$top={maxRows + 1}";
+
+        var ids = await ReadIdColumnAsync(query, token, source.IdAttribute, ct);
+        return ids.Count > maxRows ? (ids.Take(maxRows).ToList(), true) : (ids, false);
+    }
+
+    /// <summary>
+    /// The contacts an organization-subject No Access entry walls off (task 143): every contact with an ACTIVE
+    /// <c>sprk_contactorganization</c> row for <paramref name="organizationId"/> — bounded on <c>statecode</c> ONLY,
+    /// the same WALL set the deny veto reads (owner D-2 part 2 / D-10), never the date-bounded conferring set.
+    /// </summary>
+    /// <remarks>Throws on any fault; one row beyond <paramref name="maxRows"/> reports <c>Truncated</c>.</remarks>
+    public virtual async Task<(IReadOnlyList<Guid> ContactIds, bool Truncated)> FindWallMemberContactsAsync(
+        Guid organizationId, int maxRows, CancellationToken ct = default)
+    {
+        if (organizationId == Guid.Empty)
+        {
+            return (Array.Empty<Guid>(), false);
+        }
+
+        var token = await GetAppOnlyTokenAsync(ct);
+        var apiUrl = GetDataverseApiUrl();
+        var query = $"{apiUrl}/sprk_contactorganizations" +
+                    $"?$filter={BuildOrganizationMembershipFilterForOrganization(organizationId)}" +
+                    $"&$select=_sprk_contact_value&$top={maxRows + 1}";
+
+        var rows = await ReadIdColumnAsync(query, token, "_sprk_contact_value", ct);
+        var truncated = rows.Count > maxRows;
+        return ((truncated ? rows.Take(maxRows) : rows).Distinct().ToList(), truncated);
+    }
+
+    /// <summary>One GET; the named GUID column of every row. Any non-success status throws.</summary>
+    private async Task<List<Guid>> ReadIdColumnAsync(string query, string token, string column, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, query);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        request.Headers.Add("OData-MaxVersion", "4.0");
+        request.Headers.Add("OData-Version", "4.0");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _httpClient.SendAsync(request, ct);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+        var ids = new List<Guid>();
+        if (doc.RootElement.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var row in value.EnumerateArray())
+            {
+                if (row.TryGetProperty(column, out var cell) && cell.ValueKind == JsonValueKind.String &&
+                    Guid.TryParse(cell.GetString(), out var id) && id != Guid.Empty)
+                {
+                    ids.Add(id);
+                }
+            }
+        }
+
+        return ids;
     }
 
     /// <summary>Projection of the org-typed lookup columns (task 039). Ids arrive as strings over OData.</summary>

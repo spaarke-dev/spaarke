@@ -182,6 +182,18 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     public bool CreatorPersonColumnExists { get; set; } = true;
 
+    /// <summary>
+    /// Task 143 — the No Access list provisioning asks about the creator, a resume's person and each named colleague.
+    /// The PRODUCTION <see cref="SecureShareNoAccessGuard"/> runs over this deny-list reader (wire seam only), a flag read
+    /// that answers every record secure (provisioning only runs on secure records), and a link store that answers every
+    /// user as "read, linked to nobody". <see cref="Reset"/> empties the list.
+    /// </summary>
+    internal AccessControl.GrantPolicyTestDoubles.SeamNoAccessListReader NoAccessList { get; private set; } = new();
+
+    /// <summary>Task 143: the guard's flag/organization reads. Default: every record secure, no organizations.</summary>
+    internal AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService NoAccessReads { get; private set; } =
+        new(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
+
     /// <summary>Business units' shared containers (<c>businessunit.sprk_containerid</c>), by business unit id (task 133 b2).</summary>
     public Dictionary<Guid, string> BusinessUnitContainers { get; } = new();
 
@@ -443,6 +455,9 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
         FailRevokeForPrincipal = null;
         StrictShareReadSucceeds = true;
         SoftShareReadSucceeds = true;
+        NoAccessList = new AccessControl.GrantPolicyTestDoubles.SeamNoAccessListReader();
+        NoAccessReads = new AccessControl.GrantPolicyTestDoubles.FlagStubParticipationService(
+            defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
         Logs.Clear();
     }
 
@@ -527,6 +542,16 @@ public sealed class ProvisionProjectTestFixture : WorkspaceTestFixture
             // Container creation, substituted at the ADR-007 facade.
             services.RemoveAll<SpeFileStore>();
             services.AddSingleton<SpeFileStore>(sp => new StubSpeFileStore(sp, this));
+
+            // Task 143 — the production guard over this fixture's deny list (read per request, so Reset takes effect).
+            // Every user is "read, linked to no contact": the systemuser subject is what these tests exercise.
+            var links = new Mock<IContactIdentityStore>();
+            links.Setup(s => s.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, CancellationToken _) =>
+                    new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
+            services.RemoveAll<SecureShareNoAccessGuard>();
+            services.AddScoped(_ => new SecureShareNoAccessGuard(
+                NoAccessReads, NoAccessList, links.Object, NullLogger<SecureShareNoAccessGuard>.Instance));
 
             // Capture logs in-memory so a test can assert the endpoint actually WROTE its warning.
             services.AddSingleton<ILoggerProvider>(Logs);

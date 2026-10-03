@@ -18,6 +18,17 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 // Slot 1 — the deny-list slot that is currently a documented no-op. This file delivers the STORE
 // (src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md) and the READER only;
 // AccessibleRecordSetService.cs is deliberately NOT touched here.
+//
+// unified-access-control-r2 task 143 (owner Q4 / N1, 2026-09-30): a THIRD subject — a systemuser
+// (sprk_subjectsystemuser) — so an internal user can be named on the list directly, and the list binds
+// internal users on SECURE records. Exactly one of the THREE subjects must be populated; a row with none
+// or more than one is malformed and denies nothing. Each denial now carries WHICH subject kind matched
+// (NoAccessListResult.DenyingSubjectKinds), because the systemuser plane treats a systemuser-subject entry
+// and a contact-sourced one differently on a non-secure record (owner N3).
+//
+// ⚠️ DEPLOY ORDER: RowSelect names _sprk_subjectsystemuser_value. In an environment without that column
+// every read 400s, fails CLOSED and denies every queried candidate — an outage on both planes. The column
+// is created (scripts/Set-NoAccessSystemUserSubjectSchema.ps1 -Apply, then -Verify) BEFORE this code deploys.
 
 /// <summary>
 /// One candidate record to evaluate against the deny list: its own id plus every organization id
@@ -37,6 +48,63 @@ public sealed record NoAccessCandidateRecord(
     string EntityLogicalName,
     Guid RecordId,
     IReadOnlyCollection<Guid> ReferencedOrganizationIds);
+
+/// <summary>
+/// Which kind of subject an entry named (task 143). A flags enum because one record can be denied by
+/// more than one entry, each naming a different subject kind.
+/// </summary>
+[Flags]
+public enum NoAccessSubjectKinds
+{
+    /// <summary>No subject PROVABLY matched — also the value for a fail-closed denial.</summary>
+    None = 0,
+
+    /// <summary><c>sprk_subjectcontact</c> — the contact itself.</summary>
+    Contact = 1,
+
+    /// <summary><c>sprk_subjectorganization</c> — an organization the contact is an active member of.</summary>
+    Organization = 2,
+
+    /// <summary><c>sprk_subjectsystemuser</c> — the internal user named directly (task 143).</summary>
+    SystemUser = 4,
+}
+
+/// <summary>
+/// The identities one evaluation checks against the deny list (task 143): contacts, the organizations they
+/// are ACTIVE members of, and a systemuser. Any may be absent; an evaluation with none of them has nothing
+/// to check.
+/// </summary>
+/// <param name="ContactIds">Contacts to check as a direct subject. More than one only when a systemuser's
+/// linked identity is ambiguous — over-matching is the safe direction for a veto (B-10).</param>
+/// <param name="OrganizationIds">Organizations whose active members are denied (the wall set — the caller
+/// resolves membership, see <see cref="INoAccessListReader"/>).</param>
+/// <param name="SystemUserId">The internal user named directly, or <c>null</c>.</param>
+public sealed record NoAccessSubjects(
+    IReadOnlyCollection<Guid> ContactIds,
+    IReadOnlyCollection<Guid> OrganizationIds,
+    Guid? SystemUserId)
+{
+    /// <summary>The pre-143 subject shape: one contact (or none) plus its organizations.</summary>
+    public static NoAccessSubjects ForContact(Guid? contactId, IReadOnlyCollection<Guid>? organizationIds)
+        => new(
+            contactId is { } c && c != Guid.Empty ? new[] { c } : Array.Empty<Guid>(),
+            organizationIds ?? Array.Empty<Guid>(),
+            SystemUserId: null);
+
+    /// <summary>Distinct, non-empty contact ids.</summary>
+    internal IReadOnlyList<Guid> Contacts =>
+        (ContactIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+
+    /// <summary>Distinct, non-empty organization ids.</summary>
+    internal IReadOnlyList<Guid> Organizations =>
+        (OrganizationIds ?? Array.Empty<Guid>()).Where(id => id != Guid.Empty).Distinct().ToList();
+
+    /// <summary>The systemuser, when present and non-empty.</summary>
+    internal Guid? User => SystemUserId is { } u && u != Guid.Empty ? u : null;
+
+    /// <summary>Whether there is anything to check at all.</summary>
+    internal bool IsEmpty => Contacts.Count == 0 && Organizations.Count == 0 && User is null;
+}
 
 /// <summary>
 /// The outcome of evaluating a candidate-record batch against the active deny list.
@@ -61,6 +129,15 @@ public sealed class NoAccessListResult
     /// denied" — both are correctly DENIES, but they are not the same kind of fact.
     /// </summary>
     public bool FailedClosed { get; init; }
+
+    /// <summary>
+    /// <c>recordId -&gt;</c> the subject kinds of the entries that denied it (task 143). Set for every id in
+    /// <see cref="DeniedRecordIds"/> on a provable denial; absent for a fail-closed one, where nothing provably
+    /// matched — a consumer that splits on the kind MUST treat a fail-closed denial as the strictest case, never
+    /// as "no subject".
+    /// </summary>
+    public IReadOnlyDictionary<Guid, NoAccessSubjectKinds> DenyingSubjectKinds { get; init; }
+        = new Dictionary<Guid, NoAccessSubjectKinds>();
 
     /// <summary>No subject identity, or no candidates, to evaluate. Not a fail-closed outcome —
     /// a considered "nothing to check" answer, distinct from a faulted read.</summary>
@@ -152,6 +229,16 @@ public interface INoAccessListReader
         IReadOnlyCollection<Guid> organizationIds,
         IReadOnlyCollection<NoAccessCandidateRecord> candidates,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The same evaluation over any combination of the THREE subject kinds (task 143): contacts, their
+    /// organizations, and a systemuser named directly. The result says which subject kind denied each record
+    /// (<see cref="NoAccessListResult.DenyingSubjectKinds"/>). Fails closed exactly as the contact overload.
+    /// </summary>
+    Task<NoAccessListResult> GetDeniedRecordsAsync(
+        NoAccessSubjects subjects,
+        IReadOnlyCollection<NoAccessCandidateRecord> candidates,
+        CancellationToken ct = default);
 }
 
 /// <inheritdoc cref="INoAccessListReader" />
@@ -179,6 +266,7 @@ public class NoAccessListReader : INoAccessListReader
     /// <summary>Columns needed to classify a row's subject/object shape and identify it for provenance.</summary>
     internal const string RowSelect =
         "sprk_noaccessentryid,_sprk_subjectcontact_value,_sprk_subjectorganization_value," +
+        "_sprk_subjectsystemuser_value," +
         "_sprk_objectorganization_value,_sprk_objectrecordtype_value,sprk_objectrecordid";
 
     /// <summary>
@@ -189,16 +277,28 @@ public class NoAccessListReader : INoAccessListReader
     /// intercepting HTTP transport.
     /// </summary>
     internal static string BuildSubjectFilter(Guid? contactId, IReadOnlyCollection<Guid> organizationIds)
+        => BuildSubjectFilter(NoAccessSubjects.ForContact(contactId, organizationIds));
+
+    /// <summary>
+    /// The subject <c>$filter</c> fragment over all three subject kinds (task 143): any of these contacts, OR
+    /// any of these organizations, OR this systemuser. Same composition rules as the contact overload.
+    /// </summary>
+    internal static string BuildSubjectFilter(NoAccessSubjects subjects)
     {
         var parts = new List<string>();
-        if (contactId is Guid cid && cid != Guid.Empty)
+        foreach (var cid in subjects.Contacts)
         {
             parts.Add($"sprk_subjectcontact eq {cid}");
         }
 
-        if (organizationIds.Count > 0)
+        if (subjects.Organizations.Count > 0)
         {
-            parts.Add("(" + string.Join(" or ", organizationIds.Select(id => $"sprk_subjectorganization eq {id}")) + ")");
+            parts.Add("(" + string.Join(" or ", subjects.Organizations.Select(id => $"sprk_subjectorganization eq {id}")) + ")");
+        }
+
+        if (subjects.User is { } userId)
+        {
+            parts.Add($"sprk_subjectsystemuser eq {userId}");
         }
 
         // Caller (GetDeniedRecordsAsync) guarantees at least one part before calling this.
@@ -265,17 +365,29 @@ public class NoAccessListReader : INoAccessListReader
     }
 
     /// <inheritdoc />
-    public async Task<NoAccessListResult> GetDeniedRecordsAsync(
+    public Task<NoAccessListResult> GetDeniedRecordsAsync(
         Guid? contactId,
         IReadOnlyCollection<Guid> organizationIds,
         IReadOnlyCollection<NoAccessCandidateRecord> candidates,
         CancellationToken ct = default)
+        => GetDeniedRecordsAsync(NoAccessSubjects.ForContact(contactId, organizationIds), candidates, ct);
+
+    /// <summary>
+    /// Most contacts one evaluation embeds as subjects (task 143: a systemuser's linked contact, plus any contact
+    /// bound to its oid). Same reasoning as <see cref="MaxSubjectOrganizationIds"/>: an implausible count fails SAFE.
+    /// </summary>
+    internal const int MaxSubjectContactIds = 5;
+
+    /// <inheritdoc />
+    public async Task<NoAccessListResult> GetDeniedRecordsAsync(
+        NoAccessSubjects subjects,
+        IReadOnlyCollection<NoAccessCandidateRecord> candidates,
+        CancellationToken ct = default)
     {
-        organizationIds ??= Array.Empty<Guid>();
+        subjects ??= NoAccessSubjects.ForContact(null, null);
         candidates ??= Array.Empty<NoAccessCandidateRecord>();
 
-        var hasContact = contactId is Guid cid0 && cid0 != Guid.Empty;
-        if (!hasContact && organizationIds.Count == 0)
+        if (subjects.IsEmpty)
         {
             // No subject identity to evaluate. A considered "nothing to check" answer — not a
             // fail-closed condition (there is no missing DATA here, just no question to ask).
@@ -287,22 +399,25 @@ public class NoAccessListReader : INoAccessListReader
             return NoAccessListResult.Empty;
         }
 
-        if (organizationIds.Count > MaxSubjectOrganizationIds)
+        var organizationIds = subjects.Organizations;
+        if (organizationIds.Count > MaxSubjectOrganizationIds || subjects.Contacts.Count > MaxSubjectContactIds)
         {
             // Cannot safely embed this many ids in one bounded $filter (NFR-02), and there is no
             // sound way to split the SUBJECT side across multiple requests and still trust any
             // single response alone. The safe response to "cannot be safely evaluated" is the same
             // one NFR-01 prescribes for an unreadable read: deny everything queried.
             _logger.LogError(
-                "[NO-ACCESS] FAIL-CLOSED: {Count} organization ids exceeds the safe query bound " +
-                "({Max}) for a single subject evaluation. Denying all {CandidateCount} queried " +
-                "candidates — deny-list evaluation for this subject cannot be safely performed.",
-                organizationIds.Count, MaxSubjectOrganizationIds, candidates.Count);
+                "[NO-ACCESS] FAIL-CLOSED: {Count} organization ids / {ContactCount} contact ids exceed the safe " +
+                "query bound ({Max} / {MaxContacts}) for a single subject evaluation. Denying all {CandidateCount} " +
+                "queried candidates — deny-list evaluation for this subject cannot be safely performed.",
+                organizationIds.Count, subjects.Contacts.Count, MaxSubjectOrganizationIds, MaxSubjectContactIds,
+                candidates.Count);
             return FailClosed(candidates);
         }
 
-        var subjectFilter = BuildSubjectFilter(contactId, organizationIds);
+        var subjectFilter = BuildSubjectFilter(subjects);
         var denied = new Dictionary<Guid, List<Guid>>();
+        var kinds = new Dictionary<Guid, NoAccessSubjectKinds>();
 
         try
         {
@@ -322,7 +437,7 @@ public class NoAccessListReader : INoAccessListReader
                     return FailClosed(candidates);
                 }
 
-                ProcessRows(rows, candidates, denied);
+                ProcessRows(rows, candidates, denied, kinds);
             }
 
             // Loop B — per-child revocation: chunk the DISTINCT candidate record ids themselves.
@@ -336,7 +451,7 @@ public class NoAccessListReader : INoAccessListReader
                     return FailClosed(candidates);
                 }
 
-                ProcessRows(rows, candidates, denied);
+                ProcessRows(rows, candidates, denied, kinds);
             }
         }
         catch (OperationCanceledException)
@@ -356,6 +471,7 @@ public class NoAccessListReader : INoAccessListReader
         {
             DeniedRecordIds = denied.Keys.ToHashSet(),
             DenyingEntryIds = denied.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<Guid>)kv.Value),
+            DenyingSubjectKinds = kinds,
             FailedClosed = false,
         };
     }
@@ -378,13 +494,27 @@ public class NoAccessListReader : INoAccessListReader
     private void ProcessRows(
         IReadOnlyList<NoAccessEntryRow> rows,
         IReadOnlyCollection<NoAccessCandidateRecord> candidates,
-        Dictionary<Guid, List<Guid>> denied)
+        Dictionary<Guid, List<Guid>> denied,
+        Dictionary<Guid, NoAccessSubjectKinds> kinds)
     {
         foreach (var row in rows)
         {
             if (row.sprk_noaccessentryid is not Guid entryId)
             {
                 continue; // Defensive — the primary key is always present on a real row.
+            }
+
+            // Exactly ONE of the three subjects (task 143; schema Business Rule 1). A row naming none, or more
+            // than one, has no knowable scope — it denies nothing, and says so.
+            if (SubjectKindOf(row) is not { } subjectKind)
+            {
+                _logger.LogWarning(
+                    "[NO-ACCESS] Entry {EntryId} has an ambiguous subject shape (contact populated: {HasContact}, " +
+                    "organization populated: {HasOrg}, systemuser populated: {HasUser}) — exactly one subject is " +
+                    "required. Excluding this entry from matching (denies nothing).",
+                    entryId, row._sprk_subjectcontact_value.HasValue, row._sprk_subjectorganization_value.HasValue,
+                    row._sprk_subjectsystemuser_value.HasValue);
+                continue;
             }
 
             var objOrgPopulated = row._sprk_objectorganization_value.HasValue;
@@ -412,7 +542,7 @@ public class NoAccessListReader : INoAccessListReader
                 {
                     if (candidate.ReferencedOrganizationIds?.Contains(orgId) == true)
                     {
-                        AddDenial(denied, candidate.RecordId, entryId);
+                        AddDenial(denied, kinds, candidate.RecordId, entryId, subjectKind);
                     }
                 }
             }
@@ -422,7 +552,7 @@ public class NoAccessListReader : INoAccessListReader
                 {
                     if (candidate.RecordId == deniedRecordId)
                     {
-                        AddDenial(denied, candidate.RecordId, entryId);
+                        AddDenial(denied, kinds, candidate.RecordId, entryId, subjectKind);
                     }
                 }
             }
@@ -435,6 +565,36 @@ public class NoAccessListReader : INoAccessListReader
                     entryId, row.sprk_objectrecordid);
             }
         }
+    }
+
+    /// <summary>
+    /// The ONE subject kind a row names, or <c>null</c> when it names none or more than one (task 143). Pure and
+    /// <c>internal</c>, and shared with the enforcer, so "which entries are well-formed" has one answer.
+    /// </summary>
+    internal static NoAccessSubjectKinds? SubjectKindOf(NoAccessEntryRow row)
+    {
+        var count = (row._sprk_subjectcontact_value.HasValue ? 1 : 0)
+                    + (row._sprk_subjectorganization_value.HasValue ? 1 : 0)
+                    + (row._sprk_subjectsystemuser_value.HasValue ? 1 : 0);
+        if (count != 1)
+        {
+            return null;
+        }
+
+        return row._sprk_subjectcontact_value.HasValue ? NoAccessSubjectKinds.Contact
+            : row._sprk_subjectorganization_value.HasValue ? NoAccessSubjectKinds.Organization
+            : NoAccessSubjectKinds.SystemUser;
+    }
+
+    private static void AddDenial(
+        Dictionary<Guid, List<Guid>> denied,
+        Dictionary<Guid, NoAccessSubjectKinds> kinds,
+        Guid recordId,
+        Guid entryId,
+        NoAccessSubjectKinds kind)
+    {
+        kinds[recordId] = kinds.TryGetValue(recordId, out var existing) ? existing | kind : kind;
+        AddDenial(denied, recordId, entryId);
     }
 
     private static void AddDenial(Dictionary<Guid, List<Guid>> denied, Guid recordId, Guid entryId)
@@ -570,6 +730,10 @@ internal sealed class NoAccessEntryRow
 
     [JsonPropertyName("_sprk_subjectorganization_value")]
     public Guid? _sprk_subjectorganization_value { get; set; }
+
+    /// <summary>Task 143: the systemuser subject (<c>sprk_subjectsystemuser</c>).</summary>
+    [JsonPropertyName("_sprk_subjectsystemuser_value")]
+    public Guid? _sprk_subjectsystemuser_value { get; set; }
 
     [JsonPropertyName("_sprk_objectorganization_value")]
     public Guid? _sprk_objectorganization_value { get; set; }

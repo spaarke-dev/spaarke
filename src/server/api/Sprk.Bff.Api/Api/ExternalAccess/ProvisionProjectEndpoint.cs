@@ -218,6 +218,30 @@ public static class ProvisionProjectEndpoint
     /// </summary>
     internal const string ReasonResumeColleaguesNotPermitted = "sdap.provision.resume_colleagues_not_permitted";
 
+    // Task 143 (owner N6 / Q4) — the No Access list binds internal users on secure records.
+
+    /// <summary>
+    /// The calling user is on the No Access list for this record (it names them, a contact that represents them, an
+    /// organization that contact belongs to, or an organization the record references). Owner N6: provisioning is
+    /// REFUSED before any change, with a clear message — never provisioned and then emptied (403).
+    /// </summary>
+    internal const string ReasonCreatorNoAccess = "sdap.provision.creator_no_access";
+
+    /// <summary>Whether the creator is on the record's No Access list could not be checked — refused before any change (500).</summary>
+    internal const string ReasonCreatorNoAccessUnverifiable = "sdap.provision.creator_no_access_unverifiable";
+
+    /// <summary>
+    /// A RESUME's person (<c>createdby</c> / <c>sprk_createdbyperson</c>) is on the record's No Access list, or that list
+    /// could not be checked: no share is issued to them and nothing is written (409; 500 when unverifiable).
+    /// </summary>
+    internal const string ReasonResumeCreatorNoAccess = "sdap.provision.resume_creator_no_access";
+
+    /// <summary>A named colleague on the record's No Access list — skipped with a per-person warning (owner N6).</summary>
+    internal const string ReasonPrincipalNoAccess = "sdap.provision.principal_no_access";
+
+    /// <summary>A named colleague whose No Access check could not be completed — skipped (ADR-003).</summary>
+    internal const string ReasonPrincipalNoAccessUnverifiable = "sdap.provision.principal_no_access_unverifiable";
+
     /// <summary>
     /// The owner PATCH was sent but its outcome could not be read back. A share to the creator was issued — read back
     /// when the read works (<c>creatorShareConfirmed: true</c>), otherwise issued without confirmation. The next call
@@ -374,6 +398,7 @@ public static class ProvisionProjectEndpoint
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
         IConfiguration configuration,
+        SecureShareNoAccessGuard noAccessGuard,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -637,6 +662,30 @@ public static class ProvisionProjectEndpoint
             if (colleagueRefusal != null)
                 return colleagueRefusal;
 
+            // ── RESUME: that person must not be on the record's No Access list (task 143) ──
+            // Before the share, whoever ResolveResumeCreatorAsync named (createdby or sprk_createdbyperson). Nothing is
+            // written for a walled or unverifiable person; the record stays as the earlier run left it.
+            var resumeWall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, person.CreatorId, ct);
+            if (resumeWall.RefusesShare)
+            {
+                var walled = resumeWall.Outcome == SecureShareWallOutcome.Walled;
+                logger.LogWarning(
+                    "[PROVISION] RESUME of {RecordType} {RecordId} refused: its creator {CreatorId} is {State} the No " +
+                    "Access list ({Detail}). Nothing was written. TraceId={TraceId}",
+                    root.WireToken, recordId, person.CreatorId, walled ? "on" : "not provably off",
+                    walled ? string.Join(",", resumeWall.EntryIds) : resumeWall.Fault, traceId);
+                return Problem(
+                    walled ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError,
+                    walled ? "Conflict" : "Internal Server Error",
+                    walled
+                        ? $"The person who created this {root.DisplayLabel.ToLowerInvariant()} is on its No Access list, so " +
+                          "provisioning will not share it to them, and nothing was changed. An administrator assigns the " +
+                          "record to the person who should hold it; that person then provisions it."
+                        : $"Whether the person who created this {root.DisplayLabel.ToLowerInvariant()} is on its No Access " +
+                          "list could not be checked, so nothing was changed. The same caller may try again.",
+                    traceId, (ReasonKey, ReasonResumeCreatorNoAccess));
+            }
+
             // ── RESUME: ensure that person's share ──
             var resumed = await EnsureResumeCreatorShareAsync(
                 recordShare, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
@@ -650,7 +699,7 @@ public static class ProvisionProjectEndpoint
         {
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
-                dataverseClient, recordShare, callerAccessProbe, httpContext, root, recordId, row, ownerTeamId,
+                dataverseClient, recordShare, callerAccessProbe, noAccessGuard, httpContext, root, recordId, row, ownerTeamId,
                 keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, logger, traceId, ct);
 
             if (forward.Error != null)
@@ -660,8 +709,8 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Named colleagues: only once the creator's share is proven ─────────
-        var additionalShared = await ShareToColleaguesAsync(
-            recordShare, request, root, recordId, creatorId, logger, traceId, ct);
+        var (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
+            recordShare, noAccessGuard, request, root, recordId, creatorId, logger, traceId, ct);
 
         // ── Steps 6 + 7: the record's own SPE container — kept when it already has one ──
         if (keptContainerId is not null)
@@ -681,7 +730,8 @@ public static class ProvisionProjectEndpoint
                 AdditionalPrincipalsShared: additionalShared,
                 RecordType: root.WireToken,
                 RecordId: recordId,
-                Resumed: resume));
+                Resumed: resume,
+                SkippedPrincipals: skippedPrincipals));
         }
 
         // ── Step 6: Create the record's own SPE container ────────────────────
@@ -738,7 +788,8 @@ public static class ProvisionProjectEndpoint
             AdditionalPrincipalsShared: additionalShared,
             RecordType: root.WireToken,
             RecordId: recordId,
-            Resumed: resume));
+            Resumed: resume,
+            SkippedPrincipals: skippedPrincipals));
     }
 
     // =========================================================================
@@ -997,6 +1048,7 @@ public static class ProvisionProjectEndpoint
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
+        SecureShareNoAccessGuard noAccessGuard,
         HttpContext httpContext,
         SecureRecordRoot root,
         Guid recordId,
@@ -1025,6 +1077,31 @@ public static class ProvisionProjectEndpoint
                 "back to them. Provisioning stopped before changing anything: the record's ownership and shares are " +
                 "as they were, and the same caller may retry.",
                 traceId, (ReasonKey, ReasonCreatorUnresolved)));
+        }
+
+        // ── Owner N6 (task 143): a creator the record's No Access list walls off is refused BEFORE any change ──
+        // In task 133's order this is before Step 4.2 (the first write) and the share-first step, so nothing is moved,
+        // unlinked or shared. The message names no entry and no reason (the refusal contract).
+        var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, creatorId, ct);
+        if (wall.RefusesShare)
+        {
+            var walled = wall.Outcome == SecureShareWallOutcome.Walled;
+            logger.LogWarning(
+                "[PROVISION] Refused to provision {RecordType} {RecordId}: its creator {CreatorId} is {State} the No Access " +
+                "list ({Detail}). Nothing was changed. TraceId={TraceId}",
+                root.WireToken, recordId, creatorId, walled ? "on" : "not provably off",
+                walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
+
+            return CreatorShareStep.Failed(walled
+                ? Problem(StatusCodes.Status403Forbidden, "Forbidden",
+                    $"You are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} — directly, through " +
+                    "an organization you belong to, or through an organization it references — so it cannot be made a " +
+                    "secure record shared to you. Nothing was changed.",
+                    traceId, (ReasonKey, ReasonCreatorNoAccess))
+                : Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    $"Whether you are on the No Access list for this {root.DisplayLabel.ToLowerInvariant()} could not be " +
+                    "checked, so provisioning stopped before changing anything. Try again.",
+                    traceId, (ReasonKey, ReasonCreatorNoAccessUnverifiable)));
         }
 
         // The owner compensation would restore. Every Dataverse row has one; a row read without it is not one this
@@ -1524,8 +1601,8 @@ public static class ProvisionProjectEndpoint
     /// or ASSIGN the record to the person who should hold it — it then leaves the owner team, so the next call by that
     /// person is a forward run that shares it to them.</para>
     ///
-    /// <para>No Access (task 143) is not yet in this branch: when it lands, a creator on the record's No Access list is
-    /// refused here, before the share.</para>
+    /// <para>No Access (task 143): the caller checks the person this returns against the record's No Access list before
+    /// the share, and refuses (<see cref="ReasonResumeCreatorNoAccess"/>) with nothing written.</para>
     /// </remarks>
     private static async Task<CreatorShareStep> ResolveResumeCreatorAsync(
         DataverseWebApiClient dataverseClient,
@@ -2018,8 +2095,9 @@ public static class ProvisionProjectEndpoint
     /// shares cannot be read, every colleague is shared to, as before task 133 — their absence is visible and fixable
     /// through the FR-29 "+ User" path, the creator's is not.
     /// </remarks>
-    private static async Task<int> ShareToColleaguesAsync(
+    private static async Task<(int Shared, IReadOnlyList<ProvisionSkippedPrincipal> Skipped)> ShareToColleaguesAsync(
         IDataverseRecordShareService recordShare,
+        SecureShareNoAccessGuard noAccessGuard,
         ProvisionProjectRequest request,
         SecureRecordRoot root,
         Guid recordId,
@@ -2033,8 +2111,39 @@ public static class ProvisionProjectEndpoint
             .Distinct()
             .ToList();
 
+        var skipped = new List<ProvisionSkippedPrincipal>();
         if (colleagues.Count == 0)
-            return 0;
+            return (0, skipped);
+
+        // ── Owner N6 (task 143): a walled colleague is SKIPPED with a per-person warning; the others are shared ──
+        // Asked before any colleague share is written. An unanswerable check skips that colleague too (ADR-003).
+        var allowed = new List<Guid>(colleagues.Count);
+        foreach (var principalId in colleagues)
+        {
+            var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, principalId, ct);
+            if (!wall.RefusesShare)
+            {
+                allowed.Add(principalId);
+                continue;
+            }
+
+            var walled = wall.Outcome == SecureShareWallOutcome.Walled;
+            logger.LogWarning(
+                "[PROVISION] Not sharing {RecordType} {RecordId} with named principal {PrincipalId}: {State} the No Access " +
+                "list ({Detail}). TraceId={TraceId}",
+                root.WireToken, recordId, principalId, walled ? "on" : "not provably off",
+                walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
+            skipped.Add(walled
+                ? new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccess,
+                    "This person is on the No Access list for this record, so it was not shared with them.")
+                : new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccessUnverifiable,
+                    "Whether this person is on the No Access list for this record could not be checked, so it was not " +
+                    "shared with them. Add them through Manage Access once it can be checked."));
+        }
+
+        colleagues = allowed;
+        if (colleagues.Count == 0)
+            return (0, skipped);
 
         IReadOnlyList<DataversePrincipalAccess> existing;
         try
@@ -2075,7 +2184,7 @@ public static class ProvisionProjectEndpoint
             "[PROVISION] {RecordType} {RecordId} shared to creator {CreatorId} and {Count} named principal(s).",
             root.WireToken, recordId, creatorId, shared);
 
-        return shared;
+        return (shared, skipped);
     }
 
     /// <summary>

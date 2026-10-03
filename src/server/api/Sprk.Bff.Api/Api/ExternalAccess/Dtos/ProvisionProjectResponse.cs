@@ -55,6 +55,12 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// the record — its <c>createdby</c> user, or for an app-created record the BFF-recorded <c>sprk_createdbyperson</c>
 /// (owner round 7 item 2) — not necessarily the caller. Additive to the JSON contract.
 /// </param>
+/// <param name="SkippedPrincipals">
+/// Task 143 (owner N6): named colleagues who were NOT shared to, each with a reason — on the record's No Access list
+/// (<c>sdap.provision.principal_no_access</c>), or that list could not be checked
+/// (<c>sdap.provision.principal_no_access_unverifiable</c>). The other colleagues are still shared. Empty when none was
+/// skipped. Additive to the JSON contract.
+/// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
@@ -65,4 +71,8 @@ public record ProvisionProjectResponse(
     int AdditionalPrincipalsShared,
     string RecordType,
     Guid RecordId,
-    bool Resumed = false);
+    bool Resumed = false,
+    IReadOnlyList<ProvisionSkippedPrincipal>? SkippedPrincipals = null);
+
+/// <summary>A named colleague provisioning did not share to, and why (task 143). The message names no entry or reason text.</summary>
+public record ProvisionSkippedPrincipal(Guid SystemUserId, string ReasonCode, string Message);

@@ -66,6 +66,13 @@ internal static class AccessibleRecordSetTestFactory
                 It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(NoAccessListResult.Empty);
+        // Task 143: the three-subject overload the systemuser plane calls — inert too.
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<NoAccessSubjects>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NoAccessListResult.Empty);
         return reader.Object;
     }
 }
