@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-15 in Word: Send Email offers a choice — Spaarke email or Outlook on the web; FR-10: records open as a focused Spaarke page</title>
     <phase>5 Remediation — spec reconciliation follow-through</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.ts`/`.tsx` in `office-addins/shared/taskpane` (frontend) and adds tests under `__tests__`.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -131,6 +131,62 @@
     <file>src/client/office-addins/shared/taskpane/services/sendEmailService.ts</file>
     <file>src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
   </outputs>
+
+  <notes>
+    **Completed 2026-10-02**, executed as a background Sonnet-5 subagent in the shared worktree
+    (parallel with the main session's task 076; office-addins-only, no git state changes). Client-only —
+    no BFF file touched.
+
+    `openRecordLauncher.buildOpenRecordUrl` now appends `navbar=off` unconditionally (never `cmdbar=false`)
+    — one change, consumed by `SaveFlow.tsx`'s Open affordances AND `sendEmailService.ts`'s record link.
+    Added generic `openUrlInBrowserWindow` (reuses the existing `defaultOpener`) for the Word choice to
+    open through, not a second mechanism.
+
+    `sendEmailService.ts`: extracted the existing link-resolution step (document share-link mint + record
+    deep link) into a shared `resolveSendEmailLinks`, used by BOTH the unchanged Outlook path
+    (`prepareSendEmail`) and the new `prepareWordSendEmailChoice` — structurally enforces "never mint a
+    link a second way," not just by convention. Added `buildSpaarkeComposeUrl` (the
+    `sprk_communicationpage` `data=` envelope, verified against `parseParams.ts`/`index.tsx`, HTML body),
+    `buildOutlookWebComposeUrl` (the documented `outlook.office.com` deep link, plain-text body), and
+    `resolveSendEmailAffordance` (the one pure, tested gating function: `'outlook-native' | 'word-choice' |
+    'none'`, capability-only per NFR-10).
+
+    **A real encoding bug was found and fixed during this task's own verification**: the first
+    `buildSpaarkeComposeUrl` used a single-encode construction that is silently corrupted by
+    `parseParams.ts`'s real (unconditional, double) decode sequence whenever a field value contains a
+    literal `&amp;`/`=` — exactly what the embedded four-param record URL and an "X &amp; Y"-style subject both
+    are. Caught by a round-trip test reproducing the REAL decode algorithm (not the test's own encoding
+    assumptions); fixed via explicit `encodeURIComponent(inner.toString())`. Full derivation in
+    `notes/086-word-send-email-and-focused-open.md`.
+
+    `App.tsx`: extracted `buildSendEmailRelatedRecordInput` (shared by both Send Email paths); added
+    `handleSendEmailChoice`; replaced the single `canSendEmail` boolean with the `resolveSendEmailAffordance`
+    result, rendering the unchanged single Button for Outlook or a new Fluent v9 `Menu` (two `MenuItem`s —
+    "Spaarke email" / "Outlook on the web") for Word; neither renders when there is nothing to link or
+    neither capability holds.
+
+    Deviation: the POML's `&lt;relevant-files&gt;` named `SaveFlow.tsx` as a Send Email edit target; the
+    affordance actually lives in `App.tsx` (confirmed by grep before writing anything) — `SaveFlow.tsx` was
+    not touched. Gating is tested via the extracted pure `resolveSendEmailAffordance` rather than mounting
+    the full `App.tsx` in RTL (no precedent for that in this package; task 036 took the same proportionate
+    approach for the Outlook button).
+
+    Neither escalation trigger fired: the Communication page's compose-mode pre-fill works from a plain
+    browser URL (verified by reading `index.tsx`/`parseParams.ts`/`App.tsx`). CORRECTED on main-session review:
+    it does NOT match `createTodoLauncher.ts` — that launcher appends flat params to a configured base URL, not
+    `main.aspx?...&amp;data=`; the `data=` form has no shipped precedent here, so the live check is its first proof); the Outlook-web body-length trigger was not
+    measured live (no live host reachable here) but is not expected to fire given the body's actual length
+    — recorded as an estimate, not a verification.
+
+    Gates: gated jest 62/62 suites, 836/836 tests (817 before this task's +19 new tests — no new suite
+    file; both touched test files were already gated from tasks 027/036); lint exit 0; `npm run typecheck`
+    68 total / **0 production** (pinned baseline, after fixing one `exactOptionalPropertyTypes` regression
+    introduced and caught mid-task); `npm run build` exit 0. Self-run code-review + adr-check: 0 Critical,
+    0 Warning, 1 Suggestion (a minor naming nit); 0 ADR violations.
+
+    Acceptance criterion 8 (live, post-deploy check) left open — no deployed SWA / live Office host /
+    Dataverse session reachable from this environment. Full report: `notes/086-word-send-email-and-focused-open.md`.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

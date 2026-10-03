@@ -35,9 +35,16 @@
  * payload and a `window.open` popup lifecycle; this one owns an EXISTING-record deep link and the
  * `OpenBrowserWindowApi` lifecycle Spike-2 selected. They share no state.
  *
+ * **Task 086 (FR-10 amended 2026-10-02)**: the opened record is a FOCUSED page (`navbar=off`, command
+ * bar kept) — see {@link buildOpenRecordUrl}'s doc comment. This file also exposes
+ * {@link openUrlInBrowserWindow}, a generic version of the same opener, reused by
+ * `sendEmailService.ts`'s Word Send Email choice so the two compose URLs open through the SAME
+ * mechanism as an opened record, not a second one.
+ *
  * @see projects/spaarkeai-word-add-in-r1/spec.md FR-10
  * @see projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md
  * @see projects/spaarkeai-word-add-in-r1/notes/027-record-open-mechanism.md
+ * @see projects/spaarkeai-word-add-in-r1/notes/086-word-send-email-and-focused-open.md
  */
 
 import { cleanGuid } from '../utils/cleanGuid';
@@ -72,9 +79,16 @@ export interface OpenRecordResult {
  * Build the `main.aspx` deep-link URL for an existing record. Exported for tests; callers should
  * normally use {@link openRecord}, which also handles the unset-`orgUrl` / missing-id no-op cases
  * and performs the `cleanGuid` canonicalization.
+ *
+ * `navbar=off` (spaarkeai-word-add-in-r1 task 086, FR-10 amended 2026-10-02): the record opens as a
+ * **focused record page** — the Spaarke app's own navigation is hidden, but the command bar is kept
+ * (no `cmdbar=false`) so Save and the record's actions stay available. This differs deliberately from
+ * the Quick Create URL in `App.tsx` (`onQuickCreate`), which sets BOTH `navbar=off` AND `cmdbar=false`
+ * for its small popup create form — that URL is a separate, pre-existing builder and is out of this
+ * task's scope.
  */
 export function buildOpenRecordUrl(orgUrl: string, entityType: string, canonicalRecordId: string): string {
-  return `${orgUrl}/main.aspx?etn=${entityType}&id=${canonicalRecordId}&pagetype=entityrecord`;
+  return `${orgUrl}/main.aspx?etn=${entityType}&id=${canonicalRecordId}&pagetype=entityrecord&navbar=off`;
 }
 
 /**
@@ -84,6 +98,17 @@ export function buildOpenRecordUrl(orgUrl: string, entityType: string, canonical
  */
 function defaultOpener(url: string): void {
   Office.context.ui.openBrowserWindow(url);
+}
+
+/**
+ * Opens an arbitrary URL in a new browser tab/window via `Office.context.ui.openBrowserWindow` — the
+ * SAME mechanism {@link openRecord} uses, exposed generically for other pane-driven browser-tab opens
+ * (spaarkeai-word-add-in-r1 task 086 / FR-15: the Word Send Email choice's two compose URLs). Never
+ * `window.open` / the Office Dialog API. Callers MUST gate on `HostCapabilities.canOpenBrowserWindow`
+ * themselves (NFR-10) — this function does not re-check the capability.
+ */
+export function openUrlInBrowserWindow(url: string, opener: (url: string) => void = defaultOpener): void {
+  opener(url);
 }
 
 /**
