@@ -43,6 +43,7 @@ public class RecordCreationNumberReadBackTests
             new Mock<IFieldMappingDataverseService>().Object,
             ownership.Object,
             IdentityNormalizationFixtures.WithContact(null).Object,
+            Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
             NullLogger<RecordCreationService>.Instance);
 
         var result = await sut.CreateAsync(
