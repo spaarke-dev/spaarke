@@ -314,13 +314,16 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         }
     }
 
+    private static StoreWriteResult DuplicateMirrorKey()
+        => new(StoreWriteStatus.KeyConflict, Error: "0x80060892 Entity Key External Object ID (unique) violated");
+
     public async Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct)
     {
         lock (_gate)
         {
             if (FailCreate) return new StoreWriteResult(StoreWriteStatus.Failed, Error: "injected");
             if (!KeyDefined) return new StoreWriteResult(StoreWriteStatus.KeyMissing);
-            if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
+            if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return DuplicateMirrorKey();
         }
 
         if (BeforeCreate is not null)
@@ -331,8 +334,9 @@ public sealed class InMemoryContactIdentityStore : IContactIdentityStore
         lock (_gate)
         {
             // The unique index on the MIRROR decides, atomically, at insert time — exactly one contact per oid. The
-            // create-only PATCH is addressed by the mirror key and carries the binding in its body: both land together.
-            if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return new StoreWriteResult(StoreWriteStatus.PreconditionFailed);
+            // POST carries the binding and the mirror in one body: both land together, or the key refuses the row
+            // with the platform's duplicate fault (412 0x80060892, verified live 2026-10-02).
+            if (Contacts.Values.Any(c => OidEquals(c.KeyMirror, oid))) return DuplicateMirrorKey();
             var id = Guid.NewGuid();
             Contacts[id] = new Contact
             {

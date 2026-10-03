@@ -133,8 +133,9 @@ public interface IContactIdentityStore
     Task<StoreWriteResult> BindOidAsync(Guid contactId, string? etag, Guid oid, IdentityPlaneMarker plane, CancellationToken ct);
 
     /// <summary>
-    /// Creates a contact keyed by <paramref name="oid"/> — create-only through the alternate key on the uniqueness
-    /// mirror, with the binding and the plane written in the same request.
+    /// Creates a contact for <paramref name="oid"/> — one POST carrying the binding, the uniqueness mirror and the
+    /// plane. Another contact holding the oid in its mirror makes the key's unique index refuse the create
+    /// (<see cref="StoreWriteStatus.KeyConflict"/>).
     /// </summary>
     Task<StoreWriteResult> CreateContactForOidAsync(Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct);
 
@@ -281,11 +282,22 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         => $"contacts?$select={ContactSelect}&$filter={FlagOnColumn} ne null&$orderby=contactid";
 
     /// <summary>
-    /// The create-only path: the alternate key in the URL — on the UNSECURED uniqueness mirror, because Dataverse
-    /// refuses an alternate key on the field-secured binding column (owner round 4 item 4, B2).
+    /// The create request: a plain <c>POST contacts</c> whose body carries the binding, the UNSECURED uniqueness
+    /// mirror and the plane (owner round 4 item 4, B2: Dataverse refuses an alternate key on the field-secured binding,
+    /// so the key lives on the mirror). The key's unique index refuses a second contact for the same oid with HTTP 412
+    /// <c>0x80060892</c> (<see cref="IsDuplicateKey"/> → <see cref="StoreWriteStatus.KeyConflict"/>), so two first
+    /// sign-ins that race still produce exactly one contact.
     /// </summary>
-    public static string BuildCreateByKeyPath(Guid oid)
-        => $"contacts({ContactBindingDecision.KeyMirrorColumn}='{oid:D}')";
+    /// <remarks>
+    /// Not <c>PATCH contacts(sprk_externalobjectidkey='…')</c> with <c>If-None-Match: *</c>: Dataverse answers that
+    /// create-only upsert on an alternate key with HTTP 404 <c>0x80060891</c> ("A record with the specified key values
+    /// does not exist in contact entity") and creates nothing. Verified live on spaarkedev1 2026-10-02 (task 141 gate
+    /// G-6: all seven creates of the first write run failed that way; a POST probe created, and a second POST with the
+    /// same mirror value got 412 <c>0x80060892</c>).
+    /// </remarks>
+    public static (HttpMethod Method, string Path, Dictionary<string, object?> Payload) BuildCreateRequest(
+        Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
+        => (HttpMethod.Post, "contacts", CreatePayload(oid, plane, details));
 
     /// <summary>
     /// The bind payload: the oid in "D" format into the binding AND the uniqueness mirror, and the plane marker —
@@ -299,9 +311,9 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     };
 
     /// <summary>
-    /// The create payload: the binding (the field-secured column the BFF's writer profile may create) and the plane.
-    /// The mirror — the key column — comes from the URL (<see cref="BuildCreateByKeyPath"/>), so the created row
-    /// carries the same oid in both.
+    /// The create payload: the binding (the field-secured column the BFF's writer profile may create), the uniqueness
+    /// mirror (the key column) and the plane — the same oid in both columns, in the one create request
+    /// (<see cref="BuildCreateRequest"/>).
     /// </summary>
     public static Dictionary<string, object?> CreatePayload(Guid oid, IdentityPlaneMarker plane, NewContactDetails details)
     {
@@ -310,6 +322,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
         {
             ["lastname"] = details.LastName,
             [ContactBindingDecision.ExternalObjectIdColumn] = oid.ToString("D"),
+            [ContactBindingDecision.KeyMirrorColumn] = oid.ToString("D"),
             [ContactBindingDecision.IdentityPlaneColumn] = (int)plane,
         };
         if (!string.IsNullOrWhiteSpace(details.FirstName)) payload["firstname"] = details.FirstName;
@@ -608,12 +621,12 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     public async Task<StoreWriteResult> CreateContactForOidAsync(
         Guid oid, IdentityPlaneMarker plane, NewContactDetails details, CancellationToken ct)
     {
-        // PATCH on the alternate key + If-None-Match: * is CREATE-ONLY: Dataverse answers 412 when a contact
-        // already holds that oid in the uniqueness mirror. With the key's unique index this is exactly one contact
-        // per oid even when two first sign-ins race — the loser gets 412 and re-reads by the binding. A 412 the
-        // re-read cannot explain (no contact BOUND to the oid) is a squatted mirror: the binder denies and flags.
-        var result = await WriteAsync(HttpMethod.Patch, BuildCreateByKeyPath(oid), CreatePayload(oid, plane, details),
-            ("If-None-Match", "*"), ct).ConfigureAwait(false);
+        // A POST carrying the mirror: the key's unique index answers 412 0x80060892 (KeyConflict) when a contact
+        // already holds that oid in the mirror. That is exactly one contact per oid even when two first sign-ins
+        // race — the loser re-reads by the binding. A conflict the re-read cannot explain (no contact BOUND to the
+        // oid) is a squatted mirror: the binder denies and flags. See BuildCreateRequest for why not a keyed PATCH.
+        var (method, path, payload) = BuildCreateRequest(oid, plane, details);
+        var result = await WriteAsync(method, path, payload, precondition: null, ct).ConfigureAwait(false);
         return result;
     }
 
@@ -713,7 +726,7 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
     }
 
     private async Task<StoreWriteResult> WriteAsync(
-        HttpMethod method, string path, Dictionary<string, object?> payload, (string Name, string Value) precondition,
+        HttpMethod method, string path, Dictionary<string, object?> payload, (string Name, string Value)? precondition,
         CancellationToken ct)
     {
         try
@@ -726,7 +739,10 @@ public sealed class DataverseContactIdentityStore : IContactIdentityStore
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
             request.Headers.Add("OData-MaxVersion", "4.0");
             request.Headers.Add("OData-Version", "4.0");
-            request.Headers.TryAddWithoutValidation(precondition.Name, precondition.Value);
+            if (precondition is { } header)
+            {
+                request.Headers.TryAddWithoutValidation(header.Name, header.Value);
+            }
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             using var client = _httpClientFactory.CreateClient(HttpClientName);
